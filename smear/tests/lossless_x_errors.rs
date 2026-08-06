@@ -12,13 +12,13 @@
 //!
 //! The `unclosed` list is a **macro argument**, so each dialect states its own pairs. GraphQLx
 //! states a fourth — `<>` — because its lexer depth-counts `<` and `>` alongside the other three
-//! (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`). That fourth entry is the single line in
+//! (`smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`). That fourth entry is the single line in
 //! this task that a reviewer cannot check by symmetry with GraphQL, and it is the line that
 //! decides whether an unterminated generic list reports `Unclosed::Angle` or the catch-all's
 //! `Other("unclosed delimiter")`.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::{
+use smear::parser::{
   graphqlx::{
     GraphQLx,
     error::{ErrorData, Expectation, GraphqlxErrors, Unclosed as DialectUnclosed},
@@ -192,7 +192,7 @@ fn the_two_layers_agree_on_what_end_of_input_reports() {
 /// `Expectation::Name`, which is a plausible-looking wrong answer rather than a crash.
 #[test]
 fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
-  use smear_parser::lexer::graphqlx::lossless::{LosslessToken, LosslessTokenKind as LK};
+  use smear::parser::lexer::graphqlx::lossless::{LosslessToken, LosslessTokenKind as LK};
   use tokora::error::token::UnexpectedToken as TokUnexpectedToken;
 
   /// The expectation the lossless conversion produces when `expected` was demanded and `found`
@@ -243,7 +243,7 @@ fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
 /// carries a single span — so it is zeroed.
 #[test]
 fn a_lexer_error_lands_as_error_data_lexer_not_as_a_note() {
-  use smear_parser::lexer::graphqlx::error::LexerErrors;
+  use smear::parser::lexer::graphqlx::error::LexerErrors;
   use tokora::state::tracker::LimitExceeded;
 
   let errs: Errs = LexerErrors::<char, LimitExceeded>::default().into();

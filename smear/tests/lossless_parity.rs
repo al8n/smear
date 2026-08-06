@@ -96,14 +96,16 @@
 
 use std::path::PathBuf;
 
-use smear_lexer::graphql::{error::LexerErrors, lossless::LosslessLexer};
-use smear_parser::graphql::{
-  GraphQL,
-  ast::{Document, ExecutableDocument, TypeSystemDocument},
-  error::{ErrorData, GraphqlErrors},
-  kinds::SyntaxKind as K,
-  lossless::{parse_document, parse_executable_document, parse_type_system_document},
-  syntactic::{GraphqlLexer, document, executable_document, type_system_document},
+use smear::{
+  lexer::graphql::{error::LexerErrors, lossless::LosslessLexer},
+  parser::graphql::{
+    GraphQL,
+    ast::{Document, ExecutableDocument, TypeSystemDocument},
+    error::{ErrorData, GraphqlErrors},
+    kinds::SyntaxKind as K,
+    lossless::{parse_document, parse_executable_document, parse_type_system_document},
+    syntactic::{GraphqlLexer, document, executable_document, type_system_document},
+  },
 };
 use tokora::{Lexer as _, Parse as _, Parser};
 

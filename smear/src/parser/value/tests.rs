@@ -1,6 +1,6 @@
 use std::{string::String, vec};
 
-use smear_lexer::LitStr;
+use crate::lexer::LitStr;
 use tokora::{
   span::{AsSpan, IntoSpan},
   utils::IntoComponents,
@@ -140,9 +140,10 @@ fn carriers_support_custom_spans_and_language_markers() {
 
   #[cfg(feature = "graphql")]
   {
-    let branded: crate::graphql::ast::BooleanValue<str, CustomSpan> =
-      BooleanValue::<str, CustomSpan, crate::graphql::GraphQL>::new(CustomSpan(15), false);
-    let _: crate::value::BooleanValue<str, CustomSpan, crate::graphql::GraphQL> = branded;
+    let branded: crate::parser::graphql::ast::BooleanValue<str, CustomSpan> =
+      BooleanValue::<str, CustomSpan, crate::parser::graphql::GraphQL>::new(CustomSpan(15), false);
+    let _: crate::parser::value::BooleanValue<str, CustomSpan, crate::parser::graphql::GraphQL> =
+      branded;
   }
 }
 

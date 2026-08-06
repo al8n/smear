@@ -13,7 +13,7 @@ use super::{
   executable_definition, executable_document, fragment_definition, operation_definition,
   operation_type, variable_definition, variables_definition,
 };
-use crate::graphql::{
+use crate::parser::graphql::{
   GraphQL,
   ast::{
     DescribedExecutableDefinition, DescribedVariableDefinition, ExecutableDocument,

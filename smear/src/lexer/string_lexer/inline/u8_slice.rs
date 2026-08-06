@@ -7,7 +7,7 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::{
+use crate::lexer::{
   error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError},
   hints::LineTerminatorHint,
 };

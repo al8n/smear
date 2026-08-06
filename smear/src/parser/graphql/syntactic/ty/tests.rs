@@ -7,12 +7,12 @@
 //! verdicts the frozen `smear-parser` crate's `parse_type` produces for the same
 //! inputs.
 
-use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use crate::lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
   FatalContext, Lexer, Parse, Parser, SimpleSpan, Source, punct::Bracket, utils::cmp::Equivalent,
 };
 
-use crate::graphql::{
+use crate::parser::graphql::{
   GraphQL,
   ast::{Name, Type, Type as AstType},
   error::{ErrorData, Expectation, GraphqlError as DialectGraphqlError, GraphqlErrors, Unclosed},
@@ -134,7 +134,7 @@ fn type_graphql_does_not_require_equivalent() {
     TypeSlice: tokora::Slice<'inp> + Clone + 'inp,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-    Ctx: crate::combinator::ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+    Ctx: crate::parser::combinator::ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
     GraphqlError<'inp, Src, Ctx>: From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
       + From<DialectGraphqlError<TypeSlice>>,
   {

@@ -36,10 +36,10 @@
 //! fidelity is untouched; only the node's own `text_range` is one trivia run longer.
 //! `SelectionSet` is immune, its `}` ending the node before anything after it is read.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, TryParseInput as _, try_parse_input::ParseAttempt};
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -57,7 +57,7 @@ use super::{
   value::Constness,
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;

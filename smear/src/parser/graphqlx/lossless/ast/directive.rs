@@ -33,7 +33,7 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       ty::TypePath,
@@ -46,7 +46,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One argument, `name : value`.
   ///
   /// One node kind for both the executable and the constant spelling: the grammar's
@@ -81,7 +81,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An argument list, `( … )`.
   ///
   /// Delimited, so an empty `()` is a real, written-down list and gets its node — unlike
@@ -93,7 +93,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One directive, `@ TypePath Arguments?`.
   Directive => K::Directive {
     /// The directive's name, which the `@` precedes — a whole path with optional generics, for the
@@ -105,7 +105,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A run of directives.
   ///
   /// Undelimited, so this node exists only where at least one directive was written — see this

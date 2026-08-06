@@ -1,8 +1,8 @@
 //! GraphQL value productions over the concrete syntactic lexer.
 //!
 //! Public associated parsers live directly on the GraphQL AST types, such as
-//! [`crate::graphql::ast::IntValue`], [`crate::graphql::ast::VariableValue`], and
-//! [`crate::graphql::ast::Object`]. Their slice generic is fixed by the AST result
+//! [`crate::parser::graphql::ast::IntValue`], [`crate::parser::graphql::ast::VariableValue`], and
+//! [`crate::parser::graphql::ast::Object`]. Their slice generic is fixed by the AST result
 //! while the [`GraphqlLexer`] source is inferred from the parser input. Public
 //! free production functions remain available for direct parser composition.
 //!
@@ -28,10 +28,10 @@ use tokora::{
   utils::{DowncastRef, typenum::U1},
 };
 
-use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use crate::lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name};
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, colon, dollar, equal},
   graphql::{
     GraphQL,

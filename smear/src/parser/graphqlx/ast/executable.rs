@@ -16,11 +16,11 @@ use super::{
 
 /// A GraphQLx node with an optional leading string description.
 pub type Described<T, S, Span = SimpleSpan> =
-  crate::executable::Described<T, StringValue<S, Span>, Span>;
+  crate::parser::executable::Described<T, StringValue<S, Span>, Span>;
 
 /// A GraphQLx variable definition in an executable operation.
 pub type VariableDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::executable::VariableDefinition<
+  crate::parser::executable::VariableDefinition<
     VariableValue<S, Span>,
     Ty,
     DefaultInputValue<S, Span>,
@@ -38,8 +38,11 @@ pub type VariablesDefinition<
   Span = SimpleSpan,
   Ty = Type<S, Span>,
   Container = DefaultVec<DescribedVariableDefinition<S, Span, Ty>>,
-> =
-  crate::executable::VariablesDefinition<DescribedVariableDefinition<S, Span, Ty>, Span, Container>;
+> = crate::parser::executable::VariablesDefinition<
+  DescribedVariableDefinition<S, Span, Ty>,
+  Span,
+  Container,
+>;
 
 /// The GraphQLx operation keyword (`query`, `mutation`, or `subscription`).
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, IsVariant, TryUnwrap, Unwrap)]
@@ -111,7 +114,7 @@ impl<Span> Borrow<str> for OperationType<Span> {
 /// A named GraphQLx operation with optional definition generics and `where`
 /// constraints on its selection set.
 pub type NamedOperationDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::executable::NamedOperationDefinition<
+  crate::parser::executable::NamedOperationDefinition<
     DefinitionName<S, Span, Ty>,
     OperationType<Span>,
     VariablesDefinition<S, Span, Ty>,
@@ -123,7 +126,7 @@ pub type NamedOperationDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 /// A GraphQLx fragment definition with implementation/name generics and an
 /// optional `where` clause on its selection set.
 pub type FragmentDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::executable::FragmentDefinition<
+  crate::parser::executable::FragmentDefinition<
     ExecutableDefinitionHeader<
       ExecutableDefinitionTypeGenerics<S, Span>,
       ExecutableDefinitionName<S, Span>,

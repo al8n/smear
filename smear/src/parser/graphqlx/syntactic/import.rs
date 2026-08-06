@@ -15,13 +15,13 @@ use tokora::{
   utils::{DowncastRef, typenum::U1},
 };
 
-use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use crate::lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, keyword_of,
   unexpected_here,
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, asterisk},
   graphqlx::{
     GraphQLx,

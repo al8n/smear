@@ -1,7 +1,7 @@
 macro_rules! token {
   // Borrowed slice: $slice uses lifetime $lt and IS the logos slice type (no conversion)
   ($mod:ident <$lt:lifetime>($slice: ty, $char: ty, $handlers:ident, $utf8:tt $(,)?)) => {
-    $crate::graphql::lossless::token_impl!(
+    $crate::lexer::graphql::lossless::token_impl!(
       $mod [$lt] [$lt]
       ($slice, $char, $handlers, $utf8, $slice)
       {s => s}
@@ -9,7 +9,7 @@ macro_rules! token {
   };
   // Borrowed-with-conversion: $slice uses lifetime $lt but differs from logos slice
   ($mod:ident <$lt:lifetime>($slice: ty, $char: ty, $handlers:ident, $utf8:tt, $logos_slice:ty $(,)?)) => {
-    $crate::graphql::lossless::token_impl!(
+    $crate::lexer::graphql::lossless::token_impl!(
       $mod [$lt] [$lt]
       ($slice, $char, $handlers, $utf8, $logos_slice)
       {s => s.into_equivalent()}
@@ -17,7 +17,7 @@ macro_rules! token {
   };
   // Owned byte-slice
   ($mod:ident ($slice: ty, $char: ty, $handlers:ident, false $(,)?)) => {
-    $crate::graphql::lossless::token_impl!(
+    $crate::lexer::graphql::lossless::token_impl!(
       $mod ['s] []
       ($slice, $char, $handlers, false, &'s [u8])
       {s => s.into_equivalent()}
@@ -25,7 +25,7 @@ macro_rules! token {
   };
   // Owned str
   ($mod:ident ($slice: ty, $char: ty, $handlers:ident, true $(,)?)) => {
-    $crate::graphql::lossless::token_impl!(
+    $crate::lexer::graphql::lossless::token_impl!(
       $mod ['s] []
       ($slice, $char, $handlers, true, &'s str)
       {s => s.into_equivalent()}
@@ -46,7 +46,7 @@ macro_rules! token_impl {
       use tokora::{
         logos::Logos, lexer::Lexable, state::tracker::{LimitExceeded, Limiter},
       };
-      use crate::{
+      use crate::lexer::{
         error::StringErrors,
         graphql::{
           error::{LexerErrors, LexerError, DecimalError, FloatError},
@@ -273,7 +273,7 @@ macro_rules! token_impl {
       use tokora::{
         logos::Logos, lexer::Lexable, state::tracker::{LimitExceeded, Limiter},
       };
-      use crate::{
+      use crate::lexer::{
         error::StringErrors,
         graphql::{
           error::{LexerErrors, LexerError, DecimalError, FloatError},

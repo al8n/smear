@@ -345,7 +345,7 @@ impl SyntaxKind {
 /// once per dialect. Gated on `rowan` because that is the only feature under which any of those
 /// three is compiled.
 #[cfg(feature = "rowan")]
-impl crate::lossless::KindSpace for SyntaxKind {
+impl crate::parser::lossless::KindSpace for SyntaxKind {
   const NAME: &'static str = "graphql";
   const ERROR: Self = Self::Error;
   const GAP: Self = Self::Gap;
@@ -365,7 +365,7 @@ impl crate::lossless::KindSpace for SyntaxKind {
 
 /// The `rowan::Language` brand for the GraphQL lossless CST.
 ///
-/// Separate from [`GraphQL`](crate::graphql::GraphQL), which is tokora's *grammar brand*
+/// Separate from [`GraphQL`](crate::parser::graphql::GraphQL), which is tokora's *grammar brand*
 /// (`Dialect::Lang`, a marker keeping two grammars' vocabularies apart). A `rowan::Language`
 /// is a kind authority; the two roles are deliberately not the same type.
 #[cfg(feature = "rowan")]
@@ -405,6 +405,6 @@ mod tests {
     // bookkeeping triple last — now live in one helper so the GraphQLx space inherits them by
     // declaring the impl instead of by copying three tests. The named-constant check and the
     // liveness check are in `tests/lossless_substrate.rs`, which can see the trait's constants.
-    crate::lossless::test_support::assert_kind_space_is_well_formed::<super::SyntaxKind>();
+    crate::parser::lossless::test_support::assert_kind_space_is_well_formed::<super::SyntaxKind>();
   }
 }

@@ -3,7 +3,7 @@
 //! Gate 4 — the typed accessor layer over the GraphQL lossless CST.
 //!
 //! One test per grammar area, each walking a real tree through the wrappers rather than through
-//! [`SyntaxNode`](smear_parser::graphql::lossless::SyntaxNode). Task 14 extends this file; what is
+//! [`SyntaxNode`](smear::parser::graphql::lossless::SyntaxNode). Task 14 extends this file; what is
 //! here is Task 10's own gate.
 //!
 //! **Every fixture is chosen so each getter has something to get wrong**, which is the lesson
@@ -48,7 +48,7 @@ use std::{
   path::PathBuf,
 };
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{
     GraphQLLang, SyntaxNode, SyntaxToken,
@@ -1380,6 +1380,7 @@ fn without_comments(src: &str) -> String {
 fn source_inventory() -> Vec<SourceGetter> {
   let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("src")
+    .join("parser")
     .join("graphql")
     .join("lossless")
     .join("ast");
@@ -1419,7 +1420,7 @@ fn source_inventory() -> Vec<SourceGetter> {
         .0;
       // The header is `lang = <path>; <docs> Name`, and the wrapper is its **last** word. Taking
       // the whole trimmed prefix would have worked while `lang =` did not exist and would have
-      // silently started answering `lang = crate::graphql::kinds::GraphQLLang; Name` the moment
+      // silently started answering `lang = crate::parser::graphql::kinds::GraphQLLang; Name` the moment
       // it did — a wrapper name no census entry matches, which turns this inventory into a
       // uniformly-wrong list rather than an empty one.
       let wrapper = header

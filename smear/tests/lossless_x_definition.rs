@@ -10,7 +10,7 @@
 //! the `EnumValue` node a *value* position builds. No round-trip gate can see any of those.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::definition::test_support::{
     parse_arguments_definition, parse_directive_definition, parse_directive_locations,
@@ -175,7 +175,7 @@ fn the_three_delimited_member_blocks_are_three_node_kinds() {
 
 #[test]
 fn every_plus_block_reports_its_empty_form_without_eating_its_closer() {
-  type Driver = fn(&str) -> smear_parser::graphqlx::lossless::Parse;
+  type Driver = fn(&str) -> smear::parser::graphqlx::lossless::Parse;
   for (driver, src) in [
     (parse_fields_definition as Driver, "{}"),
     (parse_input_fields_definition as Driver, "{}"),
@@ -487,7 +487,7 @@ fn each_definition_reaches_its_own_block_and_clause_productions() {
 /// before this one existed, which left eight positions with no witness at all.
 #[test]
 fn every_sdl_directive_position_is_const() {
-  type Driver = fn(&str) -> smear_parser::graphqlx::lossless::Parse;
+  type Driver = fn(&str) -> smear::parser::graphqlx::lossless::Parse;
   for (driver, bad, good) in [
     (
       parse_input_value_definition as Driver,

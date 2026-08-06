@@ -63,7 +63,7 @@
 //! An injection gate that reports success without reporting *reach* is the vacuous case: it
 //! cannot tell a corpus that exercises every production from one that exercises three shapes many
 //! times. So the productions are instrumented — see
-//! [`smear_parser::graphql::lossless::coverage`] — and
+//! [`smear::parser::graphql::lossless::coverage`] — and
 //! [`trivia_injection_preserves_the_verdict_and_the_shape`] asserts every node kind a production
 //! can open was opened at least once during its own sweep. Run it with `--features
 //! lossless-coverage`; without the feature the instrumentation is not compiled and the assertion
@@ -71,10 +71,12 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use smear_lexer::graphql::lossless::LosslessLexer;
-use smear_parser::graphql::{
-  kinds::SyntaxKind as K,
-  lossless::{Parse, parse_document, parse_executable_document, parse_type_system_document},
+use smear::{
+  lexer::graphql::lossless::LosslessLexer,
+  parser::graphql::{
+    kinds::SyntaxKind as K,
+    lossless::{Parse, parse_document, parse_executable_document, parse_type_system_document},
+  },
 };
 use tokora::Lexer as _;
 
@@ -236,7 +238,7 @@ fn node_kinds() -> Vec<K> {
 #[test]
 fn trivia_injection_preserves_the_verdict_and_the_shape() {
   #[cfg(feature = "lossless-coverage")]
-  smear_parser::graphql::lossless::coverage::reset();
+  smear::parser::graphql::lossless::coverage::reset();
 
   let entries = valid_corpus();
   assert!(
@@ -307,7 +309,7 @@ fn trivia_injection_preserves_the_verdict_and_the_shape() {
 
   #[cfg(feature = "lossless-coverage")]
   {
-    use smear_parser::graphql::lossless::coverage;
+    use smear::parser::graphql::lossless::coverage;
 
     let mut unhit = Vec::new();
     let mut report = Vec::new();
@@ -342,7 +344,7 @@ fn trivia_injection_preserves_the_verdict_and_the_shape() {
 #[cfg(feature = "lossless-coverage")]
 #[test]
 fn the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one() {
-  use smear_parser::graphql::lossless::coverage;
+  use smear::parser::graphql::lossless::coverage;
 
   coverage::reset();
   assert_eq!(
@@ -403,7 +405,7 @@ fn the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one() {
 /// form under test must leave the **non-trivia** tokens exactly as they were.
 #[test]
 fn every_alphabet_entry_is_trivia_at_every_position() {
-  use smear_lexer::graphql::lossless::LosslessTokenKind as LK;
+  use smear::lexer::graphql::lossless::LosslessTokenKind as LK;
 
   const PROBE: &str = "type T{a:[Int!]!@d(x:$v)}";
 
@@ -503,7 +505,7 @@ fn the_injection_and_the_shape_projection_are_both_live() {
 /// boundary rather than the empty ones stops being true.
 #[test]
 fn the_compact_corpus_cannot_discriminate_the_retro_wrap_probes() {
-  use smear_lexer::graphql::lossless::LosslessTokenKind as LK;
+  use smear::lexer::graphql::lossless::LosslessTokenKind as LK;
 
   /// Does `src` ever put trivia immediately before a `:` or a `!`?
   fn pads_a_probe_junction(src: &str) -> bool {

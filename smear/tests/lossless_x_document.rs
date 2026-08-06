@@ -10,7 +10,7 @@
 //! an extension parsed as a definition, an entry that swallowed the next one.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     extension::test_support::{parse_type_system_extension, parse_union_type_extension},

@@ -98,7 +98,7 @@
 use std::{collections::BTreeSet, fmt::Write as _, path::PathBuf};
 
 use rowan::{NodeOrToken, WalkEvent};
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{SyntaxNode, parse_document, parse_type_system_document},
 };
@@ -575,7 +575,7 @@ fn gate(cases: &[(String, String)], set: &str) {
     let _ = writeln!(
       report,
       "{UPDATE_VAR}=1: rewrote {} golden(s) in the {set} set ({} new, {} changed).\n\
-       Nothing is blessed yet. Read `git diff -- smear-parser/tests/goldenx`, satisfy yourself that \
+       Nothing is blessed yet. Read `git diff -- smear/tests/goldenx`, satisfy yourself that \
        every changed line is a tree you meant to produce, then re-run WITHOUT {UPDATE_VAR} set.",
       missing.len() + differing.len(),
       missing.len(),
@@ -601,7 +601,7 @@ fn gate(cases: &[(String, String)], set: &str) {
     }
     let _ = writeln!(
       report,
-      "If every change is intended, bless with `{UPDATE_VAR}=1 cargo test -p smear-parser \
+      "If every change is intended, bless with `{UPDATE_VAR}=1 cargo test -p smear \
        --features rowan,graphqlx --test lossless_x_golden`, which rewrites the files and then fails \
        once more so the diff gets read."
     );

@@ -9,7 +9,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::{
+use crate::lexer::{
   graphql::{ContextualKeyword, syntactic::SyntacticTokenKind},
   keywords::{Fragment, Mutation, Query, Subscription},
 };
@@ -30,7 +30,7 @@ use super::{
   peeks_where,
   selection::selection_set,
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start},
   graphql::{
     GraphQL,

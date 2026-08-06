@@ -12,7 +12,7 @@ use std::string::String;
 
 use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::syntactic::SyntacticLexer;
+use crate::lexer::graphqlx::syntactic::SyntacticLexer;
 
 /// Render every token of a drive: `is_err`, `span()`, `slice()` at each step,
 /// plus `check()` whenever that step is an error. Panics if the drive never

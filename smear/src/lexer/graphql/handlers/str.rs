@@ -8,7 +8,7 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::{
+use crate::lexer::{
   handlers::{self, is_ignored_char},
   hints::{ExponentHint, FloatHint},
 };

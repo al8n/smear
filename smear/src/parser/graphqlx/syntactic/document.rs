@@ -7,7 +7,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use crate::lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
   Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
   Token,
@@ -24,7 +24,7 @@ use super::{
   import::import_definition_after_keyword,
   keyword_of, unexpected_here,
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt},
   graphqlx::{
     GraphQLx,

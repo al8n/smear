@@ -1,7 +1,7 @@
 //! SDL union type-definition parsing.
 
 use super::*;
-use crate::combinator::{extent_end, pipe, try_pipe};
+use crate::parser::combinator::{extent_end, pipe, try_pipe};
 
 fn take_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,

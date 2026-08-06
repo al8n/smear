@@ -1,7 +1,7 @@
 //! GraphQLx SDL directive definitions and directive locations.
 
 use super::*;
-use crate::combinator::{pipe, try_pipe};
+use crate::parser::combinator::{pipe, try_pipe};
 
 #[inline]
 fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {

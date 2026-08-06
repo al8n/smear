@@ -17,7 +17,7 @@
 //! optimization passes.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use smear_lexer::{
+use smear::lexer::{
   graphql::{
     lossless::{LosslessLexer, LosslessLexerErrors, LosslessToken},
     syntactic::{SyntacticLexer, SyntacticLexerErrors, SyntacticToken},
@@ -39,28 +39,27 @@ use std::hint::black_box;
 // All paths are workspace-relative; if the fixtures move these `include_str!`
 // calls will fail at compile time, which is the right failure mode.
 
-const FIXTURES_EXEC: &str = "../smear/tests/fixtures/executables";
-const FIXTURES_SCHEMA: &str = "../smear/tests/fixtures/schemas";
+const FIXTURES_EXEC: &str = "tests/fixtures/executables";
+const FIXTURES_SCHEMA: &str = "tests/fixtures/schemas";
 
 // Executable queries.
-const Q_TINY: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_01_tiny_simple.graphql");
+const Q_TINY: &str = include_str!("../tests/fixtures/executables/bench_01_tiny_simple.graphql");
 const Q_SMALL: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_03_small_variables.graphql");
+  include_str!("../tests/fixtures/executables/bench_03_small_variables.graphql");
 const Q_MED_FRAG: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_05_medium_fragments.graphql");
+  include_str!("../tests/fixtures/executables/bench_05_medium_fragments.graphql");
 const Q_LARGE_COMPLEX: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_06_large_complex.graphql");
+  include_str!("../tests/fixtures/executables/bench_06_large_complex.graphql");
 const Q_HUGE: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_10_huge_comprehensive.graphql");
+  include_str!("../tests/fixtures/executables/bench_10_huge_comprehensive.graphql");
 const Q_KITCHEN_SINK: &str =
-  include_str!("../../smear/tests/fixtures/executables/kitchen-sink_canonical.graphql");
+  include_str!("../tests/fixtures/executables/kitchen-sink_canonical.graphql");
 
 // Schemas — ascending in size.
-const S_MINIMAL: &str = include_str!("../../smear/tests/fixtures/schemas/minimal.graphql");
-const S_GMX: &str = include_str!("../../smear/tests/fixtures/schemas/gmx_schema.graphql");
-const S_GITHUB: &str = include_str!("../../smear/tests/fixtures/schemas/github_schema.graphql");
-const S_GITLAB: &str = include_str!("../../smear/tests/fixtures/schemas/gitlab_schema.graphql");
+const S_MINIMAL: &str = include_str!("../tests/fixtures/schemas/minimal.graphql");
+const S_GMX: &str = include_str!("../tests/fixtures/schemas/gmx_schema.graphql");
+const S_GITHUB: &str = include_str!("../tests/fixtures/schemas/github_schema.graphql");
+const S_GITLAB: &str = include_str!("../tests/fixtures/schemas/gitlab_schema.graphql");
 
 /// All inputs, paired with a short label for the bench id.
 const INPUTS: &[(&str, &str)] = &[
@@ -125,7 +124,7 @@ fn lossless_collect(input: &str) -> Vec<LosslessItem<'_>> {
 /// GraphQLx lossless-mode token count, mirroring `lossless_count` above.
 #[inline(always)]
 fn gx_lossless_count(input: &str) -> usize {
-  use smear_lexer::graphqlx::lossless::LosslessLexer;
+  use smear::lexer::graphqlx::lossless::LosslessLexer;
   let mut lexer = LosslessLexer::<&str>::new(input);
   let mut count = 0usize;
   while let Some(result) = lexer.lex() {
@@ -138,7 +137,7 @@ fn gx_lossless_count(input: &str) -> usize {
 /// GraphQLx SIMD syntactic lexer token count, mirroring `simd_count`.
 #[inline(always)]
 fn gx_simd_count(input: &str) -> usize {
-  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
+  use smear::lexer::graphqlx::syntactic::SyntacticLexer;
   let mut lexer = SyntacticLexer::<[u8]>::new(input.as_bytes());
   let mut count = 0usize;
   while let Some(result) = lexer.lex() {

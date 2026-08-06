@@ -1,5 +1,5 @@
 //! The GraphQL dialect error and the `From` glue that makes it a
-//! [`ParseCtx`](crate::combinator::ParseCtx) error.
+//! [`ParseCtx`](crate::parser::combinator::ParseCtx) error.
 //!
 //! The error family — [`Expectation`], [`Unclosed`], [`ErrorData`], [`Error`], and
 //! the [`Errors`] container — is copied from the frozen `smear-parser` crate
@@ -13,18 +13,18 @@
 //! lexer errors). tokora's `ComposableEmitter` bundle and `From*` blankets
 //! shrink the old twelve-impl set to the handful of `From` conversions the atoms'
 //! bounds actually demand; each lands here so [`Fatal`](tokora::emitter::Fatal)
-//! over [`GraphqlErrors`] is a complete [`ParseCtx`](crate::combinator::ParseCtx)
+//! over [`GraphqlErrors`] is a complete [`ParseCtx`](crate::parser::combinator::ParseCtx)
 //! over both `str` and `[u8]` syntactic lexers — proven by the module's compile
 //! test.
 
-use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::{
+use crate::lexer::{
   graphql::{
     error::LexerErrors,
     syntactic::{SyntacticToken, SyntacticTokenKind},
   },
   tokora::error::UnexpectedEnd,
 };
+use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   Lexer, SimpleSpan as Span,
   emitter::FromUnclosed,
@@ -728,7 +728,7 @@ impl<S, T, Char, Exp, StateError> Extend<Error<S, T, Char, Exp, StateError>>
 pub type GraphqlError<S> = Error<S, SyntacticTokenKind, char, Expectation>;
 
 /// The GraphQL dialect error container — the error type a
-/// [`ParseCtx`](crate::combinator::ParseCtx) over a GraphQL lexer emits.
+/// [`ParseCtx`](crate::parser::combinator::ParseCtx) over a GraphQL lexer emits.
 pub type GraphqlErrors<S> = Errors<S, SyntacticTokenKind, char, Expectation>;
 
 // ---- `From` glue -----------------------------------------------------------
@@ -767,6 +767,13 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     SyntacticTokenKind::Pipe => Expectation::Pipe,
     SyntacticTokenKind::Bang => Expectation::Bang,
     SyntacticTokenKind::Ampersand => Expectation::Ampersand,
+    // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
+    // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
+    // every variant from here and calls it unreachable. The arm stays because deleting it would
+    // turn "a new token kind falls back to `Name`" into "a new token kind fails to compile" — a
+    // real change to this function's contract, and this merge is a relocation. Revisiting that
+    // choice is follow-up work, not part of the move.
+    #[allow(unreachable_patterns)]
     _ => Expectation::Name,
   }
 }
@@ -902,11 +909,11 @@ impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlErrors<
 
 #[cfg(test)]
 mod tests {
-  use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
+  use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
   use tokora::{FatalContext, Lexer, SimpleSpan};
 
   use super::{ErrorData, Expectation, GraphqlErrors, SeparatedError, TokUnexpectedToken};
-  use crate::{combinator::ParseCtx, graphql::GraphQL};
+  use crate::parser::{combinator::ParseCtx, graphql::GraphQL};
 
   fn assert_parse_ctx<'inp, L, Ctx>()
   where

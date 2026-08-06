@@ -29,10 +29,10 @@
 //! `extension.rs:215-217` is divergence 17's twin. All three are the same rules the definitions
 //! carry, reached through the same two helpers, so a rule fixed at one site is fixed at both.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, cst::event::EventMark};
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 // `node_at` comes from `coverage`, not from `tokora::parser`; see any sibling production file.
 use super::coverage::node_at;
@@ -51,7 +51,7 @@ use super::{
   value::Constness,
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;

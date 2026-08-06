@@ -2,7 +2,7 @@ use std::vec::Vec;
 
 use tokora::{Lexer as _, SimpleSpan};
 
-use crate::graphql::{
+use crate::lexer::graphql::{
   error::{FloatError, LexerErrorData},
   syntactic::{SyntacticLexer, SyntacticToken},
 };

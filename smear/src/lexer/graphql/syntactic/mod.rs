@@ -9,7 +9,7 @@ use tokora::{
   utils::{CharLen, DowncastRef},
 };
 
-use crate::{
+use crate::lexer::{
   LitComplexBlockStr, LitComplexInlineStr, LitPlainStr,
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphql::error::{LexerError, LexerErrorData, LexerErrors},
@@ -28,7 +28,7 @@ use super::{
 
 use self::number::NumberLexerToken;
 
-pub use crate::simd::DEFAULT_RECURSION_LIMIT;
+pub use crate::lexer::simd::DEFAULT_RECURSION_LIMIT;
 
 /// The focused GraphQL number sub-lexer the SIMD lexer delegates malformed
 /// numbers to; see [`number::NumberToken`].
@@ -979,11 +979,10 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    match crate::simd::delegate_to_logos::<NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>(
-      self.src.as_ref(),
-      self.cursor,
-      self.state,
-    )? {
+    match crate::lexer::simd::delegate_to_logos::<
+      NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
+    >(self.src.as_ref(), self.cursor, self.state)?
+    {
       Delegated::Token { token, end, state } => {
         let number = token.into_number_token();
         let slice = self.src.slice(&token_start..&end)?;

@@ -5,8 +5,8 @@
 //! against it, and the snapshots survive as the regression oracle after Logos
 //! is deleted (phase 5).
 //!
-//! Regenerate after an *intended* change:  BLESS=1 cargo test -p smear-lexer --test oracle
-//! Verify (CI default):                     cargo test -p smear-lexer --test oracle
+//! Regenerate after an *intended* change:  BLESS=1 cargo test -p smear --test oracle
+//! Verify (CI default):                     cargo test -p smear --test oracle
 
 // Every fixture, helper, and test below exercises the `graphql` and/or
 // `graphqlx` dialect lexers; with both features off there is nothing left to
@@ -69,7 +69,7 @@ fn check(group: &str, name: &str, rendered: &str, mismatches: &mut Vec<String>) 
     return;
   }
   let expected = fs::read_to_string(&path).unwrap_or_else(|_| {
-    panic!("missing golden file {path:?}; run: BLESS=1 cargo test -p smear-lexer --test oracle")
+    panic!("missing golden file {path:?}; run: BLESS=1 cargo test -p smear --test oracle")
   });
   if rendered != expected {
     mismatches.push(format!("{group}/{name}"));
@@ -80,7 +80,7 @@ fn check(group: &str, name: &str, rendered: &str, mismatches: &mut Vec<String>) 
 fn assert_no_mismatches(mismatches: &[String]) {
   assert!(
     mismatches.is_empty(),
-    "\noracle mismatch for {} fixture(s):\n  {}\n(if this change is intended: BLESS=1 cargo test -p smear-lexer --test oracle)\n",
+    "\noracle mismatch for {} fixture(s):\n  {}\n(if this change is intended: BLESS=1 cargo test -p smear --test oracle)\n",
     mismatches.len(),
     mismatches.join("\n  "),
   );
@@ -91,27 +91,27 @@ fn assert_no_mismatches(mismatches: &[String]) {
 const CORPUS: &[(&str, &str)] = &[
   (
     "tiny",
-    include_str!("../../smear/tests/fixtures/executables/bench_01_tiny_simple.graphql"),
+    include_str!("fixtures/executables/bench_01_tiny_simple.graphql"),
   ),
   (
     "medium_fragments",
-    include_str!("../../smear/tests/fixtures/executables/bench_05_medium_fragments.graphql"),
+    include_str!("fixtures/executables/bench_05_medium_fragments.graphql"),
   ),
   (
     "huge",
-    include_str!("../../smear/tests/fixtures/executables/bench_10_huge_comprehensive.graphql"),
+    include_str!("fixtures/executables/bench_10_huge_comprehensive.graphql"),
   ),
   (
     "kitchen_sink",
-    include_str!("../../smear/tests/fixtures/executables/kitchen-sink_canonical.graphql"),
+    include_str!("fixtures/executables/kitchen-sink_canonical.graphql"),
   ),
   (
     "schema_minimal",
-    include_str!("../../smear/tests/fixtures/schemas/minimal.graphql"),
+    include_str!("fixtures/schemas/minimal.graphql"),
   ),
   (
     "schema_gmx",
-    include_str!("../../smear/tests/fixtures/schemas/gmx_schema.graphql"),
+    include_str!("fixtures/schemas/gmx_schema.graphql"),
   ),
 ];
 
@@ -228,7 +228,7 @@ const EDGES: &[(&str, &str)] = &[
 #[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_oracle() {
-  use smear_lexer::graphql::syntactic::SyntacticLexer;
+  use smear::lexer::graphql::syntactic::SyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
     let rendered = render_stream!(SyntacticLexer::<str>::new(src));
@@ -400,7 +400,7 @@ fn graphql_syntactic_simd_low_recursion_parity() {
 // Dialect-agnostic: shared by the GraphQL comparators below and the GraphQLx
 // ones further down, so this stays ungated (needed whenever either dialect
 // feature is on).
-use smear_lexer::{
+use smear::lexer::{
   LitBlockStr, LitInlineStr,
   error::{
     EscapedCharacter, FixedUnicodeEscapeError, InvalidUnicodeHexDigits, InvalidUnicodeSequence,
@@ -411,7 +411,7 @@ use smear_lexer::{
 // `SyntacticLexer` used as the `<str>` reference lexer in the matrix
 // tests below.
 #[cfg(feature = "graphql")]
-use smear_lexer::graphql::{
+use smear::lexer::graphql::{
   error::{DecimalError, FloatError},
   syntactic::SyntacticLexer,
   syntactic::{SyntacticLexerError, SyntacticLexerErrorData, SyntacticLexerErrors, SyntacticToken},
@@ -820,7 +820,7 @@ fn graphql_syntactic_simd_source_matrix_hipbyt() {
 #[cfg(feature = "graphql")]
 #[test]
 fn graphql_lossless_oracle() {
-  use smear_lexer::graphql::lossless::LosslessLexer;
+  use smear::lexer::graphql::lossless::LosslessLexer;
   let mut mismatches = Vec::new();
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
     let rendered = render_stream!(LosslessLexer::<&str>::new(src));
@@ -892,7 +892,7 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_oracle() {
-  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
+  use smear::lexer::graphqlx::syntactic::SyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
     let rendered = render_stream!(SyntacticLexer::<str>::new(src));
@@ -916,7 +916,7 @@ fn graphqlx_syntactic_simd_oracle() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
-  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
+  use smear::lexer::graphqlx::syntactic::SyntacticLexer;
   use tokora::state::recursion_tracker::RecursionLimiter;
 
   const CASES: &[(&str, &str)] = &[
@@ -1041,7 +1041,7 @@ fn graphqlx_syntactic_simd_low_recursion_parity() {
 // `LitInt`/`LitFloat` tokens the GraphQL comparators don't cover.
 
 #[cfg(feature = "graphqlx")]
-use smear_lexer::graphqlx::{
+use smear::lexer::graphqlx::{
   LitFloat, LitInt,
   error::{
     BinaryError, DecimalError as GxDecimalError, FloatError as GxFloatError, HexError,
@@ -1272,7 +1272,7 @@ fn graphqlx_syntactic_simd_source_matrix_bytes() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_lossless_oracle() {
-  use smear_lexer::graphqlx::lossless::LosslessLexer;
+  use smear::lexer::graphqlx::lossless::LosslessLexer;
   let mut mismatches = Vec::new();
   for (name, src) in GRAPHQLX_EXTRA.iter() {
     let rendered = render_stream!(LosslessLexer::<&str>::new(src));

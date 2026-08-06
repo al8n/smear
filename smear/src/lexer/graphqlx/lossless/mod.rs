@@ -320,13 +320,13 @@ impl core::fmt::Display for LosslessTokenKind {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::LitPlainStr;
+  use crate::lexer::LitPlainStr;
 
   /// Census: every declared [`LosslessTokenKind`] variant must be producible by some
   /// [`LosslessToken`], i.e. by some arm of [`LosslessToken::kind`].
   ///
   /// See the graphql (non-x) twin of this test
-  /// (`smear-lexer/src/graphql/lossless/mod.rs`) for why: that dialect shipped a
+  /// (`smear/src/lexer/graphql/lossless/mod.rs`) for why: that dialect shipped a
   /// `LosslessTokenKind::Boolean` with no `LosslessToken` able to produce it. GraphQLx's kind
   /// enum has no such gap today, but nothing previously stopped one from being added the same
   /// way, silently.

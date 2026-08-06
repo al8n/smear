@@ -19,14 +19,14 @@ use tokora::{
   utils::{DowncastRef, typenum::U1},
 };
 
-use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use crate::lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, try_name,
   unexpected_here,
   value::{const_value, value},
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, extent_end, extent_since, extent_start, try_colon},
   graphqlx::{
     GraphQLx,
@@ -172,11 +172,11 @@ argument_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
     // Not the `Delimited`'s own span: tokora builds that one from the lookahead cursor at both
     // ends, so it opens before the `(`'s leading trivia and closes wherever the peek past `)`
-    // landed. See `crate::combinator::extent`.
+    // landed. See `crate::parser::combinator::extent`.
     let node_start = extent_start(inp)?;
     let parsed = try_parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
       (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| argument(inp))
@@ -210,9 +210,9 @@ argument_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
-    // Not the `Delimited`'s own span — see `arguments` above and `crate::combinator::extent`.
+    // Not the `Delimited`'s own span — see `arguments` above and `crate::parser::combinator::extent`.
     let node_start = extent_start(inp)?;
     let parsed = try_parens::<_, _, _, _, Vec<ConstArgument<GraphqlxSlice<'inp, Src>>>, _>(
       (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_argument(inp))

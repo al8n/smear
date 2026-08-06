@@ -26,7 +26,7 @@
 //!
 //! Every `+` shape here is **reported** when it is empty, because `graphqlx/syntactic/definition/`
 //! marks each one `.at_least(1)` and gate 1 compares the two suites' verdicts input by input. The
-//! report is always [`crate::lossless::recover::report_unexpected`], which consumes nothing, so the
+//! report is always [`crate::parser::lossless::recover::report_unexpected`], which consumes nothing, so the
 //! closer stays the loop's — the consuming form eats it, and the only witness is an extra `Error`
 //! child that the text cannot show.
 //!
@@ -60,10 +60,10 @@
 //! Gate 1 compares verdicts and not diagnostic sets, which is the reason that is acceptable and is
 //! recorded rather than assumed.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, cst::event::EventMark};
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -89,10 +89,10 @@ use super::{
 
 // The nineteen directive-location spellings, from Task 7's frozen macro. Written out per dialect
 // it is the second place a dialect could forget one; generated, the two suites cannot disagree.
-// This is the invocation that leaves `crate::lossless`'s macro set with no unused member.
-crate::lossless::directive_location_predicate!(smear_lexer::graphqlx::ContextualKeyword);
+// This is the invocation that leaves `crate::parser::lossless`'s macro set with no unused member.
+crate::parser::lossless::directive_location_predicate!(crate::lexer::graphqlx::ContextualKeyword);
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;

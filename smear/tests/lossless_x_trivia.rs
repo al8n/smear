@@ -54,7 +54,7 @@
 //!
 //! An injection gate that reports success without reporting *reach* is the vacuous case: it cannot
 //! tell a corpus that exercises every production from one that exercises three shapes many times.
-//! So the productions are instrumented — see [`smear_parser::graphqlx::lossless::coverage`] — and
+//! So the productions are instrumented — see [`smear::parser::graphqlx::lossless::coverage`] — and
 //! [`trivia_injection_preserves_the_verdict_and_the_shape`] asserts every node kind a production can
 //! open was opened at least once during its own sweep. Run it with `--features lossless-coverage`;
 //! without the feature the instrumentation is not compiled and the assertion is not made.
@@ -90,23 +90,27 @@
 
 use std::collections::BTreeSet;
 
-use smear_lexer::graphqlx::{
-  lossless::{LosslessLexer, LosslessTokenKind as LK},
-  syntactic::{SyntacticLexer, SyntacticTokenKind as SK},
-};
-use smear_parser::{
-  graphqlx::{
-    GraphQLx,
-    ast::{ExecutableDocument, TypeSystemDocument},
-    error::GraphqlxErrors,
-    kinds::SyntaxKind as K,
-    lossless::{
-      Parse, kind_map::token_kind, parse_document, parse_executable_document,
-      parse_type_system_document,
-    },
-    syntactic::{GraphqlxLexer, definition::type_system_document, executable::executable_document},
+use smear::{
+  lexer::graphqlx::{
+    lossless::{LosslessLexer, LosslessTokenKind as LK},
+    syntactic::{SyntacticLexer, SyntacticTokenKind as SK},
   },
-  lossless::KindSpace,
+  parser::{
+    graphqlx::{
+      GraphQLx,
+      ast::{ExecutableDocument, TypeSystemDocument},
+      error::GraphqlxErrors,
+      kinds::SyntaxKind as K,
+      lossless::{
+        Parse, kind_map::token_kind, parse_document, parse_executable_document,
+        parse_type_system_document,
+      },
+      syntactic::{
+        GraphqlxLexer, definition::type_system_document, executable::executable_document,
+      },
+    },
+    lossless::KindSpace,
+  },
 };
 use tokora::{Lexer as _, Parse as _, Parser};
 
@@ -145,7 +149,7 @@ const UNREACHABLE_FROM_PARSE_DOCUMENT: &[K] = &[K::ExecutableDocument, K::TypeSy
 /// `{ k: 1, j: "s" }`, and the empty one pays for the two-field one. So the assertion is structural:
 /// somewhere in the corpus, one container node holds two members.
 ///
-/// [`peek_second_kind`]: smear_parser::graphqlx::lossless::trivia
+/// [`peek_second_kind`]: smear::parser::graphqlx::lossless::trivia
 const REPETITIONS_THAT_MUST_CONTINUE: &[(K, K)] = &[
   (K::WhereClause, K::WherePredicate),
   (K::DefinitionTypeGenerics, K::DefinitionTypeParam),
@@ -276,7 +280,7 @@ fn node_kinds() -> Vec<K> {
 #[test]
 fn trivia_injection_preserves_the_verdict_and_the_shape() {
   #[cfg(feature = "lossless-coverage")]
-  smear_parser::graphqlx::lossless::coverage::reset();
+  smear::parser::graphqlx::lossless::coverage::reset();
 
   let entries = valid_corpus();
   assert!(
@@ -388,7 +392,7 @@ fn trivia_injection_preserves_the_verdict_and_the_shape() {
 
   #[cfg(feature = "lossless-coverage")]
   {
-    use smear_parser::graphqlx::lossless::coverage;
+    use smear::parser::graphqlx::lossless::coverage;
 
     let mut unhit = Vec::new();
     let mut report = Vec::new();
@@ -428,7 +432,7 @@ fn trivia_injection_preserves_the_verdict_and_the_shape() {
 #[cfg(feature = "lossless-coverage")]
 #[test]
 fn the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one() {
-  use smear_parser::graphqlx::lossless::coverage;
+  use smear::parser::graphqlx::lossless::coverage;
 
   coverage::reset();
   assert_eq!(
@@ -480,7 +484,7 @@ fn the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one() {
   // it was, or one dialect's `reset` would erase the other's measurement mid-gate.
   #[cfg(feature = "graphql")]
   {
-    use smear_parser::graphql::{kinds::SyntaxKind as G, lossless as graphql_lossless};
+    use smear::parser::graphql::{kinds::SyntaxKind as G, lossless as graphql_lossless};
 
     graphql_lossless::coverage::reset();
     let before = coverage::hits_of(K::EnumTypeDefinition);

@@ -23,14 +23,14 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::{ty::Path, value::StringValue},
   },
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One named import member, `Name (as Path)?`.
   NamedSpecifier => K::NamedSpecifier {
     /// The imported name — the **first** `Name` token, the `as` after it being another; see this
@@ -44,7 +44,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A wildcard import member or clause, `* (as Path)?`.
   ///
   /// The same node in both positions: a member of a list, and a whole clause.
@@ -55,7 +55,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A braced import list, `{ ImportMember+ }`.
   ///
   /// A member is a choice between the two specifiers, so the two come back through two iterators;
@@ -69,7 +69,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An import statement, `import ImportClause from "source"`.
   ///
   /// **Never described.** A description may precede only an executable or a type-system

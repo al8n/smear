@@ -50,11 +50,11 @@ use std::{
 
 /// The dialect-generic substrate: the kind-space contract, the trivia atoms, the `Parse` surface,
 /// the coverage shims and the typed-wrapper macro.
-const SUBSTRATE: &str = "src/lossless";
+const SUBSTRATE: &str = "src/parser/lossless";
 /// The GraphQL dialect's lossless layer.
-const GRAPHQL: &str = "src/graphql/lossless";
+const GRAPHQL: &str = "src/parser/graphql/lossless";
 /// The GraphQLx dialect's lossless layer.
-const GRAPHQLX: &str = "src/graphqlx/lossless";
+const GRAPHQLX: &str = "src/parser/graphqlx/lossless";
 
 /// Every `.rs` file under `dir`, recursively, as `(path relative to the crate root, contents)`.
 ///
@@ -145,11 +145,11 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 ///
 /// The third column is what turns each zero into evidence.
 const FORBIDDEN: &[(&str, &str, &str)] = &[
-  ("crate::graphql::", GRAPHQLX, GRAPHQL),
+  ("crate::parser::graphql::", GRAPHQLX, GRAPHQL),
   ("graphql::kinds", GRAPHQLX, GRAPHQL),
   ("graphql::lossless", GRAPHQLX, GRAPHQL),
   ("GraphQLLang", GRAPHQLX, GRAPHQL),
-  ("crate::graphqlx::", GRAPHQL, GRAPHQLX),
+  ("crate::parser::graphqlx::", GRAPHQL, GRAPHQLX),
   ("graphqlx::kinds", GRAPHQL, GRAPHQLX),
   ("graphqlx::lossless", GRAPHQL, GRAPHQLX),
   ("GraphQLxLang", GRAPHQL, GRAPHQLX),
@@ -188,17 +188,35 @@ fn the_two_lossless_layers_do_not_reference_each_other() {
 /// pinned set, so a fifth spelling nobody thought of shows up as an unpinned root rather than as a
 /// pattern that was never written.
 ///
-/// Three roots, and each earns its place: the dialect's own subtree, the substrate it stands on,
-/// and [`ast_node!`](smear_parser::ast_node), a `#[macro_export]`ed macro whose expansion names
-/// `$crate` and which every wrapper file therefore spells as `crate::ast_node`.
+/// Four roots, and each earns its place: the dialect's own subtree, the substrate it stands on,
+/// [`ast_node!`](smear::ast_node) — a `#[macro_export]`ed macro whose expansion names `$crate` and
+/// which every wrapper file therefore spells as `crate::ast_node` — and the lexer.
+///
+/// `crate::lexer` is the entry the crate merge (#83) added, and it is a rename rather than a new
+/// permission: the dialect trees have always named their own lexer dialect, and they spelled it
+/// `smear_lexer::…` when that was a separate crate. An external crate name is invisible to a
+/// census that reads `crate::` roots, so the root was never pinned; now it is. What the merge
+/// does NOT do is let a dialect reach the *other* dialect's lexer through it —
+/// [`FORBIDDEN`]'s `graphql::kinds` / `graphql::lossless` spellings are substring patterns and
+/// match `crate::lexer::graphql::lossless::…` exactly as they matched `smear_lexer::graphql::…`.
 const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
   (
     GRAPHQL,
-    &["crate::ast_node", "crate::graphql", "crate::lossless"],
+    &[
+      "crate::ast_node",
+      "crate::lexer",
+      "crate::parser::graphql",
+      "crate::parser::lossless",
+    ],
   ),
   (
     GRAPHQLX,
-    &["crate::ast_node", "crate::graphqlx", "crate::lossless"],
+    &[
+      "crate::ast_node",
+      "crate::lexer",
+      "crate::parser::graphqlx",
+      "crate::parser::lossless",
+    ],
   ),
 ];
 
@@ -209,11 +227,23 @@ fn crate_roots(dir: &str) -> BTreeSet<String> {
     let mut rest = text.as_str();
     while let Some(at) = rest.find("crate::") {
       rest = &rest[at + "crate::".len()..];
+      // The parser is one module below the crate root since the crates merged, so `crate::parser::`
+      // is the prefix every in-tree path carries and the segment AFTER it is the root this census
+      // is about. The hop is stripped rather than assumed: `crate::ast_node` — the
+      // `#[macro_export]`ed macro — is still rooted at the crate itself, and folding both spellings
+      // to a single `crate::parser` would collapse the census to one entry and pin nothing.
+      let prefix = match rest.strip_prefix("parser::") {
+        Some(tail) => {
+          rest = tail;
+          "crate::parser::"
+        }
+        None => "crate::",
+      };
       let end = rest
         .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
         .unwrap_or(rest.len());
       if end > 0 {
-        out.insert(format!("crate::{}", &rest[..end]));
+        out.insert(format!("{prefix}{}", &rest[..end]));
       }
     }
   }
@@ -251,15 +281,15 @@ fn a_dialects_lossless_tree_names_only_itself_the_substrate_and_the_shared_macro
 ///
 /// The Lego rule, mechanised. `src/lossless/` may name `L: Lexer`, tokora's capability traits, the
 /// `Ctx` bundles, the `Lang` marker and `rowan::Language` — and no concrete dialect token type,
-/// kind enum, keyword enum or error type. `smear_lexer` is on the list because the substrate is
-/// generic over the lexer: the moment it names the concrete crate it has picked a token space, and
-/// a token space is a dialect.
+/// kind enum, keyword enum or error type. `crate::lexer` is on the list because the substrate is
+/// generic over the lexer: the moment it names the concrete lexer module it has picked a token
+/// space, and a token space is a dialect.
 const SUBSTRATE_FORBIDDEN: &[(&str, &str)] = &[
-  ("crate::graphql", GRAPHQL),
-  ("crate::graphqlx", GRAPHQLX),
+  ("crate::parser::graphql", GRAPHQL),
+  ("crate::parser::graphqlx", GRAPHQLX),
   ("GraphQLLang", GRAPHQL),
   ("GraphQLxLang", GRAPHQLX),
-  ("smear_lexer", GRAPHQLX),
+  ("crate::lexer", GRAPHQLX),
 ];
 
 #[test]
@@ -360,7 +390,7 @@ fn the_scanned_directories_are_real() {
   // untested, and an untested guard is the one that turns out to have been `if false`.
   let hook = std::panic::take_hook();
   std::panic::set_hook(Box::new(|_| {}));
-  let missing = std::panic::catch_unwind(|| rust_files("src/lossless_that_does_not_exist"));
+  let missing = std::panic::catch_unwind(|| rust_files("src/parser/lossless_that_does_not_exist"));
   std::panic::set_hook(hook);
   assert!(
     missing.is_err(),

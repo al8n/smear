@@ -3,7 +3,7 @@
 //!
 //! # Two kind spaces, deliberately spelled differently
 //!
-//! The node kinds are [`SyntaxKind`](crate::graphql::kinds::SyntaxKind) (`K::…`), the tree's
+//! The node kinds are [`SyntaxKind`](crate::parser::graphql::kinds::SyntaxKind) (`K::…`), the tree's
 //! space; every `expect(…)` argument is a `LosslessTokenKind` (`Kind::…`), the lexer's. They
 //! are different enums, and their names disagree on purpose in three places: the node kind for
 //! a name is `K::Name` while the *token* kind is `Kind::Identifier`; a single-line string is
@@ -78,7 +78,7 @@
 //! `directive_location` both report a reserved spelling and still build their node — applied to
 //! the productions that predate it.
 
-use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
+use crate::lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{ParseInput as _, utils::DowncastRef as _};
 
 /// What `DowncastRef` answers for a peeked token: the outer `Option` is the peek (`None` at
@@ -87,7 +87,7 @@ use tokora::{ParseInput as _, utils::DowncastRef as _};
 /// without spelling the trait path.
 type PeekedKeyword = Option<Option<ContextualKeyword>>;
 
-use crate::graphql::kinds::SyntaxKind as K;
+use crate::parser::graphql::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -148,7 +148,7 @@ impl Constness {
   }
 }
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphql::lossless;

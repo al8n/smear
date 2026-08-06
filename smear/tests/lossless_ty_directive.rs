@@ -13,7 +13,7 @@
 //! Every assertion is on the node-kind sequence, the node's own text, or both — never on a bare
 //! boolean, which is the shape three earlier mutations survived.
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{
     Parse,

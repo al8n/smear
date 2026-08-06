@@ -1,6 +1,6 @@
 use core::{fmt::Display, marker::PhantomData};
 
-use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
+use crate::lexer::{LitBlockStr, LitInlineStr, LitStr};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},

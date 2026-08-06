@@ -36,11 +36,11 @@
 
 use crate::{
   ast_node,
-  graphqlx::{kinds::SyntaxKind as K, lossless::ast::ty::Path},
+  parser::graphqlx::{kinds::SyntaxKind as K, lossless::ast::ty::Path},
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A variable, `$name`.
   ///
   /// The same node kind in a value position and in a variable *definition*: a variable is a
@@ -56,7 +56,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An integer literal value.
   IntValue => K::IntValue {
     /// The literal token — one image over all four radices, the radix staying readable from its
@@ -66,7 +66,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A float literal value.
   FloatValue => K::FloatValue {
     /// The literal token — one image over both radices.
@@ -75,7 +75,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A string literal value, inline or block.
   ///
   /// One node kind over two token kinds: the block/inline distinction is the *token*'s and
@@ -91,7 +91,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A `true` or `false` value.
   BooleanValue => K::BooleanValue {
     /// The `true` or `false` token, which the lexer hands back as an ordinary name.
@@ -100,7 +100,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A `null` value.
   NullValue => K::NullValue {
     /// The `null` token, which the lexer hands back as an ordinary name.
@@ -109,7 +109,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An enum value in a **value** position — a whole path, not a name.
   ///
   /// See this module's docs for divergence 9 and for the SDL half, which goes the other way.
@@ -120,7 +120,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A list value, `[ … ]`.
   ///
   /// One iterator per member kind — see this module's docs for what that costs and why.
@@ -151,7 +151,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A set value, `set { … }` — GraphQLx only.
   ///
   /// [`ListValue`]'s shape under a contextual keyword. The keyword is *inside* the node, the
@@ -184,7 +184,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A map value, `map { k => v, … }` — GraphQLx only.
   MapValue => K::MapValue {
     /// Every entry of the map, in order.
@@ -193,7 +193,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One entry of a map value, `key => value` — GraphQLx only.
   ///
   /// **Both halves are full values, so every getter here is plural** — see this module's docs.
@@ -224,7 +224,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An object value, `{ … }`.
   ObjectValue => K::ObjectValue {
     /// Every field of the object, in order.
@@ -233,7 +233,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One field of an object value, `name : value`.
   ///
   /// **The key is a plain `Name`, not a path.** GraphQLx widened the enum value and the directive
@@ -268,7 +268,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A default value, `= value`.
   ///
   /// The grammar takes a **const** value here, which forbids a variable. This suite keeps that out

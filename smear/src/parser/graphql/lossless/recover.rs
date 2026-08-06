@@ -7,7 +7,7 @@
 //! Everything below is **table**: the twenty-one head sets an "expected one of" diagnostic names,
 //! this dialect's three balanced pairs, its depth-zero restart predicate and its definition-start
 //! predicate. The *logic* — report, skip, attribute, guarantee progress — is
-//! [`crate::lossless::recover`]'s, shared with every dialect, and its module docs carry the
+//! [`crate::parser::lossless::recover`]'s, shared with every dialect, and its module docs carry the
 //! reasoning about `sync_balanced`'s two no-progress cases and the termination rule that follows
 //! from them.
 //!
@@ -15,7 +15,7 @@
 //! `unexpected::<Src, Ctx>(inp, VALUE_HEADS)` rather than a five-argument call naming this
 //! dialect's tables at every one of ~40 sites. They add no behaviour, exactly as `trivia.rs`'s do.
 
-use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
+use crate::lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{
   SimpleSpan,
   error::{UnclosedBrace, UnclosedBracket, UnclosedParen},
@@ -23,7 +23,7 @@ use tokora::{
   utils::DowncastRef,
 };
 
-use crate::graphql::{GraphQL, kinds::SyntaxKind as K};
+use crate::parser::graphql::{GraphQL, kinds::SyntaxKind as K};
 
 use super::trivia::kind_of;
 
@@ -82,7 +82,7 @@ pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[Kind::Identifier, Kind::At, Kind
 /// The token kinds a type condition may begin with — one, and it stands for two positions.
 ///
 /// `on` and the name after it are both `Identifier`s, and `expectation_of` collapses every
-/// token-kind expectation onto [`Expectation::Name`](crate::graphql::error::Expectation::Name)
+/// token-kind expectation onto [`Expectation::Name`](crate::parser::graphql::error::Expectation::Name)
 /// anyway, so a second set naming the keyword would report the same sentence. The precise
 /// "expected the keyword `on`" wording needs the dialect error rather than tokora's
 /// token-kind one, and no production here carries the bound that would reach it.
@@ -118,7 +118,7 @@ pub(crate) const DESCRIBED_MEMBER_HEADS: &[Kind] =
 /// The last two are *spelling* rules — `DirectiveLocation` admits nineteen names and
 /// `FragmentName` is `Name but not "on"` — which this kind-level set cannot express and does not
 /// try to: `lossless/mod.rs`'s `expectation_of` collapses every token-kind expectation onto
-/// [`Expectation::Name`](crate::graphql::error::Expectation::Name) anyway, so a finer set here
+/// [`Expectation::Name`](crate::parser::graphql::error::Expectation::Name) anyway, so a finer set here
 /// would report the same sentence. The precise wording needs the dialect error rather than
 /// tokora's token-kind one, and no production here carries the bound that would reach it — the
 /// ruling [`TYPE_CONDITION_HEADS`] already records for the keyword `on`.
@@ -166,7 +166,7 @@ pub(crate) const BLOCK_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At, Kind::LBrace]
 /// The token kinds a `SchemaDefinition`'s root-operation block may begin with.
 pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 
-pub(crate) use crate::lossless::recover::opener_span;
+pub(crate) use crate::parser::lossless::recover::opener_span;
 
 /// Where a recovery is willing to stop: a token that could start something the caller knows
 /// how to parse, or a closer the enclosing shape knows how to consume.
@@ -257,13 +257,13 @@ fn is_definition_start(kind: Kind, keyword: Option<ContextualKeyword>) -> bool {
   }
 }
 
-/// [`crate::lossless::recover::keyword_of`] with this dialect's keyword projection pinned.
+/// [`crate::parser::lossless::recover::keyword_of`] with this dialect's keyword projection pinned.
 ///
 /// The wrapper exists so the two predicates below read as membership tests over a named enum
 /// rather than as turbofished downcasts.
 #[inline]
 fn keyword_of<T: DowncastRef<ContextualKeyword>>(token: &T) -> Option<ContextualKeyword> {
-  crate::lossless::recover::keyword_of(token)
+  crate::parser::lossless::recover::keyword_of(token)
 }
 
 /// GraphQL's three delimiter pairs, for `sync_balanced`'s depth counting.
@@ -285,7 +285,7 @@ fn delimiters(kind: &Kind) -> Balance<u8> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The wrappers. Each one binds this dialect's tables to `crate::lossless::recover`'s logic and
+// The wrappers. Each one binds this dialect's tables to `crate::parser::lossless::recover`'s logic and
 // adds nothing else; the `lossless_production!` bundle is what makes them nameable from a
 // production without a turbofish per argument.
 // ---------------------------------------------------------------------------------------------
@@ -297,15 +297,15 @@ fn delimiters(kind: &Kind) -> Balance<u8> {
 // concrete slice type — and inside a `lossless_production!` body those bounds are already in
 // scope.
 
-use crate::lossless::lossless_production;
+use crate::parser::lossless::lossless_production;
 
 lossless_production! {
   dialect = graphql::lossless;
 
-  /// A list ran to end of input before its `]` arrived. [`crate::lossless::recover::unclosed`]
+  /// A list ran to end of input before its `]` arrived. [`crate::parser::lossless::recover::unclosed`]
   /// with this pair's marker.
   fn unclosed_list<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    crate::lossless::recover::unclosed(
+    crate::parser::lossless::recover::unclosed(
       inp,
       UnclosedBracket::<SimpleSpan, GraphQL>::bracket_of(open),
     )
@@ -313,27 +313,27 @@ lossless_production! {
 
   /// An object ran to end of input before its `}` arrived.
   fn unclosed_object<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    crate::lossless::recover::unclosed(inp, UnclosedBrace::<SimpleSpan, GraphQL>::brace_of(open))
+    crate::parser::lossless::recover::unclosed(inp, UnclosedBrace::<SimpleSpan, GraphQL>::brace_of(open))
   }
 
   /// An argument list ran to end of input before its `)` arrived — and the reason
   /// [`FromUnclosed`] is generic over the delimiter marker: one impl covers `[]`, `{}` and `()`,
   /// so a new pair costs a constructor call and no new bound.
   fn unclosed_parens<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    crate::lossless::recover::unclosed(inp, UnclosedParen::<SimpleSpan, GraphQL>::paren_of(open))
+    crate::parser::lossless::recover::unclosed(inp, UnclosedParen::<SimpleSpan, GraphQL>::paren_of(open))
   }
 
   /// Nothing that could start one of `expected` is here. **Report, and consume nothing.**
-  /// [`crate::lossless::recover::report_unexpected`]; that function's docs say when to reach for
+  /// [`crate::parser::lossless::recover::report_unexpected`]; that function's docs say when to reach for
   /// it rather than for [`unexpected`], and each of the three shapes is a bug if it consumes.
   fn report_unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    crate::lossless::recover::report_unexpected(inp, expected)
+    crate::parser::lossless::recover::report_unexpected(inp, expected)
   }
 
   /// Nothing that could start one of `expected` is here, and there is still input.
-  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs and restart predicate.
+  /// [`crate::parser::lossless::recover::unexpected`] with this dialect's pairs and restart predicate.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    crate::lossless::recover::unexpected(
+    crate::parser::lossless::recover::unexpected(
       inp,
       expected,
       delimiters,
@@ -343,10 +343,10 @@ lossless_production! {
   }
 
   /// A definition returned `Err`: skip its wreckage and stop before the next definition head.
-  /// [`crate::lossless::recover::resync_to`] with this dialect's definition-start predicate,
+  /// [`crate::parser::lossless::recover::resync_to`] with this dialect's definition-start predicate,
   /// which is deliberately narrower than [`is_sync_point`] — see both predicates' docs.
   fn resync_to_definition<'inp, Src, Ctx>(inp) {
-    crate::lossless::recover::resync_to(
+    crate::parser::lossless::recover::resync_to(
       inp,
       delimiters,
       |t| is_definition_start(kind_of(t), keyword_of(t)),

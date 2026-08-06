@@ -1,10 +1,10 @@
 //! Focused GraphQLx directive-production tests.
 
-use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
+use crate::lexer::graphqlx::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::super::{GraphqlxInput, GraphqlxLexer};
-use crate::graphqlx::{
+use crate::parser::graphqlx::{
   GraphQLx, ast,
   error::{ErrorData, Expectation, GraphqlxErrors, Unclosed},
 };

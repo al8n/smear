@@ -8,7 +8,7 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::error::{BadStateError, UnterminatedSpreadOperatorError};
+use crate::lexer::error::{BadStateError, UnterminatedSpreadOperatorError};
 
 #[inline(always)]
 fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)

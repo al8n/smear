@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use tokora::{Lexer, SimpleSpan, state::recursion_tracker::RecursionLimitExceeded};
 
-use crate::{
+use crate::lexer::{
   LitComplexInlineStr, LitInlineStr, LitPlainStr,
   graphql::{
     error::{DecimalError, FloatError, LexerErrorData, LexerErrors},

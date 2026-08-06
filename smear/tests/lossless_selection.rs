@@ -15,7 +15,7 @@
 //! particular is asserted on **text**: a mark placed one token late leaves the kind sequence
 //! untouched and only the node's extent moves.
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{
     Parse,

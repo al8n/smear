@@ -1,7 +1,7 @@
 //! GraphQLx type-system definition and import-aware document productions.
 
 use super::*;
-use crate::graphqlx::ast::ImportOrTypeSystemDefinitionOrExtension;
+use crate::parser::graphqlx::ast::ImportOrTypeSystemDefinitionOrExtension;
 
 /// Enters a type-system-definition tail after its leading keyword was consumed
 /// and classified by fused dispatch.

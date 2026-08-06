@@ -5,7 +5,7 @@
 //! This space is **derived from GraphQLx's own sources**, not adapted from another dialect's.
 //! Three sources, and nothing else, produced it:
 //!
-//! 1. **The images** are [`smear_lexer::graphqlx::lossless::LosslessTokenKind`]'s thirty-four
+//! 1. **The images** are [`crate::lexer::graphqlx::lossless::LosslessTokenKind`]'s thirty-four
 //!    variants, in that enum's declaration order. The block is the *lexer's*, not the grammar's,
 //!    because recovery commits every skipped token into an [`Error`](SyntaxKind::Error) node — an
 //!    image no production expects (`+`, `-`, `*` outside an import) still has to be nameable when
@@ -43,7 +43,7 @@
 //!
 //! And what it *lacks*: GraphQLx has no non-null node. `graphqlx::syntactic::ty` folds a trailing
 //! `!` into the type node it follows — `DefinitionTypePath`, `ListType`, `SetType` and `MapType`
-//! each carry their own `required` flag (`smear-parser/src/ty.rs`) — so the `!` is a
+//! each carry their own `required` flag (`smear/src/parser/ty.rs`) — so the `!` is a
 //! [`Bang`](SyntaxKind::Bang) token child of the type it modifies rather than a wrapper around it.
 //! It likewise has no bare named-type node: every type head is a `::`-separated
 //! [`Path`](SyntaxKind::Path) with optional generic arguments, which is
@@ -64,7 +64,7 @@
 //!   [`ListValue`](SyntaxKind::ListValue).
 
 #[cfg(feature = "rowan")]
-use crate::lossless::KindSpace;
+use crate::parser::lossless::KindSpace;
 
 /// A GraphQLx concrete-syntax-tree kind: one token image, one node, or one bookkeeping tile.
 ///

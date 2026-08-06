@@ -12,7 +12,7 @@ use tokora::{
   utils::{CharLen, DowncastRef},
 };
 
-use crate::{
+use crate::lexer::{
   LitComplexBlockStr, LitComplexInlineStr, LitPlainStr,
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
@@ -22,12 +22,12 @@ use crate::{
 
 use self::number::NumberLexerToken;
 
-use crate::simd::{
+use crate::lexer::simd::{
   Delegated, LogosSourceOf, NumberKind, memchr_newline, scan_identifier, scan_number,
   skip_ws_and_comma,
 };
 
-pub use crate::simd::DEFAULT_RECURSION_LIMIT;
+pub use crate::lexer::simd::DEFAULT_RECURSION_LIMIT;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -1074,11 +1074,10 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    match crate::simd::delegate_to_logos::<NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>(
-      self.src.as_ref(),
-      self.cursor,
-      self.state,
-    )? {
+    match crate::lexer::simd::delegate_to_logos::<
+      NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
+    >(self.src.as_ref(), self.cursor, self.state)?
+    {
       Delegated::Token { token, end, state } => {
         let number = token.into_number_token();
         let slice = self.src.slice(&token_start..&end)?;

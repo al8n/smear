@@ -20,13 +20,13 @@ use tokora::{
   utils::{DowncastRef, typenum::U1},
 };
 
-use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use crate::lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, keyword_of, path,
   path_after_first, unexpected_here,
 };
-use crate::{
+use crate::parser::{
   combinator::{
     ParseCtx, TokenSpannedExt, colon, dollar, extent_since, extent_start, fat_arrow, try_equal,
   },
@@ -402,23 +402,23 @@ pub(crate) enum ValueHead {
 /// Returns the deterministic FIRST-set category for a GraphQLx value token.
 #[inline]
 pub(crate) fn value_head<S>(
-  token: &smear_lexer::graphqlx::syntactic::SyntacticToken<S>,
+  token: &crate::lexer::graphqlx::syntactic::SyntacticToken<S>,
 ) -> Option<ValueHead> {
   Some(match token {
-    smear_lexer::graphqlx::syntactic::SyntacticToken::LitInt(_) => ValueHead::Int,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::LitFloat(_) => ValueHead::Float,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::LitInlineStr(_)
-    | smear_lexer::graphqlx::syntactic::SyntacticToken::LitBlockStr(_) => ValueHead::String,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::Identifier(_) => ValueHead::Identifier,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::Dollar => ValueHead::Dollar,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::LBracket => ValueHead::List,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::LBrace => ValueHead::Object,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::PathSeparator => ValueHead::Path,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::LitInt(_) => ValueHead::Int,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::LitFloat(_) => ValueHead::Float,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::LitInlineStr(_)
+    | crate::lexer::graphqlx::syntactic::SyntacticToken::LitBlockStr(_) => ValueHead::String,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::Identifier(_) => ValueHead::Identifier,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::Dollar => ValueHead::Dollar,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::LBracket => ValueHead::List,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::LBrace => ValueHead::Object,
+    crate::lexer::graphqlx::syntactic::SyntacticToken::PathSeparator => ValueHead::Path,
     _ => return None,
   })
 }
 
-fn const_value_head<S>(token: &smear_lexer::graphqlx::syntactic::SyntacticToken<S>) -> bool {
+fn const_value_head<S>(token: &crate::lexer::graphqlx::syntactic::SyntacticToken<S>) -> bool {
   !matches!(value_head(token), Some(ValueHead::Dollar) | None)
 }
 

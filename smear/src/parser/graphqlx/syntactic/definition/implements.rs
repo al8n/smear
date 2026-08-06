@@ -1,7 +1,7 @@
 //! GraphQLx `implements` clauses.
 
 use super::*;
-use crate::combinator::{ampersand, try_ampersand};
+use crate::parser::combinator::{ampersand, try_ampersand};
 
 fn implements_after_keyword<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,

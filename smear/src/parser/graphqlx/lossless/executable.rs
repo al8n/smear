@@ -56,10 +56,10 @@
 //! `document.rs`'s `import_or_executable_definition`, which is where the *other* two roots make
 //! the same decision; this document's loop reaches it rather than repeating either half.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, cst::event::EventMark};
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -98,7 +98,7 @@ pub(crate) fn starts_executable_keyword(keyword: Option<Keyword>) -> bool {
   )
 }
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;

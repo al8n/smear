@@ -1,17 +1,11 @@
-#![doc = include_str!("../README.md")]
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![allow(clippy::type_complexity)]
-#![deny(missing_docs)]
+#![doc = include_str!("README.md")]
 
-#[cfg(not(feature = "std"))]
-extern crate alloc as std;
-
-#[cfg(feature = "std")]
-extern crate std;
-
-/// Re-exported lexer crate.
-pub use smear_lexer as lexer;
+/// The lexer layer these parsers are built on.
+///
+/// A re-export of [`crate::lexer`], so `smear::parser::lexer::X` — the path `smear-parser`
+/// published as `smear_parser::lexer::X` — keeps resolving to the same items as
+/// `smear::lexer::X`.
+pub use crate::lexer;
 
 pub mod combinator;
 
@@ -81,8 +75,8 @@ True by construction — the two dialects derive their kind spaces independently
 "true by construction" is what a refactor breaks silently, so it is asserted:
 
 ```compile_fail
-# use smear_parser::{graphql, graphqlx};
-# use smear_parser::lossless::ast::CastNode;
+# use smear::parser::{graphql, graphqlx};
+# use smear::parser::lossless::ast::CastNode;
 let parse = graphql::lossless::parse_document("type T { f: Int }");
 let node = parse.syntax();
 // error[E0308]: expected `SyntaxNode<GraphQLxLang>`, found `SyntaxNode<GraphQLLang>`

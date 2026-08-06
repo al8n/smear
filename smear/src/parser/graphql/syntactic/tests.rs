@@ -1,7 +1,7 @@
 use tokora::{FatalContext, Parse, Parser, try_parse_input::ParseAttempt};
 
 use super::*;
-use crate::graphql::{GraphQL, ast, error::GraphqlErrors};
+use crate::parser::graphql::{GraphQL, ast, error::GraphqlErrors};
 
 type StrCtx<'inp> = FatalContext<'inp, GraphqlLexer<'inp, str>, GraphqlErrors<&'inp str>, GraphQL>;
 type SliceCtx<'inp> =

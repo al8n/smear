@@ -9,7 +9,7 @@ use tokora::{
   span::{AsSpan, IntoSpan},
 };
 
-use crate::graphqlx::GraphQLx;
+use crate::parser::graphqlx::GraphQLx;
 
 /// GraphQLx argument AST aliases.
 pub mod argument;
@@ -42,95 +42,98 @@ pub type DefaultVec<T> = Vec<T>;
 
 /// A GraphQLx name.
 #[allow(type_alias_bounds)]
-pub type Name<S: ?Sized, Span = SimpleSpan> = crate::name::Name<S, Span, GraphQLx>;
+pub type Name<S: ?Sized, Span = SimpleSpan> = crate::parser::name::Name<S, Span, GraphQLx>;
 
 /// A `::`-separated GraphQLx path.
 pub type Path<S, Span = SimpleSpan, Container = DefaultVec<Name<S, Span>>> =
-  crate::path::Path<Name<S, Span>, Span, Container>;
+  crate::parser::path::Path<Name<S, Span>, Span, Container>;
 
 /// A GraphQLx boolean literal.
-pub type BooleanValue<S, Span = SimpleSpan> = crate::value::BooleanValue<S, Span, GraphQLx>;
+pub type BooleanValue<S, Span = SimpleSpan> = crate::parser::value::BooleanValue<S, Span, GraphQLx>;
 
 /// A GraphQLx string literal.
-pub type StringValue<S, Span = SimpleSpan> = crate::value::StringValue<S, Span, GraphQLx>;
+pub type StringValue<S, Span = SimpleSpan> = crate::parser::value::StringValue<S, Span, GraphQLx>;
 
 /// A GraphQLx inline string literal.
 pub type InlineStringValue<S, Span = SimpleSpan> =
-  crate::value::InlineStringValue<S, Span, GraphQLx>;
+  crate::parser::value::InlineStringValue<S, Span, GraphQLx>;
 
 /// A GraphQLx block string literal.
-pub type BlockStringValue<S, Span = SimpleSpan> = crate::value::BlockStringValue<S, Span, GraphQLx>;
+pub type BlockStringValue<S, Span = SimpleSpan> =
+  crate::parser::value::BlockStringValue<S, Span, GraphQLx>;
 
 /// A GraphQLx integer literal preserving its decimal, hexadecimal, binary, or
 /// octal lexer representation while exposing the source slice as `S`.
 pub type IntValue<S, Span = SimpleSpan> =
-  crate::value::IntValue<smear_lexer::graphqlx::LitInt<S>, Span, GraphQLx>;
+  crate::parser::value::IntValue<crate::lexer::graphqlx::LitInt<S>, Span, GraphQLx>;
 
 /// A GraphQLx floating-point literal preserving its decimal or hexadecimal
 /// lexer representation while exposing the source slice as `S`.
 pub type FloatValue<S, Span = SimpleSpan> =
-  crate::value::FloatValue<smear_lexer::graphqlx::LitFloat<S>, Span, GraphQLx>;
+  crate::parser::value::FloatValue<crate::lexer::graphqlx::LitFloat<S>, Span, GraphQLx>;
 
 /// The GraphQLx `null` literal.
-pub type NullValue<S, Span = SimpleSpan> = crate::value::NullValue<S, Span, GraphQLx>;
+pub type NullValue<S, Span = SimpleSpan> = crate::parser::value::NullValue<S, Span, GraphQLx>;
 
 /// A GraphQLx enum value represented by a complete path.
-pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<Path<S, Span>, Span, GraphQLx>;
+pub type EnumValue<S, Span = SimpleSpan> =
+  crate::parser::value::EnumValue<Path<S, Span>, Span, GraphQLx>;
 
 /// A GraphQLx variable value.
-pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S, Span>, Span>;
+pub type VariableValue<S, Span = SimpleSpan> =
+  crate::parser::value::VariableValue<Name<S, Span>, Span>;
 
 /// A GraphQLx list value.
 pub type List<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
-  crate::value::List<InputValue<S, Span>, Span, Container>;
+  crate::parser::value::List<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx set value.
 pub type Set<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
-  crate::value::Set<InputValue<S, Span>, Span, Container>;
+  crate::parser::value::Set<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx map entry.
 pub type MapEntry<S, Span = SimpleSpan> =
-  crate::value::MapEntry<InputValue<S, Span>, InputValue<S, Span>, Span>;
+  crate::parser::value::MapEntry<InputValue<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx map value.
 pub type Map<S, Span = SimpleSpan, Container = DefaultVec<MapEntry<S, Span>>> =
-  crate::value::Map<InputValue<S, Span>, InputValue<S, Span>, Span, Container>;
+  crate::parser::value::Map<InputValue<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx object field.
 pub type ObjectField<S, Span = SimpleSpan> =
-  crate::value::ObjectField<Name<S, Span>, InputValue<S, Span>, Span>;
+  crate::parser::value::ObjectField<Name<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx object value.
 pub type Object<S, Span = SimpleSpan, Container = DefaultVec<ObjectField<S, Span>>> =
-  crate::value::Object<Name<S, Span>, InputValue<S, Span>, Span, Container>;
+  crate::parser::value::Object<Name<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx list value.
 pub type ConstList<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
-  crate::value::List<ConstInputValue<S, Span>, Span, Container>;
+  crate::parser::value::List<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx set value.
 pub type ConstSet<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
-  crate::value::Set<ConstInputValue<S, Span>, Span, Container>;
+  crate::parser::value::Set<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx map entry.
 pub type ConstMapEntry<S, Span = SimpleSpan> =
-  crate::value::MapEntry<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span>;
+  crate::parser::value::MapEntry<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx map value.
 pub type ConstMap<S, Span = SimpleSpan, Container = DefaultVec<ConstMapEntry<S, Span>>> =
-  crate::value::Map<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span, Container>;
+  crate::parser::value::Map<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx object field.
 pub type ConstObjectField<S, Span = SimpleSpan> =
-  crate::value::ObjectField<Name<S, Span>, ConstInputValue<S, Span>, Span>;
+  crate::parser::value::ObjectField<Name<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx object value.
 pub type ConstObject<S, Span = SimpleSpan, Container = DefaultVec<ConstObjectField<S, Span>>> =
-  crate::value::Object<Name<S, Span>, ConstInputValue<S, Span>, Span, Container>;
+  crate::parser::value::Object<Name<S, Span>, ConstInputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx default input value assignment.
 pub type DefaultInputValue<S, Span = SimpleSpan> =
-  crate::value::DefaultInputValue<ConstInputValue<S, Span>, Span>;
+  crate::parser::value::DefaultInputValue<ConstInputValue<S, Span>, Span>;
 
 /// A GraphQLx input value, including variables and extended collections.
 #[derive(
@@ -271,7 +274,7 @@ impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
 
 /// Generic type arguments used by a GraphQLx type path.
 pub type TypeGenerics<S, Span = SimpleSpan, Container = DefaultVec<Type<S, Span>>> =
-  crate::ty::TypeGenerics<Type<S, Span>, Span, Container>;
+  crate::parser::ty::TypeGenerics<Type<S, Span>, Span, Container>;
 
 /// A path type, its optional generic type arguments, and a non-null modifier.
 pub type DefinitionTypePath<
@@ -279,7 +282,13 @@ pub type DefinitionTypePath<
   Span = SimpleSpan,
   PathContainer = DefaultVec<Name<S, Span>>,
   TypeContainer = DefaultVec<Type<S, Span>>,
-> = crate::ty::DefinitionTypePath<Name<S, Span>, Type<S, Span>, Span, PathContainer, TypeContainer>;
+> = crate::parser::ty::DefinitionTypePath<
+  Name<S, Span>,
+  Type<S, Span>,
+  Span,
+  PathContainer,
+  TypeContainer,
+>;
 
 /// A recursive GraphQLx type reference.
 #[derive(
@@ -296,11 +305,11 @@ pub enum Type<S, Span = SimpleSpan> {
   /// A namespaced path with optional generic arguments.
   Path(DefinitionTypePath<S, Span>),
   /// A list type (`[T]`).
-  List(Box<crate::ty::ListType<Self, Span>>),
+  List(Box<crate::parser::ty::ListType<Self, Span>>),
   /// A set type (`<T>`).
-  Set(Box<crate::ty::SetType<Self, Span>>),
+  Set(Box<crate::parser::ty::SetType<Self, Span>>),
   /// A map type (`<K => V>`).
-  Map(Box<crate::ty::MapType<Self, Self, Span>>),
+  Map(Box<crate::parser::ty::MapType<Self, Self, Span>>),
 }
 
 impl<S, Span> Type<S, Span> {

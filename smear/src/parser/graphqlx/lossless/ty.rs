@@ -36,10 +36,10 @@
 //! skip; where the caller has already peeked, the skip finds nothing and the peek is served out of
 //! the cache.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::ParseInput as _;
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 use super::coverage::{node, node_at};
 
@@ -49,7 +49,7 @@ use super::{
   trivia::{eat_if, expect, peek_kind},
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;

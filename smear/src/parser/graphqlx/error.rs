@@ -4,14 +4,14 @@
 //! `graphqlx` feature alone; it deliberately does not depend on the separately
 //! feature-gated GraphQL dialect module.
 
-use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::{
+use crate::lexer::{
   graphqlx::{
     error::LexerErrors,
     syntactic::{SyntacticToken, SyntacticTokenKind},
   },
   tokora::error::UnexpectedEnd,
 };
+use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   Lexer, SimpleSpan as Span,
   emitter::FromUnclosed,
@@ -385,6 +385,13 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     SyntacticTokenKind::Plus => Expectation::Plus,
     SyntacticTokenKind::Minus => Expectation::Minus,
     SyntacticTokenKind::PathSeparator => Expectation::PathSeparator,
+    // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
+    // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
+    // every variant from here and calls it unreachable. The arm stays because deleting it would
+    // turn "a new token kind falls back to `Name`" into "a new token kind fails to compile" — a
+    // real change to this function's contract, and this merge is a relocation. Revisiting that
+    // choice is follow-up work, not part of the move.
+    #[allow(unreachable_patterns)]
     _ => Expectation::Name,
   }
 }

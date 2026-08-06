@@ -15,7 +15,7 @@
 //! - a materialization failure names *this* dialect.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::{GraphQLxLang, SyntaxKind as X},
   lossless::{parse_document, runner::test_support::open_raw_kind},
 };
@@ -133,7 +133,7 @@ fn the_kind_predicate_the_validator_wraps_rejects_out_of_space_raws() {
 /// output. Calling it is therefore itself an assertion about `X::Error` and `X::Gap`.
 #[test]
 fn constructing_the_profile_does_not_panic() {
-  let _ = smear_parser::graphqlx::lossless::profile::<str>();
+  let _ = smear::parser::graphqlx::lossless::profile::<str>();
 }
 
 /// The profile's validator refuses an out-of-space kind at the emit door.
@@ -192,5 +192,5 @@ fn the_profile_validator_refuses_an_out_of_space_kind_at_the_emit_door() {
 #[test]
 #[should_panic(expected = "the graphqlx lossless sink emitted a malformed event stream")]
 fn a_malformed_stream_panics_naming_the_graphqlx_sink() {
-  let _ = smear_parser::graphqlx::lossless::runner::test_support::structure_without_tokens("a", 0);
+  let _ = smear::parser::graphqlx::lossless::runner::test_support::structure_without_tokens("a", 0);
 }

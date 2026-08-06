@@ -31,7 +31,7 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       directive::Directives,
@@ -47,7 +47,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One variable definition, `$v : T = default @directives`.
   ///
   /// The directives here are **const**, and this is the one place in an executable document where
@@ -75,7 +75,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An operation's variable definitions, `( … )`.
   VariablesDefinition => K::VariablesDefinition {
     /// Every variable defined, in order.
@@ -84,7 +84,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An operation definition — the shorthand `{ … }` or the full keyword form.
   OperationDefinition => K::OperationDefinition {
     /// The operation's description, if one was written before it.
@@ -115,7 +115,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A fragment definition, `fragment F on T { … }`.
   FragmentDefinition => K::FragmentDefinition {
     /// The fragment's description, if one was written before it.
@@ -142,13 +142,13 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An executable-only document root.
   ///
-  /// Not what [`parse_document`](crate::graphqlx::lossless::parse_document) builds — that parses
+  /// Not what [`parse_document`](crate::parser::graphqlx::lossless::parse_document) builds — that parses
   /// the mixed [`Document`](super::document::Document). A consumer that will only accept
   /// executable syntax calls
-  /// [`parse_executable_document`](crate::graphqlx::lossless::parse_executable_document), which
+  /// [`parse_executable_document`](crate::parser::graphqlx::lossless::parse_executable_document), which
   /// reports a type-system definition rather than admitting one. It admits imports, which
   /// is why it has three iterators where GraphQL's has two.
   ExecutableDocument => K::ExecutableDocument {

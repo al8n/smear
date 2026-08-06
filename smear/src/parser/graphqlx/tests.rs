@@ -5,7 +5,7 @@
 //! (when enabled), so the AST aliases and parser entry points cannot
 //! accidentally become tied to one source representation.
 
-use smear_lexer::graphqlx::{LitFloat, LitInt, syntactic::SyntacticTokenKind};
+use crate::lexer::graphqlx::{LitFloat, LitInt, syntactic::SyntacticTokenKind};
 use tokora::{
   FatalContext, Parse, Parser, SimpleSpan, span::AsSpan, try_parse_input::ParseAttempt,
   utils::cmp::Equivalent,
@@ -657,54 +657,40 @@ fn failures_keep_typed_expectations_and_unclosed_kinds() {
 #[test]
 fn complete_document_accepts_every_graphqlx_fixture_over_all_borrowed_sources() {
   const FIXTURES: &[&str] = &[
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0001_import_named.graphqlx"),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0002_import_wildcard.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0001_import_named.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0002_import_wildcard.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0003_import_with_alias.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0004_generics_simple.graphqlx"),
     include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0003_import_with_alias.graphqlx"
+      "../../../tests/fixtures/parser/graphqlx/ok/0005_generics_multiple_params.graphqlx"
     ),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0004_generics_simple.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0006_where_clause_simple.graphqlx"),
     include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0005_generics_multiple_params.graphqlx"
+      "../../../tests/fixtures/parser/graphqlx/ok/0007_where_clause_multiple_bounds.graphqlx"
     ),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0008_map_value_simple.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0009_map_value_nested.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0010_generics_with_default.graphqlx"),
     include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0006_where_clause_simple.graphqlx"
+      "../../../tests/fixtures/parser/graphqlx/ok/0011_interface_with_generics.graphqlx"
     ),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0012_path_type.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0014_generics_nested.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0015_extend_with_generics.graphqlx"),
     include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0007_where_clause_multiple_bounds.graphqlx"
+      "../../../tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"
     ),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0008_map_value_simple.graphqlx"),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0009_map_value_nested.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0017_union_with_path_types.graphqlx"),
     include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0010_generics_with_default.graphqlx"
+      "../../../tests/fixtures/parser/graphqlx/ok/0018_union_with_path_types_and_generics.graphqlx"
     ),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0019_input_with_map_default.graphqlx"),
     include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0011_interface_with_generics.graphqlx"
+      "../../../tests/fixtures/parser/graphqlx/ok/0020_where_multiple_predicates.graphqlx"
     ),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0012_path_type.graphqlx"),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0014_generics_nested.graphqlx"),
-    include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0015_extend_with_generics.graphqlx"
-    ),
-    include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"
-    ),
-    include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0017_union_with_path_types.graphqlx"
-    ),
-    include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0018_union_with_path_types_and_generics.graphqlx"
-    ),
-    include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0019_input_with_map_default.graphqlx"
-    ),
-    include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0020_where_multiple_predicates.graphqlx"
-    ),
-    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0021_fat_arrow_in_map.graphqlx"),
-    include_str!(
-      "../../../smear/tests/fixtures/parser/graphqlx/ok/0022_complex_fragments.graphqlx"
-    ),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0021_fat_arrow_in_map.graphqlx"),
+    include_str!("../../../tests/fixtures/parser/graphqlx/ok/0022_complex_fragments.graphqlx"),
   ];
 
   fn check_document<S: AsRef<[u8]>>(document: ast::Document<S>) {

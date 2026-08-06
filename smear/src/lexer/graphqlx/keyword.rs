@@ -239,7 +239,7 @@ where
 ///
 /// An **array**, not a slice: the previous spelling here was `&[ContextualKeyword]`, whose length
 /// pins nothing, so a keyword inserted in the middle broke no test in either crate. The length is
-/// now a compile-time check, and `crate::keyword_prefix` compares the two dialects' lists against
+/// now a compile-time check, and `crate::lexer::keyword_prefix` compares the two dialects' lists against
 /// a third one written out by hand.
 #[cfg(test)]
 pub(crate) const KEYWORDS: [ContextualKeyword; 44] = [
@@ -295,7 +295,7 @@ impl ContextualKeyword {
   ///
   /// **The list's length pins nothing on its own.** `KEYWORDS` is hand-written, so a variant added
   /// to the enum together with its `as_str` arm — which is what a real change looks like —
-  /// compiles, classifies, and leaves every count in `crate::keyword_prefix` agreeing with itself.
+  /// compiles, classifies, and leaves every count in `crate::lexer::keyword_prefix` agreeing with itself.
   /// Task 7 measured exactly that: the mutation passed the whole suite.
   ///
   /// The `match` below is what closes it. It is exhaustive by construction, so the *next* variant

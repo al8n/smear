@@ -18,9 +18,9 @@ use tokora::conformance::Harness;
 /// Valid documents spanning query and schema shapes, plus small hand-written
 /// edge cases (block strings, escapes, comments, commas, unicode).
 const VALID: &[&str] = &[
-  include_str!("../../smear/tests/fixtures/executables/bench_01_tiny_simple.graphql"),
-  include_str!("../../smear/tests/fixtures/executables/bench_05_medium_fragments.graphql"),
-  include_str!("../../smear/tests/fixtures/executables/kitchen-sink_canonical.graphql"),
+  include_str!("fixtures/executables/bench_01_tiny_simple.graphql"),
+  include_str!("fixtures/executables/bench_05_medium_fragments.graphql"),
+  include_str!("fixtures/executables/kitchen-sink_canonical.graphql"),
   "",
   "   ",
   "\n\t\r\n",
@@ -64,7 +64,7 @@ fn corpus() -> Vec<&'static str> {
 #[cfg(feature = "graphql")]
 mod graphql {
   use super::*;
-  use smear_lexer::graphql::{lossless::LosslessLexer, syntactic::SyntacticLexer};
+  use smear::lexer::graphql::{lossless::LosslessLexer, syntactic::SyntacticLexer};
 
   #[test]
   fn syntactic_conformance() {
@@ -95,7 +95,7 @@ mod graphql {
 #[cfg(feature = "graphqlx")]
 mod graphqlx {
   use super::*;
-  use smear_lexer::graphqlx::{lossless::LosslessLexer, syntactic::SyntacticLexer};
+  use smear::lexer::graphqlx::{lossless::LosslessLexer, syntactic::SyntacticLexer};
 
   #[test]
   fn syntactic_conformance() {

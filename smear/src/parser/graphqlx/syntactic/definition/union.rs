@@ -1,7 +1,7 @@
 //! GraphQLx union type definitions and member paths.
 
 use super::*;
-use crate::combinator::{extent_end, pipe, try_pipe};
+use crate::parser::combinator::{extent_end, pipe, try_pipe};
 
 fn union_members_after_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,

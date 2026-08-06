@@ -5,61 +5,62 @@ use tokora::{
 };
 
 use super::{DefaultVec, Name};
-use crate::graphql::GraphQL;
+use crate::parser::graphql::GraphQL;
 
 /// A GraphQL boolean literal.
-pub type BooleanValue<S, Span = SimpleSpan> = crate::value::BooleanValue<S, Span, GraphQL>;
+pub type BooleanValue<S, Span = SimpleSpan> = crate::parser::value::BooleanValue<S, Span, GraphQL>;
 
 /// A GraphQL enum literal.
-pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<S, Span, GraphQL>;
+pub type EnumValue<S, Span = SimpleSpan> = crate::parser::value::EnumValue<S, Span, GraphQL>;
 
 /// A GraphQL floating-point literal.
-pub type FloatValue<S, Span = SimpleSpan> = crate::value::FloatValue<S, Span, GraphQL>;
+pub type FloatValue<S, Span = SimpleSpan> = crate::parser::value::FloatValue<S, Span, GraphQL>;
 
 /// A GraphQL integer literal.
-pub type IntValue<S, Span = SimpleSpan> = crate::value::IntValue<S, Span, GraphQL>;
+pub type IntValue<S, Span = SimpleSpan> = crate::parser::value::IntValue<S, Span, GraphQL>;
 
 /// The GraphQL `null` literal.
-pub type NullValue<S, Span = SimpleSpan> = crate::value::NullValue<S, Span, GraphQL>;
+pub type NullValue<S, Span = SimpleSpan> = crate::parser::value::NullValue<S, Span, GraphQL>;
 
 /// A GraphQL string literal.
-pub type StringValue<S, Span = SimpleSpan> = crate::value::StringValue<S, Span, GraphQL>;
+pub type StringValue<S, Span = SimpleSpan> = crate::parser::value::StringValue<S, Span, GraphQL>;
 
 /// A GraphQL inline string literal.
 pub type InlineStringValue<S, Span = SimpleSpan> =
-  crate::value::InlineStringValue<S, Span, GraphQL>;
+  crate::parser::value::InlineStringValue<S, Span, GraphQL>;
 
 /// A GraphQL block string literal.
-pub type BlockStringValue<S, Span = SimpleSpan> = crate::value::BlockStringValue<S, Span, GraphQL>;
+pub type BlockStringValue<S, Span = SimpleSpan> =
+  crate::parser::value::BlockStringValue<S, Span, GraphQL>;
 
 /// A GraphQL variable value that can appear in queries and mutations.
-pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S>, Span>;
+pub type VariableValue<S, Span = SimpleSpan> = crate::parser::value::VariableValue<Name<S>, Span>;
 
 /// List value in GraphQL (can contain variables).
 pub type List<S, Container = DefaultVec<InputValue<S>>> =
-  crate::value::List<InputValue<S>, SimpleSpan, Container>;
+  crate::parser::value::List<InputValue<S>, SimpleSpan, Container>;
 
 /// Object value in GraphQL (can contain variables).
 pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
-  crate::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
+  crate::parser::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
 
 /// Object field in GraphQL (can contain variables).
-pub type ObjectField<S> = crate::value::ObjectField<Name<S>, InputValue<S>>;
+pub type ObjectField<S> = crate::parser::value::ObjectField<Name<S>, InputValue<S>>;
 
 /// Constant list value in GraphQL (no variables).
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  crate::value::List<ConstInputValue<S>, SimpleSpan, Container>;
+  crate::parser::value::List<ConstInputValue<S>, SimpleSpan, Container>;
 
 /// Constant object value in GraphQL (no variables).
 pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
-  crate::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
+  crate::parser::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
 
 /// Constant object field in GraphQL (no variables).
-pub type ConstObjectField<S> = crate::value::ObjectField<Name<S>, ConstInputValue<S>>;
+pub type ConstObjectField<S> = crate::parser::value::ObjectField<Name<S>, ConstInputValue<S>>;
 
 /// Default value for input fields and arguments, using constant expressions
 /// (`= ConstValue`). Copied type-only from the frozen `graphql/ast/default.rs`.
-pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<S>>;
+pub type DefaultInputValue<S> = crate::parser::value::DefaultInputValue<ConstInputValue<S>>;
 
 /// GraphQL input value (executable context).
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]

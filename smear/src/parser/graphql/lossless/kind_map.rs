@@ -1,4 +1,4 @@
-//! The token mapper: which [`SyntaxKind`](crate::graphql::kinds::SyntaxKind) each lexer token
+//! The token mapper: which [`SyntaxKind`](crate::parser::graphql::kinds::SyntaxKind) each lexer token
 //! enters the tree as.
 //!
 //! [`CstProfile::new`](tokora::cst::CstProfile::new)'s first argument is `fn(&T) -> u16`, and
@@ -27,7 +27,7 @@
 //! genuinely a text-level detail.
 //!
 //! **Do not "repair" the fold by adding `CarriageReturn`/`CarriageReturnAndNewline` kinds.**
-//! That breaks [`SyntaxKind::ALL`](crate::graphql::kinds::SyntaxKind::ALL)'s 87-kind pin and
+//! That breaks [`SyntaxKind::ALL`](crate::parser::graphql::kinds::SyntaxKind::ALL)'s 87-kind pin and
 //! buys nothing the text does not already give.
 //!
 //! # No wildcard arm
@@ -36,9 +36,9 @@
 //! than a token silently classified as filler. The mapper has no fallible form — `fn(&T) -> u16`
 //! must answer for every token — so the compiler is the only place that check can live.
 
-use smear_lexer::graphql::lossless::LosslessToken;
+use crate::lexer::graphql::lossless::LosslessToken;
 
-use crate::graphql::kinds::SyntaxKind as K;
+use crate::parser::graphql::kinds::SyntaxKind as K;
 
 /// The kind a committed lexer token enters the CST as.
 ///

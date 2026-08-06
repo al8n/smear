@@ -2,7 +2,7 @@
 //! committed-token path, so no production wraps a bare token in a node.
 //!
 //! The conventions are GraphQL's and are not re-derived here: node kinds are
-//! [`SyntaxKind`](crate::graphqlx::kinds::SyntaxKind) (`K::…`) while every `expect(…)` argument is
+//! [`SyntaxKind`](crate::parser::graphqlx::kinds::SyntaxKind) (`K::…`) while every `expect(…)` argument is
 //! a `LosslessTokenKind` (`Kind::…`); every generic call carries `::<Src, Ctx>`, because `Src`
 //! reaches the input only through the associated-type projection `Src::Slice<'inp>` and is
 //! therefore not inferable; every `node(…)` closure spells its parameter in full; and
@@ -13,8 +13,8 @@
 //!
 //! **1. An enum value is a whole path.** `graphqlx/syntactic/value.rs`'s `enum_after_first` builds
 //! `EnumValue::new(span, path)`, so `::ns::Colour` and `Colour` are both enum values and the node
-//! is [`EnumValue`](crate::graphqlx::kinds::SyntaxKind::EnumValue) wrapping a
-//! [`Path`](crate::graphqlx::kinds::SyntaxKind::Path). The nesting is not decoration: it is the
+//! is [`EnumValue`](crate::parser::graphqlx::kinds::SyntaxKind::EnumValue) wrapping a
+//! [`Path`](crate::parser::graphqlx::kinds::SyntaxKind::Path). The nesting is not decoration: it is the
 //! shape the AST has, so a typed wrapper can ask an enum value for its segments.
 //!
 //! **2. A bare `::` is a value head.** `::ns::Colour` in value position is a fully qualified enum
@@ -22,7 +22,7 @@
 //! GraphQL's does not.
 //!
 //! **3. `set` and `map` are contextual, and the test is the *immediately following* token.**
-//! `set { 1, 2 }` is a [`SetValue`](crate::graphqlx::kinds::SyntaxKind::SetValue); `set` alone,
+//! `set { 1, 2 }` is a [`SetValue`](crate::parser::graphqlx::kinds::SyntaxKind::SetValue); `set` alone,
 //! and `set::Thing`, are ordinary enum values (`value.rs:791-806, 902-917`). See this module's
 //! private `collection_or_enum` for why the test needs a retro-wrap rather than a two-token peek.
 //!
@@ -37,10 +37,10 @@
 //! The rejection is a diagnostic, not a refusal to parse, exactly as in GraphQL: every byte is
 //! kept, `tree.text() == source` still holds, and the node a diagnostic wants to point at is there.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::ParseInput as _;
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -100,7 +100,7 @@ pub(crate) enum Collection {
   Map,
 }
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;

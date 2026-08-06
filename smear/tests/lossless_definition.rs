@@ -14,7 +14,7 @@
 //! extent, so every retro-wrap here — the `Description` mark above all — carries a node-**text**
 //! assertion beside its kind vector.
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{Parse, parse_document},
 };

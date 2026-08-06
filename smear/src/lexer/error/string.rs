@@ -9,7 +9,7 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::hints::{LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint};
+use crate::lexer::hints::{LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint};
 
 use super::LengthError;
 

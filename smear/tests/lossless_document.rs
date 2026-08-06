@@ -10,7 +10,7 @@
 //! cannot use `has_errors()` as a verdict until that holds, so it is asserted here directly
 //! rather than left as a side effect of the recovery tests.
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{Parse, parse_document, parse_type_system_document},
 };

@@ -13,20 +13,21 @@ use tokora::{
 use super::{Arguments, Directives, FragmentName, Name};
 
 /// A field alias in a GraphQL selection (`Name :`).
-pub type Alias<S> = crate::selection::Alias<Name<S>>;
+pub type Alias<S> = crate::parser::selection::Alias<Name<S>>;
 
 /// A fragment type condition (`on NamedType`).
-pub type TypeCondition<S> = crate::selection::TypeCondition<Name<S>>;
+pub type TypeCondition<S> = crate::parser::selection::TypeCondition<Name<S>>;
 
 /// A named fragment spread (`... FragmentName Directives?`).
-pub type FragmentSpread<S> = crate::selection::FragmentSpread<FragmentName<S>, Directives<S>>;
+pub type FragmentSpread<S> =
+  crate::parser::selection::FragmentSpread<FragmentName<S>, Directives<S>>;
 
 /// An inline fragment (`... TypeCondition? Directives? SelectionSet`).
 pub type InlineFragment<S> =
-  crate::selection::InlineFragment<TypeCondition<S>, Directives<S>, SelectionSet<S>>;
+  crate::parser::selection::InlineFragment<TypeCondition<S>, Directives<S>, SelectionSet<S>>;
 
 /// A selection set containing one or more selections.
-pub type SelectionSet<S> = crate::selection::SelectionSet<Selection<S>>;
+pub type SelectionSet<S> = crate::parser::selection::SelectionSet<Selection<S>>;
 
 /// A GraphQL selection.
 ///
@@ -76,4 +77,4 @@ impl<S> IntoSpan<Span> for Selection<S> {
 
 /// A GraphQL field (`Alias? Name Arguments? Directives? SelectionSet?`).
 pub type Field<S> =
-  crate::selection::Field<Alias<S>, Name<S>, Arguments<S>, Directives<S>, SelectionSet<S>>;
+  crate::parser::selection::Field<Alias<S>, Name<S>, Arguments<S>, Directives<S>, SelectionSet<S>>;

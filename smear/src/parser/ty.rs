@@ -12,7 +12,7 @@ use tokora::{
 };
 
 #[cfg(feature = "graphqlx")]
-use crate::path::Path;
+use crate::parser::path::Path;
 
 /// A named type reference with an optional non-null modifier.
 ///

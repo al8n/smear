@@ -10,7 +10,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::{
+use crate::lexer::{
   graphql::{ContextualKeyword, syntactic::SyntacticTokenKind},
   keywords::{Fragment, Mutation, Query, Subscription},
 };
@@ -32,7 +32,7 @@ use super::{
   ty::ty,
   value::default_value,
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, extent_end, extent_since, extent_start},
   graphql::{
     GraphQL,
@@ -472,7 +472,7 @@ executable_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
     if !peeks_where(inp, |token| token.is_l_paren())? {
       return Ok(VariablesDefinition::new(
@@ -483,7 +483,7 @@ executable_parser!(
 
     // Not the `Delimited`'s own span: tokora builds that one from the lookahead cursor at both
     // ends, so it opens before the `(`'s leading trivia and closes wherever the peek past `)`
-    // landed. See `crate::combinator::extent`.
+    // landed. See `crate::parser::combinator::extent`.
     let node_start = extent_start(inp)?;
     let delimited = parens(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
       guard_executable_phase(
@@ -603,7 +603,7 @@ executable_parser!(
   [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     // A real node start, so the **first token's** start: `inp.offset()` would report the end of a
-    // token the caller had already peeked. See `crate::combinator::extent`.
+    // token the caller had already peeked. See `crate::parser::combinator::extent`.
     let start = extent_start(inp)?;
     let classified = classify_executable_head(inp)?;
     let found = classified.found();

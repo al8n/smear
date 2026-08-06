@@ -128,17 +128,50 @@ Smear follows a three-layer architecture designed for maximum reusability:
 
 ## Feature Flags
 
+Twelve features, one crate. The lexer is not one of them: it is the irreducible base, the parser
+cannot exist without it, and a gate that can only ever be on is not a gate.
+
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `std` | Standard library support | ✓ |
-| `alloc` | Allocation support for `no_std` | |
-| `graphql` | Standard GraphQL parser | ✓ |
-| `graphqlx` | Extended GraphQL parser | ✓ |
-| `unstable` | Unstable features (required for GraphQLx) | |
+| `std` | Standard library support; off is `no_std`, and `alloc` is required either way | ✓ |
+| `graphql` | Standard GraphQL, in both layers | ✓ |
+| `graphqlx` | Extended GraphQL, in both layers. Tracks a moving dialect spec, so the GraphQLx surface is **semver-exempt** until it stabilises | ✓ |
+| `parser` | `smear::parser` — the combinators, the ASTs and (with `rowan`) the lossless CST tower. Off, the crate is the lexer alone | ✓ |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
 | `bytes` | Support `bytes::Bytes` source type | |
 | `bstr` | Support `bstr::BStr` source type | |
 | `hipstr` | Support `hipstr::{HipStr, HipByt}` source type | |
+| `smol-bytes` | Support `smol_bytes::SmolBytes` source type | |
+| `rowan` | The lossless CST tower. Implies `parser` and `std` | |
+| `lossless-coverage` | Per-node-kind hit counters for the lossless gates. Implies `rowan` | |
+| `test-support` | The lossless suites' `test_support` scaffolding. Implies nothing | |
+
+A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns
+the parser off:
+
+```toml
+[dependencies]
+smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
+```
+
+## Migrating from `smear-lexer` / `smear-parser`
+
+`smear-lexer` and `smear-parser` were merged into this crate (#83). Neither had ever been
+published, so nothing on crates.io moved; this affects path and git dependents only.
+
+| Before | After |
+|---|---|
+| `smear-lexer = "…"` / `smear-parser = "…"` | `smear = { default-features = false, features = [...] }`, per the table above |
+| `use smear_lexer::X` | `use smear::lexer::X` |
+| `use smear_parser::X` | `use smear::parser::X` |
+| `smear_lexer::keyword!` | `smear::keyword!` |
+| `smear_parser::ast_node!`, `smear_parser::typed_keyword_atom!` | `smear::ast_node!`, `smear::typed_keyword_atom!` |
+| `features = ["alloc"]` | remove — it gated no code, and `alloc` is unconditionally required |
+| `features = ["unstable"]` | remove — it gated no code; `graphqlx` no longer implies it |
+| `smear-lexer` with its defaults | `smear`'s default also compiles the parser; opt out by omitting `parser` |
+
+`smear::parser::lexer::X`, `smear::lexer::tokora::X` and every `smear::lexer::…` /
+`smear::parser::…` path resolve exactly as before.
 
 ## Benchmarks
 

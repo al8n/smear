@@ -1,6 +1,6 @@
 #![cfg(any(feature = "graphql", feature = "graphqlx"))]
 
-use smear_lexer::tokora::{
+use crate::lexer::tokora::{
   FatalContext, InputRef, Lexer, Parse, Parser,
   emitter::{FromUnclosed, FullContainerEmitter, SeparatedEmitter, TooFewEmitter},
   error::{
@@ -13,10 +13,10 @@ use smear_lexer::tokora::{
 use super::ParseCtx;
 
 #[cfg(feature = "graphql")]
-use smear_lexer::graphql::syntactic::SyntacticLexer;
+use crate::lexer::graphql::syntactic::SyntacticLexer;
 
 #[cfg(feature = "graphqlx")]
-use smear_lexer::graphqlx::syntactic::SyntacticLexer as GxLexer;
+use crate::lexer::graphqlx::syntactic::SyntacticLexer as GxLexer;
 
 /// A minimal error sink for the bundle gate: it absorbs every tokora error family
 /// (and either dialect's lexer errors) into a unit, so `Fatal<TestError>` is a
@@ -79,19 +79,19 @@ impl<S, Lang: ?Sized> From<TooFew<S, Lang>> for TestError {
 }
 
 #[cfg(feature = "graphql")]
-impl<Char, StateError> From<smear_lexer::graphql::error::LexerErrors<Char, StateError>>
+impl<Char, StateError> From<crate::lexer::graphql::error::LexerErrors<Char, StateError>>
   for TestError
 {
-  fn from(_: smear_lexer::graphql::error::LexerErrors<Char, StateError>) -> Self {
+  fn from(_: crate::lexer::graphql::error::LexerErrors<Char, StateError>) -> Self {
     Self
   }
 }
 
 #[cfg(feature = "graphqlx")]
-impl<Char, StateError> From<smear_lexer::graphqlx::error::LexerErrors<Char, StateError>>
+impl<Char, StateError> From<crate::lexer::graphqlx::error::LexerErrors<Char, StateError>>
   for TestError
 {
-  fn from(_: smear_lexer::graphqlx::error::LexerErrors<Char, StateError>) -> Self {
+  fn from(_: crate::lexer::graphqlx::error::LexerErrors<Char, StateError>) -> Self {
     Self
   }
 }

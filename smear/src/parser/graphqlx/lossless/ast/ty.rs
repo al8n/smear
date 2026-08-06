@@ -27,10 +27,10 @@
 //! exactly the case it exists for — it answers `Some` for `a::b` too, the first separator being a
 //! separator either way.
 
-use crate::{ast_node, graphqlx::kinds::SyntaxKind as K};
+use crate::{ast_node, parser::graphqlx::kinds::SyntaxKind as K};
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A `::`-separated path, `::? Name (:: Name)*`.
   ///
   /// GraphQLx only: GraphQL has no path at all, and every position that would hold a `NamedType`
@@ -47,7 +47,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// The generic arguments applied to a path, `< Type+ >`.
   ///
   /// The arguments are type references, so they come back through four iterators — one per type
@@ -66,7 +66,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A type reference's path head, `Path TypeGenerics? '!'?`.
   ///
   /// Where GraphQL writes a `NamedType`. It is the *type* position's spelling: [`TypePath`] is the
@@ -82,7 +82,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A list type reference, `[ T ] '!'?`.
   ListType => K::ListType {
     /// The element type, when it is a path type.
@@ -101,7 +101,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A set type reference, `< T > '!'?` — GraphQLx only.
   ///
   /// [`MapType`] is the same bytes up to the `=>`, which is why the production decides the kind by
@@ -121,7 +121,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A map type reference, `< K => V > '!'?` — GraphQLx only.
   ///
   /// **The getters are plural, and that is forced.** A map type holds two full type references
@@ -144,7 +144,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A path in a **non-type** position, `Path TypeGenerics?`.
   ///
   /// A directive's name, an interface, a union member, a type condition, a fragment spread's

@@ -10,7 +10,7 @@ use tokora::{
 use tokora::cst::Sink;
 
 use super::{GraphqlxLosslessLexer, GraphqlxLosslessSlice, GraphqlxLosslessToken};
-use crate::{graphqlx::kinds::SyntaxKind as K, lossless::KindSpace};
+use crate::parser::{graphqlx::kinds::SyntaxKind as K, lossless::KindSpace};
 
 /// The profile every GraphQLx lossless parse uses.
 ///
@@ -49,7 +49,7 @@ where
 pub(crate) type LosslessEmitter<'inp> = tokora::emitter::Verbose<
   super::GraphqlxLosslessErrors<&'inp str>,
   tokora::SimpleSpan,
-  crate::graphqlx::GraphQLx,
+  crate::parser::graphqlx::GraphQLx,
 >;
 
 /// The `Sink` every lossless driver records into.
@@ -75,17 +75,17 @@ pub(crate) type LosslessCst<'inp> =
 /// drivers under `test_support`, so the root kind is named once. Note that the root kind is the
 /// *tree's* root (`K::Root`) rather than the production's, which is why one wrapper covers three
 /// different document roots. Everything below that — the fallible-materialization contract and
-/// the diagnostic projection — is [`crate::lossless::runner::finish_root`]'s; this wrapper's
+/// the diagnostic projection — is [`crate::parser::lossless::runner::finish_root`]'s; this wrapper's
 /// whole content is *which* root kind and *which* dialect the panic names.
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
-  crate::lossless::runner::finish_root(cst, K::Root.raw(), <K as KindSpace>::NAME)
+  crate::parser::lossless::runner::finish_root(cst, K::Root.raw(), <K as KindSpace>::NAME)
 }
 
 /// One diagnostic a GraphQLx lossless parse recorded.
 ///
 /// Nothing in it is per-dialect — it is owned, source-independent and lifetime-free by design —
 /// so it is the substrate's type re-exported rather than a second copy of it.
-pub use crate::lossless::runner::Diagnostic;
+pub use crate::parser::lossless::runner::Diagnostic;
 
 /// The result of a GraphQLx lossless parse.
 ///
@@ -94,9 +94,10 @@ pub use crate::lossless::runner::Diagnostic;
 /// duplication the lift exists to remove.
 ///
 /// It is a *different* alias from GraphQL's, and deliberately incompatible with it: the language
-/// parameter is [`GraphQLxLang`](crate::graphqlx::kinds::GraphQLxLang), so a GraphQLx tree cannot
+/// parameter is [`GraphQLxLang`](crate::parser::graphqlx::kinds::GraphQLxLang), so a GraphQLx tree cannot
 /// be handed to a GraphQL typed wrapper. The two spaces do not even agree on what raw `0` means.
-pub type Parse = crate::lossless::runner::Parse<crate::graphqlx::kinds::GraphQLxLang>;
+pub type Parse =
+  crate::parser::lossless::runner::Parse<crate::parser::graphqlx::kinds::GraphQLxLang>;
 
 /// Parse a `&str` as a GraphQLx document, losslessly.
 ///
@@ -125,15 +126,21 @@ pub fn parse_document(src: &str) -> Parse {
   // `Src` needs its own turbofish for a second reason: `str` and `&str` both project
   // `Slice<'inp> = &'inp str`, so the lexer type alone leaves the production's source parameter
   // genuinely ambiguous. `str` is the one that matches `parse_document`'s `L::Source = str`.
-  let (cst, _out) =
-    parse_lossless::<GraphqlxLosslessLexer<'_, str>, crate::graphqlx::GraphQLx, _, _, _, _>(
-      src,
-      Default::default(),
-      LosslessEmitter::default(),
-      profile::<str>(),
-      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
-      super::document::document_entry::<str, _>,
-    );
+  let (cst, _out) = parse_lossless::<
+    GraphqlxLosslessLexer<'_, str>,
+    crate::parser::graphqlx::GraphQLx,
+    _,
+    _,
+    _,
+    _,
+  >(
+    src,
+    Default::default(),
+    LosslessEmitter::default(),
+    profile::<str>(),
+    tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
+    super::document::document_entry::<str, _>,
+  );
 
   finish_root(cst)
 }
@@ -152,7 +159,7 @@ pub fn parse_document(src: &str) -> Parse {
 /// the same [`Parse`], the same recovery. Only the root differs.
 ///
 /// ```
-/// # use smear_parser::graphqlx::lossless::{parse_document, parse_type_system_document};
+/// # use smear::parser::graphqlx::lossless::{parse_document, parse_type_system_document};
 /// # use tokora::Parse as _;
 /// // The mixed root takes it; the SDL-only root reports it.
 /// assert!(!parse_document("query Q { f }").has_errors());
@@ -162,15 +169,21 @@ pub fn parse_document(src: &str) -> Parse {
 pub fn parse_type_system_document(src: &str) -> Parse {
   // The turbofishes and the `_entry` suffix are `parse_document`'s, for `parse_document`'s
   // reasons; see the comment there rather than a second copy of it here.
-  let (cst, _out) =
-    parse_lossless::<GraphqlxLosslessLexer<'_, str>, crate::graphqlx::GraphQLx, _, _, _, _>(
-      src,
-      Default::default(),
-      LosslessEmitter::default(),
-      profile::<str>(),
-      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
-      super::document::type_system_document_entry::<str, _>,
-    );
+  let (cst, _out) = parse_lossless::<
+    GraphqlxLosslessLexer<'_, str>,
+    crate::parser::graphqlx::GraphQLx,
+    _,
+    _,
+    _,
+    _,
+  >(
+    src,
+    Default::default(),
+    LosslessEmitter::default(),
+    profile::<str>(),
+    tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
+    super::document::type_system_document_entry::<str, _>,
+  );
 
   finish_root(cst)
 }
@@ -182,7 +195,7 @@ pub fn parse_type_system_document(src: &str) -> Parse {
 /// every type-system definition and every `extend` is reported, at the parser's own position.
 ///
 /// ```
-/// # use smear_parser::graphqlx::lossless::{parse_document, parse_executable_document};
+/// # use smear::parser::graphqlx::lossless::{parse_document, parse_executable_document};
 /// # use tokora::Parse as _;
 /// // The mixed root takes it; the executable-only root reports it.
 /// assert!(!parse_document("type T { f: Int }").has_errors());
@@ -190,15 +203,21 @@ pub fn parse_type_system_document(src: &str) -> Parse {
 /// assert!(!parse_executable_document("query Q { f }").has_errors());
 /// ```
 pub fn parse_executable_document(src: &str) -> Parse {
-  let (cst, _out) =
-    parse_lossless::<GraphqlxLosslessLexer<'_, str>, crate::graphqlx::GraphQLx, _, _, _, _>(
-      src,
-      Default::default(),
-      LosslessEmitter::default(),
-      profile::<str>(),
-      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
-      super::executable::executable_document_entry::<str, _>,
-    );
+  let (cst, _out) = parse_lossless::<
+    GraphqlxLosslessLexer<'_, str>,
+    crate::parser::graphqlx::GraphQLx,
+    _,
+    _,
+    _,
+    _,
+  >(
+    src,
+    Default::default(),
+    LosslessEmitter::default(),
+    profile::<str>(),
+    tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
+    super::executable::executable_document_entry::<str, _>,
+  );
 
   finish_root(cst)
 }
@@ -206,7 +225,7 @@ pub fn parse_executable_document(src: &str) -> Parse {
 /// Test-only scaffolding for probing the sink's own kind-validator door.
 ///
 /// Every driver elsewhere in this suite runs a *production* — a function that only ever names a
-/// kind from [`K::ALL`](crate::graphqlx::kinds::SyntaxKind::ALL)'s own space, because that space
+/// kind from [`K::ALL`](crate::parser::graphqlx::kinds::SyntaxKind::ALL)'s own space, because that space
 /// is all a production can spell. There is therefore no production-shaped way to observe
 /// [`profile`]'s validator refuse a kind: the refusal only has something to refuse when the caller
 /// hands the sink a kind no production would ever construct. This module is that caller — a direct
@@ -225,7 +244,7 @@ pub mod test_support {
     GraphqlxLosslessLexer, LosslessEmitter, LosslessSink, Parse, finish_root, parse_lossless,
     profile,
   };
-  use crate::graphqlx::GraphQLx;
+  use crate::parser::graphqlx::GraphQLx;
 
   type TestCtx<'inp> = (
     LosslessSink<'inp>,
@@ -248,7 +267,7 @@ pub mod test_support {
   /// # Panics
   ///
   /// Whatever the sink's own [`cst_start_at`] panics on. Under the shipped [`profile`], any
-  /// `kind` at or past `K::ALL.len()` (`K` is [`crate::graphqlx::kinds::SyntaxKind`]) — the
+  /// `kind` at or past `K::ALL.len()` (`K` is [`crate::parser::graphqlx::kinds::SyntaxKind`]) — the
   /// reserved tombstone (`u16::MAX`) panics too, but is refused by every validator, including
   /// [`KindValidator::accept_all`](tokora::cst::KindValidator::accept_all), so it would not
   /// discriminate the real validator from a permissive one.
@@ -279,7 +298,7 @@ pub mod test_support {
   /// The one shape no production can produce: every production that opens a node either commits
   /// what it matched or reports what it did not, and the `lossless_production!` bundle gives it
   /// no other door. This probe opens and closes a node and drains nothing, which is what makes
-  /// [`crate::lossless::runner::finish_root`]'s `FinishError` arm reachable at all — and that
+  /// [`crate::parser::lossless::runner::finish_root`]'s `FinishError` arm reachable at all — and that
   /// arm's panic message is the only place the *dialect's* name appears in a materialization
   /// failure, so without a caller that reaches it, the `space` argument is threaded on trust.
   ///

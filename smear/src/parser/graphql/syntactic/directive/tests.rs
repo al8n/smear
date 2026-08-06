@@ -6,10 +6,10 @@
 //! table-driven oracle pins the frozen `smear-parser`
 //! `parse_directive`/`parse_directives` verdicts for the same inputs.
 
-use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use crate::lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
-use crate::graphql::{
+use crate::parser::graphql::{
   GraphQL,
   ast::{
     ConstDirective, ConstDirective as AstConstDirective, ConstDirectives,
@@ -219,7 +219,7 @@ fn directives_absent_is_empty_zero_width_and_non_consuming() {
   let ok = drive_str(
     |inp| {
       let ds = Directives::<_>::graphql(inp)?;
-      let leftover = crate::combinator::ident(inp)?;
+      let leftover = crate::parser::combinator::ident(inp)?;
       Ok::<_, GraphqlErrors<&str>>(
         ds.directives().is_empty()
           && *ds.span() == SimpleSpan::new(0, 0)

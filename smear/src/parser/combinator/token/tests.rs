@@ -4,7 +4,7 @@
 // supply, so the identifier tests drive GraphQL and GraphQL-like alike. Every
 // atom runs over the full source matrix (`str`, `[u8]`, and `Bytes`).
 
-use smear_lexer::tokora::{
+use crate::lexer::tokora::{
   Emitter, InputRef, Lexer, Parse, Parser, ParserContext, SimpleSpan,
   emitter::{Fatal, FromUnclosed, Verbose},
   error::{
@@ -19,14 +19,14 @@ use super::{enum_value, ident, try_enum_value, try_ident};
 #[cfg(feature = "graphql")]
 use super::{at, colon, keyword_exact, lbrace, spread, try_at, try_keyword_exact};
 #[cfg(feature = "graphql")]
-use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
+use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
 #[cfg(feature = "graphqlx")]
-use smear_lexer::graphqlx::syntactic::SyntacticLexer as GxLexer;
+use crate::lexer::graphqlx::syntactic::SyntacticLexer as GxLexer;
 
 /// A test error sink that absorbs every tokora error family (and either dialect's
 /// lexer errors) into a unit. Implementing the full `From` set makes it a
-/// [`FromEmitterError`](smear_lexer::tokora::emitter::FromEmitterError), so both
+/// [`FromEmitterError`](crate::lexer::tokora::emitter::FromEmitterError), so both
 /// [`Fatal`] and [`Verbose`] instantiate as complete emitters over it, and the
 /// [`UnexpectedEot`] conversion satisfies the committed atoms' error bound.
 #[derive(Debug)]
@@ -85,19 +85,19 @@ impl<S, Lang: ?Sized> From<TooFew<S, Lang>> for TestError {
 }
 
 #[cfg(feature = "graphql")]
-impl<Char, StateError> From<smear_lexer::graphql::error::LexerErrors<Char, StateError>>
+impl<Char, StateError> From<crate::lexer::graphql::error::LexerErrors<Char, StateError>>
   for TestError
 {
-  fn from(_: smear_lexer::graphql::error::LexerErrors<Char, StateError>) -> Self {
+  fn from(_: crate::lexer::graphql::error::LexerErrors<Char, StateError>) -> Self {
     Self
   }
 }
 
 #[cfg(feature = "graphqlx")]
-impl<Char, StateError> From<smear_lexer::graphqlx::error::LexerErrors<Char, StateError>>
+impl<Char, StateError> From<crate::lexer::graphqlx::error::LexerErrors<Char, StateError>>
   for TestError
 {
-  fn from(_: smear_lexer::graphqlx::error::LexerErrors<Char, StateError>) -> Self {
+  fn from(_: crate::lexer::graphqlx::error::LexerErrors<Char, StateError>) -> Self {
     Self
   }
 }
@@ -694,10 +694,10 @@ impl<S, Lang: ?Sized> From<TooFew<S, Lang>> for SpanOnly {
 }
 
 #[cfg(feature = "graphql")]
-impl<Char, StateError> From<smear_lexer::graphql::error::LexerErrors<Char, StateError>>
+impl<Char, StateError> From<crate::lexer::graphql::error::LexerErrors<Char, StateError>>
   for SpanOnly
 {
-  fn from(_: smear_lexer::graphql::error::LexerErrors<Char, StateError>) -> Self {
+  fn from(_: crate::lexer::graphql::error::LexerErrors<Char, StateError>) -> Self {
     unreachable!("enum_value span tests never trip a lexer error")
   }
 }
@@ -1099,8 +1099,8 @@ fn try_keyword_exact_declines_on_empty_input() {
 // atoms commit, decline, and map onto the concrete `On`/`Type` nodes.
 #[cfg(feature = "graphql")]
 typed_keyword_atom!(
-  kw_on / try_kw_on => "on" => smear_lexer::keywords::On,
-  kw_type / try_kw_type => "type" => smear_lexer::keywords::Type,
+  kw_on / try_kw_on => "on" => crate::lexer::keywords::On,
+  kw_type / try_kw_type => "type" => crate::lexer::keywords::Type,
 );
 
 #[cfg(feature = "graphql")]

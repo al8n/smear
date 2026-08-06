@@ -38,7 +38,7 @@ fn named_type_carrier_supports_custom_spans() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_carriers_support_custom_spans() {
-  use crate::path::Path;
+  use crate::parser::path::Path;
 
   use super::{DefinitionTypePath, MapType, SetType, TypeGenerics};
 

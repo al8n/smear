@@ -60,10 +60,10 @@
 //!   `err_and_pop` drops one token per turn; the resync here skips the whole wreck as one
 //!   nesting-aware region and reports it once.
 
-use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
+use crate::lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{ParseInput as _, cst::event::EventMark};
 
-use crate::graphql::kinds::SyntaxKind as K;
+use crate::parser::graphql::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -90,7 +90,7 @@ use super::{
   value::Constness,
 };
 
-use crate::lossless::lossless_production;
+use crate::parser::lossless::lossless_production;
 
 lossless_production! {
   dialect = graphql::lossless;

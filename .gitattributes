@@ -3,7 +3,7 @@
 # Without this, Windows runners check out with core.autocrlf=true, which
 # rewrites LF -> CRLF for text files. That corrupts two things the lexer
 # oracle tests depend on byte-for-byte:
-#   - the committed golden `.txt` files under smear-lexer/tests/oracle/**,
+#   - the committed golden `.txt` files under smear/tests/oracle/**,
 #     which are compared against an in-memory string built with `\n`;
 #   - the `.graphql`/`.graphqlx` fixtures under smear/tests/fixtures/**,
 #     which are pulled in via `include_str!` at compile time, so CRLF in the

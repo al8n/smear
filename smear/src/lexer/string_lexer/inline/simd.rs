@@ -27,7 +27,7 @@ use tokora::{
   utils::{Lexeme, PositionedChar},
 };
 
-use crate::error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError};
+use crate::lexer::error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError};
 
 use super::{LitComplexInlineStr, LitInlineStr, LitPlainStr, utf8_len_for_scalar};
 

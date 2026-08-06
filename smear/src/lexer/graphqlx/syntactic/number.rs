@@ -29,7 +29,7 @@
 //! only adapts the classification to tokora's trait types, avoiding any
 //! source-wrapper conversion.
 
-use crate::graphqlx::{
+use crate::lexer::graphqlx::{
   LitFloat, LitInt,
   syntactic::{SyntacticToken, SyntacticTokenKind},
 };
@@ -115,7 +115,7 @@ macro_rules! number_token_impl {
         logos::Logos,
         state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
-      use crate::graphqlx::{
+      use crate::lexer::graphqlx::{
         error::{
           BinaryError, DecimalError, FloatError, HexError, HexFloatError, LexerErrors, OctalError,
         },

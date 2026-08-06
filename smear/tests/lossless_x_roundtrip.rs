@@ -29,7 +29,7 @@
 
 use std::path::PathBuf;
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     Parse, SyntaxNode, parse_document, parse_executable_document, parse_type_system_document,

@@ -1,4 +1,4 @@
-//! This dialect's binding of [`crate::lossless::coverage`].
+//! This dialect's binding of [`crate::parser::lossless::coverage`].
 //!
 //! The production modules import `node` and `node_at` from here, so a production cannot open a
 //! node without being counted — a hand-placed `hit(K::X)` at every site is the bookkeeping a *new*
@@ -6,7 +6,7 @@
 //! Everything about *why* the counter has the shape it does is in the substrate's module docs;
 //! what is here is the choice of lane.
 //!
-//! The lane is keyed by [`KindSpace::NAME`](crate::lossless::KindSpace::NAME), which is `"graphqlx"`
+//! The lane is keyed by [`KindSpace::NAME`](crate::parser::lossless::KindSpace::NAME), which is `"graphqlx"`
 //! here and `"graphql"` there, so the two dialects tally independently on the same thread — the
 //! property that lets one gate's `reset` not clear the other's measurement.
 
@@ -23,7 +23,7 @@ pub(crate) use bound::{node, node_at};
 mod bound {
   use tokora::cst::event::EventMark;
 
-  use crate::{graphqlx::kinds::SyntaxKind as K, lossless::coverage};
+  use crate::parser::{graphqlx::kinds::SyntaxKind as K, lossless::coverage};
 
   /// [`tokora::parser::node`], counting the wrap in this dialect's lane.
   #[inline]

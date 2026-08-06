@@ -12,7 +12,7 @@
 //! can see it. Several tests below exist only to pin nesting that text fidelity cannot.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     directive::test_support::{

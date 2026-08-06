@@ -1,7 +1,7 @@
 //! The typed accessor layer over the GraphQLx lossless CST.
 //!
 //! **The substrate is tokora's, and the language-generic layer over it is
-//! [`crate::lossless::ast`].** [`CastNode`] is a one-method trait — a kind check and a wrap — and
+//! [`crate::parser::lossless::ast`].** [`CastNode`] is a one-method trait — a kind check and a wrap — and
 //! [`cast::child`], [`cast::children`] and [`NodeChildren`] are bound on it rather than on
 //! tokora's parser-facing `Node`, so a wrapper whose entire job is `field.name()` never names the
 //! `Syntax` component model. Everything in this module is the **pinning of that shared layer to
@@ -14,7 +14,7 @@
 //! resolves only when that dialect's feature is on, so
 //! `cargo doc --no-default-features --features rowan,graphqlx` fails on it under `-D warnings`.
 //! `tests/lossless_isolation.rs` is what keeps it out, and the type-level statement that the two
-//! trees cannot be crossed lives on [`graphqlx`](crate::graphqlx) at the crate root, which is the
+//! trees cannot be crossed lives on [`graphqlx`](crate::parser::graphqlx) at the crate root, which is the
 //! one module whose job is to name both dialects.
 //!
 //! # Three token getters, and why *this* grammar needs each
@@ -22,19 +22,19 @@
 //! `tokora::cst::cast` offers exactly [`child`](cast::child), [`children`](cast::children) and
 //! [`token`](cast::token), and [`token`](cast::token) is *one kind, first match*. The reasons
 //! below are **this dialect's**, which is why they are recorded here rather than beside the
-//! generic implementations in [`crate::lossless::ast`].
+//! generic implementations in [`crate::parser::lossless::ast`].
 //!
 //! - **One getter, several token kinds** ([`token_any`]). A GraphQLx string literal has two images
-//!   — [`InlineString`](crate::graphqlx::kinds::SyntaxKind::InlineString) for `"s"` and
-//!   [`BlockString`](crate::graphqlx::kinds::SyntaxKind::BlockString) for `"""s"""`. One node kind
+//!   — [`InlineString`](crate::parser::graphqlx::kinds::SyntaxKind::InlineString) for `"s"` and
+//!   [`BlockString`](crate::parser::graphqlx::kinds::SyntaxKind::BlockString) for `"""s"""`. One node kind
 //!   wraps one directly ([`StringValue`]), and — unlike GraphQL — **six more node kinds hold one
 //!   as a bare token**, because this kind space has no `Description` node: an
 //!   [`OperationDefinition`], a [`FragmentDefinition`], a [`VariableDefinition`], an
 //!   [`InputValueDefinition`], a [`FieldDefinition`] and an [`EnumValueDefinition`] each carry
 //!   their description as a direct string token.
 //! - **Several tokens of one kind** ([`tokens`]). [`Path`] holds its segments as bare
-//!   [`Name`](crate::graphqlx::kinds::SyntaxKind::Name) tokens and its `::`s as bare
-//!   [`PathSeparator`](crate::graphqlx::kinds::SyntaxKind::PathSeparator) tokens;
+//!   [`Name`](crate::parser::graphqlx::kinds::SyntaxKind::Name) tokens and its `::`s as bare
+//!   [`PathSeparator`](crate::parser::graphqlx::kinds::SyntaxKind::PathSeparator) tokens;
 //!   [`DirectiveLocations`], [`ExtensionTypeGenerics`] and
 //!   [`ExecutableDefinitionTypeGenerics`] each hold a whole list of bare `Name` tokens, their
 //!   members having no node kind of their own.
@@ -54,9 +54,9 @@
 //! [`StringValue`]: value::StringValue
 //! [`Path`]: ty::Path
 
-pub use crate::lossless::ast::{CastNode, NodeChildren, cast};
+pub use crate::parser::lossless::ast::{CastNode, NodeChildren, cast};
 
-use crate::graphqlx::{
+use crate::parser::graphqlx::{
   kinds::SyntaxKind,
   lossless::{GraphQLxLang, SyntaxNode, SyntaxToken},
 };
@@ -88,18 +88,18 @@ pub use selection::*;
 pub use ty::*;
 pub use value::*;
 
-/// [`crate::lossless::ast::AstChildren`] with this dialect's language pinned.
+/// [`crate::parser::lossless::ast::AstChildren`] with this dialect's language pinned.
 ///
 /// A convenience alias and nothing more — the iterator, and its `Iterator` impl, are tokora's. It
 /// exists so a `many` getter's return type carries one parameter instead of two, across every
 /// wrapper [`ast_node!`](crate::ast_node) generates.
-pub type AstChildren<N> = crate::lossless::ast::AstChildren<N, GraphQLxLang>;
+pub type AstChildren<N> = crate::parser::lossless::ast::AstChildren<N, GraphQLxLang>;
 
-/// [`crate::lossless::ast::AstTokens`] with this dialect's language pinned.
+/// [`crate::parser::lossless::ast::AstTokens`] with this dialect's language pinned.
 ///
 /// The token counterpart of [`AstChildren`], and unlike that one it is not an alias for an
 /// upstream type: tokora's `cst` layer has no token iterator.
-pub type AstTokens = crate::lossless::ast::AstTokens<GraphQLxLang>;
+pub type AstTokens = crate::parser::lossless::ast::AstTokens<GraphQLxLang>;
 
 /// The first direct token child of `parent` whose kind is one of `kinds`.
 ///
@@ -109,7 +109,7 @@ pub type AstTokens = crate::lossless::ast::AstTokens<GraphQLxLang>;
 /// have to know about.
 #[inline]
 pub fn token_any(parent: &SyntaxNode, kinds: &[SyntaxKind]) -> Option<SyntaxToken> {
-  crate::lossless::ast::token_any(parent, kinds)
+  crate::parser::lossless::ast::token_any(parent, kinds)
 }
 
 /// Every direct token child of `parent` with the given kind, in document order.
@@ -122,5 +122,5 @@ pub fn token_any(parent: &SyntaxNode, kinds: &[SyntaxKind]) -> Option<SyntaxToke
 /// [`DirectiveLocations`]: definition::DirectiveLocations
 #[inline]
 pub fn tokens(parent: &SyntaxNode, kind: SyntaxKind) -> AstTokens {
-  crate::lossless::ast::tokens(parent, kind)
+  crate::parser::lossless::ast::tokens(parent, kind)
 }

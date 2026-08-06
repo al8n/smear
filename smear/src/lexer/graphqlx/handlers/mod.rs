@@ -5,7 +5,7 @@ use tokora::{
   utils::Lexeme,
 };
 
-use crate::{
+use crate::lexer::{
   handlers::{self, ValidateNumberChar, handle_number_suffix},
   hints::{FloatHint, HexFloatHint},
 };

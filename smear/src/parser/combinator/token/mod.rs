@@ -260,13 +260,13 @@ macro_rules! typed_keyword_atom {
       #[inline]
       pub fn $fn_name<'inp, L, Ctx, Lang>(
         inp: &mut ::tokora::InputRef<'inp, '_, L, Ctx, Lang>,
-      ) -> ::core::result::Result<$Ty, $crate::combinator::ErrorOf<'inp, L, Ctx, Lang>>
+      ) -> ::core::result::Result<$Ty, $crate::parser::combinator::ErrorOf<'inp, L, Ctx, Lang>>
       where
         L: ::tokora::Lexer<'inp, Span = ::tokora::SimpleSpan>,
         L::Token: ::tokora::token::KeywordToken<'inp>,
-        Ctx: $crate::combinator::ParseCtx<'inp, L, Lang>,
+        Ctx: $crate::parser::combinator::ParseCtx<'inp, L, Lang>,
         Lang: ?::core::marker::Sized,
-        $crate::combinator::ErrorOf<'inp, L, Ctx, Lang>:
+        $crate::parser::combinator::ErrorOf<'inp, L, Ctx, Lang>:
           ::core::convert::From<::tokora::error::UnexpectedEot<L::Offset, Lang>>
             + ::core::convert::From<
               ::tokora::error::token::UnexpectedToken<
@@ -278,7 +278,7 @@ macro_rules! typed_keyword_atom {
               >,
             >,
       {
-        $crate::combinator::keyword_exact(inp, $kw).map(|kw| <$Ty>::new(kw.span()))
+        $crate::parser::combinator::keyword_exact(inp, $kw).map(|kw| <$Ty>::new(kw.span()))
       }
 
       #[doc = ::core::concat!(
@@ -290,17 +290,17 @@ macro_rules! typed_keyword_atom {
         inp: &mut ::tokora::InputRef<'inp, '_, L, Ctx, Lang>,
       ) -> ::core::result::Result<
         ::tokora::try_parse_input::ParseAttempt<$Ty>,
-        $crate::combinator::ErrorOf<'inp, L, Ctx, Lang>,
+        $crate::parser::combinator::ErrorOf<'inp, L, Ctx, Lang>,
       >
       where
         L: ::tokora::Lexer<'inp, Span = ::tokora::SimpleSpan>,
         L::Token: ::tokora::token::KeywordToken<'inp>,
-        Ctx: $crate::combinator::ParseCtx<'inp, L, Lang>,
+        Ctx: $crate::parser::combinator::ParseCtx<'inp, L, Lang>,
         Lang: ?::core::marker::Sized,
-        $crate::combinator::ErrorOf<'inp, L, Ctx, Lang>:
+        $crate::parser::combinator::ErrorOf<'inp, L, Ctx, Lang>:
           ::core::convert::From<::tokora::error::UnexpectedEot<L::Offset, Lang>>,
       {
-        $crate::combinator::try_keyword_exact(inp, $kw)
+        $crate::parser::combinator::try_keyword_exact(inp, $kw)
           .map(|attempt| attempt.map(|kw| <$Ty>::new(kw.span())))
       }
     )+

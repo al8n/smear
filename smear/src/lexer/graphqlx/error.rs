@@ -9,7 +9,7 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::{error::*, hints::*};
+use crate::lexer::{error::*, hints::*};
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]

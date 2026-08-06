@@ -2,7 +2,7 @@ use std::{vec, vec::Vec};
 
 use tokora::Lexer as _;
 
-use crate::graphqlx::{
+use crate::lexer::graphqlx::{
   LitFloat, LitInt,
   syntactic::{SyntacticLexer, SyntacticToken},
 };
@@ -194,7 +194,7 @@ fn byte_source_matches_str_shapes() {
   while let Some(tok) = lexer.lex() {
     kinds.push(tok.unwrap().kind());
   }
-  use crate::graphqlx::syntactic::SyntacticTokenKind as K;
+  use crate::lexer::graphqlx::syntactic::SyntacticTokenKind as K;
   assert_eq!(
     kinds,
     vec![
@@ -234,87 +234,87 @@ fn keyword_literal_and_punctuator_capabilities_are_mapped() {
 
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::open_angle(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::LAngle)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::LAngle)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::close_angle(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::RAngle)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::RAngle)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::open_brace(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::LBrace)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::LBrace)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::close_brace(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::RBrace)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::RBrace)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::open_paren(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::LParen)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::LParen)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::close_paren(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::RParen)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::RParen)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::open_bracket(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::LBracket)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::LBracket)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::close_bracket(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::RBracket)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::RBracket)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::at(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::At)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::At)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::fat_arrow(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::FatArrow)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::FatArrow)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::double_colon(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::PathSeparator)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::PathSeparator)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::asterisk(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Asterisk)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Asterisk)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::ampersand(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Ampersand)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Ampersand)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::colon(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Colon)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Colon)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::dollar(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Dollar)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Dollar)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::equal(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Equal)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Equal)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::exclamation(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Bang)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Bang)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::plus(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Plus)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Plus)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::minus(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Minus)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Minus)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::pipe(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Pipe)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Pipe)
   );
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::spread(),
-    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Spread)
+    Some(crate::lexer::graphqlx::syntactic::SyntacticTokenKind::Spread)
   );
 }
 
@@ -330,7 +330,9 @@ fn keyword_literal_and_punctuator_capabilities_are_mapped() {
 /// the variant, instead of silently staying untested.
 #[test]
 fn syntactic_token_kind_census() {
-  use crate::{LitBlockStr, LitInlineStr, LitPlainStr, graphqlx::syntactic::SyntacticTokenKind};
+  use crate::lexer::{
+    LitBlockStr, LitInlineStr, LitPlainStr, graphqlx::syntactic::SyntacticTokenKind,
+  };
 
   macro_rules! census {
     ($($variant:ident => $token:expr),+ $(,)?) => {

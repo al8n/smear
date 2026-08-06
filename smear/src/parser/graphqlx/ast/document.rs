@@ -12,10 +12,11 @@ use super::{
 };
 
 /// A GraphQLx definition: either type-system or executable syntax.
-pub type Definition<S, Span = SimpleSpan, Ty = Type<S, Span>> = crate::executable::Definition<
-  TypeSystemDefinition<S, Span, Ty>,
-  ExecutableDefinition<S, Span, Ty>,
->;
+pub type Definition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
+  crate::parser::executable::Definition<
+    TypeSystemDefinition<S, Span, Ty>,
+    ExecutableDefinition<S, Span, Ty>,
+  >;
 
 /// A described GraphQLx definition.
 pub type DescribedDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
@@ -23,7 +24,7 @@ pub type DescribedDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 
 /// A described GraphQLx definition or a type-system extension.
 pub type DefinitionOrExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::executable::DefinitionOrExtension<
+  crate::parser::executable::DefinitionOrExtension<
     DescribedDefinition<S, Span, Ty>,
     TypeSystemExtension<S, Span, Ty>,
   >;
@@ -162,7 +163,7 @@ pub type TypeSystemDocument<
   Span = SimpleSpan,
   Ty = Type<S, Span>,
   Container = DefaultVec<ImportOrTypeSystemDefinitionOrExtension<S, Span, Ty>>,
-> = crate::executable::Document<
+> = crate::parser::executable::Document<
   ImportOrTypeSystemDefinitionOrExtension<S, Span, Ty>,
   Span,
   Container,
@@ -174,7 +175,7 @@ pub type ExecutableDocument<
   Span = SimpleSpan,
   Ty = Type<S, Span>,
   Container = DefaultVec<ImportOrExecutableDefinition<S, Span, Ty>>,
-> = crate::executable::Document<ImportOrExecutableDefinition<S, Span, Ty>, Span, Container>;
+> = crate::parser::executable::Document<ImportOrExecutableDefinition<S, Span, Ty>, Span, Container>;
 
 /// A complete GraphQLx document whose entries may include imports, executable
 /// definitions, type-system definitions, and type-system extensions.
@@ -183,4 +184,5 @@ pub type Document<
   Span = SimpleSpan,
   Ty = Type<S, Span>,
   Container = DefaultVec<ImportOrDefinitionOrExtension<S, Span, Ty>>,
-> = crate::executable::Document<ImportOrDefinitionOrExtension<S, Span, Ty>, Span, Container>;
+> =
+  crate::parser::executable::Document<ImportOrDefinitionOrExtension<S, Span, Ty>, Span, Container>;

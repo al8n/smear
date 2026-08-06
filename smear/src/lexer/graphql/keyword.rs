@@ -207,7 +207,7 @@ where
 ///
 /// An **array**, so the length is a compile-time pin: a variant added to the enum without a row
 /// here does not compile. Hoisted out of `classifies_every_contextual_spelling` so
-/// `crate::keyword_prefix` can compare it against GraphQLx's without either list being derived
+/// `crate::lexer::keyword_prefix` can compare it against GraphQLx's without either list being derived
 /// from the other.
 #[cfg(test)]
 pub(crate) const KEYWORDS: [ContextualKeyword; 38] = [
@@ -257,7 +257,7 @@ impl ContextualKeyword {
   ///
   /// **The list's length pins nothing on its own.** `KEYWORDS` is hand-written, so a variant added
   /// to the enum together with its `as_str` arm — which is what a real change looks like —
-  /// compiles, classifies, and leaves every count in `crate::keyword_prefix` agreeing with itself.
+  /// compiles, classifies, and leaves every count in `crate::lexer::keyword_prefix` agreeing with itself.
   /// Task 7 measured exactly that: the mutation passed the whole suite.
   ///
   /// The `match` below is what closes it. It is exhaustive by construction, so the *next* variant
@@ -324,7 +324,7 @@ mod tests {
   use super::*;
   use tokora::token::KeywordToken;
 
-  use crate::graphql::syntactic::graphql_keyword;
+  use crate::lexer::graphql::syntactic::graphql_keyword;
 
   fn assert_contextual_keyword<S>(source: S, expected: ContextualKeyword)
   where

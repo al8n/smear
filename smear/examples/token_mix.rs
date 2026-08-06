@@ -8,11 +8,11 @@
 //!
 //! Usage:
 //!     cargo run --release --example token_mix -- <path-to-graphql-file>
-//!     cargo run --release --example token_mix -- ../smear/tests/fixtures/schemas/gmx_schema.graphql
+//!     cargo run --release --example token_mix -- tests/fixtures/schemas/gmx_schema.graphql
 
 use std::{env, fs, process::ExitCode};
 
-use smear_lexer::{
+use smear::lexer::{
   graphql::lossless::{LosslessLexer, LosslessTokenKind},
   tokora::lexer::Lexer as _,
 };

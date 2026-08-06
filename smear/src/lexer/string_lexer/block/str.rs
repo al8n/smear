@@ -3,7 +3,7 @@ use tokora::{
   logos::{Lexer, Logos, Source},
 };
 
-use crate::error::{StringError, StringErrors};
+use crate::lexer::error::{StringError, StringErrors};
 
 use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
 
@@ -491,7 +491,7 @@ mod tests {
     // Pull every block-string body out of the kitchen sink fixture
     // and run parity on each.
     const SRC: &str =
-      include_str!("../../../../smear/tests/fixtures/executables/kitchen-sink_canonical.graphql");
+      include_str!("../../../../tests/fixtures/executables/kitchen-sink_canonical.graphql");
     let bytes = SRC.as_bytes();
     let mut i = 0;
     let mut n = 0;

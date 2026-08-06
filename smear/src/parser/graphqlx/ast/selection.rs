@@ -9,19 +9,23 @@ use tokora::{
 use super::{Arguments, DefaultVec, Directives, FragmentTypePath, Name, Type, TypePath};
 
 /// A GraphQLx field alias (`Name :`).
-pub type Alias<S, Span = SimpleSpan> = crate::selection::Alias<Name<S, Span>, Span>;
+pub type Alias<S, Span = SimpleSpan> = crate::parser::selection::Alias<Name<S, Span>, Span>;
 
 /// A GraphQLx fragment type condition with a path and optional type arguments.
 pub type TypeCondition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::selection::TypeCondition<TypePath<S, Span, Ty>, Span>;
+  crate::parser::selection::TypeCondition<TypePath<S, Span, Ty>, Span>;
 
 /// A named GraphQLx fragment spread with a path and optional type arguments.
 pub type FragmentSpread<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::selection::FragmentSpread<FragmentTypePath<S, Span, Ty>, Directives<S, Span>, Span>;
+  crate::parser::selection::FragmentSpread<
+    FragmentTypePath<S, Span, Ty>,
+    Directives<S, Span>,
+    Span,
+  >;
 
 /// An inline GraphQLx fragment.
 pub type InlineFragment<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::selection::InlineFragment<
+  crate::parser::selection::InlineFragment<
     TypeCondition<S, Span, Ty>,
     Directives<S, Span>,
     SelectionSet<S, Span>,
@@ -30,7 +34,7 @@ pub type InlineFragment<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 
 /// A GraphQLx selection set containing one or more selections.
 pub type SelectionSet<S, Span = SimpleSpan, Container = DefaultVec<Selection<S, Span>>> =
-  crate::selection::SelectionSet<Selection<S, Span>, Span, Container>;
+  crate::parser::selection::SelectionSet<Selection<S, Span>, Span, Container>;
 
 /// A GraphQLx selection.
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
@@ -77,7 +81,7 @@ impl<S, Span> IntoSpan<Span> for Selection<S, Span> {
 }
 
 /// A GraphQLx field (`Alias? Name Arguments? Directives? SelectionSet?`).
-pub type Field<S, Span = SimpleSpan> = crate::selection::Field<
+pub type Field<S, Span = SimpleSpan> = crate::parser::selection::Field<
   Alias<S, Span>,
   Name<S, Span>,
   Arguments<S, Span>,

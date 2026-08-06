@@ -1,6 +1,6 @@
 //! The GraphQLx lossless parser suite: a `rowan` CST over the trivia-surfacing lexer.
 //!
-//! The second assembly over [`crate::lossless`]. Everything grammar-independent — the kind-space
+//! The second assembly over [`crate::parser::lossless`]. Everything grammar-independent — the kind-space
 //! contract, the trivia atoms, the `Parse` surface, the coverage shims, the typed-wrapper macro —
 //! is the substrate's and is shared with GraphQL verbatim; what is here is the GraphQLx-specific
 //! half: which lexer, which kind space, which error container, and which delimiter pairs.
@@ -8,10 +8,10 @@
 //! # The four places this dialect is genuinely different, not merely renamed
 //!
 //! - **A fourth balanced pair.** GraphQLx's `<>` is depth-counted by the lexer alongside `()`,
-//!   `[]` and `{}` (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
-//!   below has four entries and [`crate::graphqlx::error::Unclosed`] a fourth variant.
+//!   `[]` and `{}` (`smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
+//!   below has four entries and [`crate::parser::graphqlx::error::Unclosed`] a fourth variant.
 //! - **A wider image space.** Seven images GraphQL has no counterpart for — `<`, `>`, `::`, `=>`,
-//!   `*`, `+`, `-` — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be GraphQL's space
+//!   `*`, `+`, `-` — which is why [`crate::parser::graphqlx::kinds::SyntaxKind`] cannot be GraphQL's space
 //!   with a tail appended, and why [`kind_map`] is not GraphQL's mapper with arms added.
 //! - **A different expectation vocabulary.** The two dialects' `Expectation` enums agree on their
 //!   first nine variants and neither is a superset, so this module's private `expectation_of` is
@@ -22,14 +22,14 @@
 //!   *crate* boundary, so a match written here needs a wildcard arm no matter what. See
 //!   [`kind_map`]'s own docs for what stands in for the compiler's exhaustiveness check.
 
-use smear_lexer::graphqlx::{
+use crate::lexer::graphqlx::{
   error::LexerErrors,
   lossless::{LosslessLexer, LosslessToken, LosslessTokenKind},
 };
 use tokora::{
   InputRef,
   // Aliased because this module also declares a `Lexer` **type alias** — the name the shared
-  // macros in `crate::lossless` reach this dialect's lexer by — and a trait and a type alias share
+  // macros in `crate::parser::lossless` reach this dialect's lexer by — and a trait and a type alias share
   // one namespace.
   Lexer as TokoraLexer,
   Source,
@@ -37,7 +37,7 @@ use tokora::{
   utils::Expected,
 };
 
-use crate::{
+use crate::parser::{
   combinator::ErrorOf,
   graphqlx::{
     GraphQLx,
@@ -45,7 +45,7 @@ use crate::{
   },
 };
 
-pub use crate::graphqlx::kinds::GraphQLxLang;
+pub use crate::parser::graphqlx::kinds::GraphQLxLang;
 
 /// A GraphQLx lossless syntax node.
 pub type SyntaxNode = rowan::SyntaxNode<GraphQLxLang>;
@@ -65,7 +65,7 @@ pub type GraphqlxLosslessSlice<'inp, Src: Source<usize> + ?Sized> =
 /// The concrete lexer used by GraphQLx lossless productions over `Src`.
 ///
 /// **Note the argument.** `LosslessLexer<'a, S = &'a str> = LogosLexer<'a, LosslessToken<S>>`
-/// (`smear-lexer/src/graphqlx/lossless/mod.rs:17`) is parameterised by the **slice** type, not by
+/// (`smear/src/lexer/graphqlx/lossless/mod.rs:17`) is parameterised by the **slice** type, not by
 /// the source type — unlike `SyntacticLexer`, which takes the source. Writing
 /// `LosslessLexer<'inp, Src>` here compiles into a lexer over the wrong token and then fails far
 /// away, at the first `Lexer<'inp>` obligation.
@@ -95,7 +95,7 @@ where
 = InputRef<'inp, 'input, GraphqlxLosslessLexer<'inp, Src>, Ctx, GraphQLx>;
 
 // ---------------------------------------------------------------------------------------------
-// The seven names the shared macros in `crate::lossless` reach this dialect by.
+// The seven names the shared macros in `crate::parser::lossless` reach this dialect by.
 //
 // Aliases, not renames, exactly as GraphQL's are: the `GraphqlxLossless*` spellings stay, because
 // they are what every signature in this suite reads. What these buy is that
@@ -106,7 +106,7 @@ where
 // a style choice: a `:path` fragment is an opaque AST node, so `$dialect::Input<…>` parses as an
 // associated item, and a `$($d:ident)::+` run cannot nest inside the repetition that walks the
 // productions. The consequence is the one this module satisfies by existing: a dialect lives at
-// exactly `crate::<a>::<b>`.
+// exactly `crate::parser::<a>::<b>`.
 // ---------------------------------------------------------------------------------------------
 
 /// This dialect's tokora grammar brand.
@@ -120,7 +120,7 @@ pub type TokenKind = LosslessTokenKind;
 ///
 /// GraphQLx has forty-four of them against GraphQL's thirty-two: `import`, `from`, `as`, `where`,
 /// `set` and `map` are keywords here and ordinary names there.
-pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
+pub type Keyword = crate::lexer::graphqlx::ContextualKeyword;
 
 /// [`GraphqlxLosslessLexer`], under the name the shared macros reach it by.
 #[allow(type_alias_bounds)]
@@ -142,7 +142,7 @@ pub type Error<'inp, Src: Source<usize> + ?Sized, Ctx> = GraphqlxLosslessError<'
 /// One error value a GraphQLx lossless parse can record.
 ///
 /// The dialect's own error, **re-keyed** to the lossless token kind and the lossless lexer's
-/// state error. [`GraphqlxError`](crate::graphqlx::error::GraphqlxError) cannot serve: it pins
+/// state error. [`GraphqlxError`](crate::parser::graphqlx::error::GraphqlxError) cannot serve: it pins
 /// `SyntacticTokenKind`, which has no image for a trivia token, so a lossless "unexpected token"
 /// would have to invent a kind for the comment or the newline it found.
 pub type GraphqlxLosslessErrorValue<S> =
@@ -157,7 +157,7 @@ pub type GraphqlxLosslessErrorValue<S> =
 pub type GraphqlxLosslessErrors<S> =
   DialectErrors<S, LosslessTokenKind, char, Expectation, LimitExceeded>;
 
-crate::lossless::lossless_error_impls! {
+crate::parser::lossless::lossless_error_impls! {
   errors       = GraphqlxLosslessErrors;
   value        = GraphqlxLosslessErrorValue;
   token        = LosslessToken;
@@ -167,7 +167,7 @@ crate::lossless::lossless_error_impls! {
   expectation  = expectation_of;
   // **Four pairs, and the fourth is not decoration.** GraphQLx's lexer depth-counts `<` and `>`
   // alongside the other three (`increase_recursion!`/`decrease_recursion!`,
-  // `smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so `<…>` is a genuinely balanced pair
+  // `smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`), so `<…>` is a genuinely balanced pair
   // and an unterminated one has a real report to make. `unclosed_angle` already existed on the
   // dialect error (`graphqlx/error.rs:252`), so the fourth pair costs nothing here and does not
   // fall through to the catch-all's `ErrorData::Other("unclosed delimiter")`.

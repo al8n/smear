@@ -6,7 +6,7 @@
 //!
 //! Everything below is **table**: the head sets an "expected one of" diagnostic names, this
 //! dialect's balanced pairs, and its depth-zero restart predicate. The *logic* — report, skip,
-//! attribute, guarantee progress — is [`crate::lossless::recover`]'s, shared with GraphQL, and its
+//! attribute, guarantee progress — is [`crate::parser::lossless::recover`]'s, shared with GraphQL, and its
 //! module docs carry the reasoning about `sync_balanced`'s two no-progress cases and the
 //! termination rule that follows from them.
 //!
@@ -14,7 +14,7 @@
 //!
 //! GraphQL's `delimiters` classifier has three pairs. GraphQLx's has four, because its lexer
 //! depth-counts `<` and `>` alongside the other three (`increase_recursion!` / `decrease_recursion!`
-//! on `b'<'` and `b'>'`, `smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`). Without the fourth
+//! on `b'<'` and `b'>'`, `smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`). Without the fourth
 //! pair a recovery inside `type T<A` would treat the `<` as neutral and the *first* `>` it met at
 //! any nesting as an ordinary token, so a skip that started inside a generic list would run past
 //! the list's own closer. The pair is not decoration: it is what makes recovery inside the whole
@@ -24,17 +24,17 @@
 //! `unexpected::<Src, Ctx>(inp, VALUE_HEADS)` rather than a five-argument call naming this
 //! dialect's tables at every site. They add no behaviour, exactly as `trivia.rs`'s do.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{
   SimpleSpan,
   error::{UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen},
   input::Balance,
 };
 
-use crate::graphqlx::{GraphQLx, kinds::SyntaxKind as K};
+use crate::parser::graphqlx::{GraphQLx, kinds::SyntaxKind as K};
 
 use super::{Keyword, trivia::kind_of};
-use crate::lossless::recover::keyword_of;
+use crate::parser::lossless::recover::keyword_of;
 
 /// The token kinds a `Value` may begin with — what an "expected a value" diagnostic names.
 ///
@@ -74,7 +74,7 @@ pub(crate) const CONST_VALUE_HEADS: &[Kind] = &[
 
 /// The token kinds an `ObjectField` may begin with.
 ///
-/// A field's key is a plain [`Name`](crate::graphqlx::kinds::SyntaxKind::Name), **not** a path:
+/// A field's key is a plain [`Name`](crate::parser::graphqlx::kinds::SyntaxKind::Name), **not** a path:
 /// `graphqlx/syntactic/value.rs`'s `object_field` is `name then_ignore(colon) then(value)`. Only
 /// the *value* side widened.
 pub(crate) const OBJECT_FIELD_HEADS: &[Kind] = &[Kind::Identifier];
@@ -97,7 +97,7 @@ pub(crate) const PATH_HEADS: &[Kind] = &[Kind::Identifier, Kind::PathSeparator];
 
 /// The token kinds an `Argument` may begin with.
 ///
-/// An argument's key is a plain [`Name`](crate::graphqlx::kinds::SyntaxKind::Name), the same
+/// An argument's key is a plain [`Name`](crate::parser::graphqlx::kinds::SyntaxKind::Name), the same
 /// ruling [`OBJECT_FIELD_HEADS`] records: `graphqlx/syntactic/argument/mod.rs`'s `argument` is
 /// `take_argument_name then_ignore(colon) then(value)`, so only the value side widened.
 pub(crate) const ARGUMENT_HEADS: &[Kind] = &[Kind::Identifier];
@@ -119,7 +119,7 @@ pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[
 /// The token kinds a `TypeCondition` may begin with.
 ///
 /// `on` is an `Identifier` to the lexer, and the type after it is a
-/// [`TypePath`](crate::graphqlx::kinds::SyntaxKind::TypePath) rather than GraphQL's bare named
+/// [`TypePath`](crate::parser::graphqlx::kinds::SyntaxKind::TypePath) rather than GraphQL's bare named
 /// type — so a leading `::` is a head here and is not one in GraphQL's set.
 pub(crate) const TYPE_CONDITION_HEADS: &[Kind] = &[Kind::Identifier, Kind::PathSeparator];
 
@@ -262,9 +262,11 @@ pub(crate) const fn starts_type(kind: Kind) -> bool {
 //
 // GraphQLx asks it in more places than GraphQL does — divergence 12 puts a description on a
 // variable definition and on an executable definition, neither of which GraphQL has.
-crate::lossless::description_head_predicate!(smear_lexer::graphqlx::lossless::LosslessTokenKind);
+crate::parser::lossless::description_head_predicate!(
+  crate::lexer::graphqlx::lossless::LosslessTokenKind
+);
 
-pub(crate) use crate::lossless::recover::opener_span;
+pub(crate) use crate::parser::lossless::recover::opener_span;
 
 /// Where a recovery is willing to stop: a token that could start something the caller knows how to
 /// parse, or a closer the enclosing shape knows how to consume.
@@ -369,7 +371,7 @@ fn delimiters(kind: &Kind) -> Balance<u8> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The wrappers. Each one binds this dialect's tables to `crate::lossless::recover`'s logic and adds
+// The wrappers. Each one binds this dialect's tables to `crate::parser::lossless::recover`'s logic and adds
 // nothing else; the `lossless_production!` bundle is what makes them nameable from a production
 // without a turbofish per argument.
 //
@@ -380,15 +382,15 @@ fn delimiters(kind: &Kind) -> Balance<u8> {
 // `lossless_production!` body that bound is already in scope.
 // ---------------------------------------------------------------------------------------------
 
-use crate::lossless::lossless_production;
+use crate::parser::lossless::lossless_production;
 
 lossless_production! {
   dialect = graphqlx::lossless;
 
-  /// A list ran to end of input before its `]` arrived. [`crate::lossless::recover::unclosed`]
+  /// A list ran to end of input before its `]` arrived. [`crate::parser::lossless::recover::unclosed`]
   /// with this pair's marker.
   fn unclosed_list<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    crate::lossless::recover::unclosed(
+    crate::parser::lossless::recover::unclosed(
       inp,
       UnclosedBracket::<SimpleSpan, GraphQLx>::bracket_of(open),
     )
@@ -397,13 +399,13 @@ lossless_production! {
   /// A brace-delimited value — an object, a `set { … }` or a `map { … }` — ran to end of input
   /// before its `}` arrived.
   fn unclosed_object<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    crate::lossless::recover::unclosed(inp, UnclosedBrace::<SimpleSpan, GraphQLx>::brace_of(open))
+    crate::parser::lossless::recover::unclosed(inp, UnclosedBrace::<SimpleSpan, GraphQLx>::brace_of(open))
   }
 
   /// A parenthesised list — an argument list or a variables definition — ran to end of input
   /// before its `)` arrived.
   fn unclosed_parens<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    crate::lossless::recover::unclosed(inp, UnclosedParen::<SimpleSpan, GraphQLx>::paren_of(open))
+    crate::parser::lossless::recover::unclosed(inp, UnclosedParen::<SimpleSpan, GraphQLx>::paren_of(open))
   }
 
   /// An angle-delimited shape — a set type, a map type or a generic list — ran to end of input
@@ -415,21 +417,21 @@ lossless_production! {
   /// `Unclosed::Angle` rather than the catch-all's untyped note because `lossless/mod.rs` lists
   /// `"<>"` — pinned by `tests/lossless_x_errors.rs`.
   fn unclosed_angle<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    crate::lossless::recover::unclosed(inp, UnclosedAngle::<SimpleSpan, GraphQLx>::angle_of(open))
+    crate::parser::lossless::recover::unclosed(inp, UnclosedAngle::<SimpleSpan, GraphQLx>::angle_of(open))
   }
 
   /// Nothing that could start one of `expected` is here. **Report, and consume nothing.**
-  /// [`crate::lossless::recover::report_unexpected`]; that function's docs say when to reach for it
+  /// [`crate::parser::lossless::recover::report_unexpected`]; that function's docs say when to reach for it
   /// rather than for [`unexpected`], and each of the shapes it serves is a bug if it consumes.
   fn report_unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    crate::lossless::recover::report_unexpected(inp, expected)
+    crate::parser::lossless::recover::report_unexpected(inp, expected)
   }
 
   /// Nothing that could start one of `expected` is here, and there is still input.
-  /// [`crate::lossless::recover::unexpected`] with this dialect's four pairs and its restart
+  /// [`crate::parser::lossless::recover::unexpected`] with this dialect's four pairs and its restart
   /// predicate.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    crate::lossless::recover::unexpected(
+    crate::parser::lossless::recover::unexpected(
       inp,
       expected,
       delimiters,
@@ -440,11 +442,11 @@ lossless_production! {
 
   /// A document entry returned `Err`: skip its wreckage and stop **before** the next entry's head.
   ///
-  /// [`crate::lossless::recover::resync_to`], which reports nothing — the failed entry's own
+  /// [`crate::parser::lossless::recover::resync_to`], which reports nothing — the failed entry's own
   /// `expect` already emitted at the position the failure happened, and a second diagnostic here
   /// would point at whatever the resync happens to start on.
   fn resync_to_definition<'inp, Src, Ctx>(inp) {
-    crate::lossless::recover::resync_to(
+    crate::parser::lossless::recover::resync_to(
       inp,
       delimiters,
       |t| is_definition_start(kind_of(t), keyword_of(t)),

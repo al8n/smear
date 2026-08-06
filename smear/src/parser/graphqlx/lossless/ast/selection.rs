@@ -21,7 +21,7 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       directive::{Arguments, Directives},
@@ -31,7 +31,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A field alias, `name :`.
   ///
   /// A retro-wrap: both an alias and a bare field name start with a `Name`, and only the `:` after
@@ -43,7 +43,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A field selection.
   Field => K::Field {
     /// The field's alias, if it was given one.
@@ -63,7 +63,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A type condition, `on T` — a node of its own in this dialect.
   ///
   /// The `on` is a bare [`Name`](K::Name) token inside it, this kind space having no per-keyword
@@ -75,7 +75,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A fragment spread, `... F`.
   FragmentSpread => K::FragmentSpread {
     /// The spread fragment's name — a whole path, so `... ::ns::F` is one spread.
@@ -86,7 +86,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An inline fragment, `... on T { … }`.
   InlineFragment => K::InlineFragment {
     /// The fragment's type condition, if it has one — a node here, unlike in GraphQL.
@@ -99,7 +99,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A selection set, `{ … }`.
   ///
   /// A selection is a three-way union with no wrapper of its own, so the three kinds come back

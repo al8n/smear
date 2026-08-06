@@ -2,7 +2,7 @@
 //!
 //! Two halves. The **shaped** half, first, is one test per grammar area, each walking a real tree
 //! through the wrappers rather than through
-//! [`SyntaxNode`](smear_parser::graphqlx::lossless::SyntaxNode). The **totality** half, from
+//! [`SyntaxNode`](smear::parser::graphqlx::lossless::SyntaxNode). The **totality** half, from
 //! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 78 wrappers and all 297
 //! getters over the shared corpus and answers five questions the shaped half cannot: whether the
 //! probe table still matches what the crate ships, whether every getter ever *projected* anything,
@@ -41,7 +41,7 @@ use std::{
   path::PathBuf,
 };
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     GraphQLxLang, SyntaxNode, SyntaxToken,
@@ -1295,6 +1295,7 @@ fn without_comments(src: &str) -> String {
 fn source_inventory() -> Vec<SourceGetter> {
   let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("src")
+    .join("parser")
     .join("graphqlx")
     .join("lossless")
     .join("ast");
@@ -1333,7 +1334,7 @@ fn source_inventory() -> Vec<SourceGetter> {
         .unwrap_or_else(|| panic!("{file}: an ast_node! body closes its brace"))
         .0;
       // The header is `lang = <path>; <docs> Name`, and the wrapper is its **last** word. Taking
-      // the whole trimmed prefix would answer `lang = crate::graphqlx::kinds::GraphQLxLang; Name`
+      // the whole trimmed prefix would answer `lang = crate::parser::graphqlx::kinds::GraphQLxLang; Name`
       // — a wrapper name no census entry matches, which turns this inventory into a
       // uniformly-wrong list rather than an empty one.
       let wrapper = header
@@ -1496,7 +1497,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 /// slipping through as a pinned exception.
 ///
 /// [`DirectiveLocations::locations`]:
-///   smear_parser::graphqlx::lossless::ast::DirectiveLocations::locations
+///   smear::parser::graphqlx::lossless::ast::DirectiveLocations::locations
 const NAME_EXCEPTIONS: &[(&str, &str, &str, &str)] = &[
   ("DirectiveDefinition", "description", "tok_any", "String"),
   ("EnumTypeDefinition", "description", "tok_any", "String"),

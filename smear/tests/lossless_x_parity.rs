@@ -74,7 +74,7 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   GraphQLx,
   ast::{Document, ExecutableDocument, TypeSystemDocument},
   error::GraphqlxErrors,

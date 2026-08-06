@@ -54,10 +54,10 @@
 //!   skipped as one nesting-aware region — the same two divergences `value.rs` records for a
 //!   list value, for the same reasons.
 
-use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
+use crate::lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{ParseInput as _, cst::event::EventMark};
 
-use crate::graphql::kinds::SyntaxKind as K;
+use crate::parser::graphql::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -78,10 +78,12 @@ use super::{
   value::{Constness, default_value, enum_value},
 };
 
-crate::lossless::description_head_predicate!(smear_lexer::graphql::lossless::LosslessTokenKind);
-crate::lossless::directive_location_predicate!(smear_lexer::graphql::ContextualKeyword);
+crate::parser::lossless::description_head_predicate!(
+  crate::lexer::graphql::lossless::LosslessTokenKind
+);
+crate::parser::lossless::directive_location_predicate!(crate::lexer::graphql::ContextualKeyword);
 
-use crate::lossless::lossless_production;
+use crate::parser::lossless::lossless_production;
 
 lossless_production! {
   dialect = graphql::lossless;

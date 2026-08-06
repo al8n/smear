@@ -54,10 +54,10 @@
 //! suite that spends the sink's rollback. Its own docs carry why a fixed `peek::<U2>()` cannot
 //! serve and why this is the sink's discipline rather than a second buffering layer.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::ParseInput as _;
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 use super::coverage::node;
 
@@ -68,7 +68,7 @@ use super::{
   ty::{path, type_path, type_ref},
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;
@@ -98,8 +98,8 @@ lossless_production! {
   /// `< DefinitionTypeParam+ >` — the parameters a definition declares.
   ///
   /// Nonempty (`generic/mod.rs:263` is `.at_least(1)`), and the empty spelling is reported with
-  /// [`crate::lossless::recover::report_unexpected`] rather than
-  /// [`crate::lossless::recover::unexpected`]: the report consumes nothing, so the `>` is still
+  /// [`crate::parser::lossless::recover::report_unexpected`] rather than
+  /// [`crate::parser::lossless::recover::unexpected`]: the report consumes nothing, so the `>` is still
   /// the loop's to eat and `<>` closes on its own delimiter. Reaching for the consuming form here
   /// would eat that `>` — a closer is a depth-zero sync point — and the list would then run to end
   /// of input hunting a closer it had already swallowed.

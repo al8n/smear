@@ -15,14 +15,14 @@ use tokora::{
   utils::{DowncastRef, typenum::U1},
 };
 
-use smear_lexer::graphql::ContextualKeyword;
+use crate::lexer::graphql::ContextualKeyword;
 
 use super::{
   GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken,
   argument::{arguments, const_arguments},
   try_name,
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, extent_end, try_at},
   graphql::{
     GraphQL,
@@ -279,7 +279,7 @@ directive_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
     match try_at(inp)? {
       ParseAttempt::Accept(at) => directives_after_at(inp, at),
@@ -302,7 +302,7 @@ directive_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
     match try_at(inp)? {
       ParseAttempt::Accept(at) => const_directives_after_at(inp, at),

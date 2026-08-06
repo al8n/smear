@@ -1,7 +1,7 @@
 #![cfg(feature = "rowan")]
 
 use rowan::Language;
-use smear_parser::graphql::{kinds::SyntaxKind as K, lossless::GraphQLLang};
+use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::GraphQLLang};
 
 #[test]
 fn every_kind_round_trips_through_raw() {

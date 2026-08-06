@@ -33,12 +33,14 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use smear_parser::graphqlx::{
-  GraphQLx,
-  ast::Document,
-  error::GraphqlxErrors,
-  syntactic::{GraphqlxLexer, document},
+use smear::{
+  lexer::graphqlx::syntactic::SyntacticLexer,
+  parser::graphqlx::{
+    GraphQLx,
+    ast::Document,
+    error::GraphqlxErrors,
+    syntactic::{GraphqlxLexer, document},
+  },
 };
 use tokora::{
   Lexer as _, Parse as _, Parser, ParserContext, SimpleSpan, cache::DefaultCache, emitter::Verbose,

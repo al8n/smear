@@ -17,10 +17,10 @@
 //! Phase B measured a token-kind prefix and rejected it as a shared-production enabler. What it did
 //! *not* reject is the prefix as a **drift alarm**: the two enums are hand-maintained, the parser's
 //! two directive-location predicates are generated from one shared variant-name list
-//! (`smear_parser::lossless::directive_location_predicate`), and that generation is silently wrong
+//! (`smear::parser::lossless::directive_location_predicate`), and that generation is silently wrong
 //! the day a name exists in one dialect and not the other.
 
-use crate::{graphql::ContextualKeyword as G, graphqlx::ContextualKeyword as X};
+use crate::lexer::{graphql::ContextualKeyword as G, graphqlx::ContextualKeyword as X};
 
 /// The 38 spellings both dialects share, in graphql's declaration order.
 ///
@@ -141,8 +141,8 @@ fn the_shared_keyword_spellings_agree() {
 /// drift a hand-maintained pair of enums produces.
 #[test]
 fn the_shared_list_is_both_dialects_declaration_order() {
-  let graphql: Vec<G> = crate::graphql::keyword::KEYWORDS.to_vec();
-  let graphqlx: Vec<X> = crate::graphqlx::keyword::KEYWORDS.to_vec();
+  let graphql: Vec<G> = crate::lexer::graphql::keyword::KEYWORDS.to_vec();
+  let graphqlx: Vec<X> = crate::lexer::graphqlx::keyword::KEYWORDS.to_vec();
 
   for (index, (word, g, x)) in SHARED.iter().enumerate() {
     assert_eq!(
@@ -163,7 +163,7 @@ fn the_shared_list_is_both_dialects_declaration_order() {
 fn graphqlx_adds_exactly_six_keywords_at_the_tail() {
   assert_eq!(EXTRA.len(), 6);
   let shared: std::collections::BTreeSet<&str> = SHARED.iter().map(|(w, _, _)| *w).collect();
-  let graphqlx = crate::graphqlx::keyword::KEYWORDS;
+  let graphqlx = crate::lexer::graphqlx::keyword::KEYWORDS;
 
   for (offset, (word, x)) in EXTRA.iter().enumerate() {
     assert_eq!(x.as_str(), *word);
@@ -185,12 +185,12 @@ fn graphqlx_adds_exactly_six_keywords_at_the_tail() {
 #[test]
 fn neither_enum_has_grown_behind_the_lists() {
   assert_eq!(
-    crate::graphql::keyword::KEYWORDS.len(),
+    crate::lexer::graphql::keyword::KEYWORDS.len(),
     SHARED.len(),
     "graphql's keyword count moved; update SHARED and say why"
   );
   assert_eq!(
-    crate::graphqlx::keyword::KEYWORDS.len(),
+    crate::lexer::graphqlx::keyword::KEYWORDS.len(),
     SHARED.len() + EXTRA.len(),
     "graphqlx's keyword count moved; update SHARED or EXTRA and say which"
   );

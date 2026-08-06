@@ -7,7 +7,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use crate::lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
   TryParseInput,
@@ -24,7 +24,7 @@ use super::{
   directive::const_directives, executable::operation_type, name as parse_name, ty::ty,
   value::default_value,
 };
-use crate::{
+use crate::parser::{
   combinator::{
     ParseCtx, TokenSpannedExt, at, colon, equal, extent_end, extent_since, extent_start, try_equal,
   },

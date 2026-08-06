@@ -14,10 +14,10 @@
 //! list's members in the order they were written must walk `syntax().children()` itself. A
 //! `Value` union is the Phase B answer; it is out of scope here rather than overlooked.
 
-use crate::{ast_node, graphql::kinds::SyntaxKind as K};
+use crate::{ast_node, parser::graphql::kinds::SyntaxKind as K};
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A variable, `$name`.
   ///
   /// The same node kind in a value position and in a variable *definition*: a variable is a
@@ -30,7 +30,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An integer literal value.
   IntValue => K::IntValue {
     /// The literal token.
@@ -39,7 +39,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A float literal value.
   FloatValue => K::FloatValue {
     /// The literal token.
@@ -48,7 +48,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A string literal value, inline or block.
   ///
   /// One node kind over two token kinds: the block/inline distinction is the *token*'s and
@@ -63,7 +63,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A `true` or `false` value.
   BooleanValue => K::BooleanValue {
     /// The `true` or `false` token, which the lexer hands back as an ordinary name.
@@ -72,7 +72,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A `null` value.
   NullValue => K::NullValue {
     /// The `null` token, which the lexer hands back as an ordinary name.
@@ -81,7 +81,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An enum value.
   ///
   /// The same node kind in a value position and in an enum value *definition*, for the reason
@@ -93,7 +93,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A list value, `[ … ]`.
   ///
   /// One iterator per member kind — see this module's docs for what that costs and why.
@@ -120,7 +120,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An object value, `{ … }`.
   ObjectValue => K::ObjectValue {
     /// Every field of the object, in order.
@@ -129,7 +129,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// One field of an object value, `name : value`.
   ObjectField => K::ObjectField {
     /// The field's name.
@@ -156,7 +156,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A default value, `= value`.
   ///
   /// The spec's `DefaultValue` takes a **const** value, which forbids a variable. This suite

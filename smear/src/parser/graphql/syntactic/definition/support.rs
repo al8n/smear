@@ -97,7 +97,10 @@ where
 
 pub(super) fn take_type<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<crate::graphql::ast::Type<Name<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
+) -> Result<
+  crate::parser::graphql::ast::Type<Name<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>,
+>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,

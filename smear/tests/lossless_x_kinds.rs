@@ -32,7 +32,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use smear_parser::{
+use smear::parser::{
   graphqlx::kinds::SyntaxKind as X,
   lexer::graphqlx::lossless::{LosslessLexer, LosslessToken, LosslessTokenKind},
   lossless::{KindSpace, test_support::assert_kind_space_is_well_formed},
@@ -320,7 +320,7 @@ fn the_graphqlx_kind_space_is_well_formed() {
 /// Every kind the space declares has a GraphQLx source anchor, and every anchor has a kind.
 ///
 /// **This is the "derived, not diffed" check.** [`source_node_names`] reads
-/// `smear-parser/src/graphqlx/ast/**` and `smear-parser/src/graphqlx/syntactic/**` and extracts the
+/// `smear/src/parser/graphqlx/ast/**` and `smear/src/parser/graphqlx/syntactic/**` and extracts the
 /// names GraphQLx's own grammar uses; the kind space is compared against *that*, never against
 /// GraphQL's. A kind copied from GraphQL for a production GraphQLx does not have lands in
 /// `kinds_without_a_source`; a GraphQLx production with no kind lands in `sources_without_a_kind`
@@ -401,7 +401,7 @@ fn every_kind_is_justified_by_a_graphqlx_source() {
 #[cfg(feature = "graphql")]
 #[test]
 fn the_two_spaces_diverge_inside_the_token_block() {
-  use smear_parser::graphql::kinds::SyntaxKind as G;
+  use smear::parser::graphql::kinds::SyntaxKind as G;
 
   let g: Vec<String> = G::ALL.iter().map(|k| format!("{k:?}")).collect();
   let x: Vec<String> = X::ALL.iter().map(|k| format!("{k:?}")).collect();
@@ -722,7 +722,7 @@ fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
 ///
 /// Applied repeatedly, so `TryConstX` reaches `X`.
 fn source_node_names() -> BTreeSet<String> {
-  let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/graphqlx");
+  let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/parser/graphqlx");
   let ast = rust_files(&root.join("ast"));
   let syntactic = rust_files(&root.join("syntactic"));
   assert!(
@@ -790,8 +790,12 @@ fn rust_files(dir: &Path) -> Vec<PathBuf> {
 fn bound_carriers(line: &str) -> Vec<String> {
   let mut out = Vec::new();
   let mut search = 0;
-  while let Some(hit) = line[search..].find("crate::") {
-    let mut cursor = search + hit + "crate::".len();
+  // `crate::parser::` and not `crate::`: the parser moved one module below the crate root when
+  // the crates merged, so every in-tree path gained that hop. Matching the bare `crate::` here
+  // would read `parser` as the first module segment and defeat both rules below — the
+  // "at least one lowercase module" test and the `graphqlx`-names-itself exclusion.
+  while let Some(hit) = line[search..].find("crate::parser::") {
+    let mut cursor = search + hit + "crate::parser::".len();
     search = cursor;
     let mut modules = 0usize;
     while let Some(segment) = leading_ident(&line[cursor..]) {

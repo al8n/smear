@@ -12,7 +12,7 @@ pub mod error;
 // No `///` here, and that is deliberate. `kinds.rs` carries its own `//!` header, and when a
 // module has doc fragments from both places rustdoc resolves the intra-doc links in *all* of them
 // against the scope of the *first* — this file's — where `SyntaxKind` is not in scope. Fifteen
-// links in that header silently broke that way; `crate::lossless`'s own header records the same
+// links in that header silently broke that way; `crate::parser::lossless`'s own header records the same
 // finding. One fragment, one scope, links that resolve where they are written.
 //
 // Not gated on `rowan`: the space describes GraphQLx's grammar, which exists whether or not a tree
@@ -23,7 +23,7 @@ pub mod kinds;
 // own `//!` header, and a module with doc fragments from both places has the intra-doc links in
 // *all* of them resolved against the scope of the first — this file's.
 //
-// Gated on `rowan` because `crate::lossless`, the substrate every item under it is written over,
+// Gated on `rowan` because `crate::parser::lossless`, the substrate every item under it is written over,
 // is. `kinds` above is *not* gated, which is the asymmetry that keeps the `graphqlx`-without-
 // `rowan` build green: the kind space describes GraphQLx's grammar, while a tree over it needs
 // rowan.

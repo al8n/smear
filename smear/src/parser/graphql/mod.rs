@@ -1,10 +1,10 @@
 //! The GraphQL dialect assembly layer.
 //!
 //! GraphQL syntactic productions are specialized to the concrete
-//! [`crate::graphql::syntactic::GraphqlLexer`] and the
-//! [`crate::graphql::GraphQL`] marker. GraphQL AST types expose `graphql` /
+//! [`crate::parser::graphql::syntactic::GraphqlLexer`] and the
+//! [`crate::parser::graphql::GraphQL`] marker. GraphQL AST types expose `graphql` /
 //! `try_graphql` methods where available; for example, calling
-//! `Directive::<&str>::graphql` on [`crate::graphql::ast::Directive`] parses a
+//! `Directive::<&str>::graphql` on [`crate::parser::graphql::ast::Directive`] parses a
 //! directive whose source slices are `&str`. The concrete lexer source is
 //! inferred from the parser input. Free production functions remain available
 //! for composition.
@@ -17,7 +17,7 @@
 //! - `keyword` — the typed keyword node atoms,
 //! - `ast` — the AST node types the productions return,
 //! - `error` — the dialect error and the `From` glue that makes it a
-//!   [`ParseCtx`](crate::combinator::ParseCtx) error over every lexer and source,
+//!   [`ParseCtx`](crate::parser::combinator::ParseCtx) error over every lexer and source,
 //! - `prelude` — the generic atom vocabulary, re-exported for productions.
 
 pub mod ast;

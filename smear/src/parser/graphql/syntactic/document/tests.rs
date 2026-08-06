@@ -1,10 +1,10 @@
 //! Full GraphQL document-production tests.
 
-use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use crate::lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan};
 
 use super::{definition, definition_or_extension, described_definition, document};
-use crate::graphql::{
+use crate::parser::graphql::{
   GraphQL,
   ast::{Definition, DefinitionOrExtension, DescribedDefinition, Document},
   error::{ErrorData, GraphqlErrors, Unclosed},

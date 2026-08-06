@@ -1,7 +1,7 @@
 //! Type-reference productions: `NamedType`, `ListType` and the retro-wrapped `NonNullType`.
 //!
 //! The conventions are `value.rs`'s, and they are not repeated here: node kinds are
-//! [`SyntaxKind`](crate::graphql::kinds::SyntaxKind) (`K::…`) while every `expect(…)` argument
+//! [`SyntaxKind`](crate::parser::graphql::kinds::SyntaxKind) (`K::…`) while every `expect(…)` argument
 //! is a `LosslessTokenKind` (`Kind::…`); every generic call carries `::<Src, Ctx>`, because
 //! `Src` reaches the input only through the associated-type projection `Src::Slice<'inp>` and
 //! is therefore not inferable; and every `node(…)` closure spells its parameter in full,
@@ -37,10 +37,10 @@
 //!   delimiter — the same trade `value.rs` makes inside a list, for the same reason: a
 //!   malformed type should cost its own node, not the rest of the file.
 
-use smear_lexer::graphql::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphql::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, TryParseInput as _};
 
-use crate::graphql::kinds::SyntaxKind as K;
+use crate::parser::graphql::kinds::SyntaxKind as K;
 
 // `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
@@ -54,7 +54,7 @@ use super::{
   trivia::{eat_if, expect, peek_kind, try_eat},
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphql::lossless;

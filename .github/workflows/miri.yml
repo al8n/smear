@@ -47,7 +47,7 @@ name: Miri
 # Measured rather than assumed, and the answer is the same one tokora reached: `cargo build` is
 # the obstacle, not Miri.
 #
-# `criterion 0.8.2` is an UNCONDITIONAL dev-dependency of both `smear-lexer` and `smear-parser`,
+# `criterion 0.8.2` is an UNCONDITIONAL dev-dependency of `smear`,
 # and it depends on `alloca 0.4.0`, whose build script is a `cc::Build` that compiles `alloca.c`.
 # `cargo check --workspace --tests` on this tree produces
 # `target/debug/build/alloca/*/out/libcalloca.a`, so the C file is built for the target selected

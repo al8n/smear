@@ -21,7 +21,7 @@
 //! # The kind vocabulary here is the lexer's, not the tree's
 //!
 //! `peek_kind` answers in `LosslessTokenKind` — `smear-lexer`'s vocabulary — and **not** in
-//! [`SyntaxKind`](crate::graphqlx::kinds::SyntaxKind), the tree's. The two are different spaces
+//! [`SyntaxKind`](crate::parser::graphqlx::kinds::SyntaxKind), the tree's. The two are different spaces
 //! with overlapping variant names; a production compares an atom's answer against
 //! `LosslessTokenKind`, and only [`super::kind_map`] ever speaks both. The lexer's space keeps
 //! `\r`, `\n` and `\r\n` apart where the tree's folds all three, but **no atom here can expose
@@ -35,14 +35,14 @@ use tokora::{
   utils::DowncastRef,
 };
 
-use crate::graphqlx::GraphQLx;
+use crate::parser::graphqlx::GraphQLx;
 
 use super::{
   GraphqlxLosslessError, GraphqlxLosslessInput, GraphqlxLosslessLexer, GraphqlxLosslessToken,
 };
 
 // ---------------------------------------------------------------------------------------------
-// The six atoms are `crate::lossless::trivia`'s, wrapped here with this dialect's four aliases
+// The six atoms are `crate::parser::lossless::trivia`'s, wrapped here with this dialect's four aliases
 // pinned.
 //
 // **Wrappers, not `pub use` re-exports**, for the reason GraphQL's twin records: a re-export would
@@ -61,9 +61,9 @@ use super::{
 
 /// The kind projection the atoms compare against, re-exported so `recover.rs`'s restart predicate
 /// can adapt a token to a kind without naming the projection twice.
-pub(crate) use crate::lossless::trivia::kind_of;
+pub(crate) use crate::parser::lossless::trivia::kind_of;
 
-/// [`crate::lossless::trivia::peek_kind`] over this dialect's input.
+/// [`crate::parser::lossless::trivia::peek_kind`] over this dialect's input.
 #[inline]
 pub(crate) fn peek_kind<'inp, Src, Ctx>(
   inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
@@ -79,7 +79,7 @@ where
   Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
   GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
 {
-  crate::lossless::trivia::peek_kind(inp)
+  crate::parser::lossless::trivia::peek_kind(inp)
 }
 
 /// Commit any leading trivia, then report the kind of the **second significant** token — the one
@@ -148,7 +148,7 @@ where
   answer
 }
 
-/// [`crate::lossless::trivia::peek_as`] over this dialect's input.
+/// [`crate::parser::lossless::trivia::peek_as`] over this dialect's input.
 #[inline]
 pub(crate) fn peek_as<'inp, Src, Ctx, Projection>(
   inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
@@ -161,10 +161,10 @@ where
   Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
   GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
 {
-  crate::lossless::trivia::peek_as(inp)
+  crate::parser::lossless::trivia::peek_as(inp)
 }
 
-/// [`crate::lossless::trivia::expect`] over this dialect's input.
+/// [`crate::parser::lossless::trivia::expect`] over this dialect's input.
 #[inline]
 pub(crate) fn expect<'inp, Src, Ctx>(
   inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
@@ -187,10 +187,10 @@ where
       >,
     >,
 {
-  crate::lossless::trivia::expect(inp, kind)
+  crate::parser::lossless::trivia::expect(inp, kind)
 }
 
-/// [`crate::lossless::trivia::eat_if`] over this dialect's input.
+/// [`crate::parser::lossless::trivia::eat_if`] over this dialect's input.
 #[inline]
 pub(crate) fn eat_if<'inp, Src, Ctx>(
   inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
@@ -203,10 +203,10 @@ where
     Lexer<'inp, Token = GraphqlxLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
 {
-  crate::lossless::trivia::eat_if(inp, kind)
+  crate::parser::lossless::trivia::eat_if(inp, kind)
 }
 
-/// [`crate::lossless::trivia::try_eat`] over this dialect's input.
+/// [`crate::parser::lossless::trivia::try_eat`] over this dialect's input.
 #[inline]
 pub(crate) fn try_eat<'inp, Src, Ctx>(
   inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
@@ -219,7 +219,7 @@ where
     Lexer<'inp, Token = GraphqlxLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
 {
-  crate::lossless::trivia::try_eat(inp, kind)
+  crate::parser::lossless::trivia::try_eat(inp, kind)
 }
 
 /// Drivers that run one atom over a `&str` and report what it committed.
@@ -254,15 +254,15 @@ pub mod test_support {
     emitter::Verbose,
   };
 
-  use crate::graphqlx::{GraphQLx, kinds::SyntaxKind as K};
+  use crate::parser::graphqlx::{GraphQLx, kinds::SyntaxKind as K};
 
   use super::super::{GraphqlxLosslessErrors, GraphqlxLosslessLexer, SyntaxNode, runner::profile};
 
   /// The kind vocabulary the atoms answer in — the lexer's, not the tree's.
-  pub type Kind = smear_lexer::graphqlx::lossless::LosslessTokenKind;
+  pub type Kind = crate::lexer::graphqlx::lossless::LosslessTokenKind;
 
   /// The contextual-keyword projection `peek_as` downcasts to.
-  pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
+  pub type Keyword = crate::lexer::graphqlx::ContextualKeyword;
 
   /// The recording emitter, the sink over it, the context pair, and the input the driver's
   /// closure receives.

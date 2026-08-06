@@ -1,4 +1,4 @@
-use crate::{
+use crate::lexer::{
   graphqlx::error::{BinaryError, HexError, OctalError},
   handlers::{self, is_ignored_byte},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},

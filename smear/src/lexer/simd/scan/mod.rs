@@ -42,7 +42,7 @@ pub(crate) enum NumberKind {
 
 /// Below this many remaining bytes, a tight scalar loop beats dispatching
 /// into `memspan`'s SIMD digit scanner — mirrors the short/long split in
-/// `scan_identifier` (`crate::simd`). GraphQL numbers are almost always
+/// `scan_identifier` (`crate::lexer::simd`). GraphQL numbers are almost always
 /// a handful of digits, so this is the overwhelmingly common branch; the
 /// SIMD path exists for pathological long digit runs (huge synthetic IDs,
 /// timestamps, etc. encoded as decimal).

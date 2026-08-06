@@ -21,7 +21,7 @@ use std::{format, string::String};
 
 use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::syntactic::SyntacticLexer;
+use crate::lexer::graphqlx::syntactic::SyntacticLexer;
 
 /// Run `f`, returning `true` if it panicked, with the panic message suppressed
 /// so an expected panic doesn't clutter test output.

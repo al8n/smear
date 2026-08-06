@@ -8,7 +8,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   GraphQLx, ast::Document, error::GraphqlxErrors, syntactic::GraphqlxLexer,
 };
 use tokora::{Parse, Parser};
@@ -21,27 +21,21 @@ struct Fixture {
 const FIXTURES: &[Fixture] = &[
   Fixture {
     name: "graphqlx_01_imports_and_paths",
-    source: include_str!(
-      "../../smear/tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"
-    ),
+    source: include_str!("../tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"),
   },
   Fixture {
     name: "graphqlx_02_definitions_and_extensions",
-    source: include_str!(
-      "../../smear/tests/fixtures/parser/graphqlx/ok/0015_extend_with_generics.graphqlx"
-    ),
+    source: include_str!("../tests/fixtures/parser/graphqlx/ok/0015_extend_with_generics.graphqlx"),
   },
   Fixture {
     name: "graphqlx_03_operations_and_generics",
     source: include_str!(
-      "../../smear/tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"
+      "../tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"
     ),
   },
   Fixture {
     name: "graphqlx_04_complex_fragments",
-    source: include_str!(
-      "../../smear/tests/fixtures/parser/graphqlx/ok/0022_complex_fragments.graphqlx"
-    ),
+    source: include_str!("../tests/fixtures/parser/graphqlx/ok/0022_complex_fragments.graphqlx"),
   },
 ];
 

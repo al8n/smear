@@ -12,7 +12,7 @@
 //! executable one.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     generic::test_support::{parse_extension_name, parse_extension_type_generics},
@@ -299,7 +299,7 @@ fn an_extension_name_wraps_a_path_where_a_definition_name_wraps_a_token() {
 /// (`tests/lossless_x_errors.rs`).
 #[test]
 fn an_unterminated_generic_list_reports_and_keeps_every_byte() {
-  type Driver = fn(&str) -> smear_parser::graphqlx::lossless::Parse;
+  type Driver = fn(&str) -> smear::parser::graphqlx::lossless::Parse;
   for (driver, src) in [
     (parse_extension_type_generics as Driver, "<A"),
     (parse_type_generics as Driver, "<A"),

@@ -14,7 +14,7 @@
 
 use crate::{
   ast_node,
-  graphql::{
+  parser::graphql::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       directive::{Arguments, Directives},
@@ -24,7 +24,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A field alias, `name :`.
   ///
   /// A retro-wrap: both an alias and a bare field name start with a `Name`, and only the `:`
@@ -36,7 +36,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A field selection.
   Field => K::Field {
     /// The field's alias, if it was given one.
@@ -56,7 +56,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A selection set, `{ … }`.
   ///
   /// A selection is a three-way union with no wrapper of its own, so the three kinds come back
@@ -73,7 +73,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A fragment spread, `... FragmentName`.
   FragmentSpread => K::FragmentSpread {
     /// The spread fragment's name.
@@ -84,7 +84,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An inline fragment, `... on T { … }`.
   InlineFragment => K::InlineFragment {
     /// The type condition's type, if the fragment has a condition.

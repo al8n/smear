@@ -6,7 +6,7 @@ use tokora::{
   utils::Lexeme,
 };
 
-use crate::{
+use crate::lexer::{
   graphqlx::error::{BinaryError, HexError, OctalError},
   handlers::{self, is_ignored_char},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},

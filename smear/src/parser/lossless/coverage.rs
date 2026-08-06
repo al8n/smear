@@ -72,7 +72,7 @@ pub use instrumented::{Counted, node, node_at};
 mod counter {
   use std::{cell::RefCell, collections::BTreeMap, vec, vec::Vec};
 
-  use crate::lossless::KindSpace;
+  use crate::parser::lossless::KindSpace;
 
   thread_local! {
     /// One tally per kind space, keyed by [`KindSpace::NAME`].
@@ -152,7 +152,7 @@ mod instrumented {
     try_parse_input::ParseAttempt,
   };
 
-  use crate::lossless::KindSpace;
+  use crate::parser::lossless::KindSpace;
 
   /// [`tokora::parser::node`], counting the wrap in `K`'s lane.
   #[inline]

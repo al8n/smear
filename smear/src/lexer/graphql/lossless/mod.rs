@@ -311,7 +311,7 @@ impl core::fmt::Display for LosslessTokenKind {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::LitPlainStr;
+  use crate::lexer::LitPlainStr;
   use tokora::token::IdentifierToken;
 
   #[test]

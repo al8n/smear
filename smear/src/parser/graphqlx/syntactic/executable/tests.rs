@@ -1,13 +1,13 @@
 //! Focused GraphQLx executable-production tests.
 
-use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
+use crate::lexer::graphqlx::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{
   executable_document, fragment_definition, operation_definition, operation_type,
   variable_definition, variables_definition,
 };
-use crate::graphqlx::{
+use crate::parser::graphqlx::{
   GraphQLx, ast,
   error::{ErrorData, Expectation, GraphqlxErrors, Unclosed},
   syntactic::{GraphqlxInput, GraphqlxLexer},
@@ -316,10 +316,10 @@ fn described_executables_and_documents_dispatch_imports_without_reclassifying_he
 fn executable_document_accepts_graphqlx_executable_fixtures() {
   const FIXTURES: &[&str] = &[
     include_str!(
-      "../../../../../smear/tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"
+      "../../../../../tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"
     ),
     include_str!(
-      "../../../../../smear/tests/fixtures/parser/graphqlx/ok/0022_complex_fragments.graphqlx"
+      "../../../../../tests/fixtures/parser/graphqlx/ok/0022_complex_fragments.graphqlx"
     ),
   ];
 

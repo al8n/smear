@@ -3,7 +3,7 @@ use tokora::{
   logos::{Lexer, Logos, Source},
 };
 
-use crate::error::{StringError, StringErrors};
+use crate::lexer::error::{StringError, StringErrors};
 
 use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
 
@@ -144,7 +144,7 @@ where
 /// `&[u8]` block-string scanner for the SIMD syntactic fast path.
 ///
 /// `src` is the block-string body **after** the opening `"""`. Mirrors
-/// [`skip_inline_str_simd`](crate::skip_inline_str_simd)'s convention: on a
+/// [`skip_inline_str_simd`](crate::lexer::skip_inline_str_simd)'s convention: on a
 /// valid literal the `usize` carried by the returned [`LitBlockStr`] is the
 /// number of bytes consumed **after** the opening delimiter — the content plus
 /// the always-3-byte closing `"""` — so the caller recovers the full token by

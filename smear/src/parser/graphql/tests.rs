@@ -4,8 +4,8 @@
 //! source representation — but binds the real dialect error
 //! ([`GraphqlErrors`](super::error::GraphqlErrors)), so it is the harness the
 //! Wave 1+ production tests reuse. The smoke test drives two atoms
-//! ([`ident`](crate::combinator::ident) and
-//! [`keyword_exact`](crate::combinator::keyword_exact)) end to end through a
+//! ([`ident`](crate::parser::combinator::ident) and
+//! [`keyword_exact`](crate::parser::combinator::keyword_exact)) end to end through a
 //! `Fatal<GraphqlErrors>` context over both `str` and `[u8]`, proving the
 //! substrate — atoms, the dialect error, and its `From` glue — hangs together.
 //!
@@ -15,11 +15,11 @@
 //! `ParseInput` at `Lang = ()`. The marker is inert at runtime, so the atoms behave
 //! identically — the entry runner (a later wave) owns marker-pinned driving.
 
-use smear_lexer::graphql::syntactic::SyntacticLexer;
+use crate::lexer::graphql::syntactic::SyntacticLexer;
 use tokora::{FatalContext, InputRef, Parse, Parser};
 
 use super::error::GraphqlErrors;
-use crate::combinator::{ident, keyword_exact};
+use crate::parser::combinator::{ident, keyword_exact};
 
 /// The fatal context a `str`-sourced GraphQL parse runs under.
 type StrCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, str>, GraphqlErrors<&'inp str>>;

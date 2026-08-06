@@ -11,13 +11,13 @@ use tokora::{
   try_parse_input::ParseAttempt, utils::typenum::U1,
 };
 
-use smear_lexer::graphqlx::{
+use crate::lexer::graphqlx::{
   ContextualKeyword,
   syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind},
 };
 
 use super::GraphQLx;
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, ident, try_double_colon, try_ident},
   graphqlx::{
     ast,

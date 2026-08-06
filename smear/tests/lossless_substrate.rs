@@ -2,11 +2,11 @@
 
 //! The dialect-generic lossless substrate's own properties.
 //!
-//! Everything here is asserted through `smear_parser::lossless`, never through a dialect module,
+//! Everything here is asserted through `smear::parser::lossless`, never through a dialect module,
 //! because the substrate's whole claim is that it is nameable and usable without one. A test that
 //! reached for `graphql::lossless` to prove a substrate property would prove the opposite.
 
-use smear_parser::{
+use smear::parser::{
   graphql::kinds::SyntaxKind as GK,
   lossless::{KindSpace, test_support::assert_kind_space_is_well_formed},
 };
@@ -49,13 +49,13 @@ fn the_graphql_kind_space_answers_in_both_directions() {
   assert_eq!(<GK as KindSpace>::from_raw(u16::MAX), None);
 }
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::{GraphQLLang, SyntaxKind as K},
   lossless::{ast as gast, parse_document},
 };
 
-smear_parser::ast_node!(
-  lang = smear_parser::graphql::kinds::GraphQLLang;
+smear::ast_node!(
+  lang = smear::parser::graphql::kinds::GraphQLLang;
   /// A locally declared twin of the shipped `Document` wrapper.
   ///
   /// Declared **in this integration test crate**, over the crate's own language, using the
@@ -93,7 +93,7 @@ fn the_exported_macro_builds_a_wrapper_outside_the_crate() {
 /// The macro emits no path that a consumer crate has to import.
 ///
 /// Measured rather than asserted: the test above compiles in a crate whose only `use` of the
-/// ecosystem is `smear_parser`. If the macro ever emits `::rowan::…` or `::tokora::…`, this file
+/// ecosystem is `smear`. If the macro ever emits `::rowan::…` or `::tokora::…`, this file
 /// stops compiling — which is a louder failure than a doc comment saying it must not.
 #[test]
 fn the_macro_needs_no_import_beyond_this_crate() {}
@@ -123,15 +123,15 @@ fn token_any_answers_in_document_order_not_in_kinds_order() {
   // The positive control: both kinds really are present as direct token children, so neither
   // rule is answering `None` by accident.
   assert!(
-    smear_parser::lossless::ast::token_any(&arguments, &[K::LParen]).is_some(),
+    smear::parser::lossless::ast::token_any(&arguments, &[K::LParen]).is_some(),
     "the fixture has no LParen"
   );
   assert!(
-    smear_parser::lossless::ast::token_any(&arguments, &[K::RParen]).is_some(),
+    smear::parser::lossless::ast::token_any(&arguments, &[K::RParen]).is_some(),
     "the fixture has no RParen"
   );
 
-  let found = smear_parser::lossless::ast::token_any(&arguments, &[K::RParen, K::LParen])
+  let found = smear::parser::lossless::ast::token_any(&arguments, &[K::RParen, K::LParen])
     .expect("neither kind matched");
   assert_eq!(
     found.kind(),
@@ -163,9 +163,9 @@ fn the_trivia_atoms_are_reachable_through_the_substrate() {
     Ctx: tokora::ParseContext<'inp, L, Lang>,
     tokora::ErrorOf<'inp, L, Ctx, Lang>: From<tokora::error::UnexpectedEot<usize, Lang>>,
   {
-    let _ = smear_parser::lossless::trivia::peek_kind::<L, Ctx, Lang>;
-    let _ = smear_parser::lossless::trivia::eat_if::<L, Ctx, Lang>;
-    let _ = smear_parser::lossless::trivia::try_eat::<L, Ctx, Lang>;
+    let _ = smear::parser::lossless::trivia::peek_kind::<L, Ctx, Lang>;
+    let _ = smear::parser::lossless::trivia::eat_if::<L, Ctx, Lang>;
+    let _ = smear::parser::lossless::trivia::try_eat::<L, Ctx, Lang>;
   }
 }
 
@@ -178,7 +178,7 @@ fn the_trivia_atoms_are_reachable_through_the_substrate() {
 #[cfg(feature = "lossless-coverage")]
 #[test]
 fn a_coverage_lane_is_per_kind_space() {
-  use smear_parser::lossless::coverage;
+  use smear::parser::lossless::coverage;
 
   coverage::reset::<GK>();
   let _ = parse_document("type T { f: Int }\n");
@@ -242,7 +242,7 @@ fn the_other_space_is_well_formed() {
 /// `Parse` is generic over the language and still answers the three questions every gate asks.
 #[test]
 fn the_parse_surface_is_language_generic() {
-  let parse: smear_parser::lossless::runner::Parse<GraphQLLang> =
+  let parse: smear::parser::lossless::runner::Parse<GraphQLLang> =
     parse_document("type T { f: Int }\n");
   assert!(!parse.has_errors());
   assert_eq!(parse.syntax().text().to_string(), "type T { f: Int }\n");
@@ -264,7 +264,7 @@ fn the_parse_surface_is_language_generic() {
 #[cfg(feature = "lossless-coverage")]
 #[test]
 fn a_declined_retro_wrap_is_not_counted() {
-  use smear_parser::lossless::coverage;
+  use smear::parser::lossless::coverage;
 
   coverage::reset::<GK>();
   // Two fields and two type references, so both retro-wrap probes run — and decline: no `:` in
@@ -314,7 +314,7 @@ fn a_declined_retro_wrap_is_not_counted() {
 #[test]
 #[should_panic(expected = "the graphql lossless sink emitted a malformed event stream")]
 fn a_malformed_stream_panics_naming_the_dialect() {
-  let _ = smear_parser::graphql::lossless::runner::test_support::structure_without_tokens("a", 0);
+  let _ = smear::parser::graphql::lossless::runner::test_support::structure_without_tokens("a", 0);
 }
 
 /// Every delimiter pair a dialect declares reaches **its own** report, and one it does not
@@ -336,7 +336,7 @@ fn a_malformed_stream_panics_naming_the_dialect() {
 /// and reaching it is what proves the arm produces an error instead of panicking.
 #[test]
 fn each_declared_delimiter_pair_reaches_its_own_report() {
-  use smear_parser::{
+  use smear::parser::{
     graphql::{
       GraphQL,
       error::{ErrorData, Unclosed as DialectUnclosed},

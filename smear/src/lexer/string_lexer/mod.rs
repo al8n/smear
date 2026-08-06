@@ -7,7 +7,7 @@ use tokora::{
   },
 };
 
-use crate::error::{StringError, StringErrors};
+use crate::lexer::error::{StringError, StringErrors};
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) use block::skip_block_str_from_bytes;

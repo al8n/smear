@@ -6,7 +6,7 @@ use tokora::{
   span::{AsSpan, IntoSpan},
 };
 
-pub use crate::ty::{ListType, NamedType};
+pub use crate::parser::ty::{ListType, NamedType};
 
 macro_rules! ty {
   ($(

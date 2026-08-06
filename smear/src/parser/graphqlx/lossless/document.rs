@@ -35,10 +35,10 @@
 //! `UncoveredGap`. The entry drains whatever an escape left behind, which turns the one failure
 //! mode `parse_document` cannot report into a reportable parse.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, cst::event::EventMark};
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 use super::coverage::node;
 
@@ -55,7 +55,7 @@ use super::{
   trivia::{peek_as, peek_kind},
 };
 
-use crate::lossless::lossless_production;
+use crate::parser::lossless::lossless_production;
 
 lossless_production! {
   dialect = graphqlx::lossless;

@@ -16,7 +16,7 @@
 //! no witness at all.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::graphqlx::lossless::trivia::test_support::{
+use smear::parser::graphqlx::lossless::trivia::test_support::{
   self as atoms, Keyword, Kind, eat_if_brace_of, expect_brace_of, peek_keyword_of, peek_kind_of,
   peek_second_kind_of, try_eat_bang_of,
 };

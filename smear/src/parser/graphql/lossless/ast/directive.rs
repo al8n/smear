@@ -24,7 +24,7 @@
 
 use crate::{
   ast_node,
-  graphql::{
+  parser::graphql::{
     kinds::SyntaxKind as K,
     lossless::ast::value::{
       BooleanValue, EnumValue, FloatValue, IntValue, ListValue, NullValue, ObjectValue,
@@ -34,7 +34,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// One argument, `name : value`.
   ///
   /// One node kind for both the executable and the constant spelling: the spec's `Argument[Const]`
@@ -65,7 +65,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An argument list, `( … )`.
   ///
   /// Delimited, so an empty `()` is a real, written-down list and gets its node.
@@ -76,7 +76,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// One directive, `@name` with an optional argument list.
   Directive => K::Directive {
     /// The directive's name, which the `@` precedes.
@@ -87,7 +87,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A run of directives.
   ///
   /// Undelimited, so this node exists only where at least one directive was written — see this

@@ -1,12 +1,12 @@
-# smear-lexer
+# `smear::lexer`
 
-[![Crates.io](https://img.shields.io/crates/v/smear-lexer.svg)](https://crates.io/crates/smear-lexer)
-[![Documentation](https://docs.rs/smear-lexer/badge.svg)](https://docs.rs/smear-lexer)
+[![Crates.io](https://img.shields.io/crates/v/smear.svg)](https://crates.io/crates/smear)
+[![Documentation](https://docs.rs/smear/badge.svg)](https://docs.rs/smear)
 [![License](https://img.shields.io/badge/License-Apache%202.0/MIT-blue.svg)](https://github.com/al8n/smear)
 
 Blazing fast, zero-copy lexer for GraphQL and GraphQL-like DSLs.
 
-`smear-lexer` is the lexical analysis layer of the [Smear](https://github.com/al8n/smear) parser ecosystem, providing high-performance tokenization for GraphQL and GraphQLx source text.
+`smear::lexer` is the lexical analysis layer of [Smear](https://github.com/al8n/smear), providing high-performance tokenization for GraphQL and GraphQLx source text. It is the crate's irreducible base: it carries no feature of its own and is always compiled.
 
 ## Features
 
@@ -24,13 +24,15 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smear-lexer = "0.0.0"
+# The lexer alone — what the `smear-lexer` crate used to be. Drop `default-features = false` to
+# get the parser too.
+smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
 ```
 
 ### Basic Usage
 
 ```rust,ignore
-use smear_lexer::{graphql::syntactic::Lexer, logosky::Lexed};
+use smear::lexer::{graphql::syntactic::Lexer, logosky::Lexed};
 
 let source = "query { user { id name } }";
 let tokens = Lexer::<&str>::new(source);
@@ -45,7 +47,7 @@ for token in tokens {
 
 ## Token Streams: Syntactic vs Lossless
 
-`smear-lexer` provides two complementary token types for different use cases:
+`smear::lexer` provides two complementary token types for different use cases:
 
 ### SyntacticToken (Fast)
 
@@ -57,7 +59,7 @@ for token in tokens {
 - Zero-copy—all tokens reference original source
 
 ```rust,ignore
-use smear_lexer::graphql::syntactic::Lexer;
+use smear::lexer::graphql::syntactic::Lexer;
 
 let source = "query GetUser { user(id: 123) { name } }";
 let tokens = Lexer::<&str>::new(source);
@@ -74,7 +76,7 @@ let tokens = Lexer::<&str>::new(source);
 - Enables accurate source reconstruction
 
 ```rust,ignore
-use smear_lexer::graphql::lossless::Lexer;
+use smear::lexer::graphql::lossless::Lexer;
 
 let source = "query GetUser { user(id: 123) { name } }";
 let tokens = Lexer::<&str>::new(source);
@@ -90,7 +92,7 @@ The lexer is generic over source type `S`, enabling flexibility:
 Most common for UTF-8 validated text:
 
 ```rust,ignore
-use smear_lexer::graphql::syntactic::Lexer;
+use smear::lexer::graphql::syntactic::Lexer;
 use logosky::TokenStream;
 
 let source = "{ field }";
@@ -102,7 +104,7 @@ let tokens = Lexer::<&str>::new(source);
 For binary protocols or pre-validation:
 
 ```rust,ignore
-use smear_lexer::graphql::syntactic::Lexer;
+use smear::lexer::graphql::syntactic::Lexer;
 
 let source = b"{ field }";
 let tokens = Lexer::<&[u8]>::new(&source[..]);
@@ -114,11 +116,11 @@ Enable the `bytes` feature for cheap cloning with Arc-backed storage:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.0", features = ["bytes"] }
+smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec", "bytes"] }
 ```
 
 ```rust,ignore
-use smear_lexer::graphql::syntactic::Lexer;
+use smear::lexer::graphql::syntactic::Lexer;
 use bytes::Bytes;
 
 let source = Bytes::from("{ field }");
@@ -132,11 +134,11 @@ Enable the `hipstr` feature for inline-optimized strings:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.0", features = ["hipstr"] }
+smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec", "hipstr"] }
 ```
 
 ```rust,ignore
-use smear_lexer::graphql::syntactic::Lexer;
+use smear::lexer::graphql::syntactic::Lexer;
 use hipstr::HipStr;
 
 let source = HipStr::from("{ field }");
@@ -160,11 +162,11 @@ The GraphQL lexer recognizes:
 
 ## GraphQLx: Extended GraphQL
 
-Enable the `graphqlx` feature (requires `unstable`) for extended tokens:
+Enable the `graphqlx` feature for extended tokens:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.0", features = ["graphqlx", "unstable"] }
+smear = { version = "0.0.0", default-features = false, features = ["std", "graphqlx", "smallvec"] }
 ```
 
 GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL tokens plus additional extensions:
@@ -181,7 +183,7 @@ GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL 
 - **Punctuators**: `<` `>` `::` `=>` `*` `+` `-`
 
     ```rust,ignore
-    use smear_lexer::graphqlx::syntactic::Lexer;
+    use smear::lexer::graphqlx::syntactic::Lexer;
 
     let source = r#"import { User } from "./types.graphqlx""#;
     let tokens = Lexer::<&str>::new(source);
@@ -192,7 +194,7 @@ GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL 
 The lexer provides comprehensive error reporting:
 
 ```rust,ignore
-use smear_lexer::{graphql::syntactic::Lexer, logosky::Lexed};
+use smear::lexer::{graphql::syntactic::Lexer, logosky::Lexed};
 
 let source = "query { 0123 }"; // Leading zeros not allowed
 let mut tokens = Lexer::<&str>::new(source);
@@ -217,17 +219,20 @@ Common error types:
 
 ## Feature Flags
 
+The lexer has no feature of its own; these are the crate features that reach it. See the crate
+root for the full table, which also covers the parser tower (`parser`, `rowan`,
+`lossless-coverage`, `test-support`).
+
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `std` | Standard library support | ✓ |
-| `alloc` | Allocation support for `no_std` | |
+| `std` | Standard library support (off = `no_std`; `alloc` is required either way) | ✓ |
 | `graphql` | Standard GraphQL lexer | ✓ |
-| `graphqlx` | Extended GraphQL lexer (requires `unstable`) | ✓ |
-| `unstable` | Unstable features | |
+| `graphqlx` | Extended GraphQL lexer; semver-exempt while the dialect moves | ✓ |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
 | `bytes` | Support `bytes::Bytes` source type | |
 | `bstr` | Support `bstr::BStr` source type | |
 | `hipstr` | Support `hipstr::{HipStr, HipByt}` source type | |
+| `smol-bytes` | Support `smol_bytes::SmolBytes` source type | |
 
 ## Performance Characteristics
 
@@ -238,10 +243,20 @@ Common error types:
 
 ## Part of the Smear Ecosystem
 
-`smear-lexer` is the tokenization layer of [Smear](https://github.com/al8n/smear), a complete GraphQL parsing solution:
+`smear::lexer` is the tokenization layer of [Smear](https://github.com/al8n/smear), a complete GraphQL
+parsing solution shipped as one crate:
 
-- **[smear-lexer](https://crates.io/crates/smear-lexer)**: Lexical analysis (this crate)
-- **[smear](https://crates.io/crates/smear)**: Complete parser with AST construction
+- `smear::lexer` — lexical analysis (this module)
+- `smear::parser` — parser combinators, ASTs and the lossless CST tower, behind the `parser`
+  feature
+
+(Plain code spans and not intra-doc links: this file is the `lexer` module's documentation in
+every configuration, including the lexer-alone ones where `smear::parser` is not compiled and a
+link to it would be an `unresolved link` error under `-D warnings`.)
+
+It was published as `smear-lexer` until the crates merged (#83). Migration for a path or git
+dependent is two lines: swap the dependency for `smear` with `default-features = false` plus the
+feature set above, and rewrite `use smear::lexer::X` to `use smear::lexer::X`.
 
 ## License
 

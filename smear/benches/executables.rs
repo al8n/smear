@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   GraphQL, ast::ExecutableDocument, error::GraphqlErrors, syntactic::GraphqlLexer,
 };
 use tokora::{Parse, Parser};
@@ -14,49 +14,43 @@ struct Fixture {
 const FIXTURES: &[Fixture] = &[
   Fixture {
     name: "bench_01_tiny_simple",
-    source: include_str!("../../smear/tests/fixtures/executables/bench_01_tiny_simple.graphql"),
+    source: include_str!("../tests/fixtures/executables/bench_01_tiny_simple.graphql"),
   },
   Fixture {
     name: "bench_02_small_simple",
-    source: include_str!("../../smear/tests/fixtures/executables/bench_02_small_simple.graphql"),
+    source: include_str!("../tests/fixtures/executables/bench_02_small_simple.graphql"),
   },
   Fixture {
     name: "bench_03_small_variables",
-    source: include_str!("../../smear/tests/fixtures/executables/bench_03_small_variables.graphql"),
+    source: include_str!("../tests/fixtures/executables/bench_03_small_variables.graphql"),
   },
   Fixture {
     name: "bench_04_medium_nested",
-    source: include_str!("../../smear/tests/fixtures/executables/bench_04_medium_nested.graphql"),
+    source: include_str!("../tests/fixtures/executables/bench_04_medium_nested.graphql"),
   },
   Fixture {
     name: "bench_05_medium_fragments",
-    source: include_str!(
-      "../../smear/tests/fixtures/executables/bench_05_medium_fragments.graphql"
-    ),
+    source: include_str!("../tests/fixtures/executables/bench_05_medium_fragments.graphql"),
   },
   Fixture {
     name: "bench_06_large_complex",
-    source: include_str!("../../smear/tests/fixtures/executables/bench_06_large_complex.graphql"),
+    source: include_str!("../tests/fixtures/executables/bench_06_large_complex.graphql"),
   },
   Fixture {
     name: "bench_07_large_deep_nesting",
-    source: include_str!(
-      "../../smear/tests/fixtures/executables/bench_07_large_deep_nesting.graphql"
-    ),
+    source: include_str!("../tests/fixtures/executables/bench_07_large_deep_nesting.graphql"),
   },
   Fixture {
     name: "bench_08_many_fields",
-    source: include_str!("../../smear/tests/fixtures/executables/bench_08_many_fields.graphql"),
+    source: include_str!("../tests/fixtures/executables/bench_08_many_fields.graphql"),
   },
   Fixture {
     name: "bench_09_many_aliases",
-    source: include_str!("../../smear/tests/fixtures/executables/bench_09_many_aliases.graphql"),
+    source: include_str!("../tests/fixtures/executables/bench_09_many_aliases.graphql"),
   },
   Fixture {
     name: "bench_10_huge_comprehensive",
-    source: include_str!(
-      "../../smear/tests/fixtures/executables/bench_10_huge_comprehensive.graphql"
-    ),
+    source: include_str!("../tests/fixtures/executables/bench_10_huge_comprehensive.graphql"),
   },
 ];
 

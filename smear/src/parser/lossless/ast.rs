@@ -13,7 +13,7 @@
 //! [`ast_node!`](crate::ast_node) is `#[macro_export]`ed and every path it emits is rooted at
 //! `$crate`, so an invocation compiles in a crate that imports neither rowan nor tokora. That
 //! property is load-bearing — `tests/lossless_substrate.rs` declares a wrapper and depends on it —
-//! and it is why the macro spells `$crate::lossless::ast::SyntaxNode<$lang>` rather than
+//! and it is why the macro spells `$crate::parser::lossless::ast::SyntaxNode<$lang>` rather than
 //! `::rowan::SyntaxNode<$lang>`.
 
 pub use tokora::cst::{CastNode, NodeChildren, cast};
@@ -148,7 +148,7 @@ impl<L: rowan::Language> Iterator for AstTokens<L> {
 /// node cannot answer for its parent.
 ///
 /// Every path the macro emits is rooted at `$crate`, so an invocation compiles wherever
-/// `smear_parser` is nameable — including an integration test crate that never imports tokora
+/// `smear` is nameable — including an integration test crate that never imports tokora
 /// itself.
 #[macro_export]
 macro_rules! ast_node {
@@ -160,12 +160,12 @@ macro_rules! ast_node {
     $(#[$meta])*
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     #[repr(transparent)]
-    pub struct $name($crate::lossless::ast::SyntaxNode<$lang>);
+    pub struct $name($crate::parser::lossless::ast::SyntaxNode<$lang>);
 
-    impl $crate::lossless::ast::CastNode<$lang> for $name {
+    impl $crate::parser::lossless::ast::CastNode<$lang> for $name {
       #[inline]
       fn cast_node(
-        syntax: $crate::lossless::ast::SyntaxNode<$lang>,
+        syntax: $crate::parser::lossless::ast::SyntaxNode<$lang>,
       ) -> ::core::option::Option<Self> {
         // A kind check and a wrap. `CastNode`'s contract is that this never panics: the
         // navigation helpers call it once per child and read `None` as "not this type, keep
@@ -185,7 +185,7 @@ macro_rules! ast_node {
       /// `syntax()`. Tokora's `Node` does, at the price of the component model — which is the
       /// price this layer declines.
       #[inline]
-      pub fn syntax(&self) -> &$crate::lossless::ast::SyntaxNode<$lang> {
+      pub fn syntax(&self) -> &$crate::parser::lossless::ast::SyntaxNode<$lang> {
         &self.0
       }
 
@@ -205,7 +205,7 @@ macro_rules! ast_node {
     $(#[$gmeta])*
     #[inline]
     pub fn $getter(&self) -> ::core::option::Option<$target> {
-      $crate::lossless::ast::cast::child(&self.0)
+      $crate::parser::lossless::ast::cast::child(&self.0)
     }
     $crate::ast_node!(@getters $lang; $($rest)*);
   };
@@ -213,8 +213,8 @@ macro_rules! ast_node {
   (@getters $lang:path; $(#[$gmeta:meta])* $getter:ident : many $target:ty , $($rest:tt)*) => {
     $(#[$gmeta])*
     #[inline]
-    pub fn $getter(&self) -> $crate::lossless::ast::AstChildren<$target, $lang> {
-      $crate::lossless::ast::cast::children(&self.0)
+    pub fn $getter(&self) -> $crate::parser::lossless::ast::AstChildren<$target, $lang> {
+      $crate::parser::lossless::ast::cast::children(&self.0)
     }
     $crate::ast_node!(@getters $lang; $($rest)*);
   };
@@ -222,10 +222,10 @@ macro_rules! ast_node {
   (@getters $lang:path; $(#[$gmeta:meta])* $getter:ident : tok $tk:path , $($rest:tt)*) => {
     $(#[$gmeta])*
     #[inline]
-    pub fn $getter(&self) -> ::core::option::Option<$crate::lossless::ast::SyntaxToken<$lang>> {
+    pub fn $getter(&self) -> ::core::option::Option<$crate::parser::lossless::ast::SyntaxToken<$lang>> {
       // `cast::token` matches a `Lang::Kind` value against **direct** token children, so a
       // nested `Name` — an argument's, say — cannot answer here.
-      $crate::lossless::ast::cast::token(&self.0, &$tk)
+      $crate::parser::lossless::ast::cast::token(&self.0, &$tk)
     }
     $crate::ast_node!(@getters $lang; $($rest)*);
   };
@@ -238,8 +238,8 @@ macro_rules! ast_node {
   (@getters $lang:path; $(#[$gmeta:meta])* $getter:ident : tok_any $($tk:path)|+ , $($rest:tt)*) => {
     $(#[$gmeta])*
     #[inline]
-    pub fn $getter(&self) -> ::core::option::Option<$crate::lossless::ast::SyntaxToken<$lang>> {
-      $crate::lossless::ast::token_any(&self.0, &[$($tk),+])
+    pub fn $getter(&self) -> ::core::option::Option<$crate::parser::lossless::ast::SyntaxToken<$lang>> {
+      $crate::parser::lossless::ast::token_any(&self.0, &[$($tk),+])
     }
     $crate::ast_node!(@getters $lang; $($rest)*);
   };
@@ -247,8 +247,8 @@ macro_rules! ast_node {
   (@getters $lang:path; $(#[$gmeta:meta])* $getter:ident : toks $tk:path , $($rest:tt)*) => {
     $(#[$gmeta])*
     #[inline]
-    pub fn $getter(&self) -> $crate::lossless::ast::AstTokens<$lang> {
-      $crate::lossless::ast::tokens(&self.0, $tk)
+    pub fn $getter(&self) -> $crate::parser::lossless::ast::AstTokens<$lang> {
+      $crate::parser::lossless::ast::tokens(&self.0, $tk)
     }
     $crate::ast_node!(@getters $lang; $($rest)*);
   };
@@ -256,9 +256,9 @@ macro_rules! ast_node {
   (@getters $lang:path; $(#[$gmeta:meta])* $getter:ident : tok_nth $n:literal $tk:path , $($rest:tt)*) => {
     $(#[$gmeta])*
     #[inline]
-    pub fn $getter(&self) -> ::core::option::Option<$crate::lossless::ast::SyntaxToken<$lang>> {
+    pub fn $getter(&self) -> ::core::option::Option<$crate::parser::lossless::ast::SyntaxToken<$lang>> {
       ::core::iter::Iterator::nth(
-        &mut $crate::lossless::ast::tokens(&self.0, $tk),
+        &mut $crate::parser::lossless::ast::tokens(&self.0, $tk),
         $n,
       )
     }

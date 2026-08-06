@@ -32,7 +32,7 @@
 //! inside the `$( … )*` that walks the productions, and rustc refuses to nest two repetitions of
 //! different lengths: *"meta-variable `inp` repeats 25 times, but `d` repeats 2 times"*. Two fixed
 //! idents have no length to disagree about. The cost is that a dialect must live at exactly
-//! `crate::<a>::<b>`, which both do and which the file layout already fixes.
+//! `crate::parser::<a>::<b>`, which both do and which the file layout already fixes.
 //!
 //! # Why not a macro that defines a macro
 //!
@@ -60,7 +60,7 @@
 /// # The seven names a dialect owes this macro
 ///
 /// `Input`, `Error`, `Token`, `Lexer`, `Brand`, `TokenKind` and `Keyword`, at
-/// `crate::<dialect>::lossless`. They are aliases over whatever that dialect already calls those
+/// `crate::parser::<dialect>::lossless`. They are aliases over whatever that dialect already calls those
 /// things, so adopting the macro renames nothing.
 ///
 /// # Why the bundle is one block, and why it is here rather than per dialect
@@ -122,50 +122,50 @@ macro_rules! lossless_production {
   ) => {$(
     $(#[$meta])*
     pub(crate) fn $name<$lt, $src, $ctx>(
-      $inp: &mut $crate::$dm::$dl::Input<$lt, '_, $src, $ctx>,
+      $inp: &mut $crate::parser::$dm::$dl::Input<$lt, '_, $src, $ctx>,
       $($arg: $argty,)*
-    ) -> ::core::result::Result<(), $crate::$dm::$dl::Error<$lt, $src, $ctx>>
+    ) -> ::core::result::Result<(), $crate::parser::$dm::$dl::Error<$lt, $src, $ctx>>
     where
       $src: ::tokora::Source<usize> + ?Sized,
-      $crate::$dm::$dl::Token<$lt, $src>: ::tokora::Token<
+      $crate::parser::$dm::$dl::Token<$lt, $src>: ::tokora::Token<
           $lt,
-          Kind = $crate::$dm::$dl::TokenKind,
+          Kind = $crate::parser::$dm::$dl::TokenKind,
         > + ::tokora::lexer::FromLogos<$lt>
         + ::core::clone::Clone
-        + ::tokora::utils::DowncastRef<$crate::$dm::$dl::Keyword>,
-      $crate::$dm::$dl::Lexer<$lt, $src>: ::tokora::Lexer<
+        + ::tokora::utils::DowncastRef<$crate::parser::$dm::$dl::Keyword>,
+      $crate::parser::$dm::$dl::Lexer<$lt, $src>: ::tokora::Lexer<
           $lt,
-          Token = $crate::$dm::$dl::Token<$lt, $src>,
+          Token = $crate::parser::$dm::$dl::Token<$lt, $src>,
           Span = ::tokora::SimpleSpan,
           Offset = usize,
         >,
       $ctx: ::tokora::ParseContext<
         $lt,
-        $crate::$dm::$dl::Lexer<$lt, $src>,
-        $crate::$dm::$dl::Brand,
+        $crate::parser::$dm::$dl::Lexer<$lt, $src>,
+        $crate::parser::$dm::$dl::Brand,
       >,
       $ctx::Emitter: ::tokora::emitter::CstEmitter<
         $lt,
-        $crate::$dm::$dl::Lexer<$lt, $src>,
-        $crate::$dm::$dl::Brand,
+        $crate::parser::$dm::$dl::Lexer<$lt, $src>,
+        $crate::parser::$dm::$dl::Brand,
       >,
-      $crate::$dm::$dl::Error<$lt, $src, $ctx>:
+      $crate::parser::$dm::$dl::Error<$lt, $src, $ctx>:
         ::core::convert::From<
-            ::tokora::error::UnexpectedEot<usize, $crate::$dm::$dl::Brand>,
+            ::tokora::error::UnexpectedEot<usize, $crate::parser::$dm::$dl::Brand>,
           >
           + ::core::convert::From<
             ::tokora::error::token::UnexpectedToken<
               $lt,
-              $crate::$dm::$dl::Token<$lt, $src>,
-              $crate::$dm::$dl::TokenKind,
+              $crate::parser::$dm::$dl::Token<$lt, $src>,
+              $crate::parser::$dm::$dl::TokenKind,
               ::tokora::SimpleSpan,
-              $crate::$dm::$dl::Brand,
+              $crate::parser::$dm::$dl::Brand,
             >,
           >
           + ::tokora::emitter::FromUnclosed<
             $lt,
-            $crate::$dm::$dl::Lexer<$lt, $src>,
-            $crate::$dm::$dl::Brand,
+            $crate::parser::$dm::$dl::Lexer<$lt, $src>,
+            $crate::parser::$dm::$dl::Brand,
           >,
     $body
   )*};
@@ -305,35 +305,35 @@ macro_rules! lossless_drivers {
       use super::super::value::Constness;
 
       /// The lexer every driver in this module pins, over `str`.
-      type Lx<'inp> = $crate::$dm::$dl::Lexer<'inp, str>;
+      type Lx<'inp> = $crate::parser::$dm::$dl::Lexer<'inp, str>;
 
       /// The context pair and the input each driver's closure receives.
       ///
       /// The sink is held **by value**: `parse_lossless` mints it from the source itself and owns
       /// it for the parse, so there is no `&mut Sink` for a driver to hand around.
       type TestCtx<'inp> = (
-        $crate::$dm::$dl::runner::LosslessSink<'inp>,
+        $crate::parser::$dm::$dl::runner::LosslessSink<'inp>,
         ::tokora::cache::DefaultCache<'inp, Lx<'inp>>,
       );
       type TestInput<'inp, 'input> =
-        ::tokora::InputRef<'inp, 'input, Lx<'inp>, TestCtx<'inp>, $crate::$dm::$dl::Brand>;
+        ::tokora::InputRef<'inp, 'input, Lx<'inp>, TestCtx<'inp>, $crate::parser::$dm::$dl::Brand>;
 
       $(
         $(#[$meta])*
         ///
         /// Test-only scaffolding; nothing in the crate calls it.
-        pub fn $name<'inp>(src: &'inp str) -> $crate::$dm::$dl::Parse {
+        pub fn $name<'inp>(src: &'inp str) -> $crate::parser::$dm::$dl::Parse {
           // The `'inp` is **named**, threaded from `src`, for the reason the trivia driver
           // records: elided, it varies independently of the error type and the closure `E0521`s.
           //
           // `Lang` is `parse_lossless`'s SECOND parameter and is used only in bounds, so it is
           // turbofished alongside the lexer or inference settles it on `()`.
           let (cst, _out) =
-            ::tokora::cst::parse_lossless::<Lx<'inp>, $crate::$dm::$dl::Brand, _, _, _, _>(
+            ::tokora::cst::parse_lossless::<Lx<'inp>, $crate::parser::$dm::$dl::Brand, _, _, _, _>(
               src,
               ::core::default::Default::default(),
               ::core::default::Default::default(),
-              $crate::$dm::$dl::runner::profile::<str>(),
+              $crate::parser::$dm::$dl::runner::profile::<str>(),
               ::tokora::cache::DefaultCache::<Lx<'_>>::default(),
               |inp: &mut TestInput<'inp, '_>| {
                 // Minted before the call, not inside the argument list: `inp` is already borrowed
@@ -348,7 +348,7 @@ macro_rules! lossless_drivers {
               },
             );
 
-          $crate::$dm::$dl::runner::finish_root(cst)
+          $crate::parser::$dm::$dl::runner::finish_root(cst)
         }
       )*
     }

@@ -14,7 +14,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tokora::{Lexer, SimpleSpan};
 
-use crate::graphql::syntactic::{SyntacticLexer, SyntacticToken};
+use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
 /// Run `f`, returning `true` if it panicked. The panic message is suppressed
 /// for the duration so an *expected* panic doesn't clutter test output;

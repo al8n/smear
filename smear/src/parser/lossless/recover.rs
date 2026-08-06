@@ -59,7 +59,7 @@ use tokora::{
   utils::DowncastRef,
 };
 
-use crate::combinator::ErrorOf;
+use crate::parser::combinator::ErrorOf;
 
 /// The span of the single-byte delimiter an `expect` has just committed, given the input's
 /// committed extent.
@@ -74,7 +74,7 @@ pub fn opener_span(end: usize) -> SimpleSpan {
   SimpleSpan::new(end.saturating_sub(1), end)
 }
 
-/// [`kind_of`](crate::lossless::trivia::kind_of)'s twin for the spelling: `DowncastRef`, reached
+/// [`kind_of`](crate::parser::lossless::trivia::kind_of)'s twin for the spelling: `DowncastRef`, reached
 /// without letting method resolution pick the wrong `Self`.
 ///
 /// `sync_balanced` hands its predicate a `Spanned<&Token, &Span>`, so the same `&&Token` receiver
@@ -82,7 +82,7 @@ pub fn opener_span(end: usize) -> SimpleSpan {
 /// nothing borrowed escapes.
 ///
 /// The projection is a type parameter for the reason
-/// [`peek_as`](crate::lossless::trivia::peek_as) records: a dialect's contextual-keyword enum is
+/// [`peek_as`](crate::parser::lossless::trivia::peek_as) records: a dialect's contextual-keyword enum is
 /// a concrete dialect type and this module may not name one.
 #[inline]
 pub fn keyword_of<Kw, T: DowncastRef<Kw>>(token: &T) -> Option<Kw> {
@@ -293,7 +293,7 @@ where
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<usize, Lang>>,
 {
-  if crate::lossless::trivia::peek_kind(inp)?.is_none() {
+  if crate::parser::lossless::trivia::peek_kind(inp)?.is_none() {
     return Ok(());
   }
 

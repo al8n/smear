@@ -16,7 +16,7 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       definition::{
@@ -35,9 +35,9 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A mixed executable-plus-type-system document — what
-  /// [`parse_document`](crate::graphqlx::lossless::parse_document) builds.
+  /// [`parse_document`](crate::parser::graphqlx::lossless::parse_document) builds.
   Document => K::Document {
     /// Every import the document makes, in order.
     import_definitions: many ImportDefinition,
@@ -79,13 +79,13 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An SDL-only document root.
   ///
   /// [`Document`] without the two executable kinds, which is the whole difference between the two
-  /// roots. Not what [`parse_document`](crate::graphqlx::lossless::parse_document) builds — a
+  /// roots. Not what [`parse_document`](crate::parser::graphqlx::lossless::parse_document) builds — a
   /// schema-only consumer calls
-  /// [`parse_type_system_document`](crate::graphqlx::lossless::parse_type_system_document), which
+  /// [`parse_type_system_document`](crate::parser::graphqlx::lossless::parse_type_system_document), which
   /// reports an executable definition rather than admitting one.
   TypeSystemDocument => K::TypeSystemDocument {
     /// Every import the document makes, in order.

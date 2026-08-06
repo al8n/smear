@@ -1,4 +1,4 @@
-//! The token mapper: which [`SyntaxKind`](crate::graphqlx::kinds::SyntaxKind) each lexer token
+//! The token mapper: which [`SyntaxKind`](crate::parser::graphqlx::kinds::SyntaxKind) each lexer token
 //! enters the tree as.
 //!
 //! [`CstProfile::new`](tokora::cst::CstProfile::new)'s first argument is `fn(&T) -> u16`, and the
@@ -26,10 +26,10 @@
 //! # The radix is not a kind distinction
 //!
 //! GraphQLx's numeric tokens carry payloads GraphQL's do not: `LitInt(LitInt<S>)` where `LitInt<S>
-//! = Decimal | Hex | Binary | Octal` (`smear-lexer/src/graphqlx/mod.rs:55`), and
+//! = Decimal | Hex | Binary | Octal` (`smear/src/lexer/graphqlx/mod.rs:55`), and
 //! `LitFloat(LitFloat<S>)` where `LitFloat<S> = Decimal | Hex` (`:134`). The kind space derived in
-//! Task 8 has a single [`Int`](crate::graphqlx::kinds::SyntaxKind::Int) image and a single
-//! [`Float`](crate::graphqlx::kinds::SyntaxKind::Float), so **all four radices map to one image
+//! Task 8 has a single [`Int`](crate::parser::graphqlx::kinds::SyntaxKind::Int) image and a single
+//! [`Float`](crate::parser::graphqlx::kinds::SyntaxKind::Float), so **all four radices map to one image
 //! and all two do**, and the radix stays readable from the token's text exactly as the
 //! line-terminator spelling does. That is not a fold in the sense above: the *lexer kind* is
 //! already one `Int`, so nothing is being collapsed at this boundary at all.
@@ -37,8 +37,8 @@
 //! # The wildcard arm is forced, and what stands in for the compiler
 //!
 //! GraphQL's `kind_map` is wildcard-free, and that is the property the plan asked for here too. It
-//! cannot be had: `smear_lexer::graphqlx::lossless::LosslessToken` is `#[non_exhaustive]`
-//! (`smear-lexer/src/graphqlx/lossless/mod.rs:90`) and GraphQL's is not, and `#[non_exhaustive]`
+//! cannot be had: `crate::lexer::graphqlx::lossless::LosslessToken` is `#[non_exhaustive]`
+//! (`smear/src/lexer/graphqlx/lossless/mod.rs:90`) and GraphQL's is not, and `#[non_exhaustive]`
 //! binds across the **crate** boundary — `smear-parser` is a different crate from `smear-lexer`,
 //! so rustc requires a wildcard arm no matter what this file wants. Task 8's
 //! `the_image_block_matches_the_graphqlx_lexer` recorded the same limitation for its own
@@ -55,9 +55,9 @@
 //!    added to `LosslessTokenKind` is a test failure rather than a silent widening of the
 //!    wildcard.
 
-use smear_lexer::graphqlx::lossless::LosslessToken;
+use crate::lexer::graphqlx::lossless::LosslessToken;
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 /// The kind a committed lexer token enters the CST as.
 ///
@@ -118,9 +118,18 @@ pub fn token_kind<S>(token: &LosslessToken<S>) -> u16 {
     LosslessToken::CarriageReturnAndNewline => K::Newline,
     LosslessToken::Comment(_) => K::Comment,
 
-    // Forced by `#[non_exhaustive]`; see the module docs. `token.kind()` rather than the token
-    // itself because `S` carries no `Debug` bound and the kind is the whole of what a reader needs
-    // to find the missing arm.
+    // Forced by `#[non_exhaustive]` while the lexer was a separate crate; see the module docs.
+    // `token.kind()` rather than the token itself because `S` carries no `Debug` bound and the
+    // kind is the whole of what a reader needs to find the missing arm.
+    //
+    // Since the crates merged (#83) the compiler can see every variant of `LosslessToken` from
+    // here, so it calls this arm unreachable — but the arm is not decoration and is not deleted.
+    // `tests/lossless_x_kind_map.rs` pins it: exactly one catch-all, and it must `panic!` rather
+    // than answer with a kind, because a wildcard that classified would give an unmapped token a
+    // real image nothing downstream could distinguish from a correct parse. What the merge does
+    // change is that rustc would now catch a missing arm at compile time; the runtime guard stays
+    // as the belt to that braces, and re-litigating it is follow-up work, not part of the move.
+    #[allow(unreachable_patterns)]
     other => panic!(
       "the graphqlx lexer emits {:?} and this mapper names no image for it; add an arm rather \
        than letting the wildcard classify it",

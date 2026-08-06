@@ -76,12 +76,14 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use smear_lexer::graphql::syntactic::SyntacticLexer;
-use smear_parser::graphql::{
-  GraphQL,
-  ast::Document,
-  error::GraphqlErrors,
-  syntactic::{GraphqlLexer, document},
+use smear::{
+  lexer::graphql::syntactic::SyntacticLexer,
+  parser::graphql::{
+    GraphQL,
+    ast::Document,
+    error::GraphqlErrors,
+    syntactic::{GraphqlLexer, document},
+  },
 };
 use tokora::{
   Lexer as _, Parse as _, Parser, ParserContext, SimpleSpan, cache::DefaultCache, emitter::Verbose,

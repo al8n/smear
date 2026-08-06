@@ -10,23 +10,23 @@ use super::{Arguments, ConstArguments, Name};
 /// Empty argument collections are represented by `None` on this node.
 ///
 /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-pub type Directive<S> = crate::directive::Directive<Name<S>, Arguments<S>>;
+pub type Directive<S> = crate::parser::directive::Directive<Name<S>, Arguments<S>>;
 
 /// Directive with constant arguments (no variables).
 ///
 /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-pub type ConstDirective<S> = crate::directive::Directive<Name<S>, ConstArguments<S>>;
+pub type ConstDirective<S> = crate::parser::directive::Directive<Name<S>, ConstArguments<S>>;
 
 /// List of directives with executable arguments.
 ///
 /// An absent collection is empty with a zero-width span and consumes no input.
 ///
 /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-pub type Directives<S> = crate::directive::Directives<Directive<S>>;
+pub type Directives<S> = crate::parser::directive::Directives<Directive<S>>;
 
 /// List of directives with constant arguments.
 ///
 /// An absent collection is empty with a zero-width span and consumes no input.
 ///
 /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-pub type ConstDirectives<S> = crate::directive::Directives<ConstDirective<S>>;
+pub type ConstDirectives<S> = crate::parser::directive::Directives<ConstDirective<S>>;

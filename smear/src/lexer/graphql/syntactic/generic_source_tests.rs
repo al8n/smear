@@ -21,7 +21,7 @@ use std::vec::Vec;
 
 use tokora::Lexer as _;
 
-use crate::{
+use crate::lexer::{
   error::StringError,
   graphql::{
     error::LexerErrorData,

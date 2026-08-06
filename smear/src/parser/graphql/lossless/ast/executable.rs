@@ -13,7 +13,7 @@
 
 use crate::{
   ast_node,
-  graphql::{
+  parser::graphql::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       definition::{Description, OperationType},
@@ -26,7 +26,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// One variable definition, `$v : T = default @directives`.
   VariableDefinition => K::VariableDefinition {
     /// The variable being defined.
@@ -45,7 +45,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An operation's variable definitions, `( … )`.
   VariablesDefinition => K::VariablesDefinition {
     /// Every variable defined, in order.
@@ -54,7 +54,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An operation definition — the shorthand `{ … }` or the full keyword form.
   OperationDefinition => K::OperationDefinition {
     /// The operation's description, if one was written before it.
@@ -78,7 +78,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A fragment definition, `fragment F on T { … }`.
   FragmentDefinition => K::FragmentDefinition {
     /// The fragment's description, if one was written before it.
@@ -95,13 +95,13 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An executable-only document root.
   ///
-  /// Not what [`parse_document`](crate::graphql::lossless::parse_document) builds — that parses
+  /// Not what [`parse_document`](crate::parser::graphql::lossless::parse_document) builds — that parses
   /// the mixed [`Document`](super::document::Document). A consumer that will only accept
   /// executable syntax calls
-  /// [`parse_executable_document`](crate::graphql::lossless::parse_executable_document), which
+  /// [`parse_executable_document`](crate::parser::graphql::lossless::parse_executable_document), which
   /// reports a type-system definition rather than admitting one.
   ExecutableDocument => K::ExecutableDocument {
     /// Every operation the document defines, in order.

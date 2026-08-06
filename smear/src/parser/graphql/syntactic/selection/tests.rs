@@ -16,7 +16,7 @@ use super::{
   field, fragment_spread, inline_fragment, selection, selection_set, try_type_condition,
   type_condition,
 };
-use crate::graphql::{
+use crate::parser::graphql::{
   GraphQL,
   ast::{Field, FragmentSpread, InlineFragment, Selection, SelectionSet, TypeCondition},
   error::{ErrorData, Expectation, GraphqlErrors, Unclosed},

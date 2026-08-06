@@ -1,7 +1,7 @@
 //! GraphQLx type-system extension productions.
 
 use super::*;
-use crate::type_system::{
+use crate::parser::type_system::{
   EnumTypeExtensionData, InputObjectTypeExtensionData, InterfaceTypeExtensionData,
   ObjectTypeExtensionData, SchemaExtensionData, UnionTypeExtensionData,
 };

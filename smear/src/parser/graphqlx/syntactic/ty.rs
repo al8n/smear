@@ -17,13 +17,13 @@ use tokora::{
   utils::typenum::U1,
 };
 
-use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
+use crate::lexer::graphqlx::syntactic::SyntacticTokenKind;
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, path_after_first,
   peek_kind, unexpected_here,
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start, try_bang, try_fat_arrow},
   graphqlx::{
     GraphQLx,
@@ -251,11 +251,13 @@ where
     TypeCore::Path(path, generics) => {
       Type::Path(DefinitionTypePath::new(span, path, generics, required))
     }
-    TypeCore::List(element) => {
-      Type::List(Box::new(crate::ty::ListType::new(span, element, required)))
-    }
-    TypeCore::Set(element) => Type::Set(Box::new(crate::ty::SetType::new(span, element, required))),
-    TypeCore::Map(key, value) => Type::Map(Box::new(crate::ty::MapType::new(
+    TypeCore::List(element) => Type::List(Box::new(crate::parser::ty::ListType::new(
+      span, element, required,
+    ))),
+    TypeCore::Set(element) => Type::Set(Box::new(crate::parser::ty::SetType::new(
+      span, element, required,
+    ))),
+    TypeCore::Map(key, value) => Type::Map(Box::new(crate::parser::ty::MapType::new(
       span, key, value, required,
     ))),
   })

@@ -8,7 +8,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::{
+use crate::lexer::{
   graphql::{ContextualKeyword, syntactic::SyntacticTokenKind},
   keywords::On,
 };
@@ -26,7 +26,7 @@ use super::{
   GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, argument::arguments,
   directive::directives, fragment_name, try_name,
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, try_colon, try_spread},
   graphql::{
     GraphQL,

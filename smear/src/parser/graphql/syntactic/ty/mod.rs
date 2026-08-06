@@ -9,14 +9,14 @@
 
 use std::boxed::Box;
 
-use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use crate::lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
   Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
   cache::PeekedTokenExt, span::Spanned, try_parse_input::ParseAttempt, utils::typenum::U1,
 };
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, try_bang},
   graphql::{
     GraphQL,

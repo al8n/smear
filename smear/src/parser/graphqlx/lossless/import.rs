@@ -26,10 +26,10 @@
 //! it narrows on the token, not on the node". A block string is therefore reported **and still
 //! built**, the same trade every other rejected-but-kept shape in this suite makes.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use crate::lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::ParseInput as _;
 
-use crate::graphqlx::kinds::SyntaxKind as K;
+use crate::parser::graphqlx::kinds::SyntaxKind as K;
 
 // `node` comes from `coverage`, not from `tokora::parser`. Behind `feature = "lossless-coverage"`
 // it is that same combinator plus the per-node-kind hit counter gate 2 measures its reach with, so
@@ -45,7 +45,7 @@ use super::{
   value::string_value,
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::parser::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
   dialect = graphqlx::lossless;

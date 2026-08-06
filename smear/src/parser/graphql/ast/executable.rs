@@ -5,8 +5,8 @@
 
 use core::borrow::Borrow;
 
+use crate::lexer::keywords::{Mutation, Query, Subscription};
 use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::keywords::{Mutation, Query, Subscription};
 use tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
@@ -18,12 +18,12 @@ use super::{
 };
 
 /// A node with an optional leading GraphQL string description.
-pub type Described<T, S> = crate::executable::Described<T, StringValue<S>>;
+pub type Described<T, S> = crate::parser::executable::Described<T, StringValue<S>>;
 
 /// A variable definition in an executable operation.
 ///
 /// Directives in this grammar position use constant arguments.
-pub type VariableDefinition<S, Ty = Type<Name<S>>> = crate::executable::VariableDefinition<
+pub type VariableDefinition<S, Ty = Type<Name<S>>> = crate::parser::executable::VariableDefinition<
   VariableValue<S>,
   Ty,
   DefaultInputValue<S>,
@@ -39,10 +39,10 @@ pub type DescribedVariableDefinition<S, Ty = Type<Name<S>>> =
 /// An absent opening parenthesis yields an empty, zero-width collection; a
 /// present parenthesized collection contains one or more definitions.
 pub type VariablesDefinition<S, Ty = Type<Name<S>>> =
-  crate::executable::VariablesDefinition<DescribedVariableDefinition<S, Ty>>;
+  crate::parser::executable::VariablesDefinition<DescribedVariableDefinition<S, Ty>>;
 
 /// A named fragment definition.
-pub type FragmentDefinition<S> = crate::executable::FragmentDefinition<
+pub type FragmentDefinition<S> = crate::parser::executable::FragmentDefinition<
   FragmentName<S>,
   TypeCondition<S>,
   Directives<S>,
@@ -122,7 +122,7 @@ impl Borrow<str> for OperationType {
 
 /// A named operation definition.
 pub type NamedOperationDefinition<S, Ty = Type<Name<S>>> =
-  crate::executable::NamedOperationDefinition<
+  crate::parser::executable::NamedOperationDefinition<
     Name<S>,
     OperationType,
     VariablesDefinition<S, Ty>,
@@ -222,4 +222,4 @@ pub type DescribedExecutableDefinition<S, Ty = Type<Name<S>>> =
 /// Its definitions may carry leading descriptions for frozen-parser/dialect
 /// compatibility; standard GraphQL executable definitions are not described.
 pub type ExecutableDocument<S, Ty = Type<Name<S>>> =
-  crate::executable::Document<DescribedExecutableDefinition<S, Ty>>;
+  crate::parser::executable::Document<DescribedExecutableDefinition<S, Ty>>;

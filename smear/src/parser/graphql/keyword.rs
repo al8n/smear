@@ -8,11 +8,11 @@
 //! form errors on anything else, the `try_` form declines without consuming.
 //!
 //! The typed nodes ([`On`], [`Query`], …) are the lexer's keyword vocabulary
-//! (`smear_lexer::keywords`), re-exported here so the productions and their AST
+//! (`crate::lexer::keywords`), re-exported here so the productions and their AST
 //! node types can name them; the atoms feed each its matched span through the
 //! node's `new` constructor.
 
-pub use smear_lexer::keywords::{
+pub use crate::lexer::keywords::{
   Directive, Enum, Extend, Fragment, Implements, Input, Interface, Mutation, On, Query, Repeatable,
   Scalar, Schema, Subscription, Type, Union,
 };

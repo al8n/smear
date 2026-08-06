@@ -23,7 +23,7 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       definition::{
@@ -37,7 +37,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A scalar type extension, `extend scalar S @d`.
   ///
   /// The one extension whose directives the grammar makes mandatory — it has no other tail.
@@ -50,7 +50,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An object type extension, `extend type T …`.
   ObjectTypeExtension => K::ObjectTypeExtension {
     /// The extended type's name, and the generic arguments the extension applies.
@@ -67,7 +67,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An interface type extension, `extend interface N …`.
   InterfaceTypeExtension => K::InterfaceTypeExtension {
     /// The extended interface's name, and the generic arguments the extension applies.
@@ -84,7 +84,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A union type extension, `extend union U …`.
   ///
   /// Its `where` clause comes after the members and requires them, exactly as
@@ -102,7 +102,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An enum type extension, `extend enum E …`.
   EnumTypeExtension => K::EnumTypeExtension {
     /// The extended enum's name, and the generic arguments the extension applies.
@@ -115,7 +115,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An input object type extension, `extend input In …`.
   InputObjectTypeExtension => K::InputObjectTypeExtension {
     /// The extended input object's name, and the generic arguments the extension applies.
@@ -130,7 +130,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A schema extension, `extend schema …`.
   ///
   /// No name getter: the two `Name` tokens beneath this node are `extend` and `schema`.

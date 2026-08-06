@@ -7,7 +7,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use crate::lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
   Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
   Token, TryParseInput,
@@ -33,7 +33,7 @@ use super::{
   unexpected_here,
   value::default_value,
 };
-use crate::{
+use crate::parser::{
   combinator::{
     ParseCtx, TokenSpannedExt, extent_end, extent_since, extent_start, try_colon, try_dollar,
   },
@@ -406,7 +406,7 @@ executable_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
     let parsed = (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| variable_definition(inp))
       .repeated_while::<_, U1>(decide_variable_definition_tail::<Src, Ctx>)

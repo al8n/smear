@@ -1,7 +1,9 @@
 #![cfg(feature = "rowan")]
 
-use smear_lexer::graphql::lossless::{LosslessLexer, LosslessToken as T, LosslessTokenKind as LK};
-use smear_parser::graphql::{kinds::SyntaxKind as K, lossless::kind_map::token_kind};
+use smear::{
+  lexer::graphql::lossless::{LosslessLexer, LosslessToken as T, LosslessTokenKind as LK},
+  parser::graphql::{kinds::SyntaxKind as K, lossless::kind_map::token_kind},
+};
 use tokora::Lexer as _;
 
 /// Lex `src` and hand back its first token.

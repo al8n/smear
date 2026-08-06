@@ -20,7 +20,7 @@
 //! only adapts the classification to tokora's trait types, avoiding any
 //! source-wrapper conversion.
 
-use crate::graphql::syntactic::SyntacticTokenKind;
+use crate::lexer::graphql::syntactic::SyntacticTokenKind;
 
 use super::SyntacticToken;
 
@@ -86,7 +86,7 @@ macro_rules! number_token_impl {
         logos::Logos,
         state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
-      use crate::graphql::{
+      use crate::lexer::graphql::{
         error::{DecimalError, FloatError, LexerErrors},
         handlers,
         syntactic::{

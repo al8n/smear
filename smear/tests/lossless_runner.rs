@@ -1,6 +1,6 @@
 #![cfg(feature = "rowan")]
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{parse_document, runner::test_support::open_raw_kind},
 };
@@ -59,7 +59,7 @@ fn constructing_the_profile_does_not_panic() {
   // `CstProfile::new` asserts in EVERY build that its own validator admits `error_kind` and
   // `gap_kind` (`cst/profile.rs:140`) — a profile cannot describe a sink that would refuse its
   // own output. Calling it is therefore itself an assertion about K::Error and K::Gap.
-  let _ = smear_parser::graphql::lossless::profile::<str>();
+  let _ = smear::parser::graphql::lossless::profile::<str>();
 }
 
 #[test]

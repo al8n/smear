@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use smear_lexer::graphqlx::lossless::LosslessLexer;
+use smear::lexer::graphqlx::lossless::LosslessLexer;
 use tokora::Lexer as _;
 
 /// The eight ignorable forms, one variant of each corpus entry per form.

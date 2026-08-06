@@ -11,7 +11,7 @@
 //! pre-order sees it here, one production at a time, before there is a document to hide it in.
 #![cfg(all(feature = "rowan", feature = "graphqlx"))]
 
-use smear_parser::graphqlx::{
+use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     ty::test_support::{

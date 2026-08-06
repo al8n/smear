@@ -161,7 +161,7 @@ mod tests {
   };
 
   use super::{Argument, ArgumentList};
-  use crate::directive::{Directive, Directives};
+  use crate::parser::directive::{Directive, Directives};
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   struct CustomSpan(u8);

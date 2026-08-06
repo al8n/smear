@@ -1,6 +1,6 @@
 #![cfg(feature = "rowan")]
 
-use smear_parser::{
+use smear::parser::{
   graphql::lossless::trivia, lexer::graphql::lossless::LosslessTokenKind as Kind,
 };
 

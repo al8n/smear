@@ -1,4 +1,4 @@
-//! This dialect's binding of [`crate::lossless::coverage`].
+//! This dialect's binding of [`crate::parser::lossless::coverage`].
 //!
 //! The seven production modules import `node` and `node_at` from here, so a production cannot
 //! open a node without being counted — a hand-placed `hit(K::X)` at ~65 sites is the bookkeeping
@@ -22,7 +22,7 @@ pub(crate) use bound::{node, node_at};
 mod bound {
   use tokora::cst::event::EventMark;
 
-  use crate::{graphql::kinds::SyntaxKind as K, lossless::coverage};
+  use crate::parser::{graphql::kinds::SyntaxKind as K, lossless::coverage};
 
   /// [`tokora::parser::node`], counting the wrap in this dialect's lane.
   #[inline]

@@ -10,11 +10,11 @@
 //! The productions are fixed to the concrete GraphQL syntactic lexer and `GraphQL`
 //! marker, so the drivers use `Parser::with_parser` with that marker explicitly.
 
-use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use crate::lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Lexer, Parse, Parser, SimpleSpan, Source, utils::cmp::Equivalent};
 
 use super::{const_object_field, default_value, object_field, try_default_value};
-use crate::graphql::{
+use crate::parser::graphql::{
   GraphQL,
   ast::{
     BooleanValue, BooleanValue as BooleanValueParser, ConstInputValue,
@@ -125,7 +125,7 @@ fn assert_unclosed_object<S>(result: Result<(), GraphqlErrors<S>>) {
 
 #[test]
 fn int_value_accepts() {
-  fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::IntValue<S>) {
+  fn check<S: AsRef<[u8]>>(v: crate::parser::graphql::ast::IntValue<S>) {
     assert!("42".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 2));
   }
@@ -152,7 +152,7 @@ fn int_value_graphql_does_not_require_equivalent() {
     NumericSlice: tokora::Slice<'inp> + Clone + 'inp,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-    Ctx: crate::combinator::ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+    Ctx: crate::parser::combinator::ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   {
     IntValueParser::graphql(inp)
   }
@@ -160,7 +160,7 @@ fn int_value_graphql_does_not_require_equivalent() {
 
 #[test]
 fn float_value_accepts() {
-  fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::FloatValue<S>) {
+  fn check<S: AsRef<[u8]>>(v: crate::parser::graphql::ast::FloatValue<S>) {
     assert!("3.14".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
@@ -174,7 +174,7 @@ fn float_value_rejects_int() {
 
 #[test]
 fn string_value_accepts_inline() {
-  fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::StringValue<S>) {
+  fn check<S: AsRef<[u8]>>(v: crate::parser::graphql::ast::StringValue<S>) {
     assert!("\"hi\"".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
@@ -183,7 +183,7 @@ fn string_value_accepts_inline() {
 
 #[test]
 fn string_value_accepts_block() {
-  fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::StringValue<S>) {
+  fn check<S: AsRef<[u8]>>(v: crate::parser::graphql::ast::StringValue<S>) {
     assert!("\"\"\"hi\"\"\"".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 8));
   }
@@ -199,7 +199,7 @@ fn string_value_rejects_int() {
 
 #[test]
 fn variable_value_accepts() {
-  fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::VariableValue<S>) {
+  fn check<S: AsRef<[u8]>>(v: crate::parser::graphql::ast::VariableValue<S>) {
     assert!("userId".equivalent(v.name().source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 7));
   }
@@ -572,7 +572,7 @@ fn const_value_unterminated_object_is_unclosed_object() {
 
 #[test]
 fn object_field_accepts() {
-  fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ObjectField<S>) {
+  fn check<S: AsRef<[u8]>>(f: crate::parser::graphql::ast::ObjectField<S>) {
     assert!("name".equivalent(f.name().source()));
     assert!(f.value().is_string());
     assert_eq!(f.span().start(), 0);
@@ -584,7 +584,7 @@ fn object_field_accepts() {
 fn object_field_name_may_be_reserved_word() {
   // Object field names are `Name`s; `true` is a legal field name (only the enum
   // *value* position excludes it).
-  fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ObjectField<S>) {
+  fn check<S: AsRef<[u8]>>(f: crate::parser::graphql::ast::ObjectField<S>) {
     assert!("true".equivalent(f.name().source()));
     assert!(f.value().is_int());
   }
@@ -593,7 +593,7 @@ fn object_field_name_may_be_reserved_word() {
 
 #[test]
 fn const_object_field_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ConstObjectField<S>) {
+  fn check<S: AsRef<[u8]>>(f: crate::parser::graphql::ast::ConstObjectField<S>) {
     assert!("k".equivalent(f.name().source()));
     assert!(f.value().is_int());
   }

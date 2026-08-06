@@ -19,7 +19,7 @@
 
 use crate::{
   ast_node,
-  graphql::{
+  parser::graphql::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       definition::{
@@ -35,7 +35,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A scalar type extension, `extend scalar S @d`.
   ///
   /// The one extension whose directives the grammar makes mandatory — it has no other tail.
@@ -48,7 +48,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An object type extension, `extend type T …`.
   ObjectTypeExtension => K::ObjectTypeExtension {
     /// The extended type's name — the third `Name`, after `extend` and `type`.
@@ -63,7 +63,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An interface type extension, `extend interface N …`.
   InterfaceTypeExtension => K::InterfaceTypeExtension {
     /// The extended interface's name — the third `Name`, after `extend` and `interface`.
@@ -78,7 +78,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A union type extension, `extend union U …`.
   UnionTypeExtension => K::UnionTypeExtension {
     /// The extended union's name — the third `Name`, after `extend` and `union`.
@@ -91,7 +91,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An enum type extension, `extend enum E …`.
   EnumTypeExtension => K::EnumTypeExtension {
     /// The extended enum's name — the third `Name`, after `extend` and `enum`.
@@ -104,7 +104,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An input object type extension, `extend input In …`.
   InputObjectTypeExtension => K::InputObjectTypeExtension {
     /// The extended input object's name — the third `Name`, after `extend` and `input`.
@@ -117,7 +117,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A schema extension, `extend schema …`.
   ///
   /// No `name` getter: the two `Name` tokens beneath this node are `extend` and `schema`.
@@ -130,9 +130,9 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// A mixed executable-plus-type-system document — what
-  /// [`parse_document`](crate::graphql::lossless::parse_document) builds.
+  /// [`parse_document`](crate::parser::graphql::lossless::parse_document) builds.
   Document => K::Document {
     /// Every operation the document defines, in order.
     operation_definitions: many OperationDefinition,
@@ -172,13 +172,13 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphql::kinds::GraphQLLang;
+  lang = crate::parser::graphql::kinds::GraphQLLang;
   /// An SDL-only document root.
   ///
   /// [`Document`] without the two executable kinds, which is the whole difference between the
-  /// two roots. Not what [`parse_document`](crate::graphql::lossless::parse_document) builds — a
+  /// two roots. Not what [`parse_document`](crate::parser::graphql::lossless::parse_document) builds — a
   /// schema-only consumer calls
-  /// [`parse_type_system_document`](crate::graphql::lossless::parse_type_system_document), which
+  /// [`parse_type_system_document`](crate::parser::graphql::lossless::parse_type_system_document), which
   /// reports an executable definition rather than admitting one.
   TypeSystemDocument => K::TypeSystemDocument {
     /// Every scalar type the document defines, in order.

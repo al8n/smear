@@ -32,7 +32,7 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::{
       directive::Directives,
@@ -44,7 +44,7 @@ use crate::{
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One input value definition — an argument definition, or an input object's field.
   InputValueDefinition => K::InputValueDefinition {
     /// The definition's description, if it was given one.
@@ -69,7 +69,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A field's or directive's argument definitions, `( … )`.
   ArgumentsDefinition => K::ArgumentsDefinition {
     /// Every argument defined, in order.
@@ -78,7 +78,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One field definition, `name(args) : T @directives`.
   FieldDefinition => K::FieldDefinition {
     /// The definition's description, if it was given one.
@@ -102,7 +102,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An object or interface type's fields block, `{ … }`.
   FieldsDefinition => K::FieldsDefinition {
     /// Every field defined, in order.
@@ -111,7 +111,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An input object type's fields block, `{ … }`.
   ///
   /// A separate node kind from [`FieldsDefinition`] because the two blocks admit different
@@ -124,7 +124,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An `implements A & B` clause.
   ///
   /// Spelled `ImplementInterfaces` — see this module's docs.
@@ -138,7 +138,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A union's `= A | B` member list.
   UnionMemberTypes => K::UnionMemberTypes {
     /// Every member type named, in order.
@@ -147,7 +147,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A directive definition's `on FIELD | QUERY` location list.
   ///
   /// A location has no node kind of its own, so the locations are bare [`Name`](K::Name) tokens
@@ -159,7 +159,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One enum value definition.
   ///
   /// **The value is a bare `Name` token**, where a value position's enum value is a whole
@@ -177,7 +177,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An enum type's values block, `{ … }`.
   EnumValuesDefinition => K::EnumValuesDefinition {
     /// Every value defined, in order.
@@ -186,7 +186,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One root operation type definition, `query : Q`.
   ///
   /// GraphQLx has no `OperationType` node, so the keyword is a bare token here exactly as it is on
@@ -201,7 +201,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A schema's root operation types block, `{ … }`.
   ///
   /// Spelled `RootOperationTypesDefinition` — see this module's docs.
@@ -212,7 +212,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A scalar type definition.
   ScalarTypeDefinition => K::ScalarTypeDefinition {
     /// The definition's description, if it was given one.
@@ -225,7 +225,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An object type definition.
   ObjectTypeDefinition => K::ObjectTypeDefinition {
     /// The definition's description, if it was given one.
@@ -247,7 +247,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An interface type definition.
   ///
   /// [`ObjectTypeDefinition`]'s shape keyword for keyword; the two grammars are identical after
@@ -269,7 +269,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A union type definition.
   ///
   /// The one definition whose `where` clause comes **after** the thing it constrains and requires
@@ -290,7 +290,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An enum type definition.
   ///
   /// The one type-system definition with **no** `where` clause in its grammar.
@@ -307,7 +307,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An input object type definition.
   InputObjectTypeDefinition => K::InputObjectTypeDefinition {
     /// The definition's description, if it was given one.
@@ -324,7 +324,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A directive definition.
   ///
   /// **`repeatable` gets no getter.** It is a bare `Name` token between the argument definitions
@@ -349,7 +349,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A schema definition.
   ///
   /// No name getter of any form: a schema has nothing to be called, so the one `Name` token

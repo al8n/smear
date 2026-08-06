@@ -11,7 +11,7 @@
 //! productions with; the productions themselves are purely syntactic — lossless/CST
 //! structure is a separate `lossless` module's concern (a later wave).
 
-use smear_lexer::graphql::{
+use crate::lexer::graphql::{
   ContextualKeyword,
   syntactic::{SyntacticLexer, SyntacticToken},
 };
@@ -23,7 +23,7 @@ use tokora::{
 };
 
 use super::GraphQL;
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, ident, try_ident},
   graphql::{
     ast,

@@ -30,14 +30,14 @@
 
 use crate::{
   ast_node,
-  graphqlx::{
+  parser::graphqlx::{
     kinds::SyntaxKind as K,
     lossless::ast::ty::{DefinitionTypePath, ListType, MapType, Path, SetType, TypePath},
   },
 };
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One declared generic parameter, `Name (= Type)?`.
   ///
   /// **The default is a type reference, not a
@@ -59,7 +59,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// The generic parameters a definition declares, `< DefinitionTypeParam+ >`.
   ///
   /// The one list of the three whose members are nodes — see this module's docs.
@@ -70,7 +70,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// The generic arguments a type-system extension applies, `< Name+ >`.
   ///
   /// Bare name tokens: an extension applies arguments and may not default them, so its members
@@ -82,7 +82,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// The generic parameters an executable definition declares, `< Name+ >`.
   ///
   /// [`ExtensionTypeGenerics`]' shape under the other kind. A fragment definition can hold **two**
@@ -94,7 +94,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A definition's name, `Name DefinitionTypeGenerics?`.
   ///
   /// Every SDL definition's name and every operation's, so `query Q<T = Int>` and
@@ -108,7 +108,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A type-system extension's target, `Path ExtensionTypeGenerics?`.
   ///
   /// **A path, where a [`DefinitionName`] takes a bare name.** `extend type ns::T` names a
@@ -123,7 +123,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// An executable definition's name, `Name ExecutableDefinitionTypeGenerics?`.
   ///
   /// A fragment's name. Its list is the name's **own**, not the implementation list the definition
@@ -137,7 +137,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// One `where` predicate, `TypePath : TypePath (& TypePath)*`.
   ///
   /// **The getter is plural, and that is forced.** The constrained type and its bounds are all
@@ -151,7 +151,7 @@ ast_node!(
 );
 
 ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
+  lang = crate::parser::graphqlx::kinds::GraphQLxLang;
   /// A `where` clause, `where WherePredicate (, WherePredicate)*`.
   ///
   /// Undelimited, so this node exists only where a `where` was written — the same ruling

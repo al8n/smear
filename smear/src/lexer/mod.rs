@@ -1,14 +1,4 @@
-#![doc = include_str!("../README.md")]
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![deny(missing_docs)]
-#![allow(clippy::result_large_err)]
-
-#[cfg(not(feature = "std"))]
-extern crate alloc as std;
-
-#[cfg(feature = "std")]
-extern crate std;
+#![doc = include_str!("README.md")]
 
 pub use string_lexer::*;
 
@@ -65,7 +55,7 @@ pub mod punctuator;
 /// # Example
 ///
 /// ```rust,ignore
-/// use smear_lexer::graphql::syntactic::Lexer;
+/// use smear::lexer::graphql::syntactic::Lexer;
 ///
 /// let source = "query { user { id } }";
 /// let tokens = Lexer::new(source);
@@ -119,7 +109,7 @@ pub mod graphql;
 /// # Example
 ///
 /// ```rust,ignore
-/// use smear_lexer::graphqlx::syntactic::Lexer;
+/// use smear::lexer::graphqlx::syntactic::Lexer;
 ///
 /// let source = "import { User } from \"./types.graphqlx\"";
 /// let tokens = Lexer::new(source);
@@ -145,8 +135,3 @@ mod handlers;
 /// SIMD lexers.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) mod simd;
-
-#[doc(hidden)]
-pub mod __private {
-  pub use tokora;
-}

@@ -17,13 +17,13 @@ use tokora::{
   utils::{DowncastRef, typenum::U1},
 };
 
-use smear_lexer::graphql::ContextualKeyword;
+use crate::lexer::graphql::ContextualKeyword;
 
 use super::{
   GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name,
   value::{HeadKind, const_value, value, value_head_kind},
 };
-use crate::{
+use crate::parser::{
   combinator::{ParseCtx, TokenSpannedExt, colon, extent_end},
   graphql::{
     GraphQL,
@@ -236,7 +236,7 @@ argument_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
     committed_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
@@ -263,7 +263,7 @@ argument_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
+    // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
     committed_const_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)

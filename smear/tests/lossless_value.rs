@@ -13,7 +13,7 @@
 //! failure mode this plan has now been bitten by twice. The `parse_document` forms are kept below,
 //! `#[ignore]`d, so Task 8 has them to switch on.
 
-use smear_parser::graphql::{
+use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::value::test_support::{parse_const_value, parse_default_value, parse_value},
 };
@@ -394,7 +394,7 @@ fn nested_garbage_is_skipped_as_one_region() {
 #[cfg(test)]
 mod through_parse_document {
   use super::K;
-  use smear_parser::graphql::lossless::parse_document;
+  use smear::parser::graphql::lossless::parse_document;
 
   fn node_kinds(src: &str) -> Vec<K> {
     parse_document(src)

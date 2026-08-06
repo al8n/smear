@@ -7,13 +7,13 @@
 
 use std::vec::Vec;
 
-use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use crate::lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
   FatalContext, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt, utils::cmp::Equivalent,
 };
 
 use super::description;
-use crate::graphql::{
+use crate::parser::graphql::{
   GraphQL,
   ast::{
     ArgumentsDefinition, Described, DirectiveDefinition, DirectiveLocations, EnumTypeDefinition,

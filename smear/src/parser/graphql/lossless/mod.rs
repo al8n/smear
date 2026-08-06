@@ -1,13 +1,13 @@
 //! The GraphQL lossless parser suite: a `rowan` CST over the trivia-surfacing lexer.
 
-use smear_lexer::graphql::{
+use crate::lexer::graphql::{
   error::LexerErrors,
   lossless::{LosslessLexer, LosslessToken, LosslessTokenKind},
 };
 use tokora::{
   InputRef,
   // Aliased because this module also declares a `Lexer` **type alias** — the name the shared
-  // macros in `crate::lossless` reach this dialect's lexer by — and a trait and a type alias share
+  // macros in `crate::parser::lossless` reach this dialect's lexer by — and a trait and a type alias share
   // one namespace.
   Lexer as TokoraLexer,
   Source,
@@ -15,7 +15,7 @@ use tokora::{
   utils::Expected,
 };
 
-use crate::{
+use crate::parser::{
   combinator::ErrorOf,
   graphql::{
     GraphQL,
@@ -23,7 +23,7 @@ use crate::{
   },
 };
 
-pub use crate::graphql::kinds::GraphQLLang;
+pub use crate::parser::graphql::kinds::GraphQLLang;
 
 /// A GraphQL lossless syntax node.
 pub type SyntaxNode = rowan::SyntaxNode<GraphQLLang>;
@@ -43,7 +43,7 @@ pub type GraphqlLosslessSlice<'inp, Src: Source<usize> + ?Sized> =
 /// The concrete lexer used by GraphQL lossless productions over `Src`.
 ///
 /// **Note the argument.** `LosslessLexer<'a, S = &'a str> = LogosLexer<'a, LosslessToken<S>>`
-/// (`smear-lexer/src/graphql/lossless/mod.rs:16`) is parameterised by the **slice** type, not by
+/// (`smear/src/lexer/graphql/lossless/mod.rs:16`) is parameterised by the **slice** type, not by
 /// the source type — unlike `SyntacticLexer`, which takes the source. Writing
 /// `LosslessLexer<'inp, Src>` here compiles into a lexer over the wrong token and then fails far
 /// away, at the first `Lexer<'inp>` obligation.
@@ -73,7 +73,7 @@ where
 = InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, Src>, Ctx, GraphQL>;
 
 // ---------------------------------------------------------------------------------------------
-// The seven names the shared macros in `crate::lossless` reach this dialect by.
+// The seven names the shared macros in `crate::parser::lossless` reach this dialect by.
 //
 // Aliases, not renames: the `GraphqlLossless*` spellings stay, because ~200 signatures use them
 // and renaming those is a diff that buys nothing and hides everything else. What these buy is
@@ -90,7 +90,7 @@ pub type TokenKind = LosslessTokenKind;
 
 /// This dialect's contextual-keyword projection — the door a production reads a keyword's
 /// *spelling* through, since every one of them arrives as an ordinary identifier token.
-pub type Keyword = smear_lexer::graphql::ContextualKeyword;
+pub type Keyword = crate::lexer::graphql::ContextualKeyword;
 
 /// [`GraphqlLosslessLexer`], under the name the shared macros reach it by.
 #[allow(type_alias_bounds)]
@@ -127,7 +127,7 @@ pub type GraphqlLosslessErrorValue<S> =
 pub type GraphqlLosslessErrors<S> =
   DialectErrors<S, LosslessTokenKind, char, Expectation, LimitExceeded>;
 
-crate::lossless::lossless_error_impls! {
+crate::parser::lossless::lossless_error_impls! {
   errors       = GraphqlLosslessErrors;
   value        = GraphqlLosslessErrorValue;
   token        = LosslessToken;
@@ -177,7 +177,7 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
 }
 
 // The two production macros — `lossless_production!` and `lossless_drivers!` — are
-// `crate::lossless::macros`', shared with every other dialect, and each production module imports
+// `crate::parser::lossless::macros`', shared with every other dialect, and each production module imports
 // them by path. They used to be defined here, immediately above these `mod` declarations, because
 // a `macro_rules!` is in scope for a child module only if it is declared before that module's
 // `mod` item; **that ordering constraint is gone** and nothing below depends on the order of

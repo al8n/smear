@@ -2,7 +2,7 @@ use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use super::*;
 
-use crate::{
+use crate::lexer::{
   LitInlineStr, LitPlainStr,
   graphql::{
     syntactic::SyntacticLexer,
