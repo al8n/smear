@@ -2,8 +2,30 @@
 members = [
   "benchmarks",
   "smear",
+  "smear-benches",
   "smear-smoke",
 ]
+
+# ── THREE OF THE FOUR MEMBERS PULL `smear` PAST ITS DEFAULT FEATURE SET ──────────────────────
+#
+# `benchmarks` and `smear-smoke` both enable `smear/rowan`; `smear-smoke` also enables
+# `lossless-coverage` and `test-support`. Cargo unifies features across the SELECTED packages,
+# so a bare workspace-wide command resolves `smear` with every feature it declares turned on.
+#
+# That arithmetic is how the entire lossless CST tower entered the Miri selection without anyone
+# choosing it. #70 added `benchmarks`, #84 added `smear-smoke`, and each time the Miri scripts —
+# which name no `-p` and no `--features` — got wider by resolution rather than by decision. The
+# first time real lossless code reached Miri it reported undefined behaviour inside `rowan`
+# (#77), which is the sharpest available statement of what an unchosen selection costs.
+#
+# There is deliberately NO `default-members` narrowing that away. It would pin the Miri
+# selection at the price of silently narrowing every OTHER bare command in the repository:
+# `cargo test --all-features` in `.github/workflows/ci.yml` is meant to cover all four members
+# and would quietly have stopped, with no exit code saying so — the same defect class, one turn
+# later. The selection is pinned where it is READ instead: `ci/miri_sb.sh` and `ci/miri_tb.sh`
+# pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted is not what
+# those scripts claim.
+#
 # Reference-only: the superseded parser/scaffold crates and the old `smear`
 # benches and integration suite that drove them. Kept for history and parity
 # lookups, deliberately outside the build. Cargo errors on a nested package

@@ -339,7 +339,24 @@ jobs:
         cargo hack build -p smear --each-feature --features parser \
           --exclude-features rowan,lossless-coverage,default \
           --exclude-no-default-features --exclude-all-features
-  
+        # Pass 3 — the four criterion benches, which NOTHING ELSE IN CI COMPILES.
+        #
+        # Measured on this tree: `cargo test`'s default target selection is lib + bins + tests +
+        # examples; a `[[bench]]` target is not in it, and neither `cargo build --workspace
+        # --all-features` (the `msrv` job) nor `cargo hack build --each-feature` above builds
+        # one. So while the benches lived in `smear/benches/` they were compiled by no gate at
+        # all — `#73`'s family exactly, a target that exists and that nothing ever proves builds.
+        #
+        # That was survivable when the benches sat beside the fixtures they `include_str!`. It
+        # is not now: `smear-benches` reaches across a member boundary for all 29 of them
+        # (`../../smear/tests/fixtures/...`), so a fixture rename would break four bench targets
+        # and every other job would stay green. `--benches` names a target KIND on a package
+        # that has nothing else, so there is no filter here that can match zero targets and
+        # exit 0.
+        #
+        # Build, not run: criterion sampling is minutes per target and this is a compile gate.
+        cargo build -p smear-benches --benches
+
   test:
     name: test
     strategy:

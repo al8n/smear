@@ -14,23 +14,25 @@ struct Fixture {
 const FIXTURES: &[Fixture] = &[
   Fixture {
     name: "type_system_01_minimal",
-    source: include_str!("../tests/fixtures/schemas/minimal_type.graphql"),
+    source: include_str!("../../smear/tests/fixtures/schemas/minimal_type.graphql"),
   },
   Fixture {
     name: "type_system_02_descriptions",
-    source: include_str!("../tests/fixtures/schemas/directive_descriptions_canonical.graphql"),
+    source: include_str!(
+      "../../smear/tests/fixtures/schemas/directive_descriptions_canonical.graphql"
+    ),
   },
   Fixture {
     name: "type_system_03_descriptions_and_extensions",
-    source: include_str!("../tests/fixtures/schemas/kitchen-sink_canonical.graphql"),
+    source: include_str!("../../smear/tests/fixtures/schemas/kitchen-sink_canonical.graphql"),
   },
   Fixture {
     name: "type_system_04_medium_lending_schema",
-    source: include_str!("../tests/fixtures/schemas/schema-lending.graphql"),
+    source: include_str!("../../smear/tests/fixtures/schemas/schema-lending.graphql"),
   },
   Fixture {
     name: "type_system_05_large_apollo_studio_schema",
-    source: include_str!("../tests/fixtures/schemas/apollo-studio.graphql"),
+    source: include_str!("../../smear/tests/fixtures/schemas/apollo-studio.graphql"),
   },
 ];
 

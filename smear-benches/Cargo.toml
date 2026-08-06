@@ -1,0 +1,110 @@
+[package]
+name = "smear-benches"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "smear's criterion benchmarks. Not published; exists so `criterion` is not in `smear`'s own dependency graph."
+publish = false
+
+# ── WHY THE BENCHES LIVE IN THEIR OWN MEMBER ────────────────────────────────────────────────
+#
+# `criterion 0.8.2` depends on `alloca 0.4.0`, whose build script compiles `alloca.c` through
+# cc-rs. Cross-compiling to an apple target hands the HOST `cc` an `-arch x86_64` /
+# `-arch arm64` and an `-mmacosx-version-min=...`; a Linux `cc` rejects all three, and building
+# them needs Apple clang and the macOS SDK. Cargo resolves dev-dependencies per PACKAGE and not
+# per target, so while `criterion` sat in `smear`'s `[dev-dependencies]`, ANY selection that
+# built a `smear` test target for an apple target built `alloca` too — including
+# `cargo miri test --target x86_64-apple-darwin`, which died in a C compiler before Miri
+# interpreted a single instruction.
+#
+# That, and nothing about Miri, is why four Miri cells ran on `macos-latest`; the header of
+# `.github/workflows/miri.yml` carried the measurement and named this move as the way out.
+# Cargo has no optional dev-dependency, so a package boundary is the only mechanism: `criterion`
+# is a dev-dependency of THIS package, `smear` has nothing of the sort, and the four apple Miri
+# cells now run on `ubuntu-latest`. The same boundary also takes `apollo-parser` out of `smear`'s
+# dev graph — and with it `rowan`, which is the crate `#77` is about.
+#
+# ── AND WHY THESE BENCH TARGETS HAVE NO `required-features` ─────────────────────────────────
+#
+# In `smear/Cargo.toml` each `[[bench]]` carried one — `["std", "graphql", "graphqlx"]` for
+# `lex_baseline`, `["parser", <dialect>]` for the other three — because `smear`'s features can be
+# off and a bench naming a gated API would then fail to COMPILE. A bench whose required features
+# are unmet is SKIPPED, not failed: cargo compiles nothing, prints nothing and exits 0, which is
+# the same silence `#73` is about.
+#
+# Here there is nothing to skip on. The `smear` dependency below pins the feature point, so all
+# four benches compile in every configuration this package can be built in and a
+# `required-features` entry would be a tautology that could only ever go stale. The skip hazard
+# is removed by construction instead of guarded against.
+
+[dependencies]
+# The union of the four `required-features` sets these benches used to declare, plus `smallvec`.
+#
+# `default-features = false` with the set written out, so it is this list and not whatever
+# `default` happens to carry on the day — the shape `#81` was about. The list is nonetheless
+# element-for-element what `smear`'s `default` resolves to today, and deliberately so: a
+# benchmark has to measure the configuration a consumer gets from `cargo add smear`, and
+# `smallvec` is in that default and changes the collection backing on the measured paths. It is
+# in the list for that reason and not because a bench names it.
+#
+# `rowan` is deliberately ABSENT. None of the four benches touches the lossless CST tower —
+# `smear-apollo-bench` in `benchmarks/` is the member that measures it, against apollo-parser —
+# and enabling it here would compile the tower into four binaries that never enter it.
+#
+# ONE FEATURE IS LOST BY THE MOVE, and it is inert: `test-support`. Inside `smear` it was on for
+# every dev target, benches included, because that package dev-depends on itself to enable it.
+# From here there is no such edge. It changes nothing measured: everything it compiles lives
+# inside the `rowan`-gated tower, which is off in this set, so it was already compiling to
+# nothing in a bench build. Recorded because "the benches no longer resolve the same feature set"
+# is the kind of difference that would otherwise be discovered by a number moving.
+smear = { workspace = true, default-features = false, features = [
+  "std",
+  "graphql",
+  "graphqlx",
+  "parser",
+  "smallvec",
+] }
+# Named directly because all four benches spell `tokora::{Parse, Parser}` to drive a parse.
+# The workspace entry pins the same feature point `smear` resolves, so cargo links ONE copy and
+# the traits the benches name are the traits `smear`'s parsers implement.
+tokora.workspace = true
+
+[dev-dependencies]
+criterion = "0.8"
+
+# The three like-for-like comparison parsers `executables.rs` and `type_system.rs` measure
+# against. They moved here with the benches that are their only callers; no test, example or
+# source file in `smear` ever named one. `apollo-parser` is the load-bearing removal: it is the
+# only edge that put `rowan` — the crate whose UB `#77` records — into `smear`'s dependency
+# graph at all, once `smear`'s own `rowan` feature is off.
+apollo-parser = "0.8.6"
+graphql-parser = "0.4.1"
+async-graphql-parser = "7.2.1"
+cynic-parser = "=0.11.2"
+
+[lints]
+workspace = true
+
+# Disable the default libtest bench harness on all four; every bench goes through criterion.
+[[bench]]
+name = "lex_baseline"
+path = "benches/lex_baseline.rs"
+harness = false
+
+[[bench]]
+name = "executables"
+path = "benches/executables.rs"
+harness = false
+
+[[bench]]
+name = "type_system"
+path = "benches/type_system.rs"
+harness = false
+
+[[bench]]
+name = "graphqlx"
+path = "benches/graphqlx.rs"
+harness = false
