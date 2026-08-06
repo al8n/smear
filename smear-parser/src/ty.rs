@@ -16,8 +16,13 @@ use crate::path::Path;
 
 /// A named type reference with an optional non-null modifier.
 ///
-/// Vanilla GraphQL names its type references directly; GraphQLx uses
-/// [`DefinitionTypePath`] instead, since its type references are namespaced.
+/// Vanilla GraphQL names its type references directly; GraphQLx namespaces them and uses this
+/// module's `DefinitionTypePath` instead, surfaced publicly as `graphqlx::ast::DefinitionTypePath`.
+///
+/// Both are code spans and not intra-doc links, deliberately. This module is private, so the
+/// carrier has no public path to link to; and it is `graphqlx`-gated while this type is
+/// `graphql`-gated, so under `graphql` alone there is no item in scope to resolve against at all.
+/// A link here is a hard error under `RUSTDOCFLAGS="-D warnings"`, in both configurations.
 #[cfg(feature = "graphql")]
 #[derive(Debug, Clone, Copy)]
 pub struct NamedType<Name, Span = SimpleSpan> {
