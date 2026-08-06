@@ -9,18 +9,31 @@ rust-version.workspace = true
 description = "Like-for-like benchmark: smear's GraphQL lossless CST parser vs apollo-parser"
 publish = false
 
-# A workspace member rather than a dev-dependency of `smear-parser`: a dev-dependency would
-# compile apollo into every `cargo test -p smear-parser`, and a workspace-*excluded* crate would
-# not inherit the root `[patch.crates-io]` that resolves the unpublished `tokora = "0.8.0"`.
+# A workspace member rather than a dev-dependency of `smear`: a dev-dependency would compile
+# apollo into every `cargo test -p smear`. (It was also once the only way to inherit a root
+# `[patch.crates-io]` for an unpublished `tokora`; that patch went away when tokora 0.8.0 shipped,
+# so only the first reason is still live.)
 #
 # `apollo-parser` comes from the registry, not from the local `apollo-rs` checkout, so the
 # numbers describe what a real consumer gets and reproduce on any machine. 0.8.6 is both the
 # local checkout's version and crates.io's current max.
 
 [dependencies]
-# `graphqlx` is deliberately off: the benchmark only exercises the GraphQL dialect, and
-# `graphqlx` drags in `unstable`.
-smear-parser = { path = "../smear-parser", version = "0.0.0", default-features = false, features = [
+# The feature set is spelled out because `default-features = false` plus a wrong set is exactly
+# how #81 happened. Four features are in play and each is a decision:
+#
+#   `std`     — the lossless runner needs it, and `rowan` would enable it anyway.
+#   `graphql` — the dialect under measurement.
+#   `rowan`   — the lossless CST tower this benchmark exists to compare against apollo-parser.
+#   `parser`  — NOT named, because `rowan` implies it. This is the same named set as before the
+#               merge; the new gate arrives by implication rather than by hand, so a future edit
+#               that drops `rowan` cannot leave a half-configured build behind.
+#
+# `graphqlx` stays deliberately off: the benchmark only exercises the GraphQL dialect, so the
+# second dialect would be compile time bought for nothing. (Before the merge this note also said
+# `graphqlx` "drags in `unstable`"; that marker feature gated no code and is gone (#83), which
+# removes a reason without touching the decision.)
+smear = { path = "../smear", version = "0.0.0", default-features = false, features = [
   "std",
   "graphql",
   "rowan",

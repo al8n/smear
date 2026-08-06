@@ -2,8 +2,7 @@
 members = [
   "benchmarks",
   "smear",
-  "smear-lexer",
-  "smear-parser",
+  "smear-smoke",
 ]
 # Reference-only: the superseded parser/scaffold crates and the old `smear`
 # benches and integration suite that drove them. Kept for history and parity
@@ -30,8 +29,7 @@ tokora = { version = "0.8.0", default-features = false, features = ["logos", "al
 paste = "1"
 thiserror = { version = "2", default-features = false }
 
-smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
-smear-parser = { path = "smear-parser", version = "0.0.0", default-features = false }
+smear = { path = "smear", version = "0.0.0", default-features = false }
 
 [workspace.lints.rust]
 rust_2018_idioms = "warn"

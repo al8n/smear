@@ -24,7 +24,7 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # -Zmiri-address-reuse-rate=1.0 stays on for i686: it is cheap and correct
 # in intent. But it was measured *insufficient alone* across three
 # consecutive CI runs, identically under this aliasing model (Tree Borrows)
-# and under Stacked Borrows (ci/miri_sb.sh): the smear-lexer lib tests and
+# and under Stacked Borrows (ci/miri_sb.sh): the `smear` lib tests and
 # tests/oracle.rs pass in full, then tests/tokora_conformance.rs still
 # exhausts the address space partway through graphqlx::lossless_conformance.
 # cargo already runs each test binary as its own process, so every binary
@@ -35,7 +35,8 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # So i686 alone drops `--tests` and runs the lib unit tests only. This is a
 # deliberate, scoped reduction, not a silent one: i686's unique value in
 # this matrix is 32-bit pointer width on a SIMD byte-level lexer, and the
-# lib tests (115 passing at last measurement) exercise exactly that, under
+# lib tests (115 lexer unit tests at last measurement, sharing one binary
+# with the parser's since the crates merged) exercise exactly that, under
 # both aliasing models. What is given up is "integration-suite coverage at
 # 32-bit", not "32-bit coverage" — tests/oracle.rs and
 # tests/tokora_conformance.rs still run under Miri on x86_64 and

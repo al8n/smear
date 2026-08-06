@@ -34,7 +34,7 @@
 use core::fmt::Write as _;
 
 use sha2::{Digest as _, Sha256};
-use smear_parser::graphql::lossless::SyntaxNode;
+use smear::parser::graphql::lossless::SyntaxNode;
 
 use crate::{CORPUS, Entry, smear_parse};
 

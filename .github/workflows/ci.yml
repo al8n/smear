@@ -46,10 +46,10 @@ on:
       - main
       - feat/tokora-0.8
     # `**.md` used to sit in these lists. It cannot: `README.md`,
-    # `smear-lexer/README.md` and `smear-parser/README.md` are `include_str!`-ed
-    # into their crates' rustdoc, so editing one is a compile-time change to the
-    # documentation, and a broken reference-style link in a README fails the
-    # `docs` job below. Ignoring them meant the one job that can catch such a
+    # `smear/src/lexer/README.md` and `smear/src/parser/README.md` are
+    # `include_str!`-ed into the crate's rustdoc, so editing one is a compile-time
+    # change to the documentation, and a broken reference-style link in a README
+    # fails the `docs` job below. Ignoring them meant the one job that can catch such a
     # break never ran for the one change class that causes it. Only the markdown
     # no crate compiles — `docs/` notes and the excluded `legacy/` tree — is
     # ignored.
@@ -189,7 +189,26 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Apply clippy lints
-      run: cargo hack clippy --each-feature
+      run: |
+        cargo hack clippy --each-feature
+        # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
+        # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
+        # build always contained the parser; a single-crate `--each-feature` never builds `parser`
+        # together with exactly one other feature. This restores those pairs deliberately, and the
+        # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
+        #
+        # `rowan` and `lossless-coverage` are excluded because they already imply `parser`, so
+        # their pass-1 cells ARE pairs; `default`, `--no-default-features` and `--all-features`
+        # are excluded because those three runs would duplicate pass-1 exactly.
+        #
+        # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
+        # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
+        # and it does not need to be there — it already skips the `parser,parser` cell on its own.
+        # Nine cells, one per remaining feature, and a feature added to the manifest later joins
+        # them without anyone editing this file.
+        cargo hack clippy -p smear --each-feature --features parser \
+          --exclude-features rowan,lossless-coverage,default \
+          --exclude-no-default-features --exclude-all-features
 
   # Run tests on some extra platforms
   cross:
@@ -266,7 +285,26 @@ jobs:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
     - name: Run build
-      run: cargo hack build --each-feature
+      run: |
+        cargo hack build --each-feature
+        # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
+        # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
+        # build always contained the parser; a single-crate `--each-feature` never builds `parser`
+        # together with exactly one other feature. This restores those pairs deliberately, and the
+        # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
+        #
+        # `rowan` and `lossless-coverage` are excluded because they already imply `parser`, so
+        # their pass-1 cells ARE pairs; `default`, `--no-default-features` and `--all-features`
+        # are excluded because those three runs would duplicate pass-1 exactly.
+        #
+        # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
+        # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
+        # and it does not need to be there — it already skips the `parser,parser` cell on its own.
+        # Nine cells, one per remaining feature, and a feature added to the manifest later joins
+        # them without anyone editing this file.
+        cargo hack build -p smear --each-feature --features parser \
+          --exclude-features rowan,lossless-coverage,default \
+          --exclude-no-default-features --exclude-all-features
   
   test:
     name: test
@@ -381,7 +419,7 @@ jobs:
         TD="${CARGO_TARGET_DIR:-target}"
         rm -rf "$TD/doc"
         cargo doc --workspace --all-features --no-deps
-        for page in smear smear_lexer smear_parser; do
+        for page in smear; do
           if [ ! -f "$TD/doc/$page/index.html" ]; then
             echo "::error::cargo doc --workspace --all-features exited 0 but wrote no page for $page"
             exit 1
@@ -396,13 +434,15 @@ jobs:
         #
         # Every leg is `--no-default-features` plus exactly one dialect, because a
         # cross-dialect link is only unresolvable when the other dialect is absent.
-        # `rowan` rides along for `smear-parser` because the lossless tree — where
-        # Phase B found the first such link — is compiled out without it.
+        # `rowan` rides along on the parser-side legs because the lossless tree —
+        # where Phase B found the first such link — is compiled out without it, and
+        # `rowan` implies `parser`, so those two legs document the tower while the
+        # bare-dialect legs document the crate as the lexer alone. Six legs became
+        # four with the merge: the facade's own pair tested resolution forwarding
+        # through a layer that no longer exists.
         legs=(
-          "smear-parser|rowan,graphql|smear_parser"
-          "smear-parser|rowan,graphqlx|smear_parser"
-          "smear-lexer|graphql|smear_lexer"
-          "smear-lexer|graphqlx|smear_lexer"
+          "smear|rowan,graphql|smear"
+          "smear|rowan,graphqlx|smear"
           "smear|graphql|smear"
           "smear|graphqlx|smear"
         )
@@ -445,7 +485,7 @@ jobs:
     # Nightly, because `doc(cfg)` is a nightly feature and the crates gate it behind
     # `#![cfg_attr(docsrs, feature(doc_cfg))]` — the same toolchain docs.rs uses.
     #
-    # `--workspace --all-features` rather than the three published crates by name:
+    # `--workspace --all-features` rather than the one published crate by name:
     # `all-features = true` is what every publishable manifest declares, so this is
     # literally the command docs.rs runs, and naming crates would leave the next one
     # added uncovered until somebody remembered to extend a list.
@@ -460,7 +500,7 @@ jobs:
         rm -rf "$TD/doc"
         cargo +nightly doc --workspace --all-features --no-deps
 
-        for page in smear smear_lexer smear_parser; do
+        for page in smear; do
           if [ ! -f "$TD/doc/$page/index.html" ]; then
             echo "::error::cargo +nightly doc --cfg docsrs exited 0 but wrote no page for $page"
             exit 1
@@ -483,7 +523,7 @@ jobs:
         # `|| true` inside the group, not after the pipe: `set -o pipefail` is on, and
         # grep exits 1 when it matches nothing — which is the case this check exists to
         # report, so it has to reach the `if` rather than kill the step first.
-        badges=$( { grep -rl 'Available on crate feature' "$TD/doc/smear_lexer" "$TD/doc/smear_parser" || true; } | wc -l )
+        badges=$( { grep -rl 'Available on crate feature' "$TD/doc/smear" || true; } | wc -l )
         echo "pages carrying a rendered doc(cfg) badge: $badges"
         if [ "$badges" -lt 1 ]; then
           echo "::error::cargo +nightly doc exited 0 but rendered no doc(cfg) badge — --cfg docsrs did not reach rustdoc, so every cfg_attr(docsrs, ...) in the workspace was compiled away and this leg tested nothing"
@@ -660,7 +700,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --no-default-features --features graphql --run-types tests --run-types doctests --workspace --out xml -- --quiet
+          # `parser` is NOT optional here. With the crates merged it is a feature, and with it
+          # off every parser test cfgs itself out while tarpaulin still exits 0 — the parser's
+          # entire suite would vanish from coverage under a green tick. Before the merge the
+          # parser was a crate and came in unconditionally; do not lean on the bench member's
+          # dependency to force it back, which is unification and not a decision.
+          args: --no-default-features --features graphql,parser --run-types tests --run-types doctests --workspace --out xml -- --quiet
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v5
         with:

@@ -1,0 +1,60 @@
+[package]
+name = "smear-smoke"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Consumes `smear` the way a dependent does: every declared feature, reached through the front door"
+publish = false
+
+# The standing tripwire for #81's class. #81 was a declared capability that no consumer could
+# reach, and it survived because everything in the workspace reached the lossless tower from
+# INSIDE the crate that owns it — `crate::` paths, whole-crate feature resolution, never once the
+# dependency edge a real dependent resolves. The crate merge kills the forwarding half of that
+# class outright: with one manifest there is nothing to forward and nothing to forget. What it
+# does not kill is the residual half — a feature declared and unreachable, a capability documented
+# and not gated on, a future re-split quietly recreating a facade — and that is what this member
+# is for.
+#
+# It has to live on the far side of a `[dependencies]` entry. An example or doctest inside `smear`
+# resolves `crate::` paths and shares the crate's own feature resolution, so it cannot exercise
+# `default-features = false`, a named feature set, or dependency-level unification — the exact
+# edge #81 fell through.
+
+[dependencies]
+# `default-features = false` plus an explicit list, deliberately: this is the shape of dependency
+# #81 was about, and naming every feature is what makes `tests::the_smoke_consumes_every_feature`
+# able to compare the list against `smear`'s manifest. The list is parsed back out of THIS file at
+# compile time, so it is one source of truth rather than two that agree today.
+smear = { path = "../smear", default-features = false, features = [
+  "std",
+  "graphql",
+  "graphqlx",
+  "parser",
+  "smallvec",
+  "bytes",
+  "bstr",
+  "hipstr",
+  "smol-bytes",
+  "rowan",
+  "lossless-coverage",
+  "test-support",
+] }
+
+# The source-backing crates, named directly so each probe can construct a source of that type.
+# A dependent enabling `smear/bytes` has `bytes` in its own graph too; anything less would test
+# that the feature resolves, not that the surface it gates is reachable.
+bstr = { workspace = true }
+bytes = { workspace = true }
+hipstr = { version = "0.8", default-features = false }
+smol-bytes = { workspace = true }
+smallvec = { version = "1", default-features = false, features = ["const_new"] }
+rowan = "0.16"
+
+[dev-dependencies]
+toml = "0.8"
+
+[lints]
+workspace = true

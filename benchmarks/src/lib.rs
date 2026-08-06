@@ -19,7 +19,7 @@
 use core::hint::black_box;
 
 use apollo_parser::cst::{self, CstNode as _};
-use smear_parser::graphql::lossless::{
+use smear::parser::graphql::lossless::{
   self as smear_lossless, GraphqlLosslessLexer, Parse as SmearParse,
   ast::{self as smear_ast, cast as smear_cast},
 };

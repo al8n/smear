@@ -74,8 +74,8 @@
 //!
 //! # The format, and why it discriminates
 //!
-//! rust-analyzer's `.rast` style, the same one `smear-parser`'s golden-tree gate uses
-//! (`smear-parser/tests/lossless_golden.rs`): one line per element, two spaces of indent per level
+//! rust-analyzer's `.rast` style, the same one `smear`'s golden-tree gate uses
+//! (`smear/tests/lossless_golden.rs`): one line per element, two spaces of indent per level
 //! of depth, each line carrying the kind and the absolute byte range, and each **token** line
 //! additionally carrying its text, escaped so that one element is always exactly one line. Each
 //! column is one axis of structural change, and none of the four is redundant:
@@ -178,7 +178,7 @@ fn selfcheck() -> bool {
     // Recorded so the PASS line evidences the point rather than asserting it: when both sides
     // parse clean and round-trip byte-exactly, `gate.rs` has nothing left to report a difference
     // *with*, and the dump is the only thing in the harness that still can.
-    let clean = |p: &smear_parser::graphql::lossless::Parse, src: &str| {
+    let clean = |p: &smear::parser::graphql::lossless::Parse, src: &str| {
       p.diagnostics().is_empty() && p.syntax().text() == src
     };
     let both_clean = clean(&pa, probe.a) && clean(&pb, probe.b);

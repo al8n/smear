@@ -4,7 +4,7 @@
 //!
 //! Before it, the four hashes lived in a GitHub issue and in a commit message. That is a note, not
 //! a baseline: nothing recomputed it, so a change that re-shaped every tree in the corpus would go
-//! green through every gate this repository had. `smear-parser`'s own golden-tree suite covers the
+//! green through every gate this repository had. `smear`'s own golden-tree suite covers the
 //! hand-written fixtures under `tests/golden/`; this covers the three real `apollo-parser`
 //! documents, their one-byte-broken controls, 24 hand-broken documents and ~9,300 truncations, and
 //! it is the only thing that does.

@@ -1,12 +1,18 @@
 #![doc = include_str!("../../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![deny(missing_docs)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
+
+#[cfg(feature = "std")]
+extern crate std;
 
 /// Lexers for GraphQL and GraphQL-like DSLs.
 ///
-/// Re-export of the [`smear-lexer`](smear_lexer) crate, which turns source text into
-/// zero-copy tokens over `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`
-/// and friends.
+/// Turns source text into zero-copy tokens over `&str`, `&[u8]`, `bytes::Bytes`,
+/// `hipstr::{HipStr, HipByt}` and friends.
 ///
 /// Each dialect exposes two token streams:
 ///
@@ -20,17 +26,30 @@
 /// `RUSTDOCFLAGS="-D warnings"` in every single-dialect configuration — the failure the `docs`
 /// CI job's dialect-alone legs exist to catch.
 ///
+/// This module is the crate's irreducible base and carries no feature of its own: the parser
+/// cannot exist without it, and a build with both switched off would be an empty crate. The
+/// cross-reference below is gated for the same reason the dialect links are — `parser` is a
+/// module only in a build that enables its feature, and an ungated link to it is an
+/// `unresolved link` error under `RUSTDOCFLAGS="-D warnings"` in every lexer-alone build.
+///
+#[cfg_attr(
+  feature = "parser",
+  doc = "See [`parser`] for the layer built on top of it."
+)]
 /// Available dialects:
 ///
 #[cfg_attr(feature = "graphql", doc = "- [`graphql`](lexer::graphql)")]
 #[cfg_attr(feature = "graphqlx", doc = "- [`graphqlx`](lexer::graphqlx)")]
-pub use smear_lexer as lexer;
+// Scoped here rather than crate-wide: it was `#![allow(clippy::result_large_err)]` on the
+// `smear-lexer` crate root, and the merge is the moment it stops covering the parser too.
+#[allow(clippy::result_large_err)]
+pub mod lexer;
 
 /// Parsers for GraphQL and GraphQL-like DSLs.
 ///
-/// Re-export of the [`smear-parser`](smear_parser) crate: atomic parser combinators
-/// that build AST nodes from the token streams produced by [`lexer`], composed with
-/// the `tokora` combinator library.
+/// Atomic parser combinators that build AST nodes from the token streams produced by [`lexer`],
+/// composed with the `tokora` combinator library, plus the lossless CST tower behind the `rowan`
+/// feature.
 ///
 /// Available dialects, each link gated on its feature for the reason recorded on [`lexer`]:
 ///
@@ -40,7 +59,12 @@ pub use smear_lexer as lexer;
   doc = "- [`graphqlx`](parser::graphqlx) — adds imports, generics, where-clauses, map and set \
          types, and namespaced paths on top of GraphQL."
 )]
-pub use smear_parser as parser;
+#[cfg(feature = "parser")]
+#[cfg_attr(docsrs, doc(cfg(feature = "parser")))]
+// Scoped here rather than crate-wide: it was `#![allow(clippy::type_complexity)]` on the
+// `smear-parser` crate root, and the merge is the moment it stops covering the lexer too.
+#[allow(clippy::type_complexity)]
+pub mod parser;
 
 #[doc(hidden)]
 pub mod __private {
