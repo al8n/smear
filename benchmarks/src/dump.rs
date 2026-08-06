@@ -20,10 +20,16 @@
 //! * tokora, which this crate takes from crates.io as a published version, not from a sibling
 //!   checkout, so the constants reproduce on any machine with no path patch in play.
 //!
-//! Blessed against **published `tokora 0.8.0`**. Two of the four moved when this harness was
+//! Blessed against **published `tokora 0.9.0`**. Two of the four moved when this harness was
 //! rebased onto the trunk, and both moved for one reason: `NamedType` now opens *after* its
 //! leading trivia rather than before. The other two were byte-identical across that move, because
 //! no `NamedType` in either of them has leading trivia to relocate.
+//!
+//! All four are unmoved from the values blessed against published `tokora 0.8.0`, and that is a
+//! measured result rather than an expectation: the 0.8 → 0.9 bump carried tokora's `rowan` from
+//! 0.16 to 0.17, and every removal 0.17 made is on the **red** side of the tree. The dump is
+//! walked over the red tree but its content — kinds, spans and token text — is a projection of
+//! the green one, which 0.17 does not touch.
 //!
 //! # Re-blessing
 //!

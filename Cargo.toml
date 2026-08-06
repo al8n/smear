@@ -53,7 +53,23 @@ bstr = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
 smol-bytes = { version = "0.1", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
-tokora = { version = "0.8.0", default-features = false, features = ["logos", "alloc", "unstable-raw"] }
+# `rowan` is in tokora's PUBLIC API: `Cst::checkpoint` returns `rowan::Checkpoint`, `Cst::finish`
+# returns `rowan::GreenNode`, `cst::cast::token` returns `rowan::SyntaxToken`. So smear's `rowan`
+# and tokora's `rowan` are not two independent choices — they are one choice made twice, and if
+# they disagree on the major, cargo links both crates and the types stop matching. The failure is
+# not subtle and it is not a deprecation: `expected rowan::GreenNode, found rowan::GreenNode`.
+# `0.9` is therefore the floor, not a preference: published tokora 0.8.0 pins `rowan = "0.16"`,
+# and 0.9.0 is the first release carrying `rowan = "0.17"` to match the pins in `smear`,
+# `smear-smoke` and `benchmarks`. Because tokora is `0.x`, the minor IS the major — `^0.8.0`
+# cannot reach 0.9.0 — so this requirement had to be edited rather than moved by `cargo update`.
+#
+# `combinators` is named explicitly and is NOT a rowan consequence. tokora 0.9.0 put each
+# combinator family behind its own feature and made the `combinators` umbrella a DEFAULT feature;
+# this workspace passes `default-features = false`, so without naming it the build loses the
+# entire 0.8 combinator surface (`parens`, `then`, `then_ignore`, `repeated_while`,
+# `Ident::parse`, `Keyword::parse_exact`, ...) — 166 errors when measured. Whether smear wants the
+# umbrella or a narrower set of families is a compile-time-footprint question left open.
+tokora = { version = "0.9", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }

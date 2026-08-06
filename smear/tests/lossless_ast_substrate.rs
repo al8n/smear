@@ -5,7 +5,7 @@
 // the macro dropped would surface as an error on the generated `pub` item.
 #![deny(missing_docs)]
 
-//! Task 9's gate: the `ast_node!` macro over tokora 0.8.0's `CastNode` substrate.
+//! Task 9's gate: the `ast_node!` macro over tokora's `CastNode` substrate.
 //!
 //! The substrate itself is upstream — `CastNode`, `NodeChildren` and the `cast::{child,
 //! children, token}` helpers are tokora's since PR #132 — so what is under test here is the

@@ -52,7 +52,12 @@ bytes = { workspace = true }
 hipstr = { version = "0.8", default-features = false }
 smol-bytes = { workspace = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"] }
-rowan = "0.16"
+# Must track `smear`'s rowan exactly, and for this crate that is the whole point rather than
+# housekeeping. `smear-smoke` exists to stand where a real dependent stands; a dependent whose own
+# `rowan` disagreed with smear's on the major would get two rowans and `expected rowan::SyntaxNode,
+# found rowan::SyntaxNode` the moment it touched `lossless_round_trip`'s return path. Leaving this
+# at 0.16 would make the smoke crate certify a configuration that does not work.
+rowan = "0.17"
 
 [dev-dependencies]
 toml = "0.8"

@@ -67,7 +67,7 @@ smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
 # `parser` because the tower lives in that module; `std` because the runner needs it.
 #
 # EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH, and will stay outside it until
-# `rowan` is fixed upstream. `rowan 0.16.1` executes undefined behaviour on the ordinary path —
+# `rowan` is fixed upstream. `rowan 0.17.0` executes undefined behaviour on the ordinary path —
 # `src/arc.rs` under Stacked Borrows, from building any green tree, and `src/cursor.rs` under
 # Tree Borrows, from dropping any red one. Both are live in every published version through
 # `0.17.0`, both were reproduced against rowan alone with no smear code involved, and there is
@@ -120,7 +120,7 @@ bytes = { workspace = true, optional = true }
 smol-bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
-rowan = { version = "0.16", optional = true }
+rowan = { version = "0.17", optional = true }
 
 [dev-dependencies]
 # The crate depending on itself, so `test-support` is on for every dev target — tests, benches,
@@ -148,7 +148,7 @@ smear = { path = ".", features = ["test-support"] }
 # dependency above, so the two cannot resolve to different rowans. It is still the crate whose
 # undefined behaviour is #77 — which is survivable here only because `ci/miri_sb.sh` and
 # `ci/miri_tb.sh` run `-p smear --lib`, and no lib unit test reaches this dependency.
-rowan = "0.16"
+rowan = "0.17"
 # `tokora::conformance` is the lexer-contract test kit; it is test-only, so the
 # feature is pulled in here rather than in the normal dependency.
 tokora = { workspace = true, features = ["conformance"] }
