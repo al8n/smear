@@ -132,8 +132,13 @@ impl ContextualKeyword {
   }
 }
 
+/// The spelling table, in the one direction a reader of *text* needs it.
+///
+/// `pub(crate)` rather than private since #58: the CST-to-AST projection reads a keyword off a
+/// tree token's text and must classify it exactly as the lexer did, and a second copy of this
+/// table in the projection would be a spelling the two layers could disagree about.
 #[inline]
-fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
+pub(crate) fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
   match source {
     b"type" => Some(ContextualKeyword::Type),
     b"interface" => Some(ContextualKeyword::Interface),

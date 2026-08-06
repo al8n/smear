@@ -40,6 +40,8 @@ pub mod coverage;
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod macros;
 
+pub mod project;
+
 pub mod recover;
 
 pub mod runner;

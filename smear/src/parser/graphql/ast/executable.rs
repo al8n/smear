@@ -131,7 +131,7 @@ pub type NamedOperationDefinition<S, Ty = Type<Name<S>>> =
   >;
 
 /// An operation definition, either named or query shorthand.
-#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
@@ -171,7 +171,7 @@ impl<S, Ty> IntoSpan<Span> for OperationDefinition<S, Ty> {
 }
 
 /// An executable definition, either an operation or a fragment.
-#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]

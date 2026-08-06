@@ -64,7 +64,7 @@ impl<Key, Value, Span> IntoComponents for MapEntry<Key, Value, Span> {
 }
 
 /// A GraphQLx map value with its enclosing source span.
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Map<Key, Value, Span = SimpleSpan, Container = Vec<MapEntry<Key, Value, Span>>> {
   span: Span,
   entries: Container,

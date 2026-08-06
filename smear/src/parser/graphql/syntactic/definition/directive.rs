@@ -2,8 +2,13 @@
 
 use super::*;
 
+/// Maps a location keyword onto its [`Location`], or `None` when the keyword names none.
+///
+/// `pub(crate)` rather than private since #58: the CST-to-AST projection has to answer the same
+/// question off a tree token, and a second copy of this nineteen-arm table is a place the two
+/// layers could disagree about what `INPUT_FIELD_DEFINITION` means.
 #[inline]
-fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {
+pub(crate) fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {
   Some(match keyword {
     ContextualKeyword::QueryLocation => ExecutableDirectiveLocation::query(span).into(),
     ContextualKeyword::MutationLocation => ExecutableDirectiveLocation::mutation(span).into(),

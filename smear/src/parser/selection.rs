@@ -17,7 +17,7 @@ use tokora::{
 };
 
 /// A field alias (`Name :`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct Alias<Name, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -83,7 +83,7 @@ impl<Name, Span> IntoComponents for Alias<Name, Span> {
 }
 
 /// A fragment type condition (`on NamedType`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct TypeCondition<Name, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -133,7 +133,7 @@ impl<Name, Span> IntoComponents for TypeCondition<Name, Span> {
 }
 
 /// A named fragment spread (`... FragmentName Directives?`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct FragmentSpread<FragmentName, Directives, Span = SimpleSpan> {
   span: Span,
   name: FragmentName,
@@ -200,7 +200,7 @@ impl<FragmentName, Directives, Span> IntoComponents
 }
 
 /// An inline fragment (`... TypeCondition? Directives? SelectionSet`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct InlineFragment<TypeCondition, Directives, SelectionSet, Span = SimpleSpan> {
   span: Span,
   type_condition: Option<TypeCondition>,
@@ -292,7 +292,7 @@ impl<TypeCondition, Directives, SelectionSet, Span> IntoComponents
 }
 
 /// A nonempty GraphQL selection-set collection.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct SelectionSet<Selection, Span = SimpleSpan, Container = Vec<Selection>> {
   span: Span,
   selections: Container,
@@ -356,7 +356,7 @@ impl<Selection, Span, Container> IntoComponents for SelectionSet<Selection, Span
 }
 
 /// A field (`Alias? Name Arguments? Directives? SelectionSet?`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct Field<Alias, Name, Arguments, Directives, SelectionSet, Span = SimpleSpan> {
   span: Span,
   alias: Option<Alias>,

@@ -19,7 +19,7 @@ use tokora::{
 /// argument name through the end of its value.
 ///
 /// See the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct Argument<Name, Value, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -88,7 +88,7 @@ impl<Name, Value, Span> Argument<Name, Value, Span> {
 /// - `Arg`: the type representing individual arguments
 /// - `Container`: the collection holding the arguments (defaults to `Vec`)
 /// - `Span`: the span type (defaults to [`SimpleSpan`])
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ArgumentList<Arg, Container = Vec<Arg>, Span = SimpleSpan> {
   span: Span,
   arguments: Container,

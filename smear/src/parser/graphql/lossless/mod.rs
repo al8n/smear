@@ -189,6 +189,7 @@ pub mod directive;
 pub mod document;
 pub mod executable;
 pub mod kind_map;
+pub mod project;
 pub mod recover;
 pub mod runner;
 pub mod selection;
@@ -203,3 +204,7 @@ pub mod value;
 pub use runner::{
   Parse, parse_document, parse_executable_document, parse_type_system_document, profile,
 };
+
+// Beside the roots, and named for the symmetry: `parse_document(src) -> Parse`,
+// `project(&parse, src) -> Result<Document, _>`.
+pub use project::{ProjectError, ProjectErrorKind, project};

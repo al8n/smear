@@ -198,7 +198,7 @@ impl<Variable, Type, DefaultValue, Directives, Span> IntoComponents
 }
 
 /// A variable-definition collection.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct VariablesDefinition<
   VariableDefinition,
   Span = SimpleSpan,
@@ -523,7 +523,7 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Span> I
 }
 
 /// A GraphQL-family document.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct Document<Definition, Span = SimpleSpan, Container = Vec<Definition>> {
   span: Span,
   definitions: Container,
@@ -587,7 +587,7 @@ impl<Definition, Span, Container> IntoComponents for Document<Definition, Span, 
 }
 
 /// A GraphQL-family definition: either type-system or executable syntax.
-#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum Definition<TypeSystem, Executable> {
@@ -639,7 +639,7 @@ impl<TypeSystem, Executable> Definition<TypeSystem, Executable> {
 
 /// A GraphQL-family definition with its optional description, or a type-system
 /// extension that cannot carry one.
-#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum DefinitionOrExtension<Definition, Extension> {

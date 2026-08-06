@@ -126,6 +126,16 @@ rowan = { version = "0.16", optional = true }
 # published manifest does not name a version of itself.
 smear = { path = ".", features = ["test-support"] }
 
+# The projection gate builds a synthetic green tree by hand — a tree whose *text* re-parses to a
+# different structure — so that a "projection" which secretly re-parsed the source could not pass
+# it. That needs rowan's builder, which the library re-exports no door to.
+#
+# Named DIRECTLY, which is the difference from the transitive edge #87 retired below: this one is
+# chosen, visible in this manifest, and carries the same version requirement as the optional
+# dependency above, so the two cannot resolve to different rowans. It is still the crate whose
+# undefined behaviour is #77 — which is survivable here only because `ci/miri_sb.sh` and
+# `ci/miri_tb.sh` run `-p smear --lib`, and no lib unit test reaches this dependency.
+rowan = "0.16"
 # `tokora::conformance` is the lexer-contract test kit; it is test-only, so the
 # feature is pulled in here rather than in the normal dependency.
 tokora = { workspace = true, features = ["conformance"] }
@@ -147,8 +157,10 @@ tokora = { workspace = true, features = ["conformance"] }
 #     target, so this one edge is what forced four Miri cells onto a `macos-latest` runner —
 #     for a reason that has nothing to do with Miri.
 #   * `apollo-parser` pulls `rowan`, and with this package's own `rowan` feature off that edge
-#     was the ONLY thing putting rowan in the graph at all. rowan is the crate whose undefined
-#     behaviour is #77.
+#     used to be the ONLY thing putting rowan in the graph at all. rowan is the crate whose
+#     undefined behaviour is #77. That sentence held until #58's projection gate, which names
+#     `rowan` directly above — the point of the rule was never "no rowan", it was "no rowan
+#     nobody asked for", and a direct entry with a reason beside it is the asked-for kind.
 #
 # A dev-dependency added here that drags either one back re-creates both conditions, and does it
 # silently — nothing in CI reports on the shape of this block.

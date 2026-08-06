@@ -1,0 +1,958 @@
+#![cfg(all(feature = "graphql", feature = "rowan"))]
+
+//! The differential gate for the GraphQL CST → AST projection (issue #58).
+//!
+//! # The claim, and the instrument
+//!
+//! `project(parse_document(src), src) == document(src)` — the projection of a lossless parse is
+//! **the same AST value** the syntactic parser builds for the same bytes. Not "the same shape",
+//! not "the same modulo spans": the derived [`PartialEq`] this issue added across the AST
+//! closure compares every span, every slice, every literal payload, every `Option` presence and
+//! every container order, so the assertion is `assert_eq!` and nothing is discounted.
+//!
+//! # Why plain `==`, and why that is news
+//!
+//! The design for this work (issue #58's comment, written against trunk at `69fd677`) could not
+//! state it that way. It measured the syntactic AST's composite spans as **lookahead artifacts**
+//! — `NamedType` closing at the *next* token's start, the document node opening before its
+//! leading trivia — and worked around them by defining projected spans as normatively
+//! token-extent and comparing through a `normalise_spans` pass, with a self-retirement clause
+//! for the day the parser converged.
+//!
+//! **That day was #72.** It rewrote composite span computation across 44 node types and added
+//! `tests/syntactic_span_extent.rs`, which pins "a composite node's span is the extent of the
+//! tokens it contains" over the same corpus this gate reads, padded with the same eight trivia
+//! forms. Re-measured here on trunk: over `"  type T  { f : Int }  "` the parser now answers
+//! `Document 2..21`, `NamedType 16..19`, `FieldDefinition 12..19` — token extents, all three,
+//! where the design recorded `0..21`, `16..20`, `12..20`.
+//!
+//! So the normaliser is not written. There is no span-normalisation pass in this file, no drift
+//! ledger and no self-retirement test, because there is no residue for them to measure. What
+//! replaces them is [`the_span_rule_the_normaliser_would_have_hidden`], which pins the three
+//! re-measured numbers directly: if composite spans ever drift back off their token extents,
+//! that test names the node and the offset instead of a wall of `assert_eq!` diffs.
+//!
+//! # The three ways a gate like this passes without meaning anything
+//!
+//! 1. **Equality that ignores what matters.** If `PartialEq` compared shapes only, every
+//!    assertion below would hold over a projection that got every span wrong.
+//!    [`the_equality_can_answer_no`] feeds it a document shifted one byte, and a second document
+//!    with the same shape and a different name, and requires both to compare unequal.
+//! 2. **A projection that re-parses the text.** `tree.text() == source` always holds, so
+//!    `|parse, src| syntactic_document(src)` would satisfy every corpus assertion here — it
+//!    would be a re-parse wearing the projection's signature.
+//!    [`a_projection_that_re_parsed_the_source_would_fail_this`] builds a **synthetic green
+//!    tree** whose text re-parses to a different structure and requires the projection to answer
+//!    from the structure it was handed. A tree walk passes; a re-parse cannot.
+//! 3. **Error paths nobody reaches.** [`every_refusal_kind_has_a_witness`] requires each
+//!    [`ProjectErrorKind`] variant to be produced by at least one pinned input, so no refusal
+//!    ships unreachable.
+//!
+//! # The corpus, twice
+//!
+//! Every `valid_` entry in `tests/corpus/`, compact and then padded at every token boundary with
+//! each of `tests/support/span_extent.rs`'s eight ignorable forms — the same corpus and the same
+//! alphabet `lossless_trivia.rs` and `syntactic_span_extent.rs` read. The padded half is not
+//! decoration: on compact input a projection that used [`rowan::SyntaxNode::text_range`] instead
+//! of the token extent would agree with the parser everywhere, because with no trivia the two
+//! rules coincide. Interior trivia is the only material on which that bug can red.
+
+use std::{
+  collections::BTreeSet,
+  path::{Path, PathBuf},
+};
+
+use rowan::{GreenNodeBuilder, Language};
+use smear::parser::{
+  graphql::{
+    GraphQL,
+    ast::Document,
+    error::GraphqlErrors,
+    kinds::{GraphQLLang, SyntaxKind as K},
+    lossless::{
+      ProjectErrorKind, SyntaxNode, ast::Document as DocumentNode, parse_document, project,
+    },
+    syntactic::{GraphqlLexer, document},
+  },
+  lossless::ast::CastNode,
+};
+use tokora::{Parse as _, Parser};
+
+// The span-extent support module, shared with `syntactic_span_extent.rs`. This gate reads only
+// its alphabet, its injector and its `Debug` walk — the four-part checker and the discriminating
+// classifier are that gate's business — so the unused half would be four `dead_code` denials
+// under CI's `-Dwarnings`. Allowed at the include rather than at each item, which would edit a
+// file two other gates own.
+#[allow(dead_code)]
+#[path = "support/span_extent.rs"]
+mod extent;
+
+use extent::{ALPHABET, inject};
+
+/// The smallest number of `valid_` entries this gate is allowed to compare.
+///
+/// The measurement on the day it was written, as a floor. A corpus that shrank below it is a
+/// gate that stopped covering what it claims to.
+const VALID_ENTRY_FLOOR: usize = 56;
+
+/// The smallest number of `invalid_` entries the refusal census runs.
+const INVALID_ENTRY_FLOOR: usize = 31;
+
+/// The smallest number of distinct AST node types the compared documents reach.
+///
+/// Read off the syntactic parse's `Debug` rendering — the same total projection
+/// `tests/support/span_extent.rs` walks — so a corpus that stopped reaching the extensions, or
+/// the value family, is a floor failure rather than a silent narrowing.
+const OWNER_FLOOR: usize = 60;
+
+// ---------------------------------------------------------------------------------------------
+// harnesses
+// ---------------------------------------------------------------------------------------------
+
+/// The syntactic oracle: the shipped, fail-fast document root, exactly as `lossless_parity.rs`
+/// and `syntactic_span_extent.rs` drive it.
+fn oracle(src: &str) -> Result<Document<&str>, GraphqlErrors<&str>> {
+  Parser::with_parser::<'_, GraphqlLexer<'_, str>, Document<&str>, GraphqlErrors<&str>, _, GraphQL>(
+    document,
+  )
+  .parse_str(src)
+}
+
+fn corpus(prefix: &str) -> Vec<(String, String)> {
+  let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("tests")
+    .join("corpus");
+  let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+    .unwrap_or_else(|e| panic!("the shared corpus at {} is unreadable: {e}", dir.display()))
+    .map(|entry| entry.expect("a corpus directory entry").path())
+    .filter(|path| path.extension().is_some_and(|ext| ext == "graphql"))
+    .filter(|path| {
+      path
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(prefix))
+    })
+    .collect();
+  files.sort();
+  files.into_iter().map(read_entry).collect()
+}
+
+fn read_entry(path: PathBuf) -> (String, String) {
+  let name = path
+    .file_name()
+    .expect("a corpus entry has a file name")
+    .to_string_lossy()
+    .to_string();
+  let src = std::fs::read_to_string(&path)
+    .unwrap_or_else(|e| panic!("{} is unreadable: {e}", Path::display(&path)));
+  (name, src)
+}
+
+/// Every token boundary in `src`: offset 0, then the end of each lossless token.
+///
+/// Derived from the **tree**, not from a second lexer instantiation, because every entry padded
+/// here has already been parsed losslessly by the caller and the tree's token ends are the same
+/// offsets by construction.
+fn boundaries(src: &str) -> Vec<usize> {
+  let parse = parse_document(src);
+  let mut out = vec![0usize];
+  for element in parse.syntax().descendants_with_tokens() {
+    if let Some(token) = element.into_token() {
+      out.push(usize::from(token.text_range().end()));
+    }
+  }
+  out.sort_unstable();
+  out.dedup();
+  out
+}
+
+/// Every node type named in a `Debug` rendering, as `tests/support/span_extent.rs` reads them.
+fn owners(dump: &str) -> BTreeSet<String> {
+  extent::owners(&extent::spans_of(dump))
+}
+
+// ---------------------------------------------------------------------------------------------
+// the core assertion
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_projection_equals_the_parse_over_the_shared_corpus() {
+  let entries = corpus("valid_");
+  assert!(
+    entries.len() >= VALID_ENTRY_FLOOR,
+    "only {} valid corpus entries, floor is {VALID_ENTRY_FLOOR}",
+    entries.len()
+  );
+
+  let mut compared = 0usize;
+  let mut padded_compared = 0usize;
+  let mut reached: BTreeSet<String> = BTreeSet::new();
+
+  for (name, src) in &entries {
+    let marks = boundaries(src);
+    assert!(
+      marks.len() >= 3,
+      "{name}: {} token boundaries — a one-token entry cannot exercise an interior junction",
+      marks.len()
+    );
+
+    for (form, source) in std::iter::once(("compact", src.clone())).chain(
+      ALPHABET
+        .iter()
+        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+    ) {
+      let expected = oracle(&source).unwrap_or_else(|e| {
+        panic!("{name} ({form}): the syntactic parser rejects a valid corpus entry: {e:?}")
+      });
+      let parse = parse_document(&source);
+      assert!(
+        !parse.has_errors(),
+        "{name} ({form}): the lossless parser rejects a valid corpus entry"
+      );
+      let projected = project(&parse, &source)
+        .unwrap_or_else(|e| panic!("{name} ({form}): the projection refused: {e}"));
+
+      assert_eq!(
+        projected, expected,
+        "{name} ({form}): the projection is not the AST the parser builds for the same bytes"
+      );
+
+      reached.extend(owners(&format!("{expected:#?}")));
+      compared += 1;
+      if form != "compact" {
+        padded_compared += 1;
+      }
+    }
+  }
+
+  assert_eq!(
+    compared,
+    entries.len() * (ALPHABET.len() + 1),
+    "the sweep did not run every form over every entry"
+  );
+  assert_eq!(
+    padded_compared,
+    entries.len() * ALPHABET.len(),
+    "the padded half did not run every form over every entry"
+  );
+  assert!(
+    reached.len() >= OWNER_FLOOR,
+    "the compared documents reach only {} node types, floor is {OWNER_FLOOR}: {reached:?}",
+    reached.len()
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// control 1 — the equality can answer no
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_equality_can_answer_no() {
+  let compact = "type T{f:Int}";
+  let shifted = " type T{f:Int}";
+
+  let a = project(&parse_document(compact), compact).expect("projects");
+  let b = project(&parse_document(shifted), shifted).expect("projects");
+  assert_ne!(
+    a, b,
+    "the same document one byte later compares equal, so the derived PartialEq is not reading \
+     spans and every assertion in this file is discounted by exactly that much"
+  );
+
+  // Same shape, one different name: the slice half of the same control.
+  let renamed = "type U{f:Int}";
+  let c = project(&parse_document(renamed), renamed).expect("projects");
+  assert_ne!(
+    a, c,
+    "two documents differing only in a type name compare equal, so slices are not being compared"
+  );
+
+  // And a positive leg, so the control is not passing merely because everything is unequal.
+  let again = project(&parse_document(compact), compact).expect("projects");
+  assert_eq!(a, again, "the projection is not deterministic");
+}
+
+// ---------------------------------------------------------------------------------------------
+// control 2 — the fraud model
+// ---------------------------------------------------------------------------------------------
+
+/// Build a green tree by hand, so the projection is handed a structure that does **not** match
+/// the structure its own text would parse to.
+struct Tree {
+  builder: GreenNodeBuilder<'static>,
+}
+
+impl Tree {
+  fn new() -> Self {
+    Self {
+      builder: GreenNodeBuilder::new(),
+    }
+  }
+
+  fn open(&mut self, kind: K) -> &mut Self {
+    self.builder.start_node(GraphQLLang::kind_to_raw(kind));
+    self
+  }
+
+  fn close(&mut self) -> &mut Self {
+    self.builder.finish_node();
+    self
+  }
+
+  fn token(&mut self, kind: K, text: &str) -> &mut Self {
+    self.builder.token(GraphQLLang::kind_to_raw(kind), text);
+    self
+  }
+
+  fn finish(self) -> SyntaxNode {
+    SyntaxNode::new_root(self.builder.finish())
+  }
+}
+
+/// Two definitions' worth of text, in **one** definition node.
+///
+/// The text is `type T{f:Int} type U{g:Int}`, which the parser splits into two definitions. This
+/// tree says there is one, and the projection has to believe the tree. A tree walk answers one
+/// definition named `T`; anything that re-derived the structure from the bytes answers two.
+fn two_definitions_in_one_node() -> (SyntaxNode, &'static str) {
+  let text = "type T{f:Int} type U{g:Int}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ObjectTypeDefinition);
+  tree.token(K::Name, "type").token(K::Space, " ");
+  tree.token(K::Name, "T");
+  tree.open(K::FieldsDefinition);
+  tree.token(K::LBrace, "{");
+  tree.open(K::FieldDefinition);
+  tree.token(K::Name, "f").token(K::Colon, ":");
+  tree.open(K::NamedType).token(K::Name, "Int").close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.token(K::Space, " ");
+  // The second definition's tokens, swallowed by the first node.
+  tree.token(K::Name, "type").token(K::Space, " ");
+  tree.token(K::Name, "U");
+  tree.open(K::FieldsDefinition);
+  tree.token(K::LBrace, "{");
+  tree.open(K::FieldDefinition);
+  tree.token(K::Name, "g").token(K::Colon, ":");
+  tree.open(K::NamedType).token(K::Name, "Int").close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  (tree.finish(), text)
+}
+
+/// The described-probe shape, with the description hung as a **sibling** of the definition
+/// rather than as its child.
+///
+/// Its text is `"d" type T{f:Int}`, which the parser attaches — producing
+/// `Described { description: Some(_), … }`. Under this tree the description is loose under the
+/// document, which is rubble the walk has no place for.
+fn description_as_sibling() -> (SyntaxNode, &'static str) {
+  let text = "\"d\" type T{f:Int}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::Description).token(K::String, "\"d\"").close();
+  tree.token(K::Space, " ");
+  tree.open(K::ObjectTypeDefinition);
+  tree.token(K::Name, "type").token(K::Space, " ");
+  tree.token(K::Name, "T");
+  tree.open(K::FieldsDefinition);
+  tree.token(K::LBrace, "{");
+  tree.open(K::FieldDefinition);
+  tree.token(K::Name, "f").token(K::Colon, ":");
+  tree.open(K::NamedType).token(K::Name, "Int").close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  (tree.finish(), text)
+}
+
+#[test]
+fn a_projection_that_re_parsed_the_source_would_fail_this() {
+  let (node, text) = two_definitions_in_one_node();
+  assert_eq!(
+    node.text().to_string(),
+    text,
+    "the synthetic tree's text must be the text a re-parse would be handed, or this control \
+     tests nothing"
+  );
+
+  let document = DocumentNode::cast_node(node).expect("the synthetic root is a Document");
+  let from_structure = document
+    .to_ast(text)
+    .expect("the synthetic tree is well-shaped, so it projects");
+  let from_text = project(&parse_document(text), text).expect("the real parse projects");
+
+  assert_ne!(
+    from_structure, from_text,
+    "the projection answered what a re-parse of the same bytes answers, which is exactly what a \
+     projection that ignored the tree it was handed would do"
+  );
+
+  // Pinned both ways, so "differs" cannot be satisfied tomorrow by an arbitrary wrong answer.
+  assert_eq!(
+    from_structure.definitions().len(),
+    1,
+    "the tree says one definition"
+  );
+  assert_eq!(
+    from_text.definitions().len(),
+    2,
+    "the bytes say two; if the parser stopped splitting them this control has nothing to contrast"
+  );
+}
+
+#[test]
+fn a_structure_the_bytes_do_not_imply_is_refused_rather_than_re_derived() {
+  // The second leg, and the sharper one: here the tree is a shape the walk has no place for, so
+  // reading the structure *refuses* where re-parsing the same bytes would happily succeed.
+  let (node, text) = description_as_sibling();
+  assert_eq!(node.text().to_string(), text);
+
+  let document = DocumentNode::cast_node(node).expect("the synthetic root is a Document");
+  let kind = document
+    .to_ast(text)
+    .map(|_| ())
+    .expect_err("a description loose under the document is rubble, not a definition")
+    .kind()
+    .clone();
+  assert_eq!(
+    kind,
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::Description,
+      found: K::Description,
+    },
+    "the walk names the loose node where it sits"
+  );
+
+  // And the re-parse of the same bytes succeeds, which is what makes this a discriminator.
+  project(&parse_document(text), text).expect("the real parse projects");
+}
+
+#[test]
+fn the_sibling_tree_really_is_one_the_parser_would_not_build() {
+  // The other half of the control above: the *real* parse of the same text does attach the
+  // description, so the refusal genuinely comes from a different structure rather than from a
+  // projection bug that happens to refuse.
+  let (_, text) = description_as_sibling();
+  let parsed = project(&parse_document(text), text).expect("projects");
+  let described = parsed.definitions()[0]
+    .try_unwrap_definition_ref()
+    .expect("a definition");
+  assert!(
+    described.description().is_some(),
+    "the parser is expected to attach `\"d\"` to the definition that follows it; if it stopped \
+     doing so the fraud control above has nothing to contrast with"
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// the span rule #72 established, re-measured
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_span_rule_the_normaliser_would_have_hidden() {
+  // The exact probe the design's M-A measurement used, with the numbers it recorded and the
+  // numbers trunk now answers. If a composite span drifts back onto a lookahead cursor, this
+  // names it; the corpus sweep would only report that two large values differ.
+  let src = "  type T  { f : Int }  ";
+  let ast = oracle(src).expect("parses");
+  let spans = extent::spans_of(&format!("{ast:#?}"));
+
+  let of = |owner: &str| {
+    let found: Vec<_> = spans
+      .iter()
+      .filter(|span| span.owner == owner)
+      .map(|span| (span.start, span.end))
+      .collect();
+    assert_eq!(found.len(), 1, "expected one {owner} span, got {found:?}");
+    found[0]
+  };
+
+  // Token extents. The design measured 0..21, 16..20 and 12..20 respectively, pre-#72.
+  assert_eq!(
+    of("Document"),
+    (2, 21),
+    "the document opens on its first token"
+  );
+  assert_eq!(
+    of("NamedType"),
+    (16, 19),
+    "a named type closes at the end of its own name, not at the next token's start"
+  );
+  assert_eq!(
+    of("FieldDefinition"),
+    (12, 19),
+    "a field definition closes at the end of its type, not on the space after it"
+  );
+
+  // And the tree's own ranges, which are what a projection reaching for `text_range` would use.
+  let parse = parse_document(src);
+  let field = parse
+    .syntax()
+    .descendants()
+    .find(|node| node.kind() == K::FieldDefinition)
+    .expect("a field definition node");
+  assert_eq!(
+    (
+      usize::from(field.text_range().start()),
+      usize::from(field.text_range().end())
+    ),
+    (12, 20),
+    "the CST node range holds the committed space after `Int`, which is why the projection folds \
+     token extents instead of reading it"
+  );
+
+  // The projection agrees with the parser and not with the node range.
+  assert_eq!(project(&parse, src).expect("projects"), ast);
+}
+
+// ---------------------------------------------------------------------------------------------
+// the divergent shapes, each pinned by name
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn a_description_hoists_out_of_the_definition_node_it_sits_inside() {
+  let src = "\"doc\" type T { f: Int }";
+  let parse = parse_document(src);
+
+  // The tree keeps it inside.
+  let definition = parse
+    .syntax()
+    .descendants()
+    .find(|node| node.kind() == K::ObjectTypeDefinition)
+    .expect("an object type definition node");
+  assert_eq!(usize::from(definition.text_range().start()), 0);
+  assert!(
+    definition
+      .children()
+      .any(|child| child.kind() == K::Description),
+    "the CST hangs the description inside the definition"
+  );
+
+  // The AST lifts it out, and the inner definition starts after it.
+  let projected = project(&parse, src).expect("projects");
+  let described = projected.definitions()[0]
+    .try_unwrap_definition_ref()
+    .expect("a definition");
+  assert_eq!((described.span().start(), described.span().end()), (0, 23));
+  assert_eq!(
+    described
+      .description()
+      .map(|d| (d.span().start(), d.span().end())),
+    Some((0, 5))
+  );
+  assert_eq!(
+    (
+      described.node().span().start(),
+      described.node().span().end()
+    ),
+    (6, 23),
+    "the inner definition's span is synthesised: it starts after the hoisted description"
+  );
+  assert_eq!(projected, oracle(src).expect("parses"));
+}
+
+#[test]
+fn a_field_definition_keeps_its_description_inside_its_own_span() {
+  // The asymmetry the module header records: `FieldDefinition` gives the wrapper and the inner
+  // node the *same* span, description included, where the document level does not. Reproduced
+  // rather than corrected, and pinned here so a "cleanup" of either side reds.
+  let src = "type T { \"fd\" f: Int }";
+  let projected = project(&parse_document(src), src).expect("projects");
+  assert_eq!(projected, oracle(src).expect("parses"));
+
+  let described = projected.definitions()[0]
+    .try_unwrap_definition_ref()
+    .expect("a definition");
+  let object = described
+    .node()
+    .try_unwrap_type_system_ref()
+    .expect("a type-system definition")
+    .try_unwrap_type_ref()
+    .expect("a type definition")
+    .try_unwrap_object_ref()
+    .expect("an object type");
+  let fields = object.fields_definition().expect("a fields definition");
+  let field = &fields.field_definitions()[0];
+  assert_eq!(
+    (field.span().start(), field.span().end()),
+    (field.node().span().start(), field.node().span().end()),
+    "the field definition's wrapper and inner spans are the same value"
+  );
+  assert_eq!(
+    (field.span().start(), field.span().end()),
+    (9, 20),
+    "and that value includes the description"
+  );
+}
+
+#[test]
+fn the_bang_folds_into_the_node_it_wraps() {
+  // The CST has a `NonNullType` node; the AST has no image for it, only a `required` flag whose
+  // span reaches over the `!`.
+  let src = "type T { f: [Int!]! }";
+  let parse = parse_document(src);
+  assert!(
+    parse
+      .syntax()
+      .descendants()
+      .filter(|node| node.kind() == K::NonNullType)
+      .count()
+      == 2,
+    "the tree opens a NonNullType for each `!`"
+  );
+  assert_eq!(
+    project(&parse, src).expect("projects"),
+    oracle(src).expect("parses")
+  );
+}
+
+#[test]
+fn a_name_is_a_token_and_an_interface_list_holds_names_not_type_references() {
+  // Two shapes at once: the definition's name is the *second* `Name` token under its node (there
+  // is no `Name` node in this kind space), and `implements A & B` holds `NamedType` nodes in the
+  // tree but bare `Name`s in the AST.
+  let src = "type T implements A & B { f: Int }";
+  let parse = parse_document(src);
+  let clause = parse
+    .syntax()
+    .descendants()
+    .find(|node| node.kind() == K::ImplementsInterfaces)
+    .expect("an implements clause");
+  assert_eq!(
+    clause
+      .children()
+      .filter(|child| child.kind() == K::NamedType)
+      .count(),
+    2,
+    "the tree wraps each interface in a NamedType"
+  );
+  assert_eq!(
+    project(&parse, src).expect("projects"),
+    oracle(src).expect("parses")
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// refusals
+// ---------------------------------------------------------------------------------------------
+
+/// One pinned refusal: an input, and the kind the projection must answer with.
+struct Refusal {
+  what: &'static str,
+  kind: fn(&ProjectErrorKind) -> bool,
+  error: ProjectErrorKind,
+}
+
+fn refuse(source: &str) -> ProjectErrorKind {
+  let parse = parse_document(source);
+  project(&parse, source)
+    .map(|_| ())
+    .expect_err("the projection was expected to refuse")
+    .kind()
+    .clone()
+}
+
+#[test]
+fn the_lost_node_class_refuses() {
+  // `invalid_top_level_junk`: bytes a failed definition left as rubble under the document.
+  let (_, src) = read_entry(
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/invalid_top_level_junk.graphql"),
+  );
+  let kind = refuse(&src);
+  assert!(
+    matches!(kind, ProjectErrorKind::UnexpectedChild { .. }),
+    "expected an UnexpectedChild refusal, got {kind:?}"
+  );
+}
+
+#[test]
+fn the_recovered_in_place_class_refuses() {
+  // `type T { x: }` keeps its field-definition node and hangs an `Error` hole where the type
+  // should be. The hole is the refusal.
+  let kind = refuse("type T { x: }");
+  assert_eq!(
+    kind,
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::FieldDefinition,
+      found: K::Error,
+    },
+    "the hole must be named where it sits"
+  );
+}
+
+#[test]
+fn a_variable_in_a_constant_position_refuses() {
+  // The AST's own type system forbids it: `ConstInputValue` has no `Variable` variant. The
+  // lossless tree keeps the offending node so a diagnostic can point at it, so the refusal is
+  // the projection's, not a cast failure.
+  let src = "type T @d(a: $v) { f: Int }";
+  let parse = parse_document(src);
+  assert!(
+    parse
+      .syntax()
+      .descendants()
+      .any(|node| node.kind() == K::Variable),
+    "the tree is expected to keep the variable node; if it stopped, this pin moved"
+  );
+  let kind = refuse(src);
+  assert_eq!(
+    kind,
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::Argument,
+      found: K::Variable,
+    }
+  );
+}
+
+#[test]
+fn a_fragment_named_on_refuses() {
+  let (_, src) = read_entry(
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/corpus/invalid_fragment_named_on.graphql"),
+  );
+  let kind = refuse(&src);
+  assert_eq!(
+    kind,
+    ProjectErrorKind::SemanticRule {
+      rule: "a fragment may not be named `on`",
+    },
+    "the exclusion `FragmentName::new` is kept crate-private to protect has to be re-checked \
+     here, because the tree records it only as a diagnostic"
+  );
+}
+
+#[test]
+fn a_mismatched_source_refuses() {
+  let src = "type T { f: Int }";
+  let parse = parse_document(src);
+  let other = "type U { f: Int }";
+  assert_eq!(
+    src.len(),
+    other.len(),
+    "same length, so every range is in bounds"
+  );
+  let kind = project(&parse, other)
+    .map(|_| ())
+    .expect_err("a tree parsed from other bytes must not project against these")
+    .kind()
+    .clone();
+  assert_eq!(kind, ProjectErrorKind::SourceMismatch);
+
+  // A shorter source is the out-of-bounds leg of the same check.
+  let kind = project(&parse, "type")
+    .map(|_| ())
+    .expect_err("a truncated source must not project")
+    .kind()
+    .clone();
+  assert_eq!(kind, ProjectErrorKind::SourceMismatch);
+}
+
+#[test]
+fn a_missing_constituent_refuses() {
+  // No corpus entry reaches this: every shape the recovery produces either keeps the constituent
+  // or leaves an `Error` hole, which is refused earlier. So the witness is synthetic — a field
+  // definition with a name and no type, the shape a future recovery change could start emitting.
+  let text = "type T{f:}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ObjectTypeDefinition);
+  tree.token(K::Name, "type").token(K::Space, " ");
+  tree.token(K::Name, "T");
+  tree.open(K::FieldsDefinition);
+  tree.token(K::LBrace, "{");
+  tree.open(K::FieldDefinition);
+  tree.token(K::Name, "f").token(K::Colon, ":");
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+
+  let document = DocumentNode::cast_node(node).expect("a Document root");
+  let kind = document
+    .to_ast(text)
+    .map(|_| ())
+    .expect_err("a field definition with no type has no AST image")
+    .kind()
+    .clone();
+  assert_eq!(
+    kind,
+    ProjectErrorKind::MissingChild {
+      parent: K::FieldDefinition,
+      wanted: "a type reference",
+    }
+  );
+}
+
+#[test]
+fn a_token_that_will_not_cook_refuses() {
+  // Same reason as above: the lossless lexer never emits a `String` token it cannot re-lex, so
+  // this class is reachable only by handing the projection a tree that claims one. Its value is
+  // that the refusal exists rather than a panic or a silently truncated literal.
+  let text = "type T{f:Int}\"oops";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ObjectTypeDefinition);
+  tree.token(K::Name, "type").token(K::Space, " ");
+  tree.token(K::Name, "T");
+  tree.open(K::FieldsDefinition);
+  tree.token(K::LBrace, "{");
+  tree.open(K::FieldDefinition);
+  tree.token(K::Name, "f").token(K::Colon, ":");
+  tree.open(K::NamedType).token(K::Name, "Int").close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  // An unterminated literal, claimed as a description.
+  tree.open(K::Description).token(K::String, "\"oops").close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+
+  let document = DocumentNode::cast_node(node).expect("a Document root");
+  let kind = document
+    .to_ast(text)
+    .map(|_| ())
+    .expect_err("an unterminated string literal does not cook")
+    .kind()
+    .clone();
+  assert_eq!(kind, ProjectErrorKind::MalformedToken { kind: K::String });
+}
+
+#[test]
+fn every_refusal_kind_has_a_witness() {
+  // Totality. The list is written out rather than derived, because `ProjectErrorKind` is
+  // `#[non_exhaustive]` and there is no way to enumerate its variants at run time — so adding a
+  // variant without a pin has to be caught by the count below.
+  let src_junk = read_entry(
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/invalid_top_level_junk.graphql"),
+  )
+  .1;
+  let src_on = read_entry(
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/corpus/invalid_fragment_named_on.graphql"),
+  )
+  .1;
+
+  let witnesses: Vec<Refusal> = vec![
+    Refusal {
+      what: "rubble under the document",
+      kind: |k| matches!(k, ProjectErrorKind::UnexpectedChild { .. }),
+      error: refuse(&src_junk),
+    },
+    Refusal {
+      what: "a fragment named `on`",
+      kind: |k| matches!(k, ProjectErrorKind::SemanticRule { .. }),
+      error: refuse(&src_on),
+    },
+    Refusal {
+      what: "a mismatched source",
+      kind: |k| matches!(k, ProjectErrorKind::SourceMismatch),
+      error: {
+        let src = "type T { f: Int }";
+        project(&parse_document(src), "type U { f: Int }")
+          .map(|_| ())
+          .expect_err("refuses")
+          .kind()
+          .clone()
+      },
+    },
+  ];
+
+  for witness in &witnesses {
+    assert!(
+      (witness.kind)(&witness.error),
+      "{}: got {:?}",
+      witness.what,
+      witness.error
+    );
+  }
+
+  // The two synthetic classes are pinned in their own tests above; asserting them here as well
+  // would duplicate the construction without adding a check. What this count owns is the claim
+  // that five variants exist and five are witnessed somewhere in this file.
+  const KIND_COUNT: usize = 5;
+  assert_eq!(
+    witnesses.len() + 2,
+    KIND_COUNT,
+    "ProjectErrorKind has a variant with no witness in this file; add one and raise the count"
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// the shape-faithful boundary, and the invalid half as a census
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_unclosed_brace_class_projects_although_the_parser_rejects_it() {
+  // The documented boundary of "shape-faithful, not verdict-faithful". Asserted rather than
+  // left implicit so the day it moves is a day somebody is told.
+  let src = "type T {\n  x: Int\n";
+  let parse = parse_document(src);
+  assert!(
+    parse.has_errors(),
+    "the lossless parse reports the missing closer"
+  );
+  assert!(oracle(src).is_err(), "the syntactic parser rejects it");
+  assert!(
+    !parse
+      .syntax()
+      .descendants()
+      .any(|node| matches!(node.kind(), K::Error | K::Gap)),
+    "this class is shape-complete: the tree carries no hole, which is why it projects"
+  );
+  project(&parse, src).expect("a shape-complete tree projects even though the parse was rejected");
+}
+
+#[test]
+fn the_invalid_half_is_a_census_rather_than_a_wall_of_refusals() {
+  // Every `invalid_` entry, classified. No equality claim is possible — there is no oracle AST —
+  // so what this owns is that the split is measured and that neither side is empty.
+  let entries = corpus("invalid_");
+  assert!(
+    entries.len() >= INVALID_ENTRY_FLOOR,
+    "only {} invalid corpus entries, floor is {INVALID_ENTRY_FLOOR}",
+    entries.len()
+  );
+
+  let mut refused: Vec<&str> = Vec::new();
+  let mut projected: Vec<&str> = Vec::new();
+  for (name, src) in &entries {
+    let parse = parse_document(src);
+    assert!(
+      oracle(src).is_err(),
+      "{name}: an `invalid_` entry the syntactic parser accepts is a corpus fault"
+    );
+    match project(&parse, src) {
+      Ok(_) => projected.push(name),
+      Err(_) => refused.push(name),
+    }
+  }
+
+  assert!(
+    refused.len() >= 5,
+    "only {} of {} invalid entries refuse; the refusal paths are barely exercised: {refused:?}",
+    refused.len(),
+    entries.len()
+  );
+  assert!(
+    !projected.is_empty(),
+    "every invalid entry refuses, so the shape-faithful boundary is not being exercised at all \
+     and the contract in the module header is untested"
+  );
+  assert!(
+    projected.contains(&"invalid_unterminated_brace.graphql"),
+    "the unclosed-brace class is the pinned shape-faithful survivor; it now refuses: {projected:?}"
+  );
+}

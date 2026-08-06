@@ -214,6 +214,7 @@ pub use input_object::{
 };
 
 mod directive;
+pub(crate) use directive::classify_location;
 pub use directive::{directive_definition, directive_locations, location};
 
 mod schema;
