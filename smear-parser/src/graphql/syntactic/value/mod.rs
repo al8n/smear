@@ -32,7 +32,7 @@ use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name};
 use crate::{
-  combinator::{ParseCtx, colon, dollar, equal},
+  combinator::{ParseCtx, TokenSpannedExt, colon, dollar, equal},
   graphql::{
     GraphQL,
     ast::{
@@ -660,7 +660,7 @@ value_parser!(
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: values }| AstList::new(span, values))
   }
@@ -676,7 +676,7 @@ value_parser!(
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: values }| AstConstList::new(span, values))
   }
@@ -715,7 +715,7 @@ value_parser!(
         )?;
         value(inp)
       })
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data: (name, value) }| ObjectField::new(span, name, value))
       .parse_input(inp)
   }
@@ -754,7 +754,7 @@ value_parser!(
         )?;
         const_value(inp)
       })
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data: (name, value) }| ConstObjectField::new(span, name, value))
       .parse_input(inp)
   }
@@ -770,7 +770,7 @@ value_parser!(
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: fields }| AstObject::new(span, fields))
   }
@@ -786,7 +786,7 @@ value_parser!(
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: fields }| AstConstObject::new(span, fields))
   }
@@ -1049,7 +1049,7 @@ value_parser!(
 
     equal
       .ignore_then(validated_const_tail)
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data: value }| DefaultInputValue::new(span, value))
       .parse_input(inp)
   }

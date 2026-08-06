@@ -23,7 +23,7 @@ use super::{
   try_name,
 };
 use crate::{
-  combinator::{ParseCtx, try_at},
+  combinator::{ParseCtx, extent_end, try_at},
   graphql::{
     GraphQL,
     ast::{ConstDirective, ConstDirectives, Directive, Directives, Name},
@@ -277,7 +277,10 @@ directive_parser!(
   inp,
   Directives<GraphqlSlice<'inp, Src>>,
   {
-    let start = *inp.offset();
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
     match try_at(inp)? {
       ParseAttempt::Accept(at) => directives_after_at(inp, at),
       ParseAttempt::Decline => Ok(Directives::new(SimpleSpan::new(start, start), Vec::new())),
@@ -297,7 +300,10 @@ directive_parser!(
   inp,
   ConstDirectives<GraphqlSlice<'inp, Src>>,
   {
-    let start = *inp.offset();
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
     match try_at(inp)? {
       ParseAttempt::Accept(at) => const_directives_after_at(inp, at),
       ParseAttempt::Decline => Ok(ConstDirectives::new(

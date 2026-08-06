@@ -22,7 +22,7 @@ use super::{
   directive::directives, keyword_of, path_after_first, ty::try_type_generics, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, try_colon, try_spread},
+  combinator::{ParseCtx, TokenSpannedExt, try_colon, try_spread},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -188,7 +188,7 @@ selection_parser!(
   {
     take_on
       .ignore_then(super::generic::type_path)
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data }| TypeCondition::new(span, data))
       .parse_input(inp)
   }
@@ -630,7 +630,7 @@ selection_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| SelectionSet::new(span, data))
   }

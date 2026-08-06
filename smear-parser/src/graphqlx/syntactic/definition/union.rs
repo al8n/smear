@@ -1,7 +1,7 @@
 //! GraphQLx union type definitions and member paths.
 
 use super::*;
-use crate::combinator::{pipe, try_pipe};
+use crate::combinator::{extent_end, pipe, try_pipe};
 
 fn union_members_after_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -80,7 +80,6 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
   let name = definition_name(inp)?;
   let directives = optional_const_directives(inp)?;
   let members = try_union_members(inp)?;
@@ -107,7 +106,7 @@ where
     (ParseAttempt::Decline, Some(_)) => unreachable!("a where clause requires union members"),
   };
   Ok(UnionTypeDefinition::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
+    SimpleSpan::new(start, extent_end(inp)),
     name,
     directives,
     member_types,

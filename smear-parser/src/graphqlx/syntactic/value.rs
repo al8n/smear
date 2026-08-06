@@ -27,7 +27,9 @@ use super::{
   path_after_first, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, colon, dollar, fat_arrow, try_equal},
+  combinator::{
+    ParseCtx, TokenSpannedExt, colon, dollar, extent_since, extent_start, fat_arrow, try_equal,
+  },
   graphqlx::{
     GraphQLx,
     ast::{
@@ -355,7 +357,7 @@ value_parser!(
           )
           .parse_input(inp)
       })
-      .spanned()
+      .token_spanned()
       .map(
         |Spanned {
            span,
@@ -488,7 +490,7 @@ value_parser!(
     .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
     .delimited_by_brackets()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| List::new(span, data))
   }
@@ -510,7 +512,7 @@ value_parser!(
     .repeated_while::<_, U1>(decide_const_value_head::<_, Ctx>)
     .delimited_by_brackets()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstList::new(span, data))
   }
@@ -531,7 +533,7 @@ value_parser!(
   super::name
     .then_ignore(colon)
     .then(value)
-    .spanned()
+    .token_spanned()
     .map(|Spanned { span, data: (name, value) }| ObjectField::new(span, name, value))
     .parse_input(inp)
   }
@@ -552,7 +554,7 @@ value_parser!(
   super::name
     .then_ignore(colon)
     .then(const_value)
-    .spanned()
+    .token_spanned()
     .map(|Spanned { span, data: (name, value) }| ConstObjectField::new(span, name, value))
     .parse_input(inp)
   }
@@ -574,7 +576,7 @@ value_parser!(
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| Object::new(span, data))
   }
@@ -596,7 +598,7 @@ value_parser!(
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstObject::new(span, data))
   }
@@ -615,7 +617,7 @@ value_parser!(
     value
       .then_ignore(fat_arrow)
       .then(value)
-      .spanned()
+      .token_spanned()
       .map(
         |Spanned {
            span,
@@ -639,7 +641,7 @@ value_parser!(
     const_value
       .then_ignore(fat_arrow)
       .then(const_value)
-      .spanned()
+      .token_spanned()
       .map(
         |Spanned {
            span,
@@ -667,7 +669,7 @@ where
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| Set::new(SimpleSpan::new(start, span.end()), data))
 }
@@ -689,7 +691,7 @@ where
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstSet::new(SimpleSpan::new(start, span.end()), data))
 }
@@ -711,7 +713,7 @@ where
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| Map::new(SimpleSpan::new(start, span.end()), data))
 }
@@ -733,7 +735,7 @@ where
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstMap::new(SimpleSpan::new(start, span.end()), data))
 }
@@ -966,12 +968,12 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
+  let node_start = extent_start(inp)?;
   match try_equal(inp)? {
     ParseAttempt::Accept(_) => {
       let value = const_value(inp)?;
       Ok(ParseAttempt::Accept(DefaultInputValue::new(
-        inp.span_since(&cursor),
+        extent_since(inp, node_start),
         value,
       )))
     }

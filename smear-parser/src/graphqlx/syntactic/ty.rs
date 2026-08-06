@@ -24,7 +24,7 @@ use super::{
   peek_kind, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, try_bang, try_fat_arrow},
+  combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start, try_bang, try_fat_arrow},
   graphqlx::{
     GraphQLx,
     ast::{DefinitionTypePath, Type, TypeGenerics},
@@ -87,7 +87,7 @@ where
     .at_least(1)
     .delimited_by_angles()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| TypeGenerics::new(span, data))
 }
@@ -210,7 +210,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
+  let node_start = extent_start(inp)?;
   let identifier_head =
     |Spanned { span, data: token }: Spanned<GraphqlxToken<'inp, Src>, SimpleSpan>,
      inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| match token {
@@ -246,7 +246,7 @@ where
     },
   };
   let required = matches!(try_bang(inp)?, ParseAttempt::Accept(_));
-  let span = inp.span_since(&cursor);
+  let span = extent_since(inp, node_start);
   Ok(match core {
     TypeCore::Path(path, generics) => {
       Type::Path(DefinitionTypePath::new(span, path, generics, required))

@@ -121,7 +121,7 @@ definition_parser!(
   {
     description
       .then(type_system_definition)
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned {
         span,
@@ -348,7 +348,7 @@ definition_parser!(
       .map(
         |entries: Vec<ImportOrTypeSystemDefinitionOrExtension<GraphqlxSlice<'inp, Src>>>| entries,
       )
-      .spanned()
+      .token_spanned()
       .parse_input(inp)?;
     Ok(TypeSystemDocument::new(span, entries))
   }

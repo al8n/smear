@@ -25,7 +25,7 @@ use super::{
   keyword_of, unexpected_here,
 };
 use crate::{
-  combinator::ParseCtx,
+  combinator::{ParseCtx, TokenSpannedExt},
   graphqlx::{
     GraphQLx,
     ast::{Definition, Described, Document, ImportOrDefinitionOrExtension, StringValue},
@@ -333,7 +333,7 @@ document_parser!(
       .at_least(1)
       .collect_with(Vec::new())
       .map(|entries: Vec<ImportOrDefinitionOrExtension<GraphqlxSlice<'inp, Src>>>| entries)
-      .spanned()
+      .token_spanned()
       .parse_input(inp)?;
     Ok(Document::new(span, entries))
   }

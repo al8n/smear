@@ -45,11 +45,11 @@ definition_parser!(
   EnumValueDefinition<GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    let cursor = *inp.cursor();
+    let node_start = extent_start(inp)?;
     let description = description(inp)?;
     let value = take_enum_value(inp)?;
     let directives = optional_const_directives(inp)?;
-    let span = inp.span_since(&cursor);
+    let span = extent_since(inp, node_start);
     Ok(Described::new(
       span,
       description,
@@ -72,7 +72,7 @@ definition_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| EnumValuesDefinition::new(span, data))
   }
@@ -104,7 +104,6 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
   let name = take_name(inp)?;
   let directives = optional_const_directives(inp)?;
   let enum_values_definition = match try_enum_values_definition(inp)? {
@@ -112,7 +111,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(EnumTypeDefinition::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
+    SimpleSpan::new(start, extent_end(inp)),
     name,
     directives,
     enum_values_definition,

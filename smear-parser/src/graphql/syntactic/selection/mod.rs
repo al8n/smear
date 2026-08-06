@@ -27,7 +27,7 @@ use super::{
   directive::directives, fragment_name, try_name,
 };
 use crate::{
-  combinator::{ParseCtx, try_colon, try_spread},
+  combinator::{ParseCtx, TokenSpannedExt, try_colon, try_spread},
   graphql::{
     GraphQL,
     ast::{
@@ -559,7 +559,7 @@ selection_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| SelectionSet::new(span, data))
   }

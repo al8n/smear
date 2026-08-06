@@ -27,7 +27,7 @@ use super::{
   value::{const_value, value},
 };
 use crate::{
-  combinator::{ParseCtx, try_colon},
+  combinator::{ParseCtx, TokenSpannedExt, extent_end, extent_since, extent_start, try_colon},
   graphqlx::{
     GraphQLx,
     ast::{Argument, Arguments, ConstArgument, ConstArguments, Name},
@@ -111,7 +111,7 @@ argument_parser!(
     take_argument_name
       .then_ignore(take_argument_colon)
       .then(value)
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data: (name, value) }| Argument::new(span, name, value))
       .parse_input(inp)
   }
@@ -131,7 +131,7 @@ argument_parser!(
     take_argument_name
       .then_ignore(take_argument_colon)
       .then(const_value)
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data: (name, value) }| ConstArgument::new(span, name, value))
       .parse_input(inp)
   }
@@ -170,19 +170,26 @@ argument_parser!(
   inp,
   Arguments<GraphqlxSlice<'inp, Src>>;
   {
-    let start = *inp.offset();
-    try_parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
+    // Not the `Delimited`'s own span: tokora builds that one from the lookahead cursor at both
+    // ends, so it opens before the `(`'s leading trivia and closes wherever the peek past `)`
+    // landed. See `crate::combinator::extent`.
+    let node_start = extent_start(inp)?;
+    let parsed = try_parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
       (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| argument(inp))
         .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
         .collect_with(Vec::new()),
-    )(inp)
-      .map(|arguments| match arguments {
-        Some(arguments) => {
-          let (span, _, _, arguments) = arguments.into_components();
-          Arguments::new(span, arguments)
-        }
-        None => Arguments::new(SimpleSpan::new(start, start), Vec::new()),
-      })
+    )(inp)?;
+    Ok(match parsed {
+      Some(arguments) => {
+        let (_, _, _, arguments) = arguments.into_components();
+        Arguments::new(extent_since(inp, node_start), arguments)
+      }
+      None => Arguments::new(SimpleSpan::new(start, start), Vec::new()),
+    })
   }
 );
 
@@ -201,19 +208,24 @@ argument_parser!(
   inp,
   ConstArguments<GraphqlxSlice<'inp, Src>>;
   {
-    let start = *inp.offset();
-    try_parens::<_, _, _, _, Vec<ConstArgument<GraphqlxSlice<'inp, Src>>>, _>(
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
+    // Not the `Delimited`'s own span — see `arguments` above and `crate::combinator::extent`.
+    let node_start = extent_start(inp)?;
+    let parsed = try_parens::<_, _, _, _, Vec<ConstArgument<GraphqlxSlice<'inp, Src>>>, _>(
       (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_argument(inp))
         .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
         .collect_with(Vec::new()),
-    )(inp)
-      .map(|arguments| match arguments {
-        Some(arguments) => {
-          let (span, _, _, arguments) = arguments.into_components();
-          ConstArguments::new(span, arguments)
-        }
-        None => ConstArguments::new(SimpleSpan::new(start, start), Vec::new()),
-      })
+    )(inp)?;
+    Ok(match parsed {
+      Some(arguments) => {
+        let (_, _, _, arguments) = arguments.into_components();
+        ConstArguments::new(extent_since(inp, node_start), arguments)
+      }
+      None => ConstArguments::new(SimpleSpan::new(start, start), Vec::new()),
+    })
   }
 );
 

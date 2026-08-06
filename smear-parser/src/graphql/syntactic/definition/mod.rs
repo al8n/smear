@@ -25,7 +25,9 @@ use super::{
   value::default_value,
 };
 use crate::{
-  combinator::{ParseCtx, at, colon, equal, try_equal},
+  combinator::{
+    ParseCtx, TokenSpannedExt, at, colon, equal, extent_end, extent_since, extent_start, try_equal,
+  },
   graphql::{
     GraphQL,
     ast::{
