@@ -244,6 +244,31 @@ macro_rules! lossless_production {
 ///   fn parse_operation_definition => operation_definition (mark);
 /// }
 /// ```
+///
+/// # The generated module is behind `feature = "test-support"`
+///
+/// It was `#[doc(hidden)] pub` and nothing else, which hides a module from rustdoc and ships it
+/// anyway: sixteen modules and sixty-eight `fn(&str) -> Parse` entry points, public, callable and
+/// semver-relevant in every `rowan` build. The gate is written here, once, rather than at sixteen
+/// call sites.
+///
+/// **`pub` and not `pub(crate)`** because every consumer is a file under `tests/`, which cargo
+/// compiles as its own crate and which therefore sees exactly the shipped public surface.
+/// `#[cfg(test)]` cannot reach an integration test either. A feature is the only door that both
+/// lets `tests/` in and keeps a consumer out.
+///
+/// # Fourteen items the drivers were keeping alive
+///
+/// Gating the modules turned up productions whose **only** caller was a driver — the two SDL-only
+/// and executable-only document roots and their dispatchers, GraphQLx's `extension` and
+/// `path_or_recover`, and the three recovery head lists that only those productions name. They are
+/// real productions, deliberately not on `parse_str`'s path (each says so in its own docs), and
+/// they are `pub(crate)`, so with the drivers gone nothing in a shipped build can reach them.
+///
+/// Each carries `#[cfg_attr(not(feature = "test-support"), allow(dead_code))]` rather than a bare
+/// `allow`: the lint stays live in the configuration that has callers, so a driver that stops
+/// calling one is still reported. The alternative — one module-wide `allow` — would blanket four
+/// thousand lines and hide the next genuinely dead production.
 macro_rules! lossless_drivers {
   (
     dialect = $dm:ident::$dl:ident;
@@ -256,6 +281,13 @@ macro_rules! lossless_drivers {
     )*
   ) => {
     $(#[$modmeta])*
+    // The sixteen driver modules the two suites declare, gated at the one place that writes them
+    // all. `#[doc(hidden)]` alone left every one of them in the shipped `rowan` build — public,
+    // callable and semver-relevant — for the benefit of `tests/`, which is a separate crate and
+    // therefore cannot see anything less than `pub`. The feature removes them from the build
+    // instead of merely from the docs; `doc(hidden)` stays because they are not API even when a
+    // consumer opts in.
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     pub mod $modname {
       #[allow(unused_imports)]

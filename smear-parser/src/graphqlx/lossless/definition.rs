@@ -693,6 +693,10 @@ lossless_production! {
 
   /// Dispatch on a type-system definition's keyword, reading an optional leading description
   /// first. Opens **no** node of its own; the chosen production spends the mark on its own.
+  // The document dispatchers all enter at `type_system_definition_at` with a mark they already
+  // minted; this description-reading wrapper is reached only from a driver — see
+  // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn type_system_definition<'inp, Src, Ctx>(inp) {
     // The head peek first, so the leading trivia it crosses is committed before the mark is minted
     // and therefore lands outside whatever the mark eventually wraps.

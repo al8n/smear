@@ -253,6 +253,9 @@ lossless_production! {
   /// [`type_system_extension`] instead. Only the drivers and a direct consumer reach this door;
   /// `document.rs`'s dispatchers mint their own mark before the `extend`, because the same mark
   /// has to be able to cover a description on the *other* branch.
+  // "Only the drivers and a direct consumer" is one caller, the drivers being `pub(crate)`'s only
+  // reach — so the gate takes it. See `lossless_drivers!`.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn extension<'inp, Src, Ctx>(inp) {
     peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();

@@ -60,8 +60,14 @@ pub(crate) use macros::{
 /// The three bookkeeping kinds and the raw round-trip are needed in four unrelated places — the
 /// sink profile, the kind validator, the coverage tally's width, and `rowan::Language` — and
 /// threading four values through four call chains is how they drift apart. Naming them once is
-/// also what lets [`test_support::assert_kind_space_is_well_formed`] be written once instead of
-/// three times per dialect.
+/// also what lets `test_support::assert_kind_space_is_well_formed` — behind
+/// `feature = "test-support"` — be written once instead of three times per dialect.
+///
+/// The reference is deliberately **not** an intra-doc link: the item it names is compiled only
+/// under that feature, and a link to a `cfg`-gated item is a `broken_intra_doc_links` warning in
+/// every build that does not enable it. `tests/lossless_isolation.rs` records the same failure
+/// mode from the other direction — a doc link is a compile-time reference, and gating the item
+/// without gating the link moves the breakage into `cargo doc`.
 ///
 /// # The invariants, and which one is load-bearing for what
 ///
@@ -103,8 +109,26 @@ pub trait KindSpace: Copy + Eq + core::fmt::Debug + 'static {
   fn from_raw(raw: u16) -> Option<Self>;
 }
 
-/// Test-only scaffolding. Nothing in the crate calls it.
-#[doc(hidden)]
+/// The conformance assertion for a [`KindSpace`] impl, behind `feature = "test-support"`.
+///
+/// # Why this one is documented where the dialects' scaffolding is hidden
+///
+/// [`KindSpace`] is a public, unsealed trait, and it is the substrate's extension point: the
+/// module header's whole claim is that these pieces are usable without naming a dialect, and a
+/// third dialect — in this crate or outside it — becomes one by implementing it. Its invariants
+/// are stated in prose four paragraphs up and enforced nowhere else, which is precisely the shape
+/// that a downstream implementor gets wrong and finds out about as a panic inside the sink's kind
+/// validator. So the check ships, as something a consumer may opt into, rather than being hidden
+/// from the docs of the trait it belongs to.
+///
+/// Everything under a *dialect's* `lossless` module named `test_support` is the opposite case —
+/// drivers over one concrete grammar, several of which build deliberately corrupt trees — and
+/// stays `#[doc(hidden)]` under the same feature.
+///
+/// The whole module is compiled only under the feature; nothing in a default build, and nothing
+/// in a plain `rowan` build, contains it.
+#[cfg(feature = "test-support")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-support")))]
 pub mod test_support {
   use super::KindSpace;
 

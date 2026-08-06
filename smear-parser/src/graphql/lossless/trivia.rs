@@ -196,6 +196,11 @@ where
 /// **This module is where the atoms stop being generic.** The atoms above name only the
 /// projections; these drivers must choose a concrete source, emitter and context to build a
 /// `Sink` at all, exactly as [`super::runner::parse_str`] does.
+///
+/// Behind `feature = "test-support"`, and hidden even then. `pub` is forced only because
+/// `tests/lossless_trivia_atoms.rs` is a separate crate; the drivers themselves name this
+/// dialect's concrete lexer and are of no use to anyone outside it.
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support {
   use std::{

@@ -208,6 +208,9 @@ lossless_production! {
   /// Dispatch on the definition head, reading an optional leading description first. Opens
   /// **no** node of its own; the chosen production spends the mark on its own — and this is one
   /// of the two places the contextual keywords are read.
+  // Reached only from `executable_document`, itself reached only from a driver — see
+  // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn executable_definition<'inp, Src, Ctx>(inp) {
     // The head peek first — see `document::definition` for the ruling and for the measurement
     // that shows the ordering is currently redundant, every caller being a loop that peeks.
@@ -238,6 +241,9 @@ lossless_production! {
   /// The empty form is reported: `syntactic/` rejects an empty input ("one-or-more, so an empty
   /// input errors"), and gate 1 compares verdicts. The node is opened either way, so a caller
   /// always finds a document to walk.
+  // The executable-only root, off `parse_str`'s mixed-form path; its driver is its only caller
+  // and the gate takes it — see `lossless_drivers!`.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn executable_document<'inp, Src, Ctx>(inp) {
     node(
       K::ExecutableDocument.raw(),

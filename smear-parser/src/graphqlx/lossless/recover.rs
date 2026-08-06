@@ -177,6 +177,9 @@ pub(crate) const DEFINITION_HEADS: &[Kind] = &[
 ];
 
 /// The token kinds an executable-document entry may begin with.
+// Named only by the executable-only root's dispatcher, reached only from a `test_support`
+// driver — see `lossless_drivers!`.
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 pub(crate) const EXECUTABLE_ENTRY_HEADS: &[Kind] = &[
   Kind::InlineString,
   Kind::BlockString,
@@ -186,6 +189,9 @@ pub(crate) const EXECUTABLE_ENTRY_HEADS: &[Kind] = &[
 
 /// The token kinds a type-system-document entry may begin with — no `{`, the shorthand operation
 /// not being a type-system definition.
+// Named only by the SDL-only root and its dispatcher, reached only from a `test_support`
+// driver — see `lossless_drivers!`.
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 pub(crate) const TYPE_SYSTEM_ENTRY_HEADS: &[Kind] =
   &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
 

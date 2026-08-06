@@ -235,6 +235,11 @@ where
 /// `peek_keyword_of` and `try_eat_bang_of` — cover `peek_as` and `try_eat`, which GraphQL leaves
 /// to be exercised by its productions. GraphQLx has no productions yet, and an atom whose only
 /// witness is a production that does not exist is an atom with no witness.
+///
+/// Behind `feature = "test-support"`, and hidden even then. `pub` is forced only because
+/// `tests/lossless_x_trivia_atoms.rs` is a separate crate; the drivers themselves name this
+/// dialect's concrete lexer and are of no use to anyone outside it.
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support {
   use std::{

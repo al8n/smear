@@ -350,6 +350,9 @@ lossless_production! {
   ///
   /// [`definition`] without the three executable arms — which is the whole difference between a
   /// `TypeSystemDocument` and a `Document`.
+  // Reached only from `type_system_document`, itself reached only from a driver — see
+  // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn type_system_definition_or_extension<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -419,6 +422,9 @@ lossless_production! {
   ///
   /// Not reachable from [`parse_str`](super::parse_str), which parses the mixed form; the driver
   /// under `test_support` is its entry, and a schema-only consumer would call it directly.
+  // Which makes the driver its only caller, so the gate takes its last one — see
+  // `lossless_drivers!`.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn type_system_document<'inp, Src, Ctx>(inp) {
     node(
       K::TypeSystemDocument.raw(),
