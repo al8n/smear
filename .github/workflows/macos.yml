@@ -1,0 +1,191 @@
+name: macOS
+
+# ── THE QUEUE-BOUND LANE ────────────────────────────────────────────────────────────────────
+#
+# These four legs used to be the `macos-latest` row of `CI`'s `rustfmt`, `clippy`, `build` and
+# `test` matrices. They are here for the same reason the Miri matrices are in
+# `.github/workflows/miri.yml`, and the two files' headers describe one measurement: on
+# 2026-08-06 `CI` had not concluded on any of the last four pull requests, because the only jobs
+# that never started were macOS-bound and a run's conclusion is a property of the WHOLE run. Two
+# of those four merged with no CI verdict at all.
+#
+# The distinction between this file and `miri.yml` is queue versus clock. These four legs are
+# FAST once they start and slow only because they wait: in run 30963710061 — the last `CI` run
+# that concluded at all — `rustfmt (macos-latest)` waited 6h38m to run for 9 seconds,
+# `clippy (macos-latest)` waited 6h08m to run 7m24s, `build (macos-latest)` waited 9h17m to run
+# 6m05s, and `test (macos-latest)` waited 9h26m to run 18m12s. The Miri cells in that run were
+# both queue-bound AND slow (4h20m of runtime for the longest). Same cause, different shape, and
+# they are separated so that a macOS formatting failure and a Miri UB report can be read apart.
+#
+# This is a SCHEDULING change, not a coverage change. Every step below is what `CI` ran on
+# `macos-latest` before, unchanged, and the job names are unchanged too — the single-entry `os`
+# matrix is kept precisely so these still report as `rustfmt (macos-latest)` and friends. The one
+# thing dropped is `test`'s `if: runner.os == 'Windows'` step, which can never fire here.
+#
+# Worth knowing when this lane's cost is next reviewed: `cargo fmt --all -- --check` is decided
+# by the rustfmt version and `rustfmt.toml`, not by the host, so `rustfmt (macos-latest)` is the
+# leg with the least to say — 9 seconds of work behind a 6h38m queue. It is kept because moving
+# coverage and deleting it are different decisions, and it costs `CI` nothing from here.
+
+# Triggers and `paths-ignore` are deliberately identical to `.github/workflows/ci.yml` and
+# `.github/workflows/miri.yml`; read the comment there for why the ignore list carries no
+# blanket `**.md`.
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - 'legacy/**.md'
+      - '**.txt'
+  pull_request:
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - 'legacy/**.md'
+      - '**.txt'
+  workflow_dispatch:
+  schedule: [cron: "0 1 */7 * *"]
+
+concurrency:
+  # Identical to `CI`'s and `Miri`'s; see the comment in `miri.yml` for why `${{ github.workflow }}`
+  # leads the group and why `main` is keyed on the commit SHA.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Carried from `CI` verbatim: these are the same jobs, and `RUSTFLAGS` is what they compiled
+# with. `CI`'s `nightly` / `stable` entries are not carried — no step here, or there, reads them.
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings -C debuginfo=0 -C codegen-units=16
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Check formatting
+  rustfmt:
+    name: rustfmt
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+  # Apply clippy lints
+  clippy:
+    name: clippy
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+    - name: Apply clippy lints
+      run: cargo hack clippy --each-feature
+
+  build:
+    name: build
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v5
+    - name: Cache cargo build and registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-build-
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+    - name: Cache ~/.cargo
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo
+        key: ${{ runner.os }}-coverage-dotcargo
+    - name: Run build
+      run: cargo hack build --each-feature
+
+  test:
+    name: test
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v5
+    - name: Cache cargo build and registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-test-
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+    - name: Cache ~/.cargo
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo
+        key: ${{ runner.os }}-coverage-dotcargo
+
+    # No `if: runner.os == 'macOS'` guard: the matrix has one host and it is this one, so the
+    # guard would be vacuously true. A vacuously-true guard is worth deleting rather than
+    # keeping — if it ever evaluated false the step would skip in silence and `cargo test` would
+    # link with a different linker than the one this job exists to exercise.
+    - name: Install LLVM + LLD and use ld64.lld
+      run: |
+        brew update
+        brew install llvm lld
+
+        LLVM_PREFIX="$(brew --prefix llvm)"
+        LLD_PREFIX="$(brew --prefix lld)"
+        LLD_PATH="$LLD_PREFIX/bin/ld64.lld"
+
+        # Sanity checks (helpful in logs)
+        echo "LLVM_PREFIX=$LLVM_PREFIX"
+        echo "LLD_PREFIX=$LLD_PREFIX"
+        test -x "$LLVM_PREFIX/bin/clang" || { echo "clang missing"; exit 1; }
+        test -x "$LLD_PATH" || { echo "ld64.lld missing at $LLD_PATH"; exit 1; }
+
+        # Use Homebrew clang as the driver
+        echo "PATH=$LLVM_PREFIX/bin:$PATH" >> $GITHUB_ENV
+        echo "CC=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
+        echo "CXX=$LLVM_PREFIX/bin/clang++" >> $GITHUB_ENV
+
+        # Ensure Cargo uses clang on macOS targets
+        echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
+        echo "CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
+
+        # Tell clang to use ld64.lld explicitly (absolute path required on macOS)
+        echo "RUSTFLAGS=${RUSTFLAGS} -C linker=$LLVM_PREFIX/bin/clang -C link-arg=-fuse-ld=$LLD_PATH" >> $GITHUB_ENV
+
+    - name: Run test
+      run: cargo test --all-features -- --quiet
