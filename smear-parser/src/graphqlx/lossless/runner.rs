@@ -70,8 +70,11 @@ pub(crate) type LosslessCst<'inp> =
 
 /// Materialize `cst` at the root kind and collect its diagnostics.
 ///
-/// Shared by [`parse_str`] and by the per-production drivers under `test_support`, so the
-/// root kind is named once. Everything below that — the fallible-materialization contract and
+/// Shared by the three document-root entry points — [`parse_str`],
+/// [`parse_type_system_document`] and [`parse_executable_document`] — and by the per-production
+/// drivers under `test_support`, so the root kind is named once. Note that the root kind is the
+/// *tree's* root (`K::Root`) rather than the production's, which is why one wrapper covers three
+/// different document roots. Everything below that — the fallible-materialization contract and
 /// the diagnostic projection — is [`crate::lossless::runner::finish_root`]'s; this wrapper's
 /// whole content is *which* root kind and *which* dialect the panic names.
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
