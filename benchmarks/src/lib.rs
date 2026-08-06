@@ -25,6 +25,8 @@ use smear_parser::graphql::lossless::{
 };
 use tokora::{Lexer as _, emitter::Severity};
 
+pub mod dump;
+
 /// One corpus entry: a name, its source, and which of `apollo-parser`'s two published
 /// traversals matches its content.
 #[derive(Debug, Clone, Copy)]

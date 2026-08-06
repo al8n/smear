@@ -27,11 +27,16 @@ smear-parser = { path = "../smear-parser", version = "0.0.0", default-features =
 ] }
 tokora.workspace = true
 apollo-parser = "0.8.6"
-# Named directly only so `examples/treedump.rs` can spell `WalkEvent` and `NodeOrToken`, the two
-# types `SyntaxNode::preorder_with_tokens` yields. Both other members of this build graph already
+# Named directly only so `src/dump.rs` can spell `WalkEvent` and `NodeOrToken`, the two types
+# `SyntaxNode::preorder_with_tokens` yields. Both other members of this build graph already
 # depend on `rowan = "0.16"` — `apollo-parser` directly, smear through tokora — so this adds a name
 # to the namespace and nothing to the build.
 rowan = "0.16"
+# The byte-identity gate (`tests/byte_identity.rs`) recomputes the four corpus hashes in-process
+# and compares them against the constants in `src/dump.rs`. Hashing in Rust rather than piping to
+# `shasum` is what lets the gate run as an ordinary `cargo test` on any runner, and what lets the
+# 1.4 GB `prefixes` dump be hashed in bounded memory rather than materialised.
+sha2 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8"

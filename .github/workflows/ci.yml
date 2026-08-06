@@ -357,6 +357,52 @@ jobs:
     - name: cargo build --workspace --all-features
       run: cargo build --workspace --all-features
 
+  # ── THE BYTE-IDENTITY GATE ──────────────────────────────────────────────────────────────────
+  #
+  # Recomputes the four corpus tree hashes (`benchmarks/tests/byte_identity.rs`) and fails if any
+  # has moved. Before this job the four values lived in a GitHub issue and a commit message, so a
+  # change that re-shaped every tree in the corpus went green through every gate in the repository.
+  #
+  # WHY HERE, and not in `macos.yml` or `miri.yml`. Those two exist to hold legs that are
+  # queue-bound or slow, so that `CI` can reach a conclusion — see their headers. This gate is
+  # neither: it is ten seconds of pure computation whose verdict is a property of the parser's
+  # output, not of the host. Putting it behind the macOS queue would mean a moved hash surfaces
+  # hours after the pull request that moved it, and a second OS row would buy no extra information
+  # because the dump is byte-identical across platforms by construction (the escape is a fixed
+  # `char::is_control` test, deliberately not a drifting Unicode table). One Linux job, on `CI`,
+  # where a red is readable on the pull request that caused it.
+  #
+  # WHY `--release`. Not a preference. The `prefixes` corpus is ~9,300 documents and ~45 million
+  # lines of dump; in an unoptimised build it does not finish inside ten minutes, while in release
+  # all four corpora hash in about ten seconds. That is also why the test carries `#[ignore]` and
+  # why `--include-ignored` is spelled out here: `cargo test` defaults to debug, so the expensive
+  # corpus is opted into exactly once, in the one place that runs it in release. The three cheap
+  # corpora are additionally covered by the ordinary `test` job above, which needs no opt-in.
+  #
+  # WHY `--test byte_identity` RATHER THAN A FILTER. A cargo target filter that matches nothing
+  # warns and exits 0; a named `--test` target that has been renamed or deleted is a hard error.
+  # This job must fail loudly if the gate stops existing, which is the failure mode that would
+  # otherwise leave a green tick over no coverage at all.
+  byte-identity:
+    name: byte-identity
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-byte-identity-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-byte-identity-
+    - name: cargo test --release --test byte_identity -- --include-ignored
+      run: cargo test -p smear-apollo-bench --release --test byte_identity -- --include-ignored
+
   # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
   # `macos-latest` cell, so on a run where those cells never got a runner this job was never
   # created at all — it does not appear in the job list of #64's or #66's run. With the macOS

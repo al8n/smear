@@ -16,43 +16,50 @@
 //! cargo run -p smear-apollo-bench --example treedump --release -- malformed | shasum -a 256
 //! ```
 //!
+//! # This file is the human-facing half of the harness
+//!
+//! The machinery — the row projection, the escape, the renderer, the four corpora and the recorded
+//! hashes — lives in [`smear_apollo_bench::dump`], not here. That is so the *other* caller can
+//! reach it: `tests/byte_identity.rs` recomputes all four hashes and fails if any has moved. This
+//! example and that gate therefore dump the same bytes by construction rather than by two
+//! implementations agreeing, which is the only arrangement in which `treedump | shasum` and the
+//! gate can never disagree.
+//!
 //! # Two more modes, because the clean corpus cannot exercise recovery at all
 //!
-//! The three entries in [`CORPUS`] are real, hand-picked-*clean* GraphQL documents: every one of
+//! The three entries in `CORPUS` are real, hand-picked-*clean* GraphQL documents: every one of
 //! them takes **zero** emitter checkpoints, so a clean run exercises no rewind, no recovery-hole
 //! wrap, no gap tile and no error-coverage decision — the entire recovery path stays dark. A
 //! byte-identity claim resting only on that corpus is not evidence about any of those; it is
 //! silent about them. These two modes are what makes the recovery path non-vacuous:
 //!
-//! * **`malformed`** — [`MALFORMED`], 24 hand-broken documents: unclosed braces, unterminated
-//!   strings and block strings, junk prefixes and suffixes, input with nothing lexable, empty
-//!   input, bad defaults, bad variables. Cheap; safe to run any time.
+//! * **`malformed`** — 24 hand-broken documents: unclosed braces, unterminated strings and block
+//!   strings, junk prefixes and suffixes, input with nothing lexable, empty input, bad defaults,
+//!   bad variables. Cheap; safe to run any time.
 //!
-//!   ```text
-//!   cargo run -p smear-apollo-bench --example treedump --release -- malformed | shasum -a 256
-//!   ```
-//!
-//! * **`prefixes`** — [`prefixes_dump`] over every [`CORPUS`] entry: every byte offset for the
-//!   two small entries, every 37th byte of `alias` (a prime stride, so the cut points never align
-//!   with a repeating structure in the document). Truncating at each offset is the cheapest way
-//!   to reach thousands of *independent* recovery sites, each ending mid-production somewhere
-//!   different. **This mode is not cheap**: roughly 9,300 documents, on the order of 45 million
-//!   lines of dump. It is gated behind the explicit `prefixes` argument exactly like every other
-//!   mode on this page, so it is never what the no-argument default, `perturbed`, `selfcheck` or
-//!   `malformed` run. Nothing in this repository invokes it from CI — `cargo build`/`cargo test`
-//!   only ever *compile* an example, never run its `main`, and no workflow passes this example
-//!   any argument at all. Do not add one that does; redirect to a file rather than a terminal.
+//! * **`prefixes`** — every cut point of every clean entry: every byte offset for the two small
+//!   entries, every 37th byte of `alias` (a prime stride, so the cut points never align with a
+//!   repeating structure in the document). Truncating at each offset is the cheapest way to reach
+//!   thousands of *independent* recovery sites, each ending mid-production somewhere different.
+//!   **This mode is not cheap**: roughly 9,300 documents, on the order of 45 million lines of
+//!   dump. It is gated behind the explicit `prefixes` argument exactly like every other mode on
+//!   this page, so it is never what the no-argument default, `perturbed`, `selfcheck` or
+//!   `malformed` run. Redirect it to a file rather than a terminal.
 //!
 //!   ```text
 //!   cargo run -p smear-apollo-bench --example treedump --release -- prefixes > /tmp/prefixes.dump
 //!   shasum -a 256 /tmp/prefixes.dump
 //!   ```
 //!
+//!   Note that `tests/byte_identity.rs` hashes this same corpus in **bounded memory** without
+//!   writing 1.4 GB anywhere, so checking it does not require the redirect above.
+//!
 //! # Comparing two tokora checkouts
 //!
-//! Point the `tokora` patch at each checkout in turn with `--config`, never by editing the
-//! committed `[patch.crates-io]` path, and give each variant its own `CARGO_TARGET_DIR` so the two
-//! builds cannot contaminate each other:
+//! This crate takes tokora from crates.io, so the committed configuration measures what a real
+//! consumer gets. To measure an unpublished tokora instead, point the patch at each checkout in
+//! turn with `--config`, never by editing a committed manifest, and give each variant its own
+//! `CARGO_TARGET_DIR` so the two builds cannot contaminate each other:
 //!
 //! ```text
 //! for t in /path/to/tokora-a /path/to/tokora-b; do
@@ -97,184 +104,15 @@
 //! fifteen-target `cross` job ever had to link, and it would fail on every target whose linker the
 //! runner lacks.
 
-use core::fmt::Write as _;
-use std::process::ExitCode;
+use std::{
+  io::{BufWriter, Write as _},
+  process::ExitCode,
+};
 
-use rowan::{NodeOrToken, WalkEvent};
-use smear_apollo_bench::{CORPUS, Entry, smear_parse};
-use smear_parser::graphql::lossless::SyntaxNode;
-
-/// One element of a CST, projected onto the four axes the dump prints.
-///
-/// Materialised rather than streamed straight to the output so that [`selfcheck`] can compare two
-/// trees **column by column** — and therefore state "these two differ only in kind" as a checked
-/// fact rather than as a hope about the source pair it chose.
-struct Row {
-  /// Levels of nesting below the root. The root itself is 0.
-  depth: usize,
-  /// `{:?}` of the node's or token's `SyntaxKind`.
-  kind: String,
-  /// Absolute byte offset of the element's first byte.
-  start: u32,
-  /// Absolute byte offset one past the element's last byte.
-  end: u32,
-  /// `Some` for a token, carrying its escaped text; `None` for an interior node.
-  ///
-  /// This is also what tells a node line from a token line on the page: a token always carries a
-  /// quoted text and a node never does.
-  text: Option<String>,
-}
-
-/// Escape a token's text so that one token is always one line, forever.
-///
-/// Lifted from `smear-parser/tests/lossless_golden.rs`, and for its reason: backslash, quote and
-/// the three whitespace forms that would break the layout are spelled out; every other C0/C1
-/// control, plus the byte-order mark, becomes `\u{…}`. Anything else — including ordinary
-/// multi-byte text — is written through verbatim.
-///
-/// `char::escape_debug` is the wrong tool here: its notion of "printable" is a Unicode table that
-/// moves between toolchain releases, so a dump hashed on one toolchain and compared on another
-/// could differ for a reason that has nothing to do with the tree. `char::is_control` is a fixed
-/// two-range test and cannot drift.
-fn escape(text: &str) -> String {
-  let mut out = String::with_capacity(text.len());
-  for ch in text.chars() {
-    match ch {
-      '\\' => out.push_str("\\\\"),
-      '"' => out.push_str("\\\""),
-      '\n' => out.push_str("\\n"),
-      '\r' => out.push_str("\\r"),
-      '\t' => out.push_str("\\t"),
-      c if c.is_control() || c == '\u{feff}' => {
-        let _ = write!(out, "\\u{{{:04x}}}", c as u32);
-      }
-      c => out.push(c),
-    }
-  }
-  out
-}
-
-/// Walk a tree with `preorder_with_tokens` and project every element onto a [`Row`].
-///
-/// `preorder_with_tokens` rather than `descendants_with_tokens` because only the former reports
-/// `Leave`, and without `Leave` there is no depth — which would cost the dump its one defence
-/// against two differently-nested trees flattening to the same sequence.
-fn rows(root: &SyntaxNode) -> Vec<Row> {
-  let mut out = Vec::new();
-  let mut depth = 0usize;
-  for event in root.preorder_with_tokens() {
-    match event {
-      WalkEvent::Enter(element) => {
-        let range = element.text_range();
-        out.push(Row {
-          depth,
-          kind: match &element {
-            NodeOrToken::Node(node) => format!("{:?}", node.kind()),
-            NodeOrToken::Token(token) => format!("{:?}", token.kind()),
-          },
-          start: u32::from(range.start()),
-          end: u32::from(range.end()),
-          text: match &element {
-            NodeOrToken::Node(_) => None,
-            NodeOrToken::Token(token) => Some(escape(token.text())),
-          },
-        });
-        depth += 1;
-      }
-      WalkEvent::Leave(_) => depth -= 1,
-    }
-  }
-  out
-}
-
-/// Render rows in `.rast` style: `<indent><Kind>@<start>..<end>` for a node, plus ` "<text>"` for
-/// a token.
-fn render(rows: &[Row]) -> String {
-  let mut out = String::new();
-  for row in rows {
-    for _ in 0..row.depth {
-      out.push_str("  ");
-    }
-    let _ = write!(out, "{}@{}..{}", row.kind, row.start, row.end);
-    if let Some(text) = &row.text {
-      let _ = write!(out, " \"{text}\"");
-    }
-    out.push('\n');
-  }
-  out
-}
-
-/// The full dump for one source: a header, the tree, a footer, one line per diagnostic, a blank.
-///
-/// The footer is a summary of facts already implied by the lines above it, restated in one place
-/// so that a `diff` of two dumps that disagree opens with *what* disagreed — a node count, a root
-/// span, a round-trip verdict — before the reader has to find the first differing element line.
-fn dump(header: &str, src: &str) -> String {
-  let parse = smear_parse(src);
-  let root = parse.syntax();
-  let rows = rows(&root);
-
-  let nodes = rows.iter().filter(|r| r.text.is_none()).count();
-  let tokens = rows.len() - nodes;
-  let round_trips = root.text() == src;
-
-  let mut out = String::new();
-  let _ = writeln!(out, "== {header} ==");
-  out.push_str(&render(&rows));
-  let _ = writeln!(
-    out,
-    "-- {nodes} nodes, {tokens} tokens, root {}..{}, round-trip {}, {} diagnostics --",
-    u32::from(root.text_range().start()),
-    u32::from(root.text_range().end()),
-    if round_trips {
-      "byte-exact"
-    } else {
-      "MISMATCH"
-    },
-    parse.diagnostics().len(),
-  );
-  for (i, d) in parse.diagnostics().iter().enumerate() {
-    let span = d.span();
-    let _ = writeln!(
-      out,
-      "   diagnostic {i}: {}..{} {:?} skipped={}",
-      span.start,
-      span.end,
-      d.severity(),
-      match d.skipped_tokens() {
-        Some(n) => n.to_string(),
-        None => "-".to_string(),
-      },
-    );
-  }
-  out.push('\n');
-  out
-}
-
-/// Replace the entry's first `:` with a space, and report which byte moved.
-///
-/// **Why this perturbation.** The requirement on a control is that it change the *tree* and not
-/// merely the page. A colon in GraphQL is a grammatical separator — variable definition, argument,
-/// field definition, object field — and turning one into whitespace makes the production that
-/// required it fail and recover. What makes it a good control specifically is what it does *not*
-/// change: it is a one-byte substitution, so the document's length is identical, every byte other
-/// than that one is identical, the root span is unchanged, the token count is unchanged, and the
-/// parse still round-trips byte-exactly. So the perturbed dump is not a differently-*formatted*
-/// dump and it is not a dump of differently-sized input; the hash moves because the tree moved.
-///
-/// Measured, on the three entries as they stand: node counts go 33/1082/11017 → 32/1076/12016 and
-/// the diagnostic counts go 0/0/0 → 2/7/7004, while **round-trip stays byte-exact on all three**.
-/// So `gate.rs`'s round-trip column is blind to this perturbation and only its error column is
-/// not — and the pair in [`selfcheck`] is blind to the error column too.
-fn perturb(src: &str) -> Option<(String, usize)> {
-  // `:` is ASCII, so the byte index `find` returns is a char boundary in both directions.
-  let at = src.find(':')?;
-  let mut out = String::with_capacity(src.len());
-  out.push_str(&src[..at]);
-  out.push(' ');
-  out.push_str(&src[at + 1..]);
-  Some((out, at))
-}
+use smear_apollo_bench::{
+  dump::{Corpus, for_each_chunk, render, rows},
+  smear_parse,
+};
 
 /// One `selfcheck` case: a pair of sources chosen so that their trees differ along exactly one
 /// axis.
@@ -422,58 +260,6 @@ fn selfcheck() -> bool {
   all_ok
 }
 
-/// Hand-written broken documents — the corpus the clean entries cannot be.
-///
-/// A clean parse of this grammar takes **zero** emitter checkpoints, so it exercises no rewind,
-/// no recovery-hole wrap, no gap tile and no error-coverage decision. Every one of those lives
-/// on the recovery path, and the recovery path is only reachable from input that is wrong. A
-/// byte-identity claim about the sink that rests on clean input says nothing about them.
-const MALFORMED: &[(&str, &str)] = &[
-  ("unclosed_brace", "query Q { a { b "),
-  ("stray_colon", "query Q { : a }"),
-  ("bad_directive", "query Q @ @@ { a }"),
-  ("unterminated_string", "{ f(a: \"abc) }"),
-  ("junk_prefix", "%%% query Q { a }"),
-  ("empty_args", "{ f() }"),
-  ("bad_type", "query Q($v: ) { a }"),
-  ("dangling_spread", "{ ... }"),
-  ("bad_variable", "query Q($ $x: Int = ) { a }"),
-  ("mixed_garbage", "type T { f: Int } ### $$$ ### { a }"),
-  ("deep_nest_broken", "{ a { b { c { d { e ("),
-  ("bad_default", "query Q($x: Int = @) { a }"),
-  ("unterminated_block_string", "{ f(a: \"\"\"body ) }"),
-  ("lone_dollar", "$"),
-  ("nothing_lexable", "\u{7}\u{7}\u{7}"),
-  ("empty", ""),
-  ("only_trivia", "   \n\t # comment\n"),
-  ("trailing_garbage_after_doc", "{ a } %%%"),
-  ("leading_and_trailing_garbage", "%% { a } %%"),
-  ("bad_escape_in_string", "{ f(a: \"x\\q\") }"),
-  ("unclosed_paren_then_brace", "{ f(a: 1 }"),
-  ("repeated_colons", "{ a:::: b }"),
-  ("sdl_and_executable_mixed", "schema { query: } { a }"),
-  ("number_garbage", "{ f(a: 1.2.3e) }"),
-];
-
-/// Every prefix of a source — the editor-typing corpus.
-///
-/// Truncating a document at each byte in turn is the cheapest way to reach thousands of
-/// *independent* recovery sites: each prefix ends mid-production somewhere different, so
-/// between them they drive the recovery scanner, the hole wrap and the trailing-gap tile
-/// across the whole grammar rather than at the handful of points a hand-written broken
-/// document happens to hit.
-fn prefixes_dump(name: &str, src: &str, stride: usize) -> String {
-  let mut out = String::new();
-  let mut at = 0usize;
-  while at <= src.len() {
-    if src.is_char_boundary(at) {
-      out.push_str(&dump(&format!("{name} prefix {at}"), &src[..at]));
-    }
-    at += stride;
-  }
-  out
-}
-
 fn main() -> ExitCode {
   let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -485,67 +271,22 @@ fn main() -> ExitCode {
     };
   }
 
-  if args.iter().any(|a| a == "malformed") {
-    let mut out = String::new();
-    for (name, src) in MALFORMED {
-      out.push_str(&dump(&format!("{name} : {} bytes", src.len()), src));
-    }
-    print!("{out}");
-    return ExitCode::SUCCESS;
-  }
+  // `prefixes` is ~45 million lines. Gated behind its explicit argument exactly like every other
+  // mode on this page (see the module doc); nothing in this repository's CI passes any argument
+  // to this example, so it can only run when a human types `-- prefixes` on purpose.
+  let corpus = Corpus::ALL
+    .into_iter()
+    .find(|c| args.iter().any(|a| a == c.name()))
+    .unwrap_or(Corpus::Clean);
 
-  // ~45 million lines of dump. Gated behind this explicit argument exactly like every other mode
-  // on this page (see the module doc); nothing in this repository's CI passes any argument to
-  // this example, so this can only run when a human types `-- prefixes` on purpose.
-  if args.iter().any(|a| a == "prefixes") {
-    let mut out = String::new();
-    for entry in CORPUS {
-      // Every byte of the small entries; every 37th of the big one (a prime stride, so the cut
-      // points do not align with any repeating structure in the document).
-      let stride = if entry.source.len() > 20_000 { 37 } else { 1 };
-      out.push_str(&prefixes_dump(entry.name, entry.source, stride));
-    }
-    print!("{out}");
-    return ExitCode::SUCCESS;
-  }
-
-  let perturbed = args.iter().any(|a| a == "perturbed");
-
-  // Built whole and written once. At ~45,000 lines a `println!` per element spends most of its
-  // time re-acquiring the stdout lock, and the dump is a single artifact anyway — it is going to
-  // be hashed or diffed, never read as it streams.
-  let mut out = String::new();
-  for entry in CORPUS {
-    out.push_str(&entry_dump(entry, perturbed));
-  }
-  print!("{out}");
+  // Streamed through one buffered, locked handle. At ~45,000 lines an unbuffered write per
+  // element spends most of its time re-acquiring the stdout lock, and the dump is a single
+  // artifact anyway — it is going to be hashed or diffed, never read as it streams.
+  let stdout = std::io::stdout();
+  let mut out = BufWriter::with_capacity(1 << 20, stdout.lock());
+  for_each_chunk(corpus, |chunk| {
+    let _ = out.write_all(chunk.as_bytes());
+  });
+  let _ = out.flush();
   ExitCode::SUCCESS
-}
-
-/// One corpus entry's dump, in whichever of the two modes was asked for.
-fn entry_dump(entry: &Entry, perturbed: bool) -> String {
-  if perturbed {
-    match perturb(entry.source) {
-      Some((src, at)) => dump(
-        &format!(
-          "{} : {} bytes : PERTURBED byte {at} ':' -> ' '",
-          entry.name,
-          src.len()
-        ),
-        &src,
-      ),
-      // Not a case any current entry hits, and not one to paper over: a corpus entry with no
-      // colon would silently make the control identical to the dump it is a control for.
-      None => format!(
-        "== {} : {} bytes : NOT PERTURBED (no ':' in the source) ==\n\n",
-        entry.name,
-        entry.len()
-      ),
-    }
-  } else {
-    dump(
-      &format!("{} : {} bytes", entry.name, entry.len()),
-      entry.source,
-    )
-  }
 }
