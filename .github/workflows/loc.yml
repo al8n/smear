@@ -2,8 +2,21 @@ name: loc
 
 on:
   push:
+    # `main` is the DEFAULT branch, `feat/tokora-0.8` is the TRUNK, and until those are the same
+    # branch both are needed: on 2026-08-06 `main` was 145 commits behind the trunk and not an
+    # ancestor of it, so a lane naming only `main` never ran for a merge — this workflow uploads
+    # a line count to a gist that had therefore not been refreshed from the trunk once (#74).
+    # Kept identical to `ci.yml`'s list, whose comment carries the full reasoning and the note on
+    # why a literal name is unavoidable in an `on:` block;
+    # `ci/check_workflow_triggers.sh` enforces the identity.
+    #
+    # The `paths-ignore` list below is deliberately NOT the one the other three carry. This
+    # workflow counts lines of Rust, so markdown genuinely cannot change its result, whereas in
+    # `ci.yml` a blanket `**.md` suppressed the one job that catches a broken README link. Only
+    # the push-branch list is required to match.
     branches:
       - main
+      - feat/tokora-0.8
     paths-ignore:
       - 'README.md'
       - 'COPYRIGHT'

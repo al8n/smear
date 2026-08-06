@@ -27,13 +27,21 @@ name: macOS
 # leg with the least to say — 9 seconds of work behind a 6h38m queue. It is kept because moving
 # coverage and deleting it are different decisions, and it costs `CI` nothing from here.
 
-# Triggers and `paths-ignore` are deliberately identical to `.github/workflows/ci.yml` and
-# `.github/workflows/miri.yml`; read the comment there for why the ignore list carries no
-# blanket `**.md`.
+# `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
+# `.github/workflows/ci.yml` and `.github/workflows/miri.yml`; read the comment there for why the
+# ignore list carries no blanket `**.md`. `schedule` is the one deliberate difference — see below.
+# `ci/check_workflow_triggers.sh` enforces that the `on.push.branches` lists stay identical across
+# every workflow that has one, because that is the part where a divergence is silent.
 on:
   push:
+    # `main` is the DEFAULT branch, `feat/tokora-0.8` is the TRUNK, and until those are the same
+    # branch both are needed: on 2026-08-06 `main` was 145 commits behind the trunk and not an
+    # ancestor of it, so a lane naming only `main` never ran for a merge. Kept identical to
+    # `ci.yml`'s list, whose comment carries the full reasoning and the note on why a literal name
+    # is unavoidable in an `on:` block (#74).
     branches:
       - main
+      - feat/tokora-0.8
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'
@@ -48,13 +56,24 @@ on:
       - 'legacy/**.md'
       - '**.txt'
   workflow_dispatch:
-  schedule: [cron: "0 1 */7 * *"]
+  # NO `schedule`, deliberately, and this is the one place these triggers differ from `CI`'s.
+  #
+  # It carried `[cron: "0 1 */7 * *"]` until #74, where it was pure decoration: a `schedule` runs
+  # only the DEFAULT branch's copy of a workflow, and this file does not exist on `main` at all,
+  # so the line had never fired once. Removing it costs nothing that was happening.
+  #
+  # It is not restored on the retarget that would make it fire, because these four legs are the
+  # queue-bound ones — the header measures 6h38m to 9h26m of waiting for 9s to 18m of work, on a
+  # macOS runner concurrency this repository does not own and shares. A weekly re-run of unchanged
+  # code would spend that budget re-proving what the merge that produced the code already proved.
+  # `push` and `pull_request` above cover every change; the cron would only cover the passage of
+  # time, which is what `CI`'s cheap ubuntu/windows lane is for.
 
 concurrency:
   # Identical to `CI`'s and `Miri`'s; see the comment in `miri.yml` for why `${{ github.workflow }}`
-  # leads the group and why `main` is keyed on the commit SHA.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # leads the group and why a push is keyed on the commit SHA.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # Carried from `CI` verbatim: these are the same jobs, and `RUSTFLAGS` is what they compiled
 # with. `CI`'s `nightly` / `stable` entries are not carried — no step here, or there, reads them.
