@@ -54,10 +54,17 @@
 //! gate rows; the alternative — a wrapper compiled always and neutered by a `cfg` inside — puts a
 //! type the shipped parser does not need into the shipped parser's monomorphization for no gain.
 
+// Badged for the same reason `lossless::test_support` is. This module is `pub mod`
+// unconditionally while every item in it is behind the feature, so on a docs.rs page built with
+// `all-features = true` these six read as ordinary public API. The badge is the only thing that
+// says otherwise — and it renders only under `--cfg docsrs`, which is what
+// `[package.metadata.docs.rs]` in this crate's manifest makes docs.rs pass.
 #[cfg(feature = "lossless-coverage")]
+#[cfg_attr(docsrs, doc(cfg(feature = "lossless-coverage")))]
 pub use counter::{hits, hits_of, reset};
 
 #[cfg(feature = "lossless-coverage")]
+#[cfg_attr(docsrs, doc(cfg(feature = "lossless-coverage")))]
 pub use instrumented::{Counted, node, node_at};
 
 /// The thread-local tally, one lane per kind space.

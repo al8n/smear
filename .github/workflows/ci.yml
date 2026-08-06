@@ -270,6 +270,26 @@ jobs:
   # a comment. Both are needed, and neither subsumes the other: the two links this
   # job was added for failed under `--all-features`, while the two in `smear`'s
   # facade were invisible there and only the single-dialect legs saw them.
+  #
+  # A third leg joined them in #65, on the same principle and for a different class:
+  # `--cfg docsrs`, which is the only configuration that expands a `doc(cfg(...))` at
+  # all. Read the steps for the reasoning; the short version is that both legs above
+  # compile every `#[cfg_attr(docsrs, doc(cfg(...)))]` in the workspace away to nothing
+  # and therefore cannot tell a correct one from a misapplied one, while docs.rs builds
+  # WITH the cfg. Its two steps also gate the two halves of that mechanism separately —
+  # the attributes being right, and the manifests telling docs.rs to pass the cfg — for
+  # the reason recorded on the second one.
+  #
+  # WHY ALL OF THIS IS IN `ci.yml`. The same test `byte-identity` above applies:
+  # `macos.yml` and `miri.yml` exist to hold legs that are queue-bound or set their own clock, so
+  # that this workflow can reach a conclusion. A `cargo doc --no-deps` run is neither —
+  # it is a couple of minutes of compilation whose verdict is a property of the source,
+  # not of the host, and rustdoc's output does not vary by platform. A second OS row
+  # would buy no information, and putting the leg behind the macOS queue would surface a
+  # broken badge hours after the pull request that broke it. It also belongs in this
+  # *job* rather than a new one: the three legs are one gate family that differ only in
+  # the rustdoc configuration under test, and they share a checkout and a warm target
+  # directory.
   docs:
     name: docs
     runs-on: ubuntu-latest
@@ -329,6 +349,128 @@ jobs:
 
           echo "::endgroup::"
         done
+
+    # ── The docs.rs configuration ──────────────────────────────────────────────
+    #
+    # The ONLY leg that expands `doc(cfg(...))`. `#[cfg_attr(docsrs, doc(cfg(...)))]`
+    # is inert without `--cfg docsrs`, so the two steps above compile every one of
+    # them away to nothing — a misapplied attribute and a correct one look identical
+    # to them. docs.rs builds WITH the cfg, which is the entire reason the idiom
+    # exists, so a fault only this leg can see is a real published-docs failure found
+    # after publication.
+    #
+    # tokora hit exactly that in its #195: ten attributes sat on block expressions
+    # rather than on items and took `cargo +nightly doc` to exit 101 while every other
+    # gate was green. smear's own instance was the mirror image (#65) — the attributes
+    # were correct and no manifest declared `[package.metadata.docs.rs]`, so docs.rs
+    # never passed the cfg and the badges had never rendered. Same silence, opposite
+    # mechanism; this step and the one after it are the two halves.
+    #
+    # Nightly, because `doc(cfg)` is a nightly feature and the crates gate it behind
+    # `#![cfg_attr(docsrs, feature(doc_cfg))]` — the same toolchain docs.rs uses.
+    #
+    # `--workspace --all-features` rather than the three published crates by name:
+    # `all-features = true` is what every publishable manifest declares, so this is
+    # literally the command docs.rs runs, and naming crates would leave the next one
+    # added uncovered until somebody remembered to extend a list.
+    - name: Install Rust (nightly, for the docs.rs configuration)
+      run: rustup toolchain install nightly --no-self-update
+    - name: RUSTDOCFLAGS="--cfg docsrs -D warnings" cargo +nightly doc --workspace --all-features --no-deps
+      env:
+        RUSTDOCFLAGS: --cfg docsrs -D warnings
+      run: |
+        set -euo pipefail
+        TD="${CARGO_TARGET_DIR:-target}"
+        rm -rf "$TD/doc"
+        cargo +nightly doc --workspace --all-features --no-deps
+
+        for page in smear smear_lexer smear_parser; do
+          if [ ! -f "$TD/doc/$page/index.html" ]; then
+            echo "::error::cargo +nightly doc --cfg docsrs exited 0 but wrote no page for $page"
+            exit 1
+          fi
+        done
+
+        # The assertion that makes this leg self-verifying, and it is not decoration.
+        # Everything above still exits 0 if `--cfg docsrs` never reaches rustdoc — a
+        # typo in the env key, a `RUSTDOCFLAGS` overwritten by a later edit, the flag
+        # dropped in a refactor — and the result is a green leg that expands nothing,
+        # which is precisely the inert state #65 was about. The rendered badge is the
+        # only direct evidence the cfg was in effect.
+        #
+        # A floor of one, deliberately, not a per-attribute census. `--cfg docsrs` is
+        # all-or-nothing for an invocation, so one badge proves the mechanism for all
+        # of them; the per-attribute failure is a MISAPPLIED attribute, and that is a
+        # hard error above, not a missing badge. A pinned count would red on every
+        # honest edit and buy nothing this does not already have.
+        #
+        # `|| true` inside the group, not after the pipe: `set -o pipefail` is on, and
+        # grep exits 1 when it matches nothing — which is the case this check exists to
+        # report, so it has to reach the `if` rather than kill the step first.
+        badges=$( { grep -rl 'Available on crate feature' "$TD/doc/smear_lexer" "$TD/doc/smear_parser" || true; } | wc -l )
+        echo "pages carrying a rendered doc(cfg) badge: $badges"
+        if [ "$badges" -lt 1 ]; then
+          echo "::error::cargo +nightly doc exited 0 but rendered no doc(cfg) badge — --cfg docsrs did not reach rustdoc, so every cfg_attr(docsrs, ...) in the workspace was compiled away and this leg tested nothing"
+          exit 1
+        fi
+
+    # The other half, and the half that would actually have caught #65. The step above
+    # passes `--cfg docsrs` itself, so it proves the ATTRIBUTES are right while saying
+    # nothing about whether docs.rs will ever pass the cfg — that is a property of the
+    # manifests, and for the whole life of the repository no manifest had it. A gate on
+    # the attributes alone would have stayed green through the entire defect.
+    #
+    # Derived from `cargo metadata` over every workspace member rather than a list of
+    # three crate names, so a crate added later is covered the day it is added. Keyed on
+    # `publish`: cargo reports `[]` for `publish = false` and null otherwise, so
+    # `smear-apollo-bench` — a bench harness docs.rs will never build — is skipped
+    # without being named.
+    - name: every publishable crate declares [package.metadata.docs.rs]
+      run: |
+        set -euo pipefail
+        META="${RUNNER_TEMP:-/tmp}/cargo-metadata.json"
+        cargo metadata --no-deps --format-version 1 > "$META"
+
+        # A quoted heredoc delimiter, so the shell expands nothing between here and
+        # `PY` and the script can use whichever quotes read best. `python3 -c '...'`
+        # cannot: the body would sit inside shell single quotes, and every quote in it
+        # would need escaping.
+        python3 - "$META" <<'PY'
+        import json, sys
+
+        with open(sys.argv[1]) as handle:
+            packages = json.load(handle)["packages"]
+
+        checked, missing = [], []
+        for pkg in packages:
+            # cargo reports `[]` for `publish = false` and null for a publishable crate.
+            if pkg.get("publish") == []:
+                continue
+            docsrs = (pkg.get("metadata") or {}).get("docs", {}).get("rs")
+            if docsrs is None:
+                missing.append(f'{pkg["name"]}: no [package.metadata.docs.rs] table')
+                continue
+            args = docsrs.get("rustdoc-args", [])
+            if "--cfg" not in args or "docsrs" not in args:
+                missing.append(f'{pkg["name"]}: rustdoc-args does not pass --cfg docsrs (got {args!r})')
+            else:
+                checked.append(pkg["name"])
+
+        for name in sorted(checked):
+            print(f'ok: {name} declares rustdoc-args = ["--cfg", "docsrs"]')
+
+        # A filter that matches everything leaves nothing to check and still exits 0,
+        # which is the shape of green this whole issue is about.
+        if not checked and not missing:
+            print("::error::no publishable workspace member was checked, so this gate proved nothing")
+            sys.exit(1)
+
+        for problem in missing:
+            print(f"::error::{problem}")
+        if missing:
+            print("::error::without that table docs.rs does not pass --cfg docsrs, so every cfg_attr(docsrs, doc(cfg(...))) in the crate is inert ON DOCS.RS, not merely in CI — see #65")
+            sys.exit(1)
+        PY
 
   # Build with exactly the MSRV declared in Cargo.toml's `rust-version`, so
   # a floor that silently drifts above the declared value is caught here

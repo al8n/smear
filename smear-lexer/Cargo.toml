@@ -69,3 +69,17 @@ required-features = ["std", "graphql"]
 
 [lints]
 workspace = true
+
+# See `smear/Cargo.toml` for why this block exists at all (#65).
+#
+# `all-features = true`, and this is the crate where that setting is load-bearing rather than
+# merely harmless: the workspace's only two `doc(cfg)` attributes outside `smear-parser` sit on
+# the `graphql` and `graphqlx` modules here, and a build that leaves a dialect out does not
+# compile the module its badge is attached to. Documenting one dialect would therefore render one
+# badge and silently drop the other — the same "the attribute is there and the page disagrees"
+# shape #65 is about. Everything else this crate declares is a consumer-facing source-type
+# backing (`bytes`, `bstr`, `hipstr`, `smol-bytes`) or an allocation tier; nothing here is
+# test-only.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

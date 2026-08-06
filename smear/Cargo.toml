@@ -30,3 +30,19 @@ smallvec = ["smear-lexer/smallvec", "smear-parser/smallvec"]
 tokora.workspace = true
 smear-lexer.workspace = true
 smear-parser.workspace = true
+
+# Without this block docs.rs does not pass `--cfg docsrs`, so every
+# `#[cfg_attr(docsrs, doc(cfg(...)))]` in the workspace expands to nothing — on docs.rs ITSELF,
+# not merely in CI. That was the state until #65: the attributes were written correctly and the
+# badges they exist to render had never once appeared. `rustdoc-args` is the half that makes them
+# expand; `all-features` is the half that decides the surface they are expanded over, and it is a
+# per-crate decision rather than a paste — see `smear-parser/Cargo.toml` for the one that was
+# actually in question.
+#
+# Here there is nothing to weigh. Every feature this facade declares is consumer-facing — the two
+# dialects (both already in `default`), the allocation tiers, and the source-type backings — and
+# it declares no test-only feature at all, so there is no subset that documents less and loses
+# nothing.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
