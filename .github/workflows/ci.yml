@@ -1,5 +1,26 @@
 name: CI
 
+# ── THIS IS THE FAST LANE ───────────────────────────────────────────────────────────────────
+#
+# Every job here runs on `ubuntu-latest` or `windows-latest`. Nothing macOS-bound lives in this
+# file: the Miri matrices are in `.github/workflows/miri.yml` and the four ordinary macOS legs
+# are in `.github/workflows/macos.yml`, and those two headers carry the measurement that
+# separated them.
+#
+# The short version: on 2026-08-06 `CI` had not concluded on any of the last four pull requests
+# — two of which merged anyway — while `loc` completed on the same refs, so it was never an
+# outage. On #64's run (31051592352) 29 of 39 jobs finished and every one was green, but a
+# conclusion is a property of the WHOLE run, so none of those 29 verdicts was readable. The 10
+# that did not finish were 8 macOS-bound jobs plus 2 ubuntu Miri cells still running, and
+# `coverage` was never even created because it `needs:` matrices those macOS cells sat in.
+#
+# So the contract is: this workflow's conclusion is the one a merge waits for, and it is
+# answerable in tens of minutes because nothing in it queues for a macOS runner. Adding a
+# `runs-on: macos-*` here gives that up — the whole lane is then only as fast as its scarcest
+# host, which is the state this split undid. Adding a Miri cell here gives it up for a different
+# reason: Miri sets its own wall clock (4h20m for the longest cell in the last run that
+# concluded) regardless of how free the runners are.
+
 on:
   push:
     branches:
@@ -28,6 +49,23 @@ on:
   workflow_dispatch:
   schedule: [cron: "0 1 */7 * *"]
 
+concurrency:
+  # There was no concurrency group here at all before the split, so every push to a branch left
+  # its predecessor's run alive and competing for the same runners — which fed the very queue
+  # that stopped this workflow concluding. One in-flight run per workflow per ref now, so a
+  # branch's CI reflects its tip rather than a backlog of superseded commits.
+  #
+  # `main` is the exception: the group is keyed on the commit SHA so that every main commit gets
+  # its own group and its own verdict. Do NOT collapse that back to one group per ref —
+  # `cancel-in-progress: false` does not protect a main run on its own, because a run queued
+  # into a group that already has one in progress cancels whichever run was PENDING there
+  # regardless of that setting.
+  #
+  # `${{ github.workflow }}` leading the group is what keeps the three lanes apart: `CI-...`,
+  # `Miri-...` and `macOS-...` are different groups, so no lane can cancel another's run.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings -C debuginfo=0 -C codegen-units=16
@@ -41,9 +79,10 @@ jobs:
     name: rustfmt
     strategy:
       matrix:
+        # `macos-latest` is deliberately absent — it lives in
+        # `.github/workflows/macos.yml`. See this file's header before adding it back.
         os:
           - ubuntu-latest
-          - macos-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
@@ -60,9 +99,10 @@ jobs:
     name: clippy
     strategy:
       matrix:
+        # `macos-latest` is deliberately absent — it lives in
+        # `.github/workflows/macos.yml`. See this file's header before adding it back.
         os:
           - ubuntu-latest
-          - macos-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
@@ -121,9 +161,10 @@ jobs:
     name: build
     strategy:
       matrix:
+        # `macos-latest` is deliberately absent — it lives in
+        # `.github/workflows/macos.yml`. See this file's header before adding it back.
         os:
           - ubuntu-latest
-          - macos-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
@@ -155,9 +196,10 @@ jobs:
     name: test
     strategy:
       matrix:
+        # `macos-latest` is deliberately absent — it lives in
+        # `.github/workflows/macos.yml`. See this file's header before adding it back.
         os:
           - ubuntu-latest
-          - macos-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
@@ -206,33 +248,9 @@ jobs:
         # Make PDB generation lighter & avoid incremental weirdness in CI
         echo "RUSTFLAGS=$env:RUSTFLAGS -C link-arg=/DEBUG:FASTLINK -C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
 
-    - name: Install LLVM + LLD and use ld64.lld (macOS)
-      if: runner.os == 'macOS'
-      run: |
-        brew update
-        brew install llvm lld
-
-        LLVM_PREFIX="$(brew --prefix llvm)"
-        LLD_PREFIX="$(brew --prefix lld)"
-        LLD_PATH="$LLD_PREFIX/bin/ld64.lld"
-
-        # Sanity checks (helpful in logs)
-        echo "LLVM_PREFIX=$LLVM_PREFIX"
-        echo "LLD_PREFIX=$LLD_PREFIX"
-        test -x "$LLVM_PREFIX/bin/clang" || { echo "clang missing"; exit 1; }
-        test -x "$LLD_PATH" || { echo "ld64.lld missing at $LLD_PATH"; exit 1; }
-
-        # Use Homebrew clang as the driver
-        echo "PATH=$LLVM_PREFIX/bin:$PATH" >> $GITHUB_ENV
-        echo "CC=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
-        echo "CXX=$LLVM_PREFIX/bin/clang++" >> $GITHUB_ENV
-
-        # Ensure Cargo uses clang on macOS targets
-        echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
-        echo "CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
-
-        # Tell clang to use ld64.lld explicitly (absolute path required on macOS)
-        echo "RUSTFLAGS=${RUSTFLAGS} -C linker=$LLVM_PREFIX/bin/clang -C link-arg=-fuse-ld=$LLD_PATH" >> $GITHUB_ENV
+    # The `if: runner.os == 'macOS'` step that used to sit here moved with the macOS leg to
+    # `.github/workflows/macos.yml`; no host in this job's matrix can satisfy that guard, so
+    # leaving it would have been a step that reads as coverage and compiles nothing.
 
     - name: Run test
       run: cargo test --all-features -- --quiet
@@ -339,133 +357,11 @@ jobs:
     - name: cargo build --workspace --all-features
       run: cargo build --workspace --all-features
 
-  miri-tb:
-    name: miri-tb-${{ matrix.target }}
-    strategy:
-      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
-      # a cross toolchain (installed below); don't let a failure there
-      # cancel the other, unrelated cells in this matrix.
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-        target:
-          - x86_64-unknown-linux-gnu
-          - i686-unknown-linux-gnu
-          - powerpc64-unknown-linux-gnu
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
-        # Exclude invalid combinations
-        exclude:
-          - os: ubuntu-latest
-            target: x86_64-apple-darwin
-          - os: ubuntu-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: i686-unknown-linux-gnu
-          - os: macos-latest
-            target: powerpc64-unknown-linux-gnu
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-      - name: Cache cargo build and registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-miri-
-      - name: Install cargo-hack
-        run: cargo install cargo-hack
-      - name: Install cross C toolchain for ${{ matrix.target }}
-        # x86_64-unknown-linux-gnu and the macOS targets build with the
-        # runner's native toolchain; only the two Linux cross targets need
-        # an extra package, so install exactly the one each needs.
-        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
-        run: |
-          case "${{ matrix.target }}" in
-            i686-unknown-linux-gnu)
-              sudo apt-get update
-              sudo apt-get install -y gcc-multilib
-              ;;
-            powerpc64-unknown-linux-gnu)
-              sudo apt-get update
-              sudo apt-get install -y gcc-powerpc64-linux-gnu
-              ;;
-          esac
-      - name: Miri
-        run: |
-          bash ci/miri_tb.sh ${{ matrix.target }}
-
-  miri-sb:
-    name: miri-sb-${{ matrix.target }}
-    strategy:
-      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
-      # a cross toolchain (installed below); don't let a failure there
-      # cancel the other, unrelated cells in this matrix.
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-        target:
-          - x86_64-unknown-linux-gnu
-          - i686-unknown-linux-gnu
-          - powerpc64-unknown-linux-gnu
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
-        # Exclude invalid combinations
-        exclude:
-          - os: ubuntu-latest
-            target: x86_64-apple-darwin
-          - os: ubuntu-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: i686-unknown-linux-gnu
-          - os: macos-latest
-            target: powerpc64-unknown-linux-gnu
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-      - name: Cache cargo build and registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-miri-
-      - name: Install cargo-hack
-        run: cargo install cargo-hack
-      - name: Install cross C toolchain for ${{ matrix.target }}
-        # x86_64-unknown-linux-gnu and the macOS targets build with the
-        # runner's native toolchain; only the two Linux cross targets need
-        # an extra package, so install exactly the one each needs.
-        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
-        run: |
-          case "${{ matrix.target }}" in
-            i686-unknown-linux-gnu)
-              sudo apt-get update
-              sudo apt-get install -y gcc-multilib
-              ;;
-            powerpc64-unknown-linux-gnu)
-              sudo apt-get update
-              sudo apt-get install -y gcc-powerpc64-linux-gnu
-              ;;
-          esac
-      - name: Miri
-        run: |
-          bash ci/miri_sb.sh ${{ matrix.target }}
+  # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
+  # `macos-latest` cell, so on a run where those cells never got a runner this job was never
+  # created at all — it does not appear in the job list of #64's or #66's run. With the macOS
+  # cells gone from those matrices it becomes reachable again, which means the first runs after
+  # this change are the first time in a while that anything has watched `coverage` finish.
   coverage:
     name: coverage
     runs-on: ubuntu-latest

@@ -1,0 +1,251 @@
+name: Miri
+
+# ── THE SLOW LANE ───────────────────────────────────────────────────────────────────────────
+#
+# Miri lives in its own workflow so that `CI` can reach a CONCLUSION. Measured 2026-08-06 on the
+# last five pull requests: `CI` concluded on exactly one of them. The four most recent — #60 and
+# #63 (both MERGED anyway), #64 and #66 — were still `queued` hours later, while `loc` completed
+# on the same refs in the same window, so it was never an outage.
+#
+# The jobs were not the problem; the RUN was. On #64's run (31051592352) 29 of 39 jobs completed
+# and every one of them was green, but a conclusion is a property of the WHOLE run, so all 29 of
+# those verdicts were unreadable. The 8 that never started were the 4 `macos-latest` legs of
+# `rustfmt`/`clippy`/`build`/`test` and the 4 apple-darwin Miri cells; `coverage` never even got
+# created, because it `needs:` matrices those macOS cells belong to. Nothing else was outstanding.
+#
+# WHY: the account's macOS runner concurrency is the binding constraint, and it is shared. At the
+# time of measurement 96 macOS-bound jobs were queued or running in another repository's Miri
+# workflow. smear's eight sat behind all of them.
+#
+# The one run that did conclude (30963710061, created 00:34:20Z) shows the cost with no queue
+# theory needed: the last job to finish was `miri-tb-x86_64-apple-darwin` at 15:16:25Z — a
+# 14h42m wall clock, of which the entire tail was macOS. `rustfmt (macos-latest)` in that run
+# waited 6h38m to run for 9 seconds.
+#
+# WHY MIRI AND NOT ONLY THE APPLE CELLS. The 6 ubuntu Miri cells are not queue-bound, but they
+# are the wall clock: in that same run `miri-tb-x86_64-apple-darwin` ran 4h20m and
+# `miri-tb-aarch64-apple-darwin` 3h56m once started. Leaving any Miri cell in `CI` would keep
+# `CI`'s answer hours away even with every runner free, so the whole gate moves and Miri reports
+# on its own clock. The four ordinary macOS legs are queue-bound rather than slow, so they went
+# to `.github/workflows/macos.yml` instead — a third lane, not this one, because a macOS
+# formatting failure and a Miri UB report are different findings and should be readable apart.
+#
+# This is a SCHEDULING change, not a coverage change. Every job, matrix cell and step below runs
+# what `.github/workflows/ci.yml` ran before, unchanged — the same 10 cells, the same two
+# aliasing models, the same `ci/miri_tb.sh` / `ci/miri_sb.sh`. The one step dropped in the move
+# was `cargo install cargo-hack`, which neither script invokes: both run `cargo miri setup` and
+# `cargo miri test` and nothing else, so it compiled a tool no cell used, on every cell.
+#
+# What this does NOT do is make Miri faster. It cannot: the macOS queue is a runner-concurrency
+# constraint this repository does not own. What the split buys is that `CI`'s answer no longer
+# waits behind it.
+
+# ── WHY THE APPLE CELLS STILL RUN ON A macOS HOST ───────────────────────────────────────────
+#
+# Miri interprets a TARGET, so the host ought to be irrelevant, and if it were, these 4 cells
+# would become ubuntu ones and the queue that forced this split would stop mattering here.
+# Measured rather than assumed, and the answer is the same one tokora reached: `cargo build` is
+# the obstacle, not Miri.
+#
+# `criterion 0.8.2` is an UNCONDITIONAL dev-dependency of both `smear-lexer` and `smear-parser`,
+# and it depends on `alloca 0.4.0`, whose build script is a `cc::Build` that compiles `alloca.c`.
+# `cargo check --workspace --tests` on this tree produces
+# `target/debug/build/alloca/*/out/libcalloca.a`, so the C file is built for the target selected
+# by `--tests` — which is exactly the selection `ci/miri_tb.sh` and `ci/miri_sb.sh` make. On a
+# Linux host targeting `*-apple-darwin`, cc-rs invokes the host `cc` with `-arch x86_64` /
+# `-arch arm64` and `-mmacosx-version-min=...`; a Linux `cc` rejects those, and compiling them
+# needs Apple clang and the macOS SDK.
+#
+# So `macos-latest` here is load-bearing for a reason that has nothing to do with Miri, and it is
+# not a leftover. Moving these cells means getting criterion out of the dev-dependency graph
+# first — cargo has no optional dev-dependencies, so that means the benches moving to their own
+# workspace member — or putting an osxcross toolchain on the runner, which trades a runner queue
+# for an unmanaged SDK. Neither is a CI edit.
+#
+# WHAT THE TARGET AXIS BUYS, separately from the host. This workspace contains no `target_arch`,
+# `target_os`, `target_vendor`, `target_pointer_width` or `target_endian` cfg anywhere, so every
+# cell interprets the same source and what varies is only what Miri models: word size, byte
+# order and layout. On that axis `i686-unknown-linux-gnu` (32-bit) and
+# `powerpc64-unknown-linux-gnu` (big-endian) are each unique, and `x86_64-unknown-linux-gnu`,
+# `x86_64-apple-darwin` and `aarch64-apple-darwin` are all 64-bit little-endian. The two apple
+# cells are therefore the weakest of the five, and `x86_64-apple-darwin` is the weakest of those
+# — it shares its word size and byte order with the linux x86_64 cell and its OS with the other
+# apple cell. They are kept because dropping coverage is a different decision from moving it,
+# and because they cost `CI` nothing from here; if the macOS budget ever has to shrink,
+# `x86_64-apple-darwin` is the cell to spend first.
+
+# Triggers and `paths-ignore` are deliberately identical to `.github/workflows/ci.yml` and
+# `.github/workflows/macos.yml`; read the comment there for why the ignore list carries no
+# blanket `**.md`.
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - 'legacy/**.md'
+      - '**.txt'
+  pull_request:
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - 'legacy/**.md'
+      - '**.txt'
+  workflow_dispatch:
+  schedule: [cron: "0 1 */7 * *"]
+
+concurrency:
+  # Same expression as `CI`'s and `macOS`'s, and `${{ github.workflow }}` leading it is what keeps
+  # the three lanes independent: `CI-...`, `Miri-...` and `macOS-...` are different groups, so no
+  # lane can cancel another's run. One in-flight run per ref, except on `main`, where the group is
+  # keyed on the commit SHA so that every main commit gets its own group and its own verdict. Do
+  # NOT collapse that back to one group per ref: `cancel-in-progress: false` does not protect a
+  # main run on its own, because a run queued into a group that already has one in progress
+  # cancels whichever run was PENDING there regardless of that setting — and this workflow is
+  # precisely the one whose runs stay pending long enough for the next push to do it.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# `RUSTFLAGS` is carried over from `CI` verbatim even though `ci/miri_tb.sh` and `ci/miri_sb.sh`
+# both set `MIRIFLAGS` before any `cargo miri test`: neither script touches `RUSTFLAGS`, so this
+# value is what `cargo miri setup` and the test build see, and changing it here would change what
+# these cells compile. `CI`'s `nightly` / `stable` entries are not carried — no step in this
+# workflow, or in that one, references them.
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings -C debuginfo=0 -C codegen-units=16
+  RUST_BACKTRACE: 1
+
+jobs:
+  miri-tb:
+    name: miri-tb-${{ matrix.target }}
+    strategy:
+      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
+      # a cross toolchain (installed below); don't let a failure there
+      # cancel the other, unrelated cells in this matrix.
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        target:
+          - x86_64-unknown-linux-gnu
+          - i686-unknown-linux-gnu
+          - powerpc64-unknown-linux-gnu
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+        # Exclude invalid combinations. All five entries below are live: each
+        # names an `os` and a `target` that both appear in the lists above, so
+        # each removes a cell that the product would otherwise create. 2 x 5
+        # minus 5 leaves the 5 cells this matrix runs.
+        exclude:
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: i686-unknown-linux-gnu
+          - os: macos-latest
+            target: powerpc64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache cargo build and registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-miri-
+      - name: Install cross C toolchain for ${{ matrix.target }}
+        # x86_64-unknown-linux-gnu and the macOS targets build with the
+        # runner's native toolchain; only the two Linux cross targets need
+        # an extra package, so install exactly the one each needs.
+        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          case "${{ matrix.target }}" in
+            i686-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-multilib
+              ;;
+            powerpc64-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-powerpc64-linux-gnu
+              ;;
+          esac
+      - name: Miri
+        run: |
+          bash ci/miri_tb.sh ${{ matrix.target }}
+
+  miri-sb:
+    name: miri-sb-${{ matrix.target }}
+    strategy:
+      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
+      # a cross toolchain (installed below); don't let a failure there
+      # cancel the other, unrelated cells in this matrix.
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        target:
+          - x86_64-unknown-linux-gnu
+          - i686-unknown-linux-gnu
+          - powerpc64-unknown-linux-gnu
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+        # Exclude invalid combinations. All five entries below are live: each
+        # names an `os` and a `target` that both appear in the lists above, so
+        # each removes a cell that the product would otherwise create. 2 x 5
+        # minus 5 leaves the 5 cells this matrix runs.
+        exclude:
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: i686-unknown-linux-gnu
+          - os: macos-latest
+            target: powerpc64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache cargo build and registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-miri-
+      - name: Install cross C toolchain for ${{ matrix.target }}
+        # x86_64-unknown-linux-gnu and the macOS targets build with the
+        # runner's native toolchain; only the two Linux cross targets need
+        # an extra package, so install exactly the one each needs.
+        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          case "${{ matrix.target }}" in
+            i686-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-multilib
+              ;;
+            powerpc64-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-powerpc64-linux-gnu
+              ;;
+          esac
+      - name: Miri
+        run: |
+          bash ci/miri_sb.sh ${{ matrix.target }}
