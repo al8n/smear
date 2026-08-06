@@ -76,10 +76,10 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 use smear_parser::graphqlx::{
   GraphQLx,
-  ast::Document,
+  ast::{Document, ExecutableDocument, TypeSystemDocument},
   error::GraphqlxErrors,
-  lossless::{document::test_support::parse_type_system_document, parse_str},
-  syntactic::{GraphqlxLexer, document},
+  lossless::{parse_executable_document, parse_str, parse_type_system_document},
+  syntactic::{GraphqlxLexer, document, executable_document, type_system_document},
 };
 use tokora::{Parse as _, Parser};
 
@@ -110,6 +110,40 @@ fn syntactic_has_errors<'inp>(src: &'inp str) -> bool {
     _,
     GraphQLx,
   >(document)
+  .parse_str(src)
+  .is_err()
+}
+
+/// The syntactic verdict for the **SDL-only** root — imports and type-system entries, no
+/// executable definition and no shorthand operation.
+///
+/// Whole-input for [`syntactic_has_errors`]'s reason: the repetition re-enters the entry
+/// dispatcher on anything it cannot stop at, so a trailing executable definition fails there
+/// rather than being left behind.
+fn syntactic_type_system_has_errors<'inp>(src: &'inp str) -> bool {
+  Parser::with_parser::<
+    'inp,
+    GraphqlxLexer<'inp, str>,
+    TypeSystemDocument<&'inp str>,
+    GraphqlxErrors<&'inp str>,
+    _,
+    GraphQLx,
+  >(type_system_document)
+  .parse_str(src)
+  .is_err()
+}
+
+/// The syntactic verdict for the **executable-only** root,
+/// [`syntactic_type_system_has_errors`]'s mirror.
+fn syntactic_executable_has_errors<'inp>(src: &'inp str) -> bool {
+  Parser::with_parser::<
+    'inp,
+    GraphqlxLexer<'inp, str>,
+    ExecutableDocument<&'inp str>,
+    GraphqlxErrors<&'inp str>,
+    _,
+    GraphQLx,
+  >(executable_document)
   .parse_str(src)
   .is_err()
 }
@@ -318,6 +352,60 @@ fn the_corpus_can_tell_the_two_suites_apart() {
     discriminators >= 20,
     "only {discriminators} entries separate the SDL-only root from the mixed one; the corpus \
      cannot tell two GraphQLx productions apart and this gate would pass on an inert set"
+  );
+}
+
+/// Gate 1, extended to the **two alternate roots** now that each is a shipped entry point.
+///
+/// GraphQL's twin carries the reasoning; the short version is that until smear issue #67 the two
+/// alternate roots were reachable only from a `test_support` driver, so every assertion over them
+/// compared the lossless suite with itself. Each is now held against **its own syntactic
+/// counterpart** — not against the mixed one, which accepts strictly more than either and would
+/// force the comparison to be weakened into an implication.
+#[test]
+fn both_alternate_roots_agree_with_their_syntactic_counterparts() {
+  let mut sdl_accepted = 0usize;
+  let mut sdl_rejected = 0usize;
+  let mut roots_disagree = 0usize;
+
+  for entry in corpus_files() {
+    let src = std::fs::read_to_string(&entry).unwrap();
+    let name = entry.display();
+
+    let lossless_sdl = parse_type_system_document(&src).has_errors();
+    let lossless_executable = parse_executable_document(&src).has_errors();
+
+    assert_eq!(
+      lossless_sdl,
+      syntactic_type_system_has_errors(&src),
+      "{name}: the SDL-only roots disagree — lossless says has_errors={lossless_sdl}"
+    );
+    assert_eq!(
+      lossless_executable,
+      syntactic_executable_has_errors(&src),
+      "{name}: the executable-only roots disagree — lossless says \
+       has_errors={lossless_executable}"
+    );
+
+    if lossless_sdl {
+      sdl_rejected += 1;
+    } else {
+      sdl_accepted += 1;
+    }
+    if lossless_sdl != lossless_executable {
+      roots_disagree += 1;
+    }
+  }
+
+  assert!(
+    sdl_accepted > 0 && sdl_rejected > 0,
+    "the SDL-only verdict is a constant over this corpus ({sdl_accepted} accepted, \
+     {sdl_rejected} rejected); a parity assertion against it proves nothing"
+  );
+  assert!(
+    roots_disagree >= 20,
+    "only {roots_disagree} corpus entries separate the SDL-only entry point from the \
+     executable-only one; the two are being compared against oracles that cannot tell them apart"
   );
 }
 

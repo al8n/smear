@@ -70,8 +70,11 @@ pub(crate) type LosslessCst<'inp> =
 
 /// Materialize `cst` at the root kind and collect its diagnostics.
 ///
-/// Shared by [`parse_str`] and by the per-production drivers under `test_support`, so the
-/// root kind is named once. Everything below that — the fallible-materialization contract and
+/// Shared by the three document-root entry points — [`parse_str`],
+/// [`parse_type_system_document`] and [`parse_executable_document`] — and by the per-production
+/// drivers under `test_support`, so the root kind is named once. Note that the root kind is the
+/// *tree's* root (`K::Root`) rather than the production's, which is why one wrapper covers three
+/// different document roots. Everything below that — the fallible-materialization contract and
 /// the diagnostic projection — is [`crate::lossless::runner::finish_root`]'s; this wrapper's
 /// whole content is *which* root kind and *which* dialect the panic names.
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
@@ -104,8 +107,10 @@ pub type Parse = crate::lossless::runner::Parse<crate::graphqlx::kinds::GraphQLx
 /// source uncommitted and `finish` would refuse it as a `FinishError::UncoveredGap`. The drain
 /// turns the one failure mode `parse_str` cannot report into a reportable parse.
 ///
-/// The SDL-only root has no entry here; a schema-only consumer calls `document.rs`'s
-/// `type_system_document` directly.
+/// A consumer that will only accept one half of the language has a root of its own rather than a
+/// filter to write afterwards — see [`parse_type_system_document`] and
+/// [`parse_executable_document`]. The difference is not cosmetic: those roots reject the other
+/// half *at the parser's own position*, which a caller walking a mixed tree cannot reconstruct.
 pub fn parse_str(src: &str) -> Parse {
   // `parse_lossless` is the only door that mints a `Sink`: it takes the source ONCE and uses
   // that one argument for both the sink and the input, so the buffer the tree's text comes from
@@ -128,6 +133,70 @@ pub fn parse_str(src: &str) -> Parse {
       profile::<str>(),
       tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
       super::document::document_entry::<str, _>,
+    );
+
+  finish_root(cst)
+}
+
+/// Parse a `&str` as a GraphQLx **type-system** (SDL-only) document, losslessly.
+///
+/// [`parse_str`]'s root without the executable half: `ImportOrTypeSystemDefinitionOrExtension+`,
+/// the tree [`ast::TypeSystemDocument`](super::ast::TypeSystemDocument) wraps. Imports stay in —
+/// a GraphQLx schema is the thing that imports — but an `operation`, a shorthand `{ … }` or a
+/// `fragment` is **reported here**, with the span the parser was standing on, rather than
+/// accepted into a mixed tree for the caller to find and reject with a position it has to
+/// reconstruct.
+///
+/// Everything else is [`parse_str`]'s contract unchanged: the same lexer, the same profile, the
+/// same [`Parse`], the same recovery. Only the root differs.
+///
+/// ```
+/// # use smear_parser::graphqlx::lossless::{parse_str, parse_type_system_document};
+/// # use tokora::Parse as _;
+/// // The mixed root takes it; the SDL-only root reports it.
+/// assert!(!parse_str("query Q { f }").has_errors());
+/// assert!(parse_type_system_document("query Q { f }").has_errors());
+/// assert!(!parse_type_system_document("type T { f: Int }").has_errors());
+/// ```
+pub fn parse_type_system_document(src: &str) -> Parse {
+  // The turbofishes and the `_entry` suffix are `parse_str`'s, for `parse_str`'s reasons; see
+  // the comment there rather than a second copy of it here.
+  let (cst, _out) =
+    parse_lossless::<GraphqlxLosslessLexer<'_, str>, crate::graphqlx::GraphQLx, _, _, _, _>(
+      src,
+      Default::default(),
+      LosslessEmitter::default(),
+      profile::<str>(),
+      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
+      super::document::type_system_document_entry::<str, _>,
+    );
+
+  finish_root(cst)
+}
+
+/// Parse a `&str` as a GraphQLx **executable** document, losslessly.
+///
+/// [`parse_type_system_document`]'s mirror: `ImportOrExecutableDefinition+`, the tree
+/// [`ast::ExecutableDocument`](super::ast::ExecutableDocument) wraps. Imports stay in here too;
+/// every type-system definition and every `extend` is reported, at the parser's own position.
+///
+/// ```
+/// # use smear_parser::graphqlx::lossless::{parse_executable_document, parse_str};
+/// # use tokora::Parse as _;
+/// // The mixed root takes it; the executable-only root reports it.
+/// assert!(!parse_str("type T { f: Int }").has_errors());
+/// assert!(parse_executable_document("type T { f: Int }").has_errors());
+/// assert!(!parse_executable_document("query Q { f }").has_errors());
+/// ```
+pub fn parse_executable_document(src: &str) -> Parse {
+  let (cst, _out) =
+    parse_lossless::<GraphqlxLosslessLexer<'_, str>, crate::graphqlx::GraphQLx, _, _, _, _>(
+      src,
+      Default::default(),
+      LosslessEmitter::default(),
+      profile::<str>(),
+      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
+      super::executable::executable_document_entry::<str, _>,
     );
 
   finish_root(cst)

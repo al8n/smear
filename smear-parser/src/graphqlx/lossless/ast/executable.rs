@@ -147,8 +147,9 @@ ast_node!(
   ///
   /// Not what [`parse_str`](crate::graphqlx::lossless::parse_str) builds — that parses the mixed
   /// [`Document`](super::document::Document). A consumer that will only accept executable syntax
-  /// drives `executable_document` directly. It admits imports, which is why it has three
-  /// iterators where GraphQL's has two.
+  /// calls [`parse_executable_document`](crate::graphqlx::lossless::parse_executable_document),
+  /// which reports a type-system definition rather than admitting one. It admits imports, which
+  /// is why it has three iterators where GraphQL's has two.
   ExecutableDocument => K::ExecutableDocument {
     /// Every import the document makes, in order.
     import_definitions: many ImportDefinition,

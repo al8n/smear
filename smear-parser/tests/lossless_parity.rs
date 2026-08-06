@@ -99,11 +99,11 @@ use std::path::PathBuf;
 use smear_lexer::graphql::{error::LexerErrors, lossless::LosslessLexer};
 use smear_parser::graphql::{
   GraphQL,
-  ast::Document,
+  ast::{Document, ExecutableDocument, TypeSystemDocument},
   error::{ErrorData, GraphqlErrors},
   kinds::SyntaxKind as K,
-  lossless::{document::test_support::parse_type_system_document, parse_str},
-  syntactic::{GraphqlLexer, document},
+  lossless::{parse_executable_document, parse_str, parse_type_system_document},
+  syntactic::{GraphqlLexer, document, executable_document, type_system_document},
 };
 use tokora::{Lexer as _, Parse as _, Parser};
 
@@ -134,6 +134,40 @@ fn syntactic_has_errors<'inp>(src: &'inp str) -> bool {
     _,
     GraphQL,
   >(document)
+  .parse_str(src)
+  .is_err()
+}
+
+/// The syntactic verdict for the **SDL-only** root.
+///
+/// Whole-input for [`syntactic_has_errors`]'s reason: `type_system_document`'s
+/// `repeated_while` decider (`decide_type_system_definition_or_extension_head`) answers `Stop`
+/// only on `None`, so a trailing executable definition re-enters
+/// `type_system_definition_or_extension` and fails there rather than being left behind.
+fn syntactic_type_system_has_errors<'inp>(src: &'inp str) -> bool {
+  Parser::with_parser::<
+    'inp,
+    GraphqlLexer<'inp, str>,
+    TypeSystemDocument<&'inp str>,
+    GraphqlErrors<&'inp str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(src)
+  .is_err()
+}
+
+/// The syntactic verdict for the **executable-only** root, [`syntactic_type_system_has_errors`]'s
+/// mirror — `decide_executable_definition_head` stops only on `None` too.
+fn syntactic_executable_has_errors<'inp>(src: &'inp str) -> bool {
+  Parser::with_parser::<
+    'inp,
+    GraphqlLexer<'inp, str>,
+    ExecutableDocument<&'inp str>,
+    GraphqlErrors<&'inp str>,
+    _,
+    GraphQL,
+  >(executable_document)
   .parse_str(src)
   .is_err()
 }
@@ -821,8 +855,8 @@ fn both_verdicts_answer_in_both_directions() {
 /// alias would fail to typecheck long before it failed an assertion.
 #[test]
 fn the_corpus_can_tell_the_two_suites_apart() {
-  // Half one. `parse_type_system_document` is the SDL-only root's driver — the same production
-  // set, entered one level up from `document`.
+  // Half one. `parse_type_system_document` is the SDL-only root's shipped entry point — the same
+  // production set, entered one level up from `document`.
   let mut split = 0usize;
   for entry in corpus_files() {
     let src = std::fs::read_to_string(&entry).unwrap();
@@ -879,6 +913,81 @@ fn the_corpus_can_tell_the_two_suites_apart() {
   assert_eq!(
     lossless_definitions, 2,
     "both suites must have found the two definitions that are there"
+  );
+}
+
+/// Gate 1, extended to the **two alternate roots** now that each is a shipped entry point.
+///
+/// [`both_suites_agree_on_every_corpus_entry`] holds the mixed root against `syntactic/`'s
+/// `document`. The other two roots had no entry point to hold — they were reachable only from a
+/// `test_support` driver, so every assertion over them was a lossless-versus-lossless comparison
+/// with nothing on the other side (smear issue #67). Each now has one, and each is held against
+/// **its own syntactic counterpart**: `parse_type_system_document` against
+/// `syntactic::type_system_document`, `parse_executable_document` against
+/// `syntactic::executable_document`.
+///
+/// # The oracle is on the other side, and it is not the same root
+///
+/// Anchoring both entry points against the *mixed* syntactic root would be the Task 17 mistake
+/// wearing a different hat: the mixed root accepts strictly more than either alternate, so the
+/// comparison would fail on every executable corpus entry and would have to be weakened into an
+/// implication that proves nothing. The counterpart root is the only oracle whose language is
+/// the one under test, and it is a genuinely independent parse — different lexer, different
+/// error type, an AST rather than a `rowan` tree.
+///
+/// # Why it cannot pass vacuously
+///
+/// Three counters, each of which must be nonzero:
+///
+/// - entries the SDL-only root **accepts** and entries it **rejects**, so neither verdict
+///   function is a constant over this corpus;
+/// - entries on which the two alternate roots **disagree with each other**, which is what proves
+///   `parse_type_system_document` and `parse_executable_document` are two functions rather than
+///   one name twice.
+#[test]
+fn both_alternate_roots_agree_with_their_syntactic_counterparts() {
+  let mut sdl_accepted = 0usize;
+  let mut sdl_rejected = 0usize;
+  let mut roots_disagree = 0usize;
+
+  for entry in corpus_files() {
+    let src = std::fs::read_to_string(&entry).unwrap();
+    let name = entry.display();
+
+    let lossless_sdl = parse_type_system_document(&src).has_errors();
+    let lossless_executable = parse_executable_document(&src).has_errors();
+
+    assert_eq!(
+      lossless_sdl,
+      syntactic_type_system_has_errors(&src),
+      "{name}: the SDL-only roots disagree — lossless says has_errors={lossless_sdl}"
+    );
+    assert_eq!(
+      lossless_executable,
+      syntactic_executable_has_errors(&src),
+      "{name}: the executable-only roots disagree — lossless says \
+       has_errors={lossless_executable}"
+    );
+
+    if lossless_sdl {
+      sdl_rejected += 1;
+    } else {
+      sdl_accepted += 1;
+    }
+    if lossless_sdl != lossless_executable {
+      roots_disagree += 1;
+    }
+  }
+
+  assert!(
+    sdl_accepted > 0 && sdl_rejected > 0,
+    "the SDL-only verdict is a constant over this corpus ({sdl_accepted} accepted, \
+     {sdl_rejected} rejected); a parity assertion against it proves nothing"
+  );
+  assert!(
+    roots_disagree >= 20,
+    "only {roots_disagree} corpus entries separate the SDL-only entry point from the \
+     executable-only one; the two are being compared against oracles that cannot tell them apart"
   );
 }
 

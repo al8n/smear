@@ -195,4 +195,9 @@ pub mod trivia;
 pub mod ty;
 pub mod value;
 
-pub use runner::{Parse, parse_str, profile};
+// The three document roots this suite parses, all at the same module level and all
+// `fn(&str) -> Parse`: the mixed one (`parse_str`), the SDL-only one and the executable-only one.
+// A consumer picks a root here, once, rather than parsing the mixed form and filtering the tree.
+pub use runner::{
+  Parse, parse_executable_document, parse_str, parse_type_system_document, profile,
+};

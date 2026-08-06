@@ -100,7 +100,7 @@ use std::{collections::BTreeSet, fmt::Write as _, path::PathBuf};
 use rowan::{NodeOrToken, WalkEvent};
 use smear_parser::graphqlx::{
   kinds::SyntaxKind as K,
-  lossless::{SyntaxNode, document::test_support::parse_type_system_document, parse_str},
+  lossless::{SyntaxNode, parse_str, parse_type_system_document},
 };
 
 /// The environment variable that turns a comparison run into a blessing run.

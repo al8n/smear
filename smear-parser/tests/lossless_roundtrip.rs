@@ -85,10 +85,7 @@ use std::path::PathBuf;
 
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{
-    Parse, SyntaxNode, document::test_support::parse_type_system_document,
-    executable::test_support::parse_executable_document, parse_str,
-  },
+  lossless::{Parse, SyntaxNode, parse_executable_document, parse_str, parse_type_system_document},
 };
 
 /// The corpus entries whose bytes are kept by the sink's gap tiling rather than by the grammar.
@@ -213,13 +210,14 @@ fn every_corpus_entry_round_trips_byte_for_byte() {
 
 /// The other two roots materialize their own trees, and each must round-trip too.
 ///
-/// [`parse_str`] is one driver of three, and the other two are the reason this test exists rather
-/// than being folded into the loop above. `parse_type_system_document` and
-/// `parse_executable_document` run the corpus through a production set that **rejects most of
+/// [`parse_str`] is one entry point of three, and the other two are the reason this test exists
+/// rather than being folded into the loop above. [`parse_type_system_document`] and
+/// [`parse_executable_document`] run the corpus through a production set that **rejects most of
 /// it**, so unlike `document` they routinely stop before the end of the source — which makes the
-/// drain in their driver load-bearing where `document_entry`'s is not. Measured both ways:
-/// deleting `document_entry`'s drain leaves the entire suite green, while deleting the driver
-/// macro's reds exactly this test, on `finish` refusing the uncovered tail.
+/// drain in `type_system_document_entry` and `executable_document_entry` load-bearing where
+/// `document_entry`'s is not. Measured both ways: deleting `document_entry`'s drain leaves the
+/// entire suite green, while deleting either of the other two's reds exactly this test, on
+/// `finish` refusing the uncovered tail.
 ///
 /// It is also the only sweep that materializes the **invalid** half of the corpus through the two
 /// alternate roots at all.

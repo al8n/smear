@@ -101,8 +101,7 @@ use smear_parser::{
     error::GraphqlxErrors,
     kinds::SyntaxKind as K,
     lossless::{
-      Parse, document::test_support::parse_type_system_document,
-      executable::test_support::parse_executable_document, kind_map::token_kind, parse_str,
+      Parse, kind_map::token_kind, parse_executable_document, parse_str, parse_type_system_document,
     },
     syntactic::{GraphqlxLexer, definition::type_system_document, executable::executable_document},
   },

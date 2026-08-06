@@ -31,10 +31,7 @@ use std::path::PathBuf;
 
 use smear_parser::graphqlx::{
   kinds::SyntaxKind as K,
-  lossless::{
-    Parse, SyntaxNode, document::test_support::parse_type_system_document,
-    executable::test_support::parse_executable_document, parse_str,
-  },
+  lossless::{Parse, SyntaxNode, parse_executable_document, parse_str, parse_type_system_document},
 };
 
 /// Every `.graphqlx` file in the GraphQLx corpus, in a deterministic order.
@@ -58,14 +55,14 @@ fn corpus_files() -> Vec<PathBuf> {
   files
 }
 
-/// A named root production, as a driver over a `&str`.
+/// A named root entry point over a `&str`.
 type Root = (&'static str, fn(&str) -> Parse);
 
 /// The three roots, by name, so a failure says which one lost the bytes.
 ///
-/// `parse_str` drives the mixed root; the other two are reached through their production drivers.
-/// All three are run over every entry, valid or not: a root that rejects an entry still has to
-/// keep its bytes, and the rejecting path is the one where a byte is most likely to be dropped.
+/// All three are shipped `fn(&str) -> Parse` entry points on `graphqlx::lossless`, and all three
+/// are run over every entry, valid or not: a root that rejects an entry still has to keep its
+/// bytes, and the rejecting path is the one where a byte is most likely to be dropped.
 const ROOTS: &[Root] = &[
   ("document", parse_str),
   ("type_system_document", parse_type_system_document),

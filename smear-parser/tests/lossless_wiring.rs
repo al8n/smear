@@ -55,3 +55,55 @@ fn tokoras_cst_layer_is_in_scope() {
   ) {
   }
 }
+
+/// Each dialect exposes **three** document roots as public `fn(&str) -> Parse`, at the dialect's
+/// `lossless` module and not inside `test_support`.
+///
+/// This is the guard smear issue #67 was filed for the absence of. Two of the three roots existed,
+/// worked, and were documented as things "a schema-only consumer would call directly" while being
+/// `pub(crate)` — reachable only from a driver behind `feature = "test-support"`, which is
+/// compiled out of every shipped build.
+///
+/// # What the coercion pins that a call could not
+///
+/// Binding each entry as a `fn(&str) -> Parse` **pointer** fails to compile if the item is moved
+/// back behind the feature gate, made `pub(crate)`, renamed, or given a different signature —
+/// including the plausible regression of taking the source by something other than `&str`, which
+/// a call site passing a `&'static str` would silently coerce into. The array then states the
+/// other half: all three have the *same* shape, so a consumer can pick a root at run time, which
+/// is exactly what `lossless_x_roundtrip.rs`'s `ROOTS` table does.
+///
+/// The behavioural half — that the three are three *different* parsers rather than one function
+/// under three names — is `lossless_parity.rs`'s
+/// `both_alternate_roots_agree_with_their_syntactic_counterparts`, which holds each against its
+/// own counterpart in the syntactic suite and counts the corpus entries that separate them.
+#[cfg(feature = "graphql")]
+#[test]
+fn the_graphql_lossless_suite_exposes_its_three_roots() {
+  use smear_parser::graphql::lossless::{
+    Parse, parse_executable_document, parse_str, parse_type_system_document,
+  };
+
+  let roots: [fn(&str) -> Parse; 3] = [
+    parse_str,
+    parse_type_system_document,
+    parse_executable_document,
+  ];
+  assert_eq!(roots.len(), 3);
+}
+
+/// The GraphQLx twin of the guard above.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn the_graphqlx_lossless_suite_exposes_its_three_roots() {
+  use smear_parser::graphqlx::lossless::{
+    Parse, parse_executable_document, parse_str, parse_type_system_document,
+  };
+
+  let roots: [fn(&str) -> Parse; 3] = [
+    parse_str,
+    parse_type_system_document,
+    parse_executable_document,
+  ];
+  assert_eq!(roots.len(), 3);
+}

@@ -67,9 +67,7 @@ use smear_parser::graphql::{
       TypeSystemDocument, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, Variable,
       VariableDefinition, VariablesDefinition, cast, token_any, tokens,
     },
-    document::test_support::parse_type_system_document,
-    executable::test_support::parse_executable_document,
-    parse_str,
+    parse_executable_document, parse_str, parse_type_system_document,
   },
 };
 

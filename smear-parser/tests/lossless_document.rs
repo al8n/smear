@@ -12,7 +12,7 @@
 
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{Parse, document::test_support::parse_type_system_document, parse_str},
+  lossless::{Parse, parse_str, parse_type_system_document},
 };
 
 /// The tree's node kinds in pre-order, ignoring tokens and trivia.

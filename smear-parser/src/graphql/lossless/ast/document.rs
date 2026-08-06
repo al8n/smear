@@ -176,8 +176,10 @@ ast_node!(
   /// An SDL-only document root.
   ///
   /// [`Document`] without the two executable kinds, which is the whole difference between the
-  /// two roots. Not reachable from [`parse_str`](crate::graphql::lossless::parse_str); a
-  /// schema-only consumer drives `type_system_document` directly.
+  /// two roots. Not what [`parse_str`](crate::graphql::lossless::parse_str) builds — a
+  /// schema-only consumer calls
+  /// [`parse_type_system_document`](crate::graphql::lossless::parse_type_system_document), which
+  /// reports an executable definition rather than admitting one.
   TypeSystemDocument => K::TypeSystemDocument {
     /// Every scalar type the document defines, in order.
     scalar_type_definitions: many ScalarTypeDefinition,
