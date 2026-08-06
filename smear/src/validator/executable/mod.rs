@@ -799,8 +799,12 @@ where
       .push(Frame::root(row.definition, NONE, 0));
     let mut current = root_selection_set(document, row.definition);
 
-    let mut first: Option<&'d Name<S>> = None;
-    let mut distinct = 0u32;
+    // The rule only asks whether the collected map is a set of one, so the first response name
+    // seen is all that has to be kept: any later name that differs makes at least two entries.
+    // The *field* name is kept alongside it, because "must not be an introspection field" is a
+    // question about the field and not about the key an alias would give it.
+    let mut first_response: Option<&'d Name<S>> = None;
+    let mut first_field: Option<&'d Name<S>> = None;
     let mut multiple = false;
 
     while let Some(frame) = self.scratch.roots.last().copied() {
@@ -828,13 +832,13 @@ where
 
       match selection {
         Selection::Field(field) => {
-          let name = nodes::response_name(field);
-          match first {
+          let response = nodes::response_name(field);
+          match first_response {
             None => {
-              first = Some(name);
-              distinct = 1;
+              first_response = Some(response);
+              first_field = Some(field.name());
             }
-            Some(seen) if name_bytes(seen) != name_bytes(name) => multiple = true,
+            Some(seen) if name_bytes(seen) != name_bytes(response) => multiple = true,
             Some(_) => {}
           }
         }
@@ -875,17 +879,16 @@ where
     }
 
     if multiple {
-      // The map has at least two entries; the count is not worth a second walk to make exact.
-      self.emit(
-        Diagnostic::new(Rule::SingleRootField, row.span).context(Context::Count(distinct + 1)),
-      )?;
+      // At least two entries. The exact count would cost a second walk and change nothing about
+      // the verdict, so the context reports the bound it established.
+      self.emit(Diagnostic::new(Rule::SingleRootField, row.span).context(Context::Count(2)))?;
     } else {
-      match first {
+      match first_field {
         None => {
           self.emit(Diagnostic::new(Rule::SingleRootField, row.span).context(Context::Count(0)))?;
         }
-        Some(name) if is_reserved(name_bytes(name)) => {
-          self.report_name(Rule::SingleRootField, name, Context::None)?;
+        Some(field) if is_reserved(name_bytes(field)) => {
+          self.report_name(Rule::SingleRootField, field, Context::None)?;
         }
         Some(_) => {}
       }
@@ -935,7 +938,7 @@ where
       };
       self.in_operation = true;
 
-      self.check_variable_definitions(row)?;
+      self.check_variable_definitions()?;
 
       let root = RootOperation::ALL[row.root as usize];
       if let OperationDefinition::Named(named) = operation
@@ -948,7 +951,7 @@ where
       reset_bits(&mut self.scratch.visited, self.scratch.fragments.len());
       self.walk_selections(Frame::root(row.definition, scope, Frame::CHECK))?;
 
-      self.check_variables_used(row)?;
+      self.check_variables_used()?;
 
       self.variables = &[];
       self.in_operation = false;
@@ -1001,10 +1004,9 @@ where
   /// Draft 5.8.1 and 5.8.2, plus the value and directive rules over a variable definition's own
   /// default value and directives — the one place in an executable document where constant values
   /// appear.
-  fn check_variable_definitions(&mut self, row: OperationRow) -> ControlFlow<()> {
+  fn check_variable_definitions(&mut self) -> ControlFlow<()> {
     let definitions = self.variables;
     reset_bits(&mut self.scratch.used, definitions.len());
-    let _ = row;
 
     // 5.8.1 — one type per variable name, per operation.
     if self.on(Rule::VariableUniqueness) {
@@ -1067,8 +1069,7 @@ where
   }
 
   /// Draft 5.8.4, read off the marks the usages left.
-  fn check_variables_used(&mut self, row: OperationRow) -> ControlFlow<()> {
-    let _ = row;
+  fn check_variables_used(&mut self) -> ControlFlow<()> {
     if !self.on(Rule::AllVariablesUsed) {
       return ControlFlow::Continue(());
     }

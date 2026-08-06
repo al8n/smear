@@ -973,6 +973,8 @@ fn subscription_roots_are_collected_without_runtime_values() {
     "subscription requiresRuntime($bool: Boolean!) \
      { newMessage @include(if: $bool) { body } }",
     "subscription introspects { __typename }",
+    // The rule is about the *field*, not the response key, so an alias does not launder it.
+    "subscription aliased { alias: __typename }",
     "subscription throughFragment { ...two } \
      fragment two on Subscription { newMessage { body } disallowedSecondRootField }",
   ] {
@@ -982,6 +984,12 @@ fn subscription_roots_are_collected_without_runtime_values() {
       "5.2.4.1 did not fire for\n---\n{source}\n--- got {rules:?}"
     );
   }
+
+  // And the aliased case names the field it refused, not the key the alias gave it — which is
+  // what distinguishes reading the rule as written from reading it off the response name.
+  let aliased = diagnose(&schema, "subscription aliased { alias: __typename }");
+  assert_eq!(aliased.len(), 1);
+  assert_eq!(aliased[0].subject_source(), Some(&"__typename"));
 }
 
 /// Draft 5.5.2.2 runs over the whole fragment graph, including fragments no operation reaches —
