@@ -44,6 +44,19 @@ graphqlx = []
 # can only ever be on is not a gate.
 parser = []
 
+# GraphQL document validation (`smear::validator`), including the built-once `Schema` and the
+# draft §3 "Type Validation" pass that runs inside its build.
+#
+# Off by default until the API stabilises; it flips into `default` alongside a minor bump. It
+# implies `parser` because the builder consumes a parsed `TypeSystemDocument`, and `graphql`
+# because the specification it implements is standard GraphQL's — GraphQLx deliberately has no
+# validator.
+#
+# It adds NO dependency. The schema representation is `core` + `alloc` and nothing else, which the
+# `smear-noatomic` workspace member holds to by compiling those very files for
+# `thumbv6m-none-eabi` with an empty `[dependencies]` table.
+validator = ["parser", "graphql"]
+
 smallvec = ["dep:smallvec"]
 bytes = ["dep:bytes", "tokora/bytes_1"]
 bstr = ["dep:bstr", "tokora/bstr_1"]

@@ -33,6 +33,7 @@ smear = { path = "../smear", default-features = false, features = [
   "graphql",
   "graphqlx",
   "parser",
+  "validator",
   "smallvec",
   "bytes",
   "bstr",

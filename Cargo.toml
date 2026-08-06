@@ -3,14 +3,21 @@ members = [
   "benchmarks",
   "smear",
   "smear-benches",
+  "smear-noatomic",
   "smear-smoke",
 ]
 
-# ── THREE OF THE FOUR MEMBERS PULL `smear` PAST ITS DEFAULT FEATURE SET ──────────────────────
+# ── THREE OF THE FIVE MEMBERS PULL `smear` PAST ITS DEFAULT FEATURE SET ──────────────────────
 #
 # `benchmarks` and `smear-smoke` both enable `smear/rowan`; `smear-smoke` also enables
 # `lossless-coverage` and `test-support`. Cargo unifies features across the SELECTED packages,
 # so a bare workspace-wide command resolves `smear` with every feature it declares turned on.
+#
+# `smear-noatomic` is the one member this arithmetic does not reach, and deliberately so: its
+# `[dependencies]` table is empty and CI asserts that out of `cargo metadata`, so it has no edge
+# to `smear` to unify a feature through. It reaches the representation by `#[path]`-including
+# those source files, which is what lets it build for a core with no compare-and-swap while
+# `smear` itself cannot.
 #
 # That arithmetic is how the entire lossless CST tower entered the Miri selection without anyone
 # choosing it. #70 added `benchmarks`, #84 added `smear-smoke`, and each time the Miri scripts —
@@ -20,7 +27,7 @@ members = [
 #
 # There is deliberately NO `default-members` narrowing that away. It would pin the Miri
 # selection at the price of silently narrowing every OTHER bare command in the repository:
-# `cargo test --all-features` in `.github/workflows/ci.yml` is meant to cover all four members
+# `cargo test --all-features` in `.github/workflows/ci.yml` is meant to cover all five members
 # and would quietly have stopped, with no exit code saying so — the same defect class, one turn
 # later. The selection is pinned where it is READ instead: `ci/miri_sb.sh` and `ci/miri_tb.sh`
 # pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted is not what

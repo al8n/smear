@@ -1,0 +1,31 @@
+[package]
+name = "smear-noatomic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Compiles the validator's `Schema` representation for a core with no atomics, out of `smear`'s own source files"
+publish = false
+
+# The standing proof of one of the validator's load-bearing claims: the schema representation
+# needs no shared-ownership primitive, no interior mutability and no dependency, so it builds for
+# a target that has no compare-and-swap instruction at all.
+#
+# It does that by compiling `smear`'s own files — `#[path]`-included, not copied. A copy would
+# pass forever after the original drifted; this member fails to build the moment a `use` in
+# `smear/src/validator/schema/repr/` reaches outside `core` and `alloc`.
+#
+# The gate is `cargo build -p smear-noatomic --target thumbv6m-none-eabi`. `smear` itself cannot
+# build for that target and is not expected to: its syntactic AST offers an `Arc`-backed list-type
+# spelling (`parser::graphql::ast::ArcType`), which needs `alloc::sync` and therefore native
+# atomics. That is exactly why the claim is about the *schema*, which the caller wraps in whatever
+# pointer their platform has, and not about the crate.
+
+# Deliberately empty, and asserted by CI rather than by comment: the representation depends on
+# nothing.
+[dependencies]
+
+[lints]
+workspace = true
