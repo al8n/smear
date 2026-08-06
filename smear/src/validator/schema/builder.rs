@@ -888,7 +888,7 @@ impl SchemaBuilder {
       let TypeSystemDefinition::Type(ty) = described.node() else {
         continue;
       };
-      let name = introspection_type_name(ty);
+      let name = type_definition_name(ty);
       match self.interner.lookup(name.as_bytes()).and_then(|sym| {
         self
           .type_index(sym)
@@ -915,7 +915,7 @@ impl SchemaBuilder {
       let TypeSystemDefinition::Type(ty) = described.node() else {
         continue;
       };
-      let name = introspection_type_name(ty);
+      let name = type_definition_name(ty);
       let taken = self
         .interner
         .lookup(name.as_bytes())
@@ -1941,9 +1941,11 @@ impl SchemaBuilder {
               let ty = ty.push_non_null().unwrap_or(ty);
               rows.push(FieldDef::new(name, ty, Range32::EMPTY));
             }
-            if let (Some(name), Some(arg), true) =
-              (type_field_sym, type_arg_sym, type_type_id != UNRESOLVED)
-              && !rows.iter().any(|row| row.name() == name)
+            if let (Some(name), Some(arg), true) = (
+              type_field_sym,
+              type_arg_sym,
+              type_type_id != UNRESOLVED && string_id != UNRESOLVED,
+            ) && !rows.iter().any(|row| row.name() == name)
             {
               let args_start = inputs.len() as u32;
               let arg_ty =
@@ -2130,7 +2132,10 @@ fn map_location(location: &Location) -> Option<DirectiveLocation> {
 }
 
 /// The name of a type definition, as a `&str` over the built-in SDL's `&'static str` source.
-fn introspection_type_name(definition: &TypeDefinition<&'static str>) -> &'static str {
+///
+/// Used for both the introspection types and the built-in scalars; the two differ in what the
+/// caller does when the name is already taken, not in how it is read.
+fn type_definition_name(definition: &TypeDefinition<&'static str>) -> &'static str {
   match definition {
     TypeDefinition::Scalar(def) => def.name().source(),
     TypeDefinition::Object(def) => def.name().source(),
