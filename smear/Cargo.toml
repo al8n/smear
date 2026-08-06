@@ -52,6 +52,18 @@ smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
 
 # The lossless CST tower. Reachable through the crate named `smear` for the first time here (#81).
 # `parser` because the tower lives in that module; `std` because the runner needs it.
+#
+# EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH, and will stay outside it until
+# `rowan` is fixed upstream. `rowan 0.16.1` executes undefined behaviour on the ordinary path —
+# `src/arc.rs` under Stacked Borrows, from building any green tree, and `src/cursor.rs` under
+# Tree Borrows, from dropping any red one. Both are live in every published version through
+# `0.17.0`, both were reproduced against rowan alone with no smear code involved, and there is
+# no version to move to. #77 has the evidence; `ci/miri_sb.sh` has the decision; and
+# `ci/miri_scope.py` will fail the Miri matrix if this feature ever resolves ON inside it, so
+# turning it on there is not something that can happen by accident again.
+#
+# This says nothing against the feature — it is a headline capability and its 33 integration
+# targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
 rowan = ["dep:rowan", "tokora/rowan", "std", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
@@ -114,42 +126,38 @@ rowan = { version = "0.16", optional = true }
 # published manifest does not name a version of itself.
 smear = { path = ".", features = ["test-support"] }
 
-criterion = "0.8"
 # `tokora::conformance` is the lexer-contract test kit; it is test-only, so the
 # feature is pulled in here rather than in the normal dependency.
 tokora = { workspace = true, features = ["conformance"] }
-apollo-parser = "0.8.6"
-graphql-parser = "0.4.1"
-async-graphql-parser = "7.2.1"
-cynic-parser = "=0.11.2"
 
-# Disable the default libtest bench harness; all benches go through criterion.
+# ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────────────────────
+#
+# `criterion`, and with it `apollo-parser`, `graphql-parser`, `async-graphql-parser` and
+# `cynic-parser`. All five were dev-dependencies of this package and all five were reached from
+# `benches/` and from nowhere else — no test, example or source file named one. They moved to
+# the `smear-benches` member along with the four `[[bench]]` sections that used them; that
+# manifest's header carries the reasoning in full.
+#
+# The short version, because putting any of them back has a cost that is not local. Cargo
+# resolves dev-dependencies per PACKAGE, not per target, so every entry in this block is built
+# for every test target of this package:
+#
+#   * `criterion` pulls `alloca`, whose build script compiles C through cc-rs. A Linux `cc`
+#     rejects the `-arch arm64` / `-mmacosx-version-min` that cc-rs hands it for an apple
+#     target, so this one edge is what forced four Miri cells onto a `macos-latest` runner —
+#     for a reason that has nothing to do with Miri.
+#   * `apollo-parser` pulls `rowan`, and with this package's own `rowan` feature off that edge
+#     was the ONLY thing putting rowan in the graph at all. rowan is the crate whose undefined
+#     behaviour is #77.
+#
+# A dev-dependency added here that drags either one back re-creates both conditions, and does it
+# silently — nothing in CI reports on the shape of this block.
+#
+# `[lib] bench = false` stays. This package declares no `[[bench]]` target any more, so nothing
+# here goes through criterion — but the setting is about the LIB, and without it cargo still
+# builds a libtest bench harness for `src/lib.rs`.
 [lib]
 bench = false
-
-[[bench]]
-name = "lex_baseline"
-path = "benches/lex_baseline.rs"
-harness = false
-required-features = ["std", "graphql", "graphqlx"]
-
-[[bench]]
-name = "executables"
-path = "benches/executables.rs"
-harness = false
-required-features = ["parser", "graphql"]
-
-[[bench]]
-name = "type_system"
-path = "benches/type_system.rs"
-harness = false
-required-features = ["parser", "graphql"]
-
-[[bench]]
-name = "graphqlx"
-path = "benches/graphqlx.rs"
-harness = false
-required-features = ["parser", "graphqlx"]
 
 # Both examples read files from argv and print to stdout, and they drive the
 # GraphQL lossless lexer, so they need `std` and `graphql`.

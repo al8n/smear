@@ -177,7 +177,7 @@ published, so nothing on crates.io moved; this affects path and git dependents o
 
 All benchmarks compare **smear** against [`apollo-parser`](https://crates.io/crates/apollo-parser), [`graphql-parser`](https://crates.io/crates/graphql-parser), [`async-graphql-parser`](https://crates.io/crates/async-graphql-parser), and [`cynic-parser`](https://crates.io/crates/cynic-parser). Lower is better.
 
-Run with: `cargo bench --package smear --bench <name> -- --quick`
+Run with: `cargo bench --package smear-benches --bench <name> -- --quick`
 
 ### Schema Parsing
 

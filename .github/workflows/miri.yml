@@ -30,37 +30,50 @@ name: Miri
 # to `.github/workflows/macos.yml` instead — a third lane, not this one, because a macOS
 # formatting failure and a Miri UB report are different findings and should be readable apart.
 #
-# This is a SCHEDULING change, not a coverage change. Every job, matrix cell and step below runs
-# what `.github/workflows/ci.yml` ran before, unchanged — the same 10 cells, the same two
-# aliasing models, the same `ci/miri_tb.sh` / `ci/miri_sb.sh`. The one step dropped in the move
-# was `cargo install cargo-hack`, which neither script invokes: both run `cargo miri setup` and
+# The SPLIT (#69/#71) was a scheduling change and not a coverage change: it moved the same 10
+# cells, the same two aliasing models and the same `ci/miri_tb.sh` / `ci/miri_sb.sh` out of
+# `.github/workflows/ci.yml` unchanged. The one step dropped in the move was
+# `cargo install cargo-hack`, which neither script invokes: both run `cargo miri setup` and
 # `cargo miri test` and nothing else, so it compiled a tool no cell used, on every cell.
 #
-# What this does NOT do is make Miri faster. It cannot: the macOS queue is a runner-concurrency
-# constraint this repository does not own. What the split buys is that `CI`'s answer no longer
-# waits behind it.
+# TWO THINGS ABOVE ARE NOW OUT OF DATE, and are kept because they are the measurement that
+# justified the split rather than a description of the file. #77 changed both:
+#
+#   * "the macOS queue is a runner-concurrency constraint this repository does not own" — still
+#     true of the account, and still true of `.github/workflows/macos.yml`'s four legs, but no
+#     longer true HERE: every cell in this file runs on `ubuntu-latest`. The next section says
+#     why that became possible. What is left of this lane's cost is wall clock alone.
+#   * "not a coverage change" — that was the split. #77 IS a coverage change, deliberately and
+#     in one direction: the scripts now pass `-p smear`, which drops the lossless CST tower.
+#     See "WHAT THIS MATRIX DOES NOT COVER" below; it is not optional and it is not a saving.
 
-# ── WHY THE APPLE CELLS STILL RUN ON A macOS HOST ───────────────────────────────────────────
+# ── WHY THE APPLE CELLS NO LONGER RUN ON A macOS HOST ───────────────────────────────────────
 #
-# Miri interprets a TARGET, so the host ought to be irrelevant, and if it were, these 4 cells
-# would become ubuntu ones and the queue that forced this split would stop mattering here.
-# Measured rather than assumed, and the answer is the same one tokora reached: `cargo build` is
-# the obstacle, not Miri.
+# Every cell below runs on `ubuntu-latest`, the two apple targets included, and this repository
+# now asks this workflow for no macOS runner at all. Miri interprets a TARGET, so the host was
+# always supposed to be irrelevant; until #77 it was not, and the reason had nothing to do with
+# Miri.
 #
-# `criterion 0.8.2` is an UNCONDITIONAL dev-dependency of `smear`,
-# and it depends on `alloca 0.4.0`, whose build script is a `cc::Build` that compiles `alloca.c`.
-# `cargo check --workspace --tests` on this tree produces
-# `target/debug/build/alloca/*/out/libcalloca.a`, so the C file is built for the target selected
-# by `--tests` — which is exactly the selection `ci/miri_tb.sh` and `ci/miri_sb.sh` make. On a
-# Linux host targeting `*-apple-darwin`, cc-rs invokes the host `cc` with `-arch x86_64` /
-# `-arch arm64` and `-mmacosx-version-min=...`; a Linux `cc` rejects those, and compiling them
-# needs Apple clang and the macOS SDK.
+# `criterion 0.8.2` was an unconditional dev-dependency of `smear` and it depends on
+# `alloca 0.4.0`, whose build script is a `cc::Build` that compiles `alloca.c`. Cargo resolves
+# dev-dependencies per PACKAGE and not per target, so the `--tests` selection these scripts make
+# built `alloca` for whatever target was named; on a Linux host targeting `*-apple-darwin`, cc-rs
+# invokes the host `cc` with `-arch x86_64` / `-arch arm64` and `-mmacosx-version-min=...`, which
+# a Linux `cc` rejects. Four cells were therefore pinned to `macos-latest` by one C file in one
+# transitive dependency of a benchmark harness.
 #
-# So `macos-latest` here is load-bearing for a reason that has nothing to do with Miri, and it is
-# not a leftover. Moving these cells means getting criterion out of the dev-dependency graph
-# first — cargo has no optional dev-dependencies, so that means the benches moving to their own
-# workspace member — or putting an osxcross toolchain on the runner, which trades a runner queue
-# for an unmanaged SDK. Neither is a CI edit.
+# The previous revision of this comment named the way out and called it "not a CI edit": get
+# criterion out of the dev-dependency graph, which — since cargo has no optional
+# dev-dependency — means the benches moving to their own workspace member. That is what
+# `smear-benches` is (see its manifest header), and it is the same move tokora made in its #216.
+# Measured on this tree afterwards: `cargo miri test -p smear --tests --lib` resolves to 32
+# packages where it previously resolved 95, and not one of the remaining build scripts compiles
+# C — `alloca`, `cc`, `criterion` and the three comparison parsers are all gone from the graph.
+# `apollo-parser` went with them, which also takes `rowan` out of `smear`'s dev graph entirely.
+#
+# Do not reintroduce a `criterion` — or anything else with a `cc` build script — into `smear`'s
+# `[dev-dependencies]`. It will not fail here; it will silently make these four cells
+# unschedulable on Linux again, and the symptom will look like a compiler error in C.
 #
 # WHAT THE TARGET AXIS BUYS, separately from the host. This workspace contains no `target_arch`,
 # `target_os`, `target_vendor`, `target_pointer_width` or `target_endian` cfg anywhere, so every
@@ -68,11 +81,26 @@ name: Miri
 # order and layout. On that axis `i686-unknown-linux-gnu` (32-bit) and
 # `powerpc64-unknown-linux-gnu` (big-endian) are each unique, and `x86_64-unknown-linux-gnu`,
 # `x86_64-apple-darwin` and `aarch64-apple-darwin` are all 64-bit little-endian. The two apple
-# cells are therefore the weakest of the five, and `x86_64-apple-darwin` is the weakest of those
-# — it shares its word size and byte order with the linux x86_64 cell and its OS with the other
-# apple cell. They are kept because dropping coverage is a different decision from moving it,
-# and because they cost `CI` nothing from here; if the macOS budget ever has to shrink,
-# `x86_64-apple-darwin` is the cell to spend first.
+# cells are therefore the weakest of the five. They are kept because dropping coverage is a
+# different decision from moving it, and the reason to spend them first is now weaker than it
+# was: they no longer cost a macOS runner, only wall clock on the same host class as every
+# other cell.
+
+# ── WHAT THIS MATRIX DOES NOT COVER, AND WHY IT IS STATED HERE ──────────────────────────────
+#
+# The 33 `#![cfg(feature = "rowan")]` integration targets in `smear/tests/` — the entire lossless
+# CST tower — are NOT interpreted by any cell in this file, on any target, under either aliasing
+# model. `rowan` itself has undefined behaviour reachable from its ordinary public API, live in
+# every published version including `0.17.0` (2026-08-02), reported upstream since 2021 and
+# unfixed; `ci/miri_sb.sh` and `ci/miri_tb.sh` carry the two sites, the reproduction and the
+# upstream references, and #77 carries the decision.
+#
+# This is an exclusion, not a silence. `ci/miri_scope.py` runs at the end of every cell, prints
+# the excluded set with its reason, and FAILS the cell in either direction: if a target that is
+# not `rowan`-gated ran zero tests (#73's mechanism — a built, linked, passing, empty harness),
+# or if a `rowan`-gated one ran any test at all (#77's mechanism — a new workspace member
+# unifying `smear/rowan` back into the resolve). The matrix is therefore allowed to be narrower
+# than the test tree, and not allowed to be narrower than it says.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
 # `.github/workflows/ci.yml` and `.github/workflows/macos.yml`; read the comment there for why the
@@ -137,10 +165,12 @@ concurrency:
 # Every `run:` here is bash — the same block `ci.yml` and `macos.yml` carry, and `ci.yml`'s has
 # the full account of what it is for. The construct at risk in this file is the
 # `case ... esac` in both `Install cross C toolchain` steps, which PowerShell cannot parse at
-# all. It is safe today only because that step's `if: runner.os == 'Linux'` skips it on the two
-# apple cells, so the ONLY host that ever executes it is the one whose default shell is already
-# bash — a guard written for a different purpose holding up a dialect assumption by accident.
-# Stated here so the assumption is the file's, not the matrix's.
+# all. Before #86 it was safe only because that step's `if: runner.os == 'Linux'` skipped it on
+# the two apple cells — a guard written for a different purpose holding up a dialect assumption
+# by accident. It is now safe twice over and for the stated reason: this block, and the fact
+# that since #77 every cell in this file runs on `ubuntu-latest`. Both stay. "Every host happens
+# to be Linux" is a property of the matrix, which can change in one line; declaring the shell is
+# a property of the file.
 defaults:
   run:
     shell: bash
@@ -164,31 +194,18 @@ jobs:
       # cancel the other, unrelated cells in this matrix.
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+        # ONE dimension. Until #77 there was an `os` dimension too, with five `exclude:` entries
+        # pairing each target to the only host that could build it — a 2 x 5 product carved back
+        # down to 5. The two apple targets needed `macos-latest` because `criterion` put a C
+        # build script in `smear`'s dev graph; `smear-benches` took it out, so every target now
+        # builds on the same host and the product is the list. See the header.
         target:
           - x86_64-unknown-linux-gnu
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - x86_64-apple-darwin
           - aarch64-apple-darwin
-        # Exclude invalid combinations. All five entries below are live: each
-        # names an `os` and a `target` that both appear in the lists above, so
-        # each removes a cell that the product would otherwise create. 2 x 5
-        # minus 5 leaves the 5 cells this matrix runs.
-        exclude:
-          - os: ubuntu-latest
-            target: x86_64-apple-darwin
-          - os: ubuntu-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: i686-unknown-linux-gnu
-          - os: macos-latest
-            target: powerpc64-unknown-linux-gnu
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Cache cargo build and registry
@@ -202,10 +219,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-miri-
       - name: Install cross C toolchain for ${{ matrix.target }}
-        # x86_64-unknown-linux-gnu and the macOS targets build with the
-        # runner's native toolchain; only the two Linux cross targets need
-        # an extra package, so install exactly the one each needs.
-        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        # Named targets rather than a negation. The guard used to read
+        # `runner.os == 'Linux' && matrix.target != 'x86_64-apple-darwin'`-shaped, which was
+        # true for exactly the two targets the `case` below has branches for — but only by
+        # coincidence, and since #77 every host IS Linux, so the `runner.os` half is now a
+        # condition that can never be false. Naming the two keeps the guard and the `case`
+        # arms in agreement where a reader can see it, and makes adding a third target a
+        # deliberate edit in two visible places rather than a silent fall-through to a `case`
+        # with no matching branch.
+        if: matrix.target == 'i686-unknown-linux-gnu' || matrix.target == 'powerpc64-unknown-linux-gnu'
         run: |
           case "${{ matrix.target }}" in
             i686-unknown-linux-gnu)
@@ -229,31 +251,18 @@ jobs:
       # cancel the other, unrelated cells in this matrix.
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+        # ONE dimension. Until #77 there was an `os` dimension too, with five `exclude:` entries
+        # pairing each target to the only host that could build it — a 2 x 5 product carved back
+        # down to 5. The two apple targets needed `macos-latest` because `criterion` put a C
+        # build script in `smear`'s dev graph; `smear-benches` took it out, so every target now
+        # builds on the same host and the product is the list. See the header.
         target:
           - x86_64-unknown-linux-gnu
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - x86_64-apple-darwin
           - aarch64-apple-darwin
-        # Exclude invalid combinations. All five entries below are live: each
-        # names an `os` and a `target` that both appear in the lists above, so
-        # each removes a cell that the product would otherwise create. 2 x 5
-        # minus 5 leaves the 5 cells this matrix runs.
-        exclude:
-          - os: ubuntu-latest
-            target: x86_64-apple-darwin
-          - os: ubuntu-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: i686-unknown-linux-gnu
-          - os: macos-latest
-            target: powerpc64-unknown-linux-gnu
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Cache cargo build and registry
@@ -267,10 +276,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-miri-
       - name: Install cross C toolchain for ${{ matrix.target }}
-        # x86_64-unknown-linux-gnu and the macOS targets build with the
-        # runner's native toolchain; only the two Linux cross targets need
-        # an extra package, so install exactly the one each needs.
-        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        # Named targets rather than a negation. The guard used to read
+        # `runner.os == 'Linux' && matrix.target != 'x86_64-apple-darwin'`-shaped, which was
+        # true for exactly the two targets the `case` below has branches for — but only by
+        # coincidence, and since #77 every host IS Linux, so the `runner.os` half is now a
+        # condition that can never be false. Naming the two keeps the guard and the `case`
+        # arms in agreement where a reader can see it, and makes adding a third target a
+        # deliberate edit in two visible places rather than a silent fall-through to a `case`
+        # with no matching branch.
+        if: matrix.target == 'i686-unknown-linux-gnu' || matrix.target == 'powerpc64-unknown-linux-gnu'
         run: |
           case "${{ matrix.target }}" in
             i686-unknown-linux-gnu)
