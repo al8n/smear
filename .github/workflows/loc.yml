@@ -34,6 +34,17 @@ on:
       - 'art'
   workflow_dispatch:
 
+# Every `run:` here is bash — the same block the other three workflows carry, and `ci.yml`'s
+# has the full account. This is the weakest of the four instances: one ubuntu job, and its
+# three `run:` blocks are plain command sequences that any shell would take. It is stated
+# anyway so that "every workflow in this repository declares bash" is a property somebody can
+# check by reading the four files, rather than a rule with one silent exception in the file
+# nobody looks at. This repository has twice shipped a workflow fix into `ci.yml` and left the
+# siblings behind.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   loc:
     runs-on: ubuntu-latest

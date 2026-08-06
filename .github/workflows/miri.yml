@@ -134,6 +134,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
+# Every `run:` here is bash — the same block `ci.yml` and `macos.yml` carry, and `ci.yml`'s has
+# the full account of what it is for. The construct at risk in this file is the
+# `case ... esac` in both `Install cross C toolchain` steps, which PowerShell cannot parse at
+# all. It is safe today only because that step's `if: runner.os == 'Linux'` skips it on the two
+# apple cells, so the ONLY host that ever executes it is the one whose default shell is already
+# bash — a guard written for a different purpose holding up a dialect assumption by accident.
+# Stated here so the assumption is the file's, not the matrix's.
+defaults:
+  run:
+    shell: bash
+
 # `RUSTFLAGS` is carried over from `CI` verbatim even though `ci/miri_tb.sh` and `ci/miri_sb.sh`
 # both set `MIRIFLAGS` before any `cargo miri test`: neither script touches `RUSTFLAGS`, so this
 # value is what `cargo miri setup` and the test build see, and changing it here would change what
