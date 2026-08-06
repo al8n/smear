@@ -2,6 +2,7 @@
 members = [
   "benchmarks",
   "smear",
+  "smear-smoke",
 ]
 # Reference-only: the superseded parser/scaffold crates and the old `smear`
 # benches and integration suite that drove them. Kept for history and parity

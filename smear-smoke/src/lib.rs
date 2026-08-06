@@ -1,0 +1,331 @@
+//! Consumes `smear` the way a dependent does.
+//!
+//! One `pub fn` per feature `smear` declares, each naming that feature's flagship surface through
+//! the front door, plus the compatibility aliases the crate merge promised to keep. The point is
+//! not that these functions are *called* — most of them are never run — it is that they
+//! **compile**, across a real `[dependencies]` edge with `default-features = false` and a named
+//! feature set. If a path stops resolving, the workspace stops building.
+//!
+//! # There is no `#[cfg]` in this crate, on purpose
+//!
+//! A `#[cfg(feature = "…")]` here would let a probe silently compile to nothing, which is the
+//! shape of green [#81] is about: the lossless tower was thoroughly tested and untested in the
+//! configuration that shipped. Every feature is unconditionally on in `Cargo.toml`, so every
+//! probe is unconditionally compiled, and a feature that stops existing fails **resolution** —
+//! loudly, before rustc is reached.
+//!
+//! # The two directions this gate discriminates
+//!
+//! Both were exercised against a deliberately broken tree before this crate landed, and the
+//! observed failures are recorded because a gate nobody has seen fail is a gate nobody has
+//! tested.
+//!
+//! - **A feature added to `smear` and not smoked** fails
+//!   `tests::the_smoke_consumes_every_feature` (a `#[cfg(test)]` unit test, so a code span and
+//!   not a link), which compares `smear`'s `[features]` keys against the list this crate's own
+//!   manifest enables. Adding `zzz-throwaway-probe = []` to
+//!   `smear` produced: *smear declares ["zzz-throwaway-probe"] and this crate does not enable
+//!   them*.
+//! - **A feature removed or renamed in `smear`** fails cargo's own resolution of the dependency
+//!   entry, before this file is compiled at all. Deleting `lossless-coverage` produced:
+//!   *package `smear-smoke` depends on `smear` with feature `lossless-coverage` but `smear` does
+//!   not have that feature*.
+//!
+//! One caveat on the second direction, found while proving it. Six of the twelve features —
+//! `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec`, `rowan` — share a name with an OPTIONAL
+//! DEPENDENCY, so deleting the explicit `[features]` line does not remove the name: cargo falls
+//! back to the implicit feature an optional dependency creates, resolution succeeds, and only the
+//! `tokora/<backing>` half is silently lost. Those six still red here — the probe below needs the
+//! surface that half enables, so deleting `smol-bytes = [...]` broke compilation of
+//! [`smol_bytes_source`] — but they red as a compile error rather than as a resolution error, and
+//! they red BECAUSE a probe names the surface. That is the case for writing probes rather than
+//! trusting the dependency edge alone.
+//!
+//! [#81]: https://github.com/al8n/smear/issues/81
+
+use smear::lexer::tokora::{Lexer as _, Parse as _, Parser};
+
+/// `std` — the OS tier. Off, the crate is `no_std` and `thiserror` builds without its `std`
+/// feature, so the crate's `#[derive(thiserror::Error)]` types lose their
+/// `std::error::Error` implementation.
+///
+/// Written as a bound rather than a call so the probe IS the trait implementation.
+pub fn std_tier() -> &'static str {
+  fn assert_error<E: std::error::Error>() -> &'static str {
+    core::any::type_name::<E>()
+  }
+  assert_error::<smear::lexer::error::LengthError>()
+}
+
+/// `graphql` — the GraphQL dialect in the lexer: a syntactic lex driven to exhaustion.
+pub fn graphql_lexer(src: &str) -> usize {
+  let mut lexer = smear::lexer::graphql::syntactic::SyntacticLexer::<str>::new(src);
+  let mut tokens = 0usize;
+  while lexer.lex().is_some() {
+    tokens += 1;
+  }
+  tokens
+}
+
+/// `graphqlx` — the GraphQLx dialect in the lexer: the extended token set, over the same driver.
+pub fn graphqlx_lexer(src: &str) -> usize {
+  let mut lexer = smear::lexer::graphqlx::syntactic::SyntacticLexer::<str>::new(src);
+  let mut tokens = 0usize;
+  while lexer.lex().is_some() {
+    tokens += 1;
+  }
+  tokens
+}
+
+/// `parser` — the parser tower: a GraphQL executable document, parsed to an AST.
+///
+/// This is the probe the `parser` gate exists for. With the feature off, `smear::parser` is not a
+/// module and this function does not resolve.
+#[allow(clippy::type_complexity)]
+pub fn graphql_parser(
+  src: &str,
+) -> Result<
+  smear::parser::graphql::ast::ExecutableDocument<&str>,
+  smear::parser::graphql::error::GraphqlErrors<&str>,
+> {
+  use smear::parser::graphql::{
+    GraphQL, ast::ExecutableDocument, error::GraphqlErrors, syntactic::GraphqlLexer,
+  };
+
+  Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(ExecutableDocument::<&str>::graphql)
+  .parse_str(src)
+}
+
+/// `graphqlx` + `parser` — the GraphQLx dialect in the parser, which is where the dialect's
+/// imports, generics and namespaced paths actually live.
+#[allow(clippy::type_complexity)]
+pub fn graphqlx_parser(
+  src: &str,
+) -> Result<
+  smear::parser::graphqlx::ast::Document<&str>,
+  smear::parser::graphqlx::error::GraphqlxErrors<&str>,
+> {
+  use smear::parser::graphqlx::{
+    GraphQLx, ast::Document, error::GraphqlxErrors, syntactic::GraphqlxLexer,
+  };
+
+  Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
+    Document::<&str>::graphqlx,
+  )
+  .parse_str(src)
+}
+
+/// `smallvec` — the error container is SmallVec-backed rather than `Vec`-backed.
+///
+/// The coercion is the probe: with the feature off the deref target is a `Vec` and the binding
+/// does not type-check.
+pub fn smallvec_backed_errors(errors: &smear::lexer::graphql::error::LexerErrors) -> usize {
+  let inline: &smallvec::SmallVec<[smear::lexer::graphql::error::LexerError; 1]> = errors;
+  inline.len()
+}
+
+/// `rowan` — the lossless CST tower, reachable through the crate named `smear` for the first time
+/// (#81). A `parse_document` -> [`Parse`] -> `SyntaxNode` round trip.
+///
+/// [`Parse`]: smear::parser::graphql::lossless::Parse
+pub fn lossless_round_trip(src: &str) -> String {
+  let parse: smear::parser::graphql::lossless::Parse =
+    smear::parser::graphql::lossless::parse_document(src);
+  let node: smear::parser::graphql::lossless::SyntaxNode = parse.syntax();
+  node.text().to_string()
+}
+
+/// `lossless-coverage` — the per-node-kind hit counters the trivia gates measure with.
+pub fn lossless_coverage(src: &str) -> u32 {
+  use smear::parser::{graphql::kinds::SyntaxKind, lossless::coverage};
+
+  coverage::reset::<SyntaxKind>();
+  let _ = smear::parser::graphql::lossless::parse_document(src);
+  coverage::hits_of::<SyntaxKind>(SyntaxKind::Document)
+}
+
+/// `test-support` — the lossless suites' scaffolding, which is public API in a build that enables
+/// the feature and compiled to nothing in one that does not.
+pub fn test_support_scaffolding() {
+  smear::parser::lossless::test_support::assert_kind_space_is_well_formed::<
+    smear::parser::graphql::kinds::SyntaxKind,
+  >();
+}
+
+/// `bytes` — a `bytes::Bytes`-backed source.
+pub fn bytes_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
+  keyword_of(bytes::Bytes::from_static(b"query"))
+}
+
+/// `bstr` — a `bstr::BStr`-backed source.
+pub fn bstr_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
+  keyword_of(bstr::BStr::new(b"mutation"))
+}
+
+/// `hipstr` — a `hipstr::HipStr`-backed source.
+pub fn hipstr_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
+  keyword_of(hipstr::HipStr::from("subscription"))
+}
+
+/// `smol-bytes` — a `smol_bytes::shared::Bytes`-backed source.
+pub fn smol_bytes_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
+  keyword_of(smol_bytes::shared::Bytes::from_static(b"fragment"))
+}
+
+/// Classify an identifier held in whatever source type `S` is.
+///
+/// The four probes above differ only in that type, which is the whole of what their features
+/// gate: each source backing is an `impl` block that exists only under its feature, so a missing
+/// one is a trait-resolution failure here.
+fn keyword_of<S>(source: S) -> Option<smear::lexer::graphql::ContextualKeyword>
+where
+  S: AsRef<[u8]>,
+  smear::lexer::graphql::syntactic::SyntacticToken<S>:
+    smear::lexer::tokora::utils::DowncastRef<smear::lexer::graphql::ContextualKeyword>,
+{
+  use smear::lexer::tokora::utils::DowncastRef as _;
+  smear::lexer::graphql::syntactic::SyntacticToken::Identifier(source).downcast_ref()
+}
+
+// ---------------------------------------------------------------------------------------------
+// the compatibility aliases the merge promised to keep
+// ---------------------------------------------------------------------------------------------
+
+/// `smear::parser::lexer::…` — the nested alias `smear-parser` published as
+/// `smear_parser::lexer::…`, preserved by `pub use crate::lexer` in the parser module.
+///
+/// The `same_type` binding is the assertion: it only compiles if the alias resolves to the very
+/// type `smear::lexer` names, rather than to some parallel re-export.
+pub fn nested_lexer_alias(src: &str) -> usize {
+  let via_alias = smear::parser::lexer::graphql::syntactic::SyntacticLexer::<str>::new(src);
+  let same_type: smear::lexer::graphql::syntactic::SyntacticLexer<'_, str> = via_alias;
+  same_type.span().len()
+}
+
+/// `smear::lexer::tokora` — the nested `tokora` re-export, an existing public path.
+pub fn nested_tokora_alias() -> smear::lexer::tokora::SimpleSpan {
+  smear::lexer::tokora::SimpleSpan::new(0, 0)
+}
+
+/// `smear::ast_node!` — the `#[macro_export]`ed typed-wrapper macro, at the merged crate root
+/// rather than under `parser::`, exactly as `macro_export` has always placed it.
+pub mod exported_macro {
+  use smear::parser::graphql::kinds::SyntaxKind as K;
+
+  smear::ast_node!(
+    lang = smear::parser::graphql::kinds::GraphQLLang;
+    /// A document, wrapped by the macro from outside the defining crate.
+    SmokeDocument => K::Document {
+      /// The document's definitions.
+      definitions: many SmokeDefinition,
+    }
+  );
+
+  smear::ast_node!(
+    lang = smear::parser::graphql::kinds::GraphQLLang;
+    /// A type-system definition.
+    SmokeDefinition => K::ObjectTypeDefinition {
+      /// The definition's name token.
+      name: tok K::Name,
+    }
+  );
+}
+
+#[cfg(test)]
+mod tests {
+  use std::collections::BTreeSet;
+
+  /// Features named in `smear`'s manifest but deliberately not smoked, each with a written
+  /// reason.
+  ///
+  /// **Empty, and meant to stay that way.** An allowlist is how a census stops being one; the
+  /// entry that belongs here is a feature whose surface genuinely cannot be reached from a
+  /// dependent, and no such feature exists today.
+  const NOT_SMOKED: &[(&str, &str)] = &[];
+
+  /// Every feature `smear` declares is enabled by this crate's dependency on it.
+  ///
+  /// Both manifests are read at **compile** time, so the test cannot pass by reading a file that
+  /// is not the one the build used, and the smoke's own feature list is parsed back out of its
+  /// manifest rather than restated here — one source of truth, not two that agree today.
+  #[test]
+  fn the_smoke_consumes_every_feature() {
+    let smear: toml::Value = toml::from_str(include_str!("../../smear/Cargo.toml"))
+      .expect("smear/Cargo.toml is not valid TOML");
+    let smoke: toml::Value =
+      toml::from_str(include_str!("../Cargo.toml")).expect("this crate's Cargo.toml is invalid");
+
+    let declared: BTreeSet<String> = smear
+      .get("features")
+      .and_then(toml::Value::as_table)
+      .expect("smear declares no [features] table, which cannot be right")
+      .keys()
+      // `default` is a resolution of the others, not a capability of its own.
+      .filter(|name| name.as_str() != "default")
+      .cloned()
+      .collect();
+
+    let enabled: BTreeSet<String> = smoke
+      .get("dependencies")
+      .and_then(|deps| deps.get("smear"))
+      .and_then(|smear| smear.get("features"))
+      .and_then(toml::Value::as_array)
+      .expect("this crate does not name a feature list on its `smear` dependency")
+      .iter()
+      .map(|value| {
+        value
+          .as_str()
+          .expect("a feature entry that is not a string")
+          .to_owned()
+      })
+      .collect();
+
+    let excused: BTreeSet<String> = NOT_SMOKED
+      .iter()
+      .map(|(name, _)| (*name).to_owned())
+      .collect();
+
+    // A census over an empty set passes vacuously, which is the failure mode this whole crate is
+    // about. Assert it read something first.
+    assert!(
+      declared.len() >= 12,
+      "read only {} features out of smear's manifest; the parse is wrong, not the manifest",
+      declared.len()
+    );
+
+    let unsmoked: Vec<&String> = declared.difference(&enabled).collect();
+    let unsmoked: Vec<&&String> = unsmoked
+      .iter()
+      .filter(|name| !excused.contains(**name))
+      .collect();
+    assert!(
+      unsmoked.is_empty(),
+      "smear declares {unsmoked:?} and this crate does not enable them, so nothing compiles \
+       their surface through the dependency edge — add a probe in `lib.rs` and the feature here, \
+       or record a written reason in NOT_SMOKED"
+    );
+
+    // The other direction. A feature enabled here that smear no longer declares would already
+    // have failed cargo's resolution, but a name that moved into `default` or an entry left
+    // behind by a rename would not, and either makes the list above stop describing the crate.
+    let phantom: Vec<&String> = enabled.difference(&declared).collect();
+    assert!(
+      phantom.is_empty(),
+      "this crate enables {phantom:?}, which smear does not declare as a non-default feature"
+    );
+
+    for (name, _) in NOT_SMOKED {
+      assert!(
+        declared.contains(*name),
+        "NOT_SMOKED excuses `{name}`, which smear no longer declares; a stale excuse hides the \
+         next real one"
+      );
+    }
+  }
+}
