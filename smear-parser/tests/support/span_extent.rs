@@ -38,7 +38,9 @@
 //!   between two tokens. Weaker than the non-empty rule on purpose: a zero-width span records a
 //!   *position*, and the two candidate positions on either side of a run of trivia are both
 //!   defensible, so pinning it tighter than "not in the middle of the whitespace" would be pinning
-//!   a choice rather than a fact.
+//!   a choice rather than a fact. A source the lexer yields **no token at all** for — an empty
+//!   file, a comment-only one, one the lexer rejects on its first byte — has no boundaries for the
+//!   rule to name, and there the two input edges are the only positions there are; see [`check`].
 //! - `not-contained` — a node's span lies inside its parent's. Free from the walk's nesting, and
 //!   the check that catches an endpoint that ran past the construct it belongs to.
 //!
@@ -214,7 +216,19 @@ pub struct Extents {
 /// Every way `spans` fails the extent invariant against `extents`.
 ///
 /// An empty result is the pass. `src` is used only to quote the offending bytes in the message.
+///
+/// # The tokenless source
+///
+/// `empty-off-boundary` asks whether a zero-width span sits on a token boundary, and a source the
+/// lexer yields **no** token for has none: an empty file, a comment-only one, a byte the lexer
+/// refuses outright. The invalid corpora contain all three, and a parse of one under a recovering
+/// emitter still produces a document node — a zero-width one, because there is nothing for it to
+/// contain. The only two positions such a node can carry are the input's own edges, so both are
+/// accepted **and only when the token set is empty**: with even one token in the source the
+/// ordinary rule applies at offset 0 like anywhere else, so an optional-collection marker parked in
+/// front of a leading run of trivia is still named. `the_checker_can_answer_no` pins both halves.
 pub fn check(src: &str, spans: &[FoundSpan], extents: &Extents) -> Vec<Violation> {
+  let tokenless = extents.starts.is_empty() && extents.ends.is_empty();
   let mut out = Vec::new();
   let mut note = |owner: &str, rule: &'static str, detail: String| {
     out.push(Violation {
@@ -252,7 +266,10 @@ pub fn check(src: &str, spans: &[FoundSpan], extents: &Extents) -> Vec<Violation
           format!("{where_} — closes past its last token, in the ignorable bytes that follow"),
         );
       }
-    } else if !extents.starts.contains(&span.start) && !extents.ends.contains(&span.start) {
+    } else if !extents.starts.contains(&span.start)
+      && !extents.ends.contains(&span.start)
+      && !(tokenless && (span.start == 0 || span.start == src.len()))
+    {
       note(
         &span.owner,
         "empty-off-boundary",
