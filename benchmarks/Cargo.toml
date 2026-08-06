@@ -1,0 +1,50 @@
+[package]
+name = "smear-apollo-bench"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Like-for-like benchmark: smear's GraphQL lossless CST parser vs apollo-parser"
+publish = false
+
+# A workspace member rather than a dev-dependency of `smear-parser`: a dev-dependency would
+# compile apollo into every `cargo test -p smear-parser`, and a workspace-*excluded* crate would
+# not inherit the root `[patch.crates-io]` that resolves the unpublished `tokora = "0.8.0"`.
+#
+# `apollo-parser` comes from the registry, not from the local `apollo-rs` checkout, so the
+# numbers describe what a real consumer gets and reproduce on any machine. 0.8.6 is both the
+# local checkout's version and crates.io's current max.
+
+[dependencies]
+# `graphqlx` is deliberately off: the benchmark only exercises the GraphQL dialect, and
+# `graphqlx` drags in `unstable`.
+smear-parser = { path = "../smear-parser", version = "0.0.0", default-features = false, features = [
+  "std",
+  "graphql",
+  "rowan",
+] }
+tokora.workspace = true
+apollo-parser = "0.8.6"
+# Named directly only so `src/dump.rs` can spell `WalkEvent` and `NodeOrToken`, the two types
+# `SyntaxNode::preorder_with_tokens` yields. Both other members of this build graph already
+# depend on `rowan = "0.16"` — `apollo-parser` directly, smear through tokora — so this adds a name
+# to the namespace and nothing to the build.
+rowan = "0.16"
+# The byte-identity gate (`tests/byte_identity.rs`) recomputes the four corpus hashes in-process
+# and compares them against the constants in `src/dump.rs`. Hashing in Rust rather than piping to
+# `shasum` is what lets the gate run as an ordinary `cargo test` on any runner, and what lets the
+# 1.4 GB `prefixes` dump be hashed in bounded memory rather than materialised.
+sha2 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+criterion = "0.8"
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "apollo_comparison"
+path = "benches/apollo_comparison.rs"
+harness = false
