@@ -100,7 +100,8 @@ ast_node!(
   ///
   /// Not what [`parse_str`](crate::graphql::lossless::parse_str) builds — that parses the mixed
   /// [`Document`](super::document::Document). A consumer that will only accept executable syntax
-  /// drives `executable_document` directly.
+  /// calls [`parse_executable_document`](crate::graphql::lossless::parse_executable_document),
+  /// which reports a type-system definition rather than admitting one.
   ExecutableDocument => K::ExecutableDocument {
     /// Every operation the document defines, in order.
     operation_definitions: many OperationDefinition,

@@ -95,9 +95,6 @@ pub(crate) const VARIABLE_DEFINITION_HEADS: &[Kind] = &[Kind::Dollar];
 /// description, the `{` of a shorthand operation, or the
 /// `query`/`mutation`/`subscription`/`fragment` keyword — an `Identifier` to the lexer, which
 /// is why the set cannot be finer than this.
-// Named only by the executable-only root and its dispatcher, both of which are reached only from
-// a `test_support` driver — see `lossless_drivers!`.
-#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[
   Kind::InlineString,
   Kind::BlockString,

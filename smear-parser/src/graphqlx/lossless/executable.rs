@@ -334,9 +334,9 @@ lossless_production! {
   /// walk. This loop's terminating peek is also what crosses the trailing trivia, which therefore
   /// lands inside the document — a document *is* the whole file, so that is the right answer
   /// rather than a tolerated one.
-  // The executable-only root, off `parse_str`'s mixed-form path; its driver is its only caller
-  // and the gate takes it — see `lossless_drivers!`.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+  ///
+  /// The executable-only root, off [`super::parse_str`]'s mixed-form path.
+  /// [`super::parse_executable_document`] is its shipped entry point.
   fn executable_document<'inp, Src, Ctx>(inp) {
     node(
       K::ExecutableDocument.raw(),
@@ -353,6 +353,16 @@ lossless_production! {
       },
     )
     .parse_input(inp)
+  }
+
+  /// [`executable_document`], then a drain — the production [`super::parse_executable_document`]
+  /// applies.
+  ///
+  /// See `document.rs`'s module docs for why the drain is not optional.
+  fn executable_document_entry<'inp, Src, Ctx>(inp) {
+    let out = executable_document::<Src, Ctx>(inp);
+    inp.skip_while(|_| true)?;
+    out
   }
 }
 
@@ -371,8 +381,4 @@ lossless_drivers! {
 
   /// `super::fragment_definition` over `src`.
   fn parse_fragment_definition => fragment_definition (mark);
-
-  /// `super::executable_document` over `src` — the entry every executable parse uses, and the only
-  /// door to `executable_definition`.
-  fn parse_executable_document => executable_document;
 }

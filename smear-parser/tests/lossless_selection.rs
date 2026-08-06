@@ -20,9 +20,9 @@ use smear_parser::graphql::{
   lossless::{
     Parse,
     executable::test_support::{
-      parse_executable_document, parse_fragment_definition, parse_operation_definition,
-      parse_variables_definition,
+      parse_fragment_definition, parse_operation_definition, parse_variables_definition,
     },
+    parse_executable_document,
     selection::test_support::{parse_field, parse_selection, parse_selection_set},
   },
 };

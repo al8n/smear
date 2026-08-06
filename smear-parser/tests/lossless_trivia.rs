@@ -74,10 +74,7 @@ use std::{collections::BTreeSet, path::PathBuf};
 use smear_lexer::graphql::lossless::LosslessLexer;
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{
-    Parse, document::test_support::parse_type_system_document,
-    executable::test_support::parse_executable_document, parse_str,
-  },
+  lossless::{Parse, parse_executable_document, parse_str, parse_type_system_document},
 };
 use tokora::Lexer as _;
 

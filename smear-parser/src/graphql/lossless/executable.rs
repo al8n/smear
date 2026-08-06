@@ -208,9 +208,6 @@ lossless_production! {
   /// Dispatch on the definition head, reading an optional leading description first. Opens
   /// **no** node of its own; the chosen production spends the mark on its own — and this is one
   /// of the two places the contextual keywords are read.
-  // Reached only from `executable_document`, itself reached only from a driver — see
-  // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn executable_definition<'inp, Src, Ctx>(inp) {
     // The head peek first — see `document::definition` for the ruling and for the measurement
     // that shows the ordering is currently redundant, every caller being a loop that peeks.
@@ -241,9 +238,9 @@ lossless_production! {
   /// The empty form is reported: `syntactic/` rejects an empty input ("one-or-more, so an empty
   /// input errors"), and gate 1 compares verdicts. The node is opened either way, so a caller
   /// always finds a document to walk.
-  // The executable-only root, off `parse_str`'s mixed-form path; its driver is its only caller
-  // and the gate takes it — see `lossless_drivers!`.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+  ///
+  /// The executable-only root, off [`parse_str`](super::parse_str)'s mixed-form path.
+  /// [`parse_executable_document`](super::parse_executable_document) is its shipped entry point.
   fn executable_document<'inp, Src, Ctx>(inp) {
     node(
       K::ExecutableDocument.raw(),
@@ -259,6 +256,19 @@ lossless_production! {
       },
     )
     .parse_input(inp)
+  }
+
+  /// [`executable_document`] plus the drain, for the reason `document.rs`'s `document_entry`
+  /// carries one.
+  ///
+  /// This loop does not even catch — `executable_definition::<Src, Ctx>(inp)?` propagates — so an
+  /// `Err` reaching [`parse_executable_document`](super::parse_executable_document) is the
+  /// ordinary case rather than the exotic one, and the tail it left uncommitted would be a
+  /// `FinishError::UncoveredGap` panic in materialization without this drain.
+  fn executable_document_entry<'inp, Src, Ctx>(inp) {
+    let out = executable_document::<Src, Ctx>(inp);
+    inp.skip_while(|_| true)?;
+    out
   }
 }
 
@@ -277,8 +287,4 @@ lossless_drivers! {
 
   /// `super::fragment_definition` over `src`.
   fn parse_fragment_definition => fragment_definition (mark);
-
-  /// `super::executable_document` over `src` — the entry every executable parse uses, and the
-  /// only door to `executable_definition`.
-  fn parse_executable_document => executable_document;
 }

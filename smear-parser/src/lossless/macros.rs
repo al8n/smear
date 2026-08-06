@@ -249,21 +249,30 @@ macro_rules! lossless_production {
 ///
 /// It was `#[doc(hidden)] pub` and nothing else, which hides a module from rustdoc and ships it
 /// anyway: sixteen modules and sixty-eight `fn(&str) -> Parse` entry points, public, callable and
-/// semver-relevant in every `rowan` build. The gate is written here, once, rather than at sixteen
-/// call sites.
+/// semver-relevant in every `rowan` build. The gate is written here, once, rather than at each
+/// call site. Fifteen modules and sixty-four drivers remain — smear issue #67 promoted the four
+/// document roots to real entry points on each dialect's `lossless` module, which retired their
+/// drivers and emptied GraphQL's `document::test_support` altogether.
 ///
 /// **`pub` and not `pub(crate)`** because every consumer is a file under `tests/`, which cargo
 /// compiles as its own crate and which therefore sees exactly the shipped public surface.
 /// `#[cfg(test)]` cannot reach an integration test either. A feature is the only door that both
 /// lets `tests/` in and keeps a consumer out.
 ///
-/// # Fourteen items the drivers were keeping alive
+/// # Three items the drivers are still keeping alive, down from fourteen
 ///
-/// Gating the modules turned up productions whose **only** caller was a driver — the two SDL-only
-/// and executable-only document roots and their dispatchers, GraphQLx's `extension` and
-/// `path_or_recover`, and the three recovery head lists that only those productions name. They are
-/// real productions, deliberately not on `parse_str`'s path (each says so in its own docs), and
-/// they are `pub(crate)`, so with the drivers gone nothing in a shipped build can reach them.
+/// Gating the modules turned up fourteen productions whose **only** caller was a driver. Eleven of
+/// them were the two alternate document roots in each dialect and the dispatchers and recovery head
+/// lists that only those roots name — and smear issue #67 gave the roots real entry points
+/// (`parse_type_system_document`, `parse_executable_document`, beside each dialect's `parse_str`),
+/// which gave all eleven a caller that is not a test.
+///
+/// The three that remain are the ones a document root does not reach: GraphQLx's `extension` and
+/// `path_or_recover`, and GraphQLx's description-reading `type_system_definition` wrapper, which
+/// the three document dispatchers bypass by entering at `type_system_definition_at` with a mark
+/// they already minted. They are real productions, deliberately not on any root's path (each says
+/// so in its own docs), and they are `pub(crate)`, so with the drivers gone nothing in a shipped
+/// build can reach them.
 ///
 /// Each carries `#[cfg_attr(not(feature = "test-support"), allow(dead_code))]` rather than a bare
 /// `allow`: the lint stays live in the configuration that has callers, so a driver that stops
@@ -281,7 +290,7 @@ macro_rules! lossless_drivers {
     )*
   ) => {
     $(#[$modmeta])*
-    // The sixteen driver modules the two suites declare, gated at the one place that writes them
+    // The fifteen driver modules the two suites declare, gated at the one place that writes them
     // all. `#[doc(hidden)]` alone left every one of them in the shipped `rowan` build — public,
     // callable and semver-relevant — for the benefit of `tests/`, which is a separate crate and
     // therefore cannot see anything less than `pub`. The feature removes them from the build

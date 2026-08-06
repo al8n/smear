@@ -120,9 +120,6 @@ lossless_production! {
 
   /// One entry of an [`executable_document`](super::executable::executable_document): an import or
   /// a described executable definition.
-  // Reached only from `executable::executable_document`, itself reached only from a driver — see
-  // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn import_or_executable_definition<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -141,9 +138,6 @@ lossless_production! {
 
   /// One entry of a [`type_system_document`]: an import, an extension, or a described type-system
   /// definition.
-  // Reached only from `type_system_document`, itself reached only from a driver — see
-  // `lossless_drivers!`.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn import_or_type_system_definition_or_extension<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -200,9 +194,11 @@ lossless_production! {
   /// [`document`]'s loop over the SDL-only dispatcher, written out rather than shared: a
   /// higher-ranked `fn` parameter would be the only way to abstract over the three dispatchers, and
   /// it buys eight lines at the cost of a signature no reader can check at a glance.
-  // The SDL-only root, off `parse_str`'s mixed-form path; its driver is its only caller and the
-  // gate takes it — see `lossless_drivers!`.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+  ///
+  /// The SDL-only root, off [`super::parse_str`]'s mixed-form path.
+  /// [`super::parse_type_system_document`] is its shipped entry point — the one a schema-only
+  /// consumer calls so that an executable definition is rejected by the parser, at the parser's
+  /// own position, rather than by hand afterwards.
   fn type_system_document<'inp, Src, Ctx>(inp) {
     node(
       K::TypeSystemDocument.raw(),
@@ -229,18 +225,25 @@ lossless_production! {
     inp.skip_while(|_| true)?;
     out
   }
+
+  /// [`type_system_document`], then a drain — the production
+  /// [`super::parse_type_system_document`] applies.
+  ///
+  /// See the module docs for why the drain is not optional; the SDL-only loop catches and
+  /// resynchronises exactly as the mixed one does, so an `Err` can still escape it.
+  fn type_system_document_entry<'inp, Src, Ctx>(inp) {
+    let out = type_system_document::<Src, Ctx>(inp);
+    inp.skip_while(|_| true)?;
+    out
+  }
 }
 
 lossless_drivers! {
   dialect = graphqlx::lossless;
 
-  /// Drivers that run one document root over a `&str` and hand back the tree it built, for
-  /// `tests/lossless_x_document.rs`.
+  /// Drivers that run one document-level production over a `&str` and hand back the tree it built,
+  /// for `tests/lossless_x_document.rs`.
   mod test_support;
-
-  /// `super::type_system_document` over `src` — the SDL-only root, which
-  /// [`super::super::parse_str`] does not reach.
-  fn parse_type_system_document => type_system_document;
 
   /// `super::import_or_executable_definition` over `src` — the executable-document entry, whose
   /// loop Task 11's `executable_document` owns.

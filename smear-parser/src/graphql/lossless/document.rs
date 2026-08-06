@@ -90,7 +90,7 @@ use super::{
   value::Constness,
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::lossless::lossless_production;
 
 lossless_production! {
   dialect = graphql::lossless;
@@ -350,9 +350,6 @@ lossless_production! {
   ///
   /// [`definition`] without the three executable arms — which is the whole difference between a
   /// `TypeSystemDocument` and a `Document`.
-  // Reached only from `type_system_document`, itself reached only from a driver — see
-  // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn type_system_definition_or_extension<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -420,11 +417,10 @@ lossless_production! {
   /// higher-ranked `fn` parameter would be the only way to abstract over the two dispatchers,
   /// and it buys eight lines at the cost of a signature no reader can check at a glance.
   ///
-  /// Not reachable from [`parse_str`](super::parse_str), which parses the mixed form; the driver
-  /// under `test_support` is its entry, and a schema-only consumer would call it directly.
-  // Which makes the driver its only caller, so the gate takes its last one — see
-  // `lossless_drivers!`.
-  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+  /// Not reachable from [`parse_str`](super::parse_str), which parses the mixed form.
+  /// [`parse_type_system_document`](super::parse_type_system_document) is its shipped entry
+  /// point — the one a schema-only consumer calls so that an executable definition is rejected
+  /// by the parser, at the parser's own position, rather than by hand afterwards.
   fn type_system_document<'inp, Src, Ctx>(inp) {
     node(
       K::TypeSystemDocument.raw(),
@@ -455,16 +451,17 @@ lossless_production! {
     inp.skip_while(|_| true)?;
     out
   }
-}
 
-lossless_drivers! {
-  dialect = graphql::lossless;
-
-  /// Drivers that run one document-level production over a `&str` and hand back the tree it
-  /// built, for `tests/lossless_document.rs`.
-  mod test_support;
-
-  /// `super::type_system_document` over `src` — the SDL-only root, which
-  /// [`parse_str`](super::super::parse_str) does not reach.
-  fn parse_type_system_document => type_system_document;
+  /// [`type_system_document`] plus the drain, for the same reason [`document_entry`] carries one.
+  ///
+  /// The SDL-only loop catches and resynchronises exactly as the mixed one does, so an `Err` can
+  /// still escape it — through [`recover::resync_to_definition`] — and leave the tail
+  /// uncommitted. [`parse_type_system_document`](super::parse_type_system_document) discards the
+  /// parser's result, so without the drain that tail would be a `FinishError::UncoveredGap` panic
+  /// in materialization instead of a reportable parse.
+  fn type_system_document_entry<'inp, Src, Ctx>(inp) {
+    let out = type_system_document::<Src, Ctx>(inp);
+    inp.skip_while(|_| true)?;
+    out
+  }
 }

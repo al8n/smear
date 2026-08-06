@@ -70,6 +70,20 @@ pub mod value;
 
 pub use document::{definition, definition_or_extension, described_definition, document};
 
+// The suite's three document roots, side by side. Each was already `pub` where it is defined —
+// [`document::document`], [`definition::type_system_document`],
+// [`executable::executable_document`] — but only the mixed one was hoisted here, so the two
+// alternates read as internals of the modules they happen to live in. They are the syntactic
+// counterparts of `lossless`'s `parse_str`, `parse_type_system_document` and
+// `parse_executable_document`, and a consumer choosing a root should find all three in one place
+// (smear issue #67).
+//
+// These are productions, not `fn(&str) -> …` entry points: this layer has no runner of its own, so
+// a consumer drives one through `tokora::Parser::with_parser(…).parse_str(src)`. That is why the
+// names cannot match the lossless layer's — the shapes do not.
+pub use definition::type_system_document;
+pub use executable::executable_document;
+
 fn name<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
 ) -> Result<ast::Name<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>

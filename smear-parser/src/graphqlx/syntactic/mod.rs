@@ -68,6 +68,12 @@ pub mod value;
 
 pub use document::{document, import_or_definition_or_extension};
 
+// The suite's three document roots, side by side, for the reason GraphQL's `syntactic/mod.rs`
+// records: each alternate was already `pub` where it is defined, but only the mixed one was
+// hoisted here, so the other two read as internals of the modules they happen to live in.
+pub use definition::type_system_document;
+pub use executable::executable_document;
+
 /// Returns the GraphQLx contextual classification for an identifier token.
 #[inline]
 pub(crate) fn keyword_of<S>(token: &SyntacticToken<S>) -> Option<ContextualKeyword>
