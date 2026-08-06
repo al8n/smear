@@ -51,7 +51,7 @@ fn the_graphql_kind_space_answers_in_both_directions() {
 
 use smear_parser::graphql::{
   kinds::{GraphQLLang, SyntaxKind as K},
-  lossless::{ast as gast, parse_str},
+  lossless::{ast as gast, parse_document},
 };
 
 smear_parser::ast_node!(
@@ -75,7 +75,7 @@ smear_parser::ast_node!(
 /// The exported macro builds a working wrapper from outside the crate that defines it.
 #[test]
 fn the_exported_macro_builds_a_wrapper_outside_the_crate() {
-  let parse = parse_str("type T { f: Int }\n");
+  let parse = parse_document("type T { f: Int }\n");
   let root = parse.syntax();
   let doc = root
     .children()
@@ -113,7 +113,7 @@ fn the_macro_needs_no_import_beyond_this_crate() {}
 /// order — has one answer under each rule, so the assertion can only pass under one of them.
 #[test]
 fn token_any_answers_in_document_order_not_in_kinds_order() {
-  let parse = parse_str("query { f(s: \"in\") }\n");
+  let parse = parse_document("query { f(s: \"in\") }\n");
   let root = parse.syntax();
   let arguments = root
     .descendants()
@@ -181,7 +181,7 @@ fn a_coverage_lane_is_per_kind_space() {
   use smear_parser::lossless::coverage;
 
   coverage::reset::<GK>();
-  let _ = parse_str("type T { f: Int }\n");
+  let _ = parse_document("type T { f: Int }\n");
   let after = coverage::hits_of::<GK>(GK::ObjectTypeDefinition);
   assert!(after >= 1, "the graphql lane recorded nothing");
 
@@ -242,7 +242,8 @@ fn the_other_space_is_well_formed() {
 /// `Parse` is generic over the language and still answers the three questions every gate asks.
 #[test]
 fn the_parse_surface_is_language_generic() {
-  let parse: smear_parser::lossless::runner::Parse<GraphQLLang> = parse_str("type T { f: Int }\n");
+  let parse: smear_parser::lossless::runner::Parse<GraphQLLang> =
+    parse_document("type T { f: Int }\n");
   assert!(!parse.has_errors());
   assert_eq!(parse.syntax().text().to_string(), "type T { f: Int }\n");
   assert!(parse.diagnostics().is_empty());
@@ -268,7 +269,7 @@ fn a_declined_retro_wrap_is_not_counted() {
   coverage::reset::<GK>();
   // Two fields and two type references, so both retro-wrap probes run — and decline: no `:` in
   // alias position, no `!` anywhere.
-  let parse = parse_str("query { a b } type T { f: Int }\n");
+  let parse = parse_document("query { a b } type T { f: Int }\n");
   assert!(!parse.has_errors());
 
   // The positive control: the probes really did run, which is what makes the two zeroes below
@@ -295,7 +296,7 @@ fn a_declined_retro_wrap_is_not_counted() {
 
   // And an *accepted* one is counted, so the impl is not simply never firing.
   coverage::reset::<GK>();
-  let parse = parse_str("query { alias: a } type T { f: Int! }\n");
+  let parse = parse_document("query { alias: a } type T { f: Int! }\n");
   assert!(!parse.has_errors());
   assert_eq!(coverage::hits_of::<GK>(GK::Alias), 1);
   assert_eq!(coverage::hits_of::<GK>(GK::NonNullType), 1);

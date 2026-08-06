@@ -4,13 +4,13 @@
 //! round-trip, and the two recovery shapes that keep a malformed value from costing the rest
 //! of the file.
 //!
-//! **These tests drive `value` (and `default_value`) directly, not through `parse_str`.**
+//! **These tests drive `value` (and `default_value`) directly, not through `parse_document`.**
 //! That is a deliberate departure from the plan's Task 5 Step 1, and it is not a matter of
-//! taste: `document` is still Task 3's stub, so nothing under `parse_str` ever reaches a value
+//! taste: `document` is still Task 3's stub, so nothing under `parse_document` ever reaches a value
 //! production. Written the plan's way, `an_object_value_wraps_each_field` would *fail* and
 //! `trivia_inside_a_list_does_not_change_its_shape` would *pass vacuously* — both sides of its
 //! `assert_eq!` being the one-element `[Root]` of an empty tree — which is the weak-assertion
-//! failure mode this plan has now been bitten by twice. The `parse_str` forms are kept below,
+//! failure mode this plan has now been bitten by twice. The `parse_document` forms are kept below,
 //! `#[ignore]`d, so Task 8 has them to switch on.
 
 use smear_parser::graphql::{
@@ -382,7 +382,7 @@ fn nested_garbage_is_skipped_as_one_region() {
 // ---- The plan's own Task 5 Step 1 tests, switched on in Task 8 ---------------------------
 //
 // These are the plan's four tests verbatim in intent. They were `#[ignore]`d through Tasks 5
-// to 7, because `parse_str` drove only the drain-everything `document` stub and every
+// to 7, because `parse_document` drove only the drain-everything `document` stub and every
 // `node_kinds` answered `[Root]` — which would have failed two of them and, worse, passed the
 // other two *vacuously*, both sides of the trivia comparison being the same empty tree.
 //
@@ -392,12 +392,12 @@ fn nested_garbage_is_skipped_as_one_region() {
 // node, so the kind this task added does not appear here.
 
 #[cfg(test)]
-mod through_parse_str {
+mod through_parse_document {
   use super::K;
-  use smear_parser::graphql::lossless::parse_str;
+  use smear_parser::graphql::lossless::parse_document;
 
   fn node_kinds(src: &str) -> Vec<K> {
-    parse_str(src)
+    parse_document(src)
       .syntax()
       .descendants()
       .map(|n| n.kind())

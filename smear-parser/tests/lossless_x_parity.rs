@@ -78,7 +78,7 @@ use smear_parser::graphqlx::{
   GraphQLx,
   ast::{Document, ExecutableDocument, TypeSystemDocument},
   error::GraphqlxErrors,
-  lossless::{parse_executable_document, parse_str, parse_type_system_document},
+  lossless::{parse_document, parse_executable_document, parse_type_system_document},
   syntactic::{GraphqlxLexer, document, executable_document, type_system_document},
 };
 use tokora::{Parse as _, Parser};
@@ -92,13 +92,13 @@ use padding::{ALPHABET, UNPADDABLE, corpus_files, inject, name_of, token_boundar
 ///
 /// Recovery holes and warnings do not count — see `Parse::has_errors`.
 fn lossless_has_errors(src: &str) -> bool {
-  parse_str(src).has_errors()
+  parse_document(src).has_errors()
 }
 
 /// The syntactic verdict: did the shipped GraphQLx `document` production reject the source?
 ///
 /// A whole-input verdict rather than a prefix one, for the reason GraphQL's twin records: tokora's
-/// `parse_str` does not check for end-of-input, and `document` is nonetheless a whole-input
+/// `parse_document` does not check for end-of-input, and `document` is nonetheless a whole-input
 /// production because its repetition re-enters the entry dispatcher on trailing junk and fails
 /// there rather than leaving it behind.
 fn syntactic_has_errors<'inp>(src: &'inp str) -> bool {
@@ -321,8 +321,8 @@ fn both_verdicts_answer_in_both_directions() {
 
 /// The corpus is discriminating material rather than inert.
 ///
-/// GraphQLx has three roots and `parse_str` drives the mixed one. The SDL-only root rejects every
-/// executable definition and every shorthand operation, so an entry on which the two roots
+/// GraphQLx has three roots and `parse_document` drives the mixed one. The SDL-only root rejects
+/// every executable definition and every shorthand operation, so an entry on which the two roots
 /// **disagree** is an entry that can tell two GraphQLx productions apart — which is what makes the
 /// parity comparison a claim rather than a tautology.
 ///

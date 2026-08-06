@@ -22,7 +22,7 @@ use smear_parser::graphql::{
   lossless::{
     GraphQLLang,
     ast::{AstChildren, CastNode, NodeChildren, cast},
-    parse_str,
+    parse_document,
   },
 };
 
@@ -107,7 +107,7 @@ fn tok_text(t: Option<smear_parser::graphql::lossless::SyntaxToken>) -> Option<S
 
 #[test]
 fn cast_node_accepts_its_own_kind_and_rejects_others() {
-  let p = parse_str("{ a }");
+  let p = parse_document("{ a }");
   let root = p.syntax();
   let doc = root.children().find(|n| n.kind() == K::Document).unwrap();
   assert!(TestDoc::cast_node(doc.clone()).is_some());
@@ -129,7 +129,7 @@ fn cast_node_accepts_its_own_kind_and_rejects_others() {
   );
 
   // A wrapper declared with an empty getter list is still a wrapper.
-  let op_type = parse_str("query Q { a }")
+  let op_type = parse_document("query Q { a }")
     .syntax()
     .descendants()
     .find(|n| n.kind() == K::OperationType)
@@ -142,7 +142,7 @@ fn cast_node_accepts_its_own_kind_and_rejects_others() {
 fn syntax_round_trips_so_a_consumer_can_cross_back_to_rowan() {
   // `CastNode` is a one-way door — it has no `syntax()`. This asserts the inherent method the
   // macro generates in its place, which is the only way back out to untyped rowan.
-  let p = parse_str("{ a }");
+  let p = parse_document("{ a }");
   let root = p.syntax();
   let doc = root.children().find(|n| n.kind() == K::Document).unwrap();
   let typed = TestDoc::cast_node(doc.clone()).unwrap();
@@ -160,7 +160,7 @@ fn the_generated_getters_navigate_through_tokoras_cast_helpers() {
   //                                     SelectionSet]
   //   Directives > Directive > [At "@", Name "d", Space]
   //   SelectionSet > [LBrace, Space, Field "a ", Field "b ", RBrace]
-  let p = parse_str("query Q @d { a b }");
+  let p = parse_document("query Q @d { a b }");
   let root = p.syntax();
   let doc: TestDoc = cast::child(&root).expect("Root wraps one Document");
   let op = doc
@@ -215,7 +215,7 @@ fn the_generated_getters_navigate_through_tokoras_cast_helpers() {
 
 #[test]
 fn many_filters_by_kind_rather_than_yielding_every_child() {
-  let p = parse_str("query Q { a } fragment F on T { c }");
+  let p = parse_document("query Q { a } fragment F on T { c }");
   let root = p.syntax();
   let doc: TestDoc = cast::child(&root).expect("Root wraps one Document");
 
@@ -238,7 +238,7 @@ fn a_tok_getter_declines_a_token_that_belongs_to_a_child_node() {
   // The negative half of `cast::token`'s contract, on a node that has no `Name` of its own but
   // plenty beneath it. Without this, a getter built on `descendants_with_tokens` passes every
   // positive assertion above by luck of document order.
-  let p = parse_str("query Q { a b }");
+  let p = parse_document("query Q { a b }");
   let root = p.syntax();
   let set: TestSelSet = cast::child(&root)
     .and_then(|d: TestDoc| d.definitions().next())

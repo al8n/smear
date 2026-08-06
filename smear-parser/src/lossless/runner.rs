@@ -2,9 +2,9 @@
 //! builds it.
 //!
 //! What is *not* here is everything that names a concrete lexer, emitter or kind space: the
-//! `CstProfile`, the emitter and sink aliases, and `parse_str` itself stay in each dialect's own
-//! `runner`, because every one of them has to spell a dialect type to exist at all. What is here
-//! is the shape of the answer, which does not.
+//! `CstProfile`, the emitter and sink aliases, and `parse_document` itself stay in each dialect's
+//! own `runner`, because every one of them has to spell a dialect type to exist at all. What is
+//! here is the shape of the answer, which does not.
 
 use tokora::{Lexer, cst::Cst, emitter::Severity};
 
@@ -49,7 +49,7 @@ impl Diagnostic {
 ///
 /// Each dialect re-exports this under an alias with its own language pinned — a **type alias**,
 /// not a newtype: a newtype would need every getter re-written per dialect, which is the
-/// duplication this module exists to remove, and an alias keeps `parse_str(&str) -> Parse`
+/// duplication this module exists to remove, and an alias keeps `parse_document(&str) -> Parse`
 /// reading exactly as it did at every call site.
 pub struct Parse<L: rowan::Language> {
   green: rowan::GreenNode,
@@ -91,7 +91,7 @@ impl<L: rowan::Language> Parse<L> {
 
 /// Materialize `cst` at `root` and collect its diagnostics.
 ///
-/// Shared by every dialect's `parse_str` and by its per-production drivers, so the
+/// Shared by every dialect's `parse_document` and by its per-production drivers, so the
 /// fallible-materialization contract and the diagnostic projection are stated once. The
 /// materialization door names the root kind — it is NOT profile data — and hands back the inner
 /// emitter, which is where the diagnostics live.
@@ -121,7 +121,7 @@ impl<L: rowan::Language> Parse<L> {
 ///   token and no diagnostic can ever cover the tail, and a dialect's `document_entry`
 ///   `skip_while` drain cannot reach it either — that drain is the mechanism which otherwise
 ///   guarantees coverage.
-/// - So `finish` reported `UncoveredGap` and `parse_str` panicked, at 501 open brackets, for
+/// - So `finish` reported `UncoveredGap` and `parse_document` panicked, at 501 open brackets, for
 ///   input an IDE produces by typing. That was smear issue #57.
 ///
 /// Under this door the same parse hands back a tree over every byte (`tree.text() == source`

@@ -2,7 +2,7 @@
 
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{parse_str, runner::test_support::open_raw_kind},
+  lossless::{parse_document, runner::test_support::open_raw_kind},
 };
 
 #[test]
@@ -12,7 +12,7 @@ fn an_empty_source_yields_a_root_and_an_empty_document() {
   // and gate 1 compares the two suites' verdicts input by input, so the empty source is
   // reported here too; Task 7 took the same ruling for `ExecutableDocument`. The tree is
   // unchanged, which is what the two surviving assertions pin.
-  let p = parse_str("");
+  let p = parse_document("");
   assert_eq!(p.syntax().kind(), K::Root);
   assert_eq!(p.syntax().text().to_string(), "");
   assert!(p.has_errors(), "an empty document must report");
@@ -22,7 +22,7 @@ fn an_empty_source_yields_a_root_and_an_empty_document() {
 fn every_byte_reaches_the_tree_including_trivia() {
   // The lossless guarantee, and the reason the sink refuses trivia-skipping lexers.
   let src = "# leading comment\n{ a }\n";
-  let p = parse_str(src);
+  let p = parse_document(src);
   assert_eq!(
     p.syntax().text().to_string(),
     src,
@@ -165,16 +165,16 @@ fn brace_offset(level: usize) -> usize {
 ///
 /// # GraphQLx
 ///
-/// The same three assertions hold for GraphQLx's `parse_str`, at the identical count, measured on
-/// the Phase B branch where that dialect exists. It shares this lexer's `Limiter` and this
-/// runner's materialization step, so it inherits the fix rather than needing its own; Phase B's
-/// own gates cover it.
+/// The same three assertions hold for GraphQLx's `parse_document`, at the identical count,
+/// measured on the Phase B branch where that dialect exists. It shares this lexer's `Limiter`
+/// and this runner's materialization step, so it inherits the fix rather than needing its own;
+/// Phase B's own gates cover it.
 #[test]
 fn nesting_past_the_lexer_budget_reports_instead_of_panicking() {
   // The last depth inside the budget: unchanged by the fix, and the control that proves the
   // assertions below measure the boundary rather than "deep input reports".
   let inside = nested_selection_sets(500);
-  let parse = parse_str(&inside);
+  let parse = parse_document(&inside);
   assert!(
     !parse.has_errors(),
     "500 open brackets is inside the budget and must still parse clean"
@@ -187,7 +187,7 @@ fn nesting_past_the_lexer_budget_reports_instead_of_panicking() {
 
   // One past it. Every assertion here was unreachable before the fix: the call panicked.
   let over = nested_selection_sets(501);
-  let parse = parse_str(&over);
+  let parse = parse_document(&over);
   assert!(
     parse.has_errors(),
     "501 open brackets must be reported, not accepted"
@@ -211,7 +211,7 @@ fn nesting_past_the_lexer_budget_reports_instead_of_panicking() {
 
   // Far past it, because a fix that merely moved the cliff would pass everything above.
   let far = nested_selection_sets(2_000);
-  let parse = parse_str(&far);
+  let parse = parse_document(&far);
   assert!(parse.has_errors());
   assert_eq!(parse.syntax().text().to_string(), far);
 }

@@ -3,7 +3,7 @@
 //!
 //! # What is real here and what is a stub
 //!
-//! `parse_str` drives a **drain-everything stub** until Task 14 writes `document_entry`, so no
+//! `parse_document` drives a **drain-everything stub** until Task 14 writes `document_entry`, so no
 //! node exists yet and nothing in this file asserts anything about GraphQLx's grammar. What it
 //! does assert is the wiring the grammar will sit on, and every one of those facts is real now:
 //!
@@ -17,7 +17,7 @@
 
 use smear_parser::graphqlx::{
   kinds::{GraphQLxLang, SyntaxKind as X},
-  lossless::{parse_str, runner::test_support::open_raw_kind},
+  lossless::{parse_document, runner::test_support::open_raw_kind},
 };
 
 /// The node-kind pre-order of a parse's *tokens*, in document order.
@@ -38,7 +38,7 @@ fn token_kinds(node: &rowan::SyntaxNode<GraphQLxLang>) -> Vec<X> {
 /// a GraphQLx `Sink` is monomorphized, so the *existence* of this test's binary is the evidence.
 #[test]
 fn the_graphqlx_sink_builds_at_all() {
-  let parse = parse_str("");
+  let parse = parse_document("");
   assert_eq!(parse.syntax().kind(), X::Root);
   assert_eq!(parse.syntax().text().to_string(), "");
 }
@@ -51,7 +51,7 @@ fn the_graphqlx_sink_builds_at_all() {
 #[test]
 fn every_byte_reaches_the_tree_including_trivia() {
   let src = "# leading\nimport * from \"a\"\ntype T<A> { f: map<::ns::K => V> }\n";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert_eq!(
     parse.syntax().text().to_string(),
     src,
@@ -62,16 +62,17 @@ fn every_byte_reaches_the_tree_including_trivia() {
 /// The tokens in the tree carry the images the GraphQLx mapper gives them.
 ///
 /// **The mapper checked through the sink, not by calling it.** `tests/lossless_x_kind_map.rs`
-/// calls `token_kind` directly; this asserts that the profile `parse_str` actually arms is wired
-/// to *that* mapper, in order, over a real parse. A profile pointing at some other mapper — or a
-/// pair of arms transposed — reds here as well as there, and a transposition is the mutation that
+/// calls `token_kind` directly; this asserts that the profile `parse_document` actually arms is
+/// wired to *that* mapper, in order, over a real parse. A profile pointing at some other mapper —
+/// or a pair of arms transposed — reds here as well as there, and a transposition is the mutation
+/// that
 /// survives the round-trip gate, the validator and the golden printer alike.
 ///
 /// The source is chosen so that no two adjacent tokens share an image: a mapper that answered its
 /// neighbour's kind would have to be wrong twice to still produce this sequence.
 #[test]
 fn the_tree_carries_the_mappers_images_in_document_order() {
-  let parse = parse_str("a::b<C>");
+  let parse = parse_document("a::b<C>");
   assert_eq!(
     token_kinds(&parse.syntax()),
     vec![
@@ -87,7 +88,7 @@ fn the_tree_carries_the_mappers_images_in_document_order() {
 
   // The trivia forms the tree keeps apart, in one source. `Space` and `Tab` are distinct images
   // and the BOM is a third; only the line terminators fold.
-  let parse = parse_str("\u{FEFF} \t\r\n,# c\n");
+  let parse = parse_document("\u{FEFF} \t\r\n,# c\n");
   assert_eq!(
     token_kinds(&parse.syntax()),
     vec![

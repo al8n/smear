@@ -139,7 +139,7 @@ pub fn apollo_lex(src: &str) -> usize {
 /// Parse to smear's lossless rowan CST. No traversal.
 #[inline]
 pub fn smear_parse(src: &str) -> SmearParse {
-  smear_lossless::parse_str(src)
+  smear_lossless::parse_document(src)
 }
 
 /// Parse to apollo's rowan CST. No traversal.
@@ -169,7 +169,7 @@ pub enum SmearFieldTy {
   NonNull(smear_ast::NonNullType),
 }
 
-/// The one [`smear_ast::Document`] a `parse_str` tree carries.
+/// The one [`smear_ast::Document`] a `parse_document` tree carries.
 ///
 /// A structural difference from apollo worth naming: apollo's tree root **is** the `Document`,
 /// while smear's root is a `Root` node that wraps exactly one `Document`. So smear's typed

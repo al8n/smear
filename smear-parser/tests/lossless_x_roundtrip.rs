@@ -31,7 +31,9 @@ use std::path::PathBuf;
 
 use smear_parser::graphqlx::{
   kinds::SyntaxKind as K,
-  lossless::{Parse, SyntaxNode, parse_executable_document, parse_str, parse_type_system_document},
+  lossless::{
+    Parse, SyntaxNode, parse_document, parse_executable_document, parse_type_system_document,
+  },
 };
 
 /// Every `.graphqlx` file in the GraphQLx corpus, in a deterministic order.
@@ -64,7 +66,7 @@ type Root = (&'static str, fn(&str) -> Parse);
 /// are run over every entry, valid or not: a root that rejects an entry still has to keep its
 /// bytes, and the rejecting path is the one where a byte is most likely to be dropped.
 const ROOTS: &[Root] = &[
-  ("document", parse_str),
+  ("document", parse_document),
   ("type_system_document", parse_type_system_document),
   ("executable_document", parse_executable_document),
 ];
@@ -166,7 +168,7 @@ fn only_the_unlexable_entries_are_tiled_with_gaps() {
   let mut seen: Vec<(String, usize)> = Vec::new();
   for entry in corpus_files() {
     let src = std::fs::read_to_string(&entry).unwrap();
-    let (_, gaps) = token_bytes(&parse_str(&src).syntax());
+    let (_, gaps) = token_bytes(&parse_document(&src).syntax());
     if gaps > 0 {
       seen.push((
         entry.file_name().unwrap().to_string_lossy().to_string(),
@@ -195,7 +197,7 @@ fn only_the_unlexable_entries_are_tiled_with_gaps() {
 fn two_different_trees_over_one_source_carry_the_same_bytes() {
   const SRC: &str = "query Q<T = Int>($v: T) { f(a: $v) }\n";
 
-  let mixed = parse_str(SRC);
+  let mixed = parse_document(SRC);
   let sdl_only = parse_type_system_document(SRC);
 
   assert_eq!(text_of(&mixed.syntax()), SRC);
@@ -231,7 +233,7 @@ fn two_different_trees_over_one_source_carry_the_same_bytes() {
 fn a_round_trip_gate_is_blind_to_a_lost_definition_node() {
   const SRC: &str = "type T { f: Int } type";
 
-  let tree = parse_str(SRC);
+  let tree = parse_document(SRC);
   assert_eq!(text_of(&tree.syntax()), SRC, "the round-trip is perfect");
   let (bytes, gaps) = token_bytes(&tree.syntax());
   assert_eq!(bytes, SRC.len(), "and every byte is carried by a token");
@@ -281,7 +283,7 @@ fn the_lexical_edges_the_corpus_does_not_contain() {
   ];
 
   for (label, src) in EDGES {
-    let tree = parse_str(src);
+    let tree = parse_document(src);
     assert_eq!(text_of(&tree.syntax()), *src, "{label}: lost bytes");
     assert!(
       !tree.has_errors(),
@@ -315,7 +317,7 @@ fn an_uppercase_radix_prefix_is_refused_and_still_kept() {
     "query { f(a: 0B1) }",
     "query { f(a: 0O7) }",
   ] {
-    let tree = parse_str(src);
+    let tree = parse_document(src);
     assert_eq!(text_of(&tree.syntax()), src, "{src:?}: lost bytes");
     assert!(
       tree.has_errors(),
@@ -338,7 +340,7 @@ fn an_uppercase_radix_prefix_is_refused_and_still_kept() {
 #[test]
 fn a_source_that_is_nothing_but_a_lexer_error_does_not_panic() {
   for src in ["\"unterminated", "%", "\"\"\"unterminated block"] {
-    let tree = parse_str(src);
+    let tree = parse_document(src);
     assert_eq!(text_of(&tree.syntax()), src, "{src:?}: lost bytes");
     assert!(
       tree.has_errors(),
@@ -364,7 +366,7 @@ fn the_round_trip_comparison_is_not_vacuous() {
   // Leading and trailing whitespace, and a leading comment, all of which a `trim()` on either side
   // would silently drop while every existing corpus entry survived it.
   const PADDED: &str = "\n\n  # leading\n  type T { f: Int }  \n\n";
-  let tree = parse_str(PADDED);
+  let tree = parse_document(PADDED);
   assert_eq!(text_of(&tree.syntax()), PADDED);
   assert_ne!(
     text_of(&tree.syntax()),
@@ -375,6 +377,6 @@ fn the_round_trip_comparison_is_not_vacuous() {
   // And the round-trip of one source is not the text of another: without this the comparison could
   // be against a constant that happens to equal the fixture.
   const OTHER: &str = "type U { g: String }\n";
-  assert_ne!(text_of(&parse_str(OTHER).syntax()), PADDED);
-  assert_eq!(text_of(&parse_str(OTHER).syntax()), OTHER);
+  assert_ne!(text_of(&parse_document(OTHER).syntax()), PADDED);
+  assert_eq!(text_of(&parse_document(OTHER).syntax()), OTHER);
 }

@@ -37,7 +37,7 @@ use crate::{
 ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
   /// A mixed executable-plus-type-system document — what
-  /// [`parse_str`](crate::graphqlx::lossless::parse_str) builds.
+  /// [`parse_document`](crate::graphqlx::lossless::parse_document) builds.
   Document => K::Document {
     /// Every import the document makes, in order.
     import_definitions: many ImportDefinition,
@@ -83,8 +83,8 @@ ast_node!(
   /// An SDL-only document root.
   ///
   /// [`Document`] without the two executable kinds, which is the whole difference between the two
-  /// roots. Not what [`parse_str`](crate::graphqlx::lossless::parse_str) builds — a schema-only
-  /// consumer calls
+  /// roots. Not what [`parse_document`](crate::graphqlx::lossless::parse_document) builds — a
+  /// schema-only consumer calls
   /// [`parse_type_system_document`](crate::graphqlx::lossless::parse_type_system_document), which
   /// reports an executable definition rather than admitting one.
   TypeSystemDocument => K::TypeSystemDocument {

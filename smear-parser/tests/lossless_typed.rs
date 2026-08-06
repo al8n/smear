@@ -67,7 +67,7 @@ use smear_parser::graphql::{
       TypeSystemDocument, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, Variable,
       VariableDefinition, VariablesDefinition, cast, token_any, tokens,
     },
-    parse_executable_document, parse_str, parse_type_system_document,
+    parse_document, parse_executable_document, parse_type_system_document,
   },
 };
 
@@ -76,9 +76,9 @@ fn tok(t: Option<SyntaxToken>) -> Option<String> {
   t.map(|t| t.text().to_string())
 }
 
-/// The one `Document` a [`parse_str`] tree carries, typed.
+/// The one `Document` a [`parse_document`] tree carries, typed.
 fn document(src: &str) -> Document {
-  let root = parse_str(src).syntax();
+  let root = parse_document(src).syntax();
   cast::child(&root).expect("Root wraps exactly one Document")
 }
 
@@ -695,7 +695,7 @@ fn a_type_system_extension_names_itself_past_two_keywords() {
 
 #[test]
 fn the_two_alternative_document_roots_wrap_their_own_definitions() {
-  // Neither root is reachable from `parse_str`, which parses the mixed `Document`; both have a
+  // Neither root is reachable from `parse_document`, which parses the mixed `Document`; both have a
   // driver, and both are among the fifty-nine.
   let exec = parse_executable_document("query Q { a } fragment F on T { b } query R { c }");
   let root = exec.syntax();
@@ -1187,11 +1187,11 @@ impl Registry {
 
   /// Parse one source through all three roots and probe every tree.
   ///
-  /// All three, because `parse_str` reaches 57 of the 59 wrappers structurally: `ExecutableDocument`
-  /// and `TypeSystemDocument` are *roots*, and a parse has one. Driving the other two over the
-  /// same bytes is what Task 12 does for the same reason.
+  /// All three, because `parse_document` reaches 57 of the 59 wrappers structurally:
+  /// `ExecutableDocument` and `TypeSystemDocument` are *roots*, and a parse has one. Driving the
+  /// other two over the same bytes is what Task 12 does for the same reason.
   fn sweep_source(&mut self, src: &str) {
-    self.walk(&parse_str(src).syntax());
+    self.walk(&parse_document(src).syntax());
     self.walk(&parse_executable_document(src).syntax());
     self.walk(&parse_type_system_document(src).syntax());
   }
@@ -1780,7 +1780,7 @@ fn every_fixture_is_a_document_the_suite_accepts() {
   // subtrees it managed to build — so "the sweep is green" would then rest on trees nobody meant
   // to write. Each fixture is a document this suite accepts outright.
   for (name, src) in FIXTURES {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert!(
       !parse.has_errors(),
       "fixture `{name}` does not parse cleanly: {:?}",
@@ -1921,7 +1921,7 @@ fn every_recovery_fixture_really_is_malformed() {
   // that, and [`UNDISCRIMINATED`] would grow three entries with no explanation attached.
   for (name, src) in RECOVERY_FIXTURES {
     assert!(
-      parse_str(src).has_errors(),
+      parse_document(src).has_errors(),
       "recovery fixture `{name}` parses cleanly, so it no longer holds a recovery hole"
     );
   }

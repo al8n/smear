@@ -4,11 +4,11 @@
 //! trivia-invariance, their verbatim round-trip, and the recovery shapes that keep a malformed
 //! type or argument list from costing the rest of the file.
 //!
-//! **These tests drive the productions directly, not through `parse_str`.** `document` is still
-//! Task 3's stub, so nothing under `parse_str` reaches a type or a directive yet; written the
-//! other way every assertion here would compare one empty tree against another and pass without
-//! a single production existing. That is the vacuous-assertion failure mode Task 5 recorded, and
-//! the reason `value.rs` grew its own drivers first.
+//! **These tests drive the productions directly, not through `parse_document`.** `document` is
+//! still Task 3's stub, so nothing under `parse_document` reaches a type or a directive yet;
+//! written the other way every assertion here would compare one empty tree against another and
+//! pass without a single production existing. That is the vacuous-assertion failure mode Task 5
+//! recorded, and the reason `value.rs` grew its own drivers first.
 //!
 //! Every assertion is on the node-kind sequence, the node's own text, or both — never on a bare
 //! boolean, which is the shape three earlier mutations survived.

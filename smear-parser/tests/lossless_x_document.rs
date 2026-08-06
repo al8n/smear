@@ -1,6 +1,6 @@
 //! The GraphQLx type-system extensions and the three document roots.
 //!
-//! **This is the first file that can drive `parse_str`**, because it is the task that replaces
+//! **This is the first file that can drive `parse_document`**, because it is the task that replaces
 //! Task 9's drain-everything stub with the real `document_entry`. Every earlier test file says why
 //! it could not: written through the stub, an assertion compared two one-element `[Root]` trees and
 //! passed vacuously.
@@ -14,7 +14,7 @@ use smear_parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     extension::test_support::{parse_type_system_extension, parse_union_type_extension},
-    parse_str,
+    parse_document,
   },
 };
 
@@ -183,12 +183,12 @@ fn a_description_may_precede_a_definition_and_not_an_import_or_an_extension() {
     "\"doc\" fragment F on T { g }",
   ] {
     assert!(
-      !parse_str(src).has_errors(),
+      !parse_document(src).has_errors(),
       "a description belongs on a definition: {src}"
     );
   }
   for src in ["\"doc\" import * from \"x\"", "\"doc\" extend type T @d"] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert!(
       parse.has_errors(),
       "an import and an extension are deliberately undescribed: {src}"
@@ -202,7 +202,7 @@ fn a_description_may_precede_a_definition_and_not_an_import_or_an_extension() {
   // The described import still builds its ImportDefinition, so a diagnostic has a node to point
   // at — the same trade every rejected-but-kept shape in this suite makes.
   assert!(
-    parse_str("\"doc\" import * from \"x\"")
+    parse_document("\"doc\" import * from \"x\"")
       .syntax()
       .descendants()
       .any(|n| n.kind() == K::ImportDefinition)
@@ -219,7 +219,7 @@ fn a_document_holds_imports_definitions_and_extensions_side_by_side() {
              \"doc\" type T { f: Int }\n\
              extend type T @d\n\
              query Q { f }\n";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert!(!parse.has_errors(), "the mixed document must parse clean");
   assert_eq!(parse.syntax().text().to_string(), src, "round trip");
   assert_eq!(
@@ -254,7 +254,7 @@ fn a_document_holds_imports_definitions_and_extensions_side_by_side() {
   );
   assert_eq!(
     node_text!(
-      parse_str,
+      parse_document,
       "\"doc\" type T { f: Int }",
       K::ObjectTypeDefinition
     )
@@ -268,10 +268,10 @@ fn a_document_holds_imports_definitions_and_extensions_side_by_side() {
 #[test]
 fn a_document_covers_the_whole_file() {
   let src = "\n# leading\nscalar S\n\n# trailing\n";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert!(!parse.has_errors());
   assert_eq!(
-    node_text!(parse_str, src, K::Document).as_deref(),
+    node_text!(parse_document, src, K::Document).as_deref(),
     Some(src),
     "a document IS the whole file"
   );
@@ -279,21 +279,21 @@ fn a_document_covers_the_whole_file() {
 
 #[test]
 fn an_empty_document_reports_and_is_still_a_node() {
-  let parse = parse_str("");
+  let parse = parse_document("");
   assert!(parse.has_errors(), "`syntactic/` rejects an empty document");
-  assert_eq!(kinds!(parse_str, ""), vec![K::Root, K::Document]);
+  assert_eq!(kinds!(parse_document, ""), vec![K::Root, K::Document]);
 }
 
 /// A failed entry is resynchronised past, and the entries after it survive.
 ///
 /// This is the property the drain-everything stub could not have: an `Err` escaping an entry left
 /// the rest of the source uncommitted, and `finish` refused it as an `UncoveredGap`. The entry
-/// drains what an escape left behind, which turns the one failure mode `parse_str` could not
+/// drains what an escape left behind, which turns the one failure mode `parse_document` could not
 /// report into a reportable parse.
 #[test]
 fn a_broken_entry_costs_itself_and_not_the_rest_of_the_document() {
   let src = "type T { f: Int }\n!!!\nscalar S\n";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert!(parse.has_errors());
   assert_eq!(parse.syntax().text().to_string(), src, "round trip holds");
   assert_eq!(
@@ -336,7 +336,7 @@ fn every_entry_head_is_a_restart_point_after_a_broken_entry() {
   ] {
     // `scalar @d` fails inside `definition_name`, which is what sends the loop to the resync.
     let src = format!("scalar @d\n{tail}\n");
-    let parse = parse_str(&src);
+    let parse = parse_document(&src);
     assert!(parse.has_errors(), "the broken entry must report: {src:?}");
     assert_eq!(
       parse.syntax().text().to_string(),
@@ -352,7 +352,7 @@ fn every_entry_head_is_a_restart_point_after_a_broken_entry() {
 
 /// Every byte reaches the tree, whatever the input.
 #[test]
-fn parse_str_round_trips_every_fixture() {
+fn parse_document_round_trips_every_fixture() {
   for src in [
     "",
     "   ",
@@ -367,7 +367,7 @@ fn parse_str_round_trips_every_fixture() {
     "type T { f: Int",
     "union U = | A | ::ns::B where A: C & D",
   ] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert_eq!(
       parse.syntax().text().to_string(),
       src,

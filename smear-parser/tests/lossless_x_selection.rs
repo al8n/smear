@@ -1,8 +1,9 @@
 //! The GraphQLx argument, directive, selection and executable-definition productions.
 //!
-//! **These tests drive the productions directly, not through `parse_str`.** `parse_str` is still
-//! Task 9's drain-everything stub, so nothing under it reaches any production here; written through
-//! it, every assertion would compare two one-element `[Root]` trees and pass vacuously.
+//! **These tests drive the productions directly, not through `parse_document`.** `parse_document`
+//! is still Task 9's drain-everything stub, so nothing under it reaches any production here;
+//! written through it, every assertion would compare two one-element `[Root]` trees and pass
+//! vacuously.
 //! `tests/lossless_x_value.rs` records the same reasoning for the value family.
 //!
 //! Every test asserts the **node-kind pre-order** of a real parse rather than a verdict. A verdict

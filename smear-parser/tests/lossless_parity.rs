@@ -72,9 +72,9 @@
 //! **production** divergence, which is permanent by construction: the lossless suite's SDL-only
 //! root rejects every executable definition, while `syntactic/`'s mixed root accepts them, so the
 //! corpus's twenty-eight executable entries split the two suites on demand. The gate is green
-//! because `parse_str`'s root and `document` describe the same language — not because the corpus
-//! is inert. Closing *that* divergence would be a bug, so unlike the eleven it cannot quietly go
-//! away.
+//! because `parse_document`'s root and `document` describe the same language — not because the
+//! corpus is inert. Closing *that* divergence would be a bug, so unlike the eleven it cannot
+//! quietly go away.
 //!
 //! # The corpus is run twice: compact, and padded with gate 2's trivia
 //!
@@ -102,7 +102,7 @@ use smear_parser::graphql::{
   ast::{Document, ExecutableDocument, TypeSystemDocument},
   error::{ErrorData, GraphqlErrors},
   kinds::SyntaxKind as K,
-  lossless::{parse_executable_document, parse_str, parse_type_system_document},
+  lossless::{parse_document, parse_executable_document, parse_type_system_document},
   syntactic::{GraphqlLexer, document, executable_document, type_system_document},
 };
 use tokora::{Lexer as _, Parse as _, Parser};
@@ -111,14 +111,14 @@ use tokora::{Lexer as _, Parse as _, Parser};
 ///
 /// Recovery holes and warnings do not count — see `Parse::has_errors`.
 fn lossless_has_errors(src: &str) -> bool {
-  parse_str(src).has_errors()
+  parse_document(src).has_errors()
 }
 
 /// The syntactic verdict: did the shipped `document` production reject the source?
 ///
 /// # This is a whole-input verdict, not a prefix one
 ///
-/// `tokora`'s `parse_str` does **not** check for end-of-input; it hands back whatever the
+/// `tokora`'s `parse_document` does **not** check for end-of-input; it hands back whatever the
 /// production returned. `document` is nonetheless a whole-input production, because its
 /// `repeated_while` decider (`decide_definition_or_extension_head`) answers `Stop` only on
 /// `None` — so trailing junk re-enters `definition_or_extension` and fails there rather than
@@ -242,7 +242,7 @@ fn syntactic_channel(src: &str) -> Option<Channel> {
 /// Zero is the defining property of [`LEXER_ERROR_ENTRIES`] and the exact state the upstream
 /// zero-token wall used to refuse.
 fn committed_tokens(src: &str) -> usize {
-  parse_str(src)
+  parse_document(src)
     .syntax()
     .descendants_with_tokens()
     .filter_map(|element| element.into_token())
@@ -252,7 +252,7 @@ fn committed_tokens(src: &str) -> usize {
 
 /// How many `Gap` tiles the sink laid down over `src`.
 fn gap_tokens(src: &str) -> usize {
-  parse_str(src)
+  parse_document(src)
     .syntax()
     .descendants_with_tokens()
     .filter_map(|element| element.into_token())
@@ -656,7 +656,7 @@ fn both_suites_agree_across_the_lexer_grammar_error_boundary() {
     );
 
     // The bytes survive with no grammar token carrying them.
-    let parse = parse_str(&src);
+    let parse = parse_document(&src);
     assert_eq!(
       parse.syntax().text().to_string(),
       src,
@@ -829,9 +829,9 @@ fn both_verdicts_answer_in_both_directions() {
 ///
 /// # Half one: the entries themselves split the two suites
 ///
-/// The lossless suite has two roots. `parse_str` drives the **mixed** one, which is the language
-/// `syntactic/`'s `document` also describes — that agreement is what the gate measures. Its
-/// sibling `type_system_document` is the **SDL-only** root, and it rejects every executable
+/// The lossless suite has two roots. `parse_document` drives the **mixed** one, which is the
+/// language `syntactic/`'s `document` also describes — that agreement is what the gate measures.
+/// Its sibling `type_system_document` is the **SDL-only** root, and it rejects every executable
 /// definition. So each corpus entry that carries one is an input on which a lossless production
 /// and a syntactic production answer *differently*: the material discriminates, and the gate is
 /// green because the two roots under comparison describe the same language rather than because
@@ -900,7 +900,7 @@ fn the_corpus_can_tell_the_two_suites_apart() {
   // a self-comparison the way a literal one can — the mutation the parity loop above records as
   // its own structural blind spot. The literal anchor follows, so an agreement at zero on both
   // sides is still a failure.
-  let lossless_definitions = parse_str(TWO_DEFINITIONS)
+  let lossless_definitions = parse_document(TWO_DEFINITIONS)
     .syntax()
     .descendants()
     .filter(|n| matches!(n.kind(), K::OperationDefinition | K::FragmentDefinition))
@@ -1032,7 +1032,7 @@ fn the_eleven_former_divergences_are_rejected_without_losing_their_text() {
       "{name}: the syntactic suite accepted it — this was never a divergence"
     );
     assert_eq!(
-      parse_str(&src).syntax().text().to_string(),
+      parse_document(&src).syntax().text().to_string(),
       src,
       "{name}: a rejected parse still keeps every byte"
     );
@@ -1117,7 +1117,7 @@ fn a_verdict_gate_is_blind_to_a_lost_definition_node() {
   const KEEPS_THE_NODE: &[&str] = &["type T { x: }", "type T { x: Int", "type T {}"];
 
   fn kinds_of(src: &str) -> Vec<K> {
-    parse_str(src)
+    parse_document(src)
       .syntax()
       .descendants()
       .map(|n| n.kind())
@@ -1131,7 +1131,7 @@ fn a_verdict_gate_is_blind_to_a_lost_definition_node() {
 
     // Every byte is still there — so a round-trip gate would pass it without comment too.
     assert_eq!(
-      parse_str(src).syntax().text().to_string(),
+      parse_document(src).syntax().text().to_string(),
       src,
       "{src:?}: the text did not round-trip"
     );

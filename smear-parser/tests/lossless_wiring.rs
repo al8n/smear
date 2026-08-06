@@ -81,11 +81,11 @@ fn tokoras_cst_layer_is_in_scope() {
 #[test]
 fn the_graphql_lossless_suite_exposes_its_three_roots() {
   use smear_parser::graphql::lossless::{
-    Parse, parse_executable_document, parse_str, parse_type_system_document,
+    Parse, parse_document, parse_executable_document, parse_type_system_document,
   };
 
   let roots: [fn(&str) -> Parse; 3] = [
-    parse_str,
+    parse_document,
     parse_type_system_document,
     parse_executable_document,
   ];
@@ -97,11 +97,11 @@ fn the_graphql_lossless_suite_exposes_its_three_roots() {
 #[test]
 fn the_graphqlx_lossless_suite_exposes_its_three_roots() {
   use smear_parser::graphqlx::lossless::{
-    Parse, parse_executable_document, parse_str, parse_type_system_document,
+    Parse, parse_document, parse_executable_document, parse_type_system_document,
   };
 
   let roots: [fn(&str) -> Parse; 3] = [
-    parse_str,
+    parse_document,
     parse_type_system_document,
     parse_executable_document,
   ];

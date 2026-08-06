@@ -5,14 +5,14 @@
 //! rather than propagated.
 //!
 //! **This file is where `has_errors()` becomes trustworthy.** Until Task 8, `trivia::expect`
-//! returned `Err` without emitting and `parse_str` bound the driver's result to `_out`, so a
+//! returned `Err` without emitting and `parse_document` bound the driver's result to `_out`, so a
 //! parse that failed outright reported *nothing* and read as a success. Task 11's parity gate
 //! cannot use `has_errors()` as a verdict until that holds, so it is asserted here directly
 //! rather than left as a side effect of the recovery tests.
 
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{Parse, parse_str, parse_type_system_document},
+  lossless::{Parse, parse_document, parse_type_system_document},
 };
 
 /// The tree's node kinds in pre-order, ignoring tokens and trivia.
@@ -116,7 +116,7 @@ fn every_extension_kind_is_reachable_and_wraps_its_extend() {
       ],
     ),
   ] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert_eq!(kinds(&parse), want, "{src:?}");
     assert!(!parse.has_errors(), "{src:?} must parse cleanly");
     assert_eq!(text(&parse), src, "{src:?} must round-trip verbatim");
@@ -129,7 +129,10 @@ fn an_extension_node_starts_at_its_extend_keyword() {
   // production — so the node is a retro-wrap and its mark must ride at the `extend` itself. A
   // mark minted one token later leaves the kind vector untouched and only shortens the node.
   assert_eq!(
-    texts_of(&parse_str("  extend scalar S @d"), K::ScalarTypeExtension),
+    texts_of(
+      &parse_document("  extend scalar S @d"),
+      K::ScalarTypeExtension
+    ),
     ["extend scalar S @d"]
   );
 }
@@ -147,7 +150,7 @@ fn an_extension_with_no_body_is_reported() {
     "extend input I",
     "extend schema",
   ] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert!(parse.has_errors(), "{src:?} has no body and must report");
     assert_eq!(text(&parse), src, "{src:?} must still round-trip");
   }
@@ -158,7 +161,7 @@ fn a_description_before_an_extension_is_reported() {
   // `syntactic/`'s `described_definition_after_string` matches only the eight *definition*
   // keywords, so a description followed by `extend` is rejected there. The tree still keeps the
   // extension, because a lossless consumer needs the nodes to point a diagnostic at.
-  let parse = parse_str("\"doc\" extend scalar S @d");
+  let parse = parse_document("\"doc\" extend scalar S @d");
   assert!(parse.has_errors(), "a described extension must report");
   assert!(kinds(&parse).contains(&K::ScalarTypeExtension));
   assert_eq!(text(&parse), "\"doc\" extend scalar S @d");
@@ -170,7 +173,7 @@ fn a_description_before_an_extension_is_reported() {
 fn a_document_mixes_executable_and_type_system_definitions() {
   let src = "query Q { a }\nfragment F on U { b }\ntype T { c: Int }\nextend type T @d\n";
   assert_eq!(
-    kinds(&parse_str(src)),
+    kinds(&parse_document(src)),
     vec![
       K::Root,
       K::Document,
@@ -191,7 +194,7 @@ fn a_document_mixes_executable_and_type_system_definitions() {
       K::Directive,
     ]
   );
-  assert_eq!(text(&parse_str(src)), src);
+  assert_eq!(text(&parse_document(src)), src);
 }
 
 #[test]
@@ -199,7 +202,7 @@ fn a_described_executable_definition_is_accepted() {
   // `syntactic/`'s `executable_definition` takes an optional leading string as a frozen-parser
   // compatibility extension. Task 7 could not accept it — `Description` is this task's kind —
   // and gate 1 would have seen the divergence.
-  let parse = parse_str("\"doc\" query Q { a }");
+  let parse = parse_document("\"doc\" query Q { a }");
   assert_eq!(
     kinds(&parse),
     vec![
@@ -225,15 +228,15 @@ fn an_operation_keyword_is_one_operation_type_node() {
   // is this task's kind, and `RootOperationTypeDefinition` needs the same production. Two
   // positions parsing one construct differently is a seam; they are unified here.
   assert_eq!(
-    texts_of(&parse_str("query Q { a }"), K::OperationType),
+    texts_of(&parse_document("query Q { a }"), K::OperationType),
     ["query"]
   );
   assert_eq!(
-    texts_of(&parse_str("schema { query: Q }"), K::OperationType),
+    texts_of(&parse_document("schema { query: Q }"), K::OperationType),
     ["query"]
   );
   // The shorthand has no keyword and therefore no node.
-  assert!(!kinds(&parse_str("{ a }")).contains(&K::OperationType));
+  assert!(!kinds(&parse_document("{ a }")).contains(&K::OperationType));
 }
 
 #[test]
@@ -242,14 +245,14 @@ fn a_document_covers_the_whole_file_including_its_trailing_trivia() {
   // trailing trivia to learn no further definition follows. Here that is not a compromise — a
   // document *is* the whole file, leading and trailing trivia included.
   let src = "\u{feff}# lead\nscalar S\n\n# trail\n";
-  assert_eq!(texts_of(&parse_str(src), K::Document), [src]);
-  assert_eq!(text(&parse_str(src)), src);
+  assert_eq!(texts_of(&parse_document(src), K::Document), [src]);
+  assert_eq!(text(&parse_document(src)), src);
 }
 
 #[test]
 fn an_empty_document_is_reported() {
   // `syntactic/`'s `document` is `.at_least(1)` — "nonempty".
-  let parse = parse_str("");
+  let parse = parse_document("");
   assert_eq!(kinds(&parse), vec![K::Root, K::Document]);
   assert!(parse.has_errors(), "an empty document must report");
 }
@@ -287,7 +290,7 @@ fn a_type_system_document_takes_definitions_and_extensions_but_no_operation() {
 fn junk_between_two_definitions_costs_one_error_node() {
   // The assertion the plan names: recovery earns its keep only if BOTH definitions survive.
   let src = "type A { x: Int }\n!!!\ntype B { y: Int }";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert_eq!(
     kinds(&parse),
     vec![
@@ -310,11 +313,11 @@ fn junk_between_two_definitions_costs_one_error_node() {
 
 #[test]
 fn a_failed_definition_is_caught_and_the_document_continues() {
-  // A production `Err` — here `type` with no name — used to be swallowed by `parse_str`'s
+  // A production `Err` — here `type` with no name — used to be swallowed by `parse_document`'s
   // `_out`, leaving the remainder uncommitted and `finish` panicking on `UncoveredGap`. The
   // document loop catches it, resynchronises to the next definition keyword, and continues.
   let src = "type { x: Int }\ntype B { y: Int }";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert_eq!(text(&parse), src, "every byte must still reach the tree");
   assert!(parse.has_errors(), "a nameless `type` must report");
   assert!(
@@ -333,7 +336,7 @@ fn a_resync_that_lands_on_a_definition_head_does_not_eat_it() {
   // keyword, and the whole `ScalarTypeDefinition` disappears; the text still round-trips, so
   // only a node assertion can see it. Found by mutation, not by reading.
   let src = "type T { a scalar S }";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert_eq!(text(&parse), src);
   assert!(
     kinds(&parse).contains(&K::ScalarTypeDefinition),
@@ -355,7 +358,7 @@ fn a_failed_parse_reports_and_that_is_the_parity_gate_precondition() {
     "directive d on FIELD", // no `@`
     "fragment F",           // no type condition and no selection set
   ] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert!(parse.has_errors(), "{src:?} is malformed and must report");
     assert_eq!(text(&parse), src, "{src:?} must still round-trip");
   }
@@ -367,7 +370,7 @@ fn garbage_running_to_end_of_input_terminates() {
   // same token forever without the consume-one fallback. A regression here **hangs** rather
   // than fails.
   let src = "scalar S ! ! !";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert_eq!(text(&parse), src);
   assert!(parse.has_errors());
 }
@@ -377,7 +380,7 @@ fn a_stray_closer_at_the_top_level_does_not_stall() {
   // `}` is a sync point for the balanced skip, so the skip matches it at zero cost and makes no
   // progress. Only the consume-one fallback breaks the tie.
   let src = "scalar S } scalar T";
-  let parse = parse_str(src);
+  let parse = parse_document(src);
   assert_eq!(text(&parse), src);
   assert!(parse.has_errors());
   assert_eq!(
@@ -393,7 +396,7 @@ fn a_stray_closer_at_the_top_level_does_not_stall() {
 #[test]
 fn an_unterminated_definition_terminates_and_keeps_its_text() {
   for src in ["type T {", "type T { a: Int", "schema {", "directive @d("] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert_eq!(text(&parse), src, "{src:?} must round-trip verbatim");
     assert!(
       parse.has_errors(),
@@ -417,7 +420,7 @@ fn every_document_form_round_trips_verbatim() {
     "{ a } { b }",
   ] {
     assert_eq!(
-      text(&parse_str(src)),
+      text(&parse_document(src)),
       src,
       "{src:?} must round-trip verbatim"
     );

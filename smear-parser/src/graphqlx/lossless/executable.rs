@@ -335,7 +335,7 @@ lossless_production! {
   /// lands inside the document — a document *is* the whole file, so that is the right answer
   /// rather than a tolerated one.
   ///
-  /// The executable-only root, off [`super::parse_str`]'s mixed-form path.
+  /// The executable-only root, off [`super::parse_document`]'s mixed-form path.
   /// [`super::parse_executable_document`] is its shipped entry point.
   fn executable_document<'inp, Src, Ctx>(inp) {
     node(

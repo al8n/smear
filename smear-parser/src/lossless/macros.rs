@@ -177,7 +177,7 @@ macro_rules! lossless_production {
 ///
 /// # Why every production file needs drivers at all
 ///
-/// A per-production assertion made through the dialect's `parse_str` is only as real as the
+/// A per-production assertion made through the dialect's `parse_document` is only as real as the
 /// document dispatcher that reaches the production. While a dispatcher is a stub, such an
 /// assertion does not fail — it compares two empty trees and passes, which is worse than failing.
 /// These drivers make the assertions real from the first production onward, and they stay useful
@@ -186,12 +186,12 @@ macro_rules! lossless_production {
 /// # Why a macro rather than a generic function
 ///
 /// **This is where the productions stop being generic.** A driver must choose a concrete source,
-/// emitter and context to build a `Sink` at all, exactly as a dialect's `parse_str` does, and the
-/// closure it hands to `apply` must spell its parameter type in full — a closure's parameter is
-/// **not** inferred through a `ParseInput` bound, only through an `Fn` bound, so `|inp: &mut _|`
-/// leaves `L` and `Ctx` unresolved and the body's first method call becomes the error site. A
-/// generic `fn(P) -> Parse` taking the production as a value would have to spell that
-/// higher-ranked bound at every call; a macro spells the whole driver once.
+/// emitter and context to build a `Sink` at all, exactly as a dialect's `parse_document` does,
+/// and the closure it hands to `apply` must spell its parameter type in full — a closure's
+/// parameter is **not** inferred through a `ParseInput` bound, only through an `Fn` bound, so
+/// `|inp: &mut _|` leaves `L` and `Ctx` unresolved and the body's first method call becomes the
+/// error site. A generic `fn(P) -> Parse` taking the production as a value would have to spell
+/// that higher-ranked bound at every call; a macro spells the whole driver once.
 ///
 /// # The drain is not optional
 ///
@@ -250,9 +250,11 @@ macro_rules! lossless_production {
 /// It was `#[doc(hidden)] pub` and nothing else, which hides a module from rustdoc and ships it
 /// anyway: sixteen modules and sixty-eight `fn(&str) -> Parse` entry points, public, callable and
 /// semver-relevant in every `rowan` build. The gate is written here, once, rather than at each
-/// call site. Fifteen modules and sixty-four drivers remain — smear issue #67 promoted the four
+/// call site. Fourteen modules and sixty-three drivers remain. Smear issue #67 promoted the four
 /// document roots to real entry points on each dialect's `lossless` module, which retired their
-/// drivers and emptied GraphQL's `document::test_support` altogether.
+/// drivers and emptied GraphQL's `document::test_support` altogether; GraphQLx's own
+/// `document::test_support` carried one more that no test ever called,
+/// `parse_import_or_executable_definition`, and removing it emptied that module too.
 ///
 /// **`pub` and not `pub(crate)`** because every consumer is a file under `tests/`, which cargo
 /// compiles as its own crate and which therefore sees exactly the shipped public surface.
@@ -264,8 +266,8 @@ macro_rules! lossless_production {
 /// Gating the modules turned up fourteen productions whose **only** caller was a driver. Eleven of
 /// them were the two alternate document roots in each dialect and the dispatchers and recovery head
 /// lists that only those roots name — and smear issue #67 gave the roots real entry points
-/// (`parse_type_system_document`, `parse_executable_document`, beside each dialect's `parse_str`),
-/// which gave all eleven a caller that is not a test.
+/// (`parse_type_system_document`, `parse_executable_document`, beside each dialect's
+/// `parse_document`), which gave all eleven a caller that is not a test.
 ///
 /// The three that remain are the ones a document root does not reach: GraphQLx's `extension` and
 /// `path_or_recover`, and GraphQLx's description-reading `type_system_definition` wrapper, which
@@ -290,7 +292,7 @@ macro_rules! lossless_drivers {
     )*
   ) => {
     $(#[$modmeta])*
-    // The fifteen driver modules the two suites declare, gated at the one place that writes them
+    // The fourteen driver modules the two suites declare, gated at the one place that writes them
     // all. `#[doc(hidden)]` alone left every one of them in the shipped `rowan` build — public,
     // callable and semver-relevant — for the benefit of `tests/`, which is a separate crate and
     // therefore cannot see anything less than `pub`. The feature removes them from the build

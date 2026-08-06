@@ -145,10 +145,11 @@ ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
   /// An executable-only document root.
   ///
-  /// Not what [`parse_str`](crate::graphqlx::lossless::parse_str) builds — that parses the mixed
-  /// [`Document`](super::document::Document). A consumer that will only accept executable syntax
-  /// calls [`parse_executable_document`](crate::graphqlx::lossless::parse_executable_document),
-  /// which reports a type-system definition rather than admitting one. It admits imports, which
+  /// Not what [`parse_document`](crate::graphqlx::lossless::parse_document) builds — that parses
+  /// the mixed [`Document`](super::document::Document). A consumer that will only accept
+  /// executable syntax calls
+  /// [`parse_executable_document`](crate::graphqlx::lossless::parse_executable_document), which
+  /// reports a type-system definition rather than admitting one. It admits imports, which
   /// is why it has three iterators where GraphQL's has two.
   ExecutableDocument => K::ExecutableDocument {
     /// Every import the document makes, in order.
