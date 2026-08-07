@@ -23,28 +23,33 @@ name: CI
 
 on:
   push:
-    # BOTH names are load-bearing. `main` is the repository's DEFAULT branch — it is what
-    # `schedule` runs, where a fresh clone lands, and where dependabot opens its pull requests.
-    # `feat/tokora-0.8` is the TRUNK — it is what every feature pull request is opened against and
-    # merged into. On 2026-08-06 `main` was 145 commits behind the trunk and not an ancestor of
-    # it, so those are two different branches and a post-merge lane naming only one of them
-    # watches the wrong ref. This list said `main` alone for the trunk's entire life: no merge
-    # into the trunk ever produced a run, and `gh run list --branch feat/tokora-0.8` returned
-    # nothing (#74).
+    # `main` is the repository's DEFAULT branch — what `schedule` runs, where a fresh clone lands,
+    # where dependabot opens its pull requests — and it is also the TRUNK every pull request is
+    # merged into. ONE name covers both roles only because they are currently the same branch. A
+    # post-merge lane that names the wrong ref fails by absence, not by error, so which branch is
+    # named here has to be asserted rather than assumed.
+    #
+    # That is not hypothetical. This list named `main` alone while the trunk was a separate branch,
+    # `feat/tokora-0.8`, 145 commits ahead of it and not a descendant: no merge into the trunk ever
+    # produced a run for that branch's entire life, and the only symptom was `gh run list` printing
+    # nothing for it (#74). The alias was retired after `main` was fast-forwarded onto it.
     #
     # A literal name is forced here. `on:` is resolved before any context exists, so
-    # `${{ github.event.repository.default_branch }}` cannot be written in this block, and there
-    # is no glob to fall back on: the trunk has already been renamed twice — `refactor/main` ->
-    # `refactor/main-0.8` -> `feat/tokora-0.8` — with no common prefix. A literal list will
-    # therefore go stale again, and neither of those two renames deleted the branch it replaced,
-    # so a stale entry here stays resolvable and silent.
+    # `${{ github.event.repository.default_branch }}` cannot be written in this block, and there is
+    # no glob to fall back on: the trunk has moved three times — `refactor/main` ->
+    # `refactor/main-0.8` -> `feat/tokora-0.8` -> `main` — with no common prefix, so a literal list
+    # goes stale again whenever it moves next. Whether that staleness is loud depends on what
+    # becomes of the old branch. `refactor/main` and `refactor/main-0.8` were abandoned in place
+    # and still resolve, so an entry naming either would sit here silently. `feat/tokora-0.8` is
+    # retired the other way — by deleting the ref — so an entry naming it fails the moment that
+    # happens. Retiring a trunk by deletion therefore means merging its removal from every list
+    # BEFORE deleting the ref.
     #
     # `ci/check_workflow_triggers.sh`, run by the `triggers` job below, is what makes the next one
     # loud. It does not ask what the trunk is called; it asks whether the branch this pull request
     # is being merged INTO has a push lane, and fails when it does not.
     branches:
       - main
-      - feat/tokora-0.8
     # `**.md` used to sit in these lists. It cannot: `README.md`,
     # `smear/src/lexer/README.md` and `smear/src/parser/README.md` are
     # `include_str!`-ed into the crate's rustdoc, so editing one is a compile-time
@@ -106,9 +111,9 @@ concurrency:
   # 'refs/heads/main'` until #74 — a third copy of a branch name that was already the wrong one.
   # Adding the trunk to the push list while leaving it would have half-fixed the issue and hidden
   # the other half: the trunk would have kept the cancelling behaviour, so with four merges in two
-  # hours a run WOULD have appeared for `feat/tokora-0.8` and then been cancelled by the next
-  # merge, which reads as `fail` in `gh pr checks` and is still no verdict. Keyed on the event it
-  # cannot drift at the next rename.
+  # hours a run WOULD have appeared for the then-trunk `feat/tokora-0.8` and then been cancelled by
+  # the next merge, which reads as `fail` in `gh pr checks` and is still no verdict. Keyed on the
+  # event it cannot drift at the next rename.
   #
   # `${{ github.workflow }}` leading the group is what keeps the three lanes apart: `CI-...`,
   # `Miri-...` and `macOS-...` are different groups, so no lane can cancel another's run.
@@ -160,7 +165,8 @@ jobs:
   # Check that the post-merge lanes point at the branch merges actually go to
   #
   # A workflow cannot detect its own non-execution, which is why #74 survived the trunk's entire
-  # life: every lane listed `main`, every merge went to `feat/tokora-0.8`, and the only symptom was
+  # life: every lane listed `main` at a time when the trunk was a DIFFERENT branch,
+  # `feat/tokora-0.8`, so every merge landed somewhere no lane watched and the only symptom was
   # `gh run list --branch feat/tokora-0.8` printing nothing. The assertion has to be made by the
   # runs that do happen. Ten seconds on ubuntu, in no `needs:` chain, so it blocks nothing and
   # costs this lane's conclusion nothing; the four invariants are documented in the script.
