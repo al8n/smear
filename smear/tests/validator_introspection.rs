@@ -53,6 +53,13 @@
 //!   [`redefining_a_built_in_is_the_one_flag_introspection_loses`] pins the loss instead of hiding
 //!   it.
 
+// `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
+// `#[cfg(feature = "introspection")]` in `smear/src/validator/schema/introspection/`, not merely
+// behind `validator` — the module itself is separately gated. This file carried neither gate, so
+// it was a hard `E0432`/`E0433` under any feature selection that excludes `introspection`,
+// including plain `--features validator`. `cargo test -p smear --no-run` in CI now compiles the
+// default-feature selection that always excludes it.
+#![cfg(feature = "introspection")]
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;

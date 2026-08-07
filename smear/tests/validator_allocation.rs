@@ -17,6 +17,12 @@
 //! counter moves, so a green reading below means "nothing allocated" rather than "nothing was
 //! looking".
 
+// Every fixture and assertion below calls into `smear::validator`, which does not exist in the
+// crate's API surface with the feature off. This file did not gate itself to that dependency —
+// the same defect `validator_schema.rs` carried until #100 — so it was a hard `E0433` compile
+// error under any feature selection that excludes `validator`, including the crate's own default
+// features. `cargo test -p smear --no-run` in CI now compiles exactly that selection.
+#![cfg(feature = "validator")]
 #![allow(missing_docs)]
 
 use std::{
