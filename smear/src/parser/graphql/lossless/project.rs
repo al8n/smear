@@ -83,14 +83,15 @@ use crate::{
       ast::{
         Alias, Argument, Arguments, BooleanValue, ConstArgument, ConstArguments, ConstDirective,
         ConstDirectives, ConstInputValue, ConstList, ConstObject, ConstObjectField,
-        DefaultInputValue, DefinitionOrExtension, Described, DescribedVariableDefinition,
-        Directive, Directives, Document, EnumTypeDefinition, EnumTypeExtension, EnumValue,
-        EnumValuesDefinition, ExecutableDefinition, Field, FieldsDefinition, FloatValue,
-        FragmentName, FragmentSpread, ImplementInterfaces, InlineFragment, InputFieldsDefinition,
-        InputObjectTypeDefinition, InputObjectTypeExtension, InputValue, IntValue,
-        InterfaceTypeDefinition, InterfaceTypeExtension, List, ListType, Location, Name,
-        NamedOperationDefinition, NamedType, NullValue, Object, ObjectField, ObjectTypeDefinition,
-        ObjectTypeExtension, OperationDefinition, OperationType, RootOperationTypeDefinition,
+        DefaultInputValue, DefinitionOrExtension, Described, DescribedExecutableDefinition,
+        DescribedVariableDefinition, Directive, Directives, Document, EnumTypeDefinition,
+        EnumTypeExtension, EnumValue, EnumValuesDefinition, ExecutableDefinition,
+        ExecutableDocument, Field, FieldsDefinition, FloatValue, FragmentName, FragmentSpread,
+        ImplementInterfaces, InlineFragment, InputFieldsDefinition, InputObjectTypeDefinition,
+        InputObjectTypeExtension, InputValue, IntValue, InterfaceTypeDefinition,
+        InterfaceTypeExtension, List, ListType, Location, Name, NamedOperationDefinition,
+        NamedType, NullValue, Object, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
+        OperationDefinition, OperationType, RootOperationTypeDefinition,
         RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension, SchemaDefinition,
         SchemaExtension, Selection, SelectionSet, StringValue, Type, TypeCondition, TypeDefinition,
         TypeExtension, TypeSystemDefinition, TypeSystemExtension, UnionMemberTypes,
@@ -101,7 +102,7 @@ use crate::{
       lossless::{Parse, SyntaxNode, SyntaxToken},
       syntactic::definition::classify_location,
     },
-    lossless::project::{extent_of, node_extent, to_range, to_span, verify_slice},
+    lossless::project::{Recovery, extent_of, node_extent, to_range, to_span, verify_slice},
   },
 };
 
@@ -162,6 +163,170 @@ impl super::ast::Document {
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<Document<&'src str>> {
     document(self.syntax(), source)
   }
+}
+
+/// Project a lossless **executable** parse to the AST the syntactic parser produces for `source`.
+///
+/// [`project`]'s root swapped: this reads the
+/// [`ExecutableDocument`](SyntaxKind::ExecutableDocument) that
+/// [`parse_executable_document`](super::parse_executable_document) builds, and answers the
+/// `ExecutableDocument<&str>` that `syntactic::executable_document` answers for the same bytes.
+/// Everything else — the hole scan, the verified `(tree, source)` pair, the token-extent span
+/// rule — is [`project`]'s, unchanged.
+///
+/// The root matters. A mixed parse holds a [`Document`](SyntaxKind::Document) node, so it is
+/// refused here rather than filtered: dropping the type-system half of a mixed document would
+/// answer a different question from the one the executable root asks, and the executable root is
+/// the one that reports an SDL definition *at the parser's own position*.
+///
+/// ```
+/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// use smear::parser::graphql::lossless::{parse_executable_document, project_executable_document};
+///
+/// let source = "query Q { hero { name } }";
+/// let parse = parse_executable_document(source);
+/// assert!(!parse.has_errors());
+///
+/// let ast = project_executable_document(&parse, source).expect("a well-shaped tree projects");
+/// assert_eq!(ast.definitions().len(), 1);
+/// # }
+/// ```
+pub fn project_executable_document<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> Out<ExecutableDocument<&'src str>> {
+  let root = parse.syntax();
+  reject_holes(&root)?;
+  let node = executable_root(&root).ok_or_else(|| {
+    ProjectError::new(
+      ProjectErrorKind::MissingChild {
+        parent: root.kind(),
+        wanted: "an executable document",
+      },
+      to_range(root.text_range()),
+    )
+  })?;
+  executable_document(&node, source)
+}
+
+/// Project every definition of a lossless **executable** parse that has an AST image, and count
+/// the ones that do not.
+///
+/// [`project_executable_document`] is fail-fast: one hole anywhere and the whole document is
+/// refused. That is the right answer for a caller that wants the AST or nothing, and the wrong
+/// one for an editor — a lossless CST exists precisely so it can represent a document somebody is
+/// still typing, and "no AST, no answer" is the outcome that makes the lossless leg pointless.
+///
+/// This door walks the top level instead, projects each definition **independently**, and keeps
+/// the ones that succeeded. What it could see is the [`Recovery`], and that value is the
+/// contract: read it before reading anything off the AST, because a document one definition was
+/// dropped from can both hide a finding and invent one. [`Recovery`]'s own documentation states
+/// which, and why neither can be corrected here.
+///
+/// # What counts as a top-level element
+///
+/// The definitions of the [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node when the
+/// parse has one — and the children of the tree's [`Root`](SyntaxKind::Root) when it does not.
+/// The second case is not hypothetical: the lost-node recovery class drops a failed document
+/// production's children straight under the root, so `"{ a }\nquery Bad("` has no document node
+/// at all and its one good operation is reachable only this way.
+///
+/// ```
+/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// use smear::parser::graphql::lossless::{
+///   parse_executable_document, project_executable_document_recovered,
+/// };
+///
+/// // The second operation is half-typed; the first one is not.
+/// let source = "{ hero { name } }\nquery Bad(";
+/// let parse = parse_executable_document(source);
+/// assert!(parse.has_errors());
+///
+/// let (ast, recovery) = project_executable_document_recovered(&parse, source);
+/// assert_eq!(ast.definitions().len(), 1);
+/// assert_eq!(recovery.projected(), 1);
+/// assert!(!recovery.is_complete());
+/// # }
+/// ```
+pub fn project_executable_document_recovered<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> (ExecutableDocument<&'src str>, Recovery) {
+  let root = parse.syntax();
+  let container = executable_root(&root).unwrap_or(root);
+
+  let mut definitions = Vec::new();
+  let mut skipped = 0u32;
+  // The document's own span is the extent of the tokens under the definitions that **survived**,
+  // not of the bytes that were dropped: an AST span is an extent of the tokens its node covers,
+  // and a skipped region is not one of them.
+  let mut extent: Option<TextRange> = None;
+  for element in container.children_with_tokens() {
+    match element {
+      // Rubble the parser could not attach to a definition. Counted per token rather than per
+      // run: a bound on what was lost, which is what `Recovery::skipped` promises.
+      NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
+      NodeOrToken::Token(_) => {}
+      NodeOrToken::Node(child) => match recoverable_entry(&child, source) {
+        Ok(entry) => {
+          if let Some(piece) = node_extent(&child, is_trivia) {
+            extent = Some(match extent {
+              Some(seen) => seen.cover(piece),
+              None => piece,
+            });
+          }
+          definitions.push(entry);
+        }
+        Err(_) => skipped = skipped.saturating_add(1),
+      },
+    }
+  }
+
+  // With nothing projected there is no extent, and the zero-width span at the container's start
+  // is the only position that is not a claim about text no node holds.
+  let span = match extent {
+    Some(range) => to_span(range),
+    None => {
+      let start = usize::from(container.text_range().start());
+      SimpleSpan::new(start, start)
+    }
+  };
+  let recovery = Recovery::new(definitions.len() as u32, skipped);
+  (ExecutableDocument::new(span, definitions), recovery)
+}
+
+impl super::ast::ExecutableDocument {
+  /// Project this executable-document node to the AST the syntactic parser produces for `source`.
+  ///
+  /// The compositional form of [`project_executable_document`], and
+  /// [`Document::to_ast`](super::ast::Document::to_ast)'s twin: like it, and unlike the free
+  /// function, it does **not** scan the whole parse for recovery holes up front.
+  pub fn to_ast<'src>(&self, source: &'src str) -> Out<ExecutableDocument<&'src str>> {
+    executable_document(self.syntax(), source)
+  }
+}
+
+/// The [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node under a parse's root.
+fn executable_root(root: &SyntaxNode) -> Option<SyntaxNode> {
+  root
+    .children()
+    .find(|child| child.kind() == K::ExecutableDocument)
+}
+
+/// One top-level definition, with the holes in **its own** subtree refused.
+///
+/// The scan is scoped rather than global on purpose. [`project_executable_document`] refuses a
+/// tree carrying a hole anywhere, because a hole is a region with no AST image and a fail-fast
+/// door must not silently omit one; the recovering door makes the same refusal, one definition at
+/// a time, so a hole is charged to the definition that holds it and to no other. Without the
+/// scan a hole would instead be *skipped* by whichever `child(node, kind)` lookup walked past it,
+/// which is the data loss under a success type that both doors exist to refuse.
+fn recoverable_entry<'src>(
+  node: &SyntaxNode,
+  source: &'src str,
+) -> Out<DescribedExecutableDefinition<&'src str>> {
+  reject_holes(node)?;
+  executable_entry(node, source)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -327,6 +492,60 @@ fn document_entry<'src>(
     description,
     definition,
   )))
+}
+
+/// [`document`]'s executable-only twin, over the `ExecutableDefinition+` root.
+fn executable_document<'src>(
+  node: &SyntaxNode,
+  source: &'src str,
+) -> Out<ExecutableDocument<&'src str>> {
+  let span = extent(node)?;
+  let mut definitions = Vec::new();
+  for element in node.children_with_tokens() {
+    match element {
+      // Rubble, exactly as at the mixed root and for the same reason.
+      NodeOrToken::Token(token) if !is_trivia(token.kind()) => {
+        return Err(unexpected(node, token.kind(), token.text_range()));
+      }
+      NodeOrToken::Token(_) => {}
+      NodeOrToken::Node(child) => definitions.push(executable_entry(&child, source)?),
+    }
+  }
+  Ok(ExecutableDocument::new(span, definitions))
+}
+
+/// [`document_entry`]'s executable-only twin.
+///
+/// No extension arm — `extend` is not executable syntax and the root that produced this node
+/// reports one rather than building it — and the description hoist is the document-level one: the
+/// wrapper spans description-through-definition and the inner node starts after the description.
+/// A standard executable definition carries no description at all, so on standard input the two
+/// spans coincide and the hoist is the dialect-compatibility path only.
+fn executable_entry<'src>(
+  node: &SyntaxNode,
+  source: &'src str,
+) -> Out<DescribedExecutableDefinition<&'src str>> {
+  let outer = extent(node)?;
+  let description = description(node, source)?;
+  let inner = extent_without_description(node)?;
+  let definition = executable_definition(node, inner, source)?;
+  Ok(Described::new(outer, description, definition))
+}
+
+fn executable_definition<'src>(
+  node: &SyntaxNode,
+  span: SimpleSpan,
+  source: &'src str,
+) -> Out<ExecutableDefinition<&'src str>> {
+  Ok(match node.kind() {
+    K::OperationDefinition => {
+      ExecutableDefinition::Operation(operation_definition(node, span, source)?)
+    }
+    K::FragmentDefinition => {
+      ExecutableDefinition::Fragment(fragment_definition(node, span, source)?)
+    }
+    found => return Err(unexpected(node, found, node.text_range())),
+  })
 }
 
 fn definition<'src>(
