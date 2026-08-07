@@ -465,6 +465,20 @@ jobs:
     # `.github/workflows/macos.yml`; no host in this job's matrix can satisfy that guard, so
     # leaving it would have been a step that reads as coverage and compiles nothing.
 
+    # `smear/tests/**` is compiled by nothing above this job: `clippy` and `build` never pass
+    # `--tests`, so they never touch it at all, and `Run test` below runs only `--all-features`,
+    # which turns every optional feature — `validator`, `introspection`, `rowan` and the rest — ON.
+    # A test file that reaches into a feature-gated module without gating itself compiles fine
+    # under `--all-features` and fails only at the crate's OWN default features, a selection
+    # nothing before this step ever builds. Four files in `smear/tests/` were exactly that: no
+    # inner `#![cfg(...)]`, a hard `E0432`/`E0433` under `--features graphql,parser`, and both
+    # reasons above are why a green `CI` never once saw it.
+    #
+    # Compile only, and cheap because of it — `--all-features` below is still what actually runs
+    # the suite. `-p smear` names the package rather than filtering a target, so a rename is a
+    # hard error here instead of a `--test` filter that matches nothing and exits 0.
+    - name: cargo test -p smear --no-run (default features)
+      run: cargo test -p smear --no-run
     - name: Run test
       run: cargo test --all-features -- --quiet
 
