@@ -125,6 +125,113 @@ struct Located {
   document: u32,
 }
 
+/// The head of an owner path: a name the arena holds, or the `schema` definition, which has none.
+#[derive(Debug, Clone, Copy)]
+enum Head {
+  Schema,
+  Named(Sym),
+}
+
+/// Where a §3 diagnostic is reported, held as symbols and rendered only if one is reported.
+///
+/// # Why not the `String` it prints as
+///
+/// Every owner path §3 prints is a type or directive name, then at most a member of it, then at
+/// most an argument of that member, and — for a directive *usage* — the `@name` that keeps a
+/// usage's arguments from reading as the element's own. Four symbols say all of them.
+///
+/// Building the `String` instead costs an allocation and a copy per *candidate*, and the passes
+/// have far more candidates than diagnostics: an empty build injects ninety-odd built-in items and
+/// reports nothing about any of them. `validate_directive_usages` cost 6.4 µs on a schema with
+/// zero directive usages, all of it owner and path strings built before the empty list was
+/// looked at.
+#[derive(Debug, Clone, Copy)]
+struct Coordinate {
+  head: Head,
+  member: Option<Sym>,
+  argument: Option<Sym>,
+  /// The `@name` a directive *usage*'s coordinate ends with.
+  directive: Option<Sym>,
+}
+
+impl Coordinate {
+  const fn schema() -> Self {
+    Self {
+      head: Head::Schema,
+      member: None,
+      argument: None,
+      directive: None,
+    }
+  }
+
+  const fn named(head: Sym) -> Self {
+    Self {
+      head: Head::Named(head),
+      member: None,
+      argument: None,
+      directive: None,
+    }
+  }
+
+  /// The same owner, one segment deeper: a field of a type, or an argument of a field.
+  const fn then(self, segment: Sym) -> Self {
+    match (self.member, self.argument) {
+      (None, _) => Self {
+        member: Some(segment),
+        ..self
+      },
+      (Some(_), None) => Self {
+        argument: Some(segment),
+        ..self
+      },
+      // Unreachable: no §3 owner is four names deep. Deepening a full path would silently drop a
+      // segment, so the last one wins rather than vanishing.
+      (Some(_), Some(_)) => Self {
+        argument: Some(segment),
+        ..self
+      },
+    }
+  }
+
+  /// The coordinate of a directive *usage* written on this element.
+  const fn at_directive(self, directive: Sym) -> Self {
+    Self {
+      directive: Some(directive),
+      ..self
+    }
+  }
+}
+
+/// Which input-value list a check is looking at, since it cannot hold a borrow of one.
+#[derive(Debug, Clone, Copy)]
+enum ArgumentsOf {
+  Field { ty: usize, field: usize },
+  Directive { index: usize },
+}
+
+/// Which directive-usage list a check is looking at, for the reason [`ArgumentsOf`] exists.
+#[derive(Debug, Clone, Copy)]
+enum DirectivesOf {
+  Schema,
+  Type { ty: usize },
+  Field { ty: usize, field: usize },
+  FieldArgument { ty: usize, field: usize, arg: usize },
+  InputField { ty: usize, field: usize },
+  EnumValue { ty: usize, value: usize },
+  DirectiveArgument { directive: usize, arg: usize },
+}
+
+/// What a failing literal is reported as, in symbols rather than in text.
+#[derive(Debug, Clone, Copy)]
+struct Blame {
+  owner: Coordinate,
+  subject: Sym,
+  /// What the caller wants "this literal does not fit" called. See
+  /// [`check_const_value`](SchemaBuilder::check_const_value).
+  mismatch: SchemaErrorKind,
+  document: u32,
+}
+
 /// A type reference whose base has been interned but not yet resolved.
 #[derive(Debug, Clone, Copy)]
 struct RawTypeRef {
@@ -307,6 +414,183 @@ struct RawExtension {
 }
 
 // ---------------------------------------------------------------------------------------------
+// the built-in documents
+// ---------------------------------------------------------------------------------------------
+
+/// The three constant SDL documents every build injects, parsed.
+///
+/// Held together rather than separately so the whole set is one `OnceLock` and one initialisation
+/// rather than three. It borrows the `&'static str` constants it was parsed from, so the value is
+/// `'static` itself and shareable — every field of the AST over a `&'static str` is `Send + Sync`,
+/// which the assertion below is the standing proof of.
+#[derive(Debug)]
+struct BuiltIns {
+  introspection: TypeSystemDocument<&'static str>,
+  scalars: TypeSystemDocument<&'static str>,
+  directives: TypeSystemDocument<&'static str>,
+}
+
+impl BuiltIns {
+  fn parse() -> Self {
+    Self {
+      introspection: SchemaBuilder::parse_builtin(builtin::INTROSPECTION_SDL),
+      scalars: SchemaBuilder::parse_builtin(builtin::BUILT_IN_SCALARS_SDL),
+      directives: SchemaBuilder::parse_builtin(builtin::BUILT_IN_DIRECTIVES_SDL),
+    }
+  }
+}
+
+/// What lets the parsed documents live in a `static`: a shared reference to one crosses threads.
+///
+/// Asserted rather than assumed, because the AST offers an `Arc`-backed list-type spelling and a
+/// future field that reached for a non-`Sync` cell would otherwise fail at the `OnceLock` with an
+/// error that names the lock rather than the type that broke it.
+const _: () = {
+  const fn sync<T: Sync>() {}
+  let _ = sync::<BuiltIns>;
+};
+
+// ---------------------------------------------------------------------------------------------
+// the read-only half
+// ---------------------------------------------------------------------------------------------
+
+/// Everything a draft §3 check reads, borrowed apart from what it writes.
+///
+/// # What this is for
+///
+/// A §3 check reads the merged model and appends a diagnostic, and `&mut self` cannot do both at
+/// once: `self.push(…)` may not be called while `&self.types[…]` is alive. The other way round it
+/// is to copy whatever will be read — but the copy is then made once per *candidate*: one per
+/// type, per field, per argument, per directive usage, over a merged schema whose ninety-odd
+/// built-in items produce no diagnostic at all. The copies are deep, too, because a [`RawInput`]
+/// owns its directives and its default literal.
+///
+/// Naming the read side as its own set of field borrows makes the two disjoint instead, so a
+/// literal is checked where it lies and an owner path rendered only when something is reported.
+#[derive(Clone, Copy)]
+struct Model<'a> {
+  types: &'a [RawType],
+  directives: &'a [RawDirectiveDef],
+  /// `Sym` to an index into `directives`; `u32::MAX` for "not a directive".
+  directive_of_sym: &'a [u32],
+  schema_directives: &'a [RawDirectiveUse],
+  interner: &'a Interner,
+}
+
+impl<'a> Model<'a> {
+  fn text(&self, sym: Sym) -> &'a str {
+    self.interner.text(sym)
+  }
+
+  fn owner(&self, at: Coordinate) -> String {
+    render_owner(self.interner, at)
+  }
+
+  fn directive_index(&self, sym: Sym) -> Option<usize> {
+    match self.directive_of_sym.get(sym.get() as usize) {
+      Some(&index) if index != u32::MAX => Some(index as usize),
+      _ => None,
+    }
+  }
+
+  fn arguments(&self, at: ArgumentsOf) -> &'a [RawInput] {
+    match at {
+      ArgumentsOf::Field { ty, field } => &self.types[ty].fields[field].args,
+      ArgumentsOf::Directive { index } => &self.directives[index].args,
+    }
+  }
+
+  fn directive_uses(&self, at: DirectivesOf) -> &'a [RawDirectiveUse] {
+    match at {
+      DirectivesOf::Schema => self.schema_directives,
+      DirectivesOf::Type { ty } => &self.types[ty].directives,
+      DirectivesOf::Field { ty, field } => &self.types[ty].fields[field].directives,
+      DirectivesOf::FieldArgument { ty, field, arg } => {
+        &self.types[ty].fields[field].args[arg].directives
+      }
+      DirectivesOf::InputField { ty, field } => &self.types[ty].input_fields[field].directives,
+      DirectivesOf::EnumValue { ty, value } => &self.types[ty].enum_values[value].directives,
+      DirectivesOf::DirectiveArgument { directive, arg } => {
+        &self.directives[directive].args[arg].directives
+      }
+    }
+  }
+}
+
+/// Renders a [`Coordinate`] the way the diagnostics have always spelled one.
+///
+/// Through [`owner_path`] and [`directive_coordinate`] rather than by concatenating here, so the
+/// text is the output of the same two functions every eager caller used to call.
+fn render_owner(interner: &Interner, at: Coordinate) -> String {
+  let mut segments: [&str; 3] = [""; 3];
+  segments[0] = match at.head {
+    Head::Schema => "schema",
+    Head::Named(sym) => interner.text(sym),
+  };
+  let mut len = 1;
+  if let Some(member) = at.member {
+    segments[len] = interner.text(member);
+    len += 1;
+  }
+  if let Some(argument) = at.argument {
+    segments[len] = interner.text(argument);
+    len += 1;
+  }
+  let path = owner_path(&segments[..len]);
+  match at.directive {
+    Some(directive) => directive_coordinate(&path, interner.text(directive)),
+    None => path,
+  }
+}
+
+fn push_owned(
+  errors: &mut Vec<SchemaError>,
+  kind: SchemaErrorKind,
+  subject: &str,
+  owner: String,
+  at: Located,
+) {
+  errors.push(
+    SchemaError::new(kind, subject, at.span)
+      .owned_by(owner)
+      .in_document(at.document),
+  );
+}
+
+/// Reports at a position no interned name stands for — a literal, or a whole directive usage.
+fn push_at(
+  errors: &mut Vec<SchemaError>,
+  kind: SchemaErrorKind,
+  subject: &str,
+  owner: String,
+  span: SimpleSpan,
+  document: u32,
+) {
+  errors.push(
+    SchemaError::new(kind, subject, span)
+      .owned_by(owner)
+      .in_document(document),
+  );
+}
+
+fn push_related(
+  errors: &mut Vec<SchemaError>,
+  kind: SchemaErrorKind,
+  subject: &str,
+  owner: Option<String>,
+  at: Located,
+  related: SimpleSpan,
+) {
+  let mut error = SchemaError::new(kind, subject, at.span)
+    .in_document(at.document)
+    .related_to(related);
+  if let Some(owner) = owner {
+    error = error.owned_by(owner);
+  }
+  errors.push(error);
+}
+
+// ---------------------------------------------------------------------------------------------
 // the builder
 // ---------------------------------------------------------------------------------------------
 
@@ -391,27 +675,7 @@ impl SchemaBuilder {
   }
 
   fn push_owned(&mut self, kind: SchemaErrorKind, subject: &str, owner: String, at: Located) {
-    self.errors.push(
-      SchemaError::new(kind, subject, at.span)
-        .owned_by(owner)
-        .in_document(at.document),
-    );
-  }
-
-  /// Reports at a position no interned name stands for — a literal, or a whole directive usage.
-  fn push_at(
-    &mut self,
-    kind: SchemaErrorKind,
-    subject: &str,
-    owner: String,
-    span: SimpleSpan,
-    document: u32,
-  ) {
-    self.errors.push(
-      SchemaError::new(kind, subject, span)
-        .owned_by(owner)
-        .in_document(document),
-    );
+    push_owned(&mut self.errors, kind, subject, owner, at);
   }
 
   fn push_related(
@@ -422,13 +686,21 @@ impl SchemaBuilder {
     at: Located,
     related: SimpleSpan,
   ) {
-    let mut error = SchemaError::new(kind, subject, at.span)
-      .in_document(at.document)
-      .related_to(related);
-    if let Some(owner) = owner {
-      error = error.owned_by(owner);
-    }
-    self.errors.push(error);
+    push_related(&mut self.errors, kind, subject, owner, at, related);
+  }
+
+  /// The read side and the write side, borrowed apart. See [`Model`].
+  fn split(&mut self) -> (Model<'_>, &mut Vec<SchemaError>) {
+    (
+      Model {
+        types: &self.types,
+        directives: &self.directives,
+        directive_of_sym: &self.directive_of_sym,
+        schema_directives: &self.schema_directives,
+        interner: &self.interner,
+      },
+      &mut self.errors,
+    )
   }
 
   // -- interning ------------------------------------------------------------------------------
@@ -464,6 +736,11 @@ impl SchemaBuilder {
 
   fn text(&self, sym: Sym) -> &str {
     self.interner.text(sym)
+  }
+
+  /// Renders a [`Coordinate`], for the callers that have `&self` rather than a [`Model`].
+  fn owner(&self, at: Coordinate) -> String {
+    render_owner(&self.interner, at)
   }
 
   // -- ingest ---------------------------------------------------------------------------------
@@ -1121,14 +1398,42 @@ impl SchemaBuilder {
     .expect("smear's own built-in SDL must parse; this is a defect in smear, not in the input")
   }
 
+  /// Reads the three built-in documents, parsing them at most once per process.
+  ///
+  /// The parse is 15.2 µs of a 42.6 µs empty build, and it is the same 15.2 µs every time: the
+  /// input is three `&'static str` constants of this crate's own. Caching it is what takes the
+  /// build's corpus-independent cost from 8.9x `apollo-compiler`'s to something comparable, since
+  /// apollo caches its equivalent the same way.
+  ///
+  /// # Not on a core without `std`
+  ///
+  /// [`OnceLock`](std::sync::OnceLock) is not in `alloc`, and the `validator` feature does not
+  /// imply `std` — the schema representation reaches a Cortex-M0+ with no compare-and-swap, and a
+  /// cache that needed one would take that away for a startup cost such a target pays once. So the
+  /// `not(std)` arm parses per build. The two arms call the same
+  /// [`parse_builtin`](SchemaBuilder::parse_builtin), so `builtin_sdl_parses` guards both, and
+  /// `a_warm_schema_build_allocates_only_for_the_schema` carries a ceiling for each.
+  #[cfg(feature = "std")]
+  fn built_ins() -> &'static BuiltIns {
+    static CACHE: std::sync::OnceLock<BuiltIns> = std::sync::OnceLock::new();
+    CACHE.get_or_init(BuiltIns::parse)
+  }
+
   fn inject_built_ins(&mut self) {
+    #[cfg(feature = "std")]
+    let built_ins = Self::built_ins();
+    #[cfg(not(feature = "std"))]
+    let built_ins = &BuiltIns::parse();
+    self.inject(built_ins);
+  }
+
+  fn inject(&mut self, built_ins: &BuiltIns) {
     // Anything injected here belongs to no document the caller supplied; `self.document` is
     // already one past the last real index, which is what an injected definition reports under.
 
     // The introspection meta-schema is unconditional: an introspection query must validate
     // against every schema. A user definition of one of its types collides.
-    let introspection = Self::parse_builtin(builtin::INTROSPECTION_SDL);
-    for entry in introspection.definitions() {
+    for entry in built_ins.introspection.definitions() {
       let TypeSystemDefinitionOrExtension::Definition(described) = entry else {
         continue;
       };
@@ -1154,8 +1459,7 @@ impl SchemaBuilder {
 
     // Built-in scalars and directives are replaceable: a document that spells one out keeps its
     // own, which is what makes a printed schema re-readable.
-    let scalars = Self::parse_builtin(builtin::BUILT_IN_SCALARS_SDL);
-    for entry in scalars.definitions() {
+    for entry in built_ins.scalars.definitions() {
       let TypeSystemDefinitionOrExtension::Definition(described) = entry else {
         continue;
       };
@@ -1172,8 +1476,7 @@ impl SchemaBuilder {
       }
     }
 
-    let directives = Self::parse_builtin(builtin::BUILT_IN_DIRECTIVES_SDL);
-    for entry in directives.definitions() {
+    for entry in built_ins.directives.definitions() {
       let TypeSystemDefinitionOrExtension::Definition(described) = entry else {
         continue;
       };
@@ -1286,35 +1589,33 @@ impl SchemaBuilder {
   }
 
   /// Resolves every type reference's base to a type index, reporting the ones that name nothing.
+  ///
+  /// The two report lists carry the offending position's [`Coordinate`] rather than its rendered
+  /// path: the loops below visit every field, argument and input field of every type — the
+  /// built-in ones included — and all but the handful that fail need no path at all. Rendering is
+  /// deferred to the push loops at the end, where `&mut self` is free anyway.
   fn resolve_type_refs(&mut self) {
-    let mut unresolved: Vec<(Located, String, SimpleSpan)> = Vec::new();
-    let mut too_deep: Vec<(Located, String, SimpleSpan)> = Vec::new();
+    let mut unresolved: Vec<(Located, Coordinate, SimpleSpan)> = Vec::new();
+    let mut too_deep: Vec<(Located, Coordinate, SimpleSpan)> = Vec::new();
 
     for index in 0..self.types.len() {
-      let owner = self.types[index].name.sym;
-      let owner_name = self.text(owner).to_owned();
+      let owner = Coordinate::named(self.types[index].name.sym);
 
       for field in 0..self.types[index].fields.len() {
-        let field_name = self
-          .text(self.types[index].fields[field].name.sym)
-          .to_owned();
-        let path = owner_path(&[&owner_name, &field_name]);
+        let path = owner.then(self.types[index].fields[field].name.sym);
         Self::resolve_one(
           &self.type_of_sym,
           &mut self.types[index].fields[field].ty,
-          &path,
+          path,
           &mut unresolved,
           &mut too_deep,
         );
         for arg in 0..self.types[index].fields[field].args.len() {
-          let arg_name = self
-            .text(self.types[index].fields[field].args[arg].name.sym)
-            .to_owned();
-          let path = owner_path(&[&owner_name, &field_name, &arg_name]);
+          let path = path.then(self.types[index].fields[field].args[arg].name.sym);
           Self::resolve_one(
             &self.type_of_sym,
             &mut self.types[index].fields[field].args[arg].ty,
-            &path,
+            path,
             &mut unresolved,
             &mut too_deep,
           );
@@ -1322,14 +1623,11 @@ impl SchemaBuilder {
       }
 
       for field in 0..self.types[index].input_fields.len() {
-        let field_name = self
-          .text(self.types[index].input_fields[field].name.sym)
-          .to_owned();
-        let path = owner_path(&[&owner_name, &field_name]);
+        let path = owner.then(self.types[index].input_fields[field].name.sym);
         Self::resolve_one(
           &self.type_of_sym,
           &mut self.types[index].input_fields[field].ty,
-          &path,
+          path,
           &mut unresolved,
           &mut too_deep,
         );
@@ -1337,16 +1635,13 @@ impl SchemaBuilder {
     }
 
     for index in 0..self.directives.len() {
-      let owner_name = self.text(self.directives[index].name.sym).to_owned();
+      let owner = Coordinate::named(self.directives[index].name.sym);
       for arg in 0..self.directives[index].args.len() {
-        let arg_name = self
-          .text(self.directives[index].args[arg].name.sym)
-          .to_owned();
-        let path = owner_path(&[&owner_name, &arg_name]);
+        let path = owner.then(self.directives[index].args[arg].name.sym);
         Self::resolve_one(
           &self.type_of_sym,
           &mut self.directives[index].args[arg].ty,
-          &path,
+          path,
           &mut unresolved,
           &mut too_deep,
         );
@@ -1355,10 +1650,12 @@ impl SchemaBuilder {
 
     for (at, path, _) in unresolved {
       let subject = self.text(at.sym).to_owned();
+      let path = self.owner(path);
       self.push_owned(SchemaErrorKind::UndefinedType, &subject, path, at);
     }
     for (at, path, span) in too_deep {
       let subject = self.text(at.sym).to_owned();
+      let path = self.owner(path);
       let mut at = at;
       at.span = span;
       self.push_owned(SchemaErrorKind::TypeReferenceTooDeep, &subject, path, at);
@@ -1368,12 +1665,12 @@ impl SchemaBuilder {
   fn resolve_one(
     type_of_sym: &[u32],
     reference: &mut RawTypeRef,
-    path: &str,
-    unresolved: &mut Vec<(Located, String, SimpleSpan)>,
-    too_deep: &mut Vec<(Located, String, SimpleSpan)>,
+    path: Coordinate,
+    unresolved: &mut Vec<(Located, Coordinate, SimpleSpan)>,
+    too_deep: &mut Vec<(Located, Coordinate, SimpleSpan)>,
   ) {
     if reference.too_deep {
-      too_deep.push((reference.base, path.to_owned(), reference.span));
+      too_deep.push((reference.base, path, reference.span));
     }
     let slot = reference.base.sym.get() as usize;
     match type_of_sym.get(slot) {
@@ -1384,7 +1681,7 @@ impl SchemaBuilder {
           reference.packed.wrappers(),
         );
       }
-      _ => unresolved.push((reference.base, path.to_owned(), reference.span)),
+      _ => unresolved.push((reference.base, path, reference.span)),
     }
   }
 
@@ -1436,9 +1733,13 @@ impl SchemaBuilder {
       let kind = self.types[index].kind;
       let built_in = self.types[index].built_in;
       let at = self.types[index].name;
-      let name = self.text(at.sym).to_owned();
+      let owner = Coordinate::named(at.sym);
 
-      if !built_in && !self.types[index].collides_with_built_in && is_reserved(name.as_bytes()) {
+      if !built_in
+        && !self.types[index].collides_with_built_in
+        && is_reserved(self.text(at.sym).as_bytes())
+      {
+        let name = self.text(at.sym).to_owned();
         self.push(SchemaErrorKind::ReservedTypeName, &name, at);
       }
 
@@ -1451,12 +1752,12 @@ impl SchemaBuilder {
       match kind {
         TypeKind::Scalar => {}
         TypeKind::Object | TypeKind::Interface => {
-          self.validate_fields(index, &name);
-          self.validate_implements(index, &name);
+          self.validate_fields(index, owner);
+          self.validate_implements(index, owner);
         }
-        TypeKind::Union => self.validate_union(index, &name),
-        TypeKind::Enum => self.validate_enum(index, &name),
-        TypeKind::InputObject => self.validate_input_object(index, &name, one_of),
+        TypeKind::Union => self.validate_union(index, owner),
+        TypeKind::Enum => self.validate_enum(index, owner),
+        TypeKind::InputObject => self.validate_input_object(index, owner, one_of),
       }
     }
   }
@@ -1475,23 +1776,26 @@ impl SchemaBuilder {
       .any(|used| self.text(used.name.sym) == DEPRECATED)
   }
 
-  fn validate_fields(&mut self, index: usize, owner: &str) {
+  fn validate_fields(&mut self, index: usize, owner: Coordinate) {
     if self.types[index].fields.is_empty() {
       let at = self.types[index].name;
-      self.push(SchemaErrorKind::EmptyFieldsDefinition, owner, at);
+      let subject = self.owner(owner);
+      self.push(SchemaErrorKind::EmptyFieldsDefinition, &subject, at);
       return;
     }
 
     let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
     for field in 0..self.types[index].fields.len() {
       let at = self.types[index].fields[field].name;
-      let name = self.text(at.sym).to_owned();
+      let path = owner.then(at.sym);
 
       if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
         self.push_related(
           SchemaErrorKind::DuplicateFieldName,
           &name,
-          Some(owner.to_owned()),
+          Some(owner),
           at,
           first,
         );
@@ -1499,13 +1803,10 @@ impl SchemaBuilder {
         seen.push((at.sym, at.span));
       }
 
-      if !self.types[index].built_in && is_reserved(name.as_bytes()) {
-        self.push_owned(
-          SchemaErrorKind::ReservedFieldName,
-          &name,
-          owner.to_owned(),
-          at,
-        );
+      if !self.types[index].built_in && is_reserved(self.text(at.sym).as_bytes()) {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(SchemaErrorKind::ReservedFieldName, &name, owner, at);
       }
 
       let base = self.types[index].fields[field].ty.packed.base_id();
@@ -1513,7 +1814,7 @@ impl SchemaBuilder {
         let subject = self
           .text(self.types[base.get() as usize].name.sym)
           .to_owned();
-        let path = owner_path(&[owner, &name]);
+        let path = self.owner(path);
         let mut where_ = at;
         where_.span = self.types[index].fields[field].ty.span;
         self.push_owned(
@@ -1524,12 +1825,10 @@ impl SchemaBuilder {
         );
       }
 
-      let path = owner_path(&[owner, &name]);
-      let args = self.types[index].fields[field].args.clone();
       let built_in = self.types[index].built_in;
       self.validate_arguments(
-        args,
-        &path,
+        ArgumentsOf::Field { ty: index, field },
+        path,
         built_in,
         SchemaErrorKind::DuplicateArgumentName,
         SchemaErrorKind::ReservedArgumentName,
@@ -1538,49 +1837,69 @@ impl SchemaBuilder {
     }
   }
 
+  /// One input-value list, addressed rather than borrowed.
+  ///
+  /// `&self.types[…].args` cannot be held across a `self.push*`, and the list is walked far more
+  /// often than it is reported on — every argument of every field of every type, built-ins
+  /// included — so it is re-addressed per item rather than copied once per list. See [`Model`].
+  fn arguments(&self, at: ArgumentsOf) -> &[RawInput] {
+    match at {
+      ArgumentsOf::Field { ty, field } => &self.types[ty].fields[field].args,
+      ArgumentsOf::Directive { index } => &self.directives[index].args,
+    }
+  }
+
   fn validate_arguments(
     &mut self,
-    args: Vec<RawInput>,
-    owner: &str,
+    args: ArgumentsOf,
+    owner: Coordinate,
     built_in: bool,
     duplicate: SchemaErrorKind,
     reserved: SchemaErrorKind,
     not_input: SchemaErrorKind,
   ) {
     let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
-    for arg in &args {
+    for index in 0..self.arguments(args).len() {
+      let arg = &self.arguments(args)[index];
       let at = arg.name;
-      let name = self.text(at.sym).to_owned();
+      let ty = arg.ty;
+      let required = arg.is_required();
 
       if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
-        self.push_related(duplicate, &name, Some(owner.to_owned()), at, first);
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_related(duplicate, &name, Some(owner), at, first);
       } else {
         seen.push((at.sym, at.span));
       }
 
-      if !built_in && is_reserved(name.as_bytes()) {
-        self.push_owned(reserved, &name, owner.to_owned(), at);
+      if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(reserved, &name, owner, at);
       }
 
-      let base = arg.ty.packed.base_id();
+      let base = ty.packed.base_id();
       if base != UNRESOLVED && !self.types[base.get() as usize].kind.is_input() {
         let subject = self
           .text(self.types[base.get() as usize].name.sym)
           .to_owned();
-        let path = owner_path(&[owner, &name]);
+        let path = self.owner(owner.then(at.sym));
         let mut where_ = at;
-        where_.span = arg.ty.span;
+        where_.span = ty.span;
         self.push_owned(not_input, &subject, path, where_);
       }
 
       // Draft §3.6.1(2.4.4.1): "if argument type is Non-Null and a default value is not defined,
       // the `@deprecated` directive must not be applied to this argument" — which is exactly
       // `is_required`.
-      if arg.is_required() && self.is_deprecated(&arg.directives) {
+      if required && self.is_deprecated(&self.arguments(args)[index].directives) {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
         self.push_owned(
           SchemaErrorKind::DeprecatedRequiredArgument,
           &name,
-          owner.to_owned(),
+          owner,
           at,
         );
       }
@@ -1588,29 +1907,39 @@ impl SchemaBuilder {
       // Draft §3.6.1(2.4.5): "if the argument has a default value it must be compatible with
       // `argumentType` as per the coercion rules for that type" — the same coercion procedure a
       // directive argument's *supplied* value goes through, so the two cannot answer differently.
-      if let Some(default) = &arg.default_value {
-        self.check_const_value(
+      if self.arguments(args)[index].default_value.is_some() {
+        let (model, errors) = self.split();
+        let default = model.arguments(args)[index]
+          .default_value
+          .as_ref()
+          .expect("just observed to be present");
+        Self::check_const_value(
+          model,
+          errors,
           default,
-          arg.ty.packed,
-          owner,
-          &name,
-          SchemaErrorKind::InvalidDefaultValue,
-          at.document,
+          ty.packed,
+          Blame {
+            owner,
+            subject: at.sym,
+            mismatch: SchemaErrorKind::InvalidDefaultValue,
+            document: at.document,
+          },
         );
       }
     }
   }
 
-  fn validate_implements(&mut self, index: usize, owner: &str) {
-    let implements = self.types[index].implements.clone();
+  fn validate_implements(&mut self, index: usize, owner: Coordinate) {
     let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
-    for declared in implements {
-      let name = self.text(declared.sym).to_owned();
+    for position in 0..self.types[index].implements.len() {
+      let declared = self.types[index].implements[position];
       if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == declared.sym).copied() {
+        let name = self.text(declared.sym).to_owned();
+        let owner = self.owner(owner);
         self.push_related(
           SchemaErrorKind::DuplicateImplementsInterface,
           &name,
-          Some(owner.to_owned()),
+          Some(owner),
           declared,
           first,
         );
@@ -1618,39 +1947,38 @@ impl SchemaBuilder {
       }
       seen.push((declared.sym, declared.span));
 
-      match self.type_index(declared.sym) {
-        None => self.push_owned(
-          SchemaErrorKind::UndefinedImplementsInterface,
-          &name,
-          owner.to_owned(),
-          declared,
-        ),
-        Some(target) if self.types[target].kind != TypeKind::Interface => self.push_owned(
-          SchemaErrorKind::ImplementsNonInterface,
-          &name,
-          owner.to_owned(),
-          declared,
-        ),
-        Some(_) => {}
+      let kind = match self.type_index(declared.sym) {
+        None => Some(SchemaErrorKind::UndefinedImplementsInterface),
+        Some(target) if self.types[target].kind != TypeKind::Interface => {
+          Some(SchemaErrorKind::ImplementsNonInterface)
+        }
+        Some(_) => None,
+      };
+      if let Some(kind) = kind {
+        let name = self.text(declared.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(kind, &name, owner, declared);
       }
     }
   }
 
-  fn validate_union(&mut self, index: usize, owner: &str) {
+  fn validate_union(&mut self, index: usize, owner: Coordinate) {
     if self.types[index].members.is_empty() {
       let at = self.types[index].name;
-      self.push(SchemaErrorKind::EmptyUnionMembers, owner, at);
+      let subject = self.owner(owner);
+      self.push(SchemaErrorKind::EmptyUnionMembers, &subject, at);
       return;
     }
-    let members = self.types[index].members.clone();
     let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
-    for member in members {
-      let name = self.text(member.sym).to_owned();
+    for position in 0..self.types[index].members.len() {
+      let member = self.types[index].members[position];
       if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == member.sym).copied() {
+        let name = self.text(member.sym).to_owned();
+        let owner = self.owner(owner);
         self.push_related(
           SchemaErrorKind::DuplicateUnionMember,
           &name,
-          Some(owner.to_owned()),
+          Some(owner),
           member,
           first,
         );
@@ -1658,79 +1986,76 @@ impl SchemaBuilder {
       }
       seen.push((member.sym, member.span));
 
-      match self.type_index(member.sym) {
-        None => self.push_owned(
-          SchemaErrorKind::UndefinedUnionMember,
-          &name,
-          owner.to_owned(),
-          member,
-        ),
-        Some(target) if self.types[target].kind != TypeKind::Object => self.push_owned(
-          SchemaErrorKind::UnionMemberNotObject,
-          &name,
-          owner.to_owned(),
-          member,
-        ),
-        Some(_) => {}
+      let kind = match self.type_index(member.sym) {
+        None => Some(SchemaErrorKind::UndefinedUnionMember),
+        Some(target) if self.types[target].kind != TypeKind::Object => {
+          Some(SchemaErrorKind::UnionMemberNotObject)
+        }
+        Some(_) => None,
+      };
+      if let Some(kind) = kind {
+        let name = self.text(member.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(kind, &name, owner, member);
       }
     }
   }
 
-  fn validate_enum(&mut self, index: usize, owner: &str) {
+  fn validate_enum(&mut self, index: usize, owner: Coordinate) {
     if self.types[index].enum_values.is_empty() {
       let at = self.types[index].name;
-      self.push(SchemaErrorKind::EmptyEnumValues, owner, at);
+      let subject = self.owner(owner);
+      self.push(SchemaErrorKind::EmptyEnumValues, &subject, at);
       return;
     }
     let built_in = self.types[index].built_in;
-    let values: Vec<Located> = self.types[index]
-      .enum_values
-      .iter()
-      .map(|value| value.name)
-      .collect();
     let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
-    for value in values {
-      let name = self.text(value.sym).to_owned();
+    for position in 0..self.types[index].enum_values.len() {
+      let value = self.types[index].enum_values[position].name;
       if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == value.sym).copied() {
+        let name = self.text(value.sym).to_owned();
+        let owner = self.owner(owner);
         self.push_related(
           SchemaErrorKind::DuplicateEnumValue,
           &name,
-          Some(owner.to_owned()),
+          Some(owner),
           value,
           first,
         );
       } else {
         seen.push((value.sym, value.span));
       }
-      if !built_in && is_reserved(name.as_bytes()) {
-        self.push_owned(
-          SchemaErrorKind::ReservedEnumValueName,
-          &name,
-          owner.to_owned(),
-          value,
-        );
+      if !built_in && is_reserved(self.text(value.sym).as_bytes()) {
+        let name = self.text(value.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(SchemaErrorKind::ReservedEnumValueName, &name, owner, value);
       }
     }
   }
 
-  fn validate_input_object(&mut self, index: usize, owner: &str, one_of: bool) {
+  fn validate_input_object(&mut self, index: usize, owner: Coordinate, one_of: bool) {
     if self.types[index].input_fields.is_empty() {
       let at = self.types[index].name;
-      self.push(SchemaErrorKind::EmptyInputFields, owner, at);
+      let subject = self.owner(owner);
+      self.push(SchemaErrorKind::EmptyInputFields, &subject, at);
       return;
     }
     let built_in = self.types[index].built_in;
-    let fields = self.types[index].input_fields.clone();
     let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
-    for field in &fields {
+    for position in 0..self.types[index].input_fields.len() {
+      let field = &self.types[index].input_fields[position];
       let at = field.name;
-      let name = self.text(at.sym).to_owned();
+      let ty = field.ty;
+      let required = field.is_required();
+      let has_default = field.default.is_present();
 
       if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
         self.push_related(
           SchemaErrorKind::DuplicateInputFieldName,
           &name,
-          Some(owner.to_owned()),
+          Some(owner),
           at,
           first,
         );
@@ -1738,23 +2063,20 @@ impl SchemaBuilder {
         seen.push((at.sym, at.span));
       }
 
-      if !built_in && is_reserved(name.as_bytes()) {
-        self.push_owned(
-          SchemaErrorKind::ReservedInputFieldName,
-          &name,
-          owner.to_owned(),
-          at,
-        );
+      if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(SchemaErrorKind::ReservedInputFieldName, &name, owner, at);
       }
 
-      let base = field.ty.packed.base_id();
+      let base = ty.packed.base_id();
       if base != UNRESOLVED && !self.types[base.get() as usize].kind.is_input() {
         let subject = self
           .text(self.types[base.get() as usize].name.sym)
           .to_owned();
-        let path = owner_path(&[owner, &name]);
+        let path = self.owner(owner.then(at.sym));
         let mut where_ = at;
-        where_.span = field.ty.span;
+        where_.span = ty.span;
         self.push_owned(
           SchemaErrorKind::InputFieldTypeNotInputType,
           &subject,
@@ -1764,44 +2086,55 @@ impl SchemaBuilder {
       }
 
       // Draft §3.10.1(2.4.1), the input-field twin of §3.6.1(2.4.4.1).
-      if field.is_required() && self.is_deprecated(&field.directives) {
+      if required && self.is_deprecated(&self.types[index].input_fields[position].directives) {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
         self.push_owned(
           SchemaErrorKind::DeprecatedRequiredInputField,
           &name,
-          owner.to_owned(),
+          owner,
           at,
         );
       }
 
       // The same coercion §3.6.1(2.4.5) demands of an argument's default, at the position the
       // draft's numbered list leaves implicit. See `SchemaErrorKind::InvalidDefaultValue`.
-      if let Some(default) = &field.default_value {
-        self.check_const_value(
+      //
+      // Read in place rather than taken: an input object may declare a default of its own type,
+      // and the check reads `input_fields` — the very list this loop is walking.
+      if self.types[index].input_fields[position]
+        .default_value
+        .is_some()
+      {
+        let (model, errors) = self.split();
+        let default = model.types[index].input_fields[position]
+          .default_value
+          .as_ref()
+          .expect("just observed to be present");
+        Self::check_const_value(
+          model,
+          errors,
           default,
-          field.ty.packed,
-          owner,
-          &name,
-          SchemaErrorKind::InvalidDefaultValue,
-          at.document,
+          ty.packed,
+          Blame {
+            owner,
+            subject: at.sym,
+            mismatch: SchemaErrorKind::InvalidDefaultValue,
+            document: at.document,
+          },
         );
       }
 
       if one_of {
-        if field.ty.packed.is_non_null() {
-          self.push_owned(
-            SchemaErrorKind::OneOfFieldNotNullable,
-            &name,
-            owner.to_owned(),
-            at,
-          );
+        if ty.packed.is_non_null() {
+          let name = self.text(at.sym).to_owned();
+          let owner = self.owner(owner);
+          self.push_owned(SchemaErrorKind::OneOfFieldNotNullable, &name, owner, at);
         }
-        if field.default.is_present() {
-          self.push_owned(
-            SchemaErrorKind::OneOfFieldHasDefault,
-            &name,
-            owner.to_owned(),
-            at,
-          );
+        if has_default {
+          let name = self.text(at.sym).to_owned();
+          let owner = self.owner(owner);
+          self.push_owned(SchemaErrorKind::OneOfFieldHasDefault, &name, owner, at);
         }
       }
     }
@@ -1810,17 +2143,16 @@ impl SchemaBuilder {
   fn validate_directive_definitions(&mut self) {
     for index in 0..self.directives.len() {
       let at = self.directives[index].name;
-      let name = self.text(at.sym).to_owned();
       let built_in = self.directives[index].built_in;
 
-      if !built_in && is_reserved(name.as_bytes()) {
+      if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
+        let name = self.text(at.sym).to_owned();
         self.push(SchemaErrorKind::ReservedDirectiveName, &name, at);
       }
 
-      let args = self.directives[index].args.clone();
       self.validate_arguments(
-        args,
-        &name,
+        ArgumentsOf::Directive { index },
+        Coordinate::named(at.sym),
         built_in,
         SchemaErrorKind::DuplicateDirectiveArgumentName,
         SchemaErrorKind::ReservedDirectiveArgumentName,
@@ -1842,92 +2174,97 @@ impl SchemaBuilder {
   /// be resolved before a value can be checked against it, and after
   /// [`SchemaBuilder::apply_extensions`] because a type and its extensions are one location.
   fn validate_directive_usages(&mut self) {
-    let schema_uses = self.schema_directives.clone();
-    self.check_directive_uses(&schema_uses, "schema");
+    let (model, errors) = self.split();
+    Self::check_directive_uses(model, errors, DirectivesOf::Schema, Coordinate::schema());
 
-    for index in 0..self.types.len() {
-      let owner = self.text(self.types[index].name.sym).to_owned();
+    for ty in 0..model.types.len() {
+      let owner = Coordinate::named(model.types[ty].name.sym);
+      Self::check_directive_uses(model, errors, DirectivesOf::Type { ty }, owner);
 
-      let uses = self.types[index].directives.clone();
-      self.check_directive_uses(&uses, &owner);
+      for field in 0..model.types[ty].fields.len() {
+        let path = owner.then(model.types[ty].fields[field].name.sym);
+        Self::check_directive_uses(model, errors, DirectivesOf::Field { ty, field }, path);
 
-      for field in 0..self.types[index].fields.len() {
-        let field_name = self
-          .text(self.types[index].fields[field].name.sym)
-          .to_owned();
-        let path = owner_path(&[&owner, &field_name]);
-        let uses = self.types[index].fields[field].directives.clone();
-        self.check_directive_uses(&uses, &path);
-
-        for arg in 0..self.types[index].fields[field].args.len() {
-          let arg_name = self
-            .text(self.types[index].fields[field].args[arg].name.sym)
-            .to_owned();
-          let path = owner_path(&[&owner, &field_name, &arg_name]);
-          let uses = self.types[index].fields[field].args[arg].directives.clone();
-          self.check_directive_uses(&uses, &path);
+        for arg in 0..model.types[ty].fields[field].args.len() {
+          let path = path.then(model.types[ty].fields[field].args[arg].name.sym);
+          Self::check_directive_uses(
+            model,
+            errors,
+            DirectivesOf::FieldArgument { ty, field, arg },
+            path,
+          );
         }
       }
 
-      for field in 0..self.types[index].input_fields.len() {
-        let field_name = self
-          .text(self.types[index].input_fields[field].name.sym)
-          .to_owned();
-        let path = owner_path(&[&owner, &field_name]);
-        let uses = self.types[index].input_fields[field].directives.clone();
-        self.check_directive_uses(&uses, &path);
+      for field in 0..model.types[ty].input_fields.len() {
+        let path = owner.then(model.types[ty].input_fields[field].name.sym);
+        Self::check_directive_uses(model, errors, DirectivesOf::InputField { ty, field }, path);
       }
 
-      for value in 0..self.types[index].enum_values.len() {
-        let value_name = self
-          .text(self.types[index].enum_values[value].name.sym)
-          .to_owned();
-        let path = owner_path(&[&owner, &value_name]);
-        let uses = self.types[index].enum_values[value].directives.clone();
-        self.check_directive_uses(&uses, &path);
+      for value in 0..model.types[ty].enum_values.len() {
+        let path = owner.then(model.types[ty].enum_values[value].name.sym);
+        Self::check_directive_uses(model, errors, DirectivesOf::EnumValue { ty, value }, path);
       }
     }
 
-    for index in 0..self.directives.len() {
-      let owner = self.text(self.directives[index].name.sym).to_owned();
-      for arg in 0..self.directives[index].args.len() {
-        let arg_name = self
-          .text(self.directives[index].args[arg].name.sym)
-          .to_owned();
-        let path = owner_path(&[&owner, &arg_name]);
-        let uses = self.directives[index].args[arg].directives.clone();
-        self.check_directive_uses(&uses, &path);
+    for directive in 0..model.directives.len() {
+      let owner = Coordinate::named(model.directives[directive].name.sym);
+      for arg in 0..model.directives[directive].args.len() {
+        let path = owner.then(model.directives[directive].args[arg].name.sym);
+        Self::check_directive_uses(
+          model,
+          errors,
+          DirectivesOf::DirectiveArgument { directive, arg },
+          path,
+        );
       }
     }
   }
 
   /// One element's directive list: defined, allowed here, not repeated, and correctly argued.
-  fn check_directive_uses(&mut self, uses: &[RawDirectiveUse], owner: &str) {
+  ///
+  /// Over a [`Model`] rather than `&mut self` so that the list can be read where it lies. The
+  /// owner arrives as a [`Coordinate`]: this runs once per type, field, argument, input field,
+  /// enum value and directive argument in the merged schema, and most of those carry no directive
+  /// at all — the pass cost 6.4 µs on a document with none, all of it owner paths built before the
+  /// empty list was looked at.
+  fn check_directive_uses(
+    model: Model<'_>,
+    errors: &mut Vec<SchemaError>,
+    at: DirectivesOf,
+    owner: Coordinate,
+  ) {
     // Only a definition the schema knows can be known non-repeatable, so an undefined directive
     // written twice is the undefined-directive mistake twice over and not also this one.
     let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
 
-    for used in uses {
-      let name = self.text(used.name.sym).to_owned();
-      let Some(definition) = self.directive_index(used.name.sym) else {
-        self.push_owned(
+    for index in 0..model.directive_uses(at).len() {
+      let used = &model.directive_uses(at)[index];
+      let Some(definition) = model.directive_index(used.name.sym) else {
+        let name = model.text(used.name.sym).to_owned();
+        push_owned(
+          errors,
           SchemaErrorKind::UndefinedDirective,
           &name,
-          owner.to_owned(),
+          model.owner(owner),
           used.name,
         );
         continue;
       };
 
-      if !self.directives[definition].repeatable {
+      if !model.directives[definition].repeatable {
         match seen.iter().find(|(sym, _)| *sym == used.name.sym).copied() {
-          Some((_, first)) => self.push_related(
-            SchemaErrorKind::DuplicateDirectiveUse,
-            &name,
-            Some(owner.to_owned()),
-            used.name,
-            first,
-          ),
+          Some((_, first)) => {
+            let name = model.text(used.name.sym).to_owned();
+            push_related(
+              errors,
+              SchemaErrorKind::DuplicateDirectiveUse,
+              &name,
+              Some(model.owner(owner)),
+              used.name,
+              first,
+            );
+          }
           None => seen.push((used.name.sym, used.name.span)),
         }
       }
@@ -1935,32 +2272,38 @@ impl SchemaBuilder {
       // The whole of the location rule: one shift and one `AND` against the word the definition
       // was reduced to at ingest — the same `DirectiveLocations::contains` the executable rules
       // call, so the two cannot answer differently.
-      if !self.directives[definition]
+      if !model.directives[definition]
         .locations
         .contains(used.location)
       {
-        self.push_owned(
+        let name = model.text(used.name.sym).to_owned();
+        push_owned(
+          errors,
           SchemaErrorKind::UnsupportedDirectiveLocation,
           &name,
-          owner.to_owned(),
+          model.owner(owner),
           used.name,
         );
       }
 
-      self.check_directive_arguments(used, definition, owner, &name);
+      Self::check_directive_arguments(model, errors, at, index, definition, owner);
     }
   }
 
   /// One usage's arguments, against the ones its definition declares.
   fn check_directive_arguments(
-    &mut self,
-    used: &RawDirectiveUse,
+    model: Model<'_>,
+    errors: &mut Vec<SchemaError>,
+    at: DirectivesOf,
+    index: usize,
     definition: usize,
-    owner: &str,
-    directive: &str,
+    owner: Coordinate,
   ) {
-    let coordinate = directive_coordinate(owner, directive);
-    let declared = self.directives[definition].args.clone();
+    let used = &model.directive_uses(at)[index];
+    // Rendered only where one is reported. `check_directive_arguments` runs for every well-formed
+    // usage too, and a supergraph has thousands of them.
+    let coordinate = owner.at_directive(used.name.sym);
+    let declared = &model.directives[definition].args;
 
     // Draft 5.4.2's SDL twin. Unlike the repeatability rule above, this one needs nothing from the
     // definition — an argument written twice is a mistake whether or not the directive declares it
@@ -1974,11 +2317,12 @@ impl SchemaBuilder {
         .copied()
       {
         Some((_, first)) => {
-          let name = self.text(argument.name.sym).to_owned();
-          self.push_related(
+          let name = model.text(argument.name.sym).to_owned();
+          push_related(
+            errors,
             SchemaErrorKind::DuplicateDirectiveArgumentUse,
             &name,
-            Some(coordinate.clone()),
+            Some(model.owner(coordinate)),
             argument.name,
             first,
           );
@@ -1988,12 +2332,13 @@ impl SchemaBuilder {
     }
 
     for argument in &used.args {
-      let name = self.text(argument.name.sym).to_owned();
       let Some(expected) = declared.iter().find(|d| d.name.sym == argument.name.sym) else {
-        self.push_owned(
+        let name = model.text(argument.name.sym).to_owned();
+        push_owned(
+          errors,
           SchemaErrorKind::UndefinedDirectiveArgument,
           &name,
-          coordinate.clone(),
+          model.owner(coordinate),
           argument.name,
         );
         continue;
@@ -2002,26 +2347,32 @@ impl SchemaBuilder {
       // An explicit `null` for a required argument is the required-argument mistake, not a
       // value-type one: one defect, one diagnostic, and it is the one that names the obligation.
       if expected.is_required() && matches!(argument.value.shape, RawShape::Null) {
-        self.push_owned(
+        let name = model.text(argument.name.sym).to_owned();
+        push_owned(
+          errors,
           SchemaErrorKind::MissingRequiredDirectiveArgument,
           &name,
-          coordinate.clone(),
+          model.owner(coordinate),
           argument.name,
         );
         continue;
       }
 
-      self.check_const_value(
+      Self::check_const_value(
+        model,
+        errors,
         &argument.value,
         expected.ty.packed,
-        &coordinate,
-        &name,
-        SchemaErrorKind::InvalidDirectiveArgumentValue,
-        argument.name.document,
+        Blame {
+          owner: coordinate,
+          subject: argument.name.sym,
+          mismatch: SchemaErrorKind::InvalidDirectiveArgumentValue,
+          document: argument.name.document,
+        },
       );
     }
 
-    for expected in &declared {
+    for expected in declared {
       if !expected.is_required() {
         continue;
       }
@@ -2033,11 +2384,12 @@ impl SchemaBuilder {
         continue;
       }
       // Nothing was written, so the usage itself is what the omission is blamed on.
-      let name = self.text(expected.name.sym).to_owned();
-      self.push_at(
+      let name = model.text(expected.name.sym).to_owned();
+      push_at(
+        errors,
         SchemaErrorKind::MissingRequiredDirectiveArgument,
         &name,
-        coordinate.clone(),
+        model.owner(coordinate),
         used.span,
         used.name.document,
       );
@@ -2069,17 +2421,27 @@ impl SchemaBuilder {
   /// the same mistake with the same coordinate wherever the literal is written, and giving it two
   /// names would say otherwise.
   fn check_const_value(
-    &mut self,
+    model: Model<'_>,
+    errors: &mut Vec<SchemaError>,
     value: &RawValue,
     expected: PackedType,
-    owner: &str,
-    subject: &str,
-    mismatch: SchemaErrorKind,
-    document: u32,
+    blame: Blame,
   ) {
+    let reject = |errors: &mut Vec<SchemaError>, span| {
+      let subject = model.text(blame.subject).to_owned();
+      push_at(
+        errors,
+        blame.mismatch,
+        &subject,
+        model.owner(blame.owner),
+        span,
+        blame.document,
+      );
+    };
+
     if matches!(value.shape, RawShape::Null) {
       if expected.is_non_null() {
-        self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
+        reject(errors, value.span);
       }
       return;
     }
@@ -2099,7 +2461,7 @@ impl SchemaBuilder {
         return;
       };
       for entry in entries {
-        self.check_const_value(entry, item, owner, subject, mismatch, document);
+        Self::check_const_value(model, errors, entry, item, blame);
       }
       return;
     }
@@ -2110,10 +2472,10 @@ impl SchemaBuilder {
     }
     let base = base.get() as usize;
 
-    match self.types[base].kind {
+    match model.types[base].kind {
       TypeKind::InputObject => {
         let RawShape::Object(fields) = &value.shape else {
-          self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
+          reject(errors, value.span);
           return;
         };
         // The literal is named by the input object it is being offered to, not by the argument
@@ -2121,16 +2483,17 @@ impl SchemaBuilder {
         // literal needs, because `Query.@v.p` cannot tell an offending field of the outer object
         // from one of the inner. The span still points at the field, so the usage is one lookup
         // away.
-        let object = self.text(self.types[base].name.sym).to_owned();
-        let declared = self.types[base].input_fields.clone();
+        let object = Coordinate::named(model.types[base].name.sym);
+        let declared = &model.types[base].input_fields;
         for field in fields {
           let Some(expected) = declared.iter().find(|d| d.name.sym == field.name.sym) else {
             // Draft 5.6.2's SDL twin.
-            let name = self.text(field.name.sym).to_owned();
-            self.push_owned(
+            let name = model.text(field.name.sym).to_owned();
+            push_owned(
+              errors,
               SchemaErrorKind::UndefinedInputObjectField,
               &name,
-              object.clone(),
+              model.owner(object),
               field.name,
             );
             continue;
@@ -2139,30 +2502,24 @@ impl SchemaBuilder {
           // through to the value check below so that `{ x: null }` for a required `x` produces the
           // obligation once, and not also a non-null coercion failure.
           if expected.is_required() && matches!(field.value.shape, RawShape::Null) {
-            let name = self.text(field.name.sym).to_owned();
-            self.push_at(
+            let name = model.text(field.name.sym).to_owned();
+            push_at(
+              errors,
               SchemaErrorKind::MissingRequiredInputObjectField,
               &name,
-              object.clone(),
+              model.owner(object),
               field.value.span,
-              document,
+              blame.document,
             );
             continue;
           }
-          self.check_const_value(
-            &field.value,
-            expected.ty.packed,
-            owner,
-            subject,
-            mismatch,
-            document,
-          );
+          Self::check_const_value(model, errors, &field.value, expected.ty.packed, blame);
         }
 
         // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
         // what the omission is blamed on — the same choice `check_directive_arguments` makes for
         // an omitted required argument.
-        for expected in &declared {
+        for expected in declared {
           if !expected.is_required() {
             continue;
           }
@@ -2172,20 +2529,21 @@ impl SchemaBuilder {
           {
             continue;
           }
-          let name = self.text(expected.name.sym).to_owned();
-          self.push_at(
+          let name = model.text(expected.name.sym).to_owned();
+          push_at(
+            errors,
             SchemaErrorKind::MissingRequiredInputObjectField,
             &name,
-            object.clone(),
+            model.owner(object),
             value.span,
-            document,
+            blame.document,
           );
         }
       }
       TypeKind::Enum => {
         let member = match &value.shape {
-          RawShape::Enum(bytes) => self.interner.lookup(bytes).is_some_and(|sym| {
-            self.types[base]
+          RawShape::Enum(bytes) => model.interner.lookup(bytes).is_some_and(|sym| {
+            model.types[base]
               .enum_values
               .iter()
               .any(|value| value.name.sym == sym)
@@ -2193,16 +2551,16 @@ impl SchemaBuilder {
           _ => false,
         };
         if !member {
-          self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
+          reject(errors, value.span);
         }
       }
       TypeKind::Scalar => {
-        let name = self.text(self.types[base].name.sym).to_owned();
         // A custom scalar accepts every literal, so only the five built-ins have anything to say.
+        let name = model.text(model.types[base].name.sym);
         let accepted = BuiltInScalar::from_name(name.as_bytes())
           .is_none_or(|scalar| scalar.accepts(value.shape.shape(), value.shape.spelling()));
         if !accepted {
-          self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
+          reject(errors, value.span);
         }
       }
       // An object, interface or union declared as an argument type is already the
@@ -2218,6 +2576,12 @@ impl SchemaBuilder {
         self.types[index].kind,
         TypeKind::Object | TypeKind::Interface
       ) {
+        continue;
+      }
+      // Nothing below has anything to say about a type that implements nothing, and every
+      // introspection type is one — so the owner name and the copy of the list are built after
+      // the question is asked rather than before it.
+      if self.types[index].implements.is_empty() {
         continue;
       }
       let owner = self.text(self.types[index].name.sym).to_owned();

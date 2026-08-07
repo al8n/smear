@@ -194,16 +194,20 @@ const CORPUS: &[&str] = &[
   "{ hero { conflict: name } hero { conflict: appearsIn } }",
 ];
 
-fn build() -> Schema {
-  let document = Parser::with_parser::<
+fn parse_sdl(sdl: &str) -> TypeSystemDocument<&str> {
+  Parser::with_parser::<
     GraphqlLexer<'_, str>,
     TypeSystemDocument<&str>,
     GraphqlErrors<&str>,
     _,
     GraphQL,
   >(type_system_document)
-  .parse_str(SCHEMA)
-  .expect("the corpus SDL parses");
+  .parse_str(sdl)
+  .expect("the corpus SDL parses")
+}
+
+fn build() -> Schema {
+  let document = parse_sdl(SCHEMA);
   Schema::build(&document).expect("the corpus SDL is a schema")
 }
 
@@ -238,6 +242,65 @@ fn the_gate_counts() {
   assert!(
     counted >= 1,
     "the counting allocator saw nothing; the gate below would pass vacuously"
+  );
+}
+
+/// The smallest document that is a schema, so the reading is the builder's own cost.
+const MINIMAL: &str = "type Query { ok: Int }";
+
+/// What a warm `Schema::build` of [`MINIMAL`] may allocate.
+///
+/// Measured at 215 and pinned with slack, not fitted to a projection. The slack is deliberately
+/// smaller than one eager path per element: `Schema::build` merges roughly a hundred and thirty
+/// built-in items into that one user type, so a single `to_owned()` or `owner_path(…)` put back on
+/// a success path in `resolve_type_refs` or `validate_directive_usages` — the pattern this number
+/// exists to keep out — costs about that many and crosses this line at once.
+#[cfg(feature = "std")]
+const BUILD_CEILING: u64 = 240;
+
+/// The same reading where there is no `OnceLock` to cache the built-in parse in.
+///
+/// `SchemaBuilder::built_ins` documents the split: without `std` every build re-parses the three
+/// constant SDL documents, which is 48 allocations the cached path does not pay. Measured at 263.
+///
+/// Pinned rather than skipped, because a gate that disappears under a feature selection is a gate
+/// that stops noticing — and because this is the arm no `cargo test` currently reaches: `smear`'s
+/// dev-dependency on itself does not say `default-features = false`, so every test build resolves
+/// `std` on whatever the command line asks for. Reading this number needs the `cfg` inverted by
+/// hand, or that manifest edge narrowed.
+#[cfg(not(feature = "std"))]
+const BUILD_CEILING: u64 = 288;
+
+/// A warm `Schema::build` allocates for the schema it returns, not for diagnostics it does not
+/// emit.
+///
+/// # What this pins
+///
+/// The defect class this number exists against is an owner path, a copied name or a deep-cloned
+/// argument list built for **every** type, field, argument, input field and enum value the builder
+/// merges — the ninety-odd built-in and introspection items included — so that an error arm which
+/// almost never runs has a `String` to hand. It reaches 917 allocations for a twenty-two byte
+/// document, and it is invisible to every other gate: same diagnostics, same verdicts, only the
+/// clock and the allocator notice.
+///
+/// The reading is taken on the **second** build so the once-per-process parse of the built-in SDL
+/// is not in it; that parse is the first build's cost and is not what this gate is about.
+#[test]
+fn a_warm_schema_build_allocates_only_for_the_schema() {
+  let document = parse_sdl(MINIMAL);
+  // The first build settles the process-wide built-in parse; the second is the steady state.
+  let warm = Schema::build(&document).expect("the minimal SDL is a schema");
+  std::hint::black_box(&warm);
+  let _ = allocations(|| {});
+
+  let counted = allocations(|| {
+    let schema = Schema::build(&document).expect("the minimal SDL is a schema");
+    std::hint::black_box(&schema);
+  });
+  assert!(
+    counted <= BUILD_CEILING,
+    "`Schema::build` allocated {counted} times for `{MINIMAL}`, over the {BUILD_CEILING} ceiling; \
+     if that is an intended cost, say why and move the ceiling"
   );
 }
 
