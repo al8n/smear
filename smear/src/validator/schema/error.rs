@@ -182,6 +182,34 @@ pub enum SchemaErrorKind {
   /// A directive argument's value does not fit the type the definition declares for it
   /// (draft §3.13, by way of §3.4's input coercion).
   InvalidDirectiveArgumentValue,
+  /// A directive usage passes the same argument name twice (draft §3.13, draft 5.4.2's SDL twin).
+  ///
+  /// Distinct from [`DuplicateDirectiveArgumentName`](Self::DuplicateDirectiveArgumentName), which
+  /// is a *definition* declaring one argument twice. Two mistakes, two coordinates: `d.a` names
+  /// the declaration, `Query.@d.a` names the application.
+  DuplicateDirectiveArgumentUse,
+
+  // -- §3.13 use sites, continued: inside a constant input-object literal ---------------------
+  //
+  // Draft §3.13 admits an input object as a directive argument type, so an SDL constant position
+  // can hold an input-object literal — and the two rules that govern one are draft 5.6.2 and
+  // 5.6.4, which the executable side already runs per request as
+  // [`Rule::InputObjectFieldNames`](crate::validator::Rule::InputObjectFieldNames) and
+  // [`Rule::InputObjectRequiredFields`](crate::validator::Rule::InputObjectRequiredFields). The
+  // use-site pass descends into such a literal to type-check the fields the input object
+  // *declares*; these two are what it used to say nothing about.
+  /// An input-object literal names a field the input object type does not declare (draft §3.10.1
+  /// at a constant position, draft 5.6.2's SDL twin).
+  UndefinedInputObjectField,
+  /// An input-object literal omits a required field, or passes it `null` (draft §3.10.1 at a
+  /// constant position, draft 5.6.4's SDL twin).
+  ///
+  /// Required means non-null with no default. An explicit `null` is reported here rather than as
+  /// [`InvalidDirectiveArgumentValue`](Self::InvalidDirectiveArgumentValue), for the same reason
+  /// [`MissingRequiredDirectiveArgument`](Self::MissingRequiredDirectiveArgument) claims an
+  /// explicitly `null` argument: one mistake produces one diagnostic, and it is the one that names
+  /// the obligation.
+  MissingRequiredInputObjectField,
 }
 
 impl SchemaErrorKind {
@@ -247,6 +275,9 @@ impl SchemaErrorKind {
     Self::UndefinedDirectiveArgument,
     Self::MissingRequiredDirectiveArgument,
     Self::InvalidDirectiveArgumentValue,
+    Self::DuplicateDirectiveArgumentUse,
+    Self::UndefinedInputObjectField,
+    Self::MissingRequiredInputObjectField,
   ];
 
   /// Returns the phrase this kind renders as, with no subject attached.
@@ -322,6 +353,9 @@ impl SchemaErrorKind {
       Self::InvalidDirectiveArgumentValue => {
         "directive argument value does not fit its declared type"
       }
+      Self::DuplicateDirectiveArgumentUse => "directive argument is passed twice",
+      Self::UndefinedInputObjectField => "undefined input object field",
+      Self::MissingRequiredInputObjectField => "required input object field is missing",
     }
   }
 }
