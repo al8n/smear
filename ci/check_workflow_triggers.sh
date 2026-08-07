@@ -18,10 +18,15 @@
 #      in `miri.yml` is worse than one that covers it nowhere, because it looks fixed.
 #
 #   2. Every branch named still exists on the remote. This catches a typo and a deleted branch.
-#      It is deliberately NOT the rename check: measured 2026-08-06, both previous trunks
-#      (`refactor/main`, `refactor/main-0.8`) are still present on origin, so this repository
-#      renames its trunk by starting a new branch and abandoning the old one, and a stale name
-#      here stays resolvable forever. Invariant 4 is what catches that.
+#      How much of the rename check it is depends on what became of the branch left behind, and
+#      this repository has now done it both ways. The first two trunks (`refactor/main`,
+#      `refactor/main-0.8`) were abandoned in place and are still on origin, so an entry naming
+#      either resolves forever and this invariant never fires — invariant 4 is what catches that
+#      case. `feat/tokora-0.8` is the first trunk retired by DELETING the ref instead of leaving
+#      it, and against a deleted branch this invariant is immediate: it fails every workflow the
+#      moment the ref goes. Retiring a trunk that way therefore means merging its removal from
+#      every list BEFORE deleting the ref. The reverse order reddens CI repository-wide, over a
+#      branch nobody is working on any more.
 #
 #   3. The repository's default branch is in the list. This catches a RETARGET — the default
 #      branch is what `schedule` runs and what a fresh clone lands on, so it needs a push lane

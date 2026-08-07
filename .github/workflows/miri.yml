@@ -109,14 +109,13 @@ name: Miri
 # every workflow that has one, because that is the part where a divergence is silent.
 on:
   push:
-    # `main` is the DEFAULT branch, `feat/tokora-0.8` is the TRUNK, and until those are the same
-    # branch both are needed: on 2026-08-06 `main` was 145 commits behind the trunk and not an
-    # ancestor of it, so a lane naming only `main` never ran for a merge. Kept identical to
-    # `ci.yml`'s list, whose comment carries the full reasoning and the note on why a literal name
-    # is unavoidable in an `on:` block (#74).
+    # `main` is both the DEFAULT branch and the TRUNK; the separate trunk `feat/tokora-0.8` was
+    # retired after `main` was fast-forwarded onto it. While they were different branches this lane
+    # named only `main` and so never ran for a merge (#74). Kept identical to `ci.yml`'s list, whose
+    # comment carries the full reasoning and the note on why a literal name is unavoidable in an
+    # `on:` block.
     branches:
       - main
-      - feat/tokora-0.8
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'
