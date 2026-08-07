@@ -23,9 +23,11 @@ name: CI
 
 on:
   push:
+    # Two kinds of entry belong in this list, and they go stale for different reasons.
+    #
     # `main` is the repository's DEFAULT branch — what `schedule` runs, where a fresh clone lands,
     # where dependabot opens its pull requests — and it is also the TRUNK every pull request is
-    # merged into. ONE name covers both roles only because they are currently the same branch. A
+    # merged into. One entry covers both roles only because they are currently the same branch. A
     # post-merge lane that names the wrong ref fails by absence, not by error, so which branch is
     # named here has to be asserted rather than assumed.
     #
@@ -34,22 +36,39 @@ on:
     # produced a run for that branch's entire life, and the only symptom was `gh run list` printing
     # nothing for it (#74). The alias was retired after `main` was fast-forwarded onto it.
     #
+    # Every other entry is a LIVE INTEGRATION BRANCH: one that pull requests are merged into for as
+    # long as it exists. It earns a lane on exactly the trunk's grounds — a merge writes a commit no
+    # pull request ever built, so without a lane the integrated result is never tested at all, which
+    # is #74 again confined to one subsystem. Two consequences. The entry goes in when the branch is
+    # created rather than when its first phase is ready, because until the branch has a lane
+    # `ci/check_workflow_triggers.sh`'s fourth invariant fails every pull request that targets it;
+    # that invariant's stacked-PR exemption cannot stand in, since it wants the branch to be the
+    # head of an open pull request and a branch forked from the trunk has no commits of its own for
+    # GitHub to open one from. And an entry of this kind is TEMPORARY, so it names the condition
+    # that retires it:
+    #
+    #   * `feat/proto` — integration branch for the `proto` §6/§7 campaign, one pull request per
+    #     phase. Drop this entry when that subsystem merges into `main`.
+    #
     # A literal name is forced here. `on:` is resolved before any context exists, so
     # `${{ github.event.repository.default_branch }}` cannot be written in this block, and there is
     # no glob to fall back on: the trunk has moved three times — `refactor/main` ->
     # `refactor/main-0.8` -> `feat/tokora-0.8` -> `main` — with no common prefix, so a literal list
     # goes stale again whenever it moves next. Whether that staleness is loud depends on what
-    # becomes of the old branch. `refactor/main` and `refactor/main-0.8` were abandoned in place
-    # and still resolve, so an entry naming either would sit here silently. `feat/tokora-0.8` is
-    # retired the other way — by deleting the ref — so an entry naming it fails the moment that
-    # happens. Retiring a trunk by deletion therefore means merging its removal from every list
-    # BEFORE deleting the ref.
+    # becomes of the branch left behind. `refactor/main` and `refactor/main-0.8` were abandoned in
+    # place, and for as long as a ref is left standing an entry naming it resolves and sits here
+    # silently. `feat/tokora-0.8` was retired the other way — by deleting the ref — and against a
+    # deleted branch the failure is immediate, every workflow at once. All three are gone from
+    # origin as of 2026-08-07, so the deletion ORDER is the live hazard, for a retired integration
+    # branch as much as for a retired trunk: merge the entry's removal from every list BEFORE
+    # deleting the ref.
     #
     # `ci/check_workflow_triggers.sh`, run by the `triggers` job below, is what makes the next one
     # loud. It does not ask what the trunk is called; it asks whether the branch this pull request
     # is being merged INTO has a push lane, and fails when it does not.
     branches:
       - main
+      - feat/proto
     # `**.md` used to sit in these lists. It cannot: `README.md`,
     # `smear/src/lexer/README.md` and `smear/src/parser/README.md` are
     # `include_str!`-ed into the crate's rustdoc, so editing one is a compile-time

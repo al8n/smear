@@ -18,15 +18,17 @@
 #      in `miri.yml` is worse than one that covers it nowhere, because it looks fixed.
 #
 #   2. Every branch named still exists on the remote. This catches a typo and a deleted branch.
-#      How much of the rename check it is depends on what became of the branch left behind, and
-#      this repository has now done it both ways. The first two trunks (`refactor/main`,
-#      `refactor/main-0.8`) were abandoned in place and are still on origin, so an entry naming
-#      either resolves forever and this invariant never fires — invariant 4 is what catches that
-#      case. `feat/tokora-0.8` is the first trunk retired by DELETING the ref instead of leaving
+#      How much of the rename check it is depends on what becomes of the branch left behind, and
+#      this repository has done it both ways. The first two trunks (`refactor/main`,
+#      `refactor/main-0.8`) were abandoned in place, and for as long as a ref is left standing an
+#      entry naming it resolves and this invariant never fires — invariant 4 is what catches that
+#      case. `feat/tokora-0.8` was the first trunk retired by DELETING the ref instead of leaving
 #      it, and against a deleted branch this invariant is immediate: it fails every workflow the
-#      moment the ref goes. Retiring a trunk that way therefore means merging its removal from
-#      every list BEFORE deleting the ref. The reverse order reddens CI repository-wide, over a
-#      branch nobody is working on any more.
+#      moment the ref goes. All three are gone from origin as of 2026-08-07, so the deletion ORDER
+#      is what has to be got right, and it governs the temporary integration branches this list
+#      also names, not just trunks: merge the entry's removal from every list BEFORE deleting the
+#      ref. The reverse order reddens CI repository-wide, over a branch nobody is working on any
+#      more.
 #
 #   3. The repository's default branch is in the list. This catches a RETARGET — the default
 #      branch is what `schedule` runs and what a fresh clone lands on, so it needs a push lane

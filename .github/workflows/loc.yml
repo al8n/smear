@@ -5,9 +5,12 @@ on:
     # `main` is both the DEFAULT branch and the TRUNK; the separate trunk `feat/tokora-0.8` was
     # retired after `main` was fast-forwarded onto it. While they were different branches this lane
     # named only `main` and so never ran for a merge — this workflow uploads a line count to a gist
-    # that went the trunk's entire life without one refresh (#74). Kept identical to `ci.yml`'s
-    # list, whose comment carries the full reasoning and the note on why a literal name is
-    # unavoidable in an `on:` block; `ci/check_workflow_triggers.sh` enforces the identity.
+    # that went the trunk's entire life without one refresh (#74). Any further entry is a live
+    # integration branch, which takes merges too and so needs a lane for the same reason: today
+    # that is `feat/proto`, temporary, dropped when the `proto` campaign lands on `main`. Kept
+    # identical to `ci.yml`'s list, whose comment carries the full reasoning, the order a retired
+    # entry has to be removed in, and the note on why a literal name is unavoidable in an `on:`
+    # block; `ci/check_workflow_triggers.sh` enforces the identity.
     #
     # The `paths-ignore` list below is deliberately NOT the one the other three carry. This
     # workflow counts lines of Rust, so markdown genuinely cannot change its result, whereas in
@@ -15,6 +18,7 @@ on:
     # the push-branch list is required to match.
     branches:
       - main
+      - feat/proto
     paths-ignore:
       - 'README.md'
       - 'COPYRIGHT'
