@@ -1,14 +1,21 @@
-//! The draft §5 rule corpus: one entry per rule, shared by every gate that needs documents a
-//! rule actually fires on.
+//! The validator's two rule corpora: one entry per draft §5 rule in [`FIXTURES`], one per draft §3
+//! refusal kind in [`SCHEMA_FIXTURES`], shared by every gate that needs documents a rule actually
+//! fires on.
 //!
 //! # Why it is a module and not a table in one test
 //!
-//! It was `validator_rules.rs`'s own `FIXTURES`, and it moved here unchanged when
+//! [`FIXTURES`] was `validator_rules.rs`'s own, and it moved here unchanged when
 //! `validator_lossless.rs` needed the same thirty documents. A second copy is the failure this
 //! move exists to prevent: the two gates would drift, and the differential one would then be
 //! comparing the doors over a corpus the liveness floor no longer covers. One table, two readers,
 //! and `validator_rules.rs`'s [`liveness_floor`] still asserts that every rule in `Rule::ALL` has
 //! an entry here.
+//!
+//! [`SCHEMA_FIXTURES`] arrived the same way and for the same reason. It was
+//! `validator_schema.rs`'s, and `validator_lossless_schema.rs` needed exactly it — the SDL that
+//! makes each §3 kind fire is the SDL a differential over the two schema doors has to compare on,
+//! and a second copy would be a corpus the refusal floor no longer covers. `validator_schema.rs`'s
+//! `refusal_floor` is the census that keeps it complete, unchanged and still there.
 //!
 //! Nothing in this file runs. It is data plus the shape that holds it, so a reader that needs a
 //! different harness — parsed twice, padded with trivia, validated through a different door —
@@ -16,7 +23,7 @@
 //!
 //! [`liveness_floor`]: ../validator_rules.rs
 
-use smear::validator::{Budget, Rule};
+use smear::validator::{Budget, Rule, SchemaErrorKind};
 
 /// The schema every fixture without an override validates against.
 ///
@@ -460,4 +467,342 @@ pub const FIXTURES: &[Fixture] = &[
     fires: &[Rule::MergeWorkBudget],
     valid: "{ dog { name } }",
   },
+];
+
+// ---------------------------------------------------------------------------------------------
+// the draft §3 refusal corpus
+// ---------------------------------------------------------------------------------------------
+
+/// Every kind, with a schema that makes it fire and the complete set of kinds that schema
+/// produces.
+///
+/// Pinning the whole set, not just the kind under test, is what keeps a fixture from quietly
+/// becoming a test of two rules at once.
+#[allow(clippy::type_complexity)]
+pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
+  // -- §3.3 -----------------------------------------------------------------------------------
+  (
+    SchemaErrorKind::DuplicateTypeName,
+    "type Query { ok: Int } type Dup { a: Int } type Dup { b: Int }",
+    &[SchemaErrorKind::DuplicateTypeName],
+  ),
+  (
+    SchemaErrorKind::DuplicateDirectiveDefinition,
+    "type Query { ok: Int } directive @d on FIELD directive @d on QUERY",
+    &[SchemaErrorKind::DuplicateDirectiveDefinition],
+  ),
+  (
+    SchemaErrorKind::DuplicateSchemaDefinition,
+    "type Query { ok: Int } schema { query: Query } schema { query: Query }",
+    &[SchemaErrorKind::DuplicateSchemaDefinition],
+  ),
+  (
+    SchemaErrorKind::DuplicateRootOperationType,
+    "type Query { ok: Int } type Other { ok: Int } schema { query: Query query: Other }",
+    &[SchemaErrorKind::DuplicateRootOperationType],
+  ),
+  (
+    SchemaErrorKind::UndefinedRootOperationType,
+    "type Query { ok: Int } schema { query: Query mutation: Nope }",
+    &[SchemaErrorKind::UndefinedRootOperationType],
+  ),
+  (
+    SchemaErrorKind::RootOperationTypeNotObject,
+    "interface Root { ok: Int } schema { query: Root }",
+    &[SchemaErrorKind::RootOperationTypeNotObject],
+  ),
+  (
+    SchemaErrorKind::MissingQueryRootOperationType,
+    "type NotTheRoot { ok: Int }",
+    &[SchemaErrorKind::MissingQueryRootOperationType],
+  ),
+  (
+    SchemaErrorKind::UndefinedExtensionTarget,
+    "type Query { ok: Int } extend type Nope { more: Int }",
+    &[SchemaErrorKind::UndefinedExtensionTarget],
+  ),
+  (
+    SchemaErrorKind::ExtensionKindMismatch,
+    "type Query { ok: Int } interface Iface { a: Int } extend type Iface { b: Int }",
+    &[SchemaErrorKind::ExtensionKindMismatch],
+  ),
+  (
+    SchemaErrorKind::RedefinedBuiltInType,
+    "type Query { ok: Int } type __Type { name: String }",
+    &[SchemaErrorKind::RedefinedBuiltInType],
+  ),
+  (
+    SchemaErrorKind::ReservedTypeName,
+    "type Query { ok: Int } type __Mine { a: Int }",
+    &[SchemaErrorKind::ReservedTypeName],
+  ),
+  (
+    SchemaErrorKind::UndefinedType,
+    "type Query { ok: Nope }",
+    &[SchemaErrorKind::UndefinedType],
+  ),
+  (
+    SchemaErrorKind::TypeReferenceTooDeep,
+    "type Query { ok: [[[[[[[[[[[[[[[[Int]]]]]]]]]]]]]]]] }",
+    &[SchemaErrorKind::TypeReferenceTooDeep],
+  ),
+  // -- §3.6 / §3.7 ------------------------------------------------------------------------------
+  (
+    SchemaErrorKind::EmptyFieldsDefinition,
+    "type Query { ok: Int } type Empty",
+    &[SchemaErrorKind::EmptyFieldsDefinition],
+  ),
+  (
+    SchemaErrorKind::DuplicateFieldName,
+    "type Query { ok: Int dup: Int dup: String }",
+    &[SchemaErrorKind::DuplicateFieldName],
+  ),
+  (
+    SchemaErrorKind::ReservedFieldName,
+    "type Query { ok: Int __mine: Int }",
+    &[SchemaErrorKind::ReservedFieldName],
+  ),
+  (
+    SchemaErrorKind::FieldTypeNotOutputType,
+    "type Query { ok: In } input In { a: Int }",
+    &[SchemaErrorKind::FieldTypeNotOutputType],
+  ),
+  (
+    SchemaErrorKind::DuplicateArgumentName,
+    "type Query { ok(a: Int, a: String): Int }",
+    &[SchemaErrorKind::DuplicateArgumentName],
+  ),
+  (
+    SchemaErrorKind::ReservedArgumentName,
+    "type Query { ok(__a: Int): Int }",
+    &[SchemaErrorKind::ReservedArgumentName],
+  ),
+  (
+    SchemaErrorKind::ArgumentTypeNotInputType,
+    "type Query { ok(a: Query): Int }",
+    &[SchemaErrorKind::ArgumentTypeNotInputType],
+  ),
+  (
+    SchemaErrorKind::ImplementsNonInterface,
+    "type Query { ok: Int } type Thing { a: Int } type Other implements Thing { a: Int }",
+    &[SchemaErrorKind::ImplementsNonInterface],
+  ),
+  (
+    SchemaErrorKind::UndefinedImplementsInterface,
+    "type Query { ok: Int } type Other implements Nope { a: Int }",
+    &[SchemaErrorKind::UndefinedImplementsInterface],
+  ),
+  (
+    SchemaErrorKind::DuplicateImplementsInterface,
+    "type Query { ok: Int } interface I { a: Int } type T implements I & I { a: Int }",
+    &[SchemaErrorKind::DuplicateImplementsInterface],
+  ),
+  (
+    SchemaErrorKind::SelfImplementingInterface,
+    "type Query { ok: Int } interface I implements I { a: Int }",
+    &[SchemaErrorKind::SelfImplementingInterface],
+  ),
+  (
+    SchemaErrorKind::MissingTransitiveInterface,
+    "type Query { ok: Int }
+     interface A { a: Int }
+     interface B implements A { a: Int }
+     type T implements B { a: Int }",
+    &[SchemaErrorKind::MissingTransitiveInterface],
+  ),
+  (
+    SchemaErrorKind::MissingInterfaceField,
+    "type Query { ok: Int } interface I { a: Int b: Int } type T implements I { a: Int }",
+    &[SchemaErrorKind::MissingInterfaceField],
+  ),
+  (
+    SchemaErrorKind::InvalidInterfaceFieldType,
+    "type Query { ok: Int } interface I { a: Int } type T implements I { a: String }",
+    &[SchemaErrorKind::InvalidInterfaceFieldType],
+  ),
+  (
+    SchemaErrorKind::MissingInterfaceFieldArgument,
+    "type Query { ok: Int } interface I { a(x: Int): Int } type T implements I { a: Int }",
+    &[SchemaErrorKind::MissingInterfaceFieldArgument],
+  ),
+  (
+    SchemaErrorKind::InvalidInterfaceFieldArgumentType,
+    "type Query { ok: Int }
+     interface I { a(x: Int): Int }
+     type T implements I { a(x: String): Int }",
+    &[SchemaErrorKind::InvalidInterfaceFieldArgumentType],
+  ),
+  (
+    SchemaErrorKind::UnexpectedRequiredArgument,
+    "type Query { ok: Int } interface I { a: Int } type T implements I { a(x: Int!): Int }",
+    &[SchemaErrorKind::UnexpectedRequiredArgument],
+  ),
+  // -- §3.8 -------------------------------------------------------------------------------------
+  (
+    SchemaErrorKind::EmptyUnionMembers,
+    "type Query { ok: Int } union U",
+    &[SchemaErrorKind::EmptyUnionMembers],
+  ),
+  (
+    SchemaErrorKind::UnionMemberNotObject,
+    "type Query { ok: Int } interface I { a: Int } union U = I",
+    &[SchemaErrorKind::UnionMemberNotObject],
+  ),
+  (
+    SchemaErrorKind::UndefinedUnionMember,
+    "type Query { ok: Int } union U = Nope",
+    &[SchemaErrorKind::UndefinedUnionMember],
+  ),
+  (
+    SchemaErrorKind::DuplicateUnionMember,
+    "type Query { ok: Int } type A { a: Int } union U = A | A",
+    &[SchemaErrorKind::DuplicateUnionMember],
+  ),
+  // -- §3.9 -------------------------------------------------------------------------------------
+  (
+    SchemaErrorKind::EmptyEnumValues,
+    "type Query { ok: Int } enum E",
+    &[SchemaErrorKind::EmptyEnumValues],
+  ),
+  (
+    SchemaErrorKind::DuplicateEnumValue,
+    "type Query { ok: Int } enum E { A A }",
+    &[SchemaErrorKind::DuplicateEnumValue],
+  ),
+  (
+    SchemaErrorKind::ReservedEnumValueName,
+    "type Query { ok: Int } enum E { __A }",
+    &[SchemaErrorKind::ReservedEnumValueName],
+  ),
+  // -- §3.10 ------------------------------------------------------------------------------------
+  (
+    SchemaErrorKind::EmptyInputFields,
+    "type Query { ok: Int } input In",
+    &[SchemaErrorKind::EmptyInputFields],
+  ),
+  (
+    SchemaErrorKind::DuplicateInputFieldName,
+    "type Query { ok: Int } input In { a: Int a: String }",
+    &[SchemaErrorKind::DuplicateInputFieldName],
+  ),
+  (
+    SchemaErrorKind::ReservedInputFieldName,
+    "type Query { ok: Int } input In { __a: Int }",
+    &[SchemaErrorKind::ReservedInputFieldName],
+  ),
+  (
+    SchemaErrorKind::InputFieldTypeNotInputType,
+    "type Query { ok: Int } input In { a: Query }",
+    &[SchemaErrorKind::InputFieldTypeNotInputType],
+  ),
+  (
+    SchemaErrorKind::OneOfFieldNotNullable,
+    "type Query { ok: Int } input In @oneOf { a: Int! }",
+    &[SchemaErrorKind::OneOfFieldNotNullable],
+  ),
+  (
+    SchemaErrorKind::OneOfFieldHasDefault,
+    "type Query { ok: Int } input In @oneOf { a: Int = 1 }",
+    &[SchemaErrorKind::OneOfFieldHasDefault],
+  ),
+  (
+    SchemaErrorKind::CircularNonNullInputField,
+    "type Query { ok: Int } input A { b: B! } input B { a: A! }",
+    &[SchemaErrorKind::CircularNonNullInputField],
+  ),
+  // -- §3.13 ------------------------------------------------------------------------------------
+  (
+    SchemaErrorKind::ReservedDirectiveName,
+    "type Query { ok: Int } directive @__mine on FIELD",
+    &[SchemaErrorKind::ReservedDirectiveName],
+  ),
+  (
+    SchemaErrorKind::DuplicateDirectiveArgumentName,
+    "type Query { ok: Int } directive @d(a: Int, a: String) on FIELD",
+    &[SchemaErrorKind::DuplicateDirectiveArgumentName],
+  ),
+  (
+    SchemaErrorKind::ReservedDirectiveArgumentName,
+    "type Query { ok: Int } directive @d(__a: Int) on FIELD",
+    &[SchemaErrorKind::ReservedDirectiveArgumentName],
+  ),
+  (
+    SchemaErrorKind::DirectiveArgumentTypeNotInputType,
+    "type Query { ok: Int } directive @d(a: Query) on FIELD",
+    &[SchemaErrorKind::DirectiveArgumentTypeNotInputType],
+  ),
+  (
+    SchemaErrorKind::SelfReferentialDirective,
+    "type Query { ok: Int }
+     directive @d(a: In) on INPUT_FIELD_DEFINITION
+     input In { x: Int @d }",
+    &[SchemaErrorKind::SelfReferentialDirective],
+  ),
+  // -- §3.13, at a use site -----------------------------------------------------------------
+  //
+  // Every SDL below is the probe `benchmarks`'s differential oracle used to find the gap these
+  // six kinds close (smear issue #91), verbatim. Each is refused by `apollo-compiler`, and each
+  // was built without complaint before the use-site pass existed.
+  (
+    SchemaErrorKind::UndefinedDirective,
+    "type Query @nowhere { ok: Int }",
+    &[SchemaErrorKind::UndefinedDirective],
+  ),
+  (
+    SchemaErrorKind::UnsupportedDirectiveLocation,
+    "directive @onEnum on ENUM
+     type Query @onEnum { ok: Int }",
+    &[SchemaErrorKind::UnsupportedDirectiveLocation],
+  ),
+  (
+    SchemaErrorKind::DuplicateDirectiveUse,
+    "directive @onObject on OBJECT
+     type Query @onObject @onObject { ok: Int }",
+    &[SchemaErrorKind::DuplicateDirectiveUse],
+  ),
+  (
+    SchemaErrorKind::UndefinedDirectiveArgument,
+    "directive @onObject(a: Int) on OBJECT
+     type Query @onObject(b: 1) { ok: Int }",
+    &[SchemaErrorKind::UndefinedDirectiveArgument],
+  ),
+  (
+    SchemaErrorKind::MissingRequiredDirectiveArgument,
+    "directive @onObject(a: Int!) on OBJECT
+     type Query @onObject { ok: Int }",
+    &[SchemaErrorKind::MissingRequiredDirectiveArgument],
+  ),
+  (
+    SchemaErrorKind::InvalidDirectiveArgumentValue,
+    "directive @onObject(a: Int) on OBJECT
+     type Query @onObject(a: \"x\") { ok: Int }",
+    &[SchemaErrorKind::InvalidDirectiveArgumentValue],
+  ),
+  // -- §3.13 use sites, continued (smear issue #95) -------------------------------------------
+  //
+  // The three the six above left behind. Each SDL is a probe in the differential oracle's
+  // `SDL_DIRECTIVE_PROBES` and is refused by `apollo-compiler` — as `UniqueArgument`,
+  // `UndefinedInputValue` and `RequiredField` respectively — and each was built without complaint
+  // until these kinds existed. What made them worth their own issue is that the oracle's corpus
+  // reached none of them, so its greenness said nothing either way.
+  (
+    SchemaErrorKind::DuplicateDirectiveArgumentUse,
+    "directive @onObject(a: Int) on OBJECT
+     type Query @onObject(a: 1, a: 2) { ok: Int }",
+    &[SchemaErrorKind::DuplicateDirectiveArgumentUse],
+  ),
+  (
+    SchemaErrorKind::UndefinedInputObjectField,
+    "directive @onObject(a: In) on OBJECT
+     input In { x: Int }
+     type Query @onObject(a: { y: 1 }) { ok: Int }",
+    &[SchemaErrorKind::UndefinedInputObjectField],
+  ),
+  (
+    SchemaErrorKind::MissingRequiredInputObjectField,
+    "directive @onObject(a: In) on OBJECT
+     input In { x: Int! }
+     type Query @onObject(a: {}) { ok: Int }",
+    &[SchemaErrorKind::MissingRequiredInputObjectField],
+  ),
 ];

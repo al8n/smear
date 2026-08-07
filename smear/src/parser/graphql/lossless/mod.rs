@@ -207,11 +207,13 @@ pub use runner::{
 
 // Beside the roots, and named for the symmetry: `parse_document(src) -> Parse`,
 // `project(&parse, src) -> Result<Document, _>`; `parse_executable_document(src) -> Parse`,
-// `project_executable_document(&parse, src) -> Result<ExecutableDocument, _>`. `Recovery` is the
-// substrate's — it says how much of a tree the recovering door could see and nothing about a
-// dialect — so it is re-exported here rather than copied.
+// `project_executable_document(&parse, src) -> Result<ExecutableDocument, _>`; and the same pair
+// again at the SDL root. Every root has a projection, and each single-half root has a recovering
+// one beside it. `Recovery` is the substrate's — it says how much of a tree the recovering door
+// could see and nothing about a dialect — so it is re-exported here rather than copied.
 pub use crate::parser::lossless::project::Recovery;
 pub use project::{
   ProjectError, ProjectErrorKind, project, project_executable_document,
-  project_executable_document_recovered,
+  project_executable_document_recovered, project_type_system_document,
+  project_type_system_document_recovered,
 };

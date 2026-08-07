@@ -55,6 +55,11 @@ use smear::{
 
 // The rule corpus, shared with `validator_lossless.rs`. See that module's header for what the
 // second reader does with it.
+//
+// The module also carries the draft §3 refusal corpus, which this file has no use for and which
+// would be a `dead_code` denial under CI's `-Dwarnings`. Allowed at the include, as the module's
+// three other readers do, rather than on an item of a table this file does not own.
+#[allow(dead_code)]
 #[path = "support/validator_corpus.rs"]
 mod corpus;
 

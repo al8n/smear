@@ -1,8 +1,9 @@
-//! The lossless door: draft §5 over a rowan CST.
+//! The lossless door: draft §5 and draft §3 over a rowan CST.
 //!
 //! This module is private and its header is not published. What a caller has to know is stated on
-//! [`validate_executable_lossless`] and on [`Recovery`], where the published documentation will
-//! find it; what is here is the reasoning behind the shape, for a reader of the source.
+//! [`validate_executable_lossless`], on [`validate_schema_lossless`] and on [`Recovery`], where
+//! the published documentation will find it; what is here is the reasoning behind the shape, for a
+//! reader of the source.
 //!
 //! # One validator, two doors
 //!
@@ -13,6 +14,14 @@
 //! dispatches through: the CST is projected to the AST by
 //! [`project_executable_document_recovered`], and the projection is handed to
 //! [`validate_executable_with`](super::validate_executable_with) unchanged.
+//!
+//! [`validate_schema_lossless`] is that sentence again one section of the specification over.
+//! Draft §3 lives inside [`Schema::build`], which is where an SDL author's refusals come from
+//! through every other door — the syntactic parser's, and
+//! `Schema::from_introspection`'s, which renders the response as SDL and hands it to the same
+//! builder. So the third door does the same: project, then build. One §3 implementation, reached
+//! three ways, and `tests/validator_lossless_schema.rs` compares two of them over the SDL corpus
+//! the way `tests/validator_lossless.rs` compares the other pair.
 //!
 //! That is a deliberate refusal of the obvious alternative. A validator generic over "AST or CST"
 //! would put a branch, or a virtual call, on the hot path of every rule — to buy nothing, since
@@ -55,14 +64,35 @@
 //!   syntactic door would have said. That is this door's choice, and
 //!   `tests/validator_lossless.rs` pins the artifact rather than leaving it to be discovered.
 //!
+//! # What a skipped definition does to a *schema*
+//!
+//! The same shape of answer, and a larger blast radius, which is why
+//! [`validate_schema_lossless`] states it separately rather than pointing here. Draft §5's
+//! whole-document rules are two; draft §3 is nothing but whole-document rules, because a type is
+//! what every reference to it resolves against. Dropping one definition therefore invents an
+//! [`UndefinedType`](super::SchemaErrorKind::UndefinedType) at every mention of it, and dropping
+//! the one that happened to be `Query` invents a
+//! [`MissingQueryRootOperationType`](super::SchemaErrorKind::MissingQueryRootOperationType) for
+//! the whole document.
+//!
+//! The three ways out were weighed again and answered the same way, for the same reasons: a §3
+//! pass that skipped the rules a skip can disturb would be a second builder, and refusing the
+//! document is what this door exists to replace. So it reports, the [`Recovery`] rides along in
+//! both arms, and `tests/validator_lossless_schema.rs` pins both artifacts.
+//!
 //! [`project_executable_document`]: crate::parser::graphql::lossless::project_executable_document
 //! [`project_executable_document_recovered`]: crate::parser::graphql::lossless::project_executable_document_recovered
+//! [`Schema::build`]: super::Schema::build
 
-use crate::parser::graphql::lossless::{Parse, project_executable_document_recovered};
+use crate::parser::graphql::lossless::{
+  Parse, project_executable_document_recovered, project_type_system_document_recovered,
+};
 
 pub use crate::parser::lossless::project::Recovery;
 
-use super::{Budget, Invalid, RuleSet, Schema, Scratch, Sink, validate_executable_with};
+use super::{
+  Budget, Invalid, RuleSet, Schema, SchemaErrors, Scratch, Sink, validate_executable_with,
+};
 
 /// The verdict of a failed lossless validation.
 ///
@@ -245,5 +275,152 @@ where
   match validate_executable_with(schema, &document, scratch, budget, rules, sink) {
     Ok(()) => Ok(recovery),
     Err(invalid) => Err(LosslessInvalid { invalid, recovery }),
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// the SDL half
+// ---------------------------------------------------------------------------------------------
+
+/// The verdict of a failed lossless schema build.
+///
+/// [`SchemaErrors`] plus the [`Recovery`] the successful arm carries — [`LosslessInvalid`]'s twin,
+/// so the two facts a caller needs, *what was wrong* and *how much of the document was looked at*,
+/// arrive together whichever way the result went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LosslessSchemaErrors {
+  errors: SchemaErrors,
+  recovery: Recovery,
+}
+
+impl LosslessSchemaErrors {
+  /// Returns why the build refused, exactly as [`Schema::build`](super::Schema::build) reports it.
+  #[inline]
+  pub const fn errors(&self) -> &SchemaErrors {
+    &self.errors
+  }
+
+  /// Returns how much of the parse had an AST image.
+  ///
+  /// [`Recovery::is_complete`] false means at least one of these refusals may be an artifact of a
+  /// definition that was dropped rather than of one the author wrote — see
+  /// [`validate_schema_lossless`].
+  #[inline]
+  pub const fn recovery(&self) -> Recovery {
+    self.recovery
+  }
+
+  /// Consumes this verdict and returns the refusals alone.
+  #[inline]
+  pub fn into_errors(self) -> SchemaErrors {
+    self.errors
+  }
+}
+
+impl From<LosslessSchemaErrors> for SchemaErrors {
+  #[inline]
+  fn from(value: LosslessSchemaErrors) -> Self {
+    value.errors
+  }
+}
+
+impl core::fmt::Display for LosslessSchemaErrors {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    core::fmt::Display::fmt(&self.errors, f)?;
+    if !self.recovery.is_complete() {
+      write!(f, "\n  ({} skipped by recovery)", self.recovery.skipped())?;
+    }
+    Ok(())
+  }
+}
+
+impl core::error::Error for LosslessSchemaErrors {}
+
+/// Builds a schema from a lossless type-system parse, checking every draft §3 rule.
+///
+/// [`validate_executable_lossless`]'s twin one section of the specification over, and
+/// [`Schema::build`](super::Schema::build)'s twin for the CST. `parse` is what
+/// [`parse_type_system_document`](crate::parser::graphql::lossless::parse_type_system_document)
+/// returned and `source` is the text it was parsed from — the pair is **verified, not trusted**,
+/// so a mismatched one is refused by the projection rather than built against unrelated bytes.
+///
+/// Returns `Ok((schema, recovery))` when the SDL is a schema and `Err` when it is not; either way
+/// the [`Recovery`] says how much of the parse had an AST image.
+///
+/// # One §3 pass, not two
+///
+/// This *is* [`Schema::build`](super::Schema::build): the CST is projected to the
+/// `TypeSystemDocument` the syntactic parser would have built for the same bytes, and that
+/// document is handed to the same builder, which runs the same rules in the same order and points
+/// at the same bytes. There is no second type-system pass anywhere in the crate — the
+/// introspection door renders its response as SDL and arrives at the same builder for the same
+/// reason. `tests/validator_lossless_schema.rs` compares this door against the syntactic one over
+/// the SDL refusal corpus, error for error and span for span.
+///
+/// # It recovers, and the [`Recovery`] is part of the answer
+///
+/// A CST exists so it can represent a document somebody is still typing, so this door does not
+/// refuse one. Each top-level definition is projected on its own; the ones with an AST image are
+/// built and the ones without are skipped and counted.
+///
+/// **Read the [`Recovery`] before you believe the verdict**, and here more carefully than at the
+/// executable door. With [`is_complete`](Recovery::is_complete) true this is exactly what
+/// [`Schema::build`](super::Schema::build) would have said. With it false, draft §3 is a
+/// whole-document pass over a document that is missing a piece, so:
+///
+/// - a refusal may be an **artifact** of the skip. Every reference to a dropped type is an
+///   [`UndefinedType`](super::SchemaErrorKind::UndefinedType), and a dropped `Query` is a
+///   [`MissingQueryRootOperationType`](super::SchemaErrorKind::MissingQueryRootOperationType) for
+///   the whole document; and
+/// - an `Ok` is a schema built from **less SDL than the author wrote**. It is a real, internally
+///   consistent schema, and it is not the one on screen — validating an operation against it can
+///   blame a field the missing half defines.
+///
+/// A projection refusal never reaches the returned [`SchemaErrors`]: it is not a draft §3 finding
+/// and does not become one. The parse's own diagnostics already describe the syntax that broke.
+///
+/// # Several documents
+///
+/// [`SchemaBuilder`](super::SchemaBuilder) is still the door for a schema that spans more than one
+/// file, and it is reachable from here:
+/// [`project_type_system_document_recovered`](crate::parser::graphql::lossless::project_type_system_document_recovered)
+/// is public and answers the `(document, recovery)` pair this function feeds the one-document
+/// case with.
+///
+/// # Example
+///
+/// ```
+/// # #[cfg(all(feature = "validator", feature = "rowan"))] {
+/// use smear::{
+///   parser::graphql::lossless::parse_type_system_document,
+///   validator::{SchemaErrorKind, validate_schema_lossless},
+/// };
+///
+/// // An SDL an editor is in the middle of: the interface is finished and wrong, the field after
+/// // it has no type yet. The finished half is still checked.
+/// let source = "type Query { hero: Character }\ninterface Character { name: Nope }\ntype Half { f: }";
+/// let parse = parse_type_system_document(source);
+/// assert!(parse.has_errors());
+///
+/// let refused = validate_schema_lossless(&parse, source).expect_err("`Nope` is not a type");
+///
+/// assert_eq!(refused.errors().kinds(), [SchemaErrorKind::UndefinedType]);
+/// assert_eq!(refused.recovery().projected(), 2);
+/// assert!(!refused.recovery().is_complete());
+///
+/// let error = &refused.errors().errors()[0];
+/// // The same bytes the syntactic door would have blamed.
+/// let span = error.span();
+/// assert_eq!(&source[span.start()..span.end()], "Nope");
+/// # }
+/// ```
+pub fn validate_schema_lossless(
+  parse: &Parse,
+  source: &str,
+) -> Result<(Schema, Recovery), LosslessSchemaErrors> {
+  let (document, recovery) = project_type_system_document_recovered(parse, source);
+  match Schema::build(&document) {
+    Ok(schema) => Ok((schema, recovery)),
+    Err(errors) => Err(LosslessSchemaErrors { errors, recovery }),
   }
 }

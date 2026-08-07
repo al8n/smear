@@ -27,7 +27,13 @@
          same rules over a lossless rowan CST, by projecting it to that same AST rather than by \
          being a second validator. The IDE door: it recovers per definition, so a document \
          somebody is still typing is validated as far as it is well-formed, and the \
-         [`Recovery`](crate::validator::Recovery) it returns says how far that was."
+         [`Recovery`](crate::validator::Recovery) it returns says how far that was.\n\
+         - [`validate_schema_lossless`](crate::validator::validate_schema_lossless) — the same \
+         again for SDL, and the reason an editor validating a schema through the CST gets the \
+         draft §3 refusals rather than nothing. It projects and calls \
+         [`Schema::build`](crate::validator::Schema::build), so §3 has one implementation reached \
+         three ways, and it recovers and reports a \
+         [`Recovery`](crate::validator::Recovery) for the same reason its executable twin does."
 )]
 //!
 //! Every link in this module's docs is crate-absolute on purpose. `pub mod validator;` in
@@ -127,7 +133,8 @@ pub use executable::{Invalid, validate_executable, validate_executable_with};
 #[cfg(feature = "rowan")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rowan")))]
 pub use lossless::{
-  LosslessInvalid, Recovery, validate_executable_lossless, validate_executable_lossless_with,
+  LosslessInvalid, LosslessSchemaErrors, Recovery, validate_executable_lossless,
+  validate_executable_lossless_with, validate_schema_lossless,
 };
 pub use rule::{Rule, RuleSet};
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
