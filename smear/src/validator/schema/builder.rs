@@ -307,6 +307,43 @@ struct RawExtension {
 }
 
 // ---------------------------------------------------------------------------------------------
+// the built-in documents
+// ---------------------------------------------------------------------------------------------
+
+/// The three constant SDL documents every build injects, parsed.
+///
+/// Held together rather than separately so the whole set is one `OnceLock` and one initialisation
+/// rather than three. It borrows the `&'static str` constants it was parsed from, so the value is
+/// `'static` itself and shareable — every field of the AST over a `&'static str` is `Send + Sync`,
+/// which the assertion below is the standing proof of.
+#[derive(Debug)]
+struct BuiltIns {
+  introspection: TypeSystemDocument<&'static str>,
+  scalars: TypeSystemDocument<&'static str>,
+  directives: TypeSystemDocument<&'static str>,
+}
+
+impl BuiltIns {
+  fn parse() -> Self {
+    Self {
+      introspection: SchemaBuilder::parse_builtin(builtin::INTROSPECTION_SDL),
+      scalars: SchemaBuilder::parse_builtin(builtin::BUILT_IN_SCALARS_SDL),
+      directives: SchemaBuilder::parse_builtin(builtin::BUILT_IN_DIRECTIVES_SDL),
+    }
+  }
+}
+
+/// What lets the parsed documents live in a `static`: a shared reference to one crosses threads.
+///
+/// Asserted rather than assumed, because the AST offers an `Arc`-backed list-type spelling and a
+/// future field that reached for a non-`Sync` cell would otherwise fail at the `OnceLock` with an
+/// error that names the lock rather than the type that broke it.
+const _: () = {
+  const fn sync<T: Sync>() {}
+  let _ = sync::<BuiltIns>;
+};
+
+// ---------------------------------------------------------------------------------------------
 // the builder
 // ---------------------------------------------------------------------------------------------
 
@@ -1121,14 +1158,42 @@ impl SchemaBuilder {
     .expect("smear's own built-in SDL must parse; this is a defect in smear, not in the input")
   }
 
+  /// Reads the three built-in documents, parsing them at most once per process.
+  ///
+  /// The parse is 15.2 µs of a 42.6 µs empty build, and it is the same 15.2 µs every time: the
+  /// input is three `&'static str` constants of this crate's own. Caching it is what takes the
+  /// build's corpus-independent cost from 8.9x `apollo-compiler`'s to something comparable, since
+  /// apollo caches its equivalent the same way.
+  ///
+  /// # Not on a core without `std`
+  ///
+  /// [`OnceLock`](std::sync::OnceLock) is not in `alloc`, and the `validator` feature does not
+  /// imply `std` — the schema representation reaches a Cortex-M0+ with no compare-and-swap, and a
+  /// cache that needed one would take that away for a startup cost that target pays once. So the
+  /// `not(std)` arm parses per build, exactly as every build did before this cache existed. The
+  /// two arms call the same [`parse_builtin`](SchemaBuilder::parse_builtin), so
+  /// `builtin_sdl_parses` guards both.
+  #[cfg(feature = "std")]
+  fn built_ins() -> &'static BuiltIns {
+    static CACHE: std::sync::OnceLock<BuiltIns> = std::sync::OnceLock::new();
+    CACHE.get_or_init(BuiltIns::parse)
+  }
+
   fn inject_built_ins(&mut self) {
+    #[cfg(feature = "std")]
+    let built_ins = Self::built_ins();
+    #[cfg(not(feature = "std"))]
+    let built_ins = &BuiltIns::parse();
+    self.inject(built_ins);
+  }
+
+  fn inject(&mut self, built_ins: &BuiltIns) {
     // Anything injected here belongs to no document the caller supplied; `self.document` is
     // already one past the last real index, which is what an injected definition reports under.
 
     // The introspection meta-schema is unconditional: an introspection query must validate
     // against every schema. A user definition of one of its types collides.
-    let introspection = Self::parse_builtin(builtin::INTROSPECTION_SDL);
-    for entry in introspection.definitions() {
+    for entry in built_ins.introspection.definitions() {
       let TypeSystemDefinitionOrExtension::Definition(described) = entry else {
         continue;
       };
@@ -1154,8 +1219,7 @@ impl SchemaBuilder {
 
     // Built-in scalars and directives are replaceable: a document that spells one out keeps its
     // own, which is what makes a printed schema re-readable.
-    let scalars = Self::parse_builtin(builtin::BUILT_IN_SCALARS_SDL);
-    for entry in scalars.definitions() {
+    for entry in built_ins.scalars.definitions() {
       let TypeSystemDefinitionOrExtension::Definition(described) = entry else {
         continue;
       };
@@ -1172,8 +1236,7 @@ impl SchemaBuilder {
       }
     }
 
-    let directives = Self::parse_builtin(builtin::BUILT_IN_DIRECTIVES_SDL);
-    for entry in directives.definitions() {
+    for entry in built_ins.directives.definitions() {
       let TypeSystemDefinitionOrExtension::Definition(described) = entry else {
         continue;
       };
