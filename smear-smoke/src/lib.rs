@@ -199,6 +199,24 @@ pub fn validator_source_lattice() {
   assert_lattice_member::<hipstr::HipByt<'static>>();
 }
 
+/// `introspection` — the second construction door, reached across the dependency edge.
+///
+/// With the feature off, `smear::validator::schema::introspection` is not a module,
+/// `Schema::from_introspection` is not a method, and this function does not resolve.
+///
+/// It probes both halves of the door's surface: the schema and the SDL it was built from. The
+/// caller gets the two back so the test below can assert they describe the same thing, which is
+/// the door's whole claim in one line of a consumer's code.
+pub fn graphql_introspection(
+  response: &str,
+) -> Result<(smear::validator::Schema, String), smear::validator::schema::IntrospectionError> {
+  use smear::validator::{Schema, schema::introspection};
+
+  let sdl = introspection::to_sdl(response)?;
+  let schema = Schema::from_introspection(response)?;
+  Ok((schema, sdl))
+}
+
 /// `validator`, the executable half — draft §5 validation reached across the dependency edge.
 ///
 /// Returns how many rules fired. The sink is the caller's, which is the whole point of the seam:
@@ -431,6 +449,32 @@ mod tests {
 
     let errors = super::graphql_schema("type NotARoot { ok: Int }").expect_err("not a schema");
     assert!(!errors.is_empty());
+  }
+
+  /// The introspection door, driven end to end across the dependency edge.
+  #[test]
+  fn the_introspection_door_builds_a_schema_and_refuses_a_non_response() {
+    const RESPONSE: &str = r#"{"data":{"__schema":{
+      "queryType":{"name":"Query"},
+      "directives":[],
+      "types":[
+        {"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[],"type":{"kind":"SCALAR","name":"Int"}}
+        ]},
+        {"kind":"SCALAR","name":"Int"}
+      ]
+    }}}"#;
+
+    let (schema, sdl) = super::graphql_introspection(RESPONSE).expect("a schema");
+    assert!(schema.type_by_name(b"Query").is_some());
+    // Injected by the build, not by the response — the meta-schema is unconditional.
+    assert!(schema.type_by_name(b"__Schema").is_some());
+    // ... and therefore not re-declared by the door.
+    assert!(sdl.contains("type Query"));
+    assert!(!sdl.contains("scalar Int"));
+
+    let error = super::graphql_introspection("not json").expect_err("not a response");
+    assert!(error.response_kind().is_some());
   }
 
   /// The executable entry point's bound, over the same lattice, for the same reason.

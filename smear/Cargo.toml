@@ -57,6 +57,24 @@ parser = []
 # `thumbv6m-none-eabi` with an empty `[dependencies]` table.
 validator = ["parser", "graphql"]
 
+# The second construction door: building a `Schema` out of a draft §4 introspection response
+# instead of out of SDL (`Schema::from_introspection`).
+#
+# THIS IS NOT WHAT PUTS INTROSPECTION IN A SCHEMA. The `__`-prefixed meta-schema is injected by
+# every build, feature or no feature, because an introspection *query* is an executable document
+# that draft 5.3.1 asks about like any other. This feature is only about where a schema comes
+# *from*, and `smear/src/validator/schema/builtin.rs` carries that distinction at the other end.
+#
+# It is the one validator feature that costs a dependency, which is exactly why it is a feature.
+# `serde` and `serde_json` are the workspace's first — nothing else in the tree names either — so
+# a consumer who builds schemas from SDL never resolves them, and neither does `smear-noatomic`,
+# whose empty `[dependencies]` table CI asserts.
+#
+# `std` is not decoration. `serde_json`'s `alloc`-only mode exists, but the door parses a
+# `&str` from a network response and reports through `std::error::Error`, and the whole point of
+# the no-atomic tier is the *representation*, which this feature does not touch.
+introspection = ["validator", "std", "dep:serde", "dep:serde_json"]
+
 smallvec = ["dep:smallvec"]
 bytes = ["dep:bytes", "tokora/bytes_1"]
 bstr = ["dep:bstr", "tokora/bstr_1"]
@@ -121,6 +139,14 @@ smol-bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 rowan = { version = "0.17", optional = true }
+
+# The `introspection` feature's two, and the only two dependencies in this manifest that are not
+# either a source backing or part of the parser tower. `derive` because the draft §4 shape is a
+# dozen plain records and hand-written visitors would be a dozen ways to get "missing field"
+# wrong; `default-features = false` plus `std` on both because that is what the feature declares
+# and an implicit default is how a no_std claim rots.
+serde = { version = "1", default-features = false, features = ["std", "derive"], optional = true }
+serde_json = { version = "1", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 # The crate depending on itself, so `test-support` is on for every dev target — tests, benches,

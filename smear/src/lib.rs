@@ -71,6 +71,20 @@ pub mod parser;
 /// Draft §3 "Type Validation" runs inside [`Schema::build`](validator::Schema::build), so a
 /// malformed SDL is refused once at startup rather than rediscovered per request.
 ///
+#[cfg_attr(
+  feature = "introspection",
+  doc = "A schema can also be built from a server's draft §4 introspection response — \
+         [`Schema::from_introspection`](validator::Schema::from_introspection), behind the \
+         `introspection` feature. It is a second entrance to the same value: it renders the \
+         response as SDL and hands it to the same builder, so draft §3 runs there too and the \
+         two doors cannot drift apart."
+)]
+#[cfg_attr(
+  not(feature = "introspection"),
+  doc = "The `introspection` feature adds a second construction door, building the same schema \
+         out of a server's draft §4 introspection response instead of out of SDL."
+)]
+///
 /// Standard GraphQL only —
 #[cfg_attr(
   feature = "graphqlx",

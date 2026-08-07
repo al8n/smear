@@ -10,6 +10,13 @@
 //!   [`Schema`](crate::validator::schema::Schema) every rule reads, and the draft §3 "Type
 //!   Validation" pass that runs while building it. A server rejects a malformed SDL exactly once,
 //!   at startup, and never rediscovers it per request.
+#![cfg_attr(
+  feature = "introspection",
+  doc = "- [`schema::introspection`](crate::validator::schema::introspection) — the second \
+         construction door, building that same schema out of a server's draft §4 introspection \
+         response. It renders the response as SDL and hands it to the same builder, so draft §3 \
+         runs there too and the two doors cannot drift apart."
+)]
 //! - [`validate_executable`](crate::validator::validate_executable) — the draft §5 rules over a
 //!   parsed executable document, reported into the caller's
 //!   [`Sink`](crate::validator::Sink) and worked out in the caller's
@@ -108,5 +115,9 @@ pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
 pub use executable::{Invalid, validate_executable, validate_executable_with};
 pub use rule::{Rule, RuleSet};
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
+
+#[cfg(feature = "introspection")]
+#[cfg_attr(docsrs, doc(cfg(feature = "introspection")))]
+pub use schema::IntrospectionError;
 pub use scratch::{Budget, Scratch};
 pub use sink::{Collect, Count, First, Ignore, Sink};
