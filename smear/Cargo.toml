@@ -8,6 +8,29 @@ homepage.workspace = true
 license.workspace = true
 description = "Blazing fast, fully spec-compliant, reusable parser combinators for standard GraphQL and GraphQL-like DSLs."
 
+# `smear/README.md` is a SYMLINK to the workspace-root `README.md`, and both halves of that
+# matter. `src/lib.rs` opens with `#![doc = include_str!("../README.md")]`, and until #101 that
+# path was `../../README.md` — above the package root, at a file cargo cannot put in the
+# tarball. `cargo publish` packaged the whole crate and then failed the verification build with
+# `couldn't read src/../../README.md: No such file or directory`, so this crate was not
+# publishable at all and no job in this repository said so.
+#
+# Cargo materialises a symlink's TARGET into the `.crate` archive, so the published package
+# carries a real 18KB README while the working tree keeps exactly one copy of it — the root file
+# GitHub renders as the landing page. A duplicate would have worked too and would then need a
+# byte-identity gate to stop the two drifting; a symlink has nothing to drift. It is also the
+# sibling `tokora` repository's own solution to this, `tokora/README.md` being mode 120000 for
+# the same reason.
+#
+# The one platform caveat, recorded because it is a degradation and not a failure: a Windows
+# checkout without `core.symlinks` writes this path as a 12-byte text file containing
+# `../README.md`, so a Windows build embeds that string as the crate docs. Nothing in this
+# repository renders rustdoc on Windows — `docs` and `publish-dry-run` in `.github/workflows/ci.yml`
+# are both `ubuntu-latest`, and docs.rs is Linux — so no published or gated artifact can see it.
+# `publish-dry-run` additionally hashes the packaged README against the root file, so a checkout
+# that produced the stub fails there rather than shipping twelve bytes to docs.rs.
+readme = "README.md"
+
 # One crate, two layers. `smear-lexer` and `smear-parser` were merged in here (#83): the facade
 # they sat behind had to re-declare each of their features to forward it, and it silently did not
 # forward `rowan` — the gate on the entire lossless CST tower — so the crate named `smear` could
