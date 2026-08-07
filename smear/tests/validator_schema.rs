@@ -11,6 +11,12 @@
 //!
 //! Two kinds are excused, each with a written reason, in [`UNFIREABLE`].
 
+// Every fixture and assertion below calls into `smear::validator`, which does not exist in the
+// crate's API surface with the feature off. Every other file in this directory gates itself to
+// match its real dependency (`rowan`, a dialect, or both); this one did not, so it was a hard
+// `E0433` compile error — not a cfg'd-out no-op — under any feature selection that excludes
+// `validator`, including plain `--features graphql,parser`.
+#![cfg(feature = "validator")]
 #![allow(missing_docs)]
 
 use smear::{
