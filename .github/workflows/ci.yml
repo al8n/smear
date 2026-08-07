@@ -387,7 +387,7 @@ jobs:
         cargo hack build -p smear --each-feature --features parser \
           --exclude-features rowan,lossless-coverage,validator,introspection,default \
           --exclude-no-default-features --exclude-all-features
-        # Pass 3 — the four criterion benches, which NOTHING ELSE IN CI COMPILES.
+        # Pass 3 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
         #
         # Measured on this tree: `cargo test`'s default target selection is lib + bins + tests +
         # examples; a `[[bench]]` target is not in it, and neither `cargo build --workspace
@@ -402,8 +402,23 @@ jobs:
         # that has nothing else, so there is no filter here that can match zero targets and
         # exit 0.
         #
+        # `smear-apollo-bench` is the SAME defect one member over, and it survived the fix that
+        # this comment describes: `-p smear-benches` names one package, and `benchmarks/`'s two
+        # criterion targets — `apollo_comparison` and `validator_comparison` — live in a
+        # different one. Nothing built them. `validator_comparison` in particular carries G5's
+        # acceptance criterion (issue #85), so the target that proves the validator's headline
+        # number was itself unproven. Naming the package is what makes the gate fire: a target
+        # FILTER that matches nothing warns and exits 0, a named `-p` that cannot be built fails.
+        #
+        # Two invocations rather than `-p a -p b`, deliberately. Cargo unifies features across
+        # the packages selected by ONE command, and these two resolve `smear` differently
+        # (`smear-benches` does not ask for `validator`; `smear-apollo-bench` does, and adds
+        # `rowan`). A single command would build each bench against the union and could pass a
+        # target that does not compile against its own package's declared feature set.
+        #
         # Build, not run: criterion sampling is minutes per target and this is a compile gate.
         cargo build -p smear-benches --benches
+        cargo build -p smear-apollo-bench --benches
 
   test:
     name: test
