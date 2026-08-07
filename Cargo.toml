@@ -32,12 +32,7 @@ members = [
 # later. The selection is pinned where it is READ instead: `ci/miri_sb.sh` and `ci/miri_tb.sh`
 # pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted is not what
 # those scripts claim.
-#
-# Reference-only: the superseded parser/scaffold crates and the old `smear`
-# benches and integration suite that drove them. Kept for history and parity
-# lookups, deliberately outside the build. Cargo errors on a nested package
-# that is neither a member nor excluded, so this entry is required.
-exclude = ["legacy"]
+
 resolver = "3"
 
 [workspace.package]

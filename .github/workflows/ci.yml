@@ -55,21 +55,24 @@ on:
     # `include_str!`-ed into the crate's rustdoc, so editing one is a compile-time
     # change to the documentation, and a broken reference-style link in a README
     # fails the `docs` job below. Ignoring them meant the one job that can catch such a
-    # break never ran for the one change class that causes it. Only the markdown
-    # no crate compiles — `docs/` notes and the excluded `legacy/` tree — is
-    # ignored.
+    # break never ran for the one change class that causes it. Only the markdown no crate
+    # compiles is ignored, which is the root `docs/` notes tree.
+    #
+    # `docs/**.md` stays even though `.gitignore`'s root-anchored `/docs/` keeps a docs-only
+    # commit out of reach of an ordinary `git add`. The two agree rather than duplicate, and
+    # the ignore rule is the weaker of them: `git add -f` bypasses it, and gitignore has no
+    # effect at all on a path that is already tracked. This list is what decides the trigger
+    # for a commit that contains a root `docs/` file however it got there.
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'
       - 'docs/**.md'
-      - 'legacy/**.md'
       - '**.txt'
   pull_request:
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'
       - 'docs/**.md'
-      - 'legacy/**.md'
       - '**.txt'
   workflow_dispatch:
   # KEPT here and DROPPED from `macos.yml` and `miri.yml` — the one deliberate difference between
@@ -937,10 +940,12 @@ jobs:
   # exists to catch, and this pin makes it impossible to make by accident.
   #
   # WHY A TARBALL INTO `$RUNNER_TEMP` AND NOT `actions/checkout` WITH A `path:`. `path:` must stay
-  # inside the workspace, which would put a foreign `Cargo.toml` tree inside this one's directory —
-  # the situation the root manifest's `exclude = ["legacy"]` entry exists to work around, and not
-  # one to reproduce for a directory nobody builds. `$RUNNER_TEMP` is outside the checkout, so
-  # cargo never sees it and nothing needs excluding.
+  # inside the workspace, which would put a second cargo project — apollo-rs is itself a workspace
+  # — inside this one's directory. The root manifest's literal `members` list is the only thing
+  # that would keep the two apart: cargo does not walk into a nested manifest it was not pointed
+  # at, but a glob in `members`, or any tool that scans the checkout for `Cargo.toml`, would then
+  # be reading two projects and would have to be taught to skip one. `$RUNNER_TEMP` is outside the
+  # checkout, so the question never arises.
   validator-oracle:
     name: validator-oracle
     runs-on: ubuntu-latest
