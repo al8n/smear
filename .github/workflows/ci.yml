@@ -685,6 +685,116 @@ jobs:
             sys.exit(1)
         PY
 
+  # Gate: the crate can actually be published
+  #
+  # Until #101 it could not, and never had been able to. `smear/src/lib.rs` opened with
+  # `#![doc = include_str!("../../README.md")]` — a path ABOVE the package root — so
+  # `cargo publish --dry-run -p smear` packaged the whole crate — 1290 files at 807960f, where
+  # this was found — and then died inside the verification build with
+  # `couldn't read src/../../README.md: No such file or directory`, exit 101. The packaging half
+  # always succeeded, which is what made it look fine from the outside; the workspace-root README
+  # is simply not in the crate's tarball and no manifest key can put it there.
+  #
+  # NOTHING IN THIS REPOSITORY REPORTED THAT. The only other occurrence of the word `publish` in
+  # these four workflows is the `docs` job above reading `publish` out of `cargo metadata` to
+  # decide which members need a docs.rs table — a manifest query, not a build. So the defect was
+  # invisible for the crate's entire life and would have been found by the `cargo publish` of the
+  # 0.1 release itself: after the version bump, the tag and the changelog, at the one moment the
+  # answer is most expensive to get.
+  #
+  # WHY `-p smear` AND NOT A FILTER. The same rule `byte-identity` below is written around, and
+  # the reason it is worth stating twice: a cargo target FILTER that matches nothing warns and
+  # exits 0, so a gate phrased as one turns green the moment the thing it watches is renamed or
+  # deleted. `-p` names a PACKAGE and cargo hard-errors on one that does not exist. If this crate
+  # is ever renamed this line fails loudly instead of quietly ceasing to cover anything.
+  #
+  # WHY THE FAST LANE. `cargo publish --dry-run` is a full dev-profile verification build of the
+  # packaged copy, which is the whole cost: measured at 29-35s on an M-series laptop, warm
+  # dependency cache and cold target directory alike, against the ~3m the `test` matrix in this
+  # same file takes. It needs no macOS runner and sets no clock of its own, so it does not touch
+  # either of the two things this workflow's header protects. It is deliberately outside every
+  # `needs:` chain — it blocks nothing and nothing blocks it, so no failure elsewhere in the lane
+  # can stop this verdict from being produced.
+  #
+  # Default features on purpose. That is the configuration the registry verifies and the one
+  # `cargo add smear` resolves to; `--all-features` is a different question and `docs` above
+  # already asks it.
+  publish-dry-run:
+    name: publish-dry-run
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    # First, and before anything is installed or built, because it costs milliseconds and the
+    # two steps below cannot see what it checks.
+    #
+    # The hash assertion at the end of this job compares CONTENT, so it stays green if somebody
+    # replaces the symlink with a byte-identical copy of the root README — and a copy is exactly
+    # the thing that drifts, silently, until the published README and the GitHub landing page
+    # are two different documents. Pinning the mode is what makes "there is one README" a
+    # property of the repository rather than of the day it was last checked.
+    #
+    # Lifted from the sibling `tokora` repository's `pages.yml`, which guards `tokora/README.md`
+    # with these same two lines.
+    - name: Assert smear/README.md is still a symlink to the root README
+      run: |
+        set -euo pipefail
+        mode=$(git ls-files -s smear/README.md | awk '{print $1}')
+        target=$(readlink smear/README.md || true)
+        if [ "$mode" != "120000" ] || [ "$target" != "../README.md" ]; then
+          echo "::error::smear/README.md must be a symlink to ../README.md (git mode 120000)"
+          echo "::error::got git mode '$mode', readlink '$target'"
+          echo "::error::a regular file here is a second copy of the README that will drift from the root one; see the readme key in smear/Cargo.toml"
+          exit 1
+        fi
+        echo "ok: smear/README.md is mode 120000 -> ../README.md"
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-publish-dry-run-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-publish-dry-run-
+    - name: cargo publish --dry-run -p smear
+      run: cargo publish --dry-run -p smear
+    # The dry run passing is necessary and NOT sufficient, and the gap is specific.
+    # `smear/README.md` is a symlink to the workspace-root `README.md`, which cargo resolves by
+    # copying the TARGET into the package. A checkout that did not create the symlink — Windows
+    # without `core.symlinks`, an export that dereferenced nothing, a future commit replacing it
+    # with a stub — leaves a 12-byte text file holding the string `../README.md`, and
+    # `include_str!` on that compiles perfectly. The crate would publish and docs.rs would render
+    # twelve bytes. The step above cannot see it; this one exists for exactly that.
+    #
+    # Written against the extracted package tree rather than the `.crate` archive because
+    # cargo's temporary archive path has moved between releases (`package/` -> `package/tmp-crate/`
+    # as of 1.99) while the extracted tree has not.
+    - name: Assert the packaged README is the real one
+      run: |
+        set -euo pipefail
+        TD="${CARGO_TARGET_DIR:-target}"
+        version=$(cargo metadata --no-deps --format-version 1 \
+          | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="smear"))')
+        packaged="$TD/package/smear-$version/README.md"
+
+        if [ ! -f "$packaged" ]; then
+          echo "::error::the dry run exited 0 but left no packaged README at $packaged, so this gate proved nothing"
+          exit 1
+        fi
+
+        want=$(sha256sum README.md | cut -d' ' -f1)
+        got=$(sha256sum "$packaged" | cut -d' ' -f1)
+        if [ "$want" != "$got" ]; then
+          echo "::error::smear/README.md did not materialise the workspace-root README into the package"
+          echo "::error::root sha256=$want, packaged sha256=$got, packaged size=$(wc -c < "$packaged") bytes"
+          echo "::error::a packaged size near 12 bytes means the symlink was checked out as a text stub; see the readme key in smear/Cargo.toml"
+          exit 1
+        fi
+        echo "ok: packaged README is byte-identical to the workspace-root README ($(wc -c < "$packaged") bytes)"
+
   # Build with exactly the MSRV declared in Cargo.toml's `rust-version`, so
   # a floor that silently drifts above the declared value is caught here
   # instead of surfacing as a hard `cargo` failure for users pinned to it.
