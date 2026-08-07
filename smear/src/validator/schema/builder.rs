@@ -1830,6 +1830,31 @@ impl SchemaBuilder {
     let coordinate = directive_coordinate(owner, directive);
     let declared = self.directives[definition].args.clone();
 
+    // Draft 5.4.2's SDL twin. Unlike the repeatability rule above, this one needs nothing from the
+    // definition — an argument written twice is a mistake whether or not the directive declares it
+    // — so it is checked for every written argument, including one that is about to be reported
+    // as undefined.
+    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::with_capacity(used.args.len());
+    for argument in &used.args {
+      match seen
+        .iter()
+        .find(|(sym, _)| *sym == argument.name.sym)
+        .copied()
+      {
+        Some((_, first)) => {
+          let name = self.text(argument.name.sym).to_owned();
+          self.push_related(
+            SchemaErrorKind::DuplicateDirectiveArgumentUse,
+            &name,
+            Some(coordinate.clone()),
+            argument.name,
+            first,
+          );
+        }
+        None => seen.push((argument.name.sym, argument.name.span)),
+      }
+    }
+
     for argument in &used.args {
       let name = self.text(argument.name.sym).to_owned();
       let Some(expected) = declared.iter().find(|d| d.name.sym == argument.name.sym) else {
@@ -1957,15 +1982,63 @@ impl SchemaBuilder {
           );
           return;
         };
-        // A field the input object does not declare, and a required field left out, are draft
-        // 5.6.2's and 5.6.4's business; neither is one of the six checks this pass adds, so the
-        // walk descends into what *is* declared and says nothing about the rest.
+        // The literal is named by the input object it is being offered to, not by the argument
+        // that carries it: `In.y` is what apollo's `UndefinedInputValue` says and what a nested
+        // literal needs, because `Query.@v.p` cannot tell an offending field of the outer object
+        // from one of the inner. The span still points at the field, so the usage is one lookup
+        // away.
+        let object = self.text(self.types[base].name.sym).to_owned();
         let declared = self.types[base].input_fields.clone();
         for field in fields {
           let Some(expected) = declared.iter().find(|d| d.name.sym == field.name.sym) else {
+            // Draft 5.6.2's SDL twin.
+            let name = self.text(field.name.sym).to_owned();
+            self.push_owned(
+              SchemaErrorKind::UndefinedInputObjectField,
+              &name,
+              object.clone(),
+              field.name,
+            );
             continue;
           };
+          // Draft 5.6.4's SDL twin, the explicit-`null` half. Reported here rather than let
+          // through to the value check below so that `{ x: null }` for a required `x` produces the
+          // obligation once, and not also a non-null coercion failure.
+          if expected.is_required() && matches!(field.value.shape, RawShape::Null) {
+            let name = self.text(field.name.sym).to_owned();
+            self.push_at(
+              SchemaErrorKind::MissingRequiredInputObjectField,
+              &name,
+              object.clone(),
+              field.value.span,
+              document,
+            );
+            continue;
+          }
           self.check_const_value(&field.value, expected.ty.packed, owner, subject, document);
+        }
+
+        // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
+        // what the omission is blamed on — the same choice `check_directive_arguments` makes for
+        // an omitted required argument.
+        for expected in &declared {
+          if !expected.is_required() {
+            continue;
+          }
+          if fields
+            .iter()
+            .any(|field| field.name.sym == expected.name.sym)
+          {
+            continue;
+          }
+          let name = self.text(expected.name.sym).to_owned();
+          self.push_at(
+            SchemaErrorKind::MissingRequiredInputObjectField,
+            &name,
+            object.clone(),
+            value.span,
+            document,
+          );
         }
       }
       TypeKind::Enum => {

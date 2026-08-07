@@ -397,6 +397,33 @@ const FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
      type Query @onObject(a: \"x\") { ok: Int }",
     &[SchemaErrorKind::InvalidDirectiveArgumentValue],
   ),
+  // -- §3.13 use sites, continued (smear issue #95) -------------------------------------------
+  //
+  // The three the six above left behind. Each SDL is a probe in the differential oracle's
+  // `SDL_DIRECTIVE_PROBES` and is refused by `apollo-compiler` — as `UniqueArgument`,
+  // `UndefinedInputValue` and `RequiredField` respectively — and each was built without complaint
+  // until these kinds existed. What made them worth their own issue is that the oracle's corpus
+  // reached none of them, so its greenness said nothing either way.
+  (
+    SchemaErrorKind::DuplicateDirectiveArgumentUse,
+    "directive @onObject(a: Int) on OBJECT
+     type Query @onObject(a: 1, a: 2) { ok: Int }",
+    &[SchemaErrorKind::DuplicateDirectiveArgumentUse],
+  ),
+  (
+    SchemaErrorKind::UndefinedInputObjectField,
+    "directive @onObject(a: In) on OBJECT
+     input In { x: Int }
+     type Query @onObject(a: { y: 1 }) { ok: Int }",
+    &[SchemaErrorKind::UndefinedInputObjectField],
+  ),
+  (
+    SchemaErrorKind::MissingRequiredInputObjectField,
+    "directive @onObject(a: In) on OBJECT
+     input In { x: Int! }
+     type Query @onObject(a: {}) { ok: Int }",
+    &[SchemaErrorKind::MissingRequiredInputObjectField],
+  ),
 ];
 
 #[test]
@@ -421,7 +448,7 @@ fn refusal_floor() {
 
   // The census must not pass vacuously.
   assert!(
-    SchemaErrorKind::ALL.len() >= 56,
+    SchemaErrorKind::ALL.len() >= 59,
     "read only {} kinds; the enumeration is wrong, not the fixtures",
     SchemaErrorKind::ALL.len()
   );
@@ -665,6 +692,32 @@ fn directive_usage_errors_name_their_coordinate() {
       "a",
       "Query.@onObject",
     ),
+    (
+      "directive @onObject(a: Int) on OBJECT
+       type Query @onObject(a: 1, a: 2) { ok: Int }",
+      SchemaErrorKind::DuplicateDirectiveArgumentUse,
+      "a",
+      "Query.@onObject",
+    ),
+    // The two input-object kinds are named by the input object, not by the argument that carries
+    // the literal: `In.y` is the coordinate apollo prints too, and it is the only one a nested
+    // literal can be given unambiguously.
+    (
+      "directive @onObject(a: In) on OBJECT
+       input In { x: Int }
+       type Query @onObject(a: { y: 1 }) { ok: Int }",
+      SchemaErrorKind::UndefinedInputObjectField,
+      "y",
+      "In",
+    ),
+    (
+      "directive @onObject(a: In) on OBJECT
+       input In { x: Int! }
+       type Query @onObject(a: {}) { ok: Int }",
+      SchemaErrorKind::MissingRequiredInputObjectField,
+      "x",
+      "In",
+    ),
   ];
 
   for (sdl, kind, subject, owner) in cases {
@@ -696,6 +749,111 @@ fn an_omitted_required_argument_is_blamed_on_the_usage() {
     &SDL[span.start()..span.end()],
     "@onObject",
     "the span should cover the usage, at byte {start}"
+  );
+}
+
+/// Draft 5.6.4's SDL twin claims an explicit `null` as well as an omission.
+///
+/// A required input field written `null` is one mistake, and the diagnostic that names it is the
+/// obligation rather than the coercion — the same choice `check_directive_arguments` makes for a
+/// required *argument* written `null`. `apollo-compiler` reports both `RequiredField` and
+/// `UnsupportedValueType` for this SDL; the verdicts agree either way, and reporting one is what
+/// keeps a single defect from printing twice.
+#[test]
+fn an_explicit_null_for_a_required_input_field_is_the_obligation() {
+  const SDL: &str = "directive @onObject(a: In) on OBJECT
+input In { x: Int! }
+type Query @onObject(a: { x: null }) { ok: Int }";
+  let errors = refused(SDL);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingRequiredInputObjectField]
+  );
+  let error = &errors.errors()[0];
+  assert_eq!(error.owner(), Some("In"));
+  assert_eq!(error.subject(), "x");
+  let span = error.span();
+  assert_eq!(&SDL[span.start()..span.end()], "null");
+
+  // A field with a default is not required, so the same `null` is an ordinary coercion failure.
+  let with_default = SDL.replace("x: Int!", "x: Int! = 3");
+  assert_eq!(
+    refused(&with_default).kinds(),
+    vec![SchemaErrorKind::InvalidDirectiveArgumentValue],
+    "a defaulted non-null field is not a required field"
+  );
+}
+
+/// An omitted required input field has no field to point at, so the literal is what is blamed.
+#[test]
+fn an_omitted_required_input_field_is_blamed_on_the_literal() {
+  const SDL: &str = "directive @onObject(a: In) on OBJECT
+input In { x: Int! }
+type Query @onObject(a: {}) { ok: Int }";
+  let errors = refused(SDL);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingRequiredInputObjectField]
+  );
+  let span = errors.errors()[0].span();
+  assert_eq!(&SDL[span.start()..span.end()], "{}");
+}
+
+/// A nested input object is named by *its* type, which is the whole reason the owner is not the
+/// argument coordinate.
+#[test]
+fn a_nested_input_object_is_named_by_its_own_type() {
+  const SDL: &str = "directive @onObject(a: In) on OBJECT
+input Inner { z: Int }
+input In { x: Inner }
+type Query @onObject(a: { x: { nope: 1 } }) { ok: Int }";
+  let errors = refused(SDL);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UndefinedInputObjectField]
+  );
+  let error = &errors.errors()[0];
+  assert_eq!(error.owner(), Some("Inner"));
+  assert_eq!(error.subject(), "nope");
+  let span = error.span();
+  assert_eq!(&SDL[span.start()..span.end()], "nope");
+}
+
+/// A repeated argument is reported once per repeat, and points back at the first one.
+///
+/// The definition is not consulted: an argument written twice is a mistake whether or not the
+/// directive declares it, so an *undefined* argument written twice produces both diagnostics.
+#[test]
+fn a_repeated_directive_argument_names_the_first() {
+  const SDL: &str = "directive @onObject(a: Int) on OBJECT
+type Query @onObject(a: 1, a: 2, a: 3) { ok: Int }";
+  let errors = refused(SDL);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::DuplicateDirectiveArgumentUse]
+  );
+  assert_eq!(
+    errors.len(),
+    2,
+    "one diagnostic per repeat, not one in total"
+  );
+  let first = SDL.find("a: 1").expect("the first argument is in the SDL");
+  for error in errors.errors() {
+    assert_eq!(
+      error.related(),
+      Some(SimpleSpan::const_new(first, first + 1))
+    );
+  }
+
+  let undefined = "directive @onObject(a: Int) on OBJECT
+type Query @onObject(b: 1, b: 2) { ok: Int }";
+  assert_eq!(
+    refused(undefined).kinds(),
+    vec![
+      SchemaErrorKind::UndefinedDirectiveArgument,
+      SchemaErrorKind::DuplicateDirectiveArgumentUse,
+    ],
+    "an undefined argument written twice is both mistakes"
   );
 }
 

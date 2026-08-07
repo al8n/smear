@@ -31,6 +31,17 @@
 //!
 //! Between them, phase 3 landing draft 5.3.2 needs one deletion from [`GAPS`] and no other change
 //! anywhere in the harness.
+//!
+//! # [`GAPS`] is currently empty, and that is the mechanism working
+//!
+//! Both declarations this module shipped with have since been deleted by the rules they described
+//! landing: draft 5.3.2 by liveness (a [`Rule`] now carries the section) and `3.13-usages` by
+//! exercise (`Schema::build` refuses all six probes, so nothing reached the gap any more). Neither
+//! deletion was noticed by a reviewer — the gate demanded each of them by name.
+//!
+//! An empty list is not an invitation to leave the machinery unread. The admission rules above are
+//! what the *next* declaration has to satisfy, and the two closure mechanisms are what will delete
+//! it again.
 
 use smear::validator::Rule;
 
@@ -94,57 +105,17 @@ impl Gap {
   }
 }
 
-/// Every rule apollo checks that this build of smear does not.
+/// Every rule apollo checks that this build of smear does not. **Currently none.**
 ///
 /// Kept short on purpose. An oracle whose exceptions outnumber its checks is worse than no oracle,
-/// and the arithmetic that keeps that honest is in the report: four whitelist classes and two gaps
-/// against twenty-eight rules and several hundred compared cases.
-pub const GAPS: &[Gap] = &[
-  Gap {
-    section: "5.3.2",
-    title: "Field Selection Merging",
-    stage: Stage::Executable,
-    // The three `ExecutableBuildError` variants apollo's merge engine produces. Build-stage
-    // errors, which is one more reason the harness drives `parse_and_validate` rather than
-    // `validate`.
-    apollo_error_names: &[
-      "ConflictingFieldType",
-      "ConflictingFieldName",
-      "ConflictingFieldArgument",
-    ],
-    tracking: "issue #85 wave 3 (`feat/validator-field-merge`); deliberately out of PR #90",
-  },
-  Gap {
-    section: "3.13-usages",
-    title: "Directives on type-system definitions are not validated at their use sites",
-    stage: Stage::Schema,
-    // Found by this harness, not by reading the source. `Schema::build` reads a directive
-    // *definition* — it maps the declared locations into the bitmask draft 5.7.2 later ANDs
-    // against, and it checks the definition's own argument rules — but it never looks at a
-    // directive **usage** on an SDL element. Every one of these six is a check apollo performs at
-    // schema validation and smear performs only for executable documents:
-    //
-    //   UnsupportedLocation   `directive @onEnum on ENUM` used on an object type
-    //   UndefinedDirective    `type Query @nowhere` naming no definition at all
-    //   UndefinedArgument     an argument the directive does not declare
-    //   RequiredArgument      a non-null argument with no default, omitted
-    //   UniqueDirective       a non-repeatable directive twice in one location
-    //   UnsupportedValueType  an argument value of the wrong type
-    //
-    // The corresponding executable rules (5.7.1, 5.7.2, 5.7.3, 5.4.1, 5.4.3, 5.6.1) all exist and
-    // all fire; it is only the SDL side that is unguarded. Scoped to `Stage::Schema` so those
-    // shared names cannot excuse an executable divergence.
-    apollo_error_names: &[
-      "UnsupportedLocation",
-      "UndefinedDirective",
-      "UndefinedArgument",
-      "RequiredArgument",
-      "UniqueDirective",
-      "UnsupportedValueType",
-    ],
-    tracking: "smear issue #91 — schema-builder work, out of PR #90's scope",
-  },
-];
+/// and the arithmetic that keeps that honest is in the report: four whitelist classes and no gaps
+/// at all against thirty-one rules and several hundred compared cases.
+///
+/// The two entries this list shipped with were both deleted by the gate, not by review — see the
+/// module header. Deleting the second one is also what makes the schema comparison unconditional:
+/// with no schema-stage gap declared, [`attribute`] can no longer return `Some` for an SDL, so an
+/// SDL only apollo refuses is a `SchemaOutcome::ApolloRejected` failure with no door at all.
+pub const GAPS: &[Gap] = &[];
 
 /// The gap that explains a set of apollo error names at a given stage, if one does.
 ///

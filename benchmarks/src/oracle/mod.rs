@@ -219,6 +219,27 @@ fn render(diagnostics: &[ApolloDiagnostic]) -> String {
     .join("; ")
 }
 
+/// The typed names of every diagnostic `apollo-compiler` produces for an SDL; empty if it accepts.
+///
+/// [`build_schemas`] reduces apollo's side of the schema comparison to a verdict, which is all the
+/// runner needs. The SDL probe gate needs one thing more: that a probe still provokes the *check it
+/// is named for*, and not some second defect an edit introduced. That question is about apollo's
+/// own classification, so it is asked of apollo directly rather than inferred from smear's refusal.
+///
+/// A diagnostic with no `unstable_error_name` is dropped rather than rendered, because the caller
+/// matches on names and a `None` can never equal one. See [`Gap::apollo_error_names`] for why this
+/// harness depends on that `#[doc(hidden)]` accessor at all.
+pub fn apollo_schema_error_names(sdl: &str) -> Vec<&'static str> {
+  match ApolloSchema::parse_and_validate(sdl, "schema.graphql") {
+    Ok(_) => Vec::new(),
+    Err(errors) => errors
+      .errors
+      .iter()
+      .filter_map(|diagnostic| diagnostic.error.unstable_error_name())
+      .collect(),
+  }
+}
+
 /// Parses an SDL and runs smear's draft §3 pass over it, rendering any error.
 ///
 /// Public so `benches/validator_comparison.rs` can time smear's schema build on its own —
