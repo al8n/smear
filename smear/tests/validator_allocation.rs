@@ -170,6 +170,22 @@ const CORPUS: &[&str] = &[
    fragment frag on Character { name midichlorians }",
   // Invalid in a value literal, so the value walk is on the measured path.
   r#"{ search(text: 1, filter: { limit: "ten", nope: true }) { __typename } }"#,
+  // Draft 5.3.2's engine, which has a working set of its own and is the only rule that does.
+  // Repeated response names give it groups to compare, an abstract parent beside a concrete one
+  // gives it a partition to build, and identical arguments send it back to the syntax tree to
+  // compare two value literals — the three places it could have allocated.
+  r#"query Merging($ep: Episode) {
+       hero(episode: $ep) { name }
+       hero(episode: $ep) { id friends { name } }
+       search(text: "r2", filter: { episode: JEDI, limit: 10 }) {
+         ... on Droid { name primaryFunction }
+         ... on Human { name homePlanet }
+       }
+       again: search(text: "r2", filter: { episode: JEDI, limit: 10 }) { __typename }
+     }"#,
+  // The same, refused: two selections behind one response name that cannot merge, so the
+  // diagnostic path is measured too.
+  "{ hero { conflict: name } hero { conflict: appearsIn } }",
 ];
 
 fn build() -> Schema {
@@ -231,6 +247,22 @@ fn steady_state_validation_allocates_nothing() {
 
   let mut scratch = Scratch::new();
   let mut collected: Vec<Diagnostic<&'static str>> = Vec::with_capacity(64);
+
+  // The corpus reaches draft 5.3.2's diagnostic path, not only its happy one — otherwise the
+  // reading below would be about a rule that never fired.
+  {
+    let (_, document) = documents.last().expect("a corpus");
+    let mut seen = Vec::new();
+    let mut sink = Collect::new(&mut seen);
+    let _ = validate_executable(&schema, document, &mut scratch, &budget, &mut sink);
+    assert!(
+      seen
+        .iter()
+        .any(|d| d.rule() == smear::validator::Rule::FieldSelectionMerging),
+      "the merge engine's diagnostic path is not on the measured corpus: {:?}",
+      seen.iter().map(Diagnostic::rule).collect::<Vec<_>>()
+    );
+  }
 
   // One warm pass over the whole corpus: this is where the working set and the caller's sink
   // reach the sizes the steady state reuses.

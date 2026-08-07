@@ -11,6 +11,9 @@
 //! failure this suite exists to make impossible, so the census is mechanical rather than
 //! reviewed-in.
 //!
+//! Draft 5.3.2's own cases, and the two resource bounds under a hostile document rather than a
+//! lowered knob, live in `validator_merge.rs`.
+//!
 //! Two further gates ride the same table: [`every_rule_is_independently_addressable`] runs each
 //! fixture with only its own rule enabled, proving the `RuleSet` door is real and that no rule
 //! depends on another having run; and [`every_valid_twin_is_valid_under_every_rule`] runs the
@@ -216,18 +219,20 @@ fn diagnose<'a>(schema: &Schema, source: &'a str) -> Vec<Diagnostic<&'a str>> {
 }
 
 fn diagnose_with<'a>(schema: &Schema, source: &'a str, rules: RuleSet) -> Vec<Diagnostic<&'a str>> {
+  diagnose_full(schema, source, rules, &Budget::default())
+}
+
+fn diagnose_full<'a>(
+  schema: &Schema,
+  source: &'a str,
+  rules: RuleSet,
+  budget: &Budget,
+) -> Vec<Diagnostic<&'a str>> {
   let document = parse(source);
   let mut scratch = Scratch::new();
   let mut collected = Vec::new();
   let mut sink = Collect::new(&mut collected);
-  let result = validate_executable_with(
-    schema,
-    &document,
-    &mut scratch,
-    &Budget::default(),
-    rules,
-    &mut sink,
-  );
+  let result = validate_executable_with(schema, &document, &mut scratch, budget, rules, &mut sink);
   assert_eq!(
     result.is_err(),
     !collected.is_empty(),
@@ -238,7 +243,11 @@ fn diagnose_with<'a>(schema: &Schema, source: &'a str, rules: RuleSet) -> Vec<Di
 
 /// The set of rules a document fires, sorted and deduplicated.
 fn fired(schema: &Schema, source: &str) -> Vec<Rule> {
-  let mut rules: Vec<_> = diagnose(schema, source)
+  fired_under(schema, source, &Budget::default())
+}
+
+fn fired_under(schema: &Schema, source: &str, budget: &Budget) -> Vec<Rule> {
+  let mut rules: Vec<_> = diagnose_full(schema, source, RuleSet::ALL, budget)
     .iter()
     .map(Diagnostic::rule)
     .collect();
@@ -264,6 +273,12 @@ struct Fixture {
   rule: Rule,
   /// An SDL override, when the standard schema cannot express the failure.
   schema: Option<&'static str>,
+  /// A [`Budget`] override, for the two rules that are a resource bound rather than a draft rule.
+  ///
+  /// Lowering the bound is how a bound is exercised without a hundred-kilobyte fixture; that the
+  /// **default** bound holds against a genuinely hostile document is `validator_merge.rs`'s job,
+  /// and it measures the wall clock while it is there.
+  budget: Option<Budget>,
   /// A document that makes [`Fixture::rule`] fire.
   invalid: &'static str,
   /// The **complete** set of rules [`Fixture::invalid`] fires.
@@ -280,6 +295,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::OperationTypeExistence,
     schema: Some(QUERY_ONLY),
+    budget: None,
     invalid: "mutation goodbyeMutation { goodbye }",
     fires: &[Rule::OperationTypeExistence],
     valid: "query helloQuery { ok }",
@@ -287,6 +303,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::OperationNameUniqueness,
     schema: None,
+    budget: None,
     invalid: "query getName { dog { name } } query getName { dog { nickname } }",
     fires: &[Rule::OperationNameUniqueness],
     valid: "query getName { dog { name } } query getNickname { dog { nickname } }",
@@ -294,6 +311,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::LoneAnonymousOperation,
     schema: None,
+    budget: None,
     invalid: "{ dog { name } } query getName { dog { nickname } }",
     fires: &[Rule::LoneAnonymousOperation],
     valid: "{ dog { name } }",
@@ -301,6 +319,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::SingleRootField,
     schema: None,
+    budget: None,
     invalid: "subscription sub { newMessage { body } disallowedSecondRootField }",
     fires: &[Rule::SingleRootField],
     valid: "subscription sub { newMessage { body } }",
@@ -309,13 +328,27 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FieldSelections,
     schema: None,
+    budget: None,
     invalid: "{ dog { meowVolume } }",
     fires: &[Rule::FieldSelections],
     valid: "{ dog { barkVolume } }",
   },
   Fixture {
+    rule: Rule::FieldSelectionMerging,
+    schema: None,
+    budget: None,
+    // The specification's own `conflictingBecauseAlias`. It fires twice, because the pair breaks
+    // two of the three requirements at once: `nickname` is `String` where `name` is `String!`, and
+    // the two are not the same field.
+    invalid: "{ dog { name: nickname name } }",
+    fires: &[Rule::FieldSelectionMerging],
+    // `mergeIdenticalAliasesAndFields`, which is the same shape and merges.
+    valid: "{ dog { otherName: name otherName: name } }",
+  },
+  Fixture {
     rule: Rule::LeafFieldSelections,
     schema: None,
+    budget: None,
     invalid: "{ dog { barkVolume { sinceWhen } } }",
     fires: &[Rule::LeafFieldSelections],
     valid: "{ dog { barkVolume } }",
@@ -324,6 +357,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::ArgumentNames,
     schema: None,
+    budget: None,
     invalid: "{ dog { isHouseTrained(atOtherHomes: true, unless: false) } }",
     fires: &[Rule::ArgumentNames],
     valid: "{ dog { isHouseTrained(atOtherHomes: true) } }",
@@ -331,6 +365,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::ArgumentUniqueness,
     schema: None,
+    budget: None,
     invalid: "{ dog { isHouseTrained(atOtherHomes: true, atOtherHomes: false) } }",
     fires: &[Rule::ArgumentUniqueness],
     valid: "{ dog { isHouseTrained(atOtherHomes: true) } }",
@@ -338,6 +373,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::RequiredArguments,
     schema: None,
+    budget: None,
     invalid: "{ dog { doesKnowCommand } }",
     fires: &[Rule::RequiredArguments],
     valid: "{ dog { doesKnowCommand(dogCommand: SIT) } }",
@@ -346,6 +382,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FragmentNameUniqueness,
     schema: None,
+    budget: None,
     invalid: "{ dog { ...part } } fragment part on Dog { name } fragment part on Dog { nickname }",
     fires: &[Rule::FragmentNameUniqueness],
     valid: "{ dog { ...part ...other } } fragment part on Dog { name } \
@@ -354,6 +391,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FragmentSpreadTypeExistence,
     schema: None,
+    budget: None,
     invalid: "{ dog { ...part } } fragment part on NotInSchema { name }",
     fires: &[Rule::FragmentSpreadTypeExistence],
     valid: "{ dog { ...part } } fragment part on Dog { name }",
@@ -361,6 +399,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FragmentsOnCompositeTypes,
     schema: None,
+    budget: None,
     invalid: "{ dog { ...part } } fragment part on Int { something }",
     fires: &[Rule::FragmentsOnCompositeTypes],
     valid: "{ dog { ...part } } fragment part on Dog { name }",
@@ -368,6 +407,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FragmentsMustBeUsed,
     schema: None,
+    budget: None,
     invalid: "{ dog { name } } fragment nameFragment on Dog { name }",
     fires: &[Rule::FragmentsMustBeUsed],
     valid: "{ dog { ...nameFragment } } fragment nameFragment on Dog { name }",
@@ -375,6 +415,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FragmentSpreadTargetDefined,
     schema: None,
+    budget: None,
     invalid: "{ dog { ...undefinedFragment } }",
     fires: &[Rule::FragmentSpreadTargetDefined],
     valid: "{ dog { ...definedFragment } } fragment definedFragment on Dog { name }",
@@ -382,6 +423,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FragmentSpreadsMustNotFormCycles,
     schema: None,
+    budget: None,
     invalid: "{ dog { ...nameFragment } } fragment nameFragment on Dog { name ...barkFragment } \
               fragment barkFragment on Dog { barkVolume ...nameFragment }",
     fires: &[Rule::FragmentSpreadsMustNotFormCycles],
@@ -391,6 +433,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::FragmentSpreadIsPossible,
     schema: None,
+    budget: None,
     invalid: "{ catOrDog { ... on Cat { ...dogFragment } } } \
               fragment dogFragment on Dog { barkVolume }",
     fires: &[Rule::FragmentSpreadIsPossible],
@@ -401,6 +444,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::ValuesOfCorrectType,
     schema: None,
+    budget: None,
     invalid: r#"{ arguments { intArgField(intArg: "123") } }"#,
     fires: &[Rule::ValuesOfCorrectType],
     valid: "{ arguments { intArgField(intArg: 123) } }",
@@ -408,6 +452,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::InputObjectFieldNames,
     schema: None,
+    budget: None,
     invalid: r#"{ findDog(searchBy: { favoriteCookieFlavor: "Bacon" }) { name } }"#,
     fires: &[Rule::InputObjectFieldNames],
     valid: r#"{ findDog(searchBy: { name: "Fido" }) { name } }"#,
@@ -415,6 +460,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::InputObjectFieldUniqueness,
     schema: None,
+    budget: None,
     invalid: r#"{ findDog(searchBy: { name: "Fido", name: "Milou" }) { name } }"#,
     fires: &[Rule::InputObjectFieldUniqueness],
     valid: r#"{ findDog(searchBy: { name: "Fido" }) { name } }"#,
@@ -422,6 +468,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::InputObjectRequiredFields,
     schema: None,
+    budget: None,
     invalid: "{ requiredInput(input: { opt: 1 }) }",
     fires: &[Rule::InputObjectRequiredFields],
     valid: "{ requiredInput(input: { req: 1 }) }",
@@ -430,6 +477,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::DirectivesAreDefined,
     schema: None,
+    budget: None,
     invalid: "{ dog { name @undefinedDirective } }",
     fires: &[Rule::DirectivesAreDefined],
     valid: "{ dog { name @skip(if: true) } }",
@@ -437,6 +485,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::DirectivesAreInValidLocations,
     schema: None,
+    budget: None,
     invalid: "query getName @skip(if: true) { dog { name } }",
     fires: &[Rule::DirectivesAreInValidLocations],
     valid: "query getName @onQuery { dog { name } }",
@@ -444,6 +493,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::DirectivesAreUniquePerLocation,
     schema: None,
+    budget: None,
     invalid: "{ dog { name @skip(if: true) @skip(if: false) } }",
     fires: &[Rule::DirectivesAreUniquePerLocation],
     valid: "{ dog { name @repeatableField @repeatableField } }",
@@ -452,6 +502,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::VariableUniqueness,
     schema: None,
+    budget: None,
     invalid: "query houseTrained($atOtherHomes: Boolean, $atOtherHomes: Boolean) \
               { dog { isHouseTrained(atOtherHomes: $atOtherHomes) } }",
     fires: &[Rule::VariableUniqueness],
@@ -463,6 +514,7 @@ const FIXTURES: &[Fixture] = &[
     schema: None,
     // The variable is also unused, and cannot be otherwise: no argument anywhere can have an
     // object type, so there is no position a `Cat` variable could legally be used in.
+    budget: None,
     invalid: "query takesCat($cat: Cat) { dog { name } }",
     fires: &[Rule::VariablesAreInputTypes, Rule::AllVariablesUsed],
     valid: "query takesBoolean($atOtherHomes: Boolean) \
@@ -471,6 +523,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::AllVariableUsesDefined,
     schema: None,
+    budget: None,
     invalid: "query variableIsNotDefined { dog { isHouseTrained(atOtherHomes: $atOtherHomes) } }",
     fires: &[Rule::AllVariableUsesDefined],
     valid: "query variableIsDefined($atOtherHomes: Boolean) \
@@ -479,6 +532,7 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::AllVariablesUsed,
     schema: None,
+    budget: None,
     invalid: "query variableUnused($atOtherHomes: Boolean) { dog { name } }",
     fires: &[Rule::AllVariablesUsed],
     valid: "query variableUsed($atOtherHomes: Boolean) \
@@ -487,11 +541,31 @@ const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::AllVariableUsagesAreAllowed,
     schema: None,
+    budget: None,
     invalid: "query intCannotGoIntoBoolean($intArg: Int) \
               { arguments { booleanArgField(booleanArg: $intArg) } }",
     fires: &[Rule::AllVariableUsagesAreAllowed],
     valid: "query booleanIntoBoolean($booleanArg: Boolean) \
             { arguments { booleanArgField(booleanArg: $booleanArg) } }",
+  },
+  // -- resource bounds --------------------------------------------------------------------------
+  Fixture {
+    rule: Rule::MergeDepthBudget,
+    schema: None,
+    // `Nest` is self-referential, so the response shape can be as deep as the fixture likes and
+    // nothing else about the document changes between the two halves.
+    budget: Some(Budget::new(3, Budget::DEFAULT_MERGE_WORK)),
+    invalid: "{ nest { nest { nest { leaf } } } }",
+    fires: &[Rule::MergeDepthBudget],
+    valid: "{ nest { nest { leaf } } }",
+  },
+  Fixture {
+    rule: Rule::MergeWorkBudget,
+    schema: None,
+    budget: Some(Budget::new(Budget::DEFAULT_MERGE_DEPTH, 24)),
+    invalid: "{ dog { name nickname barkVolume } }",
+    fires: &[Rule::MergeWorkBudget],
+    valid: "{ dog { name } }",
   },
 ];
 
@@ -529,7 +603,7 @@ fn liveness_floor() {
 
   // The census must not pass vacuously.
   assert!(
-    Rule::ALL.len() >= 28,
+    Rule::ALL.len() >= 31,
     "read only {} rules; the enumeration is wrong, not the fixtures",
     Rule::ALL.len()
   );
@@ -541,7 +615,8 @@ fn liveness_floor() {
     };
     let _ = &schema;
 
-    let actual = fired(&schema, fixture.invalid);
+    let budget = fixture.budget.unwrap_or_default();
+    let actual = fired_under(&schema, fixture.invalid, &budget);
     assert_eq!(
       actual,
       sorted(fixture.fires),
@@ -556,7 +631,7 @@ fn liveness_floor() {
       fixture.invalid
     );
 
-    let twin = fired(&schema, fixture.valid);
+    let twin = fired_under(&schema, fixture.valid, &budget);
     assert!(
       twin.is_empty(),
       "the valid twin for {:?} fired {twin:?}\n---\n{}",
@@ -579,8 +654,9 @@ fn every_rule_is_independently_addressable() {
       Some(sdl) => build(sdl),
       None => build(SCHEMA),
     };
+    let budget = fixture.budget.unwrap_or_default();
     let alone = RuleSet::only(fixture.rule);
-    let diagnostics = diagnose_with(&schema, fixture.invalid, alone);
+    let diagnostics = diagnose_full(&schema, fixture.invalid, alone, &budget);
     assert!(
       !diagnostics.is_empty(),
       "{:?} fired nothing when selected alone\n---\n{}",
@@ -599,7 +675,7 @@ fn every_rule_is_independently_addressable() {
 
     // And the complement: with the rule switched off, the document never reports it.
     let without = RuleSet::ALL.without(fixture.rule);
-    for diagnostic in diagnose_with(&schema, fixture.invalid, without) {
+    for diagnostic in diagnose_full(&schema, fixture.invalid, without, &budget) {
       assert_ne!(
         diagnostic.rule(),
         fixture.rule,
@@ -637,33 +713,18 @@ fn every_valid_twin_is_valid_under_every_rule() {
     };
     let document = parse(fixture.valid);
     let mut scratch = Scratch::new();
+    let budget = fixture.budget.unwrap_or_default();
 
     let mut first = First::new();
     assert!(
-      validate_executable(
-        &schema,
-        &document,
-        &mut scratch,
-        &Budget::default(),
-        &mut first
-      )
-      .is_ok(),
+      validate_executable(&schema, &document, &mut scratch, &budget, &mut first).is_ok(),
       "the twin for {:?} is invalid: {:?}",
       fixture.rule,
       first.get().map(|d| d.rule())
     );
 
     let mut count = Count::new();
-    assert!(
-      validate_executable(
-        &schema,
-        &document,
-        &mut scratch,
-        &Budget::default(),
-        &mut count
-      )
-      .is_ok()
-    );
+    assert!(validate_executable(&schema, &document, &mut scratch, &budget, &mut count).is_ok());
     assert_eq!(count.get(), 0);
   }
 }
@@ -778,7 +839,8 @@ fn every_diagnostic_renders() {
       Some(sdl) => build(sdl),
       None => build(SCHEMA),
     };
-    for diagnostic in diagnose(&schema, fixture.invalid) {
+    let budget = fixture.budget.unwrap_or_default();
+    for diagnostic in diagnose_full(&schema, fixture.invalid, RuleSet::ALL, &budget) {
       let rendered = diagnostic.display(&schema).to_string();
       assert!(
         rendered.starts_with(diagnostic.rule().section()),
@@ -1133,7 +1195,11 @@ fn deep_documents_are_walked_iteratively() {
   const DEPTH: usize = 1_000;
   let schema = build(SCHEMA);
   let mut scratch = Scratch::new();
-  let budget = Budget::default();
+  // The claim under test is that the walks do not recurse, which is about the stack and not about
+  // policy — so the budget is lifted out of the way. Under the *default* budget a thousand nested
+  // levels is refused, deliberately and by design: apollo-compiler refuses 140 for the same
+  // reason, and `validator_merge.rs` pins that refusal.
+  let budget = Budget::new(4_096, 10_000_000);
 
   let selections = nested_selection_document(DEPTH);
   assert!(

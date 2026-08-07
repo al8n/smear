@@ -3,10 +3,12 @@
 //! # Why the caller holds it
 //!
 //! Validation is a pure function of `(schema, document)`, but it needs somewhere to put a
-//! fragment index, a few bitsets and two explicit traversal stacks. Allocating those per request
-//! would put a handful of `malloc`s on the hot path of a server that otherwise makes none, so the
-//! buffers live in a [`Scratch`] the caller owns and reuses: [`Scratch::reset`] clears without
-//! freeing, capacity survives, and the steady state allocates nothing at all.
+//! fragment index, a few bitsets, several explicit traversal stacks, and — for draft 5.3.2 — a
+//! name interner, a table of every selection set in the document, and a memo over merged field
+//! sets. Allocating those per request would put a handful of `malloc`s on the hot path of a server
+//! that otherwise makes none, so the buffers live in a [`Scratch`] the caller owns and reuses:
+//! [`Scratch::reset`] clears without freeing, capacity survives, and the steady state allocates
+//! nothing at all.
 //!
 //! This is `mdns-proto`'s caller-held `Pool` idea in the shape validation actually needs. It is a
 //! concrete struct rather than a pluggable container trait because the buffers are heterogeneous
@@ -37,12 +39,20 @@ use super::schema::{PackedType, Range32, TypeId};
 /// bound different resources — parse-time nesting against merge-time work — and are set
 /// independently.
 ///
-/// # Status
+/// # What the two knobs count
 ///
-/// `OverlappingFieldsCanBeMerged` (draft 5.3.2) is the only rule that reads these knobs, and it
-/// lands in its own wave so that its resource bound is designed rather than bolted on. The type
-/// is here now because it is part of the entry point's shape, and moving that later would move it
-/// under callers.
+/// - [`merge_depth`](Budget::merge_depth) bounds how deeply the merge recursion may nest. One
+///   level is one field-nesting level of the *response shape*, so it is the same quantity
+///   `serde_json` bounds when it deserialises the answer.
+/// - [`merge_work`](Budget::merge_work) bounds everything else, as one running total for the whole
+///   call: expanded field rows, pair comparisons, the rows a common-parent partition duplicates,
+///   and the tree steps a node resolution walks. Depth alone does not bound the engine — breadth
+///   times fragment reuse does — so this is the knob that actually caps the worst case.
+///
+/// A document that exceeds either one is **refused**, with
+/// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) naming which, and
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set on the verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Budget {
   merge_depth: u32,
@@ -258,6 +268,220 @@ pub(crate) struct GraphFrame {
   pub(crate) edge: u32,
 }
 
+// ---------------------------------------------------------------------------------------------
+// draft 5.3.2's working set
+// ---------------------------------------------------------------------------------------------
+
+/// One syntactic selection set, as draft 5.3.2's expansion sees it.
+///
+/// Every selection set in the document gets one of these, once per call, and every later
+/// expansion reads them instead of the tree. A set's *scope* — the type its selections are written
+/// against — is a syntactic property, fixed by where the set is written, which is what makes the
+/// table shareable across every expansion that reaches it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MergeSet {
+  /// Index into the document's definition list of the definition this set lives in.
+  pub(crate) definition: u32,
+  /// The set that encloses this one, or [`NONE`] at a definition's own selection set.
+  pub(crate) parent: u32,
+  /// The index in the parent set's selection list that leads here; [`NONE`] at a definition root.
+  pub(crate) index: u32,
+  /// The type the set's selections are written against, or [`NONE`] when it did not resolve.
+  pub(crate) scope: u32,
+  /// The fields written directly in the set, as a range into [`Scratch::merge_fields`].
+  pub(crate) fields: Range32,
+  /// The sub-sets an expansion must also visit, as a range into [`Scratch::merge_kids`].
+  pub(crate) kids: Range32,
+}
+
+/// One field occurrence, precomputed into integers.
+///
+/// The merge engine compares response names, field names, return types and parent types with no
+/// tree access at all; it goes back to the AST only to compare argument values and to name a
+/// subject in a diagnostic.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MergeField {
+  /// The [`MergeSet`] the field is written in.
+  pub(crate) set: u32,
+  /// The field's index in that set's selection list.
+  pub(crate) index: u32,
+  /// The interned response name — the alias when there is one.
+  pub(crate) response: u32,
+  /// The interned field name.
+  pub(crate) name: u32,
+  /// The type the field is selected on, or [`NONE`] when it did not resolve.
+  pub(crate) parent: u32,
+  /// The field's own selection set, or [`NONE`] when it has none.
+  pub(crate) child: u32,
+  /// The field's declared return type, or `None` when the schema does not define the field.
+  pub(crate) ty: Option<PackedType>,
+  /// How many arguments the field was written with.
+  pub(crate) args: u32,
+  /// The span covering the whole field.
+  pub(crate) span: SimpleSpan,
+}
+
+/// A sub-set an expansion must visit after the set that names it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MergeKid {
+  /// The [`MergeSet`] to visit.
+  pub(crate) set: u32,
+  /// The fragment ordinal a named spread reaches, or [`NONE`] for an inline fragment.
+  ///
+  /// An expansion enters each *named* fragment at most once — the specification's inclusion is a
+  /// set — which is both what makes a cyclic graph terminate here and what keeps a widely reused
+  /// fragment from being expanded once per spread.
+  pub(crate) fragment: u32,
+}
+
+/// One level of the merge recursion.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MergeFrame {
+  /// The merged field set this level is checking, as a range into [`Scratch::merge_rows`].
+  pub(crate) rows: Range32,
+  /// The next row slot a response-name group starts at.
+  pub(crate) cursor: u32,
+  /// Where the current group's partition starts in [`Scratch::merge_parts`].
+  pub(crate) parts: u32,
+  /// Where the current group's partition starts in [`Scratch::merge_bounds`].
+  pub(crate) bounds: u32,
+  /// The next partition slot to check, as an index into [`Scratch::merge_bounds`].
+  pub(crate) part: u32,
+}
+
+/// One merged field set the engine has already met.
+///
+/// The key is the *content* of the row range, so two expansions that reach the same set of field
+/// occurrences by different routes share one entry — which is the memoisation that keeps a
+/// fragment-heavy document from re-deriving the same merge over and over.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MergeMemo {
+  /// The key's hash, compared before the contents are.
+  pub(crate) hash: u64,
+  /// The canonical row range for this content.
+  pub(crate) rows: Range32,
+  /// Which passes have already run over it.
+  pub(crate) flags: u8,
+}
+
+/// A document-local name interner.
+///
+/// Draft 5.3.2 groups by response name and compares field names, and it does so over a working
+/// set that may not name the document's source type — so the names are copied into an arena here
+/// and reduced to `u32`s. The schema's own interner cannot serve: an alias is not a schema name,
+/// and two *different* names the schema does not know would both resolve to "absent" and read as
+/// equal.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Names {
+  /// Every interned name's bytes, concatenated.
+  bytes: Vec<u8>,
+  /// Name id to its `(start, end)` range in [`Names::bytes`].
+  ranges: Vec<(u32, u32)>,
+  /// Open-addressing probe slots, power-of-two, [`NONE`] when empty.
+  slots: Vec<u32>,
+}
+
+impl Names {
+  /// The smallest probe table the interner builds.
+  const MIN_SLOTS: usize = 64;
+
+  /// Creates an empty interner, allocating nothing.
+  #[inline]
+  pub(crate) const fn new() -> Self {
+    Self {
+      bytes: Vec::new(),
+      ranges: Vec::new(),
+      slots: Vec::new(),
+    }
+  }
+
+  /// Empties the interner, keeping every allocation.
+  pub(crate) fn reset(&mut self) {
+    self.bytes.clear();
+    self.ranges.clear();
+    self.slots.fill(NONE);
+  }
+
+  /// Returns how many rows the interner is holding capacity for.
+  pub(crate) fn capacity(&self) -> usize {
+    self.bytes.capacity() + self.ranges.capacity() + self.slots.capacity()
+  }
+
+  /// Returns how many distinct names have been interned.
+  #[cfg(test)]
+  pub(crate) fn len(&self) -> usize {
+    self.ranges.len()
+  }
+
+  /// Returns `key`'s id, interning it if this is the first time it has been seen.
+  pub(crate) fn intern(&mut self, key: &[u8]) -> u32 {
+    // Load factor 3/4. Checked before the probe so the loop below always finds an empty slot.
+    if (self.ranges.len() + 1) * 4 >= self.slots.len() * 3 {
+      self.grow();
+    }
+    let mask = self.slots.len() - 1;
+    let mut slot = (hash_bytes(key) as usize) & mask;
+    loop {
+      let id = self.slots[slot];
+      if id == NONE {
+        let start = self.bytes.len() as u32;
+        self.bytes.extend_from_slice(key);
+        let id = self.ranges.len() as u32;
+        self.ranges.push((start, self.bytes.len() as u32));
+        self.slots[slot] = id;
+        return id;
+      }
+      let (start, end) = self.ranges[id as usize];
+      if &self.bytes[start as usize..end as usize] == key {
+        return id;
+      }
+      slot = (slot + 1) & mask;
+    }
+  }
+
+  /// Doubles the probe table and reinserts every name.
+  fn grow(&mut self) {
+    let next = (self.slots.len() * 2).max(Self::MIN_SLOTS);
+    self.slots.clear();
+    self.slots.resize(next, NONE);
+    let mask = next - 1;
+    for id in 0..self.ranges.len() as u32 {
+      let (start, end) = self.ranges[id as usize];
+      let mut slot = (hash_bytes(&self.bytes[start as usize..end as usize]) as usize) & mask;
+      while self.slots[slot] != NONE {
+        slot = (slot + 1) & mask;
+      }
+      self.slots[slot] = id;
+    }
+  }
+}
+
+/// FxHash-style multiply-fold over short keys.
+///
+/// The same shape the schema's own [`NameIndex`](super::schema::NameIndex) uses, and for the same
+/// reason: the keys are identifiers, so one multiply per eight bytes is all the mixing a probe
+/// table needs and it costs no dependency.
+#[inline]
+pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
+  const K: u64 = 0x517c_c1b7_2722_0a95;
+  let mut h: u64 = 0;
+  let (chunks, rest) = bytes.as_chunks::<8>();
+  for chunk in chunks {
+    h = (h.rotate_left(5) ^ u64::from_le_bytes(*chunk)).wrapping_mul(K);
+  }
+  let mut tail = [0u8; 8];
+  tail[..rest.len()].copy_from_slice(rest);
+  let value = u64::from_le_bytes(tail) ^ ((rest.len() as u64) << 56);
+  (h.rotate_left(5) ^ value).wrapping_mul(K)
+}
+
+/// Mixes one `u32` into a running hash.
+#[inline]
+pub(crate) fn hash_u32(state: u64, value: u32) -> u64 {
+  const K: u64 = 0x517c_c1b7_2722_0a95;
+  (state.rotate_left(5) ^ u64::from(value)).wrapping_mul(K)
+}
+
 /// The caller-held working set.
 ///
 /// Create one, hand it to every call, and reuse it. It grows to the high-water mark of the
@@ -314,6 +538,45 @@ pub struct Scratch {
   pub(crate) checked: Vec<u64>,
   /// Variable-definition indices used by the operation being walked (draft 5.8.4).
   pub(crate) used: Vec<u64>,
+
+  // -- draft 5.3.2 ------------------------------------------------------------------------------
+  /// Every selection set in the document, one row each.
+  pub(crate) merge_sets: Vec<MergeSet>,
+  /// Every field occurrence, grouped by the set that writes it.
+  pub(crate) merge_fields: Vec<MergeField>,
+  /// Every inline fragment and named spread, grouped by the set that writes it.
+  pub(crate) merge_kids: Vec<MergeKid>,
+  /// Definition index to its root [`MergeSet`], or [`NONE`].
+  pub(crate) merge_roots: Vec<u32>,
+  /// Selection sets the index build has yet to fill.
+  pub(crate) merge_todo: Vec<u32>,
+  /// The child-index chain a node resolution descends.
+  pub(crate) merge_path: Vec<u32>,
+  /// Every merged field set the engine has expanded, as indices into [`Scratch::merge_fields`].
+  ///
+  /// This is the arena the [`Budget`]'s work knob indirectly caps: an expansion appends to it, so
+  /// refusing to do more work is also refusing to grow it further.
+  pub(crate) merge_rows: Vec<u32>,
+  /// The expansion's own traversal stack, over [`MergeSet`] ids.
+  pub(crate) merge_queue: Vec<u32>,
+  /// Fragment ordinal to the expansion generation that last entered it.
+  pub(crate) merge_seen: Vec<u32>,
+  /// The selection sets the next expansion will merge.
+  pub(crate) merge_inputs: Vec<u32>,
+  /// A response-name group split by common parent type; rows repeat across parts.
+  pub(crate) merge_parts: Vec<u32>,
+  /// Where each part of the current group starts and ends in [`Scratch::merge_parts`].
+  pub(crate) merge_bounds: Vec<Range32>,
+  /// The merge recursion's frame stack.
+  pub(crate) merge_stack: Vec<MergeFrame>,
+  /// One entry per distinct merged field set met so far.
+  pub(crate) merge_memo: Vec<MergeMemo>,
+  /// Open-addressing probe slots over [`Scratch::merge_memo`], [`NONE`] when empty.
+  pub(crate) merge_slots: Vec<u32>,
+  /// The value comparison's frame stack: `(index in the left value, index in the right, cursor)`.
+  pub(crate) merge_compare: Vec<(u32, u32, u32)>,
+  /// The document's own names, interned to integers.
+  pub(crate) names: Names,
 }
 
 impl Scratch {
@@ -339,6 +602,23 @@ impl Scratch {
       done: Vec::new(),
       checked: Vec::new(),
       used: Vec::new(),
+      merge_sets: Vec::new(),
+      merge_fields: Vec::new(),
+      merge_kids: Vec::new(),
+      merge_roots: Vec::new(),
+      merge_todo: Vec::new(),
+      merge_path: Vec::new(),
+      merge_rows: Vec::new(),
+      merge_queue: Vec::new(),
+      merge_seen: Vec::new(),
+      merge_inputs: Vec::new(),
+      merge_parts: Vec::new(),
+      merge_bounds: Vec::new(),
+      merge_stack: Vec::new(),
+      merge_memo: Vec::new(),
+      merge_slots: Vec::new(),
+      merge_compare: Vec::new(),
+      names: Names::new(),
     }
   }
 
@@ -363,6 +643,25 @@ impl Scratch {
     self.done.clear();
     self.checked.clear();
     self.used.clear();
+    self.merge_sets.clear();
+    self.merge_fields.clear();
+    self.merge_kids.clear();
+    self.merge_roots.clear();
+    self.merge_todo.clear();
+    self.merge_path.clear();
+    self.merge_rows.clear();
+    self.merge_queue.clear();
+    self.merge_seen.clear();
+    self.merge_inputs.clear();
+    self.merge_parts.clear();
+    self.merge_bounds.clear();
+    self.merge_stack.clear();
+    self.merge_memo.clear();
+    // The probe table is emptied by refilling it, not by shrinking it: its size is the working
+    // set's, and a `clear` would throw that away and make the next document allocate again.
+    self.merge_slots.fill(NONE);
+    self.merge_compare.clear();
+    self.names.reset();
   }
 
   /// Returns a rough count of the rows the working set is currently holding.
@@ -385,6 +684,23 @@ impl Scratch {
       + self.done.capacity()
       + self.checked.capacity()
       + self.used.capacity()
+      + self.merge_sets.capacity()
+      + self.merge_fields.capacity()
+      + self.merge_kids.capacity()
+      + self.merge_roots.capacity()
+      + self.merge_todo.capacity()
+      + self.merge_path.capacity()
+      + self.merge_rows.capacity()
+      + self.merge_queue.capacity()
+      + self.merge_seen.capacity()
+      + self.merge_inputs.capacity()
+      + self.merge_parts.capacity()
+      + self.merge_bounds.capacity()
+      + self.merge_stack.capacity()
+      + self.merge_memo.capacity()
+      + self.merge_slots.capacity()
+      + self.merge_compare.capacity()
+      + self.names.capacity()
   }
 }
 
@@ -453,6 +769,56 @@ mod tests {
     scratch.reset();
     assert!(scratch.order.is_empty());
     assert_eq!(scratch.capacity(), capacity, "reset must not free");
+  }
+
+  #[test]
+  fn the_interner_round_trips_and_survives_a_reset() {
+    use super::Names;
+
+    let mut names = Names::new();
+    let a = names.intern(b"hero");
+    let b = names.intern(b"hero");
+    let c = names.intern(b"heroes");
+    assert_eq!(a, b, "the same name must intern to the same id");
+    assert_ne!(a, c, "a different name must not");
+    assert_eq!(names.len(), 2);
+
+    // Past the initial probe table, so the growth path is on the measured path rather than a
+    // branch nothing takes.
+    for index in 0..500u32 {
+      let key = std::format!("field{index}");
+      assert_eq!(names.intern(key.as_bytes()), 2 + index);
+    }
+    for index in 0..500u32 {
+      let key = std::format!("field{index}");
+      assert_eq!(
+        names.intern(key.as_bytes()),
+        2 + index,
+        "growth lost an entry"
+      );
+    }
+    assert_eq!(names.len(), 502);
+
+    // A reset empties it without giving the memory back, which is the whole contract.
+    let capacity = names.capacity();
+    names.reset();
+    assert_eq!(names.len(), 0);
+    assert_eq!(names.capacity(), capacity, "reset must not free");
+    assert_eq!(names.intern(b"heroes"), 0, "ids restart after a reset");
+  }
+
+  /// Names are not text: a `&[u8]` document may spell one with bytes that are not UTF-8, and the
+  /// interner is byte-keyed precisely so that it does not care.
+  #[test]
+  fn the_interner_is_byte_keyed() {
+    use super::Names;
+
+    let mut names = Names::new();
+    let a = names.intern(&[0xff, 0x00, b'a']);
+    let b = names.intern(&[0xff, 0x00, b'b']);
+    assert_ne!(a, b);
+    assert_eq!(names.intern(&[0xff, 0x00, b'a']), a);
+    assert_eq!(names.intern(b""), 2, "the empty key is a key");
   }
 
   #[test]

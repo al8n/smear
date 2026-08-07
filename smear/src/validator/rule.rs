@@ -36,6 +36,23 @@ pub enum Rule {
   /// `__typename` — which falls out of this rule rather than needing one of its own, because the
   /// schema puts `__typename` in every composite type's field group.
   FieldSelections,
+  /// Two selections that share a response name must be able to merge (draft 5.3.2).
+  ///
+  /// `FieldsInSetCanMerge` in the draft's own words: for every pair of selections a response name
+  /// collects — through fragments, inline fragments and nesting — the two must have the same
+  /// response shape, and, where they could both be encountered against the same object, must name
+  /// the same field with the same arguments. [`Context::Merge`](super::Context::Merge) says which
+  /// of the three failed.
+  ///
+  /// # Two selections carry "identical arguments" when their literals are written identically
+  ///
+  /// Argument sets are compared by name, order-independently, and each pair of values is compared
+  /// structurally — object literals order-independently too. Scalar literals are compared by their
+  /// **source spelling**: `1` and `1.0`, or `"a"` and `"""a"""`, are different literals here even
+  /// where a coercion would give them the same value. graphql-js compares the printed form and so
+  /// separates those same pairs; the one place this is stricter than graphql-js is a string
+  /// written with different escapes for the same text, which is reported rather than merged.
+  FieldSelectionMerging,
   /// A field whose type is a leaf must have no subselection, and a field whose type is composite
   /// must have one (draft 5.3.3).
   LeafFieldSelections,
@@ -114,6 +131,27 @@ pub enum Rule {
   /// A variable usage must be allowed in the position it appears in — `IsVariableUsageAllowed`,
   /// in every position, including inside list and object literals (draft 5.8.5).
   AllVariableUsagesAreAllowed,
+
+  // -- resource bounds --------------------------------------------------------------------------
+  /// The merge recursion nested deeper than [`Budget::merge_depth`](super::Budget::merge_depth).
+  ///
+  /// Not a specification rule: draft 5.3.2 is unbounded as written, and a validator on a request
+  /// path may not be. A document that reaches this is **refused** — never passed unvalidated —
+  /// and the verdict carries [`Invalid::budget_tripped`](super::Invalid::budget_tripped).
+  ///
+  /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *refusal*, not the bound: the
+  /// engine still stops, but with no diagnostic to emit the document is reported on whatever was
+  /// examined before it stopped. A caller who wants the protection wants this rule on.
+  ///
+  /// The alternative, letting the working set's capacity be the bound, was rejected in design: an
+  /// allocation failure has no rule identity and no span, and cannot distinguish "this document is
+  /// adversarial" from "this caller sized their buffers small". This rule has both.
+  MergeDepthBudget,
+  /// The merge engine reached [`Budget::merge_work`](super::Budget::merge_work).
+  ///
+  /// The companion to [`Rule::MergeDepthBudget`], and the one that actually caps the worst case:
+  /// depth alone does not bound draft 5.3.2, breadth times fragment reuse does.
+  MergeWorkBudget,
 }
 
 impl Rule {
@@ -127,6 +165,7 @@ impl Rule {
     Self::LoneAnonymousOperation,
     Self::SingleRootField,
     Self::FieldSelections,
+    Self::FieldSelectionMerging,
     Self::LeafFieldSelections,
     Self::ArgumentNames,
     Self::ArgumentUniqueness,
@@ -150,6 +189,8 @@ impl Rule {
     Self::AllVariableUsesDefined,
     Self::AllVariablesUsed,
     Self::AllVariableUsagesAreAllowed,
+    Self::MergeDepthBudget,
+    Self::MergeWorkBudget,
   ];
 
   /// Returns the rule's bit position in a [`RuleSet`].
@@ -166,29 +207,32 @@ impl Rule {
       Self::LoneAnonymousOperation => 2,
       Self::SingleRootField => 3,
       Self::FieldSelections => 4,
-      Self::LeafFieldSelections => 5,
-      Self::ArgumentNames => 6,
-      Self::ArgumentUniqueness => 7,
-      Self::RequiredArguments => 8,
-      Self::FragmentNameUniqueness => 9,
-      Self::FragmentSpreadTypeExistence => 10,
-      Self::FragmentsOnCompositeTypes => 11,
-      Self::FragmentsMustBeUsed => 12,
-      Self::FragmentSpreadTargetDefined => 13,
-      Self::FragmentSpreadsMustNotFormCycles => 14,
-      Self::FragmentSpreadIsPossible => 15,
-      Self::ValuesOfCorrectType => 16,
-      Self::InputObjectFieldNames => 17,
-      Self::InputObjectFieldUniqueness => 18,
-      Self::InputObjectRequiredFields => 19,
-      Self::DirectivesAreDefined => 20,
-      Self::DirectivesAreInValidLocations => 21,
-      Self::DirectivesAreUniquePerLocation => 22,
-      Self::VariableUniqueness => 23,
-      Self::VariablesAreInputTypes => 24,
-      Self::AllVariableUsesDefined => 25,
-      Self::AllVariablesUsed => 26,
-      Self::AllVariableUsagesAreAllowed => 27,
+      Self::FieldSelectionMerging => 5,
+      Self::LeafFieldSelections => 6,
+      Self::ArgumentNames => 7,
+      Self::ArgumentUniqueness => 8,
+      Self::RequiredArguments => 9,
+      Self::FragmentNameUniqueness => 10,
+      Self::FragmentSpreadTypeExistence => 11,
+      Self::FragmentsOnCompositeTypes => 12,
+      Self::FragmentsMustBeUsed => 13,
+      Self::FragmentSpreadTargetDefined => 14,
+      Self::FragmentSpreadsMustNotFormCycles => 15,
+      Self::FragmentSpreadIsPossible => 16,
+      Self::ValuesOfCorrectType => 17,
+      Self::InputObjectFieldNames => 18,
+      Self::InputObjectFieldUniqueness => 19,
+      Self::InputObjectRequiredFields => 20,
+      Self::DirectivesAreDefined => 21,
+      Self::DirectivesAreInValidLocations => 22,
+      Self::DirectivesAreUniquePerLocation => 23,
+      Self::VariableUniqueness => 24,
+      Self::VariablesAreInputTypes => 25,
+      Self::AllVariableUsesDefined => 26,
+      Self::AllVariablesUsed => 27,
+      Self::AllVariableUsagesAreAllowed => 28,
+      Self::MergeDepthBudget => 29,
+      Self::MergeWorkBudget => 30,
     }
   }
 
@@ -201,6 +245,7 @@ impl Rule {
       Self::LoneAnonymousOperation => "5.2.3.1",
       Self::SingleRootField => "5.2.4.1",
       Self::FieldSelections => "5.3.1",
+      Self::FieldSelectionMerging => "5.3.2",
       Self::LeafFieldSelections => "5.3.3",
       Self::ArgumentNames => "5.4.1",
       Self::ArgumentUniqueness => "5.4.2",
@@ -224,6 +269,11 @@ impl Rule {
       Self::AllVariableUsesDefined => "5.8.3",
       Self::AllVariablesUsed => "5.8.4",
       Self::AllVariableUsagesAreAllowed => "5.8.5",
+      // Not draft sections: these two are this crate's resource policy over draft 5.3.2, which
+      // the specification leaves unbounded. They are spelled so that a reader lands in the right
+      // neighbourhood and a grep for a real section number never finds them.
+      Self::MergeDepthBudget => "5.3.2/depth",
+      Self::MergeWorkBudget => "5.3.2/work",
     }
   }
 
@@ -236,6 +286,7 @@ impl Rule {
       Self::LoneAnonymousOperation => "Lone Anonymous Operation",
       Self::SingleRootField => "Single Root Field",
       Self::FieldSelections => "Field Selections",
+      Self::FieldSelectionMerging => "Field Selection Merging",
       Self::LeafFieldSelections => "Leaf Field Selections",
       Self::ArgumentNames => "Argument Names",
       Self::ArgumentUniqueness => "Argument Uniqueness",
@@ -259,6 +310,8 @@ impl Rule {
       Self::AllVariableUsesDefined => "All Variable Uses Defined",
       Self::AllVariablesUsed => "All Variables Used",
       Self::AllVariableUsagesAreAllowed => "All Variable Usages Are Allowed",
+      Self::MergeDepthBudget => "Merge Depth Budget Exceeded",
+      Self::MergeWorkBudget => "Merge Work Budget Exceeded",
     }
   }
 }
