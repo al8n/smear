@@ -55,6 +55,16 @@ use super::{
 /// The placeholder a type reference carries until its base name is resolved.
 const UNRESOLVED: TypeId = TypeId::new(u32::MAX);
 
+/// The specified `@deprecated` directive, matched by name off the *applied* list.
+///
+/// By name rather than by identity, for the reason [`BuiltInScalar::from_name`] reads names: a
+/// document may spell `directive @deprecated(…)` out and replace the injected definition — a
+/// printed schema does — and it is still the specification's directive.
+const DEPRECATED: &str = "deprecated";
+
+/// The specified `@oneOf` directive. Matched by name, for the reason [`DEPRECATED`] is.
+const ONE_OF: &str = "oneOf";
+
 // ---------------------------------------------------------------------------------------------
 // interning
 // ---------------------------------------------------------------------------------------------
@@ -205,6 +215,13 @@ struct RawInput {
   name: Located,
   ty: RawTypeRef,
   default: DefaultKind,
+  /// The default literal itself, kept only while building.
+  ///
+  /// [`DefaultKind`] is the reduction the finished [`Schema`] carries — draft 5.4.3, 5.6.4 and
+  /// 5.8.5 never read a default's *value* — but two §3 rules do: 3.6.1(2.4.5) type-checks it, and
+  /// 3.10.1(4) walks the graph these literals induce. Both run inside the build, so the literal is
+  /// retained here and dropped by [`SchemaBuilder::flatten`] rather than reaching the schema.
+  default_value: Option<RawValue>,
   directives: Vec<RawDirectiveUse>,
 }
 
@@ -874,18 +891,20 @@ impl SchemaBuilder {
       .map(|value| {
         let name = self.located(value.name());
         let ty = self.type_ref(value.ty());
-        let default = match value.default_value() {
+        let default_value = value
+          .default_value()
+          .map(|default| self.const_value(default.value()));
+        let default = match &default_value {
           None => DefaultKind::Absent,
-          Some(default) => match default.value() {
-            ConstInputValue::Null(_) => DefaultKind::Null,
-            _ => DefaultKind::NonNull,
-          },
+          Some(value) if matches!(value.shape, RawShape::Null) => DefaultKind::Null,
+          Some(_) => DefaultKind::NonNull,
         };
         let directives = self.directive_uses(value.directives(), location);
         RawInput {
           name,
           ty,
           default,
+          default_value,
           directives,
         }
       })
@@ -1046,6 +1065,32 @@ impl SchemaBuilder {
         );
         continue;
       }
+      // Draft §3.10.3(5): "the `@oneOf` directive must not be provided by an Input Object type
+      // extension". Here and not in `validate_types` because this is the last moment the
+      // provenance exists: one line further down the extension's directives join the definition's
+      // and nothing can tell which list a `@oneOf` came from.
+      //
+      // Scoped to an input object target so that one mistake produces one diagnostic:
+      // `extend type T @oneOf` is already `UnsupportedDirectiveLocation`, and saying it twice
+      // would be worse than saying it once.
+      if self.types[index].kind == TypeKind::InputObject {
+        let provided: Vec<Located> = extension
+          .directives
+          .iter()
+          .filter(|used| self.text(used.name.sym) == ONE_OF)
+          .map(|used| used.name)
+          .collect();
+        let subject = self.text(target.sym).to_owned();
+        for at in provided {
+          self.push_owned(
+            SchemaErrorKind::OneOfOnInputObjectExtension,
+            ONE_OF,
+            subject.clone(),
+            at,
+          );
+        }
+      }
+
       let raw = &mut self.types[index];
       raw.implements.extend(extension.implements);
       raw.fields.extend(extension.fields);
@@ -1164,6 +1209,7 @@ impl SchemaBuilder {
     self.validate_directive_usages();
     self.validate_interface_implementations();
     self.validate_input_object_cycles();
+    self.validate_input_object_default_cycles();
     self.validate_directive_cycles();
   }
 
@@ -1208,6 +1254,33 @@ impl SchemaBuilder {
           self.roots[operation.index()] = None;
         }
         Some(_) => {}
+      }
+    }
+
+    // Draft §3.3: "The `query`, `mutation`, and `subscription` root types must all be different
+    // types if provided."
+    //
+    // Run after the loop above rather than inside it, over what survived: a root that named
+    // nothing, or named something that is not an object, has already been reported and cleared, so
+    // one mistake still produces one diagnostic. The three defaults cannot collide — they are three
+    // distinct names — so this can only fire on a `schema` block or an `extend schema`.
+    for operation in RootOperation::ALL {
+      let Some(root) = self.roots[operation.index()] else {
+        continue;
+      };
+      let earlier = RootOperation::ALL
+        .iter()
+        .take_while(|previous| **previous != operation)
+        .find_map(|previous| self.roots[previous.index()].filter(|other| other.sym == root.sym));
+      if let Some(first) = earlier {
+        let subject = self.text(root.sym).to_owned();
+        self.push_related(
+          SchemaErrorKind::SharedRootOperationType,
+          &subject,
+          None,
+          root,
+          first.span,
+        );
       }
     }
   }
@@ -1369,8 +1442,11 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::ReservedTypeName, &name, at);
       }
 
-      // `@oneOf` is read here rather than at ingest so an extension that adds it is seen.
-      let one_of = self.has_directive(index, "oneOf");
+      // `@oneOf` is read here rather than at ingest so an extension that adds it is seen. Adding
+      // it *is* draft §3.10.3(5)'s refusal, reported by `apply_extensions`; the flag is still set
+      // from the merged list so that §3.10.3(6) — the OneOf constraints over the extension's own
+      // fields — is checked rather than hidden behind that refusal.
+      let one_of = self.has_directive(index, ONE_OF);
 
       match kind {
         TypeKind::Scalar => {}
@@ -1390,6 +1466,13 @@ impl SchemaBuilder {
       .directives
       .iter()
       .any(|used| self.text(used.name.sym) == name)
+  }
+
+  /// Whether `@deprecated` is applied in this directive list.
+  fn is_deprecated(&self, directives: &[RawDirectiveUse]) -> bool {
+    directives
+      .iter()
+      .any(|used| self.text(used.name.sym) == DEPRECATED)
   }
 
   fn validate_fields(&mut self, index: usize, owner: &str) {
@@ -1488,6 +1571,32 @@ impl SchemaBuilder {
         let mut where_ = at;
         where_.span = arg.ty.span;
         self.push_owned(not_input, &subject, path, where_);
+      }
+
+      // Draft §3.6.1(2.4.4.1): "if argument type is Non-Null and a default value is not defined,
+      // the `@deprecated` directive must not be applied to this argument" — which is exactly
+      // `is_required`.
+      if arg.is_required() && self.is_deprecated(&arg.directives) {
+        self.push_owned(
+          SchemaErrorKind::DeprecatedRequiredArgument,
+          &name,
+          owner.to_owned(),
+          at,
+        );
+      }
+
+      // Draft §3.6.1(2.4.5): "if the argument has a default value it must be compatible with
+      // `argumentType` as per the coercion rules for that type" — the same coercion procedure a
+      // directive argument's *supplied* value goes through, so the two cannot answer differently.
+      if let Some(default) = &arg.default_value {
+        self.check_const_value(
+          default,
+          arg.ty.packed,
+          owner,
+          &name,
+          SchemaErrorKind::InvalidDefaultValue,
+          at.document,
+        );
       }
     }
   }
@@ -1651,6 +1760,29 @@ impl SchemaBuilder {
           &subject,
           path,
           where_,
+        );
+      }
+
+      // Draft §3.10.1(2.4.1), the input-field twin of §3.6.1(2.4.4.1).
+      if field.is_required() && self.is_deprecated(&field.directives) {
+        self.push_owned(
+          SchemaErrorKind::DeprecatedRequiredInputField,
+          &name,
+          owner.to_owned(),
+          at,
+        );
+      }
+
+      // The same coercion §3.6.1(2.4.5) demands of an argument's default, at the position the
+      // draft's numbered list leaves implicit. See `SchemaErrorKind::InvalidDefaultValue`.
+      if let Some(default) = &field.default_value {
+        self.check_const_value(
+          default,
+          field.ty.packed,
+          owner,
+          &name,
+          SchemaErrorKind::InvalidDefaultValue,
+          at.document,
         );
       }
 
@@ -1884,6 +2016,7 @@ impl SchemaBuilder {
         expected.ty.packed,
         &coordinate,
         &name,
+        SchemaErrorKind::InvalidDirectiveArgumentValue,
         argument.name.document,
       );
     }
@@ -1923,23 +2056,30 @@ impl SchemaBuilder {
   /// unresolved base type is the undefined-type refusal, and an output type in an input position
   /// is the directive-argument-type refusal. Reporting either again would make one defect print
   /// twice.
+  ///
+  /// # Two callers, one procedure, two names for the same verdict
+  ///
+  /// A directive usage's *supplied* argument and an `InputValueDefinition`'s *default* are the
+  /// same question asked of two positions, so `mismatch` is what the caller wants the "this
+  /// literal does not fit" verdict called —
+  /// [`InvalidDirectiveArgumentValue`](SchemaErrorKind::InvalidDirectiveArgumentValue) for the
+  /// first, [`InvalidDefaultValue`](SchemaErrorKind::InvalidDefaultValue) for the second — and it
+  /// is the only thing that differs. The two input-object kinds are *not* parameterised: an
+  /// input-object literal naming a field the type does not declare, or omitting a required one, is
+  /// the same mistake with the same coordinate wherever the literal is written, and giving it two
+  /// names would say otherwise.
   fn check_const_value(
     &mut self,
     value: &RawValue,
     expected: PackedType,
     owner: &str,
     subject: &str,
+    mismatch: SchemaErrorKind,
     document: u32,
   ) {
     if matches!(value.shape, RawShape::Null) {
       if expected.is_non_null() {
-        self.push_at(
-          SchemaErrorKind::InvalidDirectiveArgumentValue,
-          subject,
-          owner.to_owned(),
-          value.span,
-          document,
-        );
+        self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
       }
       return;
     }
@@ -1959,7 +2099,7 @@ impl SchemaBuilder {
         return;
       };
       for entry in entries {
-        self.check_const_value(entry, item, owner, subject, document);
+        self.check_const_value(entry, item, owner, subject, mismatch, document);
       }
       return;
     }
@@ -1973,13 +2113,7 @@ impl SchemaBuilder {
     match self.types[base].kind {
       TypeKind::InputObject => {
         let RawShape::Object(fields) = &value.shape else {
-          self.push_at(
-            SchemaErrorKind::InvalidDirectiveArgumentValue,
-            subject,
-            owner.to_owned(),
-            value.span,
-            document,
-          );
+          self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
           return;
         };
         // The literal is named by the input object it is being offered to, not by the argument
@@ -2015,7 +2149,14 @@ impl SchemaBuilder {
             );
             continue;
           }
-          self.check_const_value(&field.value, expected.ty.packed, owner, subject, document);
+          self.check_const_value(
+            &field.value,
+            expected.ty.packed,
+            owner,
+            subject,
+            mismatch,
+            document,
+          );
         }
 
         // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
@@ -2052,13 +2193,7 @@ impl SchemaBuilder {
           _ => false,
         };
         if !member {
-          self.push_at(
-            SchemaErrorKind::InvalidDirectiveArgumentValue,
-            subject,
-            owner.to_owned(),
-            value.span,
-            document,
-          );
+          self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
         }
       }
       TypeKind::Scalar => {
@@ -2067,13 +2202,7 @@ impl SchemaBuilder {
         let accepted = BuiltInScalar::from_name(name.as_bytes())
           .is_none_or(|scalar| scalar.accepts(value.shape.shape(), value.shape.spelling()));
         if !accepted {
-          self.push_at(
-            SchemaErrorKind::InvalidDirectiveArgumentValue,
-            subject,
-            owner.to_owned(),
-            value.span,
-            document,
-          );
+          self.push_at(mismatch, subject, owner.to_owned(), value.span, document);
         }
       }
       // An object, interface or union declared as an argument type is already the
@@ -2149,6 +2278,20 @@ impl SchemaBuilder {
               &expected,
               path,
               own.name,
+            );
+          }
+
+          // `IsValidImplementation` 2.6: "if `field` is deprecated then `implementedField` must
+          // also be deprecated". The span is the implementing field, which is where the edit goes;
+          // `related` points at the interface field, which is the other half of the obligation.
+          if self.is_deprecated(&own.directives) && !self.is_deprecated(&interface_field.directives)
+          {
+            self.push_related(
+              SchemaErrorKind::InterfaceFieldNotDeprecated,
+              &field_name,
+              Some(owner.clone()),
+              own.name,
+              interface_field.name.span,
             );
           }
 
@@ -2303,6 +2446,187 @@ impl SchemaBuilder {
           stack.push((target, 0));
         }
       }
+    }
+  }
+
+  /// Draft §3.10.1(4): `InputObjectDefaultValueHasCycle(inputObject)` must be false.
+  ///
+  /// # What the rule is actually about
+  ///
+  /// Not the type graph — [`SchemaBuilder::validate_input_object_cycles`] owns that, and
+  /// `input A { b: B = {} } input B { a: A = {} }` passes it, because every link is nullable. It is
+  /// the *defaults*: coercing `{}` for an `A` has to supply `A.b`, whose default is `{}`, whose
+  /// coercion has to supply `B.a`, whose default is `{}`… A service that tried to materialise the
+  /// value would not stop.
+  ///
+  /// # The draft's two mutually recursive functions, as one iterative walk
+  ///
+  /// `InputObjectDefaultValueHasCycle(object, value, visited)` asks each field of `object` about
+  /// `value`; `InputFieldDefaultValueHasCycle(field, value, visited)` descends either into the
+  /// entry `value` supplies for that field — leaving `visited` alone, because the caller wrote
+  /// that literal out — or, when it supplies none, into the field's *own* default, adding the
+  /// field to `visited` first and returning true if it was already there.
+  ///
+  /// Only the second kind of descent grows `visited`, so the walk's depth is bounded by the number
+  /// of defaulted fields in the document — which is bounded by nothing but the document. That is
+  /// the same reason [`SchemaBuilder::validate_directive_cycles`] and the type-graph walk are
+  /// iterative, and `a_deep_input_chain_does_not_recurse` is the standing guard: a recursive
+  /// implementation would put an SDL's input-object chain on the call stack. Recursion over a
+  /// *literal* is still fine — [`SchemaBuilder::const_value`] argues why — so unwrapping the list
+  /// nesting in `value` is the one recursive step, in [`map_nodes`].
+  ///
+  /// # One diagnostic per cycle
+  ///
+  /// Every input object on the path when a cycle is found is marked, and a marked object is not
+  /// walked again from the top. Without that, `A → B → A` reports twice, once from each end. The
+  /// cost is the same one [`SchemaBuilder::validate_input_object_cycles`] pays for its colouring:
+  /// a second, independent cycle through an already-implicated object waits for the next build.
+  ///
+  /// # Settling, and why it is sound
+  ///
+  /// A frame retires only when its whole sub-exploration finished, and nothing prunes that
+  /// exploration except the cycle test itself — which does not prune, it `break`s the entire walk.
+  /// So a retired frame's object has had every path below it followed to the end with no repeat,
+  /// which is to say **no cycle is reachable from it at all**, whatever `visited` it was reached
+  /// with. Starting a fresh walk there would re-derive that at the cost of the whole subtree over
+  /// again, so it is skipped. Without it a chain of `N` defaulted input objects costs `O(N²)`:
+  /// `a_deep_defaulted_input_chain_does_not_recurse` is twenty thousand links long and takes
+  /// **41.5 s** with the skip removed against **under one second** with it — measured, not
+  /// estimated. It is the standing guard on this and on the iterative shape both.
+  fn validate_input_object_default_cycles(&mut self) {
+    /// One level of `InputObjectDefaultValueHasCycle`: an input object, and the work its
+    /// `defaultValue` produced.
+    struct Frame {
+      /// The field of the enclosing object whose *own* default this frame descended into, if that
+      /// is why it exists. Popped off the path when the frame retires.
+      pushed: Option<usize>,
+      /// `(field index in `object`, the value the caller supplied for it)`, one entry per
+      /// (map node, field) pair — which is exactly the draft's "for each field in inputObject",
+      /// run once per map node the level's value unwraps to.
+      work: Vec<(usize, Option<RawValue>)>,
+      cursor: usize,
+      /// The object whose fields `work` indexes, so a frame can name the field it blames.
+      object: usize,
+    }
+
+    let count = self.types.len();
+    // A dense id per input field, so path membership is a bit rather than a search.
+    let mut field_base: Vec<usize> = vec![0; count + 1];
+    for index in 0..count {
+      field_base[index + 1] = field_base[index] + self.types[index].input_fields.len();
+    }
+    let total_fields = field_base[count];
+
+    let mut implicated = vec![false; count];
+    // Objects a completed walk proved clean; see the header for why that is transitive.
+    let mut settled = vec![false; count];
+    let mut on_path = vec![false; total_fields];
+
+    for start in 0..count {
+      if self.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
+        continue;
+      }
+      // The draft's top-level call: `defaultValue` is an empty map, so every field is asked, and
+      // none of them is supplied a value.
+      let mut stack = vec![Frame {
+        pushed: None,
+        work: (0..self.types[start].input_fields.len())
+          .map(|field| (field, None))
+          .collect(),
+        cursor: 0,
+        object: start,
+      }];
+
+      let mut found: Option<(usize, usize)> = None;
+      while let Some(frame) = stack.last_mut() {
+        let Some((field_index, supplied)) = frame.work.get(frame.cursor).cloned() else {
+          if let Some(id) = frame.pushed {
+            on_path[id] = false;
+          }
+          settled[frame.object] = true;
+          stack.pop();
+          continue;
+        };
+        frame.cursor += 1;
+        let object = frame.object;
+
+        // `InputFieldDefaultValueHasCycle`. A field whose named type is not an input object can
+        // hold no cycle, whatever its default says.
+        let field = &self.types[object].input_fields[field_index];
+        let base = field.ty.packed.base_id();
+        if base == UNRESOLVED {
+          continue;
+        }
+        let target = base.get() as usize;
+        if self.types[target].kind != TypeKind::InputObject {
+          continue;
+        }
+
+        let (descend_into, pushed) = match supplied {
+          // The caller's literal named this field, so the field's own default is never consulted
+          // and `visited` does not grow.
+          Some(value) => (value, None),
+          None => {
+            let Some(default) = field.default_value.clone() else {
+              continue;
+            };
+            let id = field_base[object] + field_index;
+            if on_path[id] {
+              found = Some((object, field_index));
+              break;
+            }
+            on_path[id] = true;
+            (default, Some(id))
+          }
+        };
+
+        let declared = &self.types[target].input_fields;
+        let mut maps: Vec<&[RawObjectField]> = Vec::new();
+        map_nodes(&descend_into, &mut maps);
+        let mut work = Vec::new();
+        for map in &maps {
+          for (index, declared_field) in declared.iter().enumerate() {
+            let supplied = map
+              .iter()
+              .find(|entry| entry.name.sym == declared_field.name.sym)
+              .map(|entry| entry.value.clone());
+            work.push((index, supplied));
+          }
+        }
+        stack.push(Frame {
+          pushed,
+          work,
+          cursor: 0,
+          object: target,
+        });
+      }
+
+      // The path is per-start, so a walk that stopped early has to put the bits back: `break`
+      // skips the retire step that clears them, and a stale `true` would make the *next* start
+      // report a cycle it never walked into.
+      for frame in &stack {
+        if let Some(id) = frame.pushed {
+          on_path[id] = false;
+        }
+      }
+
+      let Some((object, field_index)) = found else {
+        debug_assert!(stack.is_empty(), "a completed walk retires every frame");
+        continue;
+      };
+      for frame in &stack {
+        implicated[frame.object] = true;
+      }
+      implicated[object] = true;
+      let owner = self.text(self.types[object].name.sym).to_owned();
+      let at = self.types[object].input_fields[field_index].name;
+      let name = self.text(at.sym).to_owned();
+      self.push_owned(
+        SchemaErrorKind::InputObjectDefaultValueCycle,
+        &name,
+        owner,
+        at,
+      );
     }
   }
 
@@ -2704,6 +3028,28 @@ fn set_bit(words: &mut [u64], start: u32, ordinal: u32) {
   let word = start as usize + (ordinal / 64) as usize;
   if let Some(slot) = words.get_mut(word) {
     *slot |= 1u64 << (ordinal % 64);
+  }
+}
+
+/// Every map node a default value unwraps to, in the order the draft would reach them.
+///
+/// `InputObjectDefaultValueHasCycle` handles a list by recursing into each item against the *same*
+/// input object, and a map by asking each of that object's fields about it; every other shape
+/// contributes nothing. Flattening the list nesting up front is what lets
+/// [`SchemaBuilder::validate_input_object_default_cycles`] hold one work list per level instead of
+/// a second stack for it.
+///
+/// Recursive — but over a *literal*, whose depth the parser has already bounded, and not over the
+/// type graph, whose depth it has not. That is the same line [`SchemaBuilder::const_value`] draws.
+fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
+  match &value.shape {
+    RawShape::List(items) => {
+      for item in items {
+        map_nodes(item, out);
+      }
+    }
+    RawShape::Object(fields) => out.push(fields),
+    _ => {}
   }
 }
 

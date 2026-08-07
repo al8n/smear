@@ -512,6 +512,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::RootOperationTypeNotObject],
   ),
   (
+    SchemaErrorKind::SharedRootOperationType,
+    "type Query { ok: Int } schema { query: Query mutation: Query }",
+    &[SchemaErrorKind::SharedRootOperationType],
+  ),
+  (
     SchemaErrorKind::MissingQueryRootOperationType,
     "type NotTheRoot { ok: Int }",
     &[SchemaErrorKind::MissingQueryRootOperationType],
@@ -583,6 +588,16 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::ArgumentTypeNotInputType],
   ),
   (
+    SchemaErrorKind::DeprecatedRequiredArgument,
+    "type Query { ok(a: Int! @deprecated): Int }",
+    &[SchemaErrorKind::DeprecatedRequiredArgument],
+  ),
+  (
+    SchemaErrorKind::InvalidDefaultValue,
+    "type Query { ok(a: Int = \"nope\"): Int }",
+    &[SchemaErrorKind::InvalidDefaultValue],
+  ),
+  (
     SchemaErrorKind::ImplementsNonInterface,
     "type Query { ok: Int } type Thing { a: Int } type Other implements Thing { a: Int }",
     &[SchemaErrorKind::ImplementsNonInterface],
@@ -636,6 +651,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     SchemaErrorKind::UnexpectedRequiredArgument,
     "type Query { ok: Int } interface I { a: Int } type T implements I { a(x: Int!): Int }",
     &[SchemaErrorKind::UnexpectedRequiredArgument],
+  ),
+  (
+    SchemaErrorKind::InterfaceFieldNotDeprecated,
+    "type Query { ok: Int } interface I { a: Int } type T implements I { a: Int @deprecated }",
+    &[SchemaErrorKind::InterfaceFieldNotDeprecated],
   ),
   // -- §3.8 -------------------------------------------------------------------------------------
   (
@@ -696,6 +716,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::InputFieldTypeNotInputType],
   ),
   (
+    SchemaErrorKind::DeprecatedRequiredInputField,
+    "type Query { ok: Int } input In { a: Int! @deprecated }",
+    &[SchemaErrorKind::DeprecatedRequiredInputField],
+  ),
+  (
     SchemaErrorKind::OneOfFieldNotNullable,
     "type Query { ok: Int } input In @oneOf { a: Int! }",
     &[SchemaErrorKind::OneOfFieldNotNullable],
@@ -709,6 +734,16 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     SchemaErrorKind::CircularNonNullInputField,
     "type Query { ok: Int } input A { b: B! } input B { a: A! }",
     &[SchemaErrorKind::CircularNonNullInputField],
+  ),
+  (
+    SchemaErrorKind::InputObjectDefaultValueCycle,
+    "type Query { ok: Int } input In { a: In = {} }",
+    &[SchemaErrorKind::InputObjectDefaultValueCycle],
+  ),
+  (
+    SchemaErrorKind::OneOfOnInputObjectExtension,
+    "type Query { ok: Int } input In { a: Int } extend input In @oneOf",
+    &[SchemaErrorKind::OneOfOnInputObjectExtension],
   ),
   // -- §3.13 ------------------------------------------------------------------------------------
   (

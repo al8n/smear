@@ -34,7 +34,16 @@ pub enum SchemaErrorKind {
   /// A root operation names a type the document does not define (draft §3.3).
   UndefinedRootOperationType,
   /// A root operation names a type that is not an object type (draft §3.3).
+  ///
+  /// All three roots are held to it, not only `query`: the draft says the `mutation` and
+  /// `subscription` roots "must be an Object type" in the same breath.
   RootOperationTypeNotObject,
+  /// Two root operations name the same type (draft §3.3).
+  ///
+  /// "The `query`, `mutation`, and `subscription` root types must all be different types if
+  /// provided." A shared root is not a naming slip — the three roots are the entry points of three
+  /// different operation kinds, and a type that is two of them has no consistent field set.
+  SharedRootOperationType,
   /// The schema provides no query root operation type (draft §3.3).
   MissingQueryRootOperationType,
   /// `extend` names a type the document does not define (draft §3.3).
@@ -83,6 +92,27 @@ pub enum SchemaErrorKind {
   ReservedArgumentName,
   /// An argument's type is an output type (draft §3.6.1, §3.7.1).
   ArgumentTypeNotInputType,
+  /// `@deprecated` is applied to a required argument (draft §3.6.1 2.4.4.1, §3.7.1).
+  ///
+  /// Required means non-null with no default, and §3.13's own text for the directive says why:
+  /// "to deprecate a required argument … it must first be made optional". A caller has no way to
+  /// stop passing an argument it is obliged to pass, so the deprecation would be advice nobody can
+  /// act on.
+  ///
+  /// A directive definition's arguments are held to it as well. §3.13.1's numbered list does not
+  /// repeat the clause, but the `@deprecated` directive's own prose is not scoped to fields — it
+  /// says "required (non-null without a default) arguments" — and the position is the same
+  /// `InputValueDefinition`.
+  DeprecatedRequiredArgument,
+  /// An input value's default does not fit the type declared for it (draft §3.6.1 2.4.5, §3.7.1).
+  ///
+  /// The draft numbers the rule for a *field argument*: "if the argument has a default value it
+  /// must be compatible with `argumentType` as per the coercion rules for that type". The same
+  /// coercion is applied at the two other positions an `InputValueDefinition` appears — an input
+  /// object's field and a directive definition's argument — because a default that cannot be
+  /// coerced is unusable wherever it is written, and one procedure answering differently by
+  /// position would be the defect this shares its coercion table to avoid.
+  InvalidDefaultValue,
   /// `implements` names a type that is not an interface (draft §3.6.1, §3.7.1).
   ImplementsNonInterface,
   /// `implements` names a type the document does not define (draft §3.6.1, §3.7.1).
@@ -107,6 +137,14 @@ pub enum SchemaErrorKind {
   /// A field adds a required argument the interface field does not declare (draft §3.6.1,
   /// §3.7.1).
   UnexpectedRequiredArgument,
+  /// A field is deprecated and the interface field it implements is not
+  /// (`IsValidImplementation` 2.6).
+  ///
+  /// The obligation runs one way only. An interface may deprecate a field its implementors have
+  /// not, because a client reading the interface is told the field is going away everywhere; the
+  /// reverse would tell a client reading the interface that a field is supported when one
+  /// implementation has already withdrawn it.
+  InterfaceFieldNotDeprecated,
 
   // -- §3.8 Unions --------------------------------------------------------------------------
   /// A union type declares no members (draft §3.8.1).
@@ -135,6 +173,12 @@ pub enum SchemaErrorKind {
   ReservedInputFieldName,
   /// An input field's type is an output type (draft §3.10.1).
   InputFieldTypeNotInputType,
+  /// `@deprecated` is applied to a required input field (draft §3.10.1 2.4.1).
+  ///
+  /// The input-field half of [`DeprecatedRequiredArgument`](Self::DeprecatedRequiredArgument),
+  /// with the same reasoning and its own kind because the two name different artifacts: `T.f.a` is
+  /// an argument and `In.a` is an input field.
+  DeprecatedRequiredInputField,
   /// A field of a `@oneOf` input object is non-null (draft §3.10.1).
   OneOfFieldNotNullable,
   /// A field of a `@oneOf` input object declares a default value (draft §3.10.1).
@@ -142,6 +186,25 @@ pub enum SchemaErrorKind {
   /// Input objects form a cycle in which every link is non-null, so no finite value satisfies it
   /// (draft §3.10.1).
   CircularNonNullInputField,
+  /// An input object's default values refer to one another in a cycle, so coercing the outer
+  /// default would never terminate (draft §3.10.1(4), `InputObjectDefaultValueHasCycle`).
+  ///
+  /// Distinct from [`CircularNonNullInputField`](Self::CircularNonNullInputField), which is about
+  /// the *types*: `input A { b: B = {} } input B { a: A = {} }` has a perfectly finite type graph —
+  /// every link is nullable — and it is the *defaults* that never bottom out, because coercing
+  /// `{}` for `A` needs `A.b`'s default, which needs `B.a`'s, which needs `A.b`'s.
+  InputObjectDefaultValueCycle,
+  /// `@oneOf` is provided by an input object type *extension* (draft §3.10.3(5)).
+  ///
+  /// Being a OneOf Input Object changes what every *existing* field of the type means — each one
+  /// becomes one of the alternatives, and every one of them has to be nullable and undefaulted. An
+  /// extension may not impose that retroactively, so the directive belongs on the definition or
+  /// nowhere.
+  ///
+  /// The type is still treated as OneOf for the rest of the build, so the fields an extension
+  /// added are checked against the constraint too (§3.10.3(6)) rather than going unexamined behind
+  /// this refusal.
+  OneOfOnInputObjectExtension,
 
   // -- §3.13 Directives ---------------------------------------------------------------------
   /// A directive name begins with `__` (draft §3.13.1).
@@ -224,6 +287,7 @@ impl SchemaErrorKind {
     Self::DuplicateRootOperationType,
     Self::UndefinedRootOperationType,
     Self::RootOperationTypeNotObject,
+    Self::SharedRootOperationType,
     Self::MissingQueryRootOperationType,
     Self::UndefinedExtensionTarget,
     Self::ExtensionKindMismatch,
@@ -240,6 +304,8 @@ impl SchemaErrorKind {
     Self::DuplicateArgumentName,
     Self::ReservedArgumentName,
     Self::ArgumentTypeNotInputType,
+    Self::DeprecatedRequiredArgument,
+    Self::InvalidDefaultValue,
     Self::ImplementsNonInterface,
     Self::UndefinedImplementsInterface,
     Self::DuplicateImplementsInterface,
@@ -250,6 +316,7 @@ impl SchemaErrorKind {
     Self::MissingInterfaceFieldArgument,
     Self::InvalidInterfaceFieldArgumentType,
     Self::UnexpectedRequiredArgument,
+    Self::InterfaceFieldNotDeprecated,
     Self::EmptyUnionMembers,
     Self::UnionMemberNotObject,
     Self::UndefinedUnionMember,
@@ -261,9 +328,12 @@ impl SchemaErrorKind {
     Self::DuplicateInputFieldName,
     Self::ReservedInputFieldName,
     Self::InputFieldTypeNotInputType,
+    Self::DeprecatedRequiredInputField,
     Self::OneOfFieldNotNullable,
     Self::OneOfFieldHasDefault,
     Self::CircularNonNullInputField,
+    Self::InputObjectDefaultValueCycle,
+    Self::OneOfOnInputObjectExtension,
     Self::ReservedDirectiveName,
     Self::DuplicateDirectiveArgumentName,
     Self::ReservedDirectiveArgumentName,
@@ -289,6 +359,7 @@ impl SchemaErrorKind {
       Self::DuplicateRootOperationType => "duplicate root operation type",
       Self::UndefinedRootOperationType => "undefined root operation type",
       Self::RootOperationTypeNotObject => "root operation type is not an object type",
+      Self::SharedRootOperationType => "two root operations name the same type",
       Self::MissingQueryRootOperationType => "no query root operation type",
       Self::UndefinedExtensionTarget => "extension target is not defined",
       Self::ExtensionKindMismatch => "extension does not match the kind of the type it extends",
@@ -305,6 +376,8 @@ impl SchemaErrorKind {
       Self::DuplicateArgumentName => "duplicate argument",
       Self::ReservedArgumentName => "argument name is reserved for introspection",
       Self::ArgumentTypeNotInputType => "argument type is not an input type",
+      Self::DeprecatedRequiredArgument => "required argument is deprecated",
+      Self::InvalidDefaultValue => "default value does not fit its declared type",
       Self::ImplementsNonInterface => "implemented type is not an interface",
       Self::UndefinedImplementsInterface => "implemented interface is not defined",
       Self::DuplicateImplementsInterface => "duplicate implemented interface",
@@ -324,6 +397,10 @@ impl SchemaErrorKind {
         "required argument is not declared by the interface \
                                             field"
       }
+      Self::InterfaceFieldNotDeprecated => {
+        "field is deprecated but the interface field it \
+                                             implements is not"
+      }
       Self::EmptyUnionMembers => "union declares no member types",
       Self::UnionMemberNotObject => "union member is not an object type",
       Self::UndefinedUnionMember => "union member is not defined",
@@ -335,9 +412,12 @@ impl SchemaErrorKind {
       Self::DuplicateInputFieldName => "duplicate input field",
       Self::ReservedInputFieldName => "input field name is reserved for introspection",
       Self::InputFieldTypeNotInputType => "input field type is not an input type",
+      Self::DeprecatedRequiredInputField => "required input field is deprecated",
       Self::OneOfFieldNotNullable => "field of a @oneOf input object is non-null",
       Self::OneOfFieldHasDefault => "field of a @oneOf input object has a default value",
       Self::CircularNonNullInputField => "input object cycle has no nullable or list link",
+      Self::InputObjectDefaultValueCycle => "input object default values form a cycle",
+      Self::OneOfOnInputObjectExtension => "@oneOf is provided by an input object type extension",
       Self::ReservedDirectiveName => "directive name is reserved for introspection",
       Self::DuplicateDirectiveArgumentName => "duplicate directive argument",
       Self::ReservedDirectiveArgumentName => {
