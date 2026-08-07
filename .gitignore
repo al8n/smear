@@ -7,3 +7,18 @@
 **Cargo.lock
 
 **wip
+
+# Local design docs / plans / investigation reports (never committed; see
+# team convention — the issue tracker is for defects and measurable
+# optimisations, docs/ is for everything else).
+#
+# Root-anchored on purpose: a leading "/" with no "**" prefix, unlike the
+# patterns above. This repo's other entries are meant to match at any depth
+# (a build `target/` or stray `.DS_Store` can appear under any crate), but
+# this one must not — it should catch only the top-level docs/ tree, not a
+# nested `*/docs/` directory some crate might add later (e.g. doc assets
+# under `smear-lexer/docs/`). Verified with `git check-ignore -v`: bare
+# `docs/` and `**docs/` both match at *any* depth (git only anchors a
+# pattern when it has a leading or middle slash — a trailing slash alone
+# does not anchor it), so neither achieves "root tree only". `/docs/` does.
+/docs/
