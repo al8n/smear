@@ -57,8 +57,12 @@ pub(super) struct Slot<V> {
   /// The type of this position, which is what draft §6.4.4's walk reads.
   pub(super) ty: PackedType,
   pub(super) state: State<V>,
-  /// Set when draft §6.4.4 nulled this slot or an ancestor: the subtree is no longer part of the
-  /// response, and any request outstanding under it is abandoned.
+  /// Set when draft §6.4.4 nulled this slot or an ancestor: the position is no longer part of the
+  /// response, any request outstanding under it is abandoned, and it holds no driver value.
+  ///
+  /// It is set on the whole subtree and not only on the position §6.4.4 nulled, because
+  /// `Executor::discard` marks and empties in the same pass. That is what lets a later discard
+  /// higher up stop at this slot instead of walking into a subtree that is already empty.
   pub(super) discarded: bool,
   /// The next slot on the ready chain, or [`NONE`].
   pub(super) next_ready: u32,
@@ -374,9 +378,11 @@ pub(super) fn node<'r, V>(
   index: u32,
 ) -> Node<'r, V> {
   let slot = &slots[index as usize];
-  // A slot draft §6.4.4 discarded reads as `null` whatever it used to hold. Nothing rewrites the
-  // subtree — the flag is the rewrite — which is what keeps propagation O(depth) instead of
-  // O(subtree).
+  // A slot draft §6.4.4 discarded reads as `null` whatever it used to hold. The flag is the whole
+  // of the rewrite: the subtree below keeps its links and its keys, and this one branch is what
+  // stops any of it from being read. What the executor *does* walk a discarded subtree for is
+  // release — see `Executor::discard` — and that changes nothing here, because this has already
+  // answered `null` before reaching a slot the walk emptied.
   if slot.discarded {
     return Node::Null;
   }

@@ -17,7 +17,8 @@
 //! the specification rather than against `graphql-js`, and that difference is worth knowing when
 //! reading a green run.
 
-use core::num::NonZeroU32;
+use core::{cell::Cell, num::NonZeroU32};
+use std::rc::Rc;
 
 use smear::{
   lexer::tokora::{Parse as _, Parser},
@@ -1793,6 +1794,649 @@ fn every_admissible_ceiling_finishes_a_valid_query() {
       "ceiling {ceiling}"
     );
   }
+}
+
+// ------------------------------------------------------------------------------------------
+// how long the executor holds a driver value
+// ------------------------------------------------------------------------------------------
+
+/// A driver value that says how many of itself are alive.
+///
+/// Every other case in this file drives the executor with [`J`], which is inert: a value the
+/// executor keeps after nothing can read it costs a few bytes and changes no assertion, so a
+/// retention is invisible. `Values::Value` is the driver's own type precisely so that a wasm or FFI
+/// handle can be one, and a handle held past the operation that opened it holds open whatever it
+/// names — a connection, a cursor, a table entry the driver would otherwise have reclaimed. A
+/// counter is the only way that becomes something a test can fail.
+#[derive(Debug)]
+struct Counted {
+  live: Rc<Cell<usize>>,
+  payload: Payload,
+}
+
+#[derive(Debug)]
+enum Payload {
+  Str(&'static str),
+  Obj,
+  /// A list of that many elements, each of which [`Handles::list_item`] mints as an object.
+  List(usize),
+}
+
+impl Counted {
+  fn new(live: &Rc<Cell<usize>>, payload: Payload) -> Self {
+    live.set(live.get() + 1);
+    Self {
+      live: Rc::clone(live),
+      payload,
+    }
+  }
+
+  fn obj(live: &Rc<Cell<usize>>) -> Self {
+    Self::new(live, Payload::Obj)
+  }
+
+  fn text(live: &Rc<Cell<usize>>, text: &'static str) -> Self {
+    Self::new(live, Payload::Str(text))
+  }
+
+  fn list(live: &Rc<Cell<usize>>, len: usize) -> Self {
+    Self::new(live, Payload::List(len))
+  }
+}
+
+impl Drop for Counted {
+  fn drop(&mut self) {
+    self.live.set(self.live.get() - 1);
+  }
+}
+
+/// A value space whose variable table hands each value **over** rather than lending it.
+///
+/// Handing over is what makes the count unambiguous. While the executor holds a variable's value
+/// there is exactly one of it in the program, so a non-zero counter is the executor's own retention
+/// and never a copy the test left behind in a table. It is also not an exotic driver:
+/// [`Values::variable`] takes `&mut self` so that a handle table may move, allocate or reclaim on
+/// read, and [`Space::consume_variables`] already exercises the same shape.
+struct Handles {
+  /// The counter every value this space itself mints belongs to.
+  mint: Rc<Cell<usize>>,
+  variables: Vec<(&'static str, Counted)>,
+}
+
+impl Values for Handles {
+  type Value = Counted;
+
+  /// Never. Every case in this section counts *held* values, and a null is the one answer that
+  /// leaves nothing to hold: draft §6.4.3 steps 1 and 2 would store `State::Null` and drop the
+  /// value before any of these assertions could tell a release from a value that was never kept.
+  fn is_null(&self, _: &Counted) -> bool {
+    false
+  }
+
+  fn as_bool(&self, _: &Counted) -> Option<bool> {
+    None
+  }
+
+  fn list_len(&self, value: &Counted) -> Option<usize> {
+    match value.payload {
+      Payload::List(len) => Some(len),
+      _ => None,
+    }
+  }
+
+  fn list_item(&mut self, _: &Counted, _: usize) -> Counted {
+    // `HOLD_SDL` declares one list and its element type is an object, so every element the
+    // executor completes stores a value of its own on the element slot.
+    Counted::obj(&self.mint)
+  }
+
+  fn type_name<'a>(&'a self, _: &'a Counted) -> Option<&'a str> {
+    None
+  }
+
+  fn coerce_leaf(&mut self, value: Counted, _: Leaf<'_>) -> Option<Counted> {
+    Some(value)
+  }
+
+  fn variable(&mut self, name: &str) -> Option<Counted> {
+    let index = self
+      .variables
+      .iter()
+      .position(|(declared, _)| *declared == name)?;
+    Some(self.variables.remove(index).1)
+  }
+}
+
+const HOLD_SDL: &str = r#"
+type Query {
+  echo(text: String): String
+  pair(first: String, second: String!): String
+  nest: Wrap
+}
+type Wrap {
+  boom: String!
+  echo(text: String): String
+  bulk: [Cell]
+  deep: Wrap
+}
+type Cell {
+  text: String
+  boom: String!
+  echo(text: String): String
+}
+"#;
+
+/// How many elements the `bulk` cases give the list.
+///
+/// Large enough that the retention it is watching for is a multiple of the response's own size and
+/// not a rounding error, small enough to stay well under the default in-flight ceiling.
+const CELLS: usize = 8;
+
+/// The counters a case watches, and the executor's two inputs.
+struct Held<'q> {
+  /// Counts the values handed to the executor as **variables**.
+  arguments: Rc<Cell<usize>>,
+  /// Counts everything else the test mints: the root, and every resolved field value.
+  tree: Rc<Cell<usize>>,
+  schema: Schema,
+  document: ExecutableDocument<&'q str>,
+}
+
+fn watch<'q>(query: &'q str, variables: &[&'static str]) -> (Held<'q>, Handles) {
+  assert_valid(HOLD_SDL, query);
+  let (schema, document) = compile(HOLD_SDL, query);
+  let arguments = Rc::new(Cell::new(0usize));
+  let tree = Rc::new(Cell::new(0usize));
+  let space = Handles {
+    mint: Rc::clone(&tree),
+    variables: variables
+      .iter()
+      .map(|name| (*name, Counted::text(&arguments, "V")))
+      .collect(),
+  };
+  (
+    Held {
+      arguments,
+      tree,
+      schema,
+      document,
+    },
+    space,
+  )
+}
+
+/// A request is answered, so the value its argument was checked against is released.
+///
+/// The tight point, asserted as the tight point: the release is at the answer and not at the end of
+/// the operation. Both halves matter — the value has to still be readable while the request is the
+/// one being offered, which the first assertion pins, and gone once it is not.
+#[test]
+fn answering_a_request_releases_its_argument_value() {
+  let query = "query ($text: String) { echo(text: $text) }";
+  let (held, mut space) = watch(query, &["text"]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let request = executor.poll_resolve(&mut space).expect("echo");
+  let id = request.id();
+  match request.arguments() {
+    [argument] => match argument.source() {
+      ArgumentSource::Variable { name, value } => {
+        assert_eq!(*name, "text");
+        assert!(matches!(value.payload, Payload::Str("V")));
+      }
+      other => panic!("`text` is a bare variable and arrived as {other:?}"),
+    },
+    arguments => panic!("`echo` has one argument, and got {}", arguments.len()),
+  }
+  assert_eq!(
+    held.arguments.get(),
+    1,
+    "the executor holds the checked value for as long as the request that carries it is readable"
+  );
+
+  executor.handle_resolved(&mut space, id, Counted::text(&held.tree, "E"));
+  assert_eq!(
+    held.arguments.get(),
+    0,
+    "the request is answered, so nothing can read its arguments again"
+  );
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(
+    held.arguments.get(),
+    0,
+    "and the response holds none either"
+  );
+  let Node::Object(mut fields) = response.data() else {
+    panic!("the root is an object")
+  };
+  let (key, value) = fields.next().expect("one field was selected");
+  assert_eq!(key.to_string(), "echo");
+  assert!(
+    matches!(
+      value,
+      Node::Leaf(Counted {
+        payload: Payload::Str("E"),
+        ..
+      })
+    ),
+    "releasing the arguments must not disturb the answer"
+  );
+}
+
+/// Draft §6.4.4 discards the position a request would have filled, so its argument value goes too.
+///
+/// The request is never answered — the operation abandons it — which is the exit path an
+/// answer-driven release would miss.
+#[test]
+fn an_abandoned_request_releases_its_argument_value() {
+  let query = "query ($text: String) { nest { boom echo(text: $text) } }";
+  let (held, mut space) = watch(query, &["text"]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, Counted::obj(&held.tree));
+  let boom = executor.poll_resolve(&mut space).expect("boom").id();
+  let echo = executor.poll_resolve(&mut space).expect("echo").id();
+  assert_eq!(
+    held.arguments.get(),
+    1,
+    "`echo` is in flight with its value"
+  );
+
+  // `boom` is `String!`, so failing it nulls `nest` and `echo` can no longer land anywhere.
+  executor.handle_field_error(boom, "boom");
+  assert_eq!(
+    held.arguments.get(),
+    0,
+    "the position the argument was checked for is discarded, so the value is unreachable"
+  );
+  assert_eq!(executor.poll_abandoned(), Some(echo));
+
+  // A driver that cancels asynchronously answers anyway, and the value it hands over must not be
+  // kept by an executor that has nowhere to put it.
+  let late = Rc::new(Cell::new(0usize));
+  executor.handle_resolved(&mut space, echo, Counted::text(&late, "late"));
+  assert_eq!(late.get(), 0, "a value for a retired request is dropped");
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(held.arguments.get(), 0);
+}
+
+/// A `start` that refuses releases both the operation it reset and the root it was handed.
+///
+/// Draft §6.1's `GetOperation` failures return before anything is stored, and the reset that
+/// precedes them has already emptied the last operation — so a refused restart is the point at
+/// which the executor should be holding nothing at all.
+#[test]
+fn a_refused_start_releases_what_the_last_operation_held() {
+  let query = "query ($text: String) { echo(text: $text) }";
+  let (held, mut space) = watch(query, &["text"]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+  executor.poll_resolve(&mut space).expect("echo");
+  assert_eq!(held.arguments.get(), 1);
+
+  let refused = executor
+    .start(&mut space, Some("nope"), Counted::obj(&held.tree))
+    .expect_err("the document has no operation with that name");
+  assert_eq!(refused, StartError::UnknownOperation);
+  assert_eq!(
+    held.arguments.get(),
+    0,
+    "the operation the argument belonged to is over"
+  );
+  assert_eq!(
+    held.tree.get(),
+    0,
+    "so is its response tree, and the root the refused start never stored"
+  );
+}
+
+/// A restart that asks the driver for nothing still releases the last operation's argument value.
+///
+/// Draft §4.4's `__typename` is answered by the executor, so this operation runs to a complete
+/// response without a single call in that coerces an argument. A release that rode on the next
+/// coercion would leave the previous operation's value pinned for the whole of it.
+#[test]
+fn a_restart_that_asks_the_driver_nothing_releases_the_last_argument_value() {
+  let query = "query first($text: String) { echo(text: $text) } query second { __typename }";
+  let (held, mut space) = watch(query, &["text"]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, Some("first"), Counted::obj(&held.tree))
+    .expect("the operation resolves");
+  executor.poll_resolve(&mut space).expect("echo");
+  assert_eq!(held.arguments.get(), 1);
+
+  executor
+    .start(&mut space, Some("second"), Counted::obj(&held.tree))
+    .expect("the operation resolves");
+  assert_eq!(
+    held.arguments.get(),
+    0,
+    "`start` voids the operation the value belonged to"
+  );
+  assert!(
+    executor.poll_resolve(&mut space).is_none(),
+    "`__typename` is the executor's own answer, so there is no request to hand out"
+  );
+
+  let response = executor
+    .poll_response()
+    .expect("a response that needs no driver call is finished as soon as it is started");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(held.arguments.get(), 0);
+}
+
+/// Draft §6.4.1 raising on one argument releases the values of the ones that already passed.
+///
+/// `pair` is the case a per-answer release would still miss: the field is never offered, so there
+/// is no request to answer and no request to abandon, and `first`'s value has already been read and
+/// kept when `second` raises. It is the last ready slot too, so nothing coerces after it.
+#[test]
+fn an_argument_error_releases_the_values_that_passed_before_it() {
+  let query = "query ($first: String, $second: String!) { pair(first: $first, second: $second) }";
+  // `second` is declared and never supplied, which is draft §6.4.1 step 5.d's field error.
+  let (held, mut space) = watch(query, &["first"]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  assert!(
+    executor.poll_resolve(&mut space).is_none(),
+    "the only field raised an argument error, so it is never offered"
+  );
+  assert_eq!(
+    held.arguments.get(),
+    0,
+    "`first` passed and `second` did not, and neither value can be read now"
+  );
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    response
+      .errors()
+      .next()
+      .expect("one error was raised")
+      .kind(),
+    Kind::ArgumentVariableMissing
+  );
+  assert_eq!(held.arguments.get(), 0);
+}
+
+/// Draft §6.4.4 nulls a parent, so the values completed *below* the parent die with it.
+///
+/// The subtree is the part that is easy to leave behind. §6.4.4's rewrite is a walk of the
+/// response's *depth*, and everything the driver already resolved underneath the position it nulls
+/// is off that path — so a response of one `null` can be sitting on every value a large completed
+/// subtree ever produced. The in-flight ceiling is no bound on that: it bounds outstanding work,
+/// and these are finished.
+#[test]
+fn a_discarded_ancestor_releases_the_values_completed_beneath_it() {
+  let query = "{ nest { bulk { text } boom } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, Counted::obj(&held.tree));
+  let bulk = executor.poll_resolve(&mut space).expect("bulk").id();
+  executor.handle_resolved(&mut space, bulk, Counted::list(&held.tree, CELLS));
+
+  // `boom` is offered before the element fields the list enqueues, so holding it is what puts the
+  // field error *after* the subtree it discards has completed.
+  let boom = executor.poll_resolve(&mut space).expect("boom").id();
+  for _ in 0..CELLS {
+    let text = executor
+      .poll_resolve(&mut space)
+      .expect("one cell's `text`")
+      .id();
+    executor.handle_resolved(&mut space, text, Counted::text(&held.tree, "T"));
+  }
+  assert!(
+    executor.poll_resolve(&mut space).is_none(),
+    "`boom` is the only request left outstanding"
+  );
+  assert_eq!(
+    held.tree.get(),
+    2 + 2 * CELLS,
+    "the root, `nest`, and an object and a leaf for each of the {CELLS} cells"
+  );
+
+  // `boom` is `String!` on a nullable `nest`, so §6.4.4 nulls `nest` and the whole `bulk` subtree
+  // leaves the response with it.
+  executor.handle_field_error(boom, "boom");
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "only the root is still part of the response"
+  );
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "and the response itself holds nothing the discard released"
+  );
+  let Node::Object(mut fields) = response.data() else {
+    panic!("the root is an object")
+  };
+  let (key, value) = fields.next().expect("one field was selected");
+  assert_eq!(key.to_string(), "nest");
+  assert!(
+    matches!(value, Node::Null),
+    "releasing the subtree must not change what the response says"
+  );
+  assert!(fields.next().is_none(), "`nest` is the only root field");
+}
+
+/// A discarded *list element* releases its own subtree and leaves its siblings alone.
+///
+/// The element is the position §6.4.4 stops at whenever the element type is nullable, so it is the
+/// discard root a list-shaped response hits most often — and the one where releasing too much would
+/// take the rest of the list with it.
+#[test]
+fn a_discarded_list_element_releases_only_its_own_subtree() {
+  let query = "{ nest { bulk { text boom } } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, Counted::obj(&held.tree));
+  let bulk = executor.poll_resolve(&mut space).expect("bulk").id();
+  executor.handle_resolved(&mut space, bulk, Counted::list(&held.tree, CELLS));
+
+  // The first cell completes its `text` and then fails its `String!`.
+  let text = executor.poll_resolve(&mut space).expect("text").id();
+  executor.handle_resolved(&mut space, text, Counted::text(&held.tree, "T"));
+  assert_eq!(
+    held.tree.get(),
+    3 + CELLS,
+    "the root, `nest`, {CELLS} cells and one leaf"
+  );
+  let boom = executor.poll_resolve(&mut space).expect("boom").id();
+  executor.handle_field_error(boom, "boom");
+  assert_eq!(
+    held.tree.get(),
+    1 + CELLS,
+    "the first cell's object and leaf are gone; the root, `nest` and the other cells are not"
+  );
+
+  // The rest of the list completes normally.
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Counted::text(&held.tree, "T"));
+  }
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  let Node::Object(mut fields) = response.data() else {
+    panic!("the root is an object")
+  };
+  let (_, nest) = fields.next().expect("`nest`");
+  let Node::Object(mut wrap) = nest else {
+    panic!("`nest` resolved to an object")
+  };
+  let (_, bulk) = wrap.next().expect("`bulk`");
+  let Node::List(cells) = bulk else {
+    panic!("`bulk` is a list")
+  };
+  let shape: Vec<bool> = cells
+    .map(|(_, cell)| matches!(cell, Node::Object(_)))
+    .collect();
+  assert_eq!(
+    shape,
+    core::iter::once(false)
+      .chain(core::iter::repeat_n(true, CELLS - 1))
+      .collect::<Vec<_>>(),
+    "the failing cell is null and every other cell is still an object"
+  );
+}
+
+/// A discard above an already-discarded subtree releases what is left and nothing else.
+///
+/// This is the case that decides whether draining on discard is affordable. The inner cell was
+/// drained when its own `String!` failed; nulling `nest` walks over it again, and the walk must
+/// find it empty and stop rather than descend. What a counter can say is that the second discard
+/// releases exactly the values the first one left. Whether it *walked* the drained cell is not
+/// visible from out here — a second walk over an empty subtree releases nothing and changes no
+/// response — so `proto::execute`'s own `a_drained_subtree_is_not_walked_again` pins that half.
+#[test]
+fn a_discard_above_an_already_discarded_subtree_releases_only_the_rest() {
+  let query = "{ nest { bulk { text boom } boom } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, Counted::obj(&held.tree));
+  let bulk = executor.poll_resolve(&mut space).expect("bulk").id();
+  executor.handle_resolved(&mut space, bulk, Counted::list(&held.tree, CELLS));
+  let outer = executor.poll_resolve(&mut space).expect("nest.boom").id();
+
+  // The first cell fails, which discards that element and nothing above it.
+  let text = executor.poll_resolve(&mut space).expect("text").id();
+  executor.handle_resolved(&mut space, text, Counted::text(&held.tree, "T"));
+  let inner = executor
+    .poll_resolve(&mut space)
+    .expect("the cell's boom")
+    .id();
+  executor.handle_field_error(inner, "boom");
+  assert_eq!(
+    held.tree.get(),
+    1 + CELLS,
+    "the root, `nest` and the {} cells the discard did not reach",
+    CELLS - 1
+  );
+
+  // The other cells complete, and then `nest` is nulled over the top of the drained one.
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Counted::text(&held.tree, "T"));
+  }
+  executor.handle_field_error(outer, "boom");
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "only the root is still part of the response"
+  );
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 2);
+  let Node::Object(mut fields) = response.data() else {
+    panic!("the root is an object")
+  };
+  let (key, value) = fields.next().expect("`nest`");
+  assert_eq!(key.to_string(), "nest");
+  assert!(matches!(value, Node::Null));
+}
+
+/// One discard releases a completed subtree, an in-flight request's argument, and the request.
+///
+/// The three releases have three different mechanisms — the subtree walk, `retire_arguments`, and
+/// `poll_abandoned` — and a discard is where all three come due at once. `deep` is selected after
+/// `bulk` so that its `echo` is enqueued behind the cells' fields and is therefore the *last*
+/// request offered, which is the only one whose argument values the executor still holds.
+#[test]
+fn a_discard_releases_a_completed_subtree_and_the_request_racing_it() {
+  let query = "query ($t: String) { nest { bulk { text } deep { echo(text: $t) } boom } }";
+  let (held, mut space) = watch(query, &["t"]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, Counted::obj(&held.tree));
+  let bulk = executor.poll_resolve(&mut space).expect("bulk").id();
+  executor.handle_resolved(&mut space, bulk, Counted::list(&held.tree, CELLS));
+  let deep = executor.poll_resolve(&mut space).expect("deep").id();
+  executor.handle_resolved(&mut space, deep, Counted::obj(&held.tree));
+  let boom = executor.poll_resolve(&mut space).expect("boom").id();
+  for _ in 0..CELLS {
+    let text = executor
+      .poll_resolve(&mut space)
+      .expect("one cell's `text`")
+      .id();
+    executor.handle_resolved(&mut space, text, Counted::text(&held.tree, "T"));
+  }
+  let echo = executor.poll_resolve(&mut space).expect("echo").id();
+  assert_eq!(
+    held.arguments.get(),
+    1,
+    "`echo` is the request being offered, so its checked value is readable"
+  );
+  assert_eq!(
+    held.tree.get(),
+    3 + 2 * CELLS,
+    "the root, `nest`, `deep`, and an object and a leaf for each of the {CELLS} cells"
+  );
+
+  executor.handle_field_error(boom, "boom");
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "the completed subtree under `nest` is no longer part of the response"
+  );
+  assert_eq!(
+    held.arguments.get(),
+    0,
+    "and neither is the position `echo`'s argument was checked for"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    Some(echo),
+    "the request under the discarded subtree is still reported"
+  );
+
+  let late = Rc::new(Cell::new(0usize));
+  executor.handle_resolved(&mut space, echo, Counted::text(&late, "late"));
+  assert_eq!(late.get(), 0, "a value for a retired request is dropped");
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(held.tree.get(), 1);
 }
 
 // ------------------------------------------------------------------------------------------

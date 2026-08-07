@@ -136,6 +136,15 @@ pub enum ArgumentSource<'a, S, V> {
   ///
   /// `name` is still here because draft §6.4.1's own errors name the variable, and because a
   /// driver's tracing wants it.
+  ///
+  /// # How long the executor owns it
+  ///
+  /// Only while this request is the one being offered. The driver's next call in releases it —
+  /// whether that call answers the request, reports a field error for it, retires it, takes the
+  /// response or starts another operation — so a value that owns something, a wasm or FFI handle
+  /// or a pooled buffer, is handed back inside the operation rather than at the end of it. A
+  /// driver that needs it for longer takes its own copy while the request is readable, which the
+  /// borrow already requires of anything read out of a [`FieldRequest`].
   Variable {
     /// The variable's name, without the `$`.
     name: &'a str,

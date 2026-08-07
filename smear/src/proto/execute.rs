@@ -47,6 +47,9 @@ use super::{
   response::{Key, NONE, Slot, State, node},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// What the executor will not do, whatever the document asks.
 ///
 /// One knob, because one is what draft §6 needs. Selection depth is bounded by the document, which
@@ -231,6 +234,16 @@ where
   scratch_groups: std::vec::Vec<Group>,
   scratch_visited: std::vec::Vec<u32>,
   scratch_sets: std::vec::Vec<&'a SelectionSet<S>>,
+  /// Draft §6.4.1's surviving arguments, for the one request `poll_resolve` is offering.
+  ///
+  /// The only driver values the executor owns that are not part of the response, and so the only
+  /// ones whose release is not the response tree's. An [`ArgumentSource::Variable`] carries the
+  /// very value §6.4.1 checked rather than the name to look it up by — see that variant for why it
+  /// must — which makes this vector the owner of a `V::Value` that may be a wasm or FFI handle,
+  /// and a handle held past the position it was checked for holds open whatever it names.
+  ///
+  /// It has exactly one reader, and [`retire_arguments`](Self::retire_arguments) is what that
+  /// buys.
   scratch_args: std::vec::Vec<Argument<'a, S, V::Value>>,
 }
 
@@ -297,6 +310,12 @@ where
   /// still outstanding is therefore an abandonment of the whole operation and not a corruption of
   /// the next one; the driver hears nothing more about them, because there is no longer an
   /// operation for them to belong to.
+  ///
+  /// Every driver value that operation left behind is released here as well — its response tree,
+  /// and the arguments of the last request it was offered. That happens before draft §6.1's lookup
+  /// and therefore on the refusals too, so a `start` that returns a [`StartError`] leaves the
+  /// executor holding nothing: not the operation it ended, and not the `root` it was handed, which
+  /// is never stored on a path that refuses.
   pub fn start(
     &mut self,
     ctx: &mut V,
@@ -362,22 +381,32 @@ where
   /// Draft §6.4.1 runs *here*, before the request is handed out, so an argument the specification
   /// rejects becomes a field error and its field is never offered at all.
   pub fn poll_resolve(&mut self, ctx: &mut V) -> Option<FieldRequest<'_, 'a, S, V::Value>> {
+    self.retire_arguments();
     if !self.started {
       return None;
     }
-    let slot = loop {
+    let found = loop {
       if self.live + self.abandoned >= self.limits.max_in_flight.get() {
-        return None;
+        break None;
       }
-      let slot = self.pop_ready()?;
+      let Some(slot) = self.pop_ready() else {
+        break None;
+      };
       if self.discarded(slot) {
         continue;
       }
       if self.coerce_arguments(ctx, slot) {
-        break slot;
+        break Some(slot);
       }
       // Argument coercion raised a field error, which nulled the field and may have nulled an
       // ancestor. There is nothing to hand the driver; take the next ready slot.
+    };
+    let Some(slot) = found else {
+      // Withholding is not offering, so there is no `FieldRequest` to read `scratch_args` and the
+      // last candidate coerced must not leave its values in it. The reachable case is a field whose
+      // draft §6.4.1 raised on one argument after earlier ones had already been checked and pushed.
+      self.retire_arguments();
+      return None;
     };
 
     let id = self.acquire(slot);
@@ -417,7 +446,27 @@ where
   /// [`poll_abandoned`](Executor::poll_abandoned) has retired — is ignored, and so is a value for
   /// a position draft §6.4.4 has since discarded. Both are ordinary: a driver that cancels work
   /// asynchronously will race, and the executor is the side that can tell.
+  ///
+  /// # How long the executor owns it
+  ///
+  /// Until the position leaves the response, which is not always the end of the operation. Three
+  /// exits, and only the first is the long one:
+  ///
+  /// - The position reaches the finished response, so the value is held until the next
+  ///   [`start`](Executor::start) or until the executor is dropped. A reader can still ask for it,
+  ///   which is what makes this the *response* rather than a copy of it.
+  /// - Draft §6.4.4 later discards the position, at which point the value is released — including
+  ///   when what §6.4.4 nulls is an *ancestor*, because the discard frees everything already
+  ///   completed beneath it and not only the ancestor itself. A query that nulls a large subtree
+  ///   therefore does not carry that subtree's handles to the end of the operation.
+  /// - The id was stale or its position was already discarded, so this call stores nothing and the
+  ///   value is released before it returns.
+  ///
+  /// A serialised leaf is released the same way its resolved value is: draft §6.4.3 step 4 moves
+  /// the resolver's value into [`Values::coerce_leaf`](super::Values::coerce_leaf), and the value
+  /// that comes back is what the position then owns.
   pub fn handle_resolved(&mut self, ctx: &mut V, id: ReqId, value: V::Value) {
+    self.retire_arguments();
     let Some(slot) = self.release(id) else {
       return;
     };
@@ -433,6 +482,7 @@ where
   /// The message is the driver's; the response path and the location are the executor's, so a
   /// driver never has to track where it was.
   pub fn handle_field_error(&mut self, id: ReqId, message: &str) {
+    self.retire_arguments();
     let Some(slot) = self.release(id) else {
       return;
     };
@@ -452,6 +502,7 @@ where
   ///
   /// Answering a retired request afterwards is harmless: the id is stale and ignored.
   pub fn poll_abandoned(&mut self) -> Option<ReqId> {
+    self.retire_arguments();
     if self.abandoned == 0 {
       return None;
     }
@@ -486,6 +537,7 @@ where
   /// the moment its remaining work is zero. What that costs is a driver holding live-looking
   /// [`ReqId`]s across a restart, and [`ReqId`]'s epoch is what pays it.
   pub fn poll_response(&mut self) -> Option<Response<'_, V::Value>> {
+    self.retire_arguments();
     if !self.started || self.delivered {
       return None;
     }
@@ -777,7 +829,9 @@ where
   /// far side of the boundary for every driver to re-derive; [`Values::variable`] already answers
   /// it, and the `Option` it returns is exactly §6.4.1's `hasValue`.
   fn coerce_arguments(&mut self, ctx: &mut V, slot: u32) -> bool {
-    self.scratch_args.clear();
+    // Also the release point for a candidate that raised at step 5 with earlier arguments already
+    // pushed: `poll_resolve` loops on to the next ready slot, and that slot's coercion starts here.
+    self.retire_arguments();
     let meta = &self.meta[slot as usize];
     let field_sym = meta.field_sym;
     let parent_type = meta.parent_type;
@@ -952,28 +1006,108 @@ where
   /// A list element's position type is the *element* type, which is what makes the specification's
   /// list clause fall out rather than needing a case: `[String!]` gives every element a non-null
   /// position, so one null element nulls the list; `[String]` does not.
+  ///
+  /// The upward walk only decides *where* the null lands; [`discard`](Self::discard) is what puts
+  /// it there, so every position §6.4.4 nulls — the one it stops at and the chain it came up
+  /// through — is written by one downward pass rather than twice by two.
   fn propagate(&mut self, slot: u32) {
     let mut cursor = slot;
     loop {
-      let slot = &mut self.slots[cursor as usize];
-      slot.state = State::Null;
-      slot.discarded = true;
-      let non_null = slot.ty.is_non_null();
-      let parent = slot.parent;
-      if !non_null || parent == NONE {
+      let position = &self.slots[cursor as usize];
+      let parent = position.parent;
+      if !position.ty.is_non_null() || parent == NONE {
         break;
       }
       cursor = parent;
     }
+    self.discard(cursor);
     self.abandon_under(cursor);
+  }
+
+  /// Takes the subtree at `root` out of the response, releasing every driver value in it.
+  ///
+  /// Reading the response needs none of this: [`Slot::discarded`] at `root` makes the whole subtree
+  /// answer `null` without a byte of it being rewritten, which is why the walk is not what produces
+  /// the answer. It is what stops the answer from *owning* what it no longer says. A
+  /// [`State::Leaf`] or a [`State::Object`] under a discarded ancestor is a `V::Value` nothing in
+  /// the program can reach and nothing will ever read, and `V::Value` is the driver's own type — a
+  /// wasm or FFI handle, a pooled buffer, a database cursor. Holding one to the end of the
+  /// operation holds open whatever it names, and the in-flight ceiling does not bound how many
+  /// there are: it bounds outstanding work, and these are finished.
+  ///
+  /// # Why walking the subtree is affordable
+  ///
+  /// One call is O(subtree) and the subtree may be most of the response, so the bound worth stating
+  /// is the total over an operation, and that total is linear in the number of slots — the same
+  /// order as building the tree — however many field errors are raised. Three properties give it:
+  ///
+  /// - Every slot this reaches ends `discarded` and holding no value, so *emptying* a slot happens
+  ///   at most once in an operation.
+  /// - Nothing is ever added under a discarded slot afterwards. [`push_child`](Self::push_child)
+  ///   has two callers, and both are past a `discarded` check — `expand` runs only on a slot
+  ///   `handle_resolved` admitted, and `complete`'s list arm stops the moment the list is
+  ///   discarded — so a drained subtree stays drained.
+  /// - The descent therefore stops at any child that already carries the flag instead of walking
+  ///   into it, and a child it stops at is a maximal discarded root that this call absorbs into a
+  ///   larger one. Each call creates exactly one such root, so the stops across the whole operation
+  ///   are bounded by the number of calls, which is bounded by the number of field errors.
+  ///
+  /// The alternative is a second structure listing each nullable position's value-bearing
+  /// descendants, so that a discard could unlink them without touching the positions that hold
+  /// nothing. It buys no better order — every value is still released exactly once — and costs a
+  /// per-slot link maintained on the completion path, which is the path this module spends nothing
+  /// per response key on.
+  fn discard(&mut self, root: u32) {
+    let mut cursor = root;
+    loop {
+      let slot = &mut self.slots[cursor as usize];
+      // Assigning `Null` *is* the release: it drops a leaf's serialised value and an object's
+      // resolved one. Nothing else in the slot has to change, because nothing else is owned.
+      slot.state = State::Null;
+      slot.discarded = true;
+      let first_child = slot.first_child;
+
+      if let Some(child) = self.first_live(first_child) {
+        cursor = child;
+        continue;
+      }
+      loop {
+        if cursor == root {
+          return;
+        }
+        if let Some(sibling) = self.first_live(self.slots[cursor as usize].next_sibling) {
+          cursor = sibling;
+          break;
+        }
+        cursor = self.slots[cursor as usize].parent;
+      }
+    }
+  }
+
+  /// The first slot at or after `from` on a sibling chain that a discard has not already emptied.
+  ///
+  /// Skipping is the whole of the amortised bound in [`discard`](Self::discard): a slot that
+  /// carries the flag was the root of an earlier discard, so its subtree holds nothing and
+  /// descending into it would rediscover that one slot at a time.
+  fn first_live(&self, from: u32) -> Option<u32> {
+    let mut cursor = from;
+    while cursor != NONE {
+      if !self.slots[cursor as usize].discarded {
+        return Some(cursor);
+      }
+      cursor = self.slots[cursor as usize].next_sibling;
+    }
+    None
   }
 
   /// Marks every outstanding request under `root` abandoned.
   ///
-  /// Walks *up* from each request rather than down from `root`: the in-flight table is bounded by
-  /// [`Limits::max_in_flight`] and a parent chain by the document's depth, so the cost is a small
-  /// product of two bounded numbers with no traversal of the response subtree — which may be
-  /// arbitrarily large and is about to be ignored anyway.
+  /// Walks *up* from each request rather than down from `root`, even though
+  /// [`discard`](Self::discard) has just walked down: a slot does not know which entry of the
+  /// in-flight table points at it, so folding this into that pass would mean carrying a
+  /// back-pointer on every slot to save a walk that is already the product of two bounded numbers
+  /// — the table is bounded by [`Limits::max_in_flight`] and a parent chain by the document's
+  /// depth.
   fn abandon_under(&mut self, root: u32) {
     for index in 0..self.inflight.len() {
       if self.inflight[index].state != Slotted::Live {
@@ -1013,6 +1147,26 @@ where
   // plumbing
   // ---------------------------------------------------------------------------------------
 
+  /// Drops the argument values `scratch_args` is holding.
+  ///
+  /// It holds them for exactly one reader — the [`FieldRequest`] `poll_resolve` built out of them
+  /// — and that borrow is over before any `&mut self` method can run. So a value still here is one
+  /// nothing in the program can observe, and an unobservable value must not be a held one:
+  /// `V::Value` may be a handle whose drop closes a connection, frees a table entry or releases a
+  /// foreign allocation.
+  ///
+  /// Every entry point begins with this, which makes the release **per request** rather than per
+  /// operation. It is the tightest the API admits: the executor is never told when the driver drops
+  /// a [`FieldRequest`], so the first moment it can act on that is the driver's next call in —
+  /// except in `poll_resolve`, which also releases before it withholds, a `None` return being the
+  /// statement that no request is being offered at all. Tighter than that would mean a
+  /// [`FieldRequest`] owning its arguments and releasing them with itself, which costs an
+  /// allocation per field request: the one thing this module refuses to spend per response key.
+  #[inline]
+  fn retire_arguments(&mut self) {
+    self.scratch_args.clear();
+  }
+
   fn reset(&mut self) {
     self.slots.clear();
     self.meta.clear();
@@ -1021,6 +1175,7 @@ where
     self.interner.clear();
     self.errors.clear();
     self.inflight.clear();
+    self.retire_arguments();
     // Emptying the slab makes every id the last operation issued reusable by index and generation,
     // so the epoch has to move in the same breath. `wrapping_add` because the increment must stay
     // total; at 64 bits the wrap is not reachable by any program that could also still be holding

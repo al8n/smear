@@ -266,6 +266,11 @@ pub trait Values {
   /// to look up again, so the value that passed §6.4.1's non-null check is the value the resolver
   /// receives; a condition's is read, tested and dropped inside §6.3.
   ///
+  /// Neither outlives the position that read it. A condition's value is gone before collection
+  /// returns, and an argument's is released as soon as the request carrying it stops being the one
+  /// offered, so a value moved out of a table here is given back within the operation and not at
+  /// the end of it.
+  ///
   /// So this may be called at most once per position, and an implementation that consumes,
   /// invalidates or recycles on read cannot put a value past a check it did not pass. It may still
   /// be called more than once for the same *name*: a variable used at two arguments is two
