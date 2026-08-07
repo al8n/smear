@@ -31,7 +31,7 @@
 //!   *package `smear-smoke` depends on `smear` with feature `lossless-coverage` but `smear` does
 //!   not have that feature*.
 //!
-//! One caveat on the second direction, found while proving it. Six of the twelve features —
+//! One caveat on the second direction, found while proving it. Six of the thirteen features —
 //! `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec`, `rowan` — share a name with an OPTIONAL
 //! DEPENDENCY, so deleting the explicit `[features]` line does not remove the name: cargo falls
 //! back to the implicit feature an optional dependency creates, resolution succeeds, and only the
@@ -119,6 +119,84 @@ pub fn graphqlx_parser(
     Document::<&str>::graphqlx,
   )
   .parse_str(src)
+}
+
+/// `validator` — the built-once schema, reached through the dependency edge and built from a
+/// parsed SDL document.
+///
+/// With the feature off, `smear::validator` is not a module and this function does not resolve.
+pub fn graphql_schema(
+  sdl: &str,
+) -> Result<smear::validator::Schema, smear::validator::SchemaErrors> {
+  use smear::parser::graphql::{
+    GraphQL, ast::TypeSystemDocument, error::GraphqlErrors, syntactic::GraphqlLexer,
+  };
+
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(smear::parser::graphql::syntactic::type_system_document)
+  .parse_str(sdl)
+  .expect("the probe's SDL parses");
+
+  smear::validator::Schema::build(&document)
+}
+
+/// `validator`, the other half — the source-slice bound, asserted over `tokora`'s whole
+/// `Source<usize>` implementor lattice.
+///
+/// # Why this lives here and not in `smear`'s own tests
+///
+/// The claim is that `Schema::build`'s `S: AsRef<[u8]>` bound admits **every** slice type a
+/// `smear` parse can produce, so no caller has to newtype, narrow, or copy to build a schema.
+/// Proving it needs all four source-backing features on at once and all four backing crates
+/// nameable — which is this crate's configuration and nothing else's, since it enables every
+/// feature unconditionally and forbids `#[cfg]` on principle.
+///
+/// The assertion runs on `<Src as Source<usize>>::Slice<'_>` itself, the associated type the AST's
+/// `S` is instantiated with, and it instantiates the real `Schema::build` at that type rather than
+/// restating its bound. So it fails in both directions: a `tokora` change that gives a source a
+/// slice type outside `AsRef<[u8]>`, and a `smear` change that narrows the builder's bound.
+pub fn validator_source_lattice() {
+  use smear::{
+    lexer::tokora::Source,
+    parser::graphql::ast::TypeSystemDocument,
+    validator::{Schema, SchemaErrors},
+  };
+
+  fn assert_lattice_member<Src>()
+  where
+    Src: Source<usize> + ?Sized + 'static,
+    for<'a> <Src as Source<usize>>::Slice<'a>: AsRef<[u8]>,
+  {
+    fn builds<S: AsRef<[u8]>>(document: &TypeSystemDocument<S>) -> Result<Schema, SchemaErrors> {
+      Schema::build(document)
+    }
+    let _ = builds::<<Src as Source<usize>>::Slice<'static>>;
+  }
+
+  // Borrowed tier: slices are reborrows, so a diagnostic built from one cannot outlive the
+  // request buffer.
+  assert_lattice_member::<str>();
+  assert_lattice_member::<[u8]>();
+  assert_lattice_member::<&'static str>();
+  assert_lattice_member::<&'static [u8]>();
+  assert_lattice_member::<bstr::BStr>();
+  assert_lattice_member::<&'static bstr::BStr>();
+
+  // Refcounted tier: slices own, so a diagnostic may escape the call that produced it.
+  assert_lattice_member::<bytes::Bytes>();
+  assert_lattice_member::<smol_bytes::shared::Bytes>();
+  assert_lattice_member::<smol_bytes::compact::Bytes>();
+  assert_lattice_member::<smol_bytes::Utf8Bytes>();
+  assert_lattice_member::<smol_bytes::compact::Utf8Bytes>();
+
+  // Three-way tier: inline, borrowed, or shared, decided at runtime but pinned by `'h`.
+  assert_lattice_member::<hipstr::HipStr<'static>>();
+  assert_lattice_member::<hipstr::HipByt<'static>>();
 }
 
 /// `smallvec` — the error container is SmallVec-backed rather than `Vec`-backed.
@@ -241,6 +319,27 @@ pub mod exported_macro {
 mod tests {
   use std::collections::BTreeSet;
 
+  /// The source-lattice conformance assertion, run as a test so a failure names itself rather
+  /// than appearing as "the workspace does not build".
+  ///
+  /// The body compiles the claim; calling it is what puts it in a test report.
+  #[test]
+  fn the_validator_admits_every_source_slice_type() {
+    super::validator_source_lattice();
+  }
+
+  /// The validator, driven end to end across the dependency edge.
+  #[test]
+  fn the_validator_builds_a_schema_and_refuses_a_non_schema() {
+    let schema = super::graphql_schema("type Query { ok: Int }").expect("a schema");
+    assert!(schema.type_by_name(b"Query").is_some());
+    // Introspection is unconditional, feature or no feature.
+    assert!(schema.type_by_name(b"__Schema").is_some());
+
+    let errors = super::graphql_schema("type NotARoot { ok: Int }").expect_err("not a schema");
+    assert!(!errors.is_empty());
+  }
+
   /// Features named in `smear`'s manifest but deliberately not smoked, each with a written
   /// reason.
   ///
@@ -294,7 +393,7 @@ mod tests {
     // A census over an empty set passes vacuously, which is the failure mode this whole crate is
     // about. Assert it read something first.
     assert!(
-      declared.len() >= 12,
+      declared.len() >= 13,
       "read only {} features out of smear's manifest; the parse is wrong, not the manifest",
       declared.len()
     );

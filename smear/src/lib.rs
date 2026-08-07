@@ -66,6 +66,27 @@ pub mod lexer;
 #[allow(clippy::type_complexity)]
 pub mod parser;
 
+/// GraphQL document validation, and the built-once schema every rule reads.
+///
+/// Draft §3 "Type Validation" runs inside [`Schema::build`](validator::Schema::build), so a
+/// malformed SDL is refused once at startup rather than rediscovered per request.
+///
+/// Standard GraphQL only —
+#[cfg_attr(
+  feature = "graphqlx",
+  doc = "[`graphqlx`](parser::graphqlx) has no validator, deliberately: its generics, \
+         `where` constraints, map and set types and namespaced paths have no specification \
+         semantics, so validating them would be language design rather than conformance."
+)]
+#[cfg_attr(
+  not(feature = "graphqlx"),
+  doc = "the GraphQLx dialect has no validator, deliberately: its extensions have no \
+         specification semantics to validate against."
+)]
+#[cfg(feature = "validator")]
+#[cfg_attr(docsrs, doc(cfg(feature = "validator")))]
+pub mod validator;
+
 #[doc(hidden)]
 pub mod __private {
   pub use tokora;

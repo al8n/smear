@@ -231,9 +231,9 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
-        # `rowan` and `lossless-coverage` are excluded because they already imply `parser`, so
-        # their pass-1 cells ARE pairs; `default`, `--no-default-features` and `--all-features`
-        # are excluded because those three runs would duplicate pass-1 exactly.
+        # `rowan`, `lossless-coverage` and `validator` are excluded because they already imply
+        # `parser`, so their pass-1 cells ARE pairs; `default`, `--no-default-features` and
+        # `--all-features` are excluded because those three runs would duplicate pass-1 exactly.
         #
         # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
         # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
@@ -241,7 +241,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack clippy -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,default \
+          --exclude-features rowan,lossless-coverage,validator,default \
           --exclude-no-default-features --exclude-all-features
 
   # Run tests on some extra platforms
@@ -284,7 +284,53 @@ jobs:
       - name: cargo build --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build --target ${{ matrix.target }} 
+          cargo build --target ${{ matrix.target }}
+
+  # The validator's schema representation, on a core with no compare-and-swap.
+  #
+  # NOT a cell of the `cross` matrix above, and it cannot become one: that job builds the whole
+  # workspace, and `smear` does not build for `thumbv6m-none-eabi` — its syntactic AST offers an
+  # `Arc`-backed spelling of recursive list types, which needs `alloc::sync`. The claim under test
+  # is narrower and is the one the design rests on: `Schema` holds no `Arc`, no atomics and no
+  # interior mutability and depends on nothing but `core` and `alloc`, so an embedded core can
+  # hold one and the caller picks the pointer.
+  #
+  # `-p smear-noatomic` names the package rather than filtering, so a rename is a hard error here
+  # instead of a warn-and-exit-0. That member `#[path]`-includes `smear`'s own representation
+  # files, so this builds the shipped source and not a copy of it — verified to discriminate by
+  # adding an `Arc` to the representation, which fails with "cannot find `sync` in `std`".
+  noatomic:
+    name: noatomic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache cargo build and registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-noatomic-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-noatomic-
+      - name: Install Rust
+        run: rustup update stable && rustup default stable
+      - name: cargo build -p smear-noatomic --target thumbv6m-none-eabi
+        run: |
+          rustup target add thumbv6m-none-eabi
+          cargo build -p smear-noatomic --target thumbv6m-none-eabi
+      # An empty `[dependencies]` table is the other half of the claim, and a comment cannot
+      # enforce it. Read out of `cargo metadata` so a dependency added to the manifest fails here
+      # rather than quietly widening what the target build proves.
+      - name: the representation depends on nothing
+        run: |
+          DEPS="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; p=[x for x in json.load(sys.stdin)["packages"] if x["name"]=="smear-noatomic"][0]; print(len(p["dependencies"]))')"
+          if [ "$DEPS" != "0" ]; then
+            echo "::error::smear-noatomic declares $DEPS dependencies; the whole point of the member is that it declares none"
+            exit 1
+          fi
 
   build:
     name: build
@@ -327,9 +373,9 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
-        # `rowan` and `lossless-coverage` are excluded because they already imply `parser`, so
-        # their pass-1 cells ARE pairs; `default`, `--no-default-features` and `--all-features`
-        # are excluded because those three runs would duplicate pass-1 exactly.
+        # `rowan`, `lossless-coverage` and `validator` are excluded because they already imply
+        # `parser`, so their pass-1 cells ARE pairs; `default`, `--no-default-features` and
+        # `--all-features` are excluded because those three runs would duplicate pass-1 exactly.
         #
         # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
         # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
@@ -337,7 +383,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack build -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,default \
+          --exclude-features rowan,lossless-coverage,validator,default \
           --exclude-no-default-features --exclude-all-features
         # Pass 3 — the four criterion benches, which NOTHING ELSE IN CI COMPILES.
         #

@@ -1,0 +1,352 @@
+//! The flat table rows: type definitions, fields, input values and directive definitions.
+//!
+//! Every row is `Copy` and every "child list" is a [`Range32`] into a sibling table, so the whole
+//! schema is a handful of `Box<[T]>`s with no interior pointers and no per-node allocation.
+
+use super::{
+  location::DirectiveLocations,
+  name::{Range32, Sym},
+  ty::{DefaultKind, PackedType, TypeId, TypeKind},
+};
+
+/// Per-type flags that do not deserve a field of their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct TypeFlags(u8);
+
+impl TypeFlags {
+  /// No flags.
+  pub const EMPTY: Self = Self(0);
+  /// The type carries `@oneOf` (draft §3.10).
+  pub const ONE_OF: Self = Self(1 << 0);
+  /// The type is part of the built-in or introspection meta-schema rather than the user's SDL.
+  pub const BUILT_IN: Self = Self(1 << 1);
+
+  /// Returns the union of two flag sets.
+  #[inline]
+  pub const fn union(self, other: Self) -> Self {
+    Self(self.0 | other.0)
+  }
+
+  /// Returns whether every flag in `other` is set.
+  #[inline]
+  pub const fn contains(self, other: Self) -> bool {
+    self.0 & other.0 == other.0
+  }
+
+  /// Returns the raw bits.
+  #[inline]
+  pub const fn bits(self) -> u8 {
+    self.0
+  }
+}
+
+/// A named type definition.
+///
+/// Which table `fields` indexes depends on `kind`: object and interface types index the schema's
+/// field table, input object types index its input-value table, and every other kind leaves it
+/// empty. [`Schema::fields_of`] and [`Schema::input_fields_of`] are the accessors that keep the
+/// distinction from leaking.
+///
+/// [`Schema::fields_of`]: super::Schema::fields_of
+/// [`Schema::input_fields_of`]: super::Schema::input_fields_of
+#[derive(Debug, Clone, Copy)]
+pub struct TypeDef {
+  name: Sym,
+  kind: TypeKind,
+  flags: TypeFlags,
+  fields: Range32,
+  interfaces: Range32,
+  members: Range32,
+  enum_values: Range32,
+  possible_start: u32,
+  object_ordinal: u32,
+}
+
+impl TypeDef {
+  /// The sentinel `possible_start` / `object_ordinal` for "not applicable".
+  pub const NONE: u32 = u32::MAX;
+
+  /// Assembles a row. Ranges are relative to the schema tables the row will live in.
+  #[allow(clippy::too_many_arguments)]
+  #[inline]
+  pub const fn new(
+    name: Sym,
+    kind: TypeKind,
+    flags: TypeFlags,
+    fields: Range32,
+    interfaces: Range32,
+    members: Range32,
+    enum_values: Range32,
+    possible_start: u32,
+    object_ordinal: u32,
+  ) -> Self {
+    Self {
+      name,
+      kind,
+      flags,
+      fields,
+      interfaces,
+      members,
+      enum_values,
+      possible_start,
+      object_ordinal,
+    }
+  }
+
+  /// Returns the type's interned name.
+  #[inline]
+  pub const fn name(&self) -> Sym {
+    self.name
+  }
+
+  /// Returns the type's kind.
+  #[inline]
+  pub const fn kind(&self) -> TypeKind {
+    self.kind
+  }
+
+  /// Returns the type's flags.
+  #[inline]
+  pub const fn flags(&self) -> TypeFlags {
+    self.flags
+  }
+
+  /// Returns whether the type carries `@oneOf`.
+  #[inline]
+  pub const fn is_one_of(&self) -> bool {
+    self.flags.contains(TypeFlags::ONE_OF)
+  }
+
+  /// Returns whether the type belongs to the injected meta-schema rather than the user's SDL.
+  #[inline]
+  pub const fn is_built_in(&self) -> bool {
+    self.flags.contains(TypeFlags::BUILT_IN)
+  }
+
+  /// Returns the row's field range — into the field table for objects and interfaces, into the
+  /// input-value table for input objects.
+  #[inline]
+  pub const fn fields(&self) -> Range32 {
+    self.fields
+  }
+
+  /// Returns the row's interface range, into the interface table.
+  #[inline]
+  pub const fn interfaces(&self) -> Range32 {
+    self.interfaces
+  }
+
+  /// Returns the row's union-member range, into the member table.
+  #[inline]
+  pub const fn members(&self) -> Range32 {
+    self.members
+  }
+
+  /// Returns the row's enum-value range, into the enum-value table.
+  #[inline]
+  pub const fn enum_values(&self) -> Range32 {
+    self.enum_values
+  }
+
+  /// Returns the offset of the type's possible-object bitset, or [`TypeDef::NONE`] for a
+  /// non-composite type.
+  #[inline]
+  pub const fn possible_start(&self) -> u32 {
+    self.possible_start
+  }
+
+  /// Returns the type's object ordinal — its bit position in every possible-object bitset — or
+  /// [`TypeDef::NONE`] when the type is not an object.
+  #[inline]
+  pub const fn object_ordinal(&self) -> u32 {
+    self.object_ordinal
+  }
+}
+
+/// A field definition on an object or interface type.
+#[derive(Debug, Clone, Copy)]
+pub struct FieldDef {
+  name: Sym,
+  ty: PackedType,
+  args: Range32,
+}
+
+impl FieldDef {
+  /// Assembles a field row.
+  #[inline]
+  pub const fn new(name: Sym, ty: PackedType, args: Range32) -> Self {
+    Self { name, ty, args }
+  }
+
+  /// Returns the field's interned name.
+  #[inline]
+  pub const fn name(&self) -> Sym {
+    self.name
+  }
+
+  /// Returns the field's result type.
+  #[inline]
+  pub const fn ty(&self) -> PackedType {
+    self.ty
+  }
+
+  /// Returns the field's argument range, into the input-value table.
+  #[inline]
+  pub const fn args(&self) -> Range32 {
+    self.args
+  }
+}
+
+/// An input value definition: a field argument, a directive argument, or an input-object field.
+#[derive(Debug, Clone, Copy)]
+pub struct InputValueDef {
+  name: Sym,
+  ty: PackedType,
+  default: DefaultKind,
+}
+
+impl InputValueDef {
+  /// Assembles an input-value row.
+  #[inline]
+  pub const fn new(name: Sym, ty: PackedType, default: DefaultKind) -> Self {
+    Self { name, ty, default }
+  }
+
+  /// Returns the input value's interned name.
+  #[inline]
+  pub const fn name(&self) -> Sym {
+    self.name
+  }
+
+  /// Returns the input value's declared type.
+  #[inline]
+  pub const fn ty(&self) -> PackedType {
+    self.ty
+  }
+
+  /// Returns the presence and null-ness of the declared default.
+  #[inline]
+  pub const fn default_kind(&self) -> DefaultKind {
+    self.default
+  }
+
+  /// Returns whether the input value must be supplied — non-null type and no default
+  /// (draft 5.4.3, 5.6.4).
+  #[inline]
+  pub const fn is_required(&self) -> bool {
+    self.ty.is_non_null() && !self.default.is_present()
+  }
+}
+
+/// A directive definition.
+#[derive(Debug, Clone, Copy)]
+pub struct DirectiveDef {
+  name: Sym,
+  locations: DirectiveLocations,
+  args: Range32,
+  repeatable: bool,
+  built_in: bool,
+}
+
+impl DirectiveDef {
+  /// Assembles a directive row.
+  #[inline]
+  pub const fn new(
+    name: Sym,
+    locations: DirectiveLocations,
+    args: Range32,
+    repeatable: bool,
+    built_in: bool,
+  ) -> Self {
+    Self {
+      name,
+      locations,
+      args,
+      repeatable,
+      built_in,
+    }
+  }
+
+  /// Returns the directive's interned name, without the `@`.
+  #[inline]
+  pub const fn name(&self) -> Sym {
+    self.name
+  }
+
+  /// Returns the locations the directive is valid at.
+  #[inline]
+  pub const fn locations(&self) -> DirectiveLocations {
+    self.locations
+  }
+
+  /// Returns the directive's argument range, into the input-value table.
+  #[inline]
+  pub const fn args(&self) -> Range32 {
+    self.args
+  }
+
+  /// Returns whether the directive may appear more than once at one location.
+  #[inline]
+  pub const fn is_repeatable(&self) -> bool {
+    self.repeatable
+  }
+
+  /// Returns whether the directive is one of the five the specification defines.
+  #[inline]
+  pub const fn is_built_in(&self) -> bool {
+    self.built_in
+  }
+}
+
+/// The three root operation slots, in the order [`RootOperation::ALL`] enumerates them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum RootOperation {
+  /// The `query` root.
+  Query = 0,
+  /// The `mutation` root.
+  Mutation = 1,
+  /// The `subscription` root.
+  Subscription = 2,
+}
+
+impl RootOperation {
+  /// Every root operation, in slot order.
+  pub const ALL: [Self; 3] = [Self::Query, Self::Mutation, Self::Subscription];
+
+  /// Returns the operation's slot index in the schema's `roots` array.
+  #[inline]
+  pub const fn index(&self) -> usize {
+    *self as u8 as usize
+  }
+
+  /// Returns the operation keyword.
+  #[inline]
+  pub const fn as_str(&self) -> &'static str {
+    match self {
+      Self::Query => "query",
+      Self::Mutation => "mutation",
+      Self::Subscription => "subscription",
+    }
+  }
+
+  /// Returns the type name GraphQL defaults the root to when no `schema` definition names one.
+  #[inline]
+  pub const fn default_type_name(&self) -> &'static str {
+    match self {
+      Self::Query => "Query",
+      Self::Mutation => "Mutation",
+      Self::Subscription => "Subscription",
+    }
+  }
+}
+
+impl core::fmt::Display for RootOperation {
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.write_str(self.as_str())
+  }
+}
+
+/// A type-definition row plus its id, used by lookups that return both.
+pub type TypeRef<'a> = (TypeId, &'a TypeDef);
