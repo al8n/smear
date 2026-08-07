@@ -482,6 +482,215 @@ fn subjects_are_qualified_by_their_owner() {
   );
 }
 
+/// One SDL per owner-path shape the builder renders, with the **exact** text it renders.
+///
+/// # Why the text and not the parts
+///
+/// An owner path is assembled from names the builder holds as interned symbols, at a point in a
+/// pass chosen for the borrow checker rather than for the diagnostic. Move where a path is built —
+/// which any rework of these passes does — and the segments can change without the *kind*, the
+/// *subject* or the *span* changing with them: `Query.ok.a` becomes `Query.a`, a directive
+/// coordinate loses its `@`, an argument path picks up its field twice. Every other assertion in
+/// this file would still pass.
+///
+/// So the rows below pin the rendered string, and they cover each shape separately rather than
+/// each rule: `Owner.field`, `Owner.field.arg`, `Input.field`, `directive.arg`, and the four
+/// directive-usage coordinates that a `@` distinguishes from a field path.
+const RENDERED: &[(&str, &[&str])] = &[
+  // -- unresolved and over-nested bases, whose paths are built in `resolve_type_refs` ----------
+  (
+    "type Query { ok: Nope }",
+    &["undefined type: `Query.ok.Nope`"],
+  ),
+  (
+    "type Query { ok(a: Nope): Int }",
+    &["undefined type: `Query.ok.a.Nope`"],
+  ),
+  (
+    "type Query { ok: Int } input In { x: Nope }",
+    &["undefined type: `In.x.Nope`"],
+  ),
+  (
+    "type Query { ok: Int } directive @d(a: Nope) on OBJECT",
+    &["undefined type: `d.a.Nope`"],
+  ),
+  (
+    "type Query { ok: [[[[[[[[[[[[[[[[Int]]]]]]]]]]]]]]]] }",
+    &["type reference nests too deeply: `Query.ok.Int`"],
+  ),
+  (
+    "type Query { ok(a: [[[[[[[[[[[[[[[[Int]]]]]]]]]]]]]]]]): Int }",
+    &["type reference nests too deeply: `Query.ok.a.Int`"],
+  ),
+  // -- fields and arguments --------------------------------------------------------------------
+  (
+    "type Query { ok: In } input In { x: Int }",
+    &["field type is not an output type: `Query.ok.In`"],
+  ),
+  (
+    "type Query { ok(a: Query): Int }",
+    &["argument type is not an input type: `Query.ok.a.Query`"],
+  ),
+  (
+    "type Query { ok: Int } type T { f: Int f: Int }",
+    &["duplicate field: `T.f`"],
+  ),
+  (
+    "type Query { __ok: Int }",
+    &["field name is reserved for introspection: `Query.__ok`"],
+  ),
+  (
+    "type Query { ok(__a: Int): Int }",
+    &["argument name is reserved for introspection: `Query.ok.__a`"],
+  ),
+  (
+    "type Query { ok(a: Int, a: Int): Int }",
+    &["duplicate argument: `Query.ok.a`"],
+  ),
+  (
+    "type Query { ok(a: Int! @deprecated): Int }",
+    &["required argument is deprecated: `Query.ok.a`"],
+  ),
+  (
+    "type Query { ok(a: Int = \"x\"): Int }",
+    &["default value does not fit its declared type: `Query.ok.a`"],
+  ),
+  // -- input objects -----------------------------------------------------------------------------
+  (
+    "type Query { ok(a: In): Int } input In { x: Query }",
+    &["input field type is not an input type: `In.x.Query`"],
+  ),
+  (
+    "type Query { ok(a: In): Int } input In { x: Int = \"s\" }",
+    &["default value does not fit its declared type: `In.x`"],
+  ),
+  (
+    "type Query { ok(a: In): Int } input In { x: Int! @deprecated }",
+    &["required input field is deprecated: `In.x`"],
+  ),
+  (
+    "type Query { ok(a: In): Int } input In { x: Int x: Int }",
+    &["duplicate input field: `In.x`"],
+  ),
+  (
+    "type Query { ok(a: In): Int } input In { __x: Int }",
+    &["input field name is reserved for introspection: `In.__x`"],
+  ),
+  (
+    "type Query { ok(a: In): Int } input In @oneOf { x: Int! y: Int = 1 }",
+    &[
+      "field of a @oneOf input object is non-null: `In.x`",
+      "field of a @oneOf input object has a default value: `In.y`",
+    ],
+  ),
+  // -- interfaces, unions, enums -----------------------------------------------------------------
+  (
+    "type Query implements Nope { ok: Int }",
+    &["implemented interface is not defined: `Query.Nope`"],
+  ),
+  (
+    "type Query implements I & I { ok: Int } interface I { ok: Int }",
+    &["duplicate implemented interface: `Query.I`"],
+  ),
+  (
+    "type Query { ok: U } union U = Nope",
+    &["union member is not defined: `U.Nope`"],
+  ),
+  (
+    "type Query { ok: U } union U = Query | Query",
+    &["duplicate union member: `U.Query`"],
+  ),
+  (
+    "type Query { ok: E } enum E { A A }",
+    &["duplicate enum value: `E.A`"],
+  ),
+  (
+    "type Query { ok: E } enum E { __A }",
+    &["enum value name is reserved for introspection: `E.__A`"],
+  ),
+  // -- directive definitions, whose owner is the bare directive name -----------------------------
+  (
+    "type Query { ok: Int } directive @d(a: Query) on OBJECT",
+    &["directive argument type is not an input type: `d.a.Query`"],
+  ),
+  (
+    "type Query { ok: Int } directive @d(a: Int, a: Int) on OBJECT",
+    &["duplicate directive argument: `d.a`"],
+  ),
+  (
+    "type Query { ok: Int } directive @d(__a: Int) on OBJECT",
+    &["directive argument name is reserved for introspection: `d.__a`"],
+  ),
+  // -- directive usages, once per element `check_directive_uses` is called for --------------------
+  (
+    "directive @d on OBJECT\nschema @d { query: Query }\ntype Query { ok: Int }",
+    &["directive is not allowed here: `schema.d`"],
+  ),
+  (
+    "type Query @nope { ok: Int }",
+    &["undefined directive: `Query.nope`"],
+  ),
+  (
+    "type Query { ok: Int @nope }",
+    &["undefined directive: `Query.ok.nope`"],
+  ),
+  (
+    "type Query { ok(a: Int @nope): Int }",
+    &["undefined directive: `Query.ok.a.nope`"],
+  ),
+  (
+    "type Query { ok(a: In): Int } input In { x: Int @nope }",
+    &["undefined directive: `In.x.nope`"],
+  ),
+  (
+    "type Query { ok: E } enum E { A @nope }",
+    &["undefined directive: `E.A.nope`"],
+  ),
+  (
+    "type Query { ok: Int } directive @d(a: Int @nope) on OBJECT",
+    &["undefined directive: `d.a.nope`"],
+  ),
+  (
+    "directive @d on SCALAR\ntype Query { ok: Int @d }",
+    &["directive is not allowed here: `Query.ok.d`"],
+  ),
+  (
+    "directive @d on FIELD_DEFINITION\ntype Query { ok: Int @d @d }",
+    &["directive is not repeatable: `Query.ok.d`"],
+  ),
+  // -- directive-usage arguments: the `@` coordinate, at the deepest owner there is ---------------
+  (
+    "directive @d(a: Int) on ARGUMENT_DEFINITION\ntype Query { ok(b: Int @d(c: 1)): Int }",
+    &["undefined directive argument: `Query.ok.b.@d.c`"],
+  ),
+  (
+    "directive @d(a: Int!) on ARGUMENT_DEFINITION\ntype Query { ok(b: Int @d): Int }",
+    &["required directive argument is missing: `Query.ok.b.@d.a`"],
+  ),
+  (
+    "directive @d(a: Int!) on ARGUMENT_DEFINITION\ntype Query { ok(b: Int @d(a: null)): Int }",
+    &["required directive argument is missing: `Query.ok.b.@d.a`"],
+  ),
+  (
+    "directive @d(a: Int) on ARGUMENT_DEFINITION\ntype Query { ok(b: Int @d(a: \"x\")): Int }",
+    &["directive argument value does not fit its declared type: `Query.ok.b.@d.a`"],
+  ),
+  (
+    "directive @d(a: Int) on ARGUMENT_DEFINITION\ntype Query { ok(b: Int @d(a: 1, a: 2)): Int }",
+    &["directive argument is passed twice: `Query.ok.b.@d.a`"],
+  ),
+];
+
+/// Every row of [`RENDERED`] renders exactly what it says, in exactly that order.
+#[test]
+fn refusals_render_exactly() {
+  for (sdl, expected) in RENDERED {
+    let errors = refused(sdl);
+    let rendered: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+    assert_eq!(rendered, *expected, "---\n{sdl}");
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 // directive usages: the accepted direction
 // ---------------------------------------------------------------------------------------------
