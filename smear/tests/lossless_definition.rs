@@ -1,4 +1,4 @@
-#![cfg(feature = "rowan")]
+#![cfg(all(feature = "rowan", feature = "graphql"))]
 
 //! Task 8's gate, part one: the twenty-two SDL definition node kinds, their trivia-invariance,
 //! their verbatim round-trip, and the emptiness verdicts that must agree with `syntactic/`

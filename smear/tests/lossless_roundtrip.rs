@@ -1,4 +1,4 @@
-#![cfg(feature = "rowan")]
+#![cfg(all(feature = "rowan", feature = "graphql"))]
 
 //! Gate 3: round-trip. For every corpus entry, `tree.text()` is the source, byte for byte.
 //!

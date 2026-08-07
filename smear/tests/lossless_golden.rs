@@ -1,4 +1,4 @@
-#![cfg(feature = "rowan")]
+#![cfg(all(feature = "rowan", feature = "graphql"))]
 
 //! Gate 5: golden trees — the **shape** gate, and the only one that can see a mis-shaped tree.
 //!

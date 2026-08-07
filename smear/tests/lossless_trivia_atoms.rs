@@ -1,4 +1,4 @@
-#![cfg(feature = "rowan")]
+#![cfg(all(feature = "rowan", feature = "graphql"))]
 
 use smear::parser::{
   graphql::lossless::trivia, lexer::graphql::lossless::LosslessTokenKind as Kind,
