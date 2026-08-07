@@ -45,14 +45,12 @@ on:
       - 'COPYRIGHT'
       - 'LICENSE-*'
       - 'docs/**.md'
-      - 'legacy/**.md'
       - '**.txt'
   pull_request:
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'
       - 'docs/**.md'
-      - 'legacy/**.md'
       - '**.txt'
   workflow_dispatch:
   # NO `schedule`, deliberately, and this is the one place these triggers differ from `CI`'s.
