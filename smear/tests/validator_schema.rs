@@ -353,9 +353,49 @@ const FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
   (
     SchemaErrorKind::SelfReferentialDirective,
     "type Query { ok: Int }
-     directive @d(a: In) on FIELD
+     directive @d(a: In) on INPUT_FIELD_DEFINITION
      input In { x: Int @d }",
     &[SchemaErrorKind::SelfReferentialDirective],
+  ),
+  // -- §3.13, at a use site -----------------------------------------------------------------
+  //
+  // Every SDL below is the probe `benchmarks`'s differential oracle used to find the gap these
+  // six kinds close (smear issue #91), verbatim. Each is refused by `apollo-compiler`, and each
+  // was built without complaint before the use-site pass existed.
+  (
+    SchemaErrorKind::UndefinedDirective,
+    "type Query @nowhere { ok: Int }",
+    &[SchemaErrorKind::UndefinedDirective],
+  ),
+  (
+    SchemaErrorKind::UnsupportedDirectiveLocation,
+    "directive @onEnum on ENUM
+     type Query @onEnum { ok: Int }",
+    &[SchemaErrorKind::UnsupportedDirectiveLocation],
+  ),
+  (
+    SchemaErrorKind::DuplicateDirectiveUse,
+    "directive @onObject on OBJECT
+     type Query @onObject @onObject { ok: Int }",
+    &[SchemaErrorKind::DuplicateDirectiveUse],
+  ),
+  (
+    SchemaErrorKind::UndefinedDirectiveArgument,
+    "directive @onObject(a: Int) on OBJECT
+     type Query @onObject(b: 1) { ok: Int }",
+    &[SchemaErrorKind::UndefinedDirectiveArgument],
+  ),
+  (
+    SchemaErrorKind::MissingRequiredDirectiveArgument,
+    "directive @onObject(a: Int!) on OBJECT
+     type Query @onObject { ok: Int }",
+    &[SchemaErrorKind::MissingRequiredDirectiveArgument],
+  ),
+  (
+    SchemaErrorKind::InvalidDirectiveArgumentValue,
+    "directive @onObject(a: Int) on OBJECT
+     type Query @onObject(a: \"x\") { ok: Int }",
+    &[SchemaErrorKind::InvalidDirectiveArgumentValue],
   ),
 ];
 
@@ -381,7 +421,7 @@ fn refusal_floor() {
 
   // The census must not pass vacuously.
   assert!(
-    SchemaErrorKind::ALL.len() >= 50,
+    SchemaErrorKind::ALL.len() >= 56,
     "read only {} kinds; the enumeration is wrong, not the fixtures",
     SchemaErrorKind::ALL.len()
   );
@@ -439,6 +479,242 @@ fn subjects_are_qualified_by_their_owner() {
     error.related().is_some(),
     "the first `a` should be pointed at"
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// directive usages: the accepted direction
+// ---------------------------------------------------------------------------------------------
+
+/// Every legal shape of directive usage, at every type-system location.
+///
+/// The floor above proves the six use-site refusals fire. This is the direction a refusal-only
+/// suite cannot see, and the one that matters more: a false positive in `Schema::build` refuses a
+/// schema no other implementation refuses, and there is no later stage to overrule it.
+#[test]
+fn legal_directive_usages_are_accepted() {
+  // Each of the twelve type-system locations, with a directive that lists exactly it.
+  built(
+    "directive @onSchema on SCHEMA
+     directive @onScalar on SCALAR
+     directive @onObject on OBJECT
+     directive @onFieldDef on FIELD_DEFINITION
+     directive @onArgDef on ARGUMENT_DEFINITION
+     directive @onInterface on INTERFACE
+     directive @onUnion on UNION
+     directive @onEnum on ENUM
+     directive @onEnumValue on ENUM_VALUE
+     directive @onInputObject on INPUT_OBJECT
+     directive @onInputField on INPUT_FIELD_DEFINITION
+     schema @onSchema { query: Query }
+     type Query @onObject { ok(a: Int @onArgDef): Int @onFieldDef }
+     scalar Custom @onScalar
+     interface I @onInterface { ok: Int }
+     type Impl implements I @onObject { ok: Int }
+     union U @onUnion = Query | Impl
+     enum E @onEnum { A @onEnumValue }
+     input In @onInputObject { a: Int @onInputField }",
+  );
+
+  // The same location reached through an extension, including `extend schema`.
+  built(
+    "directive @onSchema repeatable on SCHEMA
+     directive @onObject on OBJECT
+     directive @onEnumValue on ENUM_VALUE
+     schema @onSchema { query: Query }
+     extend schema @onSchema
+     type Query { ok: Int }
+     type T @onObject { a: Int }
+     enum E { A }
+     extend enum E { B @onEnumValue }",
+  );
+
+  // `repeatable` means what it says.
+  built("directive @r repeatable on OBJECT type Query @r @r @r { ok: Int }");
+
+  // The five specified directives, each at a location its own definition lists.
+  built(
+    "type Query { legacy: Int @deprecated old(a: Int @deprecated): Int }
+     scalar UUID @specifiedBy(url: \"https://example.invalid\")
+     input Filter @oneOf { a: Int b: Int }
+     input Legacy { a: Int @deprecated }
+     enum E { A @deprecated(reason: \"gone\") B }",
+  );
+
+  // Every coercion the specification grants a constant argument value, and none it does not.
+  built(
+    "directive @v(
+       i: Int
+       f: Float
+       fromInt: Float
+       s: String
+       b: Boolean
+       idText: ID
+       idNumber: ID
+       list: [Int]
+       nested: [[Int]]
+       deepSingleton: [[Int]]
+       obj: Point
+       e: Unit
+       custom: Custom
+       nullable: Int
+       defaulted: Int = 1
+     ) on OBJECT
+     scalar Custom
+     input Point { x: Int y: Int }
+     enum Unit { METER FOOT }
+     type Query @v(
+       i: -2147483648
+       f: 1.5
+       fromInt: 2
+       s: \"x\"
+       b: true
+       idText: \"abc\"
+       idNumber: 4
+       list: 1
+       nested: [[1], []]
+       deepSingleton: 7
+       obj: { x: 1 }
+       e: METER
+       custom: { anything: [1, true, NOT_AN_ENUM] }
+       nullable: null
+     ) { ok: Int }",
+  );
+}
+
+/// A type and its extensions are one location for the repeatability rule.
+#[test]
+fn a_type_and_its_extensions_are_one_directive_location() {
+  let errors = refused(
+    "directive @d on OBJECT
+     type Query @d { ok: Int }
+     extend type Query @d",
+  );
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateDirectiveUse]);
+  assert_eq!(errors.errors()[0].subject(), "d");
+  assert!(
+    errors.errors()[0].related().is_some(),
+    "the first application should be pointed at"
+  );
+}
+
+/// Use-site refusals name the element the directive sits on, and the `@name` its arguments belong
+/// to.
+#[test]
+fn directive_usage_errors_name_their_coordinate() {
+  let cases: &[(&str, SchemaErrorKind, &str, &str)] = &[
+    (
+      "type Query @nowhere { ok: Int }",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "Query",
+    ),
+    (
+      "type Query { ok: Int @nowhere }",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "Query.ok",
+    ),
+    (
+      "type Query { ok(a: Int @nowhere): Int }",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "Query.ok.a",
+    ),
+    (
+      "type Query { ok: Int } enum E { A @nowhere }",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "E.A",
+    ),
+    (
+      "type Query { ok: Int } input In { a: Int @nowhere }",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "In.a",
+    ),
+    (
+      "type Query { ok: Int } directive @d(a: Int @nowhere) on OBJECT",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "d.a",
+    ),
+    (
+      "schema @nowhere { query: Query } type Query { ok: Int }",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "schema",
+    ),
+    (
+      "directive @onObject(a: Int) on OBJECT
+       type Query @onObject(b: 1) { ok: Int }",
+      SchemaErrorKind::UndefinedDirectiveArgument,
+      "b",
+      "Query.@onObject",
+    ),
+    (
+      "directive @onObject(a: Int!) on OBJECT
+       type Query @onObject(a: null) { ok: Int }",
+      SchemaErrorKind::MissingRequiredDirectiveArgument,
+      "a",
+      "Query.@onObject",
+    ),
+    (
+      "directive @onObject(a: Int) on OBJECT
+       type Query @onObject(a: \"x\") { ok: Int }",
+      SchemaErrorKind::InvalidDirectiveArgumentValue,
+      "a",
+      "Query.@onObject",
+    ),
+  ];
+
+  for (sdl, kind, subject, owner) in cases {
+    let errors = refused(sdl);
+    assert_eq!(errors.kinds(), vec![*kind], "{sdl}");
+    let error = &errors.errors()[0];
+    assert_eq!(error.subject(), *subject, "{sdl}");
+    assert_eq!(error.owner(), Some(*owner), "{sdl}");
+    assert_eq!(
+      error.to_string(),
+      format!("{}: `{owner}.{subject}`", kind.message()),
+      "{sdl}"
+    );
+  }
+}
+
+/// An omitted required argument has no argument to point at, so the usage is what is blamed.
+#[test]
+fn an_omitted_required_argument_is_blamed_on_the_usage() {
+  const SDL: &str = "directive @onObject(a: Int!) on OBJECT\ntype Query @onObject { ok: Int }";
+  let errors = refused(SDL);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingRequiredDirectiveArgument]
+  );
+  let span = errors.errors()[0].span();
+  let start = SDL.find("@onObject { ok").expect("the usage is in the SDL");
+  assert_eq!(
+    &SDL[span.start()..span.end()],
+    "@onObject",
+    "the span should cover the usage, at byte {start}"
+  );
+}
+
+/// A nested literal is blamed where it is written, not on the argument that contains it.
+#[test]
+fn a_nested_bad_literal_is_blamed_in_place() {
+  const SDL: &str = "directive @v(p: [Point]) on OBJECT
+input Point { x: Int }
+type Query @v(p: [{ x: 1 }, { x: \"no\" }]) { ok: Int }";
+  let errors = refused(SDL);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::InvalidDirectiveArgumentValue]
+  );
+  let error = &errors.errors()[0];
+  assert_eq!(error.owner(), Some("Query.@v"));
+  assert_eq!(error.subject(), "p");
+  let span = error.span();
+  assert_eq!(&SDL[span.start()..span.end()], "\"no\"");
 }
 
 /// The one kind no parsed document can reach, reached the only other way it can be.
@@ -1097,8 +1373,8 @@ fn breakable_cycles_are_accepted() {
   // uses it — the same refinement apollo-compiler makes.
   let errors = refused(
     "type Query { ok: Int }
-     directive @a(x: In) on FIELD
-     directive @b(y: In) on FIELD
+     directive @a(x: In) on INPUT_FIELD_DEFINITION
+     directive @b(y: In) on INPUT_FIELD_DEFINITION
      input In { z: Int @a }",
   );
   assert_eq!(errors.len(), 1, "{errors}");
@@ -1145,7 +1421,8 @@ fn the_name_index_resolves_exactly_what_was_interned() {
 /// chain is bounded by nothing. This is the shape that would have found a recursive walk.
 #[test]
 fn a_deep_input_chain_does_not_recurse() {
-  let mut sdl = String::from("type Query { ok: Int }\ndirective @d(a: In0) on FIELD\n");
+  let mut sdl =
+    String::from("type Query { ok: Int }\ndirective @d(a: In0) on INPUT_FIELD_DEFINITION\n");
   const DEPTH: usize = 20_000;
   for level in 0..DEPTH {
     sdl.push_str(&format!("input In{level} {{ next: In{} }}\n", level + 1));
@@ -1154,7 +1431,8 @@ fn a_deep_input_chain_does_not_recurse() {
   built(&sdl);
 
   // The same chain, with the directive applied at the far end, is a cycle and is found.
-  let mut sdl = String::from("type Query { ok: Int }\ndirective @d(a: In0) on FIELD\n");
+  let mut sdl =
+    String::from("type Query { ok: Int }\ndirective @d(a: In0) on INPUT_FIELD_DEFINITION\n");
   for level in 0..DEPTH {
     sdl.push_str(&format!("input In{level} {{ next: In{} }}\n", level + 1));
   }

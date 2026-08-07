@@ -40,6 +40,12 @@ mod builder;
 mod error;
 mod repr;
 
+/// The literal-shape coercion table, shared with the executable rules.
+///
+/// Crate-private on purpose: it is a seam between two callers inside this crate, not a promise to
+/// anyone outside it, and `repr` — the part of this module that *is* published — stays free of it.
+pub(crate) mod literal;
+
 pub use builder::SchemaBuilder;
 pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};
 pub use repr::{
