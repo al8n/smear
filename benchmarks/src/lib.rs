@@ -1,4 +1,13 @@
-//! Like-for-like benchmark support: smear's GraphQL lossless CST parser vs `apollo-parser`.
+//! Like-for-like comparison support against the apollo-rs stack.
+//!
+//! Two comparisons live here, sharing one dependency edge and one set of corpora.
+//!
+//! * **The parser**, in this module: smear's GraphQL lossless CST vs `apollo-parser`.
+//! * **The validator**, in [`oracle`]: smear's draft §5 rules against `apollo-compiler` as a
+//!   *differential oracle*, verdict by verdict, with a directional whitelist for the four places
+//!   the oracle is measurably laxer than the specification.
+//!
+//! The rest of this header is about the parser comparison.
 //!
 //! Both sides build a rowan CST over the same source — but, since the 0.17 bump, **not the same
 //! build of rowan**. This used to be exact: `apollo-parser` depended on `rowan = "0.16.0"`
@@ -47,6 +56,7 @@ use smear::parser::graphql::lossless::{
 use tokora::{Lexer as _, emitter::Severity};
 
 pub mod dump;
+pub mod oracle;
 
 /// One corpus entry: a name, its source, and which of `apollo-parser`'s two published
 /// traversals matches its content.
