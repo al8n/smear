@@ -102,6 +102,304 @@ mod corpus;
 
 use corpus::SCHEMA_FIXTURES as FIXTURES;
 
+/// The sub-clause floor: a second SDL for a rule whose census row pins only one of its branches.
+///
+/// # Why the census above cannot do this
+///
+/// [`refusal_floor`] iterates an enumeration of **kinds**, and a kind is not a branch. One row per
+/// kind is the most a mechanical census can demand, and it is genuinely a floor — but a rule whose
+/// guard ranges over more than one input class is pinned on whichever class the fixture's author
+/// happened to write.
+///
+/// That is not a hypothetical. A completeness audit planted nineteen single-branch breakages
+/// across this validator; sixteen reddened and three did not, and the clearest of the three was
+/// narrowing [`SchemaErrorKind::RootOperationTypeNotObject`]'s guard to the **query** root. Every
+/// gate in the repository stayed green — including a differential oracle over six hundred
+/// documents — because the census row above happens to be written with a `query` root. The sibling
+/// kind [`SchemaErrorKind::UndefinedRootOperationType`] happens to be written with a `mutation`
+/// root, which is the only reason the identical planting *there* was caught. Coverage by accident,
+/// in both directions.
+///
+/// # It is systemic, and here is the number
+///
+/// The audit's nineteen plantings were spread across every rule shape and came back 3 invisible.
+/// A second sample, drawn **only** at the shape above — disable exactly one value of an enumerated
+/// domain a guard ranges over, leaving every other value working — came back **10 of 10
+/// invisible**, every one verified by an SDL the unplanted builder refuses and the planted one
+/// accepts, against the full suite *and* the differential oracle with apollo-rs's 682-case corpus.
+/// So the audit's 3-in-19 is not the rate for this defect class; it is the rate for a sample that
+/// mostly measured something else. Where a rule ranges over `TypeKind`, `DirectiveLocation` or
+/// `RootOperation`, a one-fixture census pins one value and nothing pins the rest.
+///
+/// Those ten are closed below, in the second block. That is not a bound on the population — the
+/// sample was not exhaustive and no census here can be, since the branchiness lives in guard
+/// predicates rather than in anything an enumeration can iterate. It is a floor that now moves in
+/// the right direction: a hole measured is a row added.
+///
+/// # What a row here has to be
+///
+/// A branch that was **measured** unreachable, not one that looks thin. Each row below either
+/// reddens a planting that the census row did not, or is the other end of a family whose census row
+/// leans on one side of an enumerated domain. They run through exactly the assertions the census
+/// rows do — [`branch_floor`] and [`every_refusal_names_its_subject`] — and they stay out of
+/// [`FIXTURES`] so that the one-row-per-kind census stays a census and this stays a list of holes
+/// somebody closed.
+#[allow(clippy::type_complexity)]
+const BRANCHES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
+  // -- §3.3, the three root operations ---------------------------------------------------------
+  //
+  // `RootOperationTypeNotObject` over each root and each non-object kind. The audit's planting was
+  // `&& operation == RootOperation::Query`; these are what make it red.
+  (
+    SchemaErrorKind::RootOperationTypeNotObject,
+    "type Query { ok: Int } interface M { m: Int } schema { query: Query mutation: M }",
+    &[SchemaErrorKind::RootOperationTypeNotObject],
+  ),
+  (
+    SchemaErrorKind::RootOperationTypeNotObject,
+    "type Query { ok: Int } interface S { s: Int } schema { query: Query subscription: S }",
+    &[SchemaErrorKind::RootOperationTypeNotObject],
+  ),
+  // The guard is `!= Object`, not `== Interface`: a scalar, a union, an enum and an input object
+  // are all equally not object types, and a guard written against the wrong side of that reads the
+  // same in the two rows above.
+  (
+    SchemaErrorKind::RootOperationTypeNotObject,
+    "type Query { ok: Int } scalar M schema { query: Query mutation: M }",
+    &[SchemaErrorKind::RootOperationTypeNotObject],
+  ),
+  (
+    SchemaErrorKind::RootOperationTypeNotObject,
+    "type Query { ok: Int } union S = Query schema { query: Query subscription: S }",
+    &[SchemaErrorKind::RootOperationTypeNotObject],
+  ),
+  (
+    SchemaErrorKind::RootOperationTypeNotObject,
+    "type Query { ok: Int } input M { a: Int } schema { query: Query mutation: M }",
+    &[SchemaErrorKind::RootOperationTypeNotObject],
+  ),
+  // The sibling the audit found covered *by accident* — its census row uses a non-query root, so
+  // the query branch is the one nothing pins. Same family, other end.
+  (
+    SchemaErrorKind::UndefinedRootOperationType,
+    "type Real { ok: Int } schema { query: Nope }",
+    &[SchemaErrorKind::UndefinedRootOperationType],
+  ),
+  (
+    SchemaErrorKind::UndefinedRootOperationType,
+    "type Query { ok: Int } schema { query: Query subscription: Nope }",
+    &[SchemaErrorKind::UndefinedRootOperationType],
+  ),
+  // Distinctness holds between *any* two roots, not only against the query one.
+  (
+    SchemaErrorKind::SharedRootOperationType,
+    "type Query { ok: Int } type Both { go: Int }
+     schema { query: Query mutation: Both subscription: Both }",
+    &[SchemaErrorKind::SharedRootOperationType],
+  ),
+  // -- §3.6.1 IsSubType(2), the union-membership branch of covariance --------------------------
+  //
+  // The census row for `InvalidInterfaceFieldType` is `Int` against `String`, which never reaches
+  // `is_sub_type` past its `_ => false` arm. The audit's planting was `TypeKind::Union => true`;
+  // this row is what makes it red. `valid_interface_implementations_are_accepted` holds the other
+  // direction, where the field's type *is* a member.
+  (
+    SchemaErrorKind::InvalidInterfaceFieldType,
+    "type Query { ok: Int }
+     type Member { a: Int }
+     type Outsider { a: Int }
+     union U = Member
+     interface I { f: U }
+     type T implements I { f: Outsider }",
+    &[SchemaErrorKind::InvalidInterfaceFieldType],
+  ),
+  // -- §3.13's value check, over the coercion arms one scalar row cannot reach -------------------
+  //
+  // The census row for `InvalidDirectiveArgumentValue` is a string offered to an `Int`. `ID`'s
+  // integer arm is a *range* check the audit forced to `true` with nothing noticing — apollo does
+  // not range-check `ID`, so no differential can see it. `validator_rules.rs` holds the same branch
+  // at the executable door; this is the SDL one, and the two share the coercion table.
+  (
+    SchemaErrorKind::InvalidDirectiveArgumentValue,
+    "directive @d(id: ID) on OBJECT
+     type Query @d(id: 99999999999999) { ok: Int }",
+    &[SchemaErrorKind::InvalidDirectiveArgumentValue],
+  ),
+  // -- §3.6.1(2.4.4.1) at the other `InputValueDefinition` position ----------------------------
+  (
+    SchemaErrorKind::DeprecatedRequiredArgument,
+    "type Query { ok: Int } directive @d(a: Int! @deprecated) on OBJECT",
+    &[SchemaErrorKind::DeprecatedRequiredArgument],
+  ),
+  // -- §3.6.1(2.4.5), the coercion arms a single scalar row leaves unpinned ---------------------
+  (
+    SchemaErrorKind::InvalidDefaultValue,
+    "type Query { ok(a: E = NOPE): Int } enum E { A B }",
+    &[SchemaErrorKind::InvalidDefaultValue],
+  ),
+  (
+    SchemaErrorKind::InvalidDefaultValue,
+    "type Query { ok(a: [Int] = [1, \"two\"]): Int }",
+    &[SchemaErrorKind::InvalidDefaultValue],
+  ),
+  (
+    SchemaErrorKind::InvalidDefaultValue,
+    "type Query { ok(a: Int! = null): Int }",
+    &[SchemaErrorKind::InvalidDefaultValue],
+  ),
+  (
+    SchemaErrorKind::InvalidDefaultValue,
+    "type Query { ok: Int } input In { a: Int = \"nope\" }",
+    &[SchemaErrorKind::InvalidDefaultValue],
+  ),
+  (
+    SchemaErrorKind::InvalidDefaultValue,
+    "type Query { ok: Int } directive @d(a: Int = \"nope\") on OBJECT",
+    &[SchemaErrorKind::InvalidDefaultValue],
+  ),
+  // -- §3.10.1(4), the two shapes a single self-referential row leaves unpinned -----------------
+  (
+    SchemaErrorKind::InputObjectDefaultValueCycle,
+    "type Query { ok: Int } input A { b: B = {} } input B { a: A = {} }",
+    &[SchemaErrorKind::InputObjectDefaultValueCycle],
+  ),
+  (
+    SchemaErrorKind::InputObjectDefaultValueCycle,
+    "type Query { ok: Int } input In { a: [In] = [{}] }",
+    &[SchemaErrorKind::InputObjectDefaultValueCycle],
+  ),
+  // -- the ten from the second sample ------------------------------------------------------------
+  //
+  // Every row here closes a planting that came back GREEN against the whole gate set and the wide
+  // oracle. They are grouped because they share one shape and were found by one sweep, not because
+  // they share a rule: each is a value of an enumerated domain that its kind's census row does not
+  // happen to use. See this table's header for the measurement.
+  //
+  // B1 — `UnsupportedDirectiveLocation` at a location other than `OBJECT`. Twelve locations, one
+  // census row. `legal_directive_usages_are_accepted` covers all twelve in the *accepting*
+  // direction, which is what made the hole easy to miss: the location word is exercised, the
+  // refusal at eleven of the twelve is not.
+  (
+    SchemaErrorKind::UnsupportedDirectiveLocation,
+    "directive @onObject on OBJECT
+     type Query { ok: Int }
+     enum E { A @onObject }",
+    &[SchemaErrorKind::UnsupportedDirectiveLocation],
+  ),
+  (
+    SchemaErrorKind::UnsupportedDirectiveLocation,
+    "directive @onObject on OBJECT
+     type Query { ok: Int }
+     input In { a: Int @onObject }",
+    &[SchemaErrorKind::UnsupportedDirectiveLocation],
+  ),
+  // B2 — `ExtensionKindMismatch` for an extension keyword other than `type`.
+  (
+    SchemaErrorKind::ExtensionKindMismatch,
+    "type Query { ok: Int } type T { a: Int } extend enum T { B }",
+    &[SchemaErrorKind::ExtensionKindMismatch],
+  ),
+  (
+    SchemaErrorKind::ExtensionKindMismatch,
+    "type Query { ok: Int } enum E { A } extend input E { a: Int }",
+    &[SchemaErrorKind::ExtensionKindMismatch],
+  ),
+  // B3 — `UndefinedExtensionTarget` likewise: the census row is `extend type`.
+  (
+    SchemaErrorKind::UndefinedExtensionTarget,
+    "type Query { ok: Int } extend input Nope { a: Int }",
+    &[SchemaErrorKind::UndefinedExtensionTarget],
+  ),
+  (
+    SchemaErrorKind::UndefinedExtensionTarget,
+    "type Query { ok: Int } extend union Nope = Query",
+    &[SchemaErrorKind::UndefinedExtensionTarget],
+  ),
+  // B4, B5 — `IsValidImplementationFieldType`'s two structural arms. The census row is a bare
+  // `Int` against a bare `String`, which reaches neither: the list arm and the non-null arm both
+  // returned `true` unconditionally with nothing noticing.
+  (
+    SchemaErrorKind::InvalidInterfaceFieldType,
+    "type Query { ok: Int } interface I { f: [Int] } type T implements I { f: [String] }",
+    &[SchemaErrorKind::InvalidInterfaceFieldType],
+  ),
+  (
+    SchemaErrorKind::InvalidInterfaceFieldType,
+    "type Query { ok: Int } interface I { f: Int } type T implements I { f: String! }",
+    &[SchemaErrorKind::InvalidInterfaceFieldType],
+  ),
+  // B6 — `IsSubType`(3), the interface-closure arm. Its union sibling is the P10 row above; this
+  // is the same hole one arm over, and `valid_interface_implementations_are_accepted` again covers
+  // only the accepting direction.
+  (
+    SchemaErrorKind::InvalidInterfaceFieldType,
+    "type Query { ok: Int }
+     interface N { i: Int }
+     type A { i: Int }
+     interface I { f: N }
+     type T implements I { f: A }",
+    &[SchemaErrorKind::InvalidInterfaceFieldType],
+  ),
+  // B7 — `UnionMemberNotObject` for a member that is neither an object nor an interface.
+  (
+    SchemaErrorKind::UnionMemberNotObject,
+    "type Query { ok: Int } enum E { A } union U = E",
+    &[SchemaErrorKind::UnionMemberNotObject],
+  ),
+  // B8 — `ImplementsNonInterface` where the implemented type is not an object either.
+  (
+    SchemaErrorKind::ImplementsNonInterface,
+    "type Query { ok: Int } type A { a: Int } union U = A type T implements U { a: Int }",
+    &[SchemaErrorKind::ImplementsNonInterface],
+  ),
+  // B9 — `ArgumentTypeNotInputType` for an output type other than an object.
+  (
+    SchemaErrorKind::ArgumentTypeNotInputType,
+    "type Query { ok(a: U): Int } type A { a: Int } union U = A",
+    &[SchemaErrorKind::ArgumentTypeNotInputType],
+  ),
+  (
+    SchemaErrorKind::ArgumentTypeNotInputType,
+    "type Query { ok(a: I): Int } interface I { a: Int } type A implements I { a: Int }",
+    &[SchemaErrorKind::ArgumentTypeNotInputType],
+  ),
+];
+
+/// Every branch row fires exactly what it says, and every one names a kind the census already
+/// covers.
+///
+/// The second half is what keeps this table from becoming a second census: a row here may only
+/// deepen a kind [`FIXTURES`] already has, never stand in for one.
+#[test]
+fn branch_floor() {
+  assert!(
+    !BRANCHES.is_empty(),
+    "the sub-clause floor is empty; it was seeded from measured plantings and losing them all is \
+     not an improvement"
+  );
+  for (kind, sdl, expected) in BRANCHES {
+    assert!(
+      FIXTURES.iter().any(|(census, ..)| census == kind),
+      "{kind:?} has a branch row but no census row in FIXTURES — a branch is a second fixture, \
+       not a first one"
+    );
+    assert!(
+      FIXTURES.iter().all(|(_, census_sdl, _)| census_sdl != sdl),
+      "{kind:?}'s branch row is the census row verbatim, so it pins nothing the census did not"
+    );
+    let errors = refused(sdl);
+    let mut want = expected.to_vec();
+    want.sort_unstable();
+    want.dedup();
+    assert_eq!(
+      errors.kinds(),
+      want,
+      "branch row for {kind:?} produced {:?}\n---\n{sdl}",
+      errors.kinds()
+    );
+  }
+}
+
 #[test]
 fn refusal_floor() {
   let mut missing = Vec::new();
@@ -124,7 +422,7 @@ fn refusal_floor() {
 
   // The census must not pass vacuously.
   assert!(
-    SchemaErrorKind::ALL.len() >= 59,
+    SchemaErrorKind::ALL.len() >= 66,
     "read only {} kinds; the enumeration is wrong, not the fixtures",
     SchemaErrorKind::ALL.len()
   );
@@ -152,7 +450,7 @@ fn refusal_floor() {
 /// A rule that fires without saying what tripped it is a rule an SDL author cannot act on.
 #[test]
 fn every_refusal_names_its_subject() {
-  for (kind, sdl, _) in FIXTURES {
+  for (kind, sdl, _) in FIXTURES.iter().chain(BRANCHES) {
     let errors = refused(sdl);
     for error in errors.errors() {
       assert!(
@@ -1175,14 +1473,173 @@ fn valid_interface_implementations_are_accepted() {
        # `T!` implements `T`.
        id: ID!
        name: String
-       # An extra optional argument is fine; an extra required one is not (fixtured above).
+       # A field the interfaces do not declare, so its arguments are nobody's business.
        extra(x: Int, y: Int = 1): Int
      }
      interface Container { item: Node }
      # An object is a valid implementation of an interface it implements.
      type Box implements Container { item: Impl }
      interface ListContainer { items: [Node] }
-     type ListBox implements ListContainer { items: [Impl!]! }",
+     type ListBox implements ListContainer { items: [Impl!]! }
+     # `IsValidImplementation` 2.4: an argument the interface field does not declare \"must not be
+     # required\", and required is non-null *with no default*. So `defaulted` is legal and
+     # `optional` is legal, and only a bare `Int!` is not (which is the census row for
+     # `UnexpectedRequiredArgument`). Dropping the default half of that predicate was invisible to
+     # every gate until this line existed — the obvious place to put it, `Impl.extra`, proves
+     # nothing, because the rule only ever looks at arguments of a field that *implements* an
+     # interface field.
+     interface Extras { e: Int }
+     type WithExtras implements Extras { e(defaulted: Int! = 1, optional: Int): Int }",
+  );
+
+  // `IsSubType`(2): an object that *is* a member of the interface field's union. The other end of
+  // the branch row in `BRANCHES`, and the reason that row cannot be satisfied by refusing the
+  // whole union arm.
+  built(
+    "type Query { ok: Int }
+     type Member { a: Int }
+     type Other { a: Int }
+     union U = Member | Other
+     interface I { f: U }
+     type T implements I { f: Member }
+     # And through the wrappers, which is what makes it the *sub-type* relation and not equality.
+     interface L { g: [U!] }
+     type M implements L { g: [Member!]! }",
+  );
+}
+
+/// The deprecation obligations, in the direction that accepts.
+///
+/// Three rules landed together here — `@deprecated` on a required argument, on a required input
+/// field, and on a field whose interface field is not deprecated — and every one of them is a
+/// refusal that a nearby legal SDL would trip if the predicate were written slightly wrong.
+/// "Required" in particular is *non-null with no default*, so a defaulted non-null is legal and a
+/// nullable one is legal, and a check written as `is_non_null()` alone would refuse both.
+#[test]
+fn legal_deprecations_are_accepted() {
+  built(
+    "type Query {
+       # Optional two ways: nullable, and non-null with a default.
+       nullable(a: Int @deprecated): Int
+       defaulted(a: Int! = 1 @deprecated): Int
+       # A deprecated *field* is unconditional — the obligation is about arguments and input
+       # fields, and about interfaces.
+       gone: Int @deprecated
+     }
+     input In { nullable: Int @deprecated defaulted: Int! = 1 @deprecated }
+     enum E { LIVE GONE @deprecated }
+     directive @d(nullable: Int @deprecated, defaulted: Int! = 1 @deprecated) on OBJECT",
+  );
+
+  // `IsValidImplementation` 2.6 runs one way. An interface may deprecate ahead of its
+  // implementors; an implementor may not deprecate ahead of its interface.
+  built(
+    "type Query { ok: Int }
+     interface I { f: Int @deprecated g: Int }
+     # Both deprecated, and the interface deprecated alone: the two legal shapes.
+     type Both implements I { f: Int @deprecated g: Int }
+     type InterfaceOnly implements I { f: Int g: Int }",
+  );
+}
+
+/// Default values that *do* coerce, at all three positions an `InputValueDefinition` appears.
+///
+/// The refusal is new (draft §3.6.1 2.4.5) and the direction that matters more is this one: a
+/// default the specification's coercion rules accept and `Schema::build` does not is a schema
+/// nothing else refuses, with no later stage to overrule it.
+#[test]
+fn legal_default_values_are_accepted() {
+  built(
+    "type Query {
+       f(
+         i: Int = 2147483647
+         negative: Int = -2147483648
+         fl: Float = 1.5
+         floatFromInt: Float = 2
+         s: String = \"x\"
+         b: Boolean = false
+         idText: ID = \"abc\"
+         idNumber: ID = 4
+         # The singleton-to-list coercion, at one level and at two.
+         list: [Int] = 1
+         nested: [[Int]] = 7
+         listed: [Int] = [1, 2]
+         obj: Point = { x: 1 }
+         e: Unit = METER
+         custom: Custom = { anything: [1, true, NOT_AN_ENUM] }
+         nullable: Int = null
+         emptyList: [Int] = []
+         emptyObject: Point = {}
+       ): Int
+     }
+     scalar Custom
+     input Point { x: Int y: Int }
+     enum Unit { METER FOOT }
+     input In { a: Point = { x: 1 } b: Unit = FOOT }
+     directive @d(a: Point = { y: 2 }, b: [String!] = []) on OBJECT",
+  );
+
+  // A default that reaches another input object's default is not a *cycle* — it terminates, which
+  // is the whole difference §3.10.1(4) turns on.
+  built(
+    "type Query { ok: Int }
+     input A { b: B = {} }
+     input B { n: Int = 1 }
+     # A self-referential *type* whose defaults bottom out: the literal names `c` explicitly, so
+     # `C.c`'s own default is never consulted a second time and the walk stops on `null`.
+     input C { c: C = { c: null } n: Int }
+     # And a self-reference with no default at all.
+     input D { d: D n: Int }",
+  );
+
+  // The near miss, kept next to it: leaving `c` out of the literal is what makes it a cycle,
+  // because coercing that default has to consult `C.c`'s default again to fill `c` in.
+  assert_eq!(
+    refused("type Query { ok: Int } input C { c: C = { n: 1 } n: Int }").kinds(),
+    vec![SchemaErrorKind::InputObjectDefaultValueCycle],
+    "a default that does not name the self-referential field falls back to itself"
+  );
+}
+
+/// `@oneOf` on the definition stays legal; only an extension providing it is refused.
+#[test]
+fn one_of_on_the_definition_is_accepted() {
+  built("type Query { ok: Int } input In @oneOf { a: Int b: String }");
+  // An extension of a OneOf input object is fine as long as it does not *provide* the directive,
+  // and its own fields are held to the OneOf constraints (draft §3.10.3(6)).
+  let schema = built(
+    "type Query { ok: Int }
+     input In @oneOf { a: Int }
+     extend input In { b: String }",
+  );
+  let (input, def) = schema.type_by_name(b"In").expect("In");
+  assert!(def.is_one_of());
+  assert_eq!(schema.input_fields_of(input).len(), 2);
+
+  // The extension's own fields are still checked against the constraint.
+  assert_eq!(
+    refused(
+      "type Query { ok: Int }
+       input In @oneOf { a: Int }
+       extend input In { b: String! }"
+    )
+    .kinds(),
+    vec![SchemaErrorKind::OneOfFieldNotNullable]
+  );
+}
+
+/// Three roots, three distinct types — and the defaults, which cannot collide.
+#[test]
+fn distinct_roots_are_accepted() {
+  built("type Query { ok: Int } type Mutation { go: Int } type Subscription { s: Int }");
+  built(
+    "type A { ok: Int } type B { go: Int } type C { s: Int }
+     schema { query: A mutation: B subscription: C }",
+  );
+  // A root type may still be reachable from another root; distinctness is about the three roots
+  // themselves, not about the graph under them.
+  built(
+    "type Query { m: Mutation } type Mutation { go: Int } schema { query: Query mutation: Mutation }",
   );
 }
 
@@ -1275,5 +1732,54 @@ fn a_deep_input_chain_does_not_recurse() {
   assert!(
     errors.contains_kind(SchemaErrorKind::SelfReferentialDirective),
     "{errors}"
+  );
+}
+
+/// The same shape for draft §3.10.1(4), where the chain is made of *default values*.
+///
+/// Two properties in one document, and neither is provable by a small one:
+///
+/// * **iterative.** `InputObjectDefaultValueHasCycle` is written in the draft as two mutually
+///   recursive functions, and the recursion that matters descends into a field's own default —
+///   bounded by the number of defaulted fields, which is bounded by nothing. Twenty thousand links
+///   is a stack overflow for a literal transcription.
+/// * **linear in the number of starts.** The walk begins at every input object, so without the
+///   settling described on `validate_input_object_default_cycles` this is twenty thousand walks of
+///   average length ten thousand. Measured with the skip removed: **41.5 s** for this test alone,
+///   against **0.9 s** for the whole file with it.
+#[test]
+fn a_deep_defaulted_input_chain_does_not_recurse() {
+  const DEPTH: usize = 20_000;
+
+  let mut sdl = String::from("type Query { ok: Int }\n");
+  for level in 0..DEPTH {
+    sdl.push_str(&format!(
+      "input In{level} {{ next: In{} = {{}} }}\n",
+      level + 1
+    ));
+  }
+  sdl.push_str(&format!("input In{DEPTH} {{ end: Int }}\n"));
+  built(&sdl);
+
+  // The same chain closed into a cycle: the last link's default points back at the first, so no
+  // coercion of `In0`'s default terminates.
+  let mut sdl = String::from("type Query { ok: Int }\n");
+  for level in 0..DEPTH {
+    sdl.push_str(&format!(
+      "input In{level} {{ next: In{} = {{}} }}\n",
+      level + 1
+    ));
+  }
+  sdl.push_str(&format!("input In{DEPTH} {{ next: In0 = {{}} }}\n"));
+  let errors = refused(&sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::InputObjectDefaultValueCycle],
+    "{errors}"
+  );
+  assert_eq!(
+    errors.len(),
+    1,
+    "a cycle through twenty thousand objects is one diagnostic, not twenty thousand"
   );
 }

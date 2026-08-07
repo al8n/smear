@@ -1,6 +1,6 @@
-//! What a literal *is*, and which built-in scalars accept it.
+//! What a literal *is*, and which built-in scalars accept it — **on the build door**.
 //!
-//! # One coercion table, two callers
+//! # One question, two implementations, and a test that keeps them honest
 //!
 //! Draft 5.6.1 ("Values of Correct Type") and the use-site value rule §3.13 asks about a directive
 //! argument are the same question — does this literal fit this type? — asked once per request and
@@ -8,11 +8,22 @@
 //! *not* differ is the answer, because a schema whose directive arguments were accepted at build
 //! and a query whose arguments are accepted per request have to agree about what an `Int` is.
 //!
-//! So the decision lives here, reduced to what it actually depends on: the shape of the literal
-//! ([`LiteralShape`]), which built-in scalar it is being offered to ([`BuiltInScalar`]), and — for
-//! the two numeric ranges — the literal's retained spelling. Neither the AST nor the schema tables
-//! appear in this module's signatures, which is what lets the builder call it over its own owned
-//! reduction and the executable rules call it over the syntactic AST.
+//! It would be tidier if that meant one table. It does not. This module is the **builder's**
+//! decision, reduced to what it depends on: the shape of the literal ([`LiteralShape`]), which
+//! built-in scalar it is being offered to ([`BuiltInScalar`]), and — for the two numeric ranges —
+//! the literal's retained spelling. The executable rules answer the same question in
+//! [`validator::executable::values`](crate::validator)'s `scalar_accepts`, over the syntactic AST
+//! and against interned `Sym`s rather than names, with its own copies of [`fits_i32`], [`fits_id`]
+//! and [`is_finite`]. Its only caller is
+//! [`SchemaBuilder`](super::builder)'s constant-value check.
+//!
+//! Two implementations of one paragraph can drift, and the drift is invisible from either side —
+//! a completeness audit forced this module's `ID` range arm to `true` and the whole gate set,
+//! differential oracle included, stayed green, because the SDL door's fixtures never offered an
+//! out-of-range `ID`. `the_two_coercion_tables_agree` in `tests/validator_rules.rs` is what makes
+//! that a red now: it runs every literal shape past every built-in scalar through *both* doors and
+//! requires the same verdict. Anything added here has to be added there, and the test is what says
+//! so.
 //!
 //! # Built-in-ness is decided by name
 //!
@@ -186,6 +197,21 @@ mod tests {
 
     assert!(!BuiltInScalar::Int.accepts(LiteralShape::Int, b"2147483648"));
     assert!(BuiltInScalar::Float.accepts(LiteralShape::Int, b"2147483648"));
+
+    // `ID`'s integer arm is the *same* range, and it is the branch `accepts` reaches only from
+    // inside the range in the case above. A completeness audit forced that arm to `true` and every
+    // gate in the repository stayed green, including a differential oracle over six hundred
+    // documents — apollo-compiler 1.32.0 does not range-check `ID` at all, so nothing differential
+    // can ever see it. These assertions and
+    // `values_of_correct_type_reads_the_whole_coercion_table` in `tests/validator_rules.rs` are
+    // what make the branch reachable by a gate.
+    assert!(BuiltInScalar::ID.accepts(LiteralShape::Int, b"2147483647"));
+    assert!(BuiltInScalar::ID.accepts(LiteralShape::Int, b"-2147483648"));
+    assert!(!BuiltInScalar::ID.accepts(LiteralShape::Int, b"2147483648"));
+    assert!(!BuiltInScalar::ID.accepts(LiteralShape::Int, b"-2147483649"));
+    assert!(!BuiltInScalar::ID.accepts(LiteralShape::Int, b"99999999999999"));
+    // A *string* `ID` is unbounded, which is what the range arm must not accidentally constrain.
+    assert!(BuiltInScalar::ID.accepts(LiteralShape::String, b"99999999999999"));
 
     assert!(is_finite(b"1.0"));
     assert!(is_finite(b"-1.5e3"));

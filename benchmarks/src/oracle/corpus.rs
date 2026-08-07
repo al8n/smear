@@ -460,6 +460,122 @@ pub const SDL_DIRECTIVE_CONTROLS: &[(&str, &str)] = &[
   ),
 ];
 
+/// The §3 checks `Schema::build` makes and `apollo-compiler` 1.32.0 does not.
+///
+/// # Why this table is the mirror image of [`SDL_DIRECTIVE_PROBES`], and why it is not a suite
+///
+/// Those probes are SDLs *both* implementations refuse, so a suite carrying one contributes a
+/// `BothRejected` and the runner counts it. Every SDL here is refused by **smear alone**, which the
+/// runner reports as [`SchemaOutcome::SmearRejected`](super::SchemaOutcome::SmearRejected) — always
+/// a failure, with no door. There is no schema-stage equivalent of a
+/// [`whitelist::Class`](super::whitelist::Class): a class is declared on an executable *case*, and
+/// these suites would have no cases. So they stay out of [`all`] and are asserted directly, by
+/// `every_smear_only_schema_check_is_still_smear_only`.
+///
+/// # What the assertion buys, given the oracle cannot see any of them
+///
+/// Seven §3 rules landed together (smear issue #96's completeness audit, §3 remainder) and the
+/// oracle is *silent* on all seven — apollo checks none of them, so a green differential said
+/// nothing about whether they were implemented, and would say nothing if they were deleted. That
+/// silence is the finding, and a table nobody runs would record it as prose. Asserted, it is a
+/// standing measurement in **both** directions:
+///
+/// * smear must still refuse — a check quietly lost is a red here even though the oracle stays
+///   green;
+/// * apollo must still produce exactly the declared typed error names — an empty list for the six
+///   it accepts outright, and `UndefinedDirective` for the `@oneOf` one, which apollo rejects only
+///   because 1.32.0 has no `@oneOf` built-in at all (the same absence
+///   [`Class::W4`] records). A bump under the `=1.32.0` pin that grows
+///   any of these rules reds here, naming the row, rather than silently turning a hand-expected
+///   rule into an oracle-visible one nobody re-measured.
+///
+/// Each row is `(label, apollo's typed error names for this SDL, the SDL)`.
+pub const SDL_SMEAR_ONLY_PROBES: &[(&str, &[&str], &str)] = &[
+  (
+    "3.3-roots-must-differ",
+    &[],
+    "type Query { ok: Int }\nschema { query: Query mutation: Query }",
+  ),
+  (
+    "3.6.1-deprecated-required-argument",
+    &[],
+    "type Query { f(a: Int! @deprecated): Int }",
+  ),
+  (
+    "3.10.1-deprecated-required-input-field",
+    &[],
+    "type Query { ok: Int }\ninput In { a: Int! @deprecated }",
+  ),
+  (
+    "3.6.1-interface-field-not-deprecated",
+    &[],
+    "type Query { ok: Int }\ninterface I { f: Int }\ntype T implements I { f: Int @deprecated }",
+  ),
+  (
+    "3.6.1-argument-default-value",
+    &[],
+    "type Query { f(a: Int = \"nope\"): Int }",
+  ),
+  (
+    "3.10.1-default-value-cycle",
+    &[],
+    "type Query { ok: Int }\ninput In { a: In = {} }",
+  ),
+  (
+    "3.10.3-oneof-on-extension",
+    &["UndefinedDirective"],
+    "type Query { ok: Int }\ninput In { a: Int }\nextend input In @oneOf",
+  ),
+];
+
+/// The near miss for each row of [`SDL_SMEAR_ONLY_PROBES`]: smear **accepts** it.
+///
+/// A one-sided probe with no control proves only that smear refuses *something*. Each SDL here is
+/// the smallest edit to its probe that the rule permits — an optional argument instead of a
+/// required one, a default that coerces, a cycle whose defaults bottom out — so the pair together
+/// says the check is the rule and not a blanket refusal of the shape.
+///
+/// Same three columns, and apollo's names are declared for the same reason: the `@oneOf` control is
+/// still refused by apollo, because apollo has no `@oneOf`.
+pub const SDL_SMEAR_ONLY_CONTROLS: &[(&str, &[&str], &str)] = &[
+  (
+    "3.3-distinct-roots",
+    &[],
+    "type Query { ok: Int }\ntype M { go: Int }\nschema { query: Query mutation: M }",
+  ),
+  (
+    "3.6.1-deprecated-optional-argument",
+    &[],
+    "type Query { f(a: Int @deprecated, b: Int! = 1 @deprecated): Int }",
+  ),
+  (
+    "3.10.1-deprecated-optional-input-field",
+    &[],
+    "type Query { ok: Int }\ninput In { a: Int @deprecated b: Int! = 1 @deprecated }",
+  ),
+  (
+    "3.6.1-interface-field-also-deprecated",
+    &[],
+    "type Query { ok: Int }\ninterface I { f: Int @deprecated }\ntype T implements I { f: Int \
+     @deprecated }",
+  ),
+  (
+    "3.6.1-argument-default-value-coerces",
+    &[],
+    "type Query { f(a: Int = 1, b: [Int] = 2, c: E = A): Int }\nenum E { A B }",
+  ),
+  (
+    "3.10.1-default-value-terminates",
+    &[],
+    "type Query { ok: Int }\ninput In { a: In = { a: null } n: Int }",
+  ),
+  (
+    "3.10.3-oneof-on-definition",
+    &["UndefinedDirective"],
+    "type Query { ok: Int }\ninput In @oneOf { a: Int }",
+  ),
+];
+
 /// The mechanical family: realistic seeds and every one-token mutation of them.
 pub fn generated() -> Vec<Suite> {
   let mut suites = Vec::new();

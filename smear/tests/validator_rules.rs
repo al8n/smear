@@ -69,8 +69,8 @@ use corpus::{FIXTURES, SCHEMA};
 // harness
 // ---------------------------------------------------------------------------------------------
 
-fn build(sdl: &str) -> Schema {
-  let document = Parser::with_parser::<
+fn parse_type_system(sdl: &str) -> TypeSystemDocument<&str> {
+  Parser::with_parser::<
     GraphqlLexer<'_, str>,
     TypeSystemDocument<&str>,
     GraphqlErrors<&str>,
@@ -78,7 +78,11 @@ fn build(sdl: &str) -> Schema {
     GraphQL,
   >(type_system_document)
   .parse_str(sdl)
-  .unwrap_or_else(|errors| panic!("fixture SDL does not parse: {errors:?}\n---\n{sdl}"));
+  .unwrap_or_else(|errors| panic!("fixture SDL does not parse: {errors:?}\n---\n{sdl}"))
+}
+
+fn build(sdl: &str) -> Schema {
+  let document = parse_type_system(sdl);
   Schema::build(&document)
     .unwrap_or_else(|errors| panic!("fixture SDL is not a schema:\n{errors}\n---\n{sdl}"))
 }
@@ -572,6 +576,165 @@ fn variable_usage_is_checked_inside_list_literals() {
       "query nested($v: Boolean!) { booleanList(booleanListArg: [$v]) }"
     ),
     []
+  );
+}
+
+/// Draft 5.6.1 over every arm of the built-in coercion table, in both directions.
+///
+/// The fixture in [`FIXTURES`] pins one arm — a string offered to an `Int` — and `liveness_floor`
+/// cannot ask for more, because it iterates *rules* and this is one rule holding five scalars and
+/// several widenings. The arm that turned out to matter is `ID`'s: a completeness audit forced its
+/// 32-bit range check to `true` and nothing in the repository noticed, the differential oracle
+/// included, because apollo-compiler 1.32.0 does not range-check `ID` at all. A branch with no
+/// oracle needs a written expectation, and this is it.
+#[test]
+fn values_of_correct_type_reads_the_whole_coercion_table() {
+  let schema = build(SCHEMA);
+  let bad = [Rule::ValuesOfCorrectType];
+
+  for (source, expected) in [
+    // `Int`: integer literals only, in 32-bit range.
+    ("{ arguments { intArgField(intArg: 2147483647) } }", &[][..]),
+    ("{ arguments { intArgField(intArg: -2147483648) } }", &[]),
+    ("{ arguments { intArgField(intArg: 2147483648) } }", &bad),
+    ("{ arguments { intArgField(intArg: -2147483649) } }", &bad),
+    ("{ arguments { intArgField(intArg: 1.0) } }", &bad),
+    // `Float`: an `Int` literal widens; a non-finite one does not.
+    ("{ arguments { floatArgField(floatArg: 2147483648) } }", &[]),
+    ("{ arguments { floatArgField(floatArg: 1.5) } }", &[]),
+    ("{ arguments { floatArgField(floatArg: 1e400) } }", &bad),
+    (r#"{ arguments { floatArgField(floatArg: "1.5") } }"#, &bad),
+    // `ID`: a string of any length, or an integer *in `Int`'s range*. The second half is the
+    // branch that was reachable by nothing.
+    (
+      r#"{ arguments { idArgField(idArg: "99999999999999") } }"#,
+      &[],
+    ),
+    ("{ arguments { idArgField(idArg: 2147483647) } }", &[]),
+    ("{ arguments { idArgField(idArg: -2147483648) } }", &[]),
+    ("{ arguments { idArgField(idArg: 2147483648) } }", &bad),
+    ("{ arguments { idArgField(idArg: 99999999999999) } }", &bad),
+    ("{ arguments { idArgField(idArg: 1.5) } }", &bad),
+    ("{ arguments { idArgField(idArg: true) } }", &bad),
+    // `String` and `Boolean` take their own spelling and nothing else.
+    (r#"{ arguments { stringArgField(stringArg: "x") } }"#, &[]),
+    ("{ arguments { stringArgField(stringArg: 1) } }", &bad),
+    ("{ arguments { booleanArgField(booleanArg: true) } }", &[]),
+    ("{ arguments { booleanArgField(booleanArg: 1) } }", &bad),
+    // A custom scalar accepts every literal: only the service knows how to read one.
+    (
+      "{ arguments { customScalarArgField(customArg: { any: [1, true, NOPE] }) } }",
+      &[],
+    ),
+    // An enum literal must name a member, and must not be a string.
+    ("{ dog { doesKnowCommand(dogCommand: SIT) } }", &[]),
+    ("{ dog { doesKnowCommand(dogCommand: JUMP) } }", &bad),
+    (r#"{ dog { doesKnowCommand(dogCommand: "SIT") } }"#, &bad),
+  ] {
+    assert_eq!(fired(&schema, source), sorted(expected), "---\n{source}");
+  }
+}
+
+/// The two coercion tables, held to the same answers.
+///
+/// # There are two, and the module headers now say so
+///
+/// `validator::schema::literal` decides what a built-in scalar accepts for `Schema::build`;
+/// `validator::executable::values`'s `scalar_accepts` decides it again for draft 5.6.1, with its
+/// own copies of `fits_i32`, `fits_id` and `is_finite`. Two implementations of one paragraph of the
+/// specification, kept apart on purpose — the build path reads names off an owned reduction, the
+/// request path compares interned symbols over the syntactic AST — and kept in step by nothing.
+///
+/// # Why it is a gate and not a comment
+///
+/// A completeness audit forced the **build** copy's `ID` range arm to `true`. Every gate in the
+/// repository stayed green, the differential oracle over six hundred documents included, because
+/// the SDL fixtures never offered an out-of-range `ID` and apollo-compiler does not range-check
+/// `ID` at all. The executable copy's identical arm was covered; the build copy's was not, and
+/// nothing said the two were even supposed to match.
+///
+/// So: every literal shape, past every built-in scalar and a custom one, through both doors, with
+/// the verdicts required to be equal. A one-sided edit reds here naming the pair that moved.
+#[test]
+fn the_two_coercion_tables_agree() {
+  // Every spelling that decides an arm, including both ends of each numeric range.
+  const LITERALS: &[&str] = &[
+    "1",
+    "0",
+    "-1",
+    "2147483647",
+    "-2147483648",
+    "2147483648",
+    "-2147483649",
+    "99999999999999",
+    "1.5",
+    "-1.5e3",
+    "1.0",
+    "1e400",
+    "\"x\"",
+    "\"99999999999999\"",
+    "true",
+    "false",
+    "null",
+    "NOPE",
+    "[1]",
+    "{ a: 1 }",
+  ];
+  const SCALARS: &[&str] = &["Int", "Float", "String", "Boolean", "ID", "Custom"];
+
+  let mut disagreed = Vec::new();
+  for scalar in SCALARS {
+    // The build door: the literal is a directive argument in an SDL constant position.
+    let sdl_of = |literal: &str| {
+      format!(
+        "scalar Custom\ndirective @d(v: {scalar}) on OBJECT\ntype Query @d(v: {literal}) {{ ok: \
+         Int }}"
+      )
+    };
+    // The request door: the same literal is a field argument in an executable document.
+    let schema = build(&format!(
+      "scalar Custom\ntype Query {{ ok: Int f(v: {scalar}): Int }}"
+    ));
+
+    for literal in LITERALS {
+      let sdl = sdl_of(literal);
+      let document = parse_type_system(&sdl);
+      let build_rejects = Schema::build(&document).is_err();
+      let request_rejects = !fired(&schema, &format!("{{ f(v: {literal}) }}")).is_empty();
+      if build_rejects != request_rejects {
+        disagreed.push(format!(
+          "  {scalar} given {literal}: build {}, request {}",
+          if build_rejects { "REJECTS" } else { "accepts" },
+          if request_rejects {
+            "REJECTS"
+          } else {
+            "accepts"
+          },
+        ));
+      }
+    }
+  }
+  assert!(
+    disagreed.is_empty(),
+    "the build door's coercion table and the request door's have diverged. They are separate \
+     implementations of draft 5.6.1's input coercion (see both module headers), so an arm added \
+     to one needs the matching arm in the other.\n{}",
+    disagreed.join("\n")
+  );
+
+  // The census must not pass vacuously: if the pair of doors ever stopped rejecting anything, the
+  // loop above would agree on every case and say nothing.
+  let schema = build("scalar Custom\ntype Query { ok: Int f(v: ID): Int }");
+  assert!(
+    !fired(&schema, "{ f(v: 99999999999999) }").is_empty(),
+    "an out-of-range `ID` integer is the case this test exists for"
+  );
+  assert!(
+    Schema::build(&parse_type_system(
+      "directive @d(v: ID) on OBJECT\ntype Query @d(v: 99999999999999) { ok: Int }"
+    ))
+    .is_err(),
+    "an out-of-range `ID` integer is the case this test exists for, on the build door"
   );
 }
 

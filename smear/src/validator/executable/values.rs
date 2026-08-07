@@ -601,6 +601,16 @@ where
 
   /// Whether a built-in scalar accepts this literal. Custom scalars accept everything: only the
   /// service knows how to read one, so a validator that guessed would reject valid documents.
+  ///
+  /// # The other copy
+  ///
+  /// `validator::schema::literal` answers the same question for `Schema::build`, over the
+  /// builder's owned reduction rather than the syntactic AST and against scalar *names* rather
+  /// than the interned `Sym`s compared here — which is why the two exist separately, this being
+  /// the per-request path. They must never disagree, and nothing in the type system makes that so:
+  /// `the_two_coercion_tables_agree` in `tests/validator_rules.rs` asserts it literal by literal,
+  /// because an audit that forced the *other* copy's `ID` range arm open found every gate in the
+  /// repository still green. An arm added here needs the matching arm there.
   fn scalar_accepts<V>(&self, value: &V, name: Sym) -> bool
   where
     V: ValueLike<S>,

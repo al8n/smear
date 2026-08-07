@@ -222,6 +222,84 @@ fn every_sdl_constant_position_probe_is_refused_by_both() {
   }
 }
 
+/// The §3 rules smear has and the oracle does not, held to the same two conditions from the other
+/// side.
+///
+/// Seven of them landed at once, and the fact worth gating is that **the oracle can see none of
+/// them**: `apollo-compiler` 1.32.0 accepts six outright and rejects the seventh only because it
+/// has no `@oneOf` built-in. A green differential therefore said nothing about whether those checks
+/// existed, and would say nothing if they were deleted — which is exactly the shape of defect the
+/// audit behind this table found three of.
+///
+/// So the measurement is asserted rather than written down, in both directions:
+///
+/// * **smear still refuses.** A check lost is a red here, with the row named, while
+///   [`the_oracle_agrees`] stays green.
+/// * **apollo still behaves as declared.** Each row carries apollo's typed error names for its SDL,
+///   so a bump under the `=1.32.0` pin that grows one of these rules reds here instead of quietly
+///   turning a hand-expected rule into an oracle-visible one nobody re-measured.
+///
+/// The controls are what stop a row proving only that smear refuses *something*: each is the
+/// smallest edit its rule permits, and smear must accept it.
+#[test]
+fn every_smear_only_schema_check_is_still_smear_only() {
+  let mut moved = Vec::new();
+
+  for (label, apollo_errors, sdl) in corpus::SDL_SMEAR_ONLY_PROBES {
+    match build_schemas(sdl) {
+      Err(SchemaOutcome::SmearRejected(_)) => {}
+      Err(SchemaOutcome::BothRejected) if !apollo_errors.is_empty() => {}
+      Ok(_) => moved.push(format!(
+        "  {label}: smear now ACCEPTS the SDL — the §3 check it is named for is gone"
+      )),
+      Err(other) => moved.push(format!("  {label}: {other:?}")),
+    }
+    let names = apollo_schema_error_names(sdl);
+    if names != *apollo_errors {
+      moved.push(format!(
+        "  {label}: apollo reports {names:?} for this SDL, not the declared {apollo_errors:?} — \
+         either the oracle grew the rule (delete the row and add a corpus case) or the SDL \
+         acquired a second defect"
+      ));
+    }
+  }
+
+  for (label, apollo_errors, sdl) in corpus::SDL_SMEAR_ONLY_CONTROLS {
+    match build_schemas(sdl) {
+      Ok(_) => {}
+      Err(SchemaOutcome::ApolloRejected(_) | SchemaOutcome::BothRejected)
+        if !apollo_errors.is_empty() => {}
+      Err(other) => moved.push(format!(
+        "  {label} (control): smear does not accept it — {other:?}. The probe that shares its \
+         shape now proves only that smear refuses something"
+      )),
+    }
+    let names = apollo_schema_error_names(sdl);
+    if names != *apollo_errors {
+      moved.push(format!(
+        "  {label} (control): apollo reports {names:?}, not the declared {apollo_errors:?}"
+      ));
+    }
+  }
+
+  assert!(
+    moved.is_empty(),
+    "a schema-stage check that only smear performs changed verdict.\n{}",
+    moved.join("\n")
+  );
+
+  // These SDLs must never join `corpus::all()`: an SDL only smear refuses is a
+  // `SchemaOutcome::SmearRejected`, which the runner counts as a failure with no door, so a suite
+  // carrying one would turn this measurement into a permanent red.
+  let corpus_sdls: Vec<String> = corpus::all().into_iter().map(|suite| suite.sdl).collect();
+  for (label, _, sdl) in corpus::SDL_SMEAR_ONLY_PROBES {
+    assert!(
+      !corpus_sdls.iter().any(|corpus_sdl| corpus_sdl == sdl),
+      "{label}'s SDL is in the runner's corpus, where it can only ever be a one-sided schema"
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 // re-verification of the four classes
 // ---------------------------------------------------------------------------------------------
