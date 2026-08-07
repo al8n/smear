@@ -176,7 +176,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Check workflow trigger coverage
       env:
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -196,7 +196,7 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Install Rust
       # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
       run: rustup update stable --no-self-update && rustup default stable
@@ -216,7 +216,7 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Install Rust
       # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
       run: rustup update stable --no-self-update && rustup default stable
@@ -269,9 +269,9 @@ jobs:
           - wasm32-wasip2
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Cache cargo build and registry
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -304,9 +304,9 @@ jobs:
     name: noatomic
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Cache cargo build and registry
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -344,9 +344,9 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Cache cargo build and registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -361,7 +361,7 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Cache ~/.cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
@@ -416,9 +416,9 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Cache cargo build and registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -433,7 +433,7 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Cache ~/.cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
@@ -523,7 +523,7 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: cargo doc --workspace --all-features
@@ -739,7 +739,7 @@ jobs:
     name: publish-dry-run
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     # First, and before anything is installed or built, because it costs milliseconds and the
     # two steps below cannot see what it checks.
     #
@@ -766,7 +766,7 @@ jobs:
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Cache cargo build and registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -820,7 +820,7 @@ jobs:
     name: msrv
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Read declared MSRV from Cargo.toml
       id: msrv
       run: |
@@ -873,11 +873,11 @@ jobs:
     name: byte-identity
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Cache cargo build and registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -924,7 +924,7 @@ jobs:
     name: validator-oracle
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Fetch apollo-rs's validation corpus at the pinned oracle release
       run: |
         mkdir -p "$RUNNER_TEMP/apollo-rs"
@@ -936,7 +936,7 @@ jobs:
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Cache cargo build and registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -968,7 +968,7 @@ jobs:
       - cross
       - test
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install latest nightly
         uses: actions-rs/toolchain@v1
         with:
@@ -979,12 +979,12 @@ jobs:
           crate: cargo-tarpaulin
           version: latest
       - name: Cache ~/.cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo
           key: ${{ runner.os }}-coverage-dotcargo
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target
           key: ${{ runner.os }}-coverage-cargo-build-target
@@ -999,7 +999,7 @@ jobs:
           # dependency to force it back, which is unification and not a decision.
           args: --no-default-features --features graphql,parser --run-types tests --run-types doctests --workspace --out xml -- --quiet
       - name: Upload to codecov.io
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ github.repository }}

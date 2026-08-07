@@ -49,7 +49,7 @@ jobs:
   loc:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |
@@ -65,7 +65,7 @@ jobs:
         run: |
           tokeit --lang rust
       - name: Upload total loc to GitHub Gist
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GIST_PAT }}
           script: |
