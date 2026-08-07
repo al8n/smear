@@ -109,7 +109,7 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Check formatting
@@ -124,7 +124,7 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Install cargo-hack
@@ -160,9 +160,9 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Cache cargo build and registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -176,7 +176,7 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Cache ~/.cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
@@ -211,9 +211,9 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
     - name: Cache cargo build and registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry
@@ -227,7 +227,7 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     - name: Cache ~/.cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
