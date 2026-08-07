@@ -41,10 +41,16 @@ smear = { path = "../smear", version = "0.0.0", default-features = false, featur
 tokora.workspace = true
 apollo-parser = "0.8.6"
 # Named directly only so `src/dump.rs` can spell `WalkEvent` and `NodeOrToken`, the two types
-# `SyntaxNode::preorder_with_tokens` yields. Both other members of this build graph already
-# depend on `rowan = "0.16"` — `apollo-parser` directly, smear through tokora — so this adds a name
-# to the namespace and nothing to the build.
-rowan = "0.16"
+# `SyntaxNode::preorder_with_tokens` yields. It must track whatever `smear` resolves, because
+# `dump::rows` walks a `smear::parser::graphql::lossless::SyntaxNode` and nothing else.
+#
+# THIS IS NO LONGER A FREE NAME. Until the rowan 0.17 bump this graph built exactly one `rowan`:
+# `apollo-parser` depended on it directly, smear reached the same crate through tokora, and cargo
+# unified the two. `apollo-parser` 0.8.6 requires `rowan ^0.16.0` and has no 0.17-compatible
+# release, so the graph now builds TWO rowans — 0.16 for apollo, 0.17 for smear — and this line
+# picks the smear one. It compiles because the harness never hands an apollo tree to a
+# rowan-0.17 signature, but it is a real change to what the benchmark compares; see `src/lib.rs`.
+rowan = "0.17"
 # The byte-identity gate (`tests/byte_identity.rs`) recomputes the four corpus hashes in-process
 # and compares them against the constants in `src/dump.rs`. Hashing in Rust rather than piping to
 # `shasum` is what lets the gate run as an ordinary `cargo test` on any runner, and what lets the

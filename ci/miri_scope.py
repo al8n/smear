@@ -62,7 +62,7 @@ INNER_CFG = re.compile(r"^#!\[cfg\((.*?)\)\]", re.S | re.M)
 
 # The one reason a target is allowed to be excluded, and the issue that records it.
 EXCLUSION_REASON = (
-    "gated on `rowan`, which cannot be interpreted: rowan 0.16.1 has undefined behaviour under "
+    "gated on `rowan`, which cannot be interpreted: rowan 0.17.0 has undefined behaviour under "
     "Stacked Borrows in `src/arc.rs` and under Tree Borrows in `src/cursor.rs`, live in every "
     "published version through 0.17.0 (al8n/smear#77, rust-analyzer/rowan#108 and #192)"
 )

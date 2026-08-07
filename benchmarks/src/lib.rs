@@ -1,9 +1,30 @@
 //! Like-for-like benchmark support: smear's GraphQL lossless CST parser vs `apollo-parser`.
 //!
-//! Both sides build a **rowan 0.16 CST** over the same source. `apollo-parser` depends on
-//! `rowan = "0.16.0"` directly; smear reaches the same crate through tokora, and cargo unifies
-//! the two into one build of one `rowan`. So the artifact produced is the same kind of thing,
-//! not merely analogous.
+//! Both sides build a rowan CST over the same source — but, since the 0.17 bump, **not the same
+//! build of rowan**. This used to be exact: `apollo-parser` depended on `rowan = "0.16.0"`
+//! directly, smear reached the same crate through tokora, and cargo unified the two into one
+//! build, so the artifact was the same kind of thing rather than merely analogous.
+//!
+//! `apollo-parser` 0.8.6 requires `rowan ^0.16.0` and there is no 0.17-compatible release, so the
+//! graph now builds **two** rowans: apollo's trees are rowan 0.16, smear's are rowan 0.17. What
+//! that costs the comparison, stated so a reader can discount it rather than discover it:
+//!
+//! * **The green tree is unchanged between the two.** 0.17's removals are all on the *red* side —
+//!   the mutable-tree API and the `sll` module that backed it. `GreenNode`, `GreenToken`, the
+//!   `ThinArc`/`HeaderSlice` representation and `GreenNodeBuilder` are the same code. Both parse
+//!   tiers (`*_parse`) and the byte-identity corpus hashes live entirely on the green side, so
+//!   those numbers stay like-for-like.
+//! * **The red tree differs, and not only cosmetically.** 0.17's `cursor.rs` is 1003 lines
+//!   against 0.16.1's 1592, and `NodeData` — the per-node cursor allocation every traversal
+//!   touches — dropped four fields (`mutable`, and the `first`/`next`/`prev` intrusive sibling
+//!   links the mutable API needed) and un-`Cell`ed two more (`parent`, `index`). So on smear's
+//!   side a traversal walks a strictly smaller node with less interior mutability than on
+//!   apollo's. Treat cross-parser *traversal* deltas as carrying an unquantified component in
+//!   smear's favour until `apollo-parser` ships a rowan-0.17 release; tier 0 and tier 1 are
+//!   unaffected.
+//! * **Nothing type-checks across the seam**, which is why this compiles at all: `dump::rows`
+//!   takes smear's `SyntaxNode`, `treedump` only ever calls `smear_parse`, and apollo's tree is
+//!   reached exclusively through `apollo_parser`'s own re-exported types.
 //!
 //! This module holds everything the timing harness needs to be *honest*:
 //!

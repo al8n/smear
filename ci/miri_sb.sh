@@ -95,20 +95,23 @@ export MIRIFLAGS
 # member and the arithmetic did it. See the note in the root `Cargo.toml`.
 #
 # The widening was not survivable, and that is the finding rather than an inconvenience.
-# `rowan 0.16.1` has undefined behaviour reachable from its ordinary public API, under BOTH
+# `rowan 0.17.0` has undefined behaviour reachable from its ordinary public API, under BOTH
 # aliasing models and in two independent places:
 #
-#   * Stacked Borrows — `src/arc.rs:260`, `<HeaderSlice<H, [T; 0]> as Deref>::deref` forges a
+#   * Stacked Borrows — `src/arc.rs:264`, `<HeaderSlice<H, [T; 0]> as Deref>::deref` forges a
 #     `&HeaderSlice<H, [T]>` covering the whole slice out of a `&self` whose retag covers only
 #     the header. Reached from `GreenNodeBuilder::finish_node`, i.e. from building ANY tree.
-#   * Tree Borrows — `src/cursor.rs:219`, `rowan::cursor::free` deallocating a
+#   * Tree Borrows — `src/cursor.rs:136`, `rowan::cursor::free` deallocating a
 #     `Box<NodeData>` through a tag an ancestor's `Cell` still holds frozen. Reached from
 #     dropping any red-tree `SyntaxNode`, including out of `parse_document(..).syntax()`.
 #
 # Both were reproduced on 2026-08-07 by two standalone programs that name nothing but rowan's
 # public API, against `0.15.19`, `0.16.1`, `0.16.2` (yanked) and `0.17.0` — the newest release,
 # published 2026-08-02. The construct is byte-identical in all four, so THERE IS NO VERSION TO
-# BUMP TO. Upstream has had it reported since 2021 (rust-analyzer/rowan#108, and #163, #192);
+# BUMP TO. That prediction has since been tested rather than left standing: this workspace moved
+# to `0.17.0`, for an unrelated reason (rowan is in tokora's public API, so its major is tokora's
+# — al8n/tokora#237), and both sites were re-measured on it. Both survived. The line numbers
+# above are 0.17.0's; on 0.16.1 they were `arc.rs:260` and `cursor.rs:219`. Upstream has had it reported since 2021 (rust-analyzer/rowan#108, and #163, #192);
 # the only fix attempt, PR #211, is a conflicting draft whose own description says the immutable
 # path still fails under Stacked Borrows.
 #
