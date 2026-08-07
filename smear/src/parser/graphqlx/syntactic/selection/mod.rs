@@ -2,7 +2,9 @@
 //!
 //! Selection dispatch consumes a field or spread head exactly once. A spread
 //! then classifies its second token into a named spread, typed inline fragment,
-//! or untyped inline fragment before entering the committed recursive tail.
+//! or untyped inline fragment before entering the committed recursive tail. The
+//! field *tail* is fused the same way, on `field_after_name`'s
+//! one-classification-per-position rule.
 
 use std::vec::Vec;
 
@@ -10,7 +12,7 @@ use crate::lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
-  cache::{Peeked, PeekedTokenExt},
+  cache::Peeked,
   parser::Action,
   span::Spanned,
   try_parse_input::ParseAttempt,
@@ -18,11 +20,15 @@ use tokora::{
 };
 
 use super::{
-  GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, argument::arguments,
-  directive::directives, keyword_of, path_after_first, ty::try_type_generics, unexpected_here,
+  GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
+  argument::committed_arguments,
+  directive::{directives, directives_after_at},
+  keyword_of, path_after_first,
+  ty::try_type_generics,
+  unexpected_here,
 };
 use crate::parser::{
-  combinator::{ParseCtx, TokenSpannedExt, try_colon, try_spread},
+  combinator::{ParseCtx, TokenSpannedExt, at, try_colon, try_spread},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -213,6 +219,24 @@ selection_parser!(
   }
 );
 
+/// Parses a field tail after its first name is already consumed.
+///
+/// Every tail position is decided by **one** classification of **one** token, which then
+/// jumps straight into the committed production that classification selected: `(`
+/// arguments, `@` directives, `{` sub-selection, anything else closes the field. The four
+/// optional tails used to run as four independent probes asking that same lookahead token
+/// four different yes/no questions — one read of its kind answers all of them — and the
+/// two collection tails additionally built an empty carrier per absent tail only to
+/// span-test and `is_empty`-test it away. On a field-dense document no tail is ever taken,
+/// so that was the whole of the work.
+///
+/// [`try_colon`] keeps a probe of its own rather than joining the classification, because
+/// it is the consume-in-place form: an alias costs one lex with no cache round trip, and
+/// a field without one leaves the token at the cache front, where [`peek_kind`] then reads
+/// it in place. Folding it into the classification would trade the aliased field's saved
+/// round trip for nothing.
+///
+/// [`peek_kind`]: tokora::InputRef::peek_kind
 fn field_after_name<'inp, Src, Ctx>(
   first_name: Name<GraphqlxSlice<'inp, Src>>,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -237,24 +261,37 @@ where
   };
 
   let mut end = name.span().end();
-  let arguments = arguments(inp)?;
-  if arguments.span().start() != arguments.span().end() {
+  let mut head = inp.peek_kind()?;
+
+  let arguments = if head == Some(SyntacticTokenKind::LParen) {
+    let arguments = committed_arguments(inp)?;
     end = arguments.span().end();
-  }
-  let arguments = (!arguments.arguments().is_empty()).then_some(arguments);
+    head = inp.peek_kind()?;
+    // The lenient `()` spelling keeps its real delimiter span in `end` and still stores
+    // `None`, exactly as the empty-carrier form did.
+    (!arguments.arguments().is_empty()).then_some(arguments)
+  } else {
+    None
+  };
 
-  let directives = directives(inp)?;
-  if directives.span().start() != directives.span().end() {
+  let directives = if head == Some(SyntacticTokenKind::At) {
+    // A run entered on `@` always holds at least one directive, so the emptiness test the
+    // carrier form needed here cannot fire.
+    let at = at(inp)?;
+    let directives = directives_after_at(inp, at)?;
     end = directives.span().end();
-  }
-  let directives = (!directives.directives().is_empty()).then_some(directives);
+    head = inp.peek_kind()?;
+    Some(directives)
+  } else {
+    None
+  };
 
-  let selection_set = match try_selection_set(inp)? {
-    ParseAttempt::Accept(selection_set) => {
-      end = selection_set.span().end();
-      Some(selection_set)
-    }
-    ParseAttempt::Decline => None,
+  let selection_set = if head == Some(SyntacticTokenKind::LBrace) {
+    let selection_set = committed_selection_set(inp)?;
+    end = selection_set.span().end();
+    Some(selection_set)
+  } else {
+    None
   };
 
   Ok(Field::new(
@@ -600,25 +637,6 @@ where
   })
 }
 
-/// Continues an optional selection-set attempt only when its `{` opener is
-/// present, leaving every other token for the caller.
-fn decide_selection_set_opener<'inp, Src, Ctx>(
-  mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
-) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-{
-  Ok(match peeked.pop_front() {
-    Some(token) if token.token().is_l_brace() => Action::Continue,
-    _ => Action::Stop,
-  })
-}
-
 selection_parser!(
   committed_selection_set,
   inp,
@@ -635,24 +653,6 @@ selection_parser!(
       .map(|Spanned { span, data }| SelectionSet::new(span, data))
   }
 );
-
-fn try_selection_set<'inp, Src, Ctx>(
-  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-) -> Result<ParseAttempt<SelectionSet<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
-  GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
-{
-  committed_selection_set
-    .peek_then_try::<_, U1>(decide_selection_set_opener::<Src, Ctx>)
-    .try_parse_input(inp)
-}
 
 selection_parser!(
   /// Parses a nonempty GraphQLx selection set (`{ Selection+ }`).

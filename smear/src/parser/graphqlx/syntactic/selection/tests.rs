@@ -143,6 +143,19 @@ fn direct_field_api_accepts_alias_arguments_directives_and_nested_selections() {
 }
 
 #[test]
+fn direct_field_api_accepts_empty_parens_without_storing_arguments() {
+  // The lenient `()` spelling leaves `arguments` `None` on the field and still closes the
+  // field's span on the `)`. It is the one shape where a list absent from the node is
+  // nevertheless part of that node's extent, so the two facts have to be pinned together.
+  fn check<S: AsRef<[u8]>>(field: ast::Field<S>) {
+    assert!(field.arguments().is_none());
+    assert_eq!(*field.span(), SimpleSpan::new(0, 3));
+  }
+
+  accept_all!(ast::Field::graphqlx, "f()", check);
+}
+
+#[test]
 fn type_conditions_and_spread_dispatch_preserve_graphqlx_paths_and_generics() {
   fn check_condition<S: AsRef<[u8]>>(condition: ast::TypeCondition<S>) {
     assert_eq!(
