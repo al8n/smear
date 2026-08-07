@@ -310,6 +310,91 @@ pub fn validator_executable_source_lattice() {
   assert_lattice_member::<hipstr::HipByt<'static>>();
 }
 
+/// `proto` — draft §6 execution, driven end to end across the dependency edge.
+///
+/// The probe is the `impl Values for Driver` below as much as the execution. `smear::proto`
+/// defines no value type, so a dependent has to be able to implement that trait over *its own*
+/// representation using nothing but the crate's public surface — no crate-private helper, no
+/// sealed supertrait, no type it cannot name. A probe that only called `Executor::new` would
+/// compile even if the trait were unimplementable from outside.
+///
+/// Returns the resolved leaf and how many field errors the response carried.
+pub fn graphql_execute(sdl: &str, query: &str, value: Option<&str>) -> (Option<String>, usize) {
+  use smear::{
+    parser::graphql::{
+      GraphQL,
+      ast::ExecutableDocument,
+      error::GraphqlErrors,
+      syntactic::{GraphqlLexer, executable_document},
+    },
+    proto::{Executor, Leaf, Node, Values},
+  };
+
+  /// A dependent's value representation: an owned string, or nothing.
+  #[derive(Clone)]
+  struct Text(Option<String>);
+
+  struct Driver;
+
+  impl Values for Driver {
+    type Value = Text;
+
+    fn is_null(&self, value: &Text) -> bool {
+      value.0.is_none()
+    }
+    fn as_bool(&self, value: &Text) -> Option<bool> {
+      value.0.as_deref().map(|text| text == "true")
+    }
+    fn list_len(&self, _: &Text) -> Option<usize> {
+      None
+    }
+    fn list_item(&mut self, _: &Text, _: usize) -> Text {
+      Text(None)
+    }
+    fn type_name<'a>(&'a self, _: &'a Text) -> Option<&'a str> {
+      None
+    }
+    fn coerce_leaf(&mut self, value: Text, _: Leaf<'_>) -> Option<Text> {
+      Some(value)
+    }
+    fn variable(&mut self, _: &str) -> Option<Text> {
+      None
+    }
+  }
+
+  let schema = graphql_schema(sdl).expect("the probe's SDL is a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(query)
+  .expect("the probe's query parses");
+
+  let mut driver = Driver;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut driver, None, Text(Some(String::new())))
+    .expect("the probe's operation resolves");
+  while let Some(request) = executor.poll_resolve(&mut driver) {
+    let id = request.id();
+    executor.handle_resolved(&mut driver, id, Text(value.map(str::to_owned)));
+  }
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let errors = response.error_count();
+  let leaf = match response.data() {
+    Node::Object(mut fields) => match fields.next() {
+      Some((_, Node::Leaf(Text(text)))) => text.clone(),
+      _ => None,
+    },
+    _ => None,
+  };
+  (leaf, errors)
+}
+
 /// `smallvec` — the error container is SmallVec-backed rather than `Vec`-backed.
 ///
 /// The coercion is the probe: with the feature off the deref target is a `Vec` and the binding
@@ -449,6 +534,21 @@ mod tests {
 
     let errors = super::graphql_schema("type NotARoot { ok: Int }").expect_err("not a schema");
     assert!(!errors.is_empty());
+  }
+
+  /// Draft §6 execution, driven end to end across the dependency edge, over a value type this
+  /// crate defines and `smear` has never heard of.
+  #[test]
+  fn the_executor_completes_a_field_and_propagates_a_null() {
+    let (leaf, errors) =
+      super::graphql_execute("type Query { ok: String }", "{ ok }", Some("resolved"));
+    assert_eq!(leaf.as_deref(), Some("resolved"));
+    assert_eq!(errors, 0);
+
+    // Draft §6.4.4 through the dependency edge: a null in a non-null position nulls `data`.
+    let (leaf, errors) = super::graphql_execute("type Query { ok: String! }", "{ ok }", None);
+    assert_eq!(leaf, None);
+    assert_eq!(errors, 1);
   }
 
   /// The introspection door, driven end to end across the dependency edge.

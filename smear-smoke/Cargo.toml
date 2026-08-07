@@ -35,6 +35,7 @@ smear = { path = "../smear", default-features = false, features = [
   "parser",
   "validator",
   "introspection",
+  "proto",
   "smallvec",
   "bytes",
   "bstr",

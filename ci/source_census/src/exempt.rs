@@ -29,6 +29,13 @@
 //! and `Executor::handle_field_error`'s `message` — are absent from this table on purpose. They
 //! are classified by the rule, structurally, and needing an exemption for them would have meant
 //! the rule was wrong. See `rule`'s header.
+//!
+//! `Values::variable`'s `name` is the same module's third `&str` and it *is* recorded, which is
+//! the rule working rather than the rule wavering: test 3 acquits the other two on their receiver,
+//! `Executor<'a, S, V>`, and `Values` is the **driver's** trait with no source type anywhere in
+//! it, so nothing in that signature says the document is already in hand. The three together are
+//! the clearest calibration the table has — same module, same concrete type, opposite verdicts,
+//! each for a reason read off the signature.
 
 /// The shortest reason the census will accept. Long enough that "rowan" or "#121" alone does not
 /// clear it, short enough that a genuine one-line reason does.
@@ -294,6 +301,23 @@ pub const EXEMPTIONS: &[Exemption] = &[
              recovering door's per-definition check call. Recorded separately because widening \
              one and not the other would leave half the projection's doors narrow under a table \
              that had stopped naming them.",
+  },
+  // ── §6 execution, the driver's value trait — al8n/smear#139 ──────────────────────────────────
+  Exemption {
+    module: "smear::proto::values",
+    entry: "Values::variable",
+    param: "name",
+    kind: Kind::Tracked,
+    issue: Some(139),
+    reason: "The executor is `Executor<'a, S, V> where S: AsRef<[u8]>` and a variable's name is a \
+             slice of that document, so spelling the driver's lookup key `&str` puts a UTF-8 \
+             conversion between the two. Both call sites perform it and they disagree: draft \
+             §6.4.1's does `from_utf8(..).unwrap_or(\"\")` and asks the driver about a variable \
+             named `\"\"`, draft §6.3's condition does `.ok()` and raises. Draft §2.1.9 makes a \
+             lexed name ASCII, so neither failure branch is reachable from a parsed document — but \
+             `Name::new` is public, so a rewritten one reaches the branch that substitutes a name \
+             for the name it could not read. #139 owns the signature and the fallback together. \
+             Recorded, not accepted.",
   },
   // ── Not narrowings: the rule's default-convict misfiring ─────────────────────────────────────
   //
