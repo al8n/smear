@@ -13,7 +13,7 @@ use std::vec::Vec;
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
-  parser::{Action, try_parens},
+  parser::{Action, parens, try_parens},
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -156,6 +156,27 @@ where
 }
 
 argument_parser!(
+  /// The `(`-committed half of [`arguments`], reachable on its own so a caller that has
+  /// already classified the head as `(` enters it without probing for the opener again.
+  pub(super) committed_arguments,
+  inp,
+  Arguments<GraphqlxSlice<'inp, Src>>;
+  {
+    // Not the `Delimited`'s own span: tokora builds that one from the lookahead cursor at both
+    // ends, so it opens before the `(`'s leading trivia and closes wherever the peek past `)`
+    // landed. See `crate::parser::combinator::extent`.
+    let node_start = extent_start(inp)?;
+    let parsed = parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
+      (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| argument(inp))
+        .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
+        .collect_with(Vec::new()),
+    )(inp)?;
+    let (_, _, _, arguments) = parsed.into_components();
+    Ok(Arguments::new(extent_since(inp, node_start), arguments))
+  }
+);
+
+argument_parser!(
   /// Parses an executable GraphQLx `Arguments` collection.
   ///
   /// When `(` is absent, this returns an empty zero-width collection without
@@ -174,22 +195,11 @@ argument_parser!(
     // token, so a caller that left a peek in the cache would anchor this absent collection past
     // the token that follows it. See `crate::parser::combinator::extent`.
     let start = extent_end(inp);
-    // Not the `Delimited`'s own span: tokora builds that one from the lookahead cursor at both
-    // ends, so it opens before the `(`'s leading trivia and closes wherever the peek past `)`
-    // landed. See `crate::parser::combinator::extent`.
-    let node_start = extent_start(inp)?;
-    let parsed = try_parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
-      (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| argument(inp))
-        .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
-        .collect_with(Vec::new()),
-    )(inp)?;
-    Ok(match parsed {
-      Some(arguments) => {
-        let (_, _, _, arguments) = arguments.into_components();
-        Arguments::new(extent_since(inp, node_start), arguments)
-      }
-      None => Arguments::new(SimpleSpan::new(start, start), Vec::new()),
-    })
+    if inp.peek_kind()? == Some(SyntacticTokenKind::LParen) {
+      committed_arguments(inp)
+    } else {
+      Ok(Arguments::new(SimpleSpan::new(start, start), Vec::new()))
+    }
   }
 );
 

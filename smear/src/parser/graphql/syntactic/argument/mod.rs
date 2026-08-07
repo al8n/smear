@@ -193,7 +193,9 @@ where
 }
 
 argument_parser!(
-  committed_arguments,
+  /// The `(`-committed half of [`arguments`], reachable on its own so a caller that has
+  /// already classified the head as `(` enters it without probing for the opener again.
+  pub(super) committed_arguments,
   inp,
   Arguments<GraphqlSlice<'inp, Src>>,
   {

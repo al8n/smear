@@ -169,7 +169,8 @@ where
     .parse_input(inp)
 }
 
-fn directives_after_at<'inp, Src, Ctx>(
+/// Parses a directive run after its first `@` has already been consumed.
+pub(super) fn directives_after_at<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   first_at: At<SimpleSpan, (), GraphQLx>,
 ) -> Result<Directives<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
