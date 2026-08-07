@@ -66,15 +66,16 @@ use rowan::{GreenNodeBuilder, Language};
 use smear::parser::{
   graphql::{
     GraphQL,
-    ast::{Document, ExecutableDocument},
+    ast::{Document, ExecutableDocument, TypeSystemDocument},
     error::GraphqlErrors,
     kinds::{GraphQLLang, SyntaxKind as K},
     lossless::{
       ProjectErrorKind, SyntaxNode, ast::Document as DocumentNode, parse_document,
-      parse_executable_document, project, project_executable_document,
-      project_executable_document_recovered,
+      parse_executable_document, parse_type_system_document, project, project_executable_document,
+      project_executable_document_recovered, project_type_system_document,
+      project_type_system_document_recovered,
     },
-    syntactic::{GraphqlLexer, document, executable_document},
+    syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
   lossless::ast::CastNode,
 };
@@ -105,6 +106,13 @@ const INVALID_ENTRY_FLOOR: usize = 31;
 /// Fewer than the mixed root's, because most of the corpus is SDL and the executable root refuses
 /// it — by design, and `lossless_runner.rs` is where that refusal is pinned.
 const EXECUTABLE_ENTRY_FLOOR: usize = 9;
+
+/// The smallest number of corpus entries the **type-system** root's sweep is allowed to compare.
+///
+/// The other side of the same split, and the larger one: most of the corpus is SDL. The two floors
+/// do not add up to the mixed root's, because an entry that mixes the two halves reaches neither
+/// single-half root.
+const TYPE_SYSTEM_ENTRY_FLOOR: usize = 28;
 
 /// The smallest number of distinct AST node types the compared documents reach.
 ///
@@ -337,6 +345,130 @@ fn the_executable_projection_equals_the_parse_over_the_shared_corpus() {
     entries.len() * (ALPHABET.len() + 1),
     "the sweep did not run every form over every entry"
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// the same assertion at the type-system root
+// ---------------------------------------------------------------------------------------------
+
+/// The syntactic oracle for the SDL-only root.
+fn type_system_oracle(src: &str) -> Result<TypeSystemDocument<&str>, GraphqlErrors<&str>> {
+  Parser::with_parser::<
+    '_,
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(src)
+}
+
+/// `project_type_system_document` is the AST the SDL parser builds — and the **recovering** door is
+/// the same value again whenever nothing had to be recovered.
+///
+/// [`the_executable_projection_equals_the_parse_over_the_shared_corpus`]'s mirror, and load-bearing
+/// for the validator in the same way: `validate_schema_lossless` goes through the recovering door,
+/// so an equality proved only of the fail-fast one would be proved of code the validator never
+/// calls. It is also the value-level statement `validator_lossless_schema.rs` stands on — that gate
+/// compares draft §3 *refusals*, which say nothing about the parts of a document no rule blames,
+/// and this one compares every span of every node.
+#[test]
+fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
+  // Every `valid_` entry the SDL root accepts, discovered rather than listed.
+  let entries: Vec<(String, String)> = corpus("valid_")
+    .into_iter()
+    .filter(|(_, src)| type_system_oracle(src).is_ok())
+    .collect();
+  assert!(
+    entries.len() >= TYPE_SYSTEM_ENTRY_FLOOR,
+    "only {} type-system corpus entries, floor is {TYPE_SYSTEM_ENTRY_FLOOR}",
+    entries.len()
+  );
+
+  let mut compared = 0usize;
+  for (name, src) in &entries {
+    let marks = boundaries(src);
+    for (form, source) in std::iter::once(("compact", src.clone())).chain(
+      ALPHABET
+        .iter()
+        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+    ) {
+      let expected = type_system_oracle(&source).unwrap_or_else(|e| {
+        panic!("{name} ({form}): the syntactic parser rejects a type-system corpus entry: {e:?}")
+      });
+      let parse = parse_type_system_document(&source);
+      assert!(
+        !parse.has_errors(),
+        "{name} ({form}): the lossless SDL root rejects an entry its syntactic twin takes"
+      );
+
+      let projected = project_type_system_document(&parse, &source)
+        .unwrap_or_else(|e| panic!("{name} ({form}): the projection refused: {e}"));
+      assert_eq!(
+        projected, expected,
+        "{name} ({form}): the type-system projection is not the AST the parser builds for the \
+         same bytes"
+      );
+
+      let (recovered, recovery) = project_type_system_document_recovered(&parse, &source);
+      assert!(
+        recovery.is_complete(),
+        "{name} ({form}): the recovering door dropped {} element(s) of a clean parse",
+        recovery.skipped()
+      );
+      assert_eq!(
+        recovery.projected() as usize,
+        expected.definitions().len(),
+        "{name} ({form}): the recovery counted a different number of definitions"
+      );
+      assert_eq!(
+        recovered, expected,
+        "{name} ({form}): the recovering door and the fail-fast one disagree on a clean parse"
+      );
+
+      compared += 1;
+    }
+  }
+
+  assert_eq!(
+    compared,
+    entries.len() * (ALPHABET.len() + 1),
+    "the sweep did not run every form over every entry"
+  );
+}
+
+/// The three roots refuse each other's trees rather than filtering them.
+///
+/// Each projection reads one root node, and a parse of a different root does not have it. Without
+/// this, a projection that fell back on the tree's own root would silently answer about a document
+/// shaped by a grammar the caller did not ask for — which is the difference between "this SDL has
+/// no query root" and "this is not an SDL parse".
+#[test]
+fn each_root_refuses_the_other_two() {
+  let sdl = "type T { f: Int }";
+  let executable = "query Q { f }";
+
+  // A mixed parse has neither single-half root.
+  let mixed = parse_document(sdl);
+  assert!(!mixed.has_errors());
+  assert!(project(&mixed, sdl).is_ok());
+  assert!(project_type_system_document(&mixed, sdl).is_err());
+  assert!(project_executable_document(&mixed, sdl).is_err());
+
+  // An SDL parse has no executable root, and the mixed projection has no `Document` node to read.
+  let type_system = parse_type_system_document(sdl);
+  assert!(!type_system.has_errors());
+  assert!(project_type_system_document(&type_system, sdl).is_ok());
+  assert!(project_executable_document(&type_system, sdl).is_err());
+  assert!(project(&type_system, sdl).is_err());
+
+  // And the other way round.
+  let executable_parse = parse_executable_document(executable);
+  assert!(!executable_parse.has_errors());
+  assert!(project_executable_document(&executable_parse, executable).is_ok());
+  assert!(project_type_system_document(&executable_parse, executable).is_err());
+  assert!(project(&executable_parse, executable).is_err());
 }
 
 // ---------------------------------------------------------------------------------------------

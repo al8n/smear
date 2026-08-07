@@ -94,9 +94,9 @@ use crate::{
         OperationDefinition, OperationType, RootOperationTypeDefinition,
         RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension, SchemaDefinition,
         SchemaExtension, Selection, SelectionSet, StringValue, Type, TypeCondition, TypeDefinition,
-        TypeExtension, TypeSystemDefinition, TypeSystemExtension, UnionMemberTypes,
-        UnionTypeDefinition, UnionTypeExtension, VariableDefinition, VariableValue,
-        VariablesDefinition,
+        TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+        TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension,
+        VariableDefinition, VariableValue, VariablesDefinition,
       },
       kinds::SyntaxKind,
       lossless::{Parse, SyntaxNode, SyntaxToken},
@@ -252,8 +252,146 @@ pub fn project_executable_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> (ExecutableDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) =
+    recovered_top_level(parse, executable_root, recoverable_entry, source);
+  (ExecutableDocument::new(span, definitions), recovery)
+}
+
+impl super::ast::ExecutableDocument {
+  /// Project this executable-document node to the AST the syntactic parser produces for `source`.
+  ///
+  /// The compositional form of [`project_executable_document`], and
+  /// [`Document::to_ast`](super::ast::Document::to_ast)'s twin: like it, and unlike the free
+  /// function, it does **not** scan the whole parse for recovery holes up front.
+  pub fn to_ast<'src>(&self, source: &'src str) -> Out<ExecutableDocument<&'src str>> {
+    executable_document(self.syntax(), source)
+  }
+}
+
+/// Project a lossless **type-system** parse to the AST the syntactic parser produces for `source`.
+///
+/// [`project`]'s root swapped the other way: this reads the
+/// [`TypeSystemDocument`](SyntaxKind::TypeSystemDocument) that
+/// [`parse_type_system_document`](super::parse_type_system_document) builds, and answers the
+/// `TypeSystemDocument<&str>` that `syntactic::type_system_document` answers for the same bytes —
+/// which is the document [`Schema::build`] consumes. Everything else — the hole scan, the verified
+/// `(tree, source)` pair, the token-extent span rule — is [`project`]'s, unchanged.
+///
+/// The root matters, for [`project_executable_document`]'s reason mirrored: a mixed parse holds a
+/// [`Document`](SyntaxKind::Document) node and is refused here rather than filtered, because
+/// dropping the executable half of a mixed document would answer a different question from the one
+/// the SDL root asks, and the SDL root is the one that reports an operation *at the parser's own
+/// position*.
+///
+/// ```
+/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// use smear::parser::graphql::lossless::{
+///   parse_type_system_document, project_type_system_document,
+/// };
+///
+/// let source = "type Query { hero: String }";
+/// let parse = parse_type_system_document(source);
+/// assert!(!parse.has_errors());
+///
+/// let ast = project_type_system_document(&parse, source).expect("a well-shaped tree projects");
+/// assert_eq!(ast.definitions().len(), 1);
+/// # }
+/// ```
+///
+/// [`Schema::build`]: https://docs.rs/smear/latest/smear/validator/struct.Schema.html
+pub fn project_type_system_document<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> Out<TypeSystemDocument<&'src str>> {
   let root = parse.syntax();
-  let container = executable_root(&root).unwrap_or(root);
+  reject_holes(&root)?;
+  let node = type_system_root(&root).ok_or_else(|| {
+    ProjectError::new(
+      ProjectErrorKind::MissingChild {
+        parent: root.kind(),
+        wanted: "a type system document",
+      },
+      to_range(root.text_range()),
+    )
+  })?;
+  type_system_document(&node, source)
+}
+
+/// Project every definition of a lossless **type-system** parse that has an AST image, and count
+/// the ones that do not.
+///
+/// [`project_executable_document_recovered`]'s mirror at the SDL root, walking the same top level
+/// with the same accounting — see it for why a fail-fast projection is the wrong answer for an
+/// editor and why the [`Recovery`] is part of the contract rather than decoration.
+///
+/// What differs is only what a dropped definition costs. Draft §3 is not resolved per definition:
+/// a type this document defines is what every reference to it elsewhere resolves against, so
+/// dropping one turns every mention of it into an undefined-type refusal, and dropping the one
+/// that happened to be `Query` turns the whole document into a schema with no query root. A
+/// [`Recovery`] with [`is_complete`](Recovery::is_complete) false therefore says rather more here
+/// than at the executable root, and the direction is the same: the refusals may be artifacts of
+/// what was skipped, and a *clean* build over a partial projection is a schema missing whatever
+/// the author was mid-way through typing.
+///
+/// ```
+/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// use smear::parser::graphql::lossless::{
+///   parse_type_system_document, project_type_system_document_recovered,
+/// };
+///
+/// // The second type's field has no type yet; the first one is finished.
+/// let source = "type Query { hero: String }\ntype Half { f: }";
+/// let parse = parse_type_system_document(source);
+/// assert!(parse.has_errors());
+///
+/// let (ast, recovery) = project_type_system_document_recovered(&parse, source);
+/// assert_eq!(ast.definitions().len(), 1);
+/// assert_eq!(recovery.projected(), 1);
+/// assert!(!recovery.is_complete());
+/// # }
+/// ```
+pub fn project_type_system_document_recovered<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> (TypeSystemDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level(
+    parse,
+    type_system_root,
+    recoverable_type_system_entry,
+    source,
+  );
+  (TypeSystemDocument::new(span, definitions), recovery)
+}
+
+impl super::ast::TypeSystemDocument {
+  /// Project this type-system-document node to the AST the syntactic parser produces for `source`.
+  ///
+  /// The compositional form of [`project_type_system_document`], and
+  /// [`ExecutableDocument::to_ast`](super::ast::ExecutableDocument::to_ast)'s twin: like it, and
+  /// unlike the free function, it does **not** scan the whole parse for recovery holes up front.
+  pub fn to_ast<'src>(&self, source: &'src str) -> Out<TypeSystemDocument<&'src str>> {
+    type_system_document(self.syntax(), source)
+  }
+}
+
+/// The recovering top-level walk, shared by both single-half roots.
+///
+/// One implementation rather than one per root, because what it computes is [`Recovery`], and
+/// `Recovery`'s documented meaning — *`skipped` is a bound on what was lost, counted per element*
+/// — has to be one statement about both doors rather than two statements that happen to agree
+/// today. The root lookup and the per-definition projection are the only things that differ, so
+/// they are the arguments; they are `fn` pointers rather than generic parameters so this
+/// monomorphises once per root and nothing here becomes a shape a caller can dispatch through.
+///
+/// Answers the surviving definitions, their span, and the tally.
+fn recovered_top_level<'src, T>(
+  parse: &Parse,
+  root_of: fn(&SyntaxNode) -> Option<SyntaxNode>,
+  entry_of: fn(&SyntaxNode, &'src str) -> Out<T>,
+  source: &'src str,
+) -> (SimpleSpan, Vec<T>, Recovery) {
+  let root = parse.syntax();
+  let container = root_of(&root).unwrap_or(root);
 
   let mut definitions = Vec::new();
   let mut skipped = 0u32;
@@ -267,7 +405,7 @@ pub fn project_executable_document_recovered<'src>(
       // run: a bound on what was lost, which is what `Recovery::skipped` promises.
       NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
       NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => match recoverable_entry(&child, source) {
+      NodeOrToken::Node(child) => match entry_of(&child, source) {
         Ok(entry) => {
           if let Some(piece) = node_extent(&child, is_trivia) {
             extent = Some(match extent {
@@ -292,18 +430,7 @@ pub fn project_executable_document_recovered<'src>(
     }
   };
   let recovery = Recovery::new(definitions.len() as u32, skipped);
-  (ExecutableDocument::new(span, definitions), recovery)
-}
-
-impl super::ast::ExecutableDocument {
-  /// Project this executable-document node to the AST the syntactic parser produces for `source`.
-  ///
-  /// The compositional form of [`project_executable_document`], and
-  /// [`Document::to_ast`](super::ast::Document::to_ast)'s twin: like it, and unlike the free
-  /// function, it does **not** scan the whole parse for recovery holes up front.
-  pub fn to_ast<'src>(&self, source: &'src str) -> Out<ExecutableDocument<&'src str>> {
-    executable_document(self.syntax(), source)
-  }
+  (span, definitions, recovery)
 }
 
 /// The [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node under a parse's root.
@@ -311,6 +438,13 @@ fn executable_root(root: &SyntaxNode) -> Option<SyntaxNode> {
   root
     .children()
     .find(|child| child.kind() == K::ExecutableDocument)
+}
+
+/// The [`TypeSystemDocument`](SyntaxKind::TypeSystemDocument) node under a parse's root.
+fn type_system_root(root: &SyntaxNode) -> Option<SyntaxNode> {
+  root
+    .children()
+    .find(|child| child.kind() == K::TypeSystemDocument)
 }
 
 /// One top-level definition, with the holes in **its own** subtree refused.
@@ -327,6 +461,15 @@ fn recoverable_entry<'src>(
 ) -> Out<DescribedExecutableDefinition<&'src str>> {
   reject_holes(node)?;
   executable_entry(node, source)
+}
+
+/// [`recoverable_entry`]'s twin at the SDL root, scoped for the same reason.
+fn recoverable_type_system_entry<'src>(
+  node: &SyntaxNode,
+  source: &'src str,
+) -> Out<TypeSystemDefinitionOrExtension<&'src str>> {
+  reject_holes(node)?;
+  type_system_entry(node, source)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -494,6 +637,51 @@ fn document_entry<'src>(
   )))
 }
 
+/// [`document`]'s SDL-only twin, over the `TypeSystemDefinitionOrExtension+` root.
+fn type_system_document<'src>(
+  node: &SyntaxNode,
+  source: &'src str,
+) -> Out<TypeSystemDocument<&'src str>> {
+  let span = extent(node)?;
+  let mut definitions = Vec::new();
+  for element in node.children_with_tokens() {
+    match element {
+      // Rubble, exactly as at the mixed root and for the same reason.
+      NodeOrToken::Token(token) if !is_trivia(token.kind()) => {
+        return Err(unexpected(node, token.kind(), token.text_range()));
+      }
+      NodeOrToken::Token(_) => {}
+      NodeOrToken::Node(child) => definitions.push(type_system_entry(&child, source)?),
+    }
+  }
+  Ok(TypeSystemDocument::new(span, definitions))
+}
+
+/// [`document_entry`]'s SDL-only twin.
+///
+/// The extension arm stays — `extend` is type-system syntax and this root is the one that builds
+/// it — and what goes is the executable half: an `OperationDefinition` or a `FragmentDefinition`
+/// under this root has no image in a `TypeSystemDocument`, and the SDL root reports one at the
+/// parser's own position rather than shaping it, so reaching this arm means the tree is not the
+/// one this door was handed.
+fn type_system_entry<'src>(
+  node: &SyntaxNode,
+  source: &'src str,
+) -> Out<TypeSystemDefinitionOrExtension<&'src str>> {
+  if let Some(extension) = type_system_extension(node, source)? {
+    return Ok(TypeSystemDefinitionOrExtension::Extension(extension));
+  }
+  let outer = extent(node)?;
+  let description = description(node, source)?;
+  let inner = extent_without_description(node)?;
+  let definition = type_system_definition(node, inner, source)?;
+  Ok(TypeSystemDefinitionOrExtension::Definition(Described::new(
+    outer,
+    description,
+    definition,
+  )))
+}
+
 /// [`document`]'s executable-only twin, over the `ExecutableDefinition+` root.
 fn executable_document<'src>(
   node: &SyntaxNode,
@@ -555,6 +743,10 @@ fn definition<'src>(
 ) -> Out<crate::parser::graphql::ast::Definition<&'src str>> {
   use crate::parser::graphql::ast::Definition as D;
 
+  // The two executable kinds, then the nine type-system ones through the shared arm. One list of
+  // the nine, not two: `type_system_definition` is what the SDL root reaches them by, and a
+  // second copy here would be nine chances for the mixed root and the SDL root to build different
+  // ASTs out of the same node. Its refusal for an unknown kind is this one's, unchanged.
   Ok(match node.kind() {
     K::OperationDefinition => D::Executable(ExecutableDefinition::Operation(operation_definition(
       node, span, source,
@@ -562,30 +754,39 @@ fn definition<'src>(
     K::FragmentDefinition => D::Executable(ExecutableDefinition::Fragment(fragment_definition(
       node, span, source,
     )?)),
-    K::ScalarTypeDefinition => D::TypeSystem(TypeSystemDefinition::Type(TypeDefinition::Scalar(
+    _ => D::TypeSystem(type_system_definition(node, span, source)?),
+  })
+}
+
+/// The nine type-system definition kinds, shared by the mixed root and the SDL-only one.
+fn type_system_definition<'src>(
+  node: &SyntaxNode,
+  span: SimpleSpan,
+  source: &'src str,
+) -> Out<TypeSystemDefinition<&'src str>> {
+  Ok(match node.kind() {
+    K::ScalarTypeDefinition => TypeSystemDefinition::Type(TypeDefinition::Scalar(
       scalar_type_definition(node, span, source)?,
-    ))),
-    K::ObjectTypeDefinition => D::TypeSystem(TypeSystemDefinition::Type(TypeDefinition::Object(
+    )),
+    K::ObjectTypeDefinition => TypeSystemDefinition::Type(TypeDefinition::Object(
       object_type_definition(node, span, source)?,
-    ))),
-    K::InterfaceTypeDefinition => D::TypeSystem(TypeSystemDefinition::Type(
-      TypeDefinition::Interface(interface_type_definition(node, span, source)?),
     )),
-    K::UnionTypeDefinition => D::TypeSystem(TypeSystemDefinition::Type(TypeDefinition::Union(
+    K::InterfaceTypeDefinition => TypeSystemDefinition::Type(TypeDefinition::Interface(
+      interface_type_definition(node, span, source)?,
+    )),
+    K::UnionTypeDefinition => TypeSystemDefinition::Type(TypeDefinition::Union(
       union_type_definition(node, span, source)?,
-    ))),
-    K::EnumTypeDefinition => D::TypeSystem(TypeSystemDefinition::Type(TypeDefinition::Enum(
-      enum_type_definition(node, span, source)?,
-    ))),
-    K::InputObjectTypeDefinition => D::TypeSystem(TypeSystemDefinition::Type(
-      TypeDefinition::InputObject(input_object_type_definition(node, span, source)?),
     )),
-    K::DirectiveDefinition => D::TypeSystem(TypeSystemDefinition::Directive(directive_definition(
-      node, span, source,
-    )?)),
-    K::SchemaDefinition => D::TypeSystem(TypeSystemDefinition::Schema(schema_definition(
-      node, span, source,
-    )?)),
+    K::EnumTypeDefinition => TypeSystemDefinition::Type(TypeDefinition::Enum(
+      enum_type_definition(node, span, source)?,
+    )),
+    K::InputObjectTypeDefinition => TypeSystemDefinition::Type(TypeDefinition::InputObject(
+      input_object_type_definition(node, span, source)?,
+    )),
+    K::DirectiveDefinition => {
+      TypeSystemDefinition::Directive(directive_definition(node, span, source)?)
+    }
+    K::SchemaDefinition => TypeSystemDefinition::Schema(schema_definition(node, span, source)?),
     found => return Err(unexpected(node, found, node.text_range())),
   })
 }
