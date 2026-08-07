@@ -66,13 +66,15 @@ use rowan::{GreenNodeBuilder, Language};
 use smear::parser::{
   graphql::{
     GraphQL,
-    ast::Document,
+    ast::{Document, ExecutableDocument},
     error::GraphqlErrors,
     kinds::{GraphQLLang, SyntaxKind as K},
     lossless::{
-      ProjectErrorKind, SyntaxNode, ast::Document as DocumentNode, parse_document, project,
+      ProjectErrorKind, SyntaxNode, ast::Document as DocumentNode, parse_document,
+      parse_executable_document, project, project_executable_document,
+      project_executable_document_recovered,
     },
-    syntactic::{GraphqlLexer, document},
+    syntactic::{GraphqlLexer, document, executable_document},
   },
   lossless::ast::CastNode,
 };
@@ -97,6 +99,12 @@ const VALID_ENTRY_FLOOR: usize = 56;
 
 /// The smallest number of `invalid_` entries the refusal census runs.
 const INVALID_ENTRY_FLOOR: usize = 31;
+
+/// The smallest number of corpus entries the **executable** root's sweep is allowed to compare.
+///
+/// Fewer than the mixed root's, because most of the corpus is SDL and the executable root refuses
+/// it — by design, and `lossless_runner.rs` is where that refusal is pinned.
+const EXECUTABLE_ENTRY_FLOOR: usize = 9;
 
 /// The smallest number of distinct AST node types the compared documents reach.
 ///
@@ -238,6 +246,96 @@ fn the_projection_equals_the_parse_over_the_shared_corpus() {
     reached.len() >= OWNER_FLOOR,
     "the compared documents reach only {} node types, floor is {OWNER_FLOOR}: {reached:?}",
     reached.len()
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// the same assertion at the executable root
+// ---------------------------------------------------------------------------------------------
+
+/// The syntactic oracle for the executable-only root.
+fn executable_oracle(src: &str) -> Result<ExecutableDocument<&str>, GraphqlErrors<&str>> {
+  Parser::with_parser::<
+    '_,
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(src)
+}
+
+/// `project_executable_document` is the AST the executable parser builds — and the **recovering**
+/// door is the same value again whenever nothing had to be recovered.
+///
+/// The second half is what makes this gate load-bearing for the validator: `validate_executable_lossless`
+/// goes through the recovering door, not the fail-fast one, so an equality proved only of the
+/// fail-fast door would be proved of code the validator never calls. The two are compared here,
+/// over the same padded corpus, and the recovery is required to report itself complete.
+#[test]
+fn the_executable_projection_equals_the_parse_over_the_shared_corpus() {
+  // Every `valid_` entry the executable root accepts, discovered rather than listed: an entry
+  // added to the corpus later joins this sweep without anybody editing a table.
+  let entries: Vec<(String, String)> = corpus("valid_")
+    .into_iter()
+    .filter(|(_, src)| executable_oracle(src).is_ok())
+    .collect();
+  assert!(
+    entries.len() >= EXECUTABLE_ENTRY_FLOOR,
+    "only {} executable corpus entries, floor is {EXECUTABLE_ENTRY_FLOOR}",
+    entries.len()
+  );
+
+  let mut compared = 0usize;
+  for (name, src) in &entries {
+    let marks = boundaries(src);
+    for (form, source) in std::iter::once(("compact", src.clone())).chain(
+      ALPHABET
+        .iter()
+        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+    ) {
+      let expected = executable_oracle(&source).unwrap_or_else(|e| {
+        panic!("{name} ({form}): the syntactic parser rejects an executable corpus entry: {e:?}")
+      });
+      let parse = parse_executable_document(&source);
+      assert!(
+        !parse.has_errors(),
+        "{name} ({form}): the lossless executable root rejects an entry its syntactic twin takes"
+      );
+
+      let projected = project_executable_document(&parse, &source)
+        .unwrap_or_else(|e| panic!("{name} ({form}): the projection refused: {e}"));
+      assert_eq!(
+        projected, expected,
+        "{name} ({form}): the executable projection is not the AST the parser builds for the \
+         same bytes"
+      );
+
+      let (recovered, recovery) = project_executable_document_recovered(&parse, &source);
+      assert!(
+        recovery.is_complete(),
+        "{name} ({form}): the recovering door dropped {} element(s) of a clean parse",
+        recovery.skipped()
+      );
+      assert_eq!(
+        recovery.projected() as usize,
+        expected.definitions().len(),
+        "{name} ({form}): the recovery counted a different number of definitions"
+      );
+      assert_eq!(
+        recovered, expected,
+        "{name} ({form}): the recovering door and the fail-fast one disagree on a clean parse"
+      );
+
+      compared += 1;
+    }
+  }
+
+  assert_eq!(
+    compared,
+    entries.len() * (ALPHABET.len() + 1),
+    "the sweep did not run every form over every entry"
   );
 }
 

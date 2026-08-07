@@ -21,6 +21,14 @@
 //!   parsed executable document, reported into the caller's
 //!   [`Sink`](crate::validator::Sink) and worked out in the caller's
 //!   [`Scratch`](crate::validator::Scratch).
+#![cfg_attr(
+  feature = "rowan",
+  doc = "- [`validate_executable_lossless`](crate::validator::validate_executable_lossless) — the \
+         same rules over a lossless rowan CST, by projecting it to that same AST rather than by \
+         being a second validator. The IDE door: it recovers per definition, so a document \
+         somebody is still typing is validated as far as it is well-formed, and the \
+         [`Recovery`](crate::validator::Recovery) it returns says how far that was."
+)]
 //!
 //! Every link in this module's docs is crate-absolute on purpose. `pub mod validator;` in
 //! `lib.rs` carries an outer doc comment as well, and rustdoc resolves the merged fragments in
@@ -107,12 +115,20 @@ pub mod schema;
 
 mod diagnostic;
 mod executable;
+#[cfg(feature = "rowan")]
+mod lossless;
 mod rule;
 mod scratch;
 mod sink;
 
 pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
 pub use executable::{Invalid, validate_executable, validate_executable_with};
+
+#[cfg(feature = "rowan")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rowan")))]
+pub use lossless::{
+  LosslessInvalid, Recovery, validate_executable_lossless, validate_executable_lossless_with,
+};
 pub use rule::{Rule, RuleSet};
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
 

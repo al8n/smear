@@ -206,5 +206,12 @@ pub use runner::{
 };
 
 // Beside the roots, and named for the symmetry: `parse_document(src) -> Parse`,
-// `project(&parse, src) -> Result<Document, _>`.
-pub use project::{ProjectError, ProjectErrorKind, project};
+// `project(&parse, src) -> Result<Document, _>`; `parse_executable_document(src) -> Parse`,
+// `project_executable_document(&parse, src) -> Result<ExecutableDocument, _>`. `Recovery` is the
+// substrate's — it says how much of a tree the recovering door could see and nothing about a
+// dialect — so it is re-exported here rather than copied.
+pub use crate::parser::lossless::project::Recovery;
+pub use project::{
+  ProjectError, ProjectErrorKind, project, project_executable_document,
+  project_executable_document_recovered,
+};

@@ -147,6 +147,74 @@ impl<K: fmt::Debug> fmt::Display for ProjectError<K> {
 
 impl<K: fmt::Debug> core::error::Error for ProjectError<K> {}
 
+/// How much of a tree a **recovering** projection could see.
+///
+/// The fail-fast projection answers `Result<Ast, ProjectError>`: one refusal, at the first
+/// obstruction, for a caller that wants the AST or nothing. A recovering projection answers the
+/// question an editor asks instead — *what does the part that is still well-formed say?* — and
+/// this is the honesty half of that answer.
+///
+/// # Read it before you read the verdict
+///
+/// A consumer that skips it is reading a statement about **some** of the document as though it
+/// were a statement about all of it. `skipped() > 0` means at least one top-level element had no
+/// AST image, so:
+///
+/// - an **absence** of findings is weaker than it looks — nothing examined what was skipped; and
+/// - a **presence** of findings may include an artifact of the skip, because a rule that reads
+///   the document as a whole (an undefined fragment spread, an unused fragment) cannot tell a
+///   definition that was never written from one that was dropped.
+///
+/// [`is_complete`](Self::is_complete) is the one-call form of that question, and it is the only
+/// state in which the recovering answer and the fail-fast one are the same value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Recovery {
+  projected: u32,
+  skipped: u32,
+}
+
+impl Recovery {
+  /// Builds a recovery tally.
+  #[inline]
+  pub const fn new(projected: u32, skipped: u32) -> Self {
+    Self { projected, skipped }
+  }
+
+  /// Returns how many top-level definitions were projected into the AST.
+  #[inline]
+  pub const fn projected(&self) -> u32 {
+    self.projected
+  }
+
+  /// Returns how many top-level elements had no AST image and were dropped.
+  ///
+  /// An *element*, not a definition: the count includes a definition the projection refused, a
+  /// recovery hole or gap tile the parser left in the definition's place, and any rubble the
+  /// parser could not attach to a definition at all. One mistyped keyword can therefore leave
+  /// more than one behind, so this is evidence that something was dropped and a bound on how
+  /// much — not a count of the constructs the author meant to write.
+  #[inline]
+  pub const fn skipped(&self) -> u32 {
+    self.skipped
+  }
+
+  /// Returns whether every top-level element had an AST image.
+  ///
+  /// When it is true the recovering projection produced exactly what the fail-fast one would
+  /// have, and anything read off the result is a statement about the whole document.
+  #[inline]
+  pub const fn is_complete(&self) -> bool {
+    self.skipped == 0
+  }
+}
+
+impl fmt::Display for Recovery {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let Self { projected, skipped } = self;
+    write!(f, "{projected} projected, {skipped} skipped")
+  }
+}
+
 /// [`TextRange`] as the AST's span type.
 #[inline]
 pub fn to_span(range: TextRange) -> SimpleSpan {
