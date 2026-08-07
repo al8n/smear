@@ -4,19 +4,77 @@
 //! types and namespaced paths have no specification semantics to validate against, so nothing in
 //! this module knows about them.
 //!
-//! # What is here now
+//! # What is here
 //!
-//! [`schema`](crate::validator::schema) — the built-once
-//! [`Schema`](crate::validator::schema::Schema) every rule reads, and the draft §3 "Type
-//! Validation" pass that runs while building it. A server rejects a malformed SDL exactly once,
-//! at startup, and never rediscovers it per request.
+//! - [`schema`](crate::validator::schema) — the built-once
+//!   [`Schema`](crate::validator::schema::Schema) every rule reads, and the draft §3 "Type
+//!   Validation" pass that runs while building it. A server rejects a malformed SDL exactly once,
+//!   at startup, and never rediscovers it per request.
+//! - [`validate_executable`](crate::validator::validate_executable) — the draft §5 rules over a
+//!   parsed executable document, reported into the caller's
+//!   [`Sink`](crate::validator::Sink) and worked out in the caller's
+//!   [`Scratch`](crate::validator::Scratch).
 //!
 //! Every link in this module's docs is crate-absolute on purpose. `pub mod validator;` in
 //! `lib.rs` carries an outer doc comment as well, and rustdoc resolves the merged fragments in
 //! the **parent** module's scope — so a `schema`-relative link here reports "no item named
 //! `schema` in module `smear`" under `RUSTDOCFLAGS="-D warnings"`.
 //!
-//! Executable-document validation (draft §5) is built on this substrate and lands separately.
+//! # Validating a request
+//!
+//! ```
+//! use smear::{
+//!   lexer::tokora::{Parse as _, Parser},
+//!   parser::graphql::{
+//!     GraphQL,
+//!     ast::{ExecutableDocument, TypeSystemDocument},
+//!     error::GraphqlErrors,
+//!     syntactic::{GraphqlLexer, executable_document, type_system_document},
+//!   },
+//!   validator::{Budget, First, Rule, Schema, Scratch, validate_executable},
+//! };
+//!
+//! let schema = Schema::build(
+//!   &Parser::with_parser::<GraphqlLexer<'_, str>, TypeSystemDocument<&str>, GraphqlErrors<&str>, _, GraphQL>(
+//!     type_system_document,
+//!   )
+//!   .parse_str("type Query { hero: Character } interface Character { name: String! }")
+//!   .expect("the SDL parses"),
+//! )
+//! .expect("the SDL is a schema");
+//!
+//! // The two the caller owns, created once and reused for every request.
+//! let mut scratch = Scratch::new();
+//! let budget = Budget::default();
+//!
+//! let request = Parser::with_parser::<GraphqlLexer<'_, str>, ExecutableDocument<&str>, GraphqlErrors<&str>, _, GraphQL>(
+//!   executable_document,
+//! )
+//! .parse_str("{ hero { title } }")
+//! .expect("the query parses");
+//!
+//! let mut sink = First::new();
+//! let invalid = validate_executable(&schema, &request, &mut scratch, &budget, &mut sink)
+//!   .expect_err("`title` is not a field of `Character`");
+//! assert_eq!(invalid.emitted(), 1);
+//!
+//! let diagnostic = sink.get().expect("a diagnostic");
+//! assert_eq!(diagnostic.rule(), Rule::FieldSelections);
+//! assert_eq!(diagnostic.subject_source(), Some(&"title"));
+//! ```
+//!
+//! # The three axes
+//!
+//! - **The schema** is built once and read as `&Schema` by an unbounded number of concurrent
+//!   validations.
+//! - **The report** is one seam: [`Sink::diagnostic`](crate::validator::Sink::diagnostic) takes a
+//!   value and returns whether to keep going. [`First`](crate::validator::First),
+//!   [`Collect`](crate::validator::Collect), [`Count`](crate::validator::Count) and
+//!   [`Ignore`](crate::validator::Ignore) mirror `tokora`'s emitter-bundle semantics.
+//! - **The working set** is the caller's [`Scratch`](crate::validator::Scratch), reused across
+//!   requests, and what may be *done* is the caller's [`Budget`](crate::validator::Budget). The
+//!   steady state allocates nothing at all, which `tests/validator_allocation.rs` measures with a
+//!   counting allocator rather than asserting.
 //!
 //! # The shape, and why
 //!
@@ -40,4 +98,15 @@
 
 pub mod schema;
 
+mod diagnostic;
+mod executable;
+mod rule;
+mod scratch;
+mod sink;
+
+pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay};
+pub use executable::{Invalid, validate_executable, validate_executable_with};
+pub use rule::{Rule, RuleSet};
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
+pub use scratch::{Budget, Scratch};
+pub use sink::{Collect, Count, First, Ignore, Sink};

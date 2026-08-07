@@ -199,6 +199,99 @@ pub fn validator_source_lattice() {
   assert_lattice_member::<hipstr::HipByt<'static>>();
 }
 
+/// `validator`, the executable half — draft §5 validation reached across the dependency edge.
+///
+/// Returns how many rules fired. The sink is the caller's, which is the whole point of the seam:
+/// this function owns no diagnostic storage and neither does `smear`.
+pub fn graphql_validate(sdl: &str, query: &str) -> u32 {
+  use smear::{
+    parser::graphql::{
+      GraphQL,
+      ast::ExecutableDocument,
+      error::GraphqlErrors,
+      syntactic::{GraphqlLexer, executable_document},
+    },
+    validator::{Budget, Count, Scratch, validate_executable},
+  };
+
+  let schema = graphql_schema(sdl).expect("the probe's SDL is a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(query)
+  .expect("the probe's query parses");
+
+  let mut scratch = Scratch::new();
+  let mut sink = Count::new();
+  let _ = validate_executable(
+    &schema,
+    &document,
+    &mut scratch,
+    &Budget::default(),
+    &mut sink,
+  );
+  sink.get()
+}
+
+/// `validator`, the executable bound — asserted over `tokora`'s whole `Source<usize>` lattice.
+///
+/// [`validate_executable`] asks for one bound more than `Schema::build` does: `Clone` as well as
+/// `AsRef<[u8]>`. That is not a convenience. A `Diagnostic` **owns** the document's own spelling
+/// of the name it refused, because the design's escape contract says a diagnostic built from a
+/// refcounted source may outlive the call that produced it — and owning the slice means cloning
+/// it, which is a reborrow on the borrowed tier and a refcount bump on the rest.
+///
+/// So the claim to check is that the wider bound still admits every member. The assertion
+/// instantiates the real entry point at each `Slice` associated type rather than restating its
+/// bound, so it fails in both directions, exactly as its `Schema::build` twin does.
+///
+/// [`validate_executable`]: smear::validator::validate_executable
+pub fn validator_executable_source_lattice() {
+  use smear::{
+    lexer::tokora::Source,
+    parser::graphql::ast::ExecutableDocument,
+    validator::{Budget, Ignore, Invalid, Schema, Scratch, validate_executable},
+  };
+
+  fn assert_lattice_member<Src>()
+  where
+    Src: Source<usize> + ?Sized + 'static,
+    for<'a> <Src as Source<usize>>::Slice<'a>: AsRef<[u8]> + Clone,
+  {
+    fn validates<S: AsRef<[u8]> + Clone>(
+      schema: &Schema,
+      document: &ExecutableDocument<S>,
+      scratch: &mut Scratch,
+    ) -> Result<(), Invalid> {
+      validate_executable(schema, document, scratch, &Budget::default(), &mut Ignore)
+    }
+    let _ = validates::<<Src as Source<usize>>::Slice<'static>>;
+  }
+
+  // Borrowed tier: a diagnostic is pinned to the request buffer and must not escape it.
+  assert_lattice_member::<str>();
+  assert_lattice_member::<[u8]>();
+  assert_lattice_member::<&'static str>();
+  assert_lattice_member::<&'static [u8]>();
+  assert_lattice_member::<bstr::BStr>();
+  assert_lattice_member::<&'static bstr::BStr>();
+
+  // Refcounted tier: a diagnostic may escape, and cloning its subject is a refcount bump.
+  assert_lattice_member::<bytes::Bytes>();
+  assert_lattice_member::<smol_bytes::shared::Bytes>();
+  assert_lattice_member::<smol_bytes::compact::Bytes>();
+  assert_lattice_member::<smol_bytes::Utf8Bytes>();
+  assert_lattice_member::<smol_bytes::compact::Utf8Bytes>();
+
+  // Three-way tier: inline, borrowed, or shared, decided at runtime but pinned by `'h`.
+  assert_lattice_member::<hipstr::HipStr<'static>>();
+  assert_lattice_member::<hipstr::HipByt<'static>>();
+}
+
 /// `smallvec` — the error container is SmallVec-backed rather than `Vec`-backed.
 ///
 /// The coercion is the probe: with the feature off the deref target is a `Vec` and the binding
@@ -338,6 +431,20 @@ mod tests {
 
     let errors = super::graphql_schema("type NotARoot { ok: Int }").expect_err("not a schema");
     assert!(!errors.is_empty());
+  }
+
+  /// The executable entry point's bound, over the same lattice, for the same reason.
+  #[test]
+  fn the_validator_admits_every_source_slice_type_for_documents_too() {
+    super::validator_executable_source_lattice();
+  }
+
+  /// Draft §5 validation, driven end to end across the dependency edge.
+  #[test]
+  fn the_validator_accepts_and_refuses_executable_documents() {
+    const SDL: &str = "type Query { hero: Character } interface Character { name: String! }";
+    assert_eq!(super::graphql_validate(SDL, "{ hero { name } }"), 0);
+    assert_eq!(super::graphql_validate(SDL, "{ hero { nickname } }"), 1);
   }
 
   /// Features named in `smear`'s manifest but deliberately not smoked, each with a written
