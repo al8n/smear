@@ -1,4 +1,4 @@
-#![cfg(feature = "rowan")]
+#![cfg(all(feature = "rowan", feature = "graphql"))]
 
 //! Task 6's gate: the seven type-reference, argument and directive node kinds, their
 //! trivia-invariance, their verbatim round-trip, and the recovery shapes that keep a malformed

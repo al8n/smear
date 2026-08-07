@@ -1,4 +1,4 @@
-#![cfg(feature = "rowan")]
+#![cfg(all(feature = "rowan", feature = "graphql"))]
 
 //! Gate 4 — the typed accessor layer over the GraphQL lossless CST.
 //!

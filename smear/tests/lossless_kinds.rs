@@ -1,4 +1,4 @@
-#![cfg(feature = "rowan")]
+#![cfg(all(feature = "rowan", feature = "graphql"))]
 
 use rowan::Language;
 use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::GraphQLLang};
