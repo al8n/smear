@@ -4,7 +4,7 @@
 //!
 //! * [`Provenance::SpecFixture`] — the per-rule liveness fixtures, both halves of every pair. They
 //!   are the specification's own §5 counter-examples, and they are what guarantees the corpus
-//!   *reaches* all twenty-eight rules rather than whichever ones a hand-written sample happens to
+//!   *reaches* every draft rule rather than whichever ones a hand-written sample happens to
 //!   trip. [`exercised_rules`] proves that mechanically instead of asserting it in prose.
 //! * [`Provenance::SpecExample`] — further draft §5 shapes the fixture table does not need,
 //!   because the liveness floor only needs one document per rule: unions and `__typename`,
@@ -28,7 +28,9 @@
 //!
 //! [`SDL_DIRECTIVE_PROBES`] carries suites with **no documents**. Building the schema is itself a
 //! comparison — smear's draft §3 pass against apollo's — and those suites exist only for it. It is
-//! the comparison that found smear issue #91.
+//! the comparison that found smear issue #91, and the place smear issue #95's three residual checks
+//! became visible: they were absent from this table, so the oracle agreed about them by never
+//! asking.
 
 use std::{fmt, fs, path::Path};
 
@@ -376,18 +378,31 @@ pub fn curated() -> Vec<Suite> {
   suites
 }
 
-/// Minimal SDLs, one per check apollo performs on a directive **usage** and smear does not.
+/// Minimal SDLs, one per check apollo performs at an SDL **constant position**.
 ///
 /// These suites carry no documents. The comparison they exist for is the *schema* one — smear's
 /// `Schema::build` against apollo's `Schema::parse_and_validate` — which runs once per suite
 /// whether or not any query follows it, so a case list would only add noise.
 ///
-/// The gap they measure was found by this harness rather than by reading the builder: `Schema::build`
-/// reads a directive *definition* thoroughly and never looks at a directive *use site*. Each entry
-/// pairs `apollo-compiler`'s own error name with the smallest SDL that produces it, so
-/// `the_sdl_directive_gap_is_exactly_as_wide_as_declared` can check the gap's width one check at a
-/// time instead of watching an aggregate count that a partial fix would leave looking healthy.
+/// A directive usage is the only constant position either implementation looks at: neither
+/// validates an SDL *default* value (smear issue #91's scope note measured that, and it is
+/// agreement rather than divergence), so every probe below is written as a directive usage even
+/// where the check it provokes is really about the input-object literal inside one.
+///
+/// # Two waves, and the second one is why the first was not enough
+///
+/// The first six were found by this harness rather than by reading the builder: `Schema::build`
+/// read a directive *definition* thoroughly and never looked at a directive *use site* (smear issue
+/// #91). The last three are the residue that issue did not enumerate (#95), and they are the more
+/// interesting half of the story — **no corpus entry reached them**, so the oracle was green on all
+/// three and would have stayed green whether or not they were ever implemented. Being absent from
+/// [`gaps::GAPS`](super::gaps::GAPS) did not make them checked; it made them invisible.
+///
+/// Each entry pairs `apollo-compiler`'s own error name with the smallest SDL that produces it, so
+/// `every_sdl_constant_position_probe_is_refused_by_both` can check one at a time instead of
+/// watching an aggregate that a partial regression would leave looking healthy.
 pub const SDL_DIRECTIVE_PROBES: &[(&str, &str)] = &[
+  // -- issue #91 / PR #94: the directive usage itself ------------------------------------------
   (
     "UnsupportedLocation",
     "directive @onEnum on ENUM\ntype Query @onEnum { ok: Int }",
@@ -409,11 +424,41 @@ pub const SDL_DIRECTIVE_PROBES: &[(&str, &str)] = &[
     "UnsupportedValueType",
     "directive @onObject(a: Int) on OBJECT\ntype Query @onObject(a: \"x\") { ok: Int }",
   ),
+  // -- issue #95: the argument list, and the input-object literal inside it ---------------------
+  (
+    "UniqueArgument",
+    "directive @onObject(a: Int) on OBJECT\ntype Query @onObject(a: 1, a: 2) { ok: Int }",
+  ),
+  (
+    "UndefinedInputValue",
+    "directive @onObject(a: In) on OBJECT\ninput In { x: Int }\ntype Query @onObject(a: { y: 1 }) { ok: Int }",
+  ),
+  (
+    "RequiredField",
+    "directive @onObject(a: In) on OBJECT\ninput In { x: Int! }\ntype Query @onObject(a: {}) { ok: Int }",
+  ),
 ];
 
-/// The SDL a correct directive usage produces, as the control for [`SDL_DIRECTIVE_PROBES`].
-pub const SDL_DIRECTIVE_CONTROL: &str =
-  "directive @onObject on OBJECT\ntype Query @onObject { ok: Int }";
+/// The SDLs a *correct* usage of each probed shape produces, accepted by both implementations.
+///
+/// One control per shape the probes use, because a control that does not share the probe's shape
+/// proves nothing about it: `@onObject(a: { x: 1 })` is what shows that the two input-object probes
+/// measure the literal's contents and not the mere presence of an input object in a directive
+/// argument.
+pub const SDL_DIRECTIVE_CONTROLS: &[(&str, &str)] = &[
+  (
+    "bare-usage",
+    "directive @onObject on OBJECT\ntype Query @onObject { ok: Int }",
+  ),
+  (
+    "one-argument",
+    "directive @onObject(a: Int) on OBJECT\ntype Query @onObject(a: 1) { ok: Int }",
+  ),
+  (
+    "input-object-argument",
+    "directive @onObject(a: In) on OBJECT\ninput In { x: Int! }\ntype Query @onObject(a: { x: 1 }) { ok: Int }",
+  ),
+];
 
 /// The mechanical family: realistic seeds and every one-token mutation of them.
 pub fn generated() -> Vec<Suite> {
@@ -565,7 +610,7 @@ struct Pair {
   class: Option<Class>,
 }
 
-/// The twenty-seven pairs that live on the menagerie schema.
+/// The twenty-eight pairs that live on the menagerie schema.
 ///
 /// `Rule::OperationTypeExistence` is not here: its fixture needs a schema without a mutation root,
 /// so it lives in [`query_only_cases`]. [`exercised_rules`] is what makes that split safe — it
@@ -593,6 +638,15 @@ const PAIRS: &[Pair] = &[
     rule: Rule::FieldSelections,
     invalid: "{ dog { meowVolume } }",
     valid: "{ dog { barkVolume } }",
+    class: None,
+  },
+  Pair {
+    rule: Rule::FieldSelectionMerging,
+    // The draft's own counter-example shape: one response key, two different fields under it.
+    // apollo reports it from its *build* stage as `ConflictingFieldName`, which is why the harness
+    // drives `parse_and_validate` rather than `validate`.
+    invalid: "{ dog { name: nickname name } }",
+    valid: "{ dog { name name } }",
     class: None,
   },
   Pair {

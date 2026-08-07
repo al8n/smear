@@ -1,12 +1,16 @@
 //! **G2 — the differential oracle.** smear's draft §5 validator against `apollo-compiler` 1.32.0.
 //!
-//! Four gates ride one corpus:
+//! Five gates ride one corpus:
 //!
 //! * [`the_oracle_agrees`] — every case, verdict against verdict, with the directional whitelist.
 //! * [`the_corpus_reaches_every_rule`] — a corpus that never exercises half the rule set would
 //!   agree with anything, so the census is mechanical.
 //! * [`every_whitelist_class_is_exercised`] — an excuse nothing hits is an excuse nobody has
 //!   checked.
+//! * [`every_sdl_constant_position_probe_is_refused_by_both`] — the schema comparison's own
+//!   census, one apollo error name at a time. The census exists because its absence is what smear
+//!   issue #95 was about: three checks nothing in the corpus reached, so the oracle was green
+//!   about them without ever having asked.
 //! * [`the_harness_reds_when_a_rule_goes_lax`] — the discrimination proof. Runs the whole corpus
 //!   once per rule with that rule switched off and requires a red, so "the oracle agrees" cannot
 //!   be true merely because the oracle cannot tell.
@@ -20,8 +24,8 @@ use std::collections::BTreeMap;
 
 use smear::validator::Rule;
 use smear_apollo_bench::oracle::{
-  Class, Divergence, Oracle, Report, SchemaOutcome, build_schemas, corpus, gaps,
-  whitelist::Expectation,
+  Class, Divergence, Oracle, Report, SchemaOutcome, apollo_schema_error_names, build_schemas,
+  corpus, gaps, whitelist::Expectation,
 };
 
 fn run() -> Report {
@@ -42,11 +46,33 @@ fn the_oracle_agrees() {
   );
 }
 
+/// Rules with no case, each with the reason written down.
+///
+/// A [`Rule`] belongs here only when the *oracle* cannot express it — not when writing the case is
+/// merely awkward. Both entries are this crate's resource policy over draft 5.3.2, which the
+/// specification leaves unbounded: a document that trips one is refused by smear and accepted by
+/// apollo, which has no such bound, so any case reaching one would be an
+/// [`UndeclaredStricter`](Divergence::UndeclaredStricter) divergence rather than coverage. The
+/// bounds are gated where they can be: `smear/tests/validator_merge.rs` drives them directly.
+///
+/// The list is asserted **exactly**, so a rule that acquires a case must be deleted from here.
+const UNREACHABLE_BY_DIFFERENTIAL: &[(Rule, &str)] = &[
+  (
+    Rule::MergeDepthBudget,
+    "a resource bound, not a draft rule: apollo has no depth limit, so tripping it is smear \
+     being stricter with nothing to compare against",
+  ),
+  (
+    Rule::MergeWorkBudget,
+    "likewise a resource bound; the same argument as MergeDepthBudget",
+  ),
+];
+
 /// The corpus must reach every rule, or "we agree" is a statement about the corpus.
 ///
-/// A rule added to `Rule::ALL` — draft 5.3.2 is the one still outstanding — fails here until a
-/// case exists for it. That is deliberately a one-line addition to `corpus::PAIRS` or
-/// `whitelist_probes`, not a restructuring: the harness has no per-rule machinery to extend.
+/// A rule added to `Rule::ALL` fails here until a case exists for it. That is deliberately a
+/// one-line addition to `corpus::PAIRS` or `whitelist_probes`, not a restructuring: the harness has
+/// no per-rule machinery to extend.
 #[test]
 fn the_corpus_reaches_every_rule() {
   let exercised = corpus::exercised_rules();
@@ -55,10 +81,16 @@ fn the_corpus_reaches_every_rule() {
     .copied()
     .filter(|rule| !exercised.contains(rule))
     .collect();
-  assert!(
-    missing.is_empty(),
-    "the differential corpus exercises no case for {missing:?} — add one to `corpus::PAIRS` or \
-     `corpus::whitelist_probes`, next to the rule's neighbours"
+  let excused: Vec<Rule> = UNREACHABLE_BY_DIFFERENTIAL
+    .iter()
+    .map(|(rule, _)| *rule)
+    .collect();
+  assert_eq!(
+    missing, excused,
+    "the set of rules the differential corpus does not reach has moved. A rule that gained a \
+     case must leave UNREACHABLE_BY_DIFFERENTIAL; a rule that lost one needs a case added to \
+     `corpus::PAIRS` or `corpus::whitelist_probes`, next to its neighbours.\n  observed \
+     unreached: {missing:?}\n  declared unreachable: {excused:?}"
   );
 }
 
@@ -138,38 +170,56 @@ fn no_schema_is_accepted_by_only_one_side() {
   );
 }
 
-/// The schema-stage gap, checked one apollo error name at a time.
+/// The SDL constant-position checks, one apollo error name at a time.
 ///
-/// An aggregate hit count would stay healthy while the gap half-closed. This asserts the width:
-/// every probe must still be smear-accepts / apollo-rejects, and the control must still be
-/// accepted by both, so a fix that lands `UnsupportedLocation` alone reds here naming exactly the
-/// probe that moved.
+/// This gate has run in both directions. While the checks were missing it asserted the *gap's*
+/// width — every probe smear-accepts / apollo-rejects — so a partial fix reddened naming the probe
+/// that moved. Now that all nine have landed it asserts the same thing from the other side: every
+/// probe must be refused by **both** implementations, so removing any one check reddens naming the
+/// probe that stopped being caught. An aggregate would stay healthy through either half-move; this
+/// cannot.
+///
+/// What it does *not* pin is smear refusing for the *right* reason — `BothRejected` only says both
+/// said no. `smear/tests/validator_schema.rs::refusal_floor` is what pins the exact
+/// `SchemaErrorKind` set each of these SDLs produces, and the two together are the property.
 #[test]
-fn the_sdl_directive_gap_is_exactly_as_wide_as_declared() {
-  let mut closed = Vec::new();
-  for (name, sdl) in corpus::SDL_DIRECTIVE_PROBES {
-    match build_schemas(sdl) {
-      Err(SchemaOutcome::GapExplained(gap)) if gap.section == "3.13-usages" => {
-        println!("sdl gap still open: {name}");
-      }
-      Ok(_) => closed.push(format!("  {name}: both sides now accept the SDL")),
-      Err(other) => closed.push(format!("  {name}: {other:?}")),
+fn every_sdl_constant_position_probe_is_refused_by_both() {
+  let mut moved = Vec::new();
+  for (apollo_error, sdl) in corpus::SDL_DIRECTIVE_PROBES {
+    let outcome = build_schemas(sdl);
+    match &outcome {
+      Err(SchemaOutcome::BothRejected) => {}
+      Ok(_) => moved.push(format!("  {apollo_error}: both sides now accept the SDL")),
+      Err(other) => moved.push(format!("  {apollo_error}: {other:?}")),
+    }
+    // Naming apollo's own typed variant is what keeps a probe honest when its SDL is edited: an
+    // SDL that grew a second defect would still be `BothRejected` while measuring something else.
+    let names = apollo_schema_error_names(sdl);
+    if !names.contains(apollo_error) {
+      moved.push(format!(
+        "  {apollo_error}: apollo now reports {names:?} for this SDL, so the probe no longer \
+         measures the check it is named for"
+      ));
     }
   }
   assert!(
-    closed.is_empty(),
-    "the SDL directive-usage gap has narrowed. Re-scope `oracle::gaps::GAPS`'s `3.13-usages` \
-     entry — or delete it, if all six probes now agree.\n{}",
-    closed.join("\n")
+    moved.is_empty(),
+    "an SDL constant-position probe changed verdict. Either a check in \
+     `validator::schema::builder` was lost — the usual cause — or apollo moved under the \
+     `=1.32.0` pin.\n{}",
+    moved.join("\n")
   );
 
-  // The control proves the probes measure the *usage* check and not something incidental about
-  // the SDL shape they share.
-  assert!(
-    build_schemas(corpus::SDL_DIRECTIVE_CONTROL).is_ok(),
-    "the control SDL — a correct directive usage — is not accepted by both sides, so the probes \
-     above prove nothing"
-  );
+  // One control per probed shape. A control that does not share the probe's shape proves nothing
+  // about it, so `@onObject(a: { x: 1 })` is here to show that the two input-object probes measure
+  // the literal's contents rather than the presence of an input object in a directive argument.
+  for (name, sdl) in corpus::SDL_DIRECTIVE_CONTROLS {
+    assert!(
+      build_schemas(sdl).is_ok(),
+      "the control SDL `{name}` — a correct usage — is not accepted by both sides, so the probes \
+       that share its shape prove nothing"
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -247,7 +297,23 @@ fn the_whitelist_still_describes_apollo() {
 ///
 /// The list is asserted **exactly**: a rule that drops off it (the corpus grew a case that
 /// isolates it) fails just as loudly as a rule that joins it.
-const UNDETECTABLE_LOSSES: &[(Rule, &str)] = &[];
+///
+/// Its two entries today are there for the *other* reason a rule can be invisible — no case
+/// reaches it at all — and both are the resource bounds
+/// [`UNREACHABLE_BY_DIFFERENTIAL`] explains. That the two lists agree is a coincidence of the
+/// current corpus, not a derivation: a rule with a case can still be undetectable, which is what
+/// the paragraph above describes, so the two are asserted separately.
+const UNDETECTABLE_LOSSES: &[(Rule, &str)] = &[
+  (
+    Rule::MergeDepthBudget,
+    "no case reaches it: a document that trips a resource bound apollo does not have would be a \
+     divergence rather than coverage — see UNREACHABLE_BY_DIFFERENTIAL",
+  ),
+  (
+    Rule::MergeWorkBudget,
+    "likewise unreached; the same argument as MergeDepthBudget",
+  ),
+];
 
 #[test]
 fn the_harness_reds_when_a_rule_goes_lax() {
