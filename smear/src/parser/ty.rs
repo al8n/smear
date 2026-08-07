@@ -24,7 +24,7 @@ use crate::parser::path::Path;
 /// `graphql`-gated, so under `graphql` alone there is no item in scope to resolve against at all.
 /// A link here is a hard error under `RUSTDOCFLAGS="-D warnings"`, in both configurations.
 #[cfg(feature = "graphql")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct NamedType<Name, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -89,7 +89,7 @@ impl<Name, Span> NamedType<Name, Span> {
 }
 
 /// A list type reference with an optional non-null modifier.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ListType<Type, Span = SimpleSpan> {
   span: Span,
   ty: Type,
@@ -147,7 +147,7 @@ impl<Type, Span> ListType<Type, Span> {
 
 /// A GraphQLx set type reference with an optional non-null modifier.
 #[cfg(feature = "graphqlx")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct SetType<Type, Span = SimpleSpan> {
   span: Span,
   ty: Type,
@@ -209,7 +209,7 @@ impl<Type, Span> IntoComponents for SetType<Type, Span> {
 
 /// A GraphQLx map type reference with an optional non-null modifier.
 #[cfg(feature = "graphqlx")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct MapType<Key, Value, Span = SimpleSpan> {
   span: Span,
   key: Key,

@@ -7,7 +7,7 @@ use tokora::{
 };
 
 /// A GraphQLx set value with its enclosing source span.
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Set<Value, Span = SimpleSpan, Container = Vec<Value>> {
   span: Span,
   values: Container,

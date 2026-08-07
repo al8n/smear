@@ -5,7 +5,7 @@ use tokora::{
 };
 
 /// A default input value assignment.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct DefaultInputValue<Value, Span = SimpleSpan> {
   span: Span,
   value: Value,

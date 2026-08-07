@@ -199,6 +199,15 @@ fn the_two_lossless_layers_do_not_reference_each_other() {
 /// does NOT do is let a dialect reach the *other* dialect's lexer through it —
 /// [`FORBIDDEN`]'s `graphql::kinds` / `graphql::lossless` spellings are substring patterns and
 /// match `crate::lexer::graphql::lossless::…` exactly as they matched `smear_lexer::graphql::…`.
+///
+/// `crate::parser::type_system` is #58's entry, and it is on the GraphQL side only because that
+/// is the only dialect with a projection so far. The projection's **target** is the AST, and the
+/// AST's carriers are shared and dialect-free in exactly the way `crate::parser::lossless` is —
+/// this census is about a dialect reaching the *other dialect*, which a shared carrier is not.
+/// The narrow reason it is needed at all: three `Described<…>` aliases and six `…Data` extension
+/// enums have no spelling under `graphql::ast`, and a projection has to construct all nine. Every
+/// other AST type it builds is reached through the dialect's own `ast` module, which is why this
+/// is one root and not eight.
 const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
   (
     GRAPHQL,
@@ -207,6 +216,7 @@ const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
       "crate::lexer",
       "crate::parser::graphql",
       "crate::parser::lossless",
+      "crate::parser::type_system",
     ],
   ),
   (

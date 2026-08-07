@@ -43,7 +43,7 @@ macro_rules! impl_node_traits {
 }
 
 /// A definition of the arguments accepted by a field or directive.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ArgumentsDefinition<InputValue, Container = Vec<InputValue>, Span = SimpleSpan> {
   span: Span,
   input_value_definitions: Container,
@@ -90,7 +90,7 @@ impl<InputValue, Container, Span> ArgumentsDefinition<InputValue, Container, Spa
 }
 
 /// An input value definition used by a field, directive, or input object.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct InputValueDefinition<Name, Type, DefaultValue, Directives, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -158,7 +158,7 @@ impl<Name, Type, DefaultValue, Directives, Span>
 }
 
 /// A braced collection of input value definitions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct InputFieldsDefinition<InputValue, Container = Vec<InputValue>, Span = SimpleSpan> {
   span: Span,
   input_value_definitions: Container,
@@ -205,7 +205,7 @@ impl<InputValue, Container, Span> InputFieldsDefinition<InputValue, Container, S
 }
 
 /// A field definition in an object or interface type.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct FieldDefinition<Name, Arguments, Type, Directives, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -273,7 +273,7 @@ impl<Name, Arguments, Type, Directives, Span>
 }
 
 /// A braced collection of field definitions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct FieldsDefinition<Field, Container = Vec<Field>, Span = SimpleSpan> {
   span: Span,
   field_definitions: Container,
@@ -320,7 +320,7 @@ impl<Field, Container, Span> FieldsDefinition<Field, Container, Span> {
 }
 
 /// A list of interfaces implemented by an object or interface type.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ImplementInterfaces<Name, Container = Vec<Name>, Span = SimpleSpan> {
   span: Span,
   interfaces: Container,
@@ -367,7 +367,7 @@ impl<Name, Container, Span> ImplementInterfaces<Name, Container, Span> {
 }
 
 /// An interface type definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct InterfaceTypeDefinition<Name, Implements, Directives, Fields, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -435,7 +435,7 @@ impl<Name, Implements, Directives, Fields, Span>
 }
 
 /// A scalar type definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ScalarTypeDefinition<Name, Directives, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -479,7 +479,7 @@ impl<Name, Directives, Span> ScalarTypeDefinition<Name, Directives, Span> {
 }
 
 /// A root operation type definition in a schema definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct RootOperationTypeDefinition<Name, OperationType, Span = SimpleSpan> {
   span: Span,
   operation_type: OperationType,
@@ -523,7 +523,7 @@ impl<Name, OperationType, Span> RootOperationTypeDefinition<Name, OperationType,
 }
 
 /// A braced collection of root operation type definitions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct RootOperationTypesDefinition<
   RootOperation,
   Container = Vec<RootOperation>,
@@ -574,7 +574,7 @@ impl<RootOperation, Container, Span> RootOperationTypesDefinition<RootOperation,
 }
 
 /// An enum value definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct EnumValueDefinition<EnumValue, Directives, Span = SimpleSpan> {
   span: Span,
   value: EnumValue,
@@ -618,7 +618,7 @@ impl<EnumValue, Directives, Span> EnumValueDefinition<EnumValue, Directives, Spa
 }
 
 /// A braced collection of enum value definitions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct EnumValuesDefinition<EnumValue, Container = Vec<EnumValue>, Span = SimpleSpan> {
   span: Span,
   enum_value_definitions: Container,
@@ -665,7 +665,7 @@ impl<EnumValue, Container, Span> EnumValuesDefinition<EnumValue, Container, Span
 }
 
 /// An enum type definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct EnumTypeDefinition<Name, Directives, EnumValues, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -722,7 +722,7 @@ impl<Name, Directives, EnumValues, Span> EnumTypeDefinition<Name, Directives, En
 }
 
 /// An object type definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ObjectTypeDefinition<Name, Implements, Directives, Fields, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -790,7 +790,7 @@ impl<Name, Implements, Directives, Fields, Span>
 }
 
 /// A list of named union member types.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct UnionMemberTypes<Name, Container = Vec<Name>, Span = SimpleSpan> {
   span: Span,
   members: Container,
@@ -837,7 +837,7 @@ impl<Name, Container, Span> UnionMemberTypes<Name, Container, Span> {
 }
 
 /// A union type definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct UnionTypeDefinition<Name, Directives, MemberTypes, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -1324,7 +1324,7 @@ impl<Span> core::fmt::Display for Location<Span> {
 }
 
 /// A collection of directive locations.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct DirectiveLocations<
   DirectiveLocation,
   Container = Vec<DirectiveLocation>,
@@ -1375,7 +1375,7 @@ impl<DirectiveLocation, Container, Span> DirectiveLocations<DirectiveLocation, C
 }
 
 /// A directive definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct DirectiveDefinition<Name, Arguments, Locations, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -1441,7 +1441,7 @@ impl<Name, Arguments, Locations, Span> DirectiveDefinition<Name, Arguments, Loca
 }
 
 /// A schema definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct SchemaDefinition<Directives, RootOperations, Span = SimpleSpan> {
   span: Span,
   directives: Option<Directives>,
@@ -1489,7 +1489,7 @@ impl<Directives, RootOperations, Span> SchemaDefinition<Directives, RootOperatio
 }
 
 /// An input object type definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct InputObjectTypeDefinition<Name, Directives, Fields, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -1548,7 +1548,7 @@ impl<Name, Directives, Fields, Span> InputObjectTypeDefinition<Name, Directives,
 /// The payload contributed by an object or interface type extension.
 ///
 /// Each variant represents one of GraphQL's legal nonempty extension forms.
-#[derive(Debug, Clone, Copy, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 pub enum ObjectTypeExtensionData<Implements, Directives, Fields> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
@@ -1605,7 +1605,7 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
 /// An object type extension (`extend type Name …`).
 ///
 /// See the [GraphQL Object Type Extension specification](https://spec.graphql.org/draft/#ObjectTypeExtension).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ObjectTypeExtension<Name, Implements, Directives, Fields, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -1671,7 +1671,7 @@ impl<Name, Implements, Directives, Fields, Span>
 /// The payload contributed by an interface type extension.
 ///
 /// Each variant represents one of GraphQL's legal nonempty extension forms.
-#[derive(Debug, Clone, Copy, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 pub enum InterfaceTypeExtensionData<Implements, Directives, Fields> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
@@ -1728,7 +1728,7 @@ impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Dire
 /// An interface type extension (`extend interface Name …`).
 ///
 /// See the [GraphQL Interface Type Extension specification](https://spec.graphql.org/draft/#InterfaceTypeExtension).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct InterfaceTypeExtension<Name, Implements, Directives, Fields, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -1792,7 +1792,7 @@ impl<Name, Implements, Directives, Fields, Span>
 }
 
 /// The payload contributed by a union type extension.
-#[derive(Debug, Clone, Copy, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 pub enum UnionTypeExtensionData<Directives, MemberTypes> {
   /// Adds directives only.
   Directives(Directives),
@@ -1828,7 +1828,7 @@ impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
 /// A union type extension (`extend union Name …`).
 ///
 /// See the [GraphQL Union Type Extension specification](https://spec.graphql.org/draft/#UnionTypeExtension).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct UnionTypeExtension<Name, Directives, MemberTypes, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -1884,7 +1884,7 @@ impl<Name, Directives, MemberTypes, Span> UnionTypeExtension<Name, Directives, M
 }
 
 /// The payload contributed by an enum type extension.
-#[derive(Debug, Clone, Copy, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 pub enum EnumTypeExtensionData<Directives, Values> {
   /// Adds directives only.
   Directives(Directives),
@@ -1923,7 +1923,7 @@ impl<Directives, Values> EnumTypeExtensionData<Directives, Values> {
 /// An enum type extension (`extend enum Name …`).
 ///
 /// See the [GraphQL Enum Type Extension specification](https://spec.graphql.org/draft/#EnumTypeExtension).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct EnumTypeExtension<Name, Directives, Values, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -1979,7 +1979,7 @@ impl<Name, Directives, Values, Span> EnumTypeExtension<Name, Directives, Values,
 }
 
 /// The payload contributed by an input object type extension.
-#[derive(Debug, Clone, Copy, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 pub enum InputObjectTypeExtensionData<Directives, Fields> {
   /// Adds directives only.
   Directives(Directives),
@@ -2017,7 +2017,7 @@ impl<Directives, Fields> InputObjectTypeExtensionData<Directives, Fields> {
 /// An input object type extension (`extend input Name …`).
 ///
 /// See the [GraphQL Input Object Type Extension specification](https://spec.graphql.org/draft/#InputObjectTypeExtension).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct InputObjectTypeExtension<Name, Directives, Fields, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -2073,7 +2073,7 @@ impl<Name, Directives, Fields, Span> InputObjectTypeExtension<Name, Directives, 
 }
 
 /// The payload contributed by a schema extension.
-#[derive(Debug, Clone, Copy, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 pub enum SchemaExtensionData<Directives, RootOperations> {
   /// Adds directives only.
   Directives(Directives),
@@ -2112,7 +2112,7 @@ impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations>
 /// A schema extension (`extend schema …`).
 ///
 /// See the [GraphQL Schema Extension specification](https://spec.graphql.org/draft/#SchemaExtension).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct SchemaExtension<Directives, RootOperations, Span = SimpleSpan> {
   span: Span,
   data: SchemaExtensionData<Directives, RootOperations>,
@@ -2159,7 +2159,7 @@ impl<Directives, RootOperations, Span> SchemaExtension<Directives, RootOperation
 /// A scalar type extension (`extend scalar Name Directives`).
 ///
 /// See the [GraphQL Scalar Type Extension specification](https://spec.graphql.org/draft/#ScalarTypeExtension).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ScalarTypeExtension<Name, Directives, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -2203,7 +2203,7 @@ impl<Name, Directives, Span> ScalarTypeExtension<Name, Directives, Span> {
 }
 
 /// One of GraphQL's six named type extension shapes.
-#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum TypeExtension<
@@ -2337,7 +2337,7 @@ where
 }
 
 /// A type-system definition: named type, directive, or schema.
-#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition> {
@@ -2399,7 +2399,7 @@ impl<TypeDefinition, DirectiveDefinition, SchemaDefinition>
 }
 
 /// A type-system extension: named type or schema.
-#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum TypeSystemExtension<TypeExtension, SchemaExtension> {
@@ -2452,7 +2452,7 @@ impl<TypeExtension, SchemaExtension> TypeSystemExtension<TypeExtension, SchemaEx
 }
 
 /// Either a described type-system definition or a type-system extension.
-#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum TypeSystemDefinitionOrExtension<Definition, Extension> {

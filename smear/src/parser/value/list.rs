@@ -8,7 +8,7 @@ use tokora::{
 };
 
 /// A list value with its enclosing source span.
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct List<Value, Span = SimpleSpan, Container = Vec<Value>> {
   span: Span,
   values: Container,

@@ -16,7 +16,7 @@ macro_rules! ty {
     paste::paste! {
       $(
         $(#[$meta])*
-        #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
+        #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
         #[unwrap(ref, ref_mut)]
         #[try_unwrap(ref, ref_mut)]
         pub enum $name<Name> {

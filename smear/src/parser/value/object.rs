@@ -8,7 +8,7 @@ use tokora::{
 };
 
 /// A named field in an input object value.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct ObjectField<Name, Value, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -65,7 +65,7 @@ impl<Name, Value, Span> IntoComponents for ObjectField<Name, Value, Span> {
 }
 
 /// An input object value with its enclosing source span.
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Object<Name, Value, Span = SimpleSpan, Container = Vec<ObjectField<Name, Value, Span>>> {
   span: Span,
   fields: Container,

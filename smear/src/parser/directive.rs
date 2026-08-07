@@ -19,7 +19,7 @@ use tokora::{
 /// collections may be represented by `None` on this node.
 ///
 /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct Directive<Name, Args, Span = SimpleSpan> {
   span: Span,
   name: Name,
@@ -91,7 +91,7 @@ impl<Name, Args, Span> Directive<Name, Args, Span> {
 /// collection is empty with a zero-width span at the parser's starting offset.
 ///
 /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct Directives<Directive, Container = Vec<Directive>, Span = SimpleSpan> {
   span: Span,
   directives: Container,

@@ -63,7 +63,7 @@ pub type ConstObjectField<S> = crate::parser::value::ObjectField<Name<S>, ConstI
 pub type DefaultInputValue<S> = crate::parser::value::DefaultInputValue<ConstInputValue<S>>;
 
 /// GraphQL input value (executable context).
-#[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum InputValue<S> {
@@ -122,7 +122,7 @@ impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
 }
 
 /// GraphQL constant input value (schema context).
-#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {

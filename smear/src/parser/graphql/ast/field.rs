@@ -32,7 +32,7 @@ pub type SelectionSet<S> = crate::parser::selection::SelectionSet<Selection<S>>;
 /// A GraphQL selection.
 ///
 /// A selection is a field, a named fragment spread, or an inline fragment.
-#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]

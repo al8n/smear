@@ -205,7 +205,7 @@ pub type SchemaDefinition<S> =
 pub type DescribedSchemaDefinition<S> = Described<SchemaDefinition<S>, S>;
 
 /// A GraphQL type definition — one of the six named type-system shapes.
-#[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, Unwrap, IsVariant, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum TypeDefinition<S, Ty = Type<Name<S>>> {
