@@ -273,10 +273,50 @@ jobs:
           --exclude-features rowan,lossless-coverage,validator,introspection,default \
           --exclude-no-default-features --exclude-all-features
 
-  # Run tests on some extra platforms
+  # ── WHAT CROSS-COMPILES, AND FOR WHOM ───────────────────────────────────────────────────────
+  #
+  # Fifteen targets, one question: does the crate a consumer installs build for them. That is
+  # `smear` and only `smear` — it is the sole publishable member, which is a property of the
+  # manifests rather than an opinion, and the step below re-reads it out of `cargo metadata` so
+  # the list cannot go stale in silence. The other four are `publish = false`: two criterion
+  # harnesses — one of which also carries the `apollo-compiler` differential oracle — and two
+  # tripwires, none of which any target here will ever run.
+  #
+  # This job said `cargo build --target ...` with no package selection until it was fixed, so it
+  # built all five, and one of them cannot be built for a 32-bit target at all:
+  # `smear-apollo-bench` pins `apollo-compiler =1.32.0`, whose lib carries
+  # `assert!(size_of::<Name>() == 24)`. At 32 bits that is false, it is a const assertion so it
+  # fires during compilation, and `cross (i686-linux-android)` failed on `main` with
+  # `evaluation of name::_ failed here`. Nothing a consumer of `smear` can reach was involved:
+  # the gate was red about a benchmark harness's oracle, on Android, and it blocked merges.
+  #
+  # `-p smear` NAMES THE PACKAGE, and that is the load-bearing half — the same rule `noatomic`
+  # below, `publish-dry-run` and `byte-identity` are written around. A selection that goes quiet
+  # when it stops matching leaves a green tick over no coverage, and cargo has both kinds:
+  # measured on 1.97.1, `-p smearr` is `error: package ID specification did not match any
+  # packages`, exit 101, while `--exclude nonexistent` merely warns and exits 0 and an unmet
+  # `required-features` skips the target in silence. Fifteen cells is fifteen chances for the
+  # quiet kind to hide a rename, so the loud one is the only acceptable spelling here.
+  #
+  # `--all-features` IS NOT A WIDENING, it is what this job already compiled. Cargo unifies
+  # features across the selected packages, `smear-smoke` names all fourteen of `smear`'s declared
+  # features, so the workspace-wide build resolved `smear` with every one of them on. Dropping to
+  # default features would have quietly stopped cross-compiling `rowan`, `validator`,
+  # `introspection` and the rest while looking like a fix. This is a narrowing of PACKAGES and of
+  # nothing else.
+  #
+  # `fail-fast: false` because the matrix is fifteen independent questions. With the default, the
+  # i686 failure above took its siblings down with it — one failure and fourteen `cancelled` on
+  # `main` at 9bb4909 (run 31176675870), ten cancelled and four survivors on the pull request
+  # underneath it — so the only thing anyone knew was that one cell was red, about a matrix that
+  # had never been evaluated. Note that `gh pr checks` renders `cancelled` and `failure`
+  # identically as `fail`, which is what makes this look like a broad breakage rather than one
+  # cell and a stampede. A target that genuinely cannot be supported belongs out of the list with
+  # a reason on it, not left red cancelling the rest.
   cross:
     name: cross
     strategy:
+      fail-fast: false
       matrix:
         target:
           - aarch64-unknown-linux-gnu
@@ -310,19 +350,36 @@ jobs:
             ${{ runner.os }}-cross-
       - name: Install Rust
         run: rustup update stable && rustup default stable
-      - name: cargo build --target ${{ matrix.target }}
+      # The premise of the `-p smear` below, asserted rather than commented. A literal package
+      # list is only as good as the claim that it is the whole shipping surface, and that claim
+      # is exactly the kind that goes stale without a symptom: a second publishable member would
+      # simply never be cross-compiled, under fifteen green ticks. Keyed on the same `publish`
+      # field the `docs` job reads — cargo reports `[]` for `publish = false` and null otherwise.
+      - name: smear is still the only publishable member
+        run: |
+          PUBLISHABLE="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(",".join(sorted(p["name"] for p in json.load(sys.stdin)["packages"] if p.get("publish") != [])))')"
+          echo "publishable members: $PUBLISHABLE"
+          if [ "$PUBLISHABLE" != "smear" ]; then
+            echo "::error::this matrix cross-compiles '-p smear', but the publishable members are now: $PUBLISHABLE"
+            echo "::error::add the new one to the build below, or mark it publish = false if it does not ship"
+            exit 1
+          fi
+      - name: cargo build -p smear --all-features --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build --target ${{ matrix.target }}
+          cargo build -p smear --all-features --target ${{ matrix.target }}
 
   # The validator's schema representation, on a core with no compare-and-swap.
   #
-  # NOT a cell of the `cross` matrix above, and it cannot become one: that job builds the whole
-  # workspace, and `smear` does not build for `thumbv6m-none-eabi` — its syntactic AST offers an
-  # `Arc`-backed spelling of recursive list types, which needs `alloc::sync`. The claim under test
-  # is narrower and is the one the design rests on: `Schema` holds no `Arc`, no atomics and no
-  # interior mutability and depends on nothing but `core` and `alloc`, so an embedded core can
-  # hold one and the caller picks the pointer.
+  # NOT a cell of the `cross` matrix above, and it cannot become one: that job builds `smear`, and
+  # `smear` does not build for `thumbv6m-none-eabi` — its syntactic AST offers an `Arc`-backed
+  # spelling of recursive list types, which needs `alloc::sync`. A cell there would be permanently
+  # red. What separates this job from that matrix is the PACKAGE and not only the target, which is
+  # why narrowing `cross` to `-p smear` — it used to name no package and build every member —
+  # changed nothing here. The claim under test is narrower and is the one the design rests on:
+  # `Schema` holds no `Arc`, no atomics and no interior mutability and depends on nothing but
+  # `core` and `alloc`, so an embedded core can hold one and the caller picks the pointer.
   #
   # `-p smear-noatomic` names the package rather than filtering, so a rename is a hard error here
   # instead of a warn-and-exit-0. That member `#[path]`-includes `smear`'s own representation
