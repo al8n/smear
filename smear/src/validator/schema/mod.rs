@@ -36,6 +36,15 @@
 
 pub mod builtin;
 
+// Deliberately no outer doc comment. The module carries its own `//!` header, and rustdoc
+// resolves the *merged* fragments of a module's documentation in the scope of whichever attribute
+// came from outside — so an outer comment here would silently reinterpret every `super::` link in
+// `introspection/mod.rs` as one rooted in `validator`, and they would all stop resolving under
+// `RUSTDOCFLAGS="-D warnings"`. `validator/mod.rs`'s header records the same trap one level up.
+#[cfg(feature = "introspection")]
+#[cfg_attr(docsrs, doc(cfg(feature = "introspection")))]
+pub mod introspection;
+
 mod builder;
 mod error;
 mod repr;
@@ -45,6 +54,10 @@ mod repr;
 /// Crate-private on purpose: it is a seam between two callers inside this crate, not a promise to
 /// anyone outside it, and `repr` — the part of this module that *is* published — stays free of it.
 pub(crate) mod literal;
+
+#[cfg(feature = "introspection")]
+#[cfg_attr(docsrs, doc(cfg(feature = "introspection")))]
+pub use introspection::IntrospectionError;
 
 pub use builder::SchemaBuilder;
 pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};
