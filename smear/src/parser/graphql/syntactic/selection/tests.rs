@@ -168,6 +168,19 @@ fn field_accepts_arguments_and_directives() {
 }
 
 #[test]
+fn field_accepts_empty_parens_without_storing_arguments() {
+  // The lenient `()` spelling (see `arguments_accepts_empty_parens`) leaves `arguments`
+  // `None` on the field and still closes the field's span on the `)`. It is the one shape
+  // where a list absent from the node is nevertheless part of that node's extent, so the
+  // two facts have to be pinned together.
+  fn check<S: AsRef<[u8]>>(f: Field<S>) {
+    assert!(f.arguments().is_none());
+    assert_eq!(*f.span(), SimpleSpan::new(0, 3));
+  }
+  accept_all!(field, "f()", check);
+}
+
+#[test]
 fn field_accepts_nested_selection_set() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
     let ss = f.selection_set().expect("selection set");
