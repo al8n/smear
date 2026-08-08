@@ -986,6 +986,39 @@ fn a_mismatched_source_refuses() {
 }
 
 #[test]
+fn a_divergence_in_bytes_no_constructor_reads_refuses() {
+  // The half of the threat model a per-token comparison could not see, and the reason the check
+  // is made once against the whole tree instead. In both pairs below every token whose text a
+  // constructor reads — `type`, `T`, `f`, `Int` — is byte-identical and correctly positioned;
+  // what moved is a brace or a space. Neither was ever handed to a constructor, so neither was
+  // ever compared, and the pair projected into an AST whose spans pointed at bytes this tree
+  // never tokenised.
+  let src = "type T { f: Int }";
+  let parse = parse_document(src);
+
+  for (what, other, at) in [
+    ("punctuation", "type T ( f: Int )", 7..8),
+    ("trivia", "type T {\nf: Int }", 8..9),
+  ] {
+    assert_eq!(
+      src.len(),
+      other.len(),
+      "{what}: same length, so nothing here is caught by a bounds check"
+    );
+    let refusal = match project(&parse, other) {
+      Ok(_) => panic!("{what}: a pair that diverges only here still must not project"),
+      Err(refusal) => refusal,
+    };
+    assert_eq!(refusal.kind(), &ProjectErrorKind::SourceMismatch, "{what}");
+    assert_eq!(
+      refusal.span(),
+      &at,
+      "{what}: the refusal names the first bytes that diverge"
+    );
+  }
+}
+
+#[test]
 fn a_missing_constituent_refuses() {
   // No corpus entry reaches this: every shape the recovery produces either keeps the constituent
   // or leaves an `Error` hole, which is refused earlier. So the witness is synthetic — a field
