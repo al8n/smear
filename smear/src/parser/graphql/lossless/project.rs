@@ -21,9 +21,11 @@
 //!
 //! # Why `source` is a parameter, and why the pair is checked
 //!
-//! The AST is keyed by `S = &'src str` — the syntactic parser has the same property — and
-//! rowan's cursor API cannot lend a `&str` that outlives the transient [`SyntaxToken`] it came
-//! from, so the slices cannot be borrowed from the green tree. The caller who wants "the AST
+//! The AST is keyed by `S = &'src str` — the syntactic parser has the same property — and the
+//! bytes it borrows are the **caller's**, not the tree's. A green token does carry its own text
+//! and could lend it, but that text belongs to the parse: an AST borrowing it could not outlive
+//! the [`Parse`] it came from, and `Parse` is deliberately lifetime-free precisely so an editor
+//! can cache one per file and drop it on the next keystroke. The caller who wants "the AST
 //! without re-parsing" is holding the source by construction, so it is an argument.
 //!
 //! It is **verified, not trusted**: each door compares the whole of the tree's text against
@@ -48,14 +50,24 @@
 //! before any walk, because a hole is a region with no AST image and skipping it would be data
 //! loss wearing a success type.
 //!
-//! # Spans
+//! # What is walked, and how a span is folded
 //!
-//! Every span is the **token extent** of the constituents it covers — never
-//! [`SyntaxNode::text_range`], which includes committed trivia. See
-//! [`crate::parser::lossless::project`] for that rule and the measurement behind it.
+//! Every function below takes a [`Node`](crate::parser::lossless::project::Node) — a green node
+//! plus where it starts — and never a rowan cursor. See
+//! [the substrate](crate::parser::lossless::project#what-a-projection-walks-the-green-tree-not-a-cursor)
+//! for why: a cursor's parent pointer is what the caller's own frame already is, and its offset
+//! is what [`Node::children`](crate::parser::lossless::project::Node::children) accumulates, so
+//! the allocation per element it costs buys nothing here. The two whole-tree checks a door makes
+//! were already green; now the walk between them is too, and a fail-fast projection allocates for
+//! the AST it builds and for nothing else.
 //!
-//! It is folded **bottom-up, once**. Each node function below walks its own
-//! `children_with_tokens()` a single time: it covers the ranges of its non-trivia tokens,
+//! Every span is the **token extent** of the constituents it covers — never the node's own
+//! range, which includes committed trivia. See [`crate::parser::lossless::project`] for that
+//! rule and the measurement behind it.
+//!
+//! It is folded **bottom-up, once**. Each node function walks its own
+//! [`children`](crate::parser::lossless::project::Node::children) a single time: it covers the
+//! ranges of its non-trivia tokens,
 //! dispatches its child nodes into slots by kind, and covers the extent each projected child
 //! hands back beside its AST value — which is why so many of them answer
 //! `(value, TextRange)`. Nothing re-descends a subtree an ancestor has already walked. A child
@@ -79,7 +91,7 @@
 
 use std::{boxed::Box, vec::Vec};
 
-use rowan::{NodeOrToken, TextRange};
+use rowan::{NodeOrToken, TextRange, TextSize};
 use tokora::SimpleSpan;
 
 use crate::{
@@ -109,7 +121,7 @@ use crate::{
         VariableDefinition, VariableValue, VariablesDefinition,
       },
       kinds::{GraphQLLang, SyntaxKind},
-      lossless::{Parse, SyntaxNode, SyntaxToken},
+      lossless::Parse,
       syntactic::definition::classify_location,
     },
     lossless::project::{
@@ -137,6 +149,16 @@ pub type ProjectError = crate::parser::lossless::project::ProjectError<SyntaxKin
 /// Why the GraphQL projection refused, keyed by this dialect's [`SyntaxKind`].
 pub type ProjectErrorKind = crate::parser::lossless::project::ProjectErrorKind<SyntaxKind>;
 
+/// A green node and where it starts, in this dialect's kind space.
+///
+/// The unit every function below walks. See
+/// [the substrate](crate::parser::lossless::project#what-a-projection-walks-the-green-tree-not-a-cursor)
+/// for why the traversal is green and what a cursor would have cost.
+type Node<'g> = crate::parser::lossless::project::Node<'g, GraphQLLang>;
+
+/// [`Node`]'s other half.
+type Token<'g> = crate::parser::lossless::project::Token<'g, GraphQLLang>;
+
 type Out<T> = Result<T, ProjectError>;
 
 /// Project a lossless parse to the AST the syntactic parser produces for `source`.
@@ -148,21 +170,10 @@ type Out<T> = Result<T, ProjectError>;
 /// [`has_errors`](Parse::has_errors) first, pass the same text the tree was parsed from, and
 /// expect a refusal rather than a guess when the tree carries a hole.
 pub fn project<'src>(parse: &Parse, source: &'src str) -> Out<Document<&'src str>> {
-  let root = parse.syntax();
-  open(&root, source)?;
-  let node = root
-    .children()
-    .find(|child| child.kind() == K::Document)
-    .ok_or_else(|| {
-      ProjectError::new(
-        ProjectErrorKind::MissingChild {
-          parent: root.kind(),
-          wanted: "a document",
-        },
-        to_range(root.text_range()),
-      )
-    })?;
-  document(&node, source)
+  let root = parse_root(parse);
+  open(root, source)?;
+  let node = child_node(root, K::Document).ok_or_else(|| missing(root, "a document"))?;
+  document(node, source)
 }
 
 impl super::ast::Document {
@@ -173,7 +184,7 @@ impl super::ast::Document {
   /// subtree still refuses when the walk reaches it, but a hole elsewhere in the parse is not
   /// this node's business.
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<Document<&'src str>> {
-    let node = self.syntax();
+    let node = Node::of(self.syntax());
     open_node(node, source)?;
     document(node, source)
   }
@@ -209,18 +220,10 @@ pub fn project_executable_document<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> Out<ExecutableDocument<&'src str>> {
-  let root = parse.syntax();
-  open(&root, source)?;
-  let node = executable_root(&root).ok_or_else(|| {
-    ProjectError::new(
-      ProjectErrorKind::MissingChild {
-        parent: root.kind(),
-        wanted: "an executable document",
-      },
-      to_range(root.text_range()),
-    )
-  })?;
-  executable_document(&node, source)
+  let root = parse_root(parse);
+  open(root, source)?;
+  let node = executable_root(root).ok_or_else(|| missing(root, "an executable document"))?;
+  executable_document(node, source)
 }
 
 /// Project every definition of a lossless **executable** parse that has an AST image, and count
@@ -278,7 +281,7 @@ impl super::ast::ExecutableDocument {
   /// [`Document::to_ast`](super::ast::Document::to_ast)'s twin: like it, and unlike the free
   /// function, it does **not** scan the whole parse for recovery holes up front.
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<ExecutableDocument<&'src str>> {
-    let node = self.syntax();
+    let node = Node::of(self.syntax());
     open_node(node, source)?;
     executable_document(node, source)
   }
@@ -319,18 +322,10 @@ pub fn project_type_system_document<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> Out<TypeSystemDocument<&'src str>> {
-  let root = parse.syntax();
-  open(&root, source)?;
-  let node = type_system_root(&root).ok_or_else(|| {
-    ProjectError::new(
-      ProjectErrorKind::MissingChild {
-        parent: root.kind(),
-        wanted: "a type system document",
-      },
-      to_range(root.text_range()),
-    )
-  })?;
-  type_system_document(&node, source)
+  let root = parse_root(parse);
+  open(root, source)?;
+  let node = type_system_root(root).ok_or_else(|| missing(root, "a type system document"))?;
+  type_system_document(node, source)
 }
 
 /// Project every definition of a lossless **type-system** parse that has an AST image, and count
@@ -386,7 +381,7 @@ impl super::ast::TypeSystemDocument {
   /// [`ExecutableDocument::to_ast`](super::ast::ExecutableDocument::to_ast)'s twin: like it, and
   /// unlike the free function, it does **not** scan the whole parse for recovery holes up front.
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<TypeSystemDocument<&'src str>> {
-    let node = self.syntax();
+    let node = Node::of(self.syntax());
     open_node(node, source)?;
     type_system_document(node, source)
   }
@@ -404,12 +399,12 @@ impl super::ast::TypeSystemDocument {
 /// Answers the surviving definitions, their span, and the tally.
 fn recovered_top_level<'src, T>(
   parse: &Parse,
-  root_of: fn(&SyntaxNode) -> Option<SyntaxNode>,
-  entry_of: fn(&SyntaxNode, &'src str) -> Out<(T, TextRange)>,
+  root_of: fn(Node<'_>) -> Option<Node<'_>>,
+  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
   source: &'src str,
 ) -> (SimpleSpan, Vec<T>, Recovery) {
-  let root = parse.syntax();
-  let container = root_of(&root).unwrap_or(root);
+  let root = parse_root(parse);
+  let container = root_of(root).unwrap_or(root);
 
   let mut definitions = Vec::new();
   let mut skipped = 0u32;
@@ -417,13 +412,13 @@ fn recovered_top_level<'src, T>(
   // not of the bytes that were dropped: an AST span is an extent of the tokens its node covers,
   // and a skipped region is not one of them.
   let mut extent = Extent::default();
-  for element in container.children_with_tokens() {
+  for element in container.children() {
     match element {
       // Rubble the parser could not attach to a definition. Counted per token rather than per
       // run: a bound on what was lost, which is what `Recovery::skipped` promises.
       NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
       NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => match entry_of(&child, source) {
+      NodeOrToken::Node(child) => match entry_of(child, source) {
         Ok((entry, piece)) => {
           extent.cover(piece);
           definitions.push(entry);
@@ -447,17 +442,13 @@ fn recovered_top_level<'src, T>(
 }
 
 /// The [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node under a parse's root.
-fn executable_root(root: &SyntaxNode) -> Option<SyntaxNode> {
-  root
-    .children()
-    .find(|child| child.kind() == K::ExecutableDocument)
+fn executable_root(root: Node<'_>) -> Option<Node<'_>> {
+  child_node(root, K::ExecutableDocument)
 }
 
 /// The [`TypeSystemDocument`](SyntaxKind::TypeSystemDocument) node under a parse's root.
-fn type_system_root(root: &SyntaxNode) -> Option<SyntaxNode> {
-  root
-    .children()
-    .find(|child| child.kind() == K::TypeSystemDocument)
+fn type_system_root(root: Node<'_>) -> Option<Node<'_>> {
+  child_node(root, K::TypeSystemDocument)
 }
 
 /// One top-level definition, with the holes in **its own** subtree refused.
@@ -473,7 +464,7 @@ fn type_system_root(root: &SyntaxNode) -> Option<SyntaxNode> {
 /// has to fail *as that definition* to be counted as skipped rather than silently projected. The
 /// scope is the same one the hole scan uses, which keeps the two refusals attributed alike.
 fn recoverable_entry<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(DescribedExecutableDefinition<&'src str>, TextRange)> {
   open_node(node, source)?;
@@ -483,7 +474,7 @@ fn recoverable_entry<'src>(
 
 /// [`recoverable_entry`]'s twin at the SDL root, scoped for the same reason.
 fn recoverable_type_system_entry<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(TypeSystemDefinitionOrExtension<&'src str>, TextRange)> {
   open_node(node, source)?;
@@ -502,7 +493,7 @@ fn recoverable_type_system_entry<'src>(
 /// and not a single cursor allocation. The pair is checked first because nothing else the door
 /// could report means anything if the tree is not this text's: a hole's range, a missing
 /// constituent's span and every slice below are all statements about `source`.
-fn open(root: &SyntaxNode, source: &str) -> Out<()> {
+fn open(root: Node<'_>, source: &str) -> Out<()> {
   verify_source(root.green(), source)?;
   scan_holes(root)
 }
@@ -512,8 +503,8 @@ fn open(root: &SyntaxNode, source: &str) -> Out<()> {
 /// The compositional doors' check, and the recovering door's per-definition one. No hole scan —
 /// [`Document::to_ast`](super::ast::Document::to_ast) and its twins deliberately do not make one,
 /// and the recovering door makes its own so it can charge the hole to a definition.
-fn open_node(node: &SyntaxNode, source: &str) -> Out<()> {
-  verify_source_at(node.green(), source, usize::from(node.text_range().start()))
+fn open_node(node: Node<'_>, source: &str) -> Out<()> {
+  verify_source_at(node.green(), source, usize::from(node.start()))
 }
 
 /// Refuse a tree that carries any recovery hole or gap tile.
@@ -521,16 +512,31 @@ fn open_node(node: &SyntaxNode, source: &str) -> Out<()> {
 /// Scanned over the whole subtree rather than per walked node, so the answer does not depend on
 /// which nodes a particular walk happens to descend into: a hole anywhere is a region of the
 /// document with no AST image, and a projection that silently omitted it would be losing data
-/// under a success type.
-fn scan_holes(node: &SyntaxNode) -> Out<()> {
-  reject_holes::<GraphQLLang>(
-    node.green(),
-    usize::from(node.text_range().start()),
-    |kind| matches!(kind, K::Error | K::Gap),
-  )
+/// under a success type. At a fail-fast door the subtree is the **root's**, which is what reaches
+/// a hole the parser left beside the document node rather than inside it — see
+/// [`reject_holes`].
+fn scan_holes(node: Node<'_>) -> Out<()> {
+  // `Gap` is a **token** kind, so `reject_holes` — which tests node kinds — can never match it and
+  // the arm is dead as written. It stays because what it names is the refusal's scope rather than
+  // a live branch: were the parser ever to tile a gap as a node, dropping the arm is what would
+  // let it through, and nothing else records that a gap has no AST image.
+  reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
 }
 
-fn missing(parent: &SyntaxNode, wanted: &'static str) -> ProjectError {
+/// A parse's green root, as the walk's first node.
+fn parse_root(parse: &Parse) -> Node<'_> {
+  Node::new(parse.green(), TextSize::new(0))
+}
+
+/// The first direct child of `parent` whose kind is `kind`.
+fn child_node(parent: Node<'_>, kind: SyntaxKind) -> Option<Node<'_>> {
+  parent.children().find_map(|child| match child {
+    NodeOrToken::Node(child) if child.kind() == kind => Some(child),
+    _ => None,
+  })
+}
+
+fn missing(parent: Node<'_>, wanted: &'static str) -> ProjectError {
   ProjectError::new(
     ProjectErrorKind::MissingChild {
       parent: parent.kind(),
@@ -540,7 +546,7 @@ fn missing(parent: &SyntaxNode, wanted: &'static str) -> ProjectError {
   )
 }
 
-fn unexpected(parent: &SyntaxNode, found: SyntaxKind, at: TextRange) -> ProjectError {
+fn unexpected(parent: Node<'_>, found: SyntaxKind, at: TextRange) -> ProjectError {
   ProjectError::new(
     ProjectErrorKind::UnexpectedChild {
       parent: parent.kind(),
@@ -550,7 +556,7 @@ fn unexpected(parent: &SyntaxNode, found: SyntaxKind, at: TextRange) -> ProjectE
   )
 }
 
-fn unexpected_node(parent: &SyntaxNode, found: &SyntaxNode) -> ProjectError {
+fn unexpected_node(parent: Node<'_>, found: Node<'_>) -> ProjectError {
   unexpected(parent, found.kind(), found.text_range())
 }
 
@@ -591,7 +597,7 @@ impl Extent {
 
   /// Widen to include `token`, unless it is trivia.
   #[inline]
-  fn token(&mut self, token: &SyntaxToken) {
+  fn token(&mut self, token: Token<'_>) {
     if !is_trivia(token.kind()) {
       self.cover(token.text_range());
     }
@@ -602,7 +608,7 @@ impl Extent {
   /// The one place a subtree is still descended: an element with no AST image is not part of the
   /// AST, but its bytes are part of the parent's, and nothing else has walked it.
   #[inline]
-  fn unread(&mut self, child: &SyntaxNode) {
+  fn unread(&mut self, child: Node<'_>) {
     if let Some(piece) = node_extent(child, is_trivia) {
       self.cover(piece);
     }
@@ -631,12 +637,12 @@ impl Extent {
   }
 
   #[inline]
-  fn range(self, node: &SyntaxNode, wanted: &'static str) -> Out<TextRange> {
+  fn range(self, node: Node<'_>, wanted: &'static str) -> Out<TextRange> {
     self.0.ok_or_else(|| missing(node, wanted))
   }
 
   #[inline]
-  fn span(self, node: &SyntaxNode, wanted: &'static str) -> Out<SimpleSpan> {
+  fn span(self, node: Node<'_>, wanted: &'static str) -> Out<SimpleSpan> {
     self.range(node, wanted).map(to_span)
   }
 }
@@ -648,7 +654,7 @@ impl Extent {
 /// definition's is `inner`, which is where the hoist shows up as a number — see the module
 /// header, and note the three node types that give both the same span instead.
 fn described_extents(
-  node: &SyntaxNode,
+  node: Node<'_>,
   inner: Extent,
   described: Option<TextRange>,
 ) -> Out<(TextRange, TextRange)> {
@@ -673,27 +679,27 @@ fn described_extents(
 /// child node belongs to that child, and this is filled from the parent's own walk, so a
 /// descendant can never reach it.
 #[derive(Debug, Default)]
-struct Names([Option<SyntaxToken>; 3]);
+struct Names<'g>([Option<Token<'g>>; 3]);
 
-impl Names {
+impl<'g> Names<'g> {
   /// Record `token` if any of the three slots is still free.
   ///
   /// A fourth name is dropped rather than stored: no production reads one, and the extent it
   /// belongs to was covered when the walk passed it.
   #[inline]
-  fn push(&mut self, token: SyntaxToken) {
+  fn push(&mut self, token: Token<'g>) {
     if let Some(slot) = self.0.iter_mut().find(|slot| slot.is_none()) {
       *slot = Some(token);
     }
   }
 
   #[inline]
-  fn get(&self, index: usize) -> Option<&SyntaxToken> {
-    self.0[index].as_ref()
+  fn get(&self, index: usize) -> Option<Token<'g>> {
+    self.0[index]
   }
 
   #[inline]
-  fn at(&self, index: usize, node: &SyntaxNode, wanted: &'static str) -> Out<&SyntaxToken> {
+  fn at(&self, index: usize, node: Node<'_>, wanted: &'static str) -> Out<Token<'g>> {
     self.get(index).ok_or_else(|| missing(node, wanted))
   }
 }
@@ -705,14 +711,14 @@ impl Names {
 /// refusal below is that invariant's receipt rather than a second check — see
 /// [`verify_source`](crate::parser::lossless::project::verify_source).
 #[inline]
-fn slice<'src>(source: &'src str, token: &SyntaxToken) -> Out<&'src str> {
+fn slice<'src>(source: &'src str, token: Token<'_>) -> Out<&'src str> {
   let range = token.text_range();
   source
     .get(usize::from(range.start())..usize::from(range.end()))
     .ok_or_else(|| ProjectError::new(ProjectErrorKind::SourceMismatch, to_range(range)))
 }
 
-fn name<'src>(source: &'src str, token: &SyntaxToken) -> Out<Name<&'src str>> {
+fn name<'src>(source: &'src str, token: Token<'_>) -> Out<Name<&'src str>> {
   Ok(Name::new(
     to_span(token.text_range()),
     slice(source, token)?,
@@ -723,18 +729,18 @@ fn name<'src>(source: &'src str, token: &SyntaxToken) -> Out<Name<&'src str>> {
 ///
 /// Answers the name and the node's extent, which for these three is the name token's own range
 /// unless the tree put something else under them.
-fn inner_name<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Name<&'src str>, TextRange)> {
+fn inner_name<'src>(node: Node<'_>, source: &'src str) -> Out<(Name<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
-      NodeOrToken::Node(child) => extent.unread(&child),
+      NodeOrToken::Node(child) => extent.unread(child),
     }
   }
   let token = names.at(0, node, "a name")?;
@@ -742,7 +748,7 @@ fn inner_name<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Name<&'src str
 }
 
 /// The keyword a `Name` token spells, classified through the lexer's own table.
-fn keyword_of(token: &SyntaxToken) -> Option<ContextualKeyword> {
+fn keyword_of(token: Token<'_>) -> Option<ContextualKeyword> {
   contextual_keyword(token.text().as_bytes())
 }
 
@@ -750,10 +756,10 @@ fn keyword_of(token: &SyntaxToken) -> Option<ContextualKeyword> {
 // document
 // ---------------------------------------------------------------------------------------------
 
-fn document<'src>(node: &SyntaxNode, source: &'src str) -> Out<Document<&'src str>> {
+fn document<'src>(node: Node<'_>, source: &'src str) -> Out<Document<&'src str>> {
   let mut extent = Extent::default();
   let mut definitions = Vec::new();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       // Rubble: the lost-node recovery class drops a failed definition's bytes straight under
       // the document, where the AST has no place for them.
@@ -762,7 +768,7 @@ fn document<'src>(node: &SyntaxNode, source: &'src str) -> Out<Document<&'src st
       }
       NodeOrToken::Token(_) => {}
       NodeOrToken::Node(child) => {
-        let (entry, piece) = document_entry(&child, source)?;
+        let (entry, piece) = document_entry(child, source)?;
         extent.cover(piece);
         definitions.push(entry);
       }
@@ -772,7 +778,7 @@ fn document<'src>(node: &SyntaxNode, source: &'src str) -> Out<Document<&'src st
 }
 
 fn document_entry<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(DefinitionOrExtension<&'src str>, TextRange)> {
   if let Some((extension, extent)) = type_system_extension(node, source)? {
@@ -787,12 +793,12 @@ fn document_entry<'src>(
 
 /// [`document`]'s SDL-only twin, over the `TypeSystemDefinitionOrExtension+` root.
 fn type_system_document<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<TypeSystemDocument<&'src str>> {
   let mut extent = Extent::default();
   let mut definitions = Vec::new();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       // Rubble, exactly as at the mixed root and for the same reason.
       NodeOrToken::Token(token) if !is_trivia(token.kind()) => {
@@ -800,7 +806,7 @@ fn type_system_document<'src>(
       }
       NodeOrToken::Token(_) => {}
       NodeOrToken::Node(child) => {
-        let (entry, piece) = type_system_entry(&child, source)?;
+        let (entry, piece) = type_system_entry(child, source)?;
         extent.cover(piece);
         definitions.push(entry);
       }
@@ -820,7 +826,7 @@ fn type_system_document<'src>(
 /// parser's own position rather than shaping it, so reaching this arm means the tree is not the
 /// one this door was handed.
 fn type_system_entry<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(TypeSystemDefinitionOrExtension<&'src str>, TextRange)> {
   if let Some((extension, extent)) = type_system_extension(node, source)? {
@@ -842,12 +848,12 @@ fn type_system_entry<'src>(
 
 /// [`document`]'s executable-only twin, over the `ExecutableDefinition+` root.
 fn executable_document<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<ExecutableDocument<&'src str>> {
   let mut extent = Extent::default();
   let mut definitions = Vec::new();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       // Rubble, exactly as at the mixed root and for the same reason.
       NodeOrToken::Token(token) if !is_trivia(token.kind()) => {
@@ -855,7 +861,7 @@ fn executable_document<'src>(
       }
       NodeOrToken::Token(_) => {}
       NodeOrToken::Node(child) => {
-        let (entry, piece) = executable_entry(&child, source)?;
+        let (entry, piece) = executable_entry(child, source)?;
         extent.cover(piece);
         definitions.push(entry);
       }
@@ -875,7 +881,7 @@ fn executable_document<'src>(
 /// A standard executable definition carries no description at all, so on standard input the two
 /// spans coincide and the hoist is the dialect-compatibility path only.
 fn executable_entry<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(DescribedExecutableDefinition<&'src str>, TextRange)> {
   let (description, definition, outer) = executable_definition(node, source)?;
@@ -893,7 +899,7 @@ fn executable_entry<'src>(
 type Definition<'src, T> = (Option<StringValue<&'src str>>, T, TextRange);
 
 fn executable_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ExecutableDefinition<&'src str>>> {
   Ok(match node.kind() {
@@ -914,7 +920,7 @@ fn executable_definition<'src>(
 }
 
 fn definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, crate::parser::graphql::ast::Definition<&'src str>>> {
   use crate::parser::graphql::ast::Definition as D;
@@ -949,7 +955,7 @@ fn definition<'src>(
 
 /// The nine type-system definition kinds, shared by the mixed root and the SDL-only one.
 fn type_system_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, TypeSystemDefinition<&'src str>>> {
   Ok(match node.kind() {
@@ -1023,7 +1029,7 @@ fn type_system_definition<'src>(
 /// before the hoist rather than inside it, and its extent is the node's own with nothing lifted
 /// out of it.
 fn type_system_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Option<(TypeSystemExtension<&'src str>, TextRange)>> {
   Ok(Some(match node.kind() {
@@ -1087,40 +1093,37 @@ fn type_system_extension<'src>(
 /// its own — it is hoisted into a [`Described`] wrapper — so what the parent needs back is where
 /// the description sat, which is the difference between the wrapper's span and the definition's.
 fn description<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(StringValue<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut literal = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if literal.is_none() && matches!(token.kind(), K::String | K::BlockString) {
           literal = Some(token);
         }
       }
-      NodeOrToken::Node(child) => extent.unread(&child),
+      NodeOrToken::Node(child) => extent.unread(child),
     }
   }
   let token = literal.ok_or_else(|| missing(node, "a string token"))?;
-  Ok((
-    string_value(&token, source)?,
-    extent.range(node, "a token")?,
-  ))
+  Ok((string_value(token, source)?, extent.range(node, "a token")?))
 }
 
 /// Project the `Description` a node's walk collected, if it collected one.
 ///
 /// Answers the hoisted string and its extent side by side, because
 /// [`described_extents`] needs the second to tell the wrapper's span from the definition's.
-fn hoisted_description(
-  node: Option<SyntaxNode>,
-  source: &str,
-) -> Out<(Option<StringValue<&str>>, Option<TextRange>)> {
+fn hoisted_description<'src>(
+  node: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<(Option<StringValue<&'src str>>, Option<TextRange>)> {
   match node {
     Some(node) => {
-      let (value, extent) = description(&node, source)?;
+      let (value, extent) = description(node, source)?;
       Ok((Some(value), Some(extent)))
     }
     None => Ok((None, None)),
@@ -1133,7 +1136,7 @@ fn hoisted_description(
 /// the `required_capacity` a consumer allocates against are the lexer's answers rather than a
 /// second implementation of the escape rules. A refusal here means the two disagree about bytes
 /// the lossless lexer already accepted, which is a lexer finding, not a projection one.
-fn string_value<'src>(token: &SyntaxToken, source: &'src str) -> Out<StringValue<&'src str>> {
+fn string_value<'src>(token: Token<'_>, source: &'src str) -> Out<StringValue<&'src str>> {
   let slice = slice(source, token)?;
   let lit = LitStr::try_from(slice).map_err(|_| {
     ProjectError::new(
@@ -1149,7 +1152,7 @@ fn string_value<'src>(token: &SyntaxToken, source: &'src str) -> Out<StringValue
 // ---------------------------------------------------------------------------------------------
 
 fn operation_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, OperationDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -1159,10 +1162,10 @@ fn operation_definition<'src>(
   let mut variables_node = None;
   let mut directives_node = None;
   let mut selection_set_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -1173,14 +1176,14 @@ fn operation_definition<'src>(
         K::VariablesDefinition if variables_node.is_none() => variables_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
 
   let (description, described) = hoisted_description(description_node, source)?;
   let set = selection_set_node.ok_or_else(|| missing(node, "a selection set"))?;
-  let selections = extent.keep(selection_set(&set, source)?);
+  let selections = extent.keep(selection_set(set, source)?);
 
   let Some(keyword_node) = operation_type_node else {
     // Query shorthand: the definition *is* its selection set, and the AST's span for it is the
@@ -1188,7 +1191,7 @@ fn operation_definition<'src>(
     // shorthand operation no other constituent, but the node's extent is still the whole of what
     // the tree put under it, so anything else there is folded rather than dropped.
     for child in [variables_node, directives_node].into_iter().flatten() {
-      extent.unread(&child);
+      extent.unread(child);
     }
     let (outer, _) = described_extents(node, extent, described)?;
     return Ok((
@@ -1198,13 +1201,13 @@ fn operation_definition<'src>(
     ));
   };
 
-  let operation_type = extent.keep(operation_type(&keyword_node)?);
+  let operation_type = extent.keep(operation_type(keyword_node)?);
   let name = match names.get(0) {
     Some(token) => Some(name(source, token)?),
     None => None,
   };
   let variables = match variables_node {
-    Some(child) => Some(extent.keep(variables_definition(&child, source)?)),
+    Some(child) => Some(extent.keep(variables_definition(child, source)?)),
     None => None,
   };
   let directives = extent.keep_opt(optional_directives(directives_node, source)?);
@@ -1224,18 +1227,18 @@ fn operation_definition<'src>(
   ))
 }
 
-fn operation_type(node: &SyntaxNode) -> Out<(OperationType, TextRange)> {
+fn operation_type(node: Node<'_>) -> Out<(OperationType, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
-      NodeOrToken::Node(child) => extent.unread(&child),
+      NodeOrToken::Node(child) => extent.unread(child),
     }
   }
   let token = names.at(0, node, "an operation keyword")?;
@@ -1255,19 +1258,19 @@ fn operation_type(node: &SyntaxNode) -> Out<(OperationType, TextRange)> {
 }
 
 fn variables_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(VariablesDefinition<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut definitions = Vec::new();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::VariableDefinition => {
-          definitions.push(extent.keep(variable_definition(&child, source)?));
+          definitions.push(extent.keep(variable_definition(child, source)?));
         }
-        _ => return Err(unexpected_node(node, &child)),
+        _ => return Err(unexpected_node(node, child)),
       },
     }
   }
@@ -1279,7 +1282,7 @@ fn variables_definition<'src>(
 }
 
 fn variable_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(DescribedVariableDefinition<&'src str>, TextRange)> {
   let mut extent = Extent::default();
@@ -1288,23 +1291,23 @@ fn variable_definition<'src>(
   let mut type_node = None;
   let mut default_node = None;
   let mut directives_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::Description if description_node.is_none() => description_node = Some(child),
         K::Variable if variable_node.is_none() => variable_node = Some(child),
         kind if type_node.is_none() && TYPE_KINDS.contains(&kind) => type_node = Some(child),
         K::DefaultValue if default_node.is_none() => default_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
 
   let (description, described) = hoisted_description(description_node, source)?;
   let variable = variable_node.ok_or_else(|| missing(node, "a variable"))?;
-  let variable = extent.keep(variable_value(&variable, source)?);
+  let variable = extent.keep(variable_value(variable, source)?);
   let ty = extent.keep(require_type(node, type_node, source)?);
   let default_value = extent.keep_opt(optional_default_value(default_node, source)?);
   let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
@@ -1323,7 +1326,7 @@ fn variable_definition<'src>(
 }
 
 fn fragment_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, crate::parser::graphql::ast::FragmentDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -1332,10 +1335,10 @@ fn fragment_definition<'src>(
   let mut condition_node = None;
   let mut directives_node = None;
   let mut selection_set_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -1345,7 +1348,7 @@ fn fragment_definition<'src>(
         K::NamedType if condition_node.is_none() => condition_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -1356,7 +1359,7 @@ fn fragment_definition<'src>(
 
   let on_token = names.at(2, node, "an `on` keyword")?;
   let condition = condition_node.ok_or_else(|| missing(node, "a type condition"))?;
-  let condition_name = extent.keep(inner_name(&condition, source)?);
+  let condition_name = extent.keep(inner_name(condition, source)?);
   let type_condition = TypeCondition::new(
     SimpleSpan::new(
       usize::from(on_token.text_range().start()),
@@ -1367,7 +1370,7 @@ fn fragment_definition<'src>(
 
   let directives = extent.keep_opt(optional_directives(directives_node, source)?);
   let set = selection_set_node.ok_or_else(|| missing(node, "a selection set"))?;
-  let selections = extent.keep(selection_set(&set, source)?);
+  let selections = extent.keep(selection_set(set, source)?);
 
   let (outer, inner) = described_extents(node, extent, described)?;
   Ok((
@@ -1389,7 +1392,7 @@ fn fragment_definition<'src>(
 /// place that establishes `Name but not on`. This is the second custodian, and it exists because
 /// the lossless productions record the violation on the diagnostic channel and still build the
 /// node — so the shape alone cannot tell a legal fragment name from an illegal one.
-fn fragment_name<'src>(token: &SyntaxToken, source: &'src str) -> Out<FragmentName<&'src str>> {
+fn fragment_name<'src>(token: Token<'_>, source: &'src str) -> Out<FragmentName<&'src str>> {
   let slice = slice(source, token)?;
   if slice == "on" {
     return Err(ProjectError::new(
@@ -1407,23 +1410,23 @@ fn fragment_name<'src>(token: &SyntaxToken, source: &'src str) -> Out<FragmentNa
 // ---------------------------------------------------------------------------------------------
 
 fn selection_set<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(SelectionSet<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut selections = Vec::new();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => selections.push(match child.kind() {
-        K::Field => Selection::Field(extent.keep(field(&child, source)?)),
+        K::Field => Selection::Field(extent.keep(field(child, source)?)),
         K::FragmentSpread => {
-          Selection::FragmentSpread(extent.keep(fragment_spread(&child, source)?))
+          Selection::FragmentSpread(extent.keep(fragment_spread(child, source)?))
         }
         K::InlineFragment => {
-          Selection::InlineFragment(extent.keep(inline_fragment(&child, source)?))
+          Selection::InlineFragment(extent.keep(inline_fragment(child, source)?))
         }
-        _ => return Err(unexpected_node(node, &child)),
+        _ => return Err(unexpected_node(node, child)),
       }),
     }
   }
@@ -1431,17 +1434,17 @@ fn selection_set<'src>(
   Ok((SelectionSet::new(to_span(extent), selections), extent))
 }
 
-fn field<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Field<&'src str>, TextRange)> {
+fn field<'src>(node: Node<'_>, source: &'src str) -> Out<(Field<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut alias_node = None;
   let mut arguments_node = None;
   let mut directives_node = None;
   let mut selection_set_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -1451,7 +1454,7 @@ fn field<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Field<&'src str>, T
         K::Arguments if arguments_node.is_none() => arguments_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -1460,7 +1463,7 @@ fn field<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Field<&'src str>, T
     Some(child) => {
       // The alias node holds the `:`, and the AST's alias span holds it too — which the fold
       // gives for free, since the `:` is one of the node's own non-trivia tokens.
-      let (alias_name, piece) = inner_name(&child, source)?;
+      let (alias_name, piece) = inner_name(child, source)?;
       extent.cover(piece);
       Some(Alias::new(to_span(piece), alias_name))
     }
@@ -1471,7 +1474,7 @@ fn field<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Field<&'src str>, T
   let arguments = extent.keep_opt(optional_arguments(arguments_node, source)?);
   let directives = extent.keep_opt(optional_directives(directives_node, source)?);
   let selections = match selection_set_node {
-    Some(set) => Some(extent.keep(selection_set(&set, source)?)),
+    Some(set) => Some(extent.keep(selection_set(set, source)?)),
     None => None,
   };
   let extent = extent.range(node, "a token")?;
@@ -1489,23 +1492,23 @@ fn field<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Field<&'src str>, T
 }
 
 fn fragment_spread<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(FragmentSpread<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut directives_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
       NodeOrToken::Node(child) => match child.kind() {
         K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -1519,7 +1522,7 @@ fn fragment_spread<'src>(
 }
 
 fn inline_fragment<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(InlineFragment<&'src str>, TextRange)> {
   let mut extent = Extent::default();
@@ -1527,10 +1530,10 @@ fn inline_fragment<'src>(
   let mut condition_node = None;
   let mut directives_node = None;
   let mut selection_set_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -1539,7 +1542,7 @@ fn inline_fragment<'src>(
         K::NamedType if condition_node.is_none() => condition_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -1547,7 +1550,7 @@ fn inline_fragment<'src>(
   let type_condition = match condition_node {
     Some(child) => {
       let on_token = names.at(0, node, "an `on` keyword")?;
-      let condition_name = extent.keep(inner_name(&child, source)?);
+      let condition_name = extent.keep(inner_name(child, source)?);
       Some(TypeCondition::new(
         SimpleSpan::new(
           usize::from(on_token.text_range().start()),
@@ -1560,7 +1563,7 @@ fn inline_fragment<'src>(
   };
   let directives = extent.keep_opt(optional_directives(directives_node, source)?);
   let set = selection_set_node.ok_or_else(|| missing(node, "a selection set"))?;
-  let selections = extent.keep(selection_set(&set, source)?);
+  let selections = extent.keep(selection_set(set, source)?);
   let extent = extent.range(node, "a token")?;
   Ok((
     InlineFragment::new(to_span(extent), type_condition, directives, selections),
@@ -1578,19 +1581,19 @@ const TYPE_KINDS: [SyntaxKind; 3] = [K::NamedType, K::ListType, K::NonNullType];
 ///
 /// `child` is the slot the caller's own dispatch filled; `node` is only ever the refusal's owner.
 fn require_type<'src>(
-  node: &SyntaxNode,
-  child: Option<SyntaxNode>,
+  node: Node<'_>,
+  child: Option<Node<'_>>,
   source: &'src str,
 ) -> Out<(Type<Name<&'src str>>, TextRange)> {
   let child = child.ok_or_else(|| missing(node, "a type reference"))?;
-  ty(&child, source)
+  ty(child, source)
 }
 
 /// The `!` folds into the node it wraps, exactly as the syntactic parser folds it.
 ///
 /// A `NonNullType` has no AST image of its own: `T!` is a `NamedType` with `required` set, and
 /// its span is the extent that includes the `!`.
-fn ty<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Type<Name<&'src str>>, TextRange)> {
+fn ty<'src>(node: Node<'_>, source: &'src str) -> Out<(Type<Name<&'src str>>, TextRange)> {
   match node.kind() {
     K::NamedType => {
       let (name, extent) = inner_name(node, source)?;
@@ -1617,17 +1620,17 @@ fn ty<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Type<Name<&'src str>>,
 /// span it carries is the outer one's, so the inner node has to answer its element and its extent
 /// without also building a list of its own.
 fn list_element<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(Type<Name<&'src str>>, TextRange)> {
   let mut extent = Extent::default();
   let mut wrapped = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         kind if wrapped.is_none() && TYPE_KINDS.contains(&kind) => wrapped = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -1637,24 +1640,24 @@ fn list_element<'src>(
 
 /// `T!` and `[T]!`, where the `!` is a token of this node and the span it produces is this node's.
 fn non_null_type<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(Type<Name<&'src str>>, TextRange)> {
   let mut extent = Extent::default();
   let mut wrapped = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         kind if wrapped.is_none() && TYPE_KINDS.contains(&kind) => wrapped = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
   let inner = wrapped.ok_or_else(|| missing(node, "a wrapped type"))?;
   match inner.kind() {
     K::NamedType => {
-      let name = extent.keep(inner_name(&inner, source)?);
+      let name = extent.keep(inner_name(inner, source)?);
       let extent = extent.range(node, "a token")?;
       Ok((
         Type::Name(NamedType::new(to_span(extent), name, true)),
@@ -1662,7 +1665,7 @@ fn non_null_type<'src>(
       ))
     }
     K::ListType => {
-      let element = extent.keep(list_element(&inner, source)?);
+      let element = extent.keep(list_element(inner, source)?);
       let extent = extent.range(node, "a token")?;
       Ok((
         Type::List(Box::new(ListType::new(to_span(extent), element, true))),
@@ -1683,41 +1686,41 @@ fn non_null_type<'src>(
 ///
 /// `run` is the slot the caller's own dispatch filled, which is why this takes an `Option` rather
 /// than looking the child up again.
-fn optional_directives(
-  run: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(Directives<&str>, TextRange)>> {
+fn optional_directives<'src>(
+  run: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(Directives<&'src str>, TextRange)>> {
   let Some(run) = run else { return Ok(None) };
   let mut extent = Extent::default();
   let mut directives = Vec::new();
-  for element in run.children_with_tokens() {
+  for element in run.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
-        K::Directive => directives.push(extent.keep(directive(&child, source)?)),
-        _ => return Err(unexpected_node(&run, &child)),
+        K::Directive => directives.push(extent.keep(directive(child, source)?)),
+        _ => return Err(unexpected_node(run, child)),
       },
     }
   }
-  let extent = extent.range(&run, "a token")?;
+  let extent = extent.range(run, "a token")?;
   Ok(Some((Directives::new(to_span(extent), directives), extent)))
 }
 
-fn directive<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Directive<&'src str>, TextRange)> {
+fn directive<'src>(node: Node<'_>, source: &'src str) -> Out<(Directive<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut arguments_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
       NodeOrToken::Node(child) => match child.kind() {
         K::Arguments if arguments_node.is_none() => arguments_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -1727,68 +1730,68 @@ fn directive<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Directive<&'src
   Ok((Directive::new(to_span(extent), name, arguments), extent))
 }
 
-fn optional_arguments(
-  list: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(Arguments<&str>, TextRange)>> {
+fn optional_arguments<'src>(
+  list: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(Arguments<&'src str>, TextRange)>> {
   let Some(list) = list else { return Ok(None) };
   let mut extent = Extent::default();
   let mut arguments = Vec::new();
-  for element in list.children_with_tokens() {
+  for element in list.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
-        K::Argument => arguments.push(extent.keep(argument(&child, source)?)),
-        _ => return Err(unexpected_node(&list, &child)),
+        K::Argument => arguments.push(extent.keep(argument(child, source)?)),
+        _ => return Err(unexpected_node(list, child)),
       },
     }
   }
-  let extent = extent.range(&list, "a token")?;
+  let extent = extent.range(list, "a token")?;
   Ok(Some((Arguments::new(to_span(extent), arguments), extent)))
 }
 
-fn argument<'src>(node: &SyntaxNode, source: &'src str) -> Out<(Argument<&'src str>, TextRange)> {
+fn argument<'src>(node: Node<'_>, source: &'src str) -> Out<(Argument<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut value_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
       NodeOrToken::Node(child) => match child.kind() {
         kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
   let name = name(source, names.at(0, node, "an argument name")?)?;
   let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(value(&value_node, source)?);
+  let value = extent.keep(value(value_node, source)?);
   let extent = extent.range(node, "a token")?;
   Ok((Argument::new(to_span(extent), name, value), extent))
 }
 
-fn optional_const_directives(
-  run: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(ConstDirectives<&str>, TextRange)>> {
+fn optional_const_directives<'src>(
+  run: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(ConstDirectives<&'src str>, TextRange)>> {
   let Some(run) = run else { return Ok(None) };
   let mut extent = Extent::default();
   let mut directives = Vec::new();
-  for element in run.children_with_tokens() {
+  for element in run.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
-        K::Directive => directives.push(extent.keep(const_directive(&child, source)?)),
-        _ => return Err(unexpected_node(&run, &child)),
+        K::Directive => directives.push(extent.keep(const_directive(child, source)?)),
+        _ => return Err(unexpected_node(run, child)),
       },
     }
   }
-  let extent = extent.range(&run, "a token")?;
+  let extent = extent.range(run, "a token")?;
   Ok(Some((
     ConstDirectives::new(to_span(extent), directives),
     extent,
@@ -1796,23 +1799,23 @@ fn optional_const_directives(
 }
 
 fn const_directive<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(ConstDirective<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut arguments_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
       NodeOrToken::Node(child) => match child.kind() {
         K::Arguments if arguments_node.is_none() => arguments_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -1825,23 +1828,23 @@ fn const_directive<'src>(
   ))
 }
 
-fn optional_const_arguments(
-  list: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(ConstArguments<&str>, TextRange)>> {
+fn optional_const_arguments<'src>(
+  list: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(ConstArguments<&'src str>, TextRange)>> {
   let Some(list) = list else { return Ok(None) };
   let mut extent = Extent::default();
   let mut arguments = Vec::new();
-  for element in list.children_with_tokens() {
+  for element in list.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
-        K::Argument => arguments.push(extent.keep(const_argument(&child, source)?)),
-        _ => return Err(unexpected_node(&list, &child)),
+        K::Argument => arguments.push(extent.keep(const_argument(child, source)?)),
+        _ => return Err(unexpected_node(list, child)),
       },
     }
   }
-  let extent = extent.range(&list, "a token")?;
+  let extent = extent.range(list, "a token")?;
   Ok(Some((
     ConstArguments::new(to_span(extent), arguments),
     extent,
@@ -1849,29 +1852,29 @@ fn optional_const_arguments(
 }
 
 fn const_argument<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(ConstArgument<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut value_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
       NodeOrToken::Node(child) => match child.kind() {
         kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
   let name = name(source, names.at(0, node, "an argument name")?)?;
   let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(const_value(&value_node, source)?);
+  let value = extent.keep(const_value(node, value_node, source)?);
   let extent = extent.range(node, "a token")?;
   Ok((ConstArgument::new(to_span(extent), name, value), extent))
 }
@@ -1897,18 +1900,18 @@ const VALUE_KINDS: [SyntaxKind; 9] = [
 /// `kinds` is what the leaf's own production committed, so a token of any other kind is not the
 /// literal even when it comes first — which is the distinction between "no literal here" and "the
 /// tree put something else here".
-fn leaf_token(node: &SyntaxNode, kinds: &[SyntaxKind]) -> (Extent, Option<SyntaxToken>) {
+fn leaf_token<'g>(node: Node<'g>, kinds: &[SyntaxKind]) -> (Extent, Option<Token<'g>>) {
   let mut extent = Extent::default();
   let mut literal = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if literal.is_none() && kinds.contains(&token.kind()) {
           literal = Some(token);
         }
       }
-      NodeOrToken::Node(child) => extent.unread(&child),
+      NodeOrToken::Node(child) => extent.unread(child),
     }
   }
   (extent, literal)
@@ -1916,7 +1919,7 @@ fn leaf_token(node: &SyntaxNode, kinds: &[SyntaxKind]) -> (Extent, Option<Syntax
 
 /// A leaf value's slice, span and extent — every leaf but the string one, which has to cook.
 fn leaf<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
   kinds: &[SyntaxKind],
   wanted: &'static str,
@@ -1924,23 +1927,23 @@ fn leaf<'src>(
   let (extent, token) = leaf_token(node, kinds);
   let extent = extent.range(node, "a token")?;
   let token = token.ok_or_else(|| missing(node, wanted))?;
-  Ok((slice(source, &token)?, to_span(extent), extent))
+  Ok((slice(source, token)?, to_span(extent), extent))
 }
 
 /// A string leaf: the [`StringValue`]'s span is its **token's**, not the node's extent, which is
 /// what the syntactic parser produces and therefore what the differential gate compares against.
 fn string_literal<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(StringValue<&'src str>, TextRange)> {
   let (extent, token) = leaf_token(node, &[K::String, K::BlockString]);
   let extent = extent.range(node, "a token")?;
   let token = token.ok_or_else(|| missing(node, "a string literal"))?;
-  Ok((string_value(&token, source)?, extent))
+  Ok((string_value(token, source)?, extent))
 }
 
 fn boolean_literal<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(BooleanValue<&'src str>, TextRange)> {
   let (slice, span, extent) = leaf(node, source, &[K::Name], "a `true` or `false` keyword")?;
@@ -1954,7 +1957,7 @@ fn boolean_literal<'src>(
   }
 }
 
-fn value<'src>(node: &SyntaxNode, source: &'src str) -> Out<(InputValue<&'src str>, TextRange)> {
+fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>, TextRange)> {
   Ok(match node.kind() {
     K::Variable => {
       let (variable, extent) = variable_value(node, source)?;
@@ -1987,10 +1990,10 @@ fn value<'src>(node: &SyntaxNode, source: &'src str) -> Out<(InputValue<&'src st
     K::ListValue => {
       let mut extent = Extent::default();
       let mut values = Vec::new();
-      for element in node.children_with_tokens() {
+      for element in node.children() {
         match element {
-          NodeOrToken::Token(token) => extent.token(&token),
-          NodeOrToken::Node(child) => values.push(extent.keep(value(&child, source)?)),
+          NodeOrToken::Token(token) => extent.token(token),
+          NodeOrToken::Node(child) => values.push(extent.keep(value(child, source)?)),
         }
       }
       let extent = extent.range(node, "a token")?;
@@ -1999,12 +2002,12 @@ fn value<'src>(node: &SyntaxNode, source: &'src str) -> Out<(InputValue<&'src st
     K::ObjectValue => {
       let mut extent = Extent::default();
       let mut fields = Vec::new();
-      for element in node.children_with_tokens() {
+      for element in node.children() {
         match element {
-          NodeOrToken::Token(token) => extent.token(&token),
+          NodeOrToken::Token(token) => extent.token(token),
           NodeOrToken::Node(child) => match child.kind() {
-            K::ObjectField => fields.push(extent.keep(object_field(&child, source)?)),
-            _ => return Err(unexpected_node(node, &child)),
+            K::ObjectField => fields.push(extent.keep(object_field(child, source)?)),
+            _ => return Err(unexpected_node(node, child)),
           },
         }
       }
@@ -2022,21 +2025,19 @@ fn value<'src>(node: &SyntaxNode, source: &'src str) -> Out<(InputValue<&'src st
 ///
 /// [`ConstInputValue`] has no `Variable` variant, so the refusal is not a policy this module
 /// invented: there is nothing to construct.
+///
+/// `parent` is the node whose dispatch reached `node`. A green tree carries no parent pointer, and
+/// the caller's own frame is where the one the refusal names comes from — see
+/// [`Node`](crate::parser::lossless::project::Node).
 fn const_value<'src>(
-  node: &SyntaxNode,
+  parent: Node<'_>,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(ConstInputValue<&'src str>, TextRange)> {
   Ok(match node.kind() {
     // The refusal is attributed to the position, not to the variable: a `Variable` node is
     // perfectly legal, and what is wrong is the const context that is holding one.
-    K::Variable => {
-      let parent = node.parent();
-      return Err(unexpected(
-        parent.as_ref().unwrap_or(node),
-        K::Variable,
-        node.text_range(),
-      ));
-    }
+    K::Variable => return Err(unexpected(parent, K::Variable, node.text_range())),
     K::IntValue => {
       let (text, span, extent) = leaf(node, source, &[K::Int], "an integer literal")?;
       (ConstInputValue::Int(IntValue::new(span, text)), extent)
@@ -2064,10 +2065,10 @@ fn const_value<'src>(
     K::ListValue => {
       let mut extent = Extent::default();
       let mut values = Vec::new();
-      for element in node.children_with_tokens() {
+      for element in node.children() {
         match element {
-          NodeOrToken::Token(token) => extent.token(&token),
-          NodeOrToken::Node(child) => values.push(extent.keep(const_value(&child, source)?)),
+          NodeOrToken::Token(token) => extent.token(token),
+          NodeOrToken::Node(child) => values.push(extent.keep(const_value(node, child, source)?)),
         }
       }
       let extent = extent.range(node, "a token")?;
@@ -2079,12 +2080,12 @@ fn const_value<'src>(
     K::ObjectValue => {
       let mut extent = Extent::default();
       let mut fields = Vec::new();
-      for element in node.children_with_tokens() {
+      for element in node.children() {
         match element {
-          NodeOrToken::Token(token) => extent.token(&token),
+          NodeOrToken::Token(token) => extent.token(token),
           NodeOrToken::Node(child) => match child.kind() {
-            K::ObjectField => fields.push(extent.keep(const_object_field(&child, source)?)),
-            _ => return Err(unexpected_node(node, &child)),
+            K::ObjectField => fields.push(extent.keep(const_object_field(child, source)?)),
+            _ => return Err(unexpected_node(node, child)),
           },
         }
       }
@@ -2099,7 +2100,7 @@ fn const_value<'src>(
 }
 
 fn variable_value<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(VariableValue<&'src str>, TextRange)> {
   let (name, extent) = inner_name(node, source)?;
@@ -2107,83 +2108,83 @@ fn variable_value<'src>(
 }
 
 fn object_field<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(ObjectField<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut value_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
       NodeOrToken::Node(child) => match child.kind() {
         kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
   let name = name(source, names.at(0, node, "a field name")?)?;
   let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(value(&value_node, source)?);
+  let value = extent.keep(value(value_node, source)?);
   let extent = extent.range(node, "a token")?;
   Ok((ObjectField::new(to_span(extent), name, value), extent))
 }
 
 fn const_object_field<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(ConstObjectField<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut value_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
       }
       NodeOrToken::Node(child) => match child.kind() {
         kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
   let name = name(source, names.at(0, node, "a field name")?)?;
   let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(const_value(&value_node, source)?);
+  let value = extent.keep(const_value(node, value_node, source)?);
   let extent = extent.range(node, "a token")?;
   Ok((ConstObjectField::new(to_span(extent), name, value), extent))
 }
 
-fn optional_default_value(
-  default: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(DefaultInputValue<&str>, TextRange)>> {
+fn optional_default_value<'src>(
+  default: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(DefaultInputValue<&'src str>, TextRange)>> {
   let Some(default) = default else {
     return Ok(None);
   };
   let mut extent = Extent::default();
   let mut value_node = None;
-  for element in default.children_with_tokens() {
+  for element in default.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
-  let value_node = value_node.ok_or_else(|| missing(&default, "a value"))?;
-  let value = extent.keep(const_value(&value_node, source)?);
+  let value_node = value_node.ok_or_else(|| missing(default, "a value"))?;
+  let value = extent.keep(const_value(default, value_node, source)?);
   // The span covers the `=` and the value, which is the node's own token extent.
-  let extent = extent.range(&default, "a token")?;
+  let extent = extent.range(default, "a token")?;
   Ok(Some((
     DefaultInputValue::new(to_span(extent), value),
     extent,
@@ -2201,77 +2202,77 @@ const KEYWORD_NAMED: usize = 1;
 /// An extension's name is its **third** `Name`: `extend`, the shape keyword, then the name.
 const EXTENSION_NAMED: usize = 2;
 
-fn optional_implements(
-  clause: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(ImplementInterfaces<Name<&str>>, TextRange)>> {
+fn optional_implements<'src>(
+  clause: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(ImplementInterfaces<Name<&'src str>>, TextRange)>> {
   let Some(clause) = clause else {
     return Ok(None);
   };
   let mut extent = Extent::default();
   let mut interfaces = Vec::new();
-  for element in clause.children_with_tokens() {
+  for element in clause.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         // The AST holds `Name`s, not `NamedType`s: an implemented interface can carry no `!`
         // and no brackets, so the type-reference level would be a wrapper over nothing.
-        K::NamedType => interfaces.push(extent.keep(inner_name(&child, source)?)),
-        _ => return Err(unexpected_node(&clause, &child)),
+        K::NamedType => interfaces.push(extent.keep(inner_name(child, source)?)),
+        _ => return Err(unexpected_node(clause, child)),
       },
     }
   }
-  let extent = extent.range(&clause, "a token")?;
+  let extent = extent.range(clause, "a token")?;
   Ok(Some((
     ImplementInterfaces::new(to_span(extent), interfaces),
     extent,
   )))
 }
 
-fn optional_union_members(
-  clause: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(UnionMemberTypes<Name<&str>>, TextRange)>> {
+fn optional_union_members<'src>(
+  clause: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(UnionMemberTypes<Name<&'src str>>, TextRange)>> {
   let Some(clause) = clause else {
     return Ok(None);
   };
   let mut extent = Extent::default();
   let mut members = Vec::new();
-  for element in clause.children_with_tokens() {
+  for element in clause.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
-        K::NamedType => members.push(extent.keep(inner_name(&child, source)?)),
-        _ => return Err(unexpected_node(&clause, &child)),
+        K::NamedType => members.push(extent.keep(inner_name(child, source)?)),
+        _ => return Err(unexpected_node(clause, child)),
       },
     }
   }
-  let extent = extent.range(&clause, "a token")?;
+  let extent = extent.range(clause, "a token")?;
   Ok(Some((
     UnionMemberTypes::new(to_span(extent), members),
     extent,
   )))
 }
 
-fn optional_fields_definition(
-  block: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(FieldsDefinition<&str>, TextRange)>> {
+fn optional_fields_definition<'src>(
+  block: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(FieldsDefinition<&'src str>, TextRange)>> {
   let Some(block) = block else {
     return Ok(None);
   };
   let mut extent = Extent::default();
   let mut fields = Vec::new();
-  for element in block.children_with_tokens() {
+  for element in block.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
-        K::FieldDefinition => fields.push(extent.keep(field_definition(&child, source)?)),
-        _ => return Err(unexpected_node(&block, &child)),
+        K::FieldDefinition => fields.push(extent.keep(field_definition(child, source)?)),
+        _ => return Err(unexpected_node(block, child)),
       },
     }
   }
-  let extent = extent.range(&block, "a token")?;
+  let extent = extent.range(block, "a token")?;
   Ok(Some((
     FieldsDefinition::new(to_span(extent), fields),
     extent,
@@ -2279,7 +2280,7 @@ fn optional_fields_definition(
 }
 
 fn field_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(
   crate::parser::graphql::ast::FieldDefinition<&'src str>,
@@ -2291,10 +2292,10 @@ fn field_definition<'src>(
   let mut arguments_node = None;
   let mut type_node = None;
   let mut directives_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2304,7 +2305,7 @@ fn field_definition<'src>(
         K::ArgumentsDefinition if arguments_node.is_none() => arguments_node = Some(child),
         kind if type_node.is_none() && TYPE_KINDS.contains(&kind) => type_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2333,12 +2334,12 @@ fn field_definition<'src>(
   ))
 }
 
-fn optional_arguments_definition(
-  block: Option<SyntaxNode>,
-  source: &str,
+fn optional_arguments_definition<'src>(
+  block: Option<Node<'_>>,
+  source: &'src str,
 ) -> Out<
   Option<(
-    crate::parser::graphql::ast::ArgumentsDefinition<&str>,
+    crate::parser::graphql::ast::ArgumentsDefinition<&'src str>,
     TextRange,
   )>,
 > {
@@ -2347,18 +2348,18 @@ fn optional_arguments_definition(
   };
   let mut extent = Extent::default();
   let mut definitions = Vec::new();
-  for element in block.children_with_tokens() {
+  for element in block.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::InputValueDefinition => {
-          definitions.push(extent.keep(input_value_definition(&child, source)?));
+          definitions.push(extent.keep(input_value_definition(child, source)?));
         }
-        _ => return Err(unexpected_node(&block, &child)),
+        _ => return Err(unexpected_node(block, child)),
       },
     }
   }
-  let extent = extent.range(&block, "a token")?;
+  let extent = extent.range(block, "a token")?;
   Ok(Some((
     ArgumentsDefinition::new(to_span(extent), definitions),
     extent,
@@ -2366,7 +2367,7 @@ fn optional_arguments_definition(
 }
 
 fn input_value_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(
   crate::parser::graphql::ast::InputValueDefinition<&'src str>,
@@ -2378,10 +2379,10 @@ fn input_value_definition<'src>(
   let mut type_node = None;
   let mut default_node = None;
   let mut directives_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2391,7 +2392,7 @@ fn input_value_definition<'src>(
         kind if type_node.is_none() && TYPE_KINDS.contains(&kind) => type_node = Some(child),
         K::DefaultValue if default_node.is_none() => default_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2418,52 +2419,52 @@ fn input_value_definition<'src>(
   ))
 }
 
-fn optional_input_fields_definition(
-  block: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(InputFieldsDefinition<&str>, TextRange)>> {
+fn optional_input_fields_definition<'src>(
+  block: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(InputFieldsDefinition<&'src str>, TextRange)>> {
   let Some(block) = block else {
     return Ok(None);
   };
   let mut extent = Extent::default();
   let mut definitions = Vec::new();
-  for element in block.children_with_tokens() {
+  for element in block.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::InputValueDefinition => {
-          definitions.push(extent.keep(input_value_definition(&child, source)?));
+          definitions.push(extent.keep(input_value_definition(child, source)?));
         }
-        _ => return Err(unexpected_node(&block, &child)),
+        _ => return Err(unexpected_node(block, child)),
       },
     }
   }
-  let extent = extent.range(&block, "a token")?;
+  let extent = extent.range(block, "a token")?;
   Ok(Some((
     InputFieldsDefinition::new(to_span(extent), definitions),
     extent,
   )))
 }
 
-fn optional_enum_values(
-  block: Option<SyntaxNode>,
-  source: &str,
-) -> Out<Option<(EnumValuesDefinition<&str>, TextRange)>> {
+fn optional_enum_values<'src>(
+  block: Option<Node<'_>>,
+  source: &'src str,
+) -> Out<Option<(EnumValuesDefinition<&'src str>, TextRange)>> {
   let Some(block) = block else {
     return Ok(None);
   };
   let mut extent = Extent::default();
   let mut values = Vec::new();
-  for element in block.children_with_tokens() {
+  for element in block.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
-        K::EnumValueDefinition => values.push(extent.keep(enum_value_definition(&child, source)?)),
-        _ => return Err(unexpected_node(&block, &child)),
+        K::EnumValueDefinition => values.push(extent.keep(enum_value_definition(child, source)?)),
+        _ => return Err(unexpected_node(block, child)),
       },
     }
   }
-  let extent = extent.range(&block, "a token")?;
+  let extent = extent.range(block, "a token")?;
   Ok(Some((
     EnumValuesDefinition::new(to_span(extent), values),
     extent,
@@ -2471,7 +2472,7 @@ fn optional_enum_values(
 }
 
 fn enum_value_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(
   crate::parser::graphql::ast::EnumValueDefinition<&'src str>,
@@ -2481,14 +2482,14 @@ fn enum_value_definition<'src>(
   let mut description_node = None;
   let mut value_node = None;
   let mut directives_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::Description if description_node.is_none() => description_node = Some(child),
         K::EnumValue if value_node.is_none() => value_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2501,7 +2502,7 @@ fn enum_value_definition<'src>(
   // The value's name lives inside the `EnumValue` node the tree opens for it, but the AST holds
   // a bare `Name` — the enum-value level has nothing else to carry.
   let value_node = value_node.ok_or_else(|| missing(node, "an enum value"))?;
-  let value = extent.keep(inner_name(&value_node, source)?);
+  let value = extent.keep(inner_name(value_node, source)?);
   let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
 
   let extent = extent.range(node, "a token")?;
@@ -2517,17 +2518,17 @@ fn enum_value_definition<'src>(
 }
 
 fn scalar_type_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ScalarTypeDefinition<&'src str>>> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut description_node = None;
   let mut directives_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2535,7 +2536,7 @@ fn scalar_type_definition<'src>(
       NodeOrToken::Node(child) => match child.kind() {
         K::Description if description_node.is_none() => description_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2556,7 +2557,7 @@ fn scalar_type_definition<'src>(
 }
 
 fn object_type_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ObjectTypeDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -2565,10 +2566,10 @@ fn object_type_definition<'src>(
   let mut implements_node = None;
   let mut directives_node = None;
   let mut fields_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2578,7 +2579,7 @@ fn object_type_definition<'src>(
         K::ImplementsInterfaces if implements_node.is_none() => implements_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::FieldsDefinition if fields_node.is_none() => fields_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2607,7 +2608,7 @@ fn object_type_definition<'src>(
 }
 
 fn interface_type_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, InterfaceTypeDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -2616,10 +2617,10 @@ fn interface_type_definition<'src>(
   let mut implements_node = None;
   let mut directives_node = None;
   let mut fields_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2629,7 +2630,7 @@ fn interface_type_definition<'src>(
         K::ImplementsInterfaces if implements_node.is_none() => implements_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::FieldsDefinition if fields_node.is_none() => fields_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2658,7 +2659,7 @@ fn interface_type_definition<'src>(
 }
 
 fn union_type_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, UnionTypeDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -2666,10 +2667,10 @@ fn union_type_definition<'src>(
   let mut description_node = None;
   let mut directives_node = None;
   let mut members_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2678,7 +2679,7 @@ fn union_type_definition<'src>(
         K::Description if description_node.is_none() => description_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::UnionMemberTypes if members_node.is_none() => members_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2700,7 +2701,7 @@ fn union_type_definition<'src>(
 }
 
 fn enum_type_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, EnumTypeDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -2708,10 +2709,10 @@ fn enum_type_definition<'src>(
   let mut description_node = None;
   let mut directives_node = None;
   let mut values_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2720,7 +2721,7 @@ fn enum_type_definition<'src>(
         K::Description if description_node.is_none() => description_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::EnumValuesDefinition if values_node.is_none() => values_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2742,7 +2743,7 @@ fn enum_type_definition<'src>(
 }
 
 fn input_object_type_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, InputObjectTypeDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -2750,10 +2751,10 @@ fn input_object_type_definition<'src>(
   let mut description_node = None;
   let mut directives_node = None;
   let mut fields_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2762,7 +2763,7 @@ fn input_object_type_definition<'src>(
         K::Description if description_node.is_none() => description_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::InputFieldsDefinition if fields_node.is_none() => fields_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2784,7 +2785,7 @@ fn input_object_type_definition<'src>(
 }
 
 fn directive_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, crate::parser::graphql::ast::DirectiveDefinition<&'src str>>> {
   let mut extent = Extent::default();
@@ -2792,10 +2793,10 @@ fn directive_definition<'src>(
   let mut description_node = None;
   let mut arguments_node = None;
   let mut locations_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2804,7 +2805,7 @@ fn directive_definition<'src>(
         K::Description if description_node.is_none() => description_node = Some(child),
         K::ArgumentsDefinition if arguments_node.is_none() => arguments_node = Some(child),
         K::DirectiveLocations if locations_node.is_none() => locations_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2822,7 +2823,7 @@ fn directive_definition<'src>(
     .get(2)
     .is_some_and(|token| keyword_of(token) == Some(ContextualKeyword::Repeatable));
   let locations_node = locations_node.ok_or_else(|| missing(node, "a location list"))?;
-  let locations = extent.keep(directive_locations(&locations_node)?);
+  let locations = extent.keep(directive_locations(locations_node)?);
 
   let (outer, inner) = described_extents(node, extent, described)?;
   Ok((
@@ -2838,17 +2839,17 @@ fn directive_definition<'src>(
   ))
 }
 
-fn directive_locations(node: &SyntaxNode) -> Out<(DirectiveLocations<Location>, TextRange)> {
+fn directive_locations(node: Node<'_>) -> Out<(DirectiveLocations<Location>, TextRange)> {
   let mut extent = Extent::default();
   let mut locations = Vec::new();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() != K::Name {
           continue;
         }
-        let location = keyword_of(&token)
+        let location = keyword_of(token)
           .and_then(|keyword| classify_location(keyword, to_span(token.text_range())))
           .ok_or_else(|| {
             ProjectError::new(
@@ -2858,7 +2859,7 @@ fn directive_locations(node: &SyntaxNode) -> Out<(DirectiveLocations<Location>, 
           })?;
         locations.push(location);
       }
-      NodeOrToken::Node(child) => extent.unread(&child),
+      NodeOrToken::Node(child) => extent.unread(child),
     }
   }
   if locations.is_empty() {
@@ -2869,21 +2870,21 @@ fn directive_locations(node: &SyntaxNode) -> Out<(DirectiveLocations<Location>, 
 }
 
 fn schema_definition<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, SchemaDefinition<&'src str>>> {
   let mut extent = Extent::default();
   let mut description_node = None;
   let mut directives_node = None;
   let mut roots_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::Description if description_node.is_none() => description_node = Some(child),
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::RootOperationTypeDefinitions if roots_node.is_none() => roots_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -2891,7 +2892,7 @@ fn schema_definition<'src>(
   let (description, described) = hoisted_description(description_node, source)?;
   let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
   let roots_node = roots_node.ok_or_else(|| missing(node, "a root operation types block"))?;
-  let roots = extent.keep(root_operation_types(&roots_node, source)?);
+  let roots = extent.keep(root_operation_types(roots_node, source)?);
 
   let (outer, inner) = described_extents(node, extent, described)?;
   Ok((
@@ -2902,19 +2903,19 @@ fn schema_definition<'src>(
 }
 
 fn root_operation_types<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(RootOperationTypesDefinition<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut roots = Vec::new();
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::RootOperationTypeDefinition => {
-          roots.push(extent.keep(root_operation_type(&child, source)?));
+          roots.push(extent.keep(root_operation_type(child, source)?));
         }
-        _ => return Err(unexpected_node(node, &child)),
+        _ => return Err(unexpected_node(node, child)),
       },
     }
   }
@@ -2926,26 +2927,26 @@ fn root_operation_types<'src>(
 }
 
 fn root_operation_type<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(RootOperationTypeDefinition<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut keyword_node = None;
   let mut named_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::OperationType if keyword_node.is_none() => keyword_node = Some(child),
         K::NamedType if named_node.is_none() => named_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
   let keyword_node = keyword_node.ok_or_else(|| missing(node, "an operation keyword"))?;
-  let operation_type = extent.keep(operation_type(&keyword_node)?);
+  let operation_type = extent.keep(operation_type(keyword_node)?);
   let named_node = named_node.ok_or_else(|| missing(node, "a root type name"))?;
-  let named = extent.keep(inner_name(&named_node, source)?);
+  let named = extent.keep(inner_name(named_node, source)?);
   let extent = extent.range(node, "a token")?;
   Ok((
     RootOperationTypeDefinition::new(to_span(extent), operation_type, named),
@@ -2974,7 +2975,7 @@ struct ExtensionParts<'src> {
   extent: TextRange,
 }
 
-fn extension_parts<'src>(node: &SyntaxNode, source: &'src str) -> Out<ExtensionParts<'src>> {
+fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionParts<'src>> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut implements_node = None;
@@ -2983,10 +2984,10 @@ fn extension_parts<'src>(node: &SyntaxNode, source: &'src str) -> Out<ExtensionP
   let mut input_fields_node = None;
   let mut members_node = None;
   let mut values_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
       NodeOrToken::Token(token) => {
-        extent.token(&token);
+        extent.token(token);
         if token.kind() == K::Name {
           names.push(token);
         }
@@ -2998,7 +2999,7 @@ fn extension_parts<'src>(node: &SyntaxNode, source: &'src str) -> Out<ExtensionP
         K::InputFieldsDefinition if input_fields_node.is_none() => input_fields_node = Some(child),
         K::UnionMemberTypes if members_node.is_none() => members_node = Some(child),
         K::EnumValuesDefinition if values_node.is_none() => values_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
@@ -3027,7 +3028,7 @@ fn extension_parts<'src>(node: &SyntaxNode, source: &'src str) -> Out<ExtensionP
 }
 
 fn scalar_type_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(ScalarTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
@@ -3042,7 +3043,7 @@ fn scalar_type_extension<'src>(
 }
 
 fn object_type_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(ObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
@@ -3071,7 +3072,7 @@ fn object_type_extension<'src>(
 }
 
 fn interface_type_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(InterfaceTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
@@ -3100,7 +3101,7 @@ fn interface_type_extension<'src>(
 }
 
 fn union_type_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(UnionTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
@@ -3124,7 +3125,7 @@ fn union_type_extension<'src>(
 }
 
 fn enum_type_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(EnumTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
@@ -3148,7 +3149,7 @@ fn enum_type_extension<'src>(
 }
 
 fn input_object_type_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(InputObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
@@ -3174,25 +3175,25 @@ fn input_object_type_extension<'src>(
 /// The one extension with no name: `extend schema` names nothing, so this walks the node itself
 /// rather than going through [`extension_parts`].
 fn schema_extension<'src>(
-  node: &SyntaxNode,
+  node: Node<'_>,
   source: &'src str,
 ) -> Out<(SchemaExtension<&'src str>, TextRange)> {
   let mut extent = Extent::default();
   let mut directives_node = None;
   let mut roots_node = None;
-  for element in node.children_with_tokens() {
+  for element in node.children() {
     match element {
-      NodeOrToken::Token(token) => extent.token(&token),
+      NodeOrToken::Token(token) => extent.token(token),
       NodeOrToken::Node(child) => match child.kind() {
         K::Directives if directives_node.is_none() => directives_node = Some(child),
         K::RootOperationTypeDefinitions if roots_node.is_none() => roots_node = Some(child),
-        _ => extent.unread(&child),
+        _ => extent.unread(child),
       },
     }
   }
   let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
   let roots = match roots_node {
-    Some(block) => Some(extent.keep(root_operation_types(&block, source)?)),
+    Some(block) => Some(extent.keep(root_operation_types(block, source)?)),
     None => None,
   };
   let data = match (directives, roots) {

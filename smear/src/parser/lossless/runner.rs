@@ -66,6 +66,17 @@ impl<L: rowan::Language> Parse<L> {
     rowan::SyntaxNode::new_root(self.green.clone())
   }
 
+  /// The tree's green root, borrowed rather than materialised.
+  ///
+  /// [`syntax`](Self::syntax) is the surface for a consumer that wants rowan's cursor API —
+  /// parents, siblings, absolute offsets — and building one clones the `Arc` and allocates the
+  /// root's cursor data. A walk that needs none of that reads the green tree directly, which is
+  /// what the projection does and what [`Node`](super::project::Node) is; this is where such a
+  /// walk starts, and it costs nothing.
+  pub fn green(&self) -> &rowan::GreenNode {
+    &self.green
+  }
+
   /// Every diagnostic the parse recorded, in emission order — errors, warnings and recovery
   /// holes alike.
   pub fn diagnostics(&self) -> &[Diagnostic] {
