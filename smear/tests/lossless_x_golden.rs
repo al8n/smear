@@ -88,12 +88,22 @@
 //! [`only_the_recorded_nodes_open_on_their_leading_trivia`] is what says so on every run rather than
 //! once.
 //!
-//! Two shapes were read, judged deliberate, and left unpinned, both inherited from Phase A's
-//! reading: a member whose type is missing recovers by consuming the enclosing `}` into an `Error`,
-//! so the surrounding block closes without a right brace; and trailing trivia attaches to whichever
-//! node was still open at the peek that crossed it, which is the preceding sibling inside a list and
-//! the enclosing list after its last element. Both are attachment policy rather than loss, and both
-//! are now on the page where a change to either shows up as a diff.
+//! Two shapes were read and judged deliberate, both inherited from Phase A's reading: a member
+//! whose type is missing recovers by consuming the enclosing `}` into an `Error`, so the
+//! surrounding block closes without a right brace; and trailing trivia attaches to whichever node
+//! was still open at the peek that crossed it, which is the preceding sibling inside a list and the
+//! enclosing list after its last element. Both are attachment policy rather than loss.
+//!
+//! **The second of those was left as prose, and prose is what a re-bless walks through.** Reading a
+//! policy once and judging it deliberate is not the same as pinning it: the goldens were the only
+//! thing holding the placement, and an `UPDATE_GOLDEN=1` run rewrites goldens. smear#131 measured
+//! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
+//! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
+//! gate, the injection gate and the projection differential all stay green. So the sentence is now
+//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-eight pairings re-derived on every run by
+//! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
+//! twin's length for a reason the constant states: GraphQLx spells a name as a path, and a path
+//! ends by probing for a `::` that is usually not there.
 
 use std::{collections::BTreeSet, fmt::Write as _, path::PathBuf};
 
@@ -155,6 +165,126 @@ const GAP_TILES_AT_ROOT: &[&str] = &[
 /// generic list and nothing else, so their entire content *is* a range — a boundary on the wrong
 /// side of a space is the whole defect, with no kind change and no line moved to show for it.
 const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
+
+/// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
+/// trivia lands inside the node's range instead of beside it.
+///
+/// **Forty-eight entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
+/// one and its full account is on the GraphQL twin's constant: an atom commits the trivia it
+/// crosses to whichever node is open at that moment, a production about to open a node crosses its
+/// leading trivia at a dispatch peek made *before* the mark, and trailing trivia has no such
+/// moment — the peek that crosses it is the peek that discovers the node is over, made from inside
+/// the node it is ending. What is worth reading here is why GraphQLx's list is nearly twice its
+/// twin's.
+///
+/// # The families GraphQL also has
+///
+/// - **The preceding sibling inside a list**, when a production ends in an optional component it
+///   has to probe for: `SelectionSet > Field`, `SelectionSet > FragmentSpread`,
+///   `FieldsDefinition > FieldDefinition`, `EnumValuesDefinition > EnumValueDefinition`,
+///   `ArgumentsDefinition > InputValueDefinition`, `InputFieldsDefinition > InputValueDefinition`,
+///   `VariablesDefinition > VariableDefinition`, and at document level
+///   `Document > ObjectTypeExtension`, the one shape here whose own last probe, rather than a list
+///   inside it, is what crossed the trivia.
+///   `DefinitionTypeGenerics > DefinitionTypeParam`, `WhereClause > WherePredicate` and
+///   `ImportList > NamedSpecifier` are GraphQLx lists of the same shape.
+/// - **A list after its last element**, the same probe one level up: every `> Directives` pairing,
+///   plus `DirectiveDefinition > DirectiveLocations`.
+/// - **Recovery geometry**, where the node open at the peek is open because a recovery put it
+///   there. `Document > Error` is a resynchronised run; `Argument > ListValue`
+///   (`invalid_unterminated_bracket`) is a list that never gets its `]`, so the enclosing `}` is
+///   consumed into an `Error` inside it and the trailing newline follows it in; `TypeGenerics >
+///   Error` (`invalid_x_name_adjacent_to_angle_in_generics`) is that shape inside an angle list;
+///   and `Document > DefinitionName` is Task 10's unwound mark — the definition node is never
+///   opened, so the name the production had already built is left as a bare child of `Document`
+///   with the trivia after it. That last one is recorded **with the loss in it**, exactly as
+///   `shape_lost_object_type_definition` is, and it moves the day the loss is fixed.
+///
+/// # GraphQLx's own, and it is most of the difference
+///
+/// GraphQLx spells a name as a **path** — `Path` is segments joined by `::`, and
+/// [`DefinitionName`](K::DefinitionName), [`ExtensionName`](K::ExtensionName) and
+/// [`ExecutableDefinitionName`](K::ExecutableDefinitionName) wrap a path plus an optional generic
+/// list. Every one of those ends by probing for a continuation that usually is not there: `Path`
+/// peeks for another `::`, the wrappers peek for a `<`. The peek crosses the trivia, declines, and
+/// the trivia stays inside. So in `type T { f: Int }` the `DefinitionName` spans `"T "` and the
+/// `Path` under `f`'s type spans `"Int "` — which is `TypePath > Path` (77 witnesses),
+/// `DefinitionTypePath > Path` (68) and `ObjectTypeDefinition > DefinitionName` (43), the three
+/// commonest pairings in this list after `Root > Document`. `EnumValue > Path`,
+/// `NamedSpecifier > Path`, `WildcardSpecifier > Path`, `ExtensionName > Path`,
+/// `FragmentDefinition > ExecutableDefinitionName` and the eight remaining `> DefinitionName`
+/// pairings are the same production in other positions.
+///
+/// **This is the one family worth arguing about, and here is the argument.** It is the trailing
+/// mirror of the leading shape Phase A treated as a defect — `RootOperationTypeDefinition >
+/// NamedType`, where a `NamedType` spanned `" Q"` and "a consumer that highlighted or renamed
+/// through that range took the space with it". Three things separate them. The leading one was an
+/// **inconsistency**: six of `named_type`'s seven call sites crossed the trivia first and one did
+/// not, where this is uniform, every path in the dialect doing it because every path has the same
+/// optional continuation. GraphQL has no counterpart at all, its `NamedType` wrapping a bare `Name`
+/// token with nothing optional after it — so the difference is one of grammar rather than of
+/// discipline. And the range a consumer reads is not this one: `extent_of` computes an AST node's
+/// span from its first non-trivia token to its last, so the projected span of that `DefinitionName`
+/// is `"T"` either way. What is recorded here is the CST range, and recording it is what makes a
+/// *change* to it visible.
+///
+/// # Why this is an array and not a sentence
+///
+/// It was a sentence — this file's header read the policy, judged it deliberate, and left it
+/// unpinned, with the `.rast` goldens as the only thing holding the placement and a bless able to
+/// launder them. smear#131 measured the cost: an `expect` that skips trivia on its accepting branch
+/// as well as before it moves this set in both directions at once, and round-trip, the gap census,
+/// the parity gate, the injection gate and the projection differential all stay green through it.
+const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
+  "Argument > ListValue",
+  "ArgumentsDefinition > InputValueDefinition",
+  "DefinitionTypeGenerics > DefinitionTypeParam",
+  "DefinitionTypePath > Path",
+  "DefinitionTypePath > TypeGenerics",
+  "DirectiveDefinition > DefinitionName",
+  "DirectiveDefinition > DirectiveLocations",
+  "Document > DefinitionName",
+  "Document > Error",
+  "Document > ObjectTypeExtension",
+  "EnumTypeDefinition > DefinitionName",
+  "EnumValue > Path",
+  "EnumValueDefinition > Directives",
+  "EnumValuesDefinition > EnumValueDefinition",
+  "ExtensionName > Path",
+  "Field > Directives",
+  "FieldDefinition > DefinitionTypePath",
+  "FieldDefinition > Directives",
+  "FieldDefinition > ListType",
+  "FieldDefinition > SetType",
+  "FieldsDefinition > FieldDefinition",
+  "FragmentDefinition > Directives",
+  "FragmentDefinition > ExecutableDefinitionName",
+  "FragmentSpread > Directives",
+  "ImportDefinition > WildcardSpecifier",
+  "ImportList > NamedSpecifier",
+  "InlineFragment > Directives",
+  "InputFieldsDefinition > InputValueDefinition",
+  "InputObjectTypeDefinition > DefinitionName",
+  "InterfaceTypeDefinition > DefinitionName",
+  "NamedSpecifier > Path",
+  "ObjectTypeDefinition > DefinitionName",
+  "ObjectTypeDefinition > Directives",
+  "ObjectTypeExtension > Directives",
+  "OperationDefinition > DefinitionName",
+  "Root > Document",
+  "ScalarTypeDefinition > DefinitionName",
+  "ScalarTypeDefinition > Directives",
+  "SchemaDefinition > Directives",
+  "SelectionSet > Field",
+  "SelectionSet > FragmentSpread",
+  "TypeGenerics > Error",
+  "TypeGenerics > ListType",
+  "TypePath > Path",
+  "UnionTypeDefinition > DefinitionName",
+  "VariablesDefinition > VariableDefinition",
+  "WhereClause > WherePredicate",
+  "WildcardSpecifier > Path",
+];
 
 /// Fixtures the corpus does not carry, each one a tree whose *shape* is its whole content.
 ///
@@ -1016,4 +1146,105 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
       pairings(src)
     );
   }
+}
+
+/// Which nodes close on the wrong side of their trailing trivia — the twin of the check above, and
+/// the reason [`CLOSES_ON_TRAILING_TRIVIA`] is an array rather than a sentence in the header.
+///
+/// Same sweep over the same two golden sets, reading `.last()` where the leading census reads
+/// `.next()`. It is the only gate in this suite that sees trailing placement without going through
+/// a `.rast` file, which is what makes it the one that survives a bless: an `UPDATE_GOLDEN=1` run
+/// rewrites every expectation a placement change touches and leaves this assertion exactly where it
+/// was. The atoms it is measuring are `smear/src/parser/lossless/trivia.rs`'s — shared with
+/// GraphQL — so this and its GraphQL twin are one gate over two grammars, and a change to the
+/// substrate reds both.
+///
+/// It fails in both directions and a real change moves it in both at once. smear#131 measured that
+/// with an `expect` that skipped trivia on its *accepting* branch as well as before it: pairings
+/// appeared where a production began holding its node open across a peek, and list pairings
+/// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
+/// that used to leave it inside the preceding sibling. So the failure is reported as the two
+/// differences rather than as two forty-eight-element vectors: which half moved is what tells a
+/// reader whether a production gained a probe or lost one.
+#[test]
+fn only_the_recorded_nodes_close_on_their_trailing_trivia() {
+  fn pairings(src: &str) -> Vec<String> {
+    parse_document(src)
+      .syntax()
+      .descendants()
+      .filter_map(|node| {
+        let last = node.children_with_tokens().last()?.into_token()?;
+        if !TRIVIA_IMAGES.contains(&last.kind()) {
+          return None;
+        }
+        Some(format!("{:?} > {:?}", node.parent()?.kind(), node.kind()))
+      })
+      .collect()
+  }
+
+  // The recorded set is written in the order the sweep produces it, so a hand edit that duplicates
+  // an entry or files one out of place is a failure here rather than a confusing diff below.
+  assert!(
+    CLOSES_ON_TRAILING_TRIVIA.windows(2).all(|w| w[0] < w[1]),
+    "CLOSES_ON_TRAILING_TRIVIA must be sorted and free of duplicates"
+  );
+
+  let mut found: Vec<String> = corpus()
+    .iter()
+    .flat_map(|(_, src)| pairings(src))
+    .chain(SHAPE_CASES.iter().flat_map(|(_, src)| pairings(src)))
+    .collect();
+  found.sort();
+  found.dedup();
+
+  let appeared: Vec<&str> = found
+    .iter()
+    .map(String::as_str)
+    .filter(|pairing| !CLOSES_ON_TRAILING_TRIVIA.contains(pairing))
+    .collect();
+  let vanished: Vec<&str> = CLOSES_ON_TRAILING_TRIVIA
+    .iter()
+    .copied()
+    .filter(|pairing| !found.iter().any(|f| f == pairing))
+    .collect();
+  assert!(
+    appeared.is_empty() && vanished.is_empty(),
+    "the set of nodes that swallow their own trailing trivia has changed.\n  appeared: \
+     {appeared:?}\n  vanished: {vanished:?}\nA pairing that appeared is a production holding its \
+     node open across a peek it used to make from outside, which puts the node's end on the far \
+     side of a space; a pairing that vanished is trivia consumed before the peek that used to \
+     cross it, which is what an `expect` that skips on its accepting branch does. Both move the \
+     `.rast` goldens in the same diff, and blessing those does not answer this."
+  );
+
+  // The positive control, and it is not optional: an empty `found` is also what a `pairings` that
+  // had stopped detecting anything would produce, so one source must still answer with a pairing.
+  // A field that ends the line it is on is the commonest instance of the commonest shared family.
+  assert_eq!(
+    pairings("{ a\n  b }"),
+    vec!["SelectionSet > Field", "SelectionSet > Field"],
+    "the sweep no longer detects a node closing on its trailing trivia at all, so every empty \
+     answer below is worthless"
+  );
+  // And the negative one: a source carrying trivia that answers with nothing, or the assertion
+  // above is satisfied by a `pairings` that reports every node it sees. Every node here ends on a
+  // real token, and the one space in it is not the last child of anything.
+  assert!(
+    pairings("query Q{f}").is_empty(),
+    "a source whose every node ends on a real token must answer with no pairing at all, or this \
+     census cannot tell an attachment from a node boundary"
+  );
+  // The GraphQLx family, on the smallest source that carries it, so the reason this list is twice
+  // its twin's length is a live value rather than a paragraph. Both halves matter: the name wrapper
+  // and the path inside the type reference.
+  assert_eq!(
+    pairings("type T { f: Int }"),
+    vec![
+      "ObjectTypeDefinition > DefinitionName",
+      "DefinitionTypePath > Path"
+    ],
+    "a path and a definition name no longer hold the trivia their continuation probe crossed. If \
+     that is deliberate it is a good change, and the array above shrinks by most of its entries in \
+     the same diff"
+  );
 }

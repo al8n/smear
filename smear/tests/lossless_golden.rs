@@ -73,12 +73,21 @@
 //! [`only_the_recorded_nodes_open_on_their_leading_trivia`], which is that eye-reading turned into
 //! a standing check, so neither this site nor a new one can open on its trivia unnoticed.
 //!
-//! Two further shapes were read, judged deliberate, and left unpinned: a `FieldDefinition` whose
-//! type is missing recovers by consuming the enclosing `}` into an `Error`, so the surrounding
-//! `FieldsDefinition` closes without a right brace; and trailing trivia attaches to whichever node
-//! was still open at the peek that crossed it, which is the preceding sibling inside a list and
-//! the enclosing list after its last element. Both are recovery and attachment policy rather than
-//! loss, and both are now on the page where a change to either shows up as a diff.
+//! Two further shapes were read and judged deliberate: a `FieldDefinition` whose type is missing
+//! recovers by consuming the enclosing `}` into an `Error`, so the surrounding `FieldsDefinition`
+//! closes without a right brace; and trailing trivia attaches to whichever node was still open at
+//! the peek that crossed it, which is the preceding sibling inside a list and the enclosing list
+//! after its last element. Both are recovery and attachment policy rather than loss.
+//!
+//! **The second of those was left as prose, and prose is what a re-bless walks through.** Reading
+//! the policy once and judging it deliberate is not the same as pinning it: the goldens were the
+//! only thing holding the placement, and an `UPDATE_GOLDEN=1` run rewrites goldens. smear#131
+//! measured what that costs — an `expect` that skips trivia on its accepting branch as well as
+//! before it moves trailing placement across the whole corpus while round-trip, the gap census, the
+//! parity gate, the injection gate and the projection differential all stay green. So the sentence
+//! is now [`CLOSES_ON_TRAILING_TRIVIA`], twenty-eight pairings re-derived on every run by
+//! [`only_the_recorded_nodes_close_on_their_trailing_trivia`], which is the trailing twin of the
+//! leading census and is the one gate here that a bless cannot launder.
 //!
 //! # Where a gap lands — no longer pending, and now frozen here
 //!
@@ -187,6 +196,83 @@ const TRIVIA_IMAGES: &[K] = &[K::Space, K::Tab, K::Newline, K::Comma, K::Comment
 /// in the trees this defect malformed, so fixing it moved `("NamedType", "name")` into that gate's
 /// `UNDISCRIMINATED`, where the reason is written down beside the entry.
 const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
+
+/// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
+/// trivia lands inside the node's range instead of beside it.
+///
+/// **Twenty-eight entries where [`OPENS_ON_LEADING_TRIVIA`] has one, and the asymmetry is the
+/// mechanism rather than a defect count.** An atom commits the trivia it crosses to whichever node
+/// is open at that moment. A production that is *about* to open a node crosses the trivia in front
+/// of it first, at a dispatch peek made before the mark, so leading trivia lands outside — which is
+/// why that list is one entry long and the entry is the document, which spans the file. Trailing
+/// trivia has no such moment: the peek that crosses it is the peek that discovers the node is over,
+/// and that peek is made from inside the node it is ending.
+///
+/// # The three families, and every entry is in one of them
+///
+/// - **The preceding sibling inside a list**, when a production ends in an optional component it
+///   has to probe for. `{ a\n b }` reaches `a`, then peeks for arguments, for a directive and for a
+///   sub-selection; the first of those crosses the newline and commits it, and all three decline. So
+///   the newline is `Field`'s last child, not the `SelectionSet`'s: `SelectionSet > Field`,
+///   `FieldsDefinition > FieldDefinition`, `EnumValuesDefinition > EnumValueDefinition`,
+///   `ArgumentsDefinition > InputValueDefinition`, `InputFieldsDefinition > InputValueDefinition`,
+///   `VariablesDefinition > VariableDefinition`, `Directives > Directive`, and at document level
+///   `Document > ScalarTypeDefinition` and `Document > ObjectTypeExtension` — the two shapes here
+///   whose own last probe, rather than a list inside them, is what crossed the trivia.
+/// - **A list after its last element**, which is the same probe one level up: the loop peeks for
+///   another element, crosses the trivia and declines. Every `> Directives` pairing is this, as are
+///   `> ImplementsInterfaces`, `> UnionMemberTypes` and `DirectiveDefinition > DirectiveLocations`.
+/// - **Recovery geometry**, where the node that was open at the peek is open because a recovery put
+///   it there. `Document > Error` is a resynchronised run whose document-level peek crossed the
+///   trivia after it. `Argument > ListValue` is the sharper one and it has a single witness,
+///   `invalid_unterminated_bracket` (`{\n  f(a: [1, 2 }`): the list never gets its `]`, so the
+///   enclosing `}` is consumed into an `Error` *inside* the `ListValue` and the trailing newline
+///   follows it in. That is the same recovery shape this file's header already records for a
+///   `FieldDefinition` with no type, read from the other side.
+///
+/// `Root > Document` is in both lists, and for one reason: `Document` spans the whole source, so a
+/// file that begins or ends with trivia has nowhere else to put it.
+///
+/// # Why this is an array and not a sentence
+///
+/// It was a sentence. This file's header read the policy once, judged it deliberate, and left it
+/// unpinned — and the `.rast` goldens were the only thing holding the placement, which a bless would
+/// launder. smear#131 measured what that costs: an `expect` that skips trivia on its *accepting*
+/// branch instead of only before it moves this set in both directions at once, and every gate that
+/// looks like a fidelity gate stays green through it. Round-trip sees the bytes, which are all
+/// still committed; the parity gate sees one bit; the injection gate projects tokens away; and the
+/// projection differential cannot see placement at all, because `extent_of` skips trivia when it
+/// computes a span. The array is what makes the sentence fail when it stops being true.
+const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
+  "Argument > ListValue",
+  "ArgumentsDefinition > InputValueDefinition",
+  "DirectiveDefinition > DirectiveLocations",
+  "Directives > Directive",
+  "Document > Error",
+  "Document > ObjectTypeExtension",
+  "Document > ScalarTypeDefinition",
+  "EnumValueDefinition > Directives",
+  "EnumValuesDefinition > EnumValueDefinition",
+  "Field > Directives",
+  "FieldDefinition > Directives",
+  "FieldsDefinition > FieldDefinition",
+  "FragmentDefinition > Directives",
+  "FragmentSpread > Directives",
+  "InlineFragment > Directives",
+  "InputFieldsDefinition > InputValueDefinition",
+  "InterfaceTypeDefinition > ImplementsInterfaces",
+  "ObjectTypeDefinition > Directives",
+  "ObjectTypeDefinition > ImplementsInterfaces",
+  "ObjectTypeExtension > Directives",
+  "ObjectTypeExtension > ImplementsInterfaces",
+  "Root > Document",
+  "ScalarTypeDefinition > Directives",
+  "SchemaDefinition > Directives",
+  "SelectionSet > Field",
+  "UnionTypeDefinition > UnionMemberTypes",
+  "UnionTypeExtension > UnionMemberTypes",
+  "VariablesDefinition > VariableDefinition",
+];
 
 /// Fixtures the corpus does not carry, each one a tree whose *shape* is its whole content.
 ///
@@ -973,5 +1059,99 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
     pairings("type T { f: Int }").is_empty(),
     "an ordinary definition must open none of its nodes on trivia, or the sweep above cannot tell \
      a defect from the normal case"
+  );
+}
+
+/// Which nodes close on the wrong side of their trailing trivia — the twin of the check above, and
+/// the reason [`CLOSES_ON_TRAILING_TRIVIA`] is an array rather than a sentence in the header.
+///
+/// Same sweep over the same two golden sets, reading `.last()` where the leading census reads
+/// `.next()`. It is the only gate in this suite that sees trailing placement without going through
+/// a `.rast` file, which is what makes it the one that survives a bless: an `UPDATE_GOLDEN=1` run
+/// rewrites every expectation a placement change touches and leaves this assertion exactly where it
+/// was.
+///
+/// It fails in both directions and a real change moves it in both at once. smear#131 measured that
+/// with an `expect` that skipped trivia on its *accepting* branch as well as before it: pairings
+/// appeared — `OperationDefinition > OperationType`, `RootOperationTypeDefinition > NamedType`,
+/// `FieldDefinition > NamedType`, `Argument > IntValue` — and list pairings vanished, because
+/// trivia eaten by the `expect` that ends an element never reaches the loop peek that used to leave
+/// it inside the preceding sibling. So the failure is reported as the two differences rather than
+/// as two twenty-eight-element vectors: which half moved is what tells a reader whether a
+/// production gained a probe or lost one.
+#[test]
+fn only_the_recorded_nodes_close_on_their_trailing_trivia() {
+  fn pairings(src: &str) -> Vec<String> {
+    parse_document(src)
+      .syntax()
+      .descendants()
+      .filter_map(|node| {
+        let last = node.children_with_tokens().last()?.into_token()?;
+        if !TRIVIA_IMAGES.contains(&last.kind()) {
+          return None;
+        }
+        Some(format!("{:?} > {:?}", node.parent()?.kind(), node.kind()))
+      })
+      .collect()
+  }
+
+  // The recorded set is written in the order the sweep produces it, so a hand edit that duplicates
+  // an entry or files one out of place is a failure here rather than a confusing diff below.
+  assert!(
+    CLOSES_ON_TRAILING_TRIVIA.windows(2).all(|w| w[0] < w[1]),
+    "CLOSES_ON_TRAILING_TRIVIA must be sorted and free of duplicates"
+  );
+
+  let mut found: Vec<String> = corpus()
+    .iter()
+    .flat_map(|(_, src)| pairings(src))
+    .chain(SHAPE_CASES.iter().flat_map(|(_, src)| pairings(src)))
+    .collect();
+  found.sort();
+  found.dedup();
+
+  let appeared: Vec<&str> = found
+    .iter()
+    .map(String::as_str)
+    .filter(|pairing| !CLOSES_ON_TRAILING_TRIVIA.contains(pairing))
+    .collect();
+  let vanished: Vec<&str> = CLOSES_ON_TRAILING_TRIVIA
+    .iter()
+    .copied()
+    .filter(|pairing| !found.iter().any(|f| f == pairing))
+    .collect();
+  assert!(
+    appeared.is_empty() && vanished.is_empty(),
+    "the set of nodes that swallow their own trailing trivia has changed.\n  appeared: \
+     {appeared:?}\n  vanished: {vanished:?}\nA pairing that appeared is a production holding its \
+     node open across a peek it used to make from outside, which puts the node's end on the far \
+     side of a space; a pairing that vanished is trivia consumed before the peek that used to \
+     cross it, which is what an `expect` that skips on its accepting branch does. Both move the \
+     `.rast` goldens in the same diff, and blessing those does not answer this."
+  );
+
+  // The positive control, and it is not optional: an empty `found` is also what a `pairings` that
+  // had stopped detecting anything would produce, so one source must still answer with a pairing.
+  // A field that ends the line it is on is the commonest instance of the commonest family.
+  assert_eq!(
+    pairings("{ a\n  b }"),
+    vec!["SelectionSet > Field", "SelectionSet > Field"],
+    "the sweep no longer detects a node closing on its trailing trivia at all, so every empty \
+     answer below is worthless"
+  );
+  // And the negative one: a source carrying trivia that answers with nothing, or the assertion
+  // above is satisfied by a `pairings` that reports every node it sees.
+  assert!(
+    pairings("schema { query: Q }").is_empty(),
+    "a source whose every node ends on a real token must answer with no pairing at all, or this \
+     census cannot tell an attachment from a node boundary"
+  );
+  // The recovery witness, named here because it is the one entry in the array no valid source
+  // produces. If the corpus loses `invalid_unterminated_bracket`, `Argument > ListValue` vanishes
+  // and the difference above reports it without saying why.
+  assert!(
+    pairings("{\n  f(a: [1, 2 }\n").contains(&"Argument > ListValue".to_string()),
+    "the unterminated bracket no longer parks the enclosing `}}` and the newline after it inside \
+     the `ListValue`, so the recovery family has lost its only witness"
   );
 }
