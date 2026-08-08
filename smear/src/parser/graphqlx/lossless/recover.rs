@@ -155,6 +155,14 @@ pub(crate) const OPERATION_TYPE_HEADS: &[Kind] = &[Kind::Identifier];
 pub(crate) const DESCRIBED_MEMBER_HEADS: &[Kind] =
   &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
 
+/// The token kinds that may follow a description on a definition: the keyword that opens the
+/// described definition, and nothing else.
+///
+/// Every alternative carrying a `Description?` opens with a keyword — an `Identifier` to the
+/// lexer. The one that does not is the shorthand `OperationDefinition : SelectionSet`, which is
+/// why this set excludes the `{` that [`EXECUTABLE_DEFINITION_HEADS`] admits.
+pub(crate) const DESCRIBED_DEFINITION_HEADS: &[Kind] = &[Kind::Identifier];
+
 /// The token kinds a type-system definition may begin with — a description, or one of the eight
 /// keyword spellings, all of which are `Identifier`s.
 pub(crate) const TYPE_SYSTEM_DEFINITION_HEADS: &[Kind] =

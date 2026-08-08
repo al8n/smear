@@ -372,8 +372,9 @@ impl<S> DirectiveLike<S> for ConstDirective<S> {
 
 /// Returns a definition by index, stripped of the description wrapper.
 ///
-/// Descriptions on executable definitions are a frozen-parser compatibility affordance and mean
-/// nothing to the specification, so no rule ever sees one.
+/// Descriptions on executable definitions are documentation and nothing else — the spec says
+/// they "MUST NOT affect the execution, validation, or response of a GraphQL document" — so no
+/// rule ever sees one. `tests/validator_descriptions.rs` holds that as a verdict equivalence.
 #[inline]
 pub(crate) fn definition<S>(
   document: &ExecutableDocument<S>,

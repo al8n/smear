@@ -313,6 +313,97 @@ fn described_executables_and_documents_dispatch_imports_without_reclassifying_he
 }
 
 #[test]
+fn a_description_reaches_every_position_the_grammar_gives_one() {
+  // `OperationDefinition : Description? OperationType …`, `FragmentDefinition : Description?
+  // fragment …` and `VariableDefinition : Description? Variable : Type …`. GraphQLx tracks the
+  // GraphQL executable grammar in all three.
+  fn described_operation<S: AsRef<[u8]>>(definition: ast::DescribedExecutableDefinition<S>) {
+    assert!(definition.description().is_some());
+    assert!(definition.node().unwrap_operation_ref().is_named());
+  }
+  fn described_fragment<S: AsRef<[u8]>>(definition: ast::DescribedExecutableDefinition<S>) {
+    assert!(definition.description().is_some());
+    assert!(definition.node().is_fragment());
+  }
+  fn described_variable<S: AsRef<[u8]>>(definition: ast::DescribedExecutableDefinition<S>) {
+    let operation = definition.node().unwrap_operation_ref();
+    let variables = operation
+      .unwrap_named_ref()
+      .variable_definitions()
+      .expect("variables definition");
+    assert!(variables.variable_definitions()[0].description().is_some());
+  }
+
+  accept_all!(
+    ast::DescribedExecutableDefinition::graphqlx,
+    "\"\"\"operation\"\"\" mutation M { id }",
+    described_operation
+  );
+  accept_all!(
+    ast::DescribedExecutableDefinition::graphqlx,
+    "\"\"\"fragment\"\"\" fragment F on ::model::Item { id }",
+    described_fragment
+  );
+  accept_all!(
+    ast::DescribedExecutableDefinition::graphqlx,
+    "query Q(\"\"\"variable\"\"\" $v: Int) { id }",
+    described_variable
+  );
+}
+
+#[test]
+fn a_description_may_not_precede_the_shorthand_operation() {
+  // The second `OperationDefinition` alternative is a bare `SelectionSet` with no `Description?`
+  // slot, so the `{` is reported where it stands.
+  for source in ["\"docs\" { id }", "\"\"\"docs\"\"\" { id }"] {
+    assert!(
+      drive_str(
+        |inp| ast::DescribedExecutableDefinition::graphqlx(inp).map(|_| ()),
+        source
+      )
+      .is_err(),
+      "a description may not decorate the shorthand operation: {source:?}"
+    );
+    assert!(
+      drive_str(
+        |inp| ast::ExecutableDocument::graphqlx(inp).map(|_| ()),
+        source
+      )
+      .is_err(),
+      "the executable document holds the same rule: {source:?}"
+    );
+    assert!(
+      drive_str(
+        |inp| super::super::document::document(inp).map(|_| ()),
+        source
+      )
+      .is_err(),
+      "and so does the mixed document root: {source:?}"
+    );
+  }
+
+  assert_unexpected(
+    drive_str(
+      |inp| ast::DescribedExecutableDefinition::graphqlx(inp).map(|_| ()),
+      "\"docs\" { id }",
+    ),
+    Expectation::OperationTypeOrFragment,
+    Some(SyntacticTokenKind::LBrace),
+  );
+
+  // The undescribed shorthand is still ordinary GraphQLx.
+  fn shorthand<S: AsRef<[u8]>>(definition: ast::DescribedExecutableDefinition<S>) {
+    assert!(definition.description().is_none());
+    assert!(definition.node().unwrap_operation_ref().is_shorthand());
+  }
+  accept_all!(
+    ast::DescribedExecutableDefinition::graphqlx,
+    "{ id }",
+    shorthand
+  );
+}
+
+#[test]
 fn executable_document_accepts_graphqlx_executable_fixtures() {
   const FIXTURES: &[&str] = &[
     include_str!(

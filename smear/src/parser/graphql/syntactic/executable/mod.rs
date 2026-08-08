@@ -402,9 +402,10 @@ where
 executable_parser!(
   /// Parses a described GraphQL variable definition.
   ///
-  /// The optional leading string description is frozen-parser compatibility;
-  /// the variable, colon, type, default-value, and directive phases remain
-  /// committed and receive local diagnostics.
+  /// `VariableDefinition : Description? Variable : Type DefaultValue?
+  /// Directives[Const]?` — the leading string is the production's own optional
+  /// description. The variable, colon, type, default-value, and directive phases
+  /// remain committed and receive local diagnostics.
   ///
   /// See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables).
   pub variable_definition,
@@ -683,13 +684,15 @@ executable_parser!(
 executable_parser!(
   /// Parses one GraphQL executable definition.
   ///
-  /// An optional leading string description is frozen-parser/dialect
-  /// compatibility, not part of the standard GraphQL executable-definition
-  /// grammar. After an accepted description, the following definition head is
-  /// committed. One-token dispatch then chooses shorthand, a named operation,
-  /// or a fragment. Each branch consumes its classified head directly before
-  /// entering the corresponding committed tail; rejected non-description heads
-  /// stay unconsumed for recovery.
+  /// Both keyworded alternatives open with an optional description —
+  /// `OperationDefinition : Description? OperationType …` and
+  /// `FragmentDefinition : Description? fragment …`. After an accepted
+  /// description, the following definition head is committed. One-token dispatch
+  /// then chooses shorthand, a named operation, or a fragment; the shorthand
+  /// `OperationDefinition : SelectionSet` has no `Description?` slot and is
+  /// refused once one was read. Each branch consumes its classified head directly
+  /// before entering the corresponding committed tail; rejected heads stay
+  /// unconsumed for recovery.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
   /// for the wrapped inner definition.
@@ -707,6 +710,19 @@ executable_parser!(
     let found = classified.found();
     let mut named_head = None;
     let branch: Branch<2> = match classified {
+      // Only the keyworded alternatives carry a `Description?`; the shorthand
+      // `OperationDefinition : SelectionSet` does not. The `{` is reported where it
+      // stands and left unconsumed, so a caller resumes at the selection set rather
+      // than inside it.
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..)
+        if description.is_some() =>
+      {
+        return expected_classified_executable_head(
+          inp,
+          Expectation::OperationTypeOrFragment,
+          found,
+        );
+      }
       ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..) => Branch::B0,
       ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(head), span, ..) => {
         named_head = Some((head, span.start()));
@@ -770,9 +786,9 @@ where
 executable_parser!(
   /// Parses a nonempty GraphQL executable document.
   ///
-  /// A document has no enclosing delimiter. Its optional leading definition
-  /// descriptions are frozen-parser/dialect compatibility, not standard
-  /// GraphQL syntax.
+  /// A document has no enclosing delimiter. Each definition may open with its own
+  /// optional description, which the keyworded alternatives carry and the
+  /// shorthand does not.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
   /// for each wrapped inner definition.
@@ -825,7 +841,7 @@ macro_rules! impl_executable_api {
 }
 
 impl_executable_api!(
-  /// Parses a variable definition without an optional compatibility description.
+  /// Parses a variable definition without its optional leading description.
   ///
   /// See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables).
   S,
@@ -835,7 +851,7 @@ impl_executable_api!(
 );
 
 impl_executable_api!(
-  /// Parses a variable definition with its optional frozen-compatibility description.
+  /// Parses a variable definition with its optional leading description.
   ///
   /// See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables).
   S,
@@ -875,9 +891,10 @@ impl_executable_api!(
 );
 
 impl_executable_api!(
-  /// Parses an executable definition with optional frozen-parser/dialect
-  /// compatibility description. Standard GraphQL executable definitions are
-  /// not described.
+  /// Parses an executable definition with its optional leading description.
+  ///
+  /// The shorthand `OperationDefinition : SelectionSet` has no `Description?`
+  /// slot and is refused once one was read.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
   /// for the wrapped inner definition.
@@ -888,9 +905,8 @@ impl_executable_api!(
 );
 
 impl_executable_api!(
-  /// Parses a nonempty executable document whose optional definition
-  /// descriptions are frozen-parser/dialect compatibility, not standard
-  /// GraphQL syntax.
+  /// Parses a nonempty executable document whose definitions may each open with
+  /// their own optional description.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
   /// for each wrapped inner definition.

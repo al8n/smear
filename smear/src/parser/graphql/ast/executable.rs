@@ -212,14 +212,15 @@ impl<S, Ty> IntoSpan<Span> for ExecutableDefinition<S, Ty> {
 
 /// A top-level executable definition with an optional leading description.
 ///
-/// Leading descriptions are frozen-parser/dialect compatibility. They are not
-/// part of the standard GraphQL executable-definition grammar.
+/// Both keyworded alternatives carry one — `OperationDefinition : Description?
+/// OperationType …` and `FragmentDefinition : Description? fragment …`. The
+/// shorthand `OperationDefinition : SelectionSet` does not, so a described
+/// wrapper around a shorthand operation is not a document this parser builds.
 pub type DescribedExecutableDefinition<S, Ty = Type<Name<S>>> =
   Described<ExecutableDefinition<S, Ty>, S>;
 
 /// A nonempty GraphQL executable document.
 ///
-/// Its definitions may carry leading descriptions for frozen-parser/dialect
-/// compatibility; standard GraphQL executable definitions are not described.
+/// Each definition may carry its own leading description.
 pub type ExecutableDocument<S, Ty = Type<Name<S>>> =
   crate::parser::executable::Document<DescribedExecutableDefinition<S, Ty>>;

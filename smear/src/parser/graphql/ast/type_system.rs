@@ -306,8 +306,9 @@ pub type Definition<S, Ty = Type<Name<S>>> =
 
 /// A GraphQL definition with an optional leading description.
 ///
-/// Descriptions on executable definitions are frozen-parser/dialect
-/// compatibility, not standard GraphQL executable syntax.
+/// Every keyworded definition carries one, executable and type-system alike. The
+/// shorthand `OperationDefinition : SelectionSet` is the one alternative that
+/// does not.
 pub type DescribedDefinition<S, Ty = Type<Name<S>>> = Described<Definition<S, Ty>, S>;
 
 /// A GraphQL definition with an optional description, or a type-system extension.
@@ -320,7 +321,7 @@ pub type DefinitionOrExtension<S, Ty = Type<Name<S>>> =
 /// A nonempty full GraphQL document.
 ///
 /// Its entries may be executable definitions, type-system definitions, or
-/// type-system extensions. Executable descriptions are retained for
-/// frozen-parser/dialect compatibility.
+/// type-system extensions. Descriptions belong to definitions of either family;
+/// a type-system extension never carries one.
 pub type Document<S, Ty = Type<Name<S>>> =
   crate::parser::executable::Document<DefinitionOrExtension<S, Ty>>;

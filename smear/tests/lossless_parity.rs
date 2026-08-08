@@ -1041,36 +1041,53 @@ fn the_eleven_former_divergences_are_rejected_without_losing_their_text() {
   }
 }
 
-/// The compatibility extension both suites share, pinned as a *non*-divergence.
+/// Where the `Description?` slot is, in both suites, on both sides of the line.
 ///
-/// A leading `Description` on an **executable** definition is not GraphQL — `apollo-parser`
-/// rejects it — but `syntactic/`'s `described_definition` accepts it for frozen-parser
-/// compatibility, and `lossless/document.rs` matches that deliberately. It is therefore a
-/// divergence from the *spec*, not between the two suites, and the parity gate must stay silent
-/// about it: `valid_executable_described_operation.graphql` carries it as an ordinary valid
-/// entry. This test states the reason that entry is filed where it is.
+/// The current draft gives one to every keyworded executable definition —
+/// `OperationDefinition : Description? OperationType …`, `FragmentDefinition : Description?
+/// fragment …`, `VariableDefinition : Description? Variable …` — so a described operation is
+/// ordinary GraphQL and `valid_executable_described_operation.graphql` carries it as an
+/// ordinary valid entry.
 ///
-/// The neighbouring case is the opposite ruling and is pinned the same way: a description before
-/// an **extension** is rejected by both (`invalid_described_extension.graphql`), because
-/// `syntactic/`'s described path commits to a definition and can never reach an extension.
+/// The two neighbouring refusals are grammar, not taste, and both suites hold them:
+///
+/// - the shorthand `OperationDefinition : SelectionSet` is the one definition alternative with
+///   **no** `Description?` slot, so `"doc" { f }` is invalid;
+/// - a `TypeSystemExtension` has none either, so `"doc" extend …` is invalid
+///   (`invalid_described_extension.graphql`), because the described path commits to a
+///   definition and can never reach an extension.
 #[test]
-fn a_description_before_an_executable_definition_is_accepted_by_both() {
+fn the_two_suites_agree_on_where_a_description_may_appear() {
   for src in [
     "\"doc\" query Q { f }",
     "\"doc\" mutation M { f }",
+    "\"doc\" subscription S { f }",
     "\"doc\" fragment F on T { f }",
-    "\"doc\" { f }",
+    "query Q(\"doc\" $v: Int) { f }",
+    "{ f }",
   ] {
     assert!(!lossless_has_errors(src), "lossless rejected {src:?}");
     assert!(!syntactic_has_errors(src), "syntactic rejected {src:?}");
   }
 
   for src in [
+    "\"doc\" { f }",
+    "\"\"\"doc\"\"\" { f }",
     "\"doc\" extend type T { f: Int }",
     "\"doc\" extend scalar S @d",
   ] {
     assert!(lossless_has_errors(src), "lossless accepted {src:?}");
     assert!(syntactic_has_errors(src), "syntactic accepted {src:?}");
+  }
+
+  // A rejected described shorthand still keeps every byte, which is what makes the refusal a
+  // diagnostic rather than a hole in the tree.
+  for src in ["\"doc\" { f }", "\"\"\"doc\"\"\" { f }"] {
+    assert_eq!(
+      parse_document(src).syntax().text().to_string(),
+      src,
+      "{src:?}: a rejected parse still keeps every byte"
+    );
   }
 }
 

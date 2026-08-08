@@ -107,6 +107,14 @@ pub enum Expectation {
   From,
   /// The contextual `as` keyword.
   As,
+  /// An operation type or the `fragment` keyword.
+  ///
+  /// The position after a leading description on an executable definition. Only
+  /// the keyworded alternatives carry a `Description?` — `OperationDefinition :
+  /// Description? OperationType …` and `FragmentDefinition : Description?
+  /// fragment …` — so the shorthand `OperationDefinition : SelectionSet` cannot
+  /// follow one.
+  OperationTypeOrFragment,
   /// A keyword with the given spelling.
   Keyword(&'static str),
 }

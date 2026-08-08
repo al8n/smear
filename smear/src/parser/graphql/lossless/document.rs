@@ -82,9 +82,9 @@ use super::{
   executable::{fragment_definition, operation_definition},
   recover,
   recover::{
-    BLOCK_EXTENSION_TAIL_HEADS, DEFINITION_HEADS, OBJECT_EXTENSION_TAIL_HEADS,
-    SCALAR_EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS, TYPE_SYSTEM_DEFINITION_HEADS,
-    UNION_EXTENSION_TAIL_HEADS,
+    BLOCK_EXTENSION_TAIL_HEADS, DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS,
+    OBJECT_EXTENSION_TAIL_HEADS, SCALAR_EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS,
+    TYPE_SYSTEM_DEFINITION_HEADS, UNION_EXTENSION_TAIL_HEADS,
   },
   trivia::{expect, peek_as, peek_kind},
   value::Constness,
@@ -322,10 +322,16 @@ lossless_production! {
       description::<Src, Ctx>(inp)?;
     }
     match peek_kind::<Src, Ctx>(inp)? {
-      // The shorthand operation, which has no keyword at all — and which a description may
-      // still precede: `syntactic/`'s described path routes through `definition`, whose own
-      // first check is for the `{`. It is only `extend` that the described path never reaches.
-      Some(Kind::LBrace) => operation_definition::<Src, Ctx>(inp, mark),
+      // The shorthand operation, which has no keyword at all — and which a description may not
+      // precede: `OperationDefinition : SelectionSet` is the one definition alternative with no
+      // `Description?` slot, so `syntactic/`'s described path rejects the combination and this
+      // one must. The operation is still parsed, for the reason the `extend` arm below records.
+      Some(Kind::LBrace) => {
+        if described {
+          recover::report_unexpected::<Src, Ctx>(inp, DESCRIBED_DEFINITION_HEADS)?;
+        }
+        operation_definition::<Src, Ctx>(inp, mark)
+      }
       Some(Kind::Identifier) => match peek_as::<Src, Ctx, ContextualKeyword>(inp)? {
         Some(
           ContextualKeyword::Query | ContextualKeyword::Mutation | ContextualKeyword::Subscription,

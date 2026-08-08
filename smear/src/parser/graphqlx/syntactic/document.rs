@@ -194,8 +194,10 @@ fn described_definition<S>(
 
 /// Enters a complete document definition after a leading description.
 ///
-/// A description can only decorate an executable or type-system definition;
-/// GraphQLx imports and extensions deliberately remain undescribed.
+/// A description can only decorate a *keyworded* executable or type-system
+/// definition; GraphQLx imports and extensions deliberately remain undescribed, and
+/// the shorthand `OperationDefinition : SelectionSet` is the one definition
+/// alternative the grammar gives no `Description?` slot.
 fn entry_after_description<'inp, Src, Ctx>(
   description: StringValue<GraphqlxSlice<'inp, Src>>,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -215,9 +217,9 @@ where
       type_system_definition_after_keyword(inp, keyword, span.start())
         .map(Definition::TypeSystem)?
     }
-    Some(DocumentHead::Executable(head)) => {
-      executable_definition_after_head(head, inp).map(Definition::Executable)?
-    }
+    Some(DocumentHead::Executable(
+      head @ (ExecutableDefinitionHead::Operation(_) | ExecutableDefinitionHead::Fragment),
+    )) => executable_definition_after_head(head, inp).map(Definition::Executable)?,
     _ => return unexpected_here(inp, Expectation::Keyword("definition after description")),
   };
   Ok(ImportOrDefinitionOrExtension::Definition(

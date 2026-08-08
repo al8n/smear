@@ -88,8 +88,11 @@ pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[Kind::Identifier, Kind::At, Kind
 /// token-kind one, and no production here carries the bound that would reach it.
 pub(crate) const TYPE_CONDITION_HEADS: &[Kind] = &[Kind::Identifier];
 
-/// The token kinds a `VariableDefinition` may begin with.
-pub(crate) const VARIABLE_DEFINITION_HEADS: &[Kind] = &[Kind::Dollar];
+/// The token kinds a `VariableDefinition` may begin with: its `$`, or the leading string of a
+/// description — `VariableDefinition : Description? Variable : Type …`, so both string kinds
+/// are heads here and the `$` is only the most common one.
+pub(crate) const VARIABLE_DEFINITION_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Dollar];
 
 /// The token kinds an executable definition may begin with: the leading string of a
 /// description, the `{` of a shorthand operation, or the
@@ -101,6 +104,15 @@ pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[
   Kind::LBrace,
   Kind::Identifier,
 ];
+
+/// The token kinds that may follow a description on a definition: the keyword that opens the
+/// described definition, and nothing else.
+///
+/// Every alternative that carries a `Description?` opens with a keyword — an `Identifier` to
+/// the lexer. The one that does not is the shorthand `OperationDefinition : SelectionSet`, so
+/// this set is [`EXECUTABLE_DEFINITION_HEADS`] minus the two string kinds a description cannot
+/// follow itself with, and minus the `{` that is the whole point of the exclusion.
+pub(crate) const DESCRIBED_DEFINITION_HEADS: &[Kind] = &[Kind::Identifier];
 
 /// The token kinds a described SDL member may begin with: its own name, or the leading string
 /// of a description.

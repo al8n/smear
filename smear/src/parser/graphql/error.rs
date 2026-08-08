@@ -261,6 +261,14 @@ pub enum Expectation {
   OperationType,
   /// An executable definition was expected.
   ExecutableDefinition,
+  /// An operation type or the `fragment` keyword was expected.
+  ///
+  /// The position after a leading description on an executable definition. Only
+  /// the keyworded alternatives carry a `Description?` — `OperationDefinition :
+  /// Description? OperationType …` and `FragmentDefinition : Description?
+  /// fragment …` — so the shorthand `OperationDefinition : SelectionSet` cannot
+  /// follow one.
+  OperationTypeOrFragment,
   /// Fragment name was expected.
   FragmentName,
   /// A name was expected.
