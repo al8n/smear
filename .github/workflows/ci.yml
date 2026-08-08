@@ -212,7 +212,8 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: bash ci/check_workflow_triggers.sh
 
-  # Check that no public entry has narrowed the source type to a concrete one
+  # Check that no public entry has narrowed the source type to a concrete one, and that no public
+  # error type has slipped out of the diagnostic contract
   #
   # The crate ships `bstr`, `bytes`, `hipstr`, `smallvec` and `smol-bytes` integrations so that a
   # consumer picks its own source representation, and §3, syntactic §5 and §6/§7 all honour that
@@ -222,19 +223,37 @@ jobs:
   # come and every one of them adds public entries, so a gate that exists BEFORE them turns each
   # future narrowing into an error at the moment it is written rather than into an audit later.
   #
+  # The same binary now also runs #126's D1–D4: every public error type either answers `Diagnose`
+  # or is recorded with a reason, the answering ones are proved by a generated crate that `cargo
+  # check` decides, no accessor the per-variant enforcement runs through carries a wildcard arm,
+  # and every `ALL`-style inventory enumerates its enum. The last of those closes a hole #126
+  # measured directly: planting a variant on `SchemaErrorKind` reddened five wildcard-free matches
+  # and left `SchemaErrorKind::ALL` green.
+  #
   # TWO STEPS, BOTH NAMED, AND THE SELFTEST FIRST. `ci/miri_scope.py` is the local model: it runs
   # its own selftest before the expensive work, because a guard that cannot fail is the defect the
-  # guard exists to catch. The census's selftest runs its verdict against synthetic crates and
-  # requires every branch to fire; if it cannot, this job is red before it has read `smear` at all.
+  # guard exists to catch. Both censuses run their verdicts against synthetic crates and require
+  # every branch to fire; if either cannot, this job is red before it has read `smear` at all.
   #
   # `-p source-census` NAMES THE PACKAGE. A cargo target *filter* that matches nothing warns and
   # exits 0, which is exactly how a gate here becomes vacuous — measured on 1.97.1, `-p` on a
   # package that does not exist is `error: package ID specification did not match any packages`,
-  # exit 101. The census additionally refuses to pass on a run that read zero public entries, and
-  # its exemption table fails on any entry that matches nothing, so a reader that stops finding
-  # the crate's surface reddens rather than reporting a clean one.
+  # exit 101. The census additionally refuses to pass on a run that read zero public entries, zero
+  # error types, zero accessor matches or zero inventories, both exemption tables fail on any entry
+  # that matches nothing, and D2 fails on a probe with no assertions in it — so a reader that stops
+  # finding the crate's surface reddens rather than reporting a clean one.
   #
-  # In no `needs:` chain, and about twenty seconds once `syn` is cached, so it blocks nothing.
+  # `--no-probe` EXISTS AND MUST NOT BE USED HERE. It skips D2's `cargo check` for a fast local
+  # loop and the run then fails on purpose, saying so; the flag is named in this comment so that
+  # adding it to the step below is a visible decision rather than a quiet one.
+  #
+  # D2 compiles `smear` with every feature, which is what takes this job from twenty seconds to a
+  # couple of minutes on a cold cache. That is the cost of the property: a probe built with fewer
+  # features would be a check narrower than what it claims. `source-census` itself still has no
+  # dependency edge to `smear` — the probe is a crate generated under `target/`, with its own
+  # `[workspace]` and its own target directory, which the cache below already covers.
+  #
+  # In no `needs:` chain, so it blocks nothing.
   source-genericity:
     name: source-genericity
     runs-on: ubuntu-latest
