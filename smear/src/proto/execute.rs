@@ -41,7 +41,7 @@ use crate::{
 
 use super::{
   Argument, ArgumentSource, Error, FieldRequest, Leaf, Node, ReqId, Values,
-  collect::{Group, Interner, collect_fields},
+  collect::{Group, Interner, Visits, collect_fields},
   error::{Raw, Row},
   request::name_bytes,
   response::{Key, NONE, Slot, State, node},
@@ -52,14 +52,35 @@ mod tests;
 
 /// What the executor will not do, whatever the document or the driver asks.
 ///
-/// Three knobs, bounding three different things: how much work is *outstanding*
-/// ([`max_in_flight`](Limits::max_in_flight)), how many positions the response *has*
-/// ([`max_response_slots`](Limits::max_response_slots)), and how much per-position bookkeeping
-/// those positions *cost* ([`max_merged_selections`](Limits::max_merged_selections)). Selection
-/// depth needs none of them — it is bounded by the document, which the validator has already
-/// accepted with acyclic fragments (draft 5.5.2.2) — and list *nesting* is bounded at
-/// [`MAX_WRAPPERS`](crate::validator::schema::MAX_WRAPPERS) by the schema, so a limit on either
-/// could never fire and a limit that cannot fire is not a limit.
+/// # One knob per resource, derived rather than accumulated
+///
+/// Three review rounds added one ceiling each, and each was found to be the wrong unit by the
+/// next. The cause was singular and is worth stating plainly: **checks were placed on allocation
+/// sites, and several of the resources are not allocation sites.** What follows is the enumeration
+/// that replaced that — resource by resource, each with the path that would spend it *without*
+/// passing its check, which is the column that makes a row falsifiable rather than reassuring.
+///
+/// | resource | unit | ceiling | charged where | what would spend it unchecked |
+/// |---|---|---|---|---|
+/// | outstanding work | requests | [`max_in_flight`](Limits::max_in_flight) | `poll_resolve` withholds, and the slab reuses freed entries | — |
+/// | response positions | positions | [`max_response_slots`](Limits::max_response_slots) | `push_child`, the only creator | — |
+/// | response metadata | merged selections **and** location spans, counted as one | [`max_response_metadata`](Limits::max_response_metadata) | `expand` before appending, and `fail_at` | a writer appending spans without charging — which `fail_at` did, making the ceiling neither bound it claimed |
+/// | collection work | selections **examined**, surviving or not | [`max_selection_visits`](Limits::max_selection_visits) | `walk`, once per selection looked at | charging appends instead of visits, which lets a document of fragments that collect nothing walk free |
+/// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
+/// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
+/// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
+/// | list nesting | — | [`MAX_WRAPPERS`](crate::validator::schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
+///
+/// Two rows are deliberately not ceilings. **Depth was removed rather than bounded**, because a
+/// depth ceiling's right value is a function of the deployment's stack and a heap stack has no such
+/// question. **Error rows are derived**, and the derivation is the falsifier: `coerce_arguments`
+/// returns after its first `fail_at` and a failed position is discarded, so one position
+/// contributes one row.
+///
+/// What none of them bounds is the cost of a *single* visit — `fragment_index` and
+/// `Interner::intern` both scan linearly, which is al8n/smear#141. That is a query quantity
+/// multiplying a query quantity, and the visit budget is what stops a driver answer from
+/// multiplying it as well.
 ///
 /// # A budget on one factor of a product bounds nothing
 ///
@@ -100,6 +121,10 @@ mod tests;
 /// a cap of `C` on each list still admits `C¹⁵` positions from one answer; at `C = 4` that is
 /// already 10⁹. What has to be bounded is the total, which is why the knob counts **positions in
 /// the response tree** rather than elements in a list.
+///
+/// Selection *depth* appears nowhere above because it stopped being a resource: draft §6.3's walk
+/// runs on an explicit stack, so descending spends heap the visit budget already counts instead of
+/// native frames nothing counted.
 ///
 /// It is enforced inside the one function that creates a position, so a phase that adds a new way
 /// to create one inherits the bound rather than having to remember it — the design's standing rule
@@ -184,9 +209,10 @@ pub struct Limits {
   /// |---|---|
   /// | the slot index in `push_child` | this ceiling |
   /// | a list element's `Key::Index` | this ceiling, via a `try_from` on the same decision |
-  /// | the two metadata range starts in `expand` | [`max_merged_selections`](Limits::max_merged_selections), via a `try_from` on the same decision |
+  /// | the two metadata range starts in `expand` | [`max_response_metadata`](Limits::max_response_metadata), via a `try_from` on the same decision |
   /// | the in-flight slab index | [`max_in_flight`](Limits::max_in_flight) |
-  /// | `fail_at`'s location index | `max_merged_selections + max_response_slots`, since an error contributes at most one span and a position fails at most once — exact for every configuration whose two ceilings sum below `u32::MAX`, which both defaults do by three orders of magnitude |
+  /// | `fail_at`'s location index | [`max_response_metadata`](Limits::max_response_metadata), which `fail_at` now charges, plus at most one for the root's fallback — and `try_from`-checked besides |
+  /// | the interner's arena offset, entry length and id | [`max_interned_bytes`](Limits::max_interned_bytes), and each `try_from`-checked independently of it |
   /// | the operation index in `operation_index` | the document's own length, which no ceiling here bounds and nothing in this module creates |
   pub max_response_slots: NonZeroU32,
 
@@ -211,7 +237,44 @@ pub struct Limits {
   /// The default is four times the position ceiling rather than equal to it: a group of one is the
   /// ordinary case, so this is only reached by a document that merges heavily, and a response of
   /// legitimately merged selections should not be refused for being tidy.
-  pub max_merged_selections: NonZeroU32,
+  pub max_response_metadata: NonZeroU32,
+
+  /// How many selections draft §6.3's collection may examine, across the whole operation.
+  ///
+  /// Charged per selection *looked at*, surviving or not. That is the difference between this and
+  /// every other ceiling here, and it is deliberate: the others count what was produced, and a
+  /// document built out of fragments that collect nothing produces nothing while walking as far as
+  /// it likes.
+  ///
+  /// It is also what replaced a recursion. `walk` used to descend the native stack once per named
+  /// fragment in a chain, and a chain is flat in the document, so no parser depth limit could see
+  /// it — a measured 1,500 links aborted the process with `SIGABRT`. The walk now runs on an
+  /// explicit stack, which turns depth into heap that this budget already bounds, so there is no
+  /// depth knob to get wrong per deployment.
+  ///
+  /// Per operation rather than per call, because `collect_fields` runs once per object position: a
+  /// per-call budget would leave the total at `positions × budget`, and positions are the driver's.
+  /// Counting down across the operation means no driver answer multiplies collection work.
+  pub max_selection_visits: NonZeroU32,
+
+  /// How many bytes of interned text the response may hold.
+  ///
+  /// Response keys, `__typename` answers and the names an error message quotes are stored once
+  /// each in one arena, and so are the messages
+  /// [`handle_field_error`](Executor::handle_field_error) is handed. That last population is the
+  /// reason this is a ceiling and not an invariant: its size is the *driver's*, one message per
+  /// failed position, and neither the length nor the count is anything the query bounds.
+  ///
+  /// **This one is a correctness ceiling before it is a resource ceiling.** Offsets into the arena
+  /// are `u32`. Without a bound, an arena past four gigabytes does not fail to allocate — it
+  /// truncates, and every name interned afterwards reads back the wrong bytes, so a response comes
+  /// out well formed and quietly wrong. The narrowing is checked as well, so the two are
+  /// independent: the check cannot be defeated by choosing a larger ceiling.
+  ///
+  /// A refusal degrades rather than propagates. A driver message that will not fit is reported as
+  /// a field error without its text; a *name* that will not fit cannot be degraded that way — a
+  /// response key is the position — so that one refuses the position.
+  pub max_interned_bytes: NonZeroU32,
 }
 
 /// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
@@ -228,9 +291,20 @@ const DEFAULT_IN_FLIGHT: NonZeroU32 = NonZeroU32::new(256).expect("256 is not ze
 const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20 is not zero");
 
 /// Four entries per position, which is generous for a document that merges and unreachable for one
-/// that does not: a group of one is the ordinary case, so an ordinary response spends this at the
-/// same rate it spends positions and runs out of positions first.
-const DEFAULT_MERGED_SELECTIONS: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
+/// that does not: a group of one costs two entries — one merged selection and one location — so an
+/// ordinary response spends this at twice the rate it spends positions and still runs out of
+/// positions first.
+const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
+
+/// Sixteen million selections examined, which no honest query approaches and no dishonest one
+/// passes: a document large enough to spend it has to *be* large, and the parser and the network
+/// have opinions about that long before this does.
+const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+
+/// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a
+/// great many driver messages, and three orders of magnitude below where a `u32` offset stops
+/// working.
+const DEFAULT_INTERNED_BYTES: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
 
 impl Default for Limits {
   #[inline]
@@ -238,7 +312,9 @@ impl Default for Limits {
     Self {
       max_in_flight: DEFAULT_IN_FLIGHT,
       max_response_slots: DEFAULT_RESPONSE_SLOTS,
-      max_merged_selections: DEFAULT_MERGED_SELECTIONS,
+      max_response_metadata: DEFAULT_RESPONSE_METADATA,
+      max_selection_visits: DEFAULT_SELECTION_VISITS,
+      max_interned_bytes: DEFAULT_INTERNED_BYTES,
     }
   }
 }
@@ -255,6 +331,7 @@ impl Default for Limits {
 enum Exhausted {
   Positions,
   Selections,
+  Names,
 }
 
 /// Why [`Executor::start`] refused.
@@ -378,6 +455,10 @@ where
   scratch_groups: std::vec::Vec<Group>,
   scratch_visited: std::vec::Vec<u32>,
   scratch_sets: std::vec::Vec<&'a SelectionSet<S>>,
+  /// Draft §6.3's descent, as heap rather than as native frames. See `collect::walk`.
+  scratch_stack: std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+  /// What is left of [`Limits::max_selection_visits`] for this operation.
+  visits: Visits,
   /// Draft §6.4.1's surviving arguments, for the one request `poll_resolve` is offering.
   ///
   /// The only driver values the executor owns that are not part of the response, and so the only
@@ -421,7 +502,7 @@ where
       meta: std::vec::Vec::new(),
       merged: std::vec::Vec::new(),
       locations: std::vec::Vec::new(),
-      interner: Interner::default(),
+      interner: Interner::new(limits.max_interned_bytes.get()),
       errors: std::vec::Vec::new(),
       inflight: std::vec::Vec::new(),
       epoch: 0,
@@ -437,6 +518,8 @@ where
       scratch_groups: std::vec::Vec::new(),
       scratch_visited: std::vec::Vec::new(),
       scratch_sets: std::vec::Vec::new(),
+      scratch_stack: std::vec::Vec::new(),
+      visits: Visits::new(limits.max_selection_visits.get()),
       scratch_args: std::vec::Vec::new(),
     }
   }
@@ -633,8 +716,14 @@ where
     if self.discarded(slot) {
       return;
     }
-    let message = self.interner.intern(message.as_bytes());
-    self.fail(slot, Raw::Resolver { message });
+    // The driver's failure is reported whether or not its text can be kept. Dropping the text is
+    // a loss; letting it push the arena past what a `u32` offset can address would corrupt every
+    // name interned after it, which is not.
+    let raw = match self.interner.intern(message.as_bytes()) {
+      Some(message) => Raw::Resolver { message },
+      None => Raw::ResolverUnstorable,
+    };
+    self.fail(slot, raw);
   }
 
   /// Returns a request whose value can no longer affect the response.
@@ -832,7 +921,10 @@ where
             .and_then(|sym| self.schema.type_of_sym(sym))
             .filter(|&id| self.schema.type_def(id).kind() == TypeKind::Object)
             .filter(|&id| self.schema.is_possible_object(base, id));
-          Some((id, self.interner.intern(name.as_bytes())))
+          self
+            .interner
+            .intern(name.as_bytes())
+            .map(|runtime| (id, runtime))
         }
       };
       match resolved {
@@ -899,6 +991,7 @@ where
     let mut fields = core::mem::take(&mut self.scratch_fields);
     let mut groups = core::mem::take(&mut self.scratch_groups);
     let mut visited = core::mem::take(&mut self.scratch_visited);
+    let mut stack = core::mem::take(&mut self.scratch_stack);
     let collected = collect_fields(
       self.schema,
       self.document,
@@ -909,6 +1002,8 @@ where
       &mut visited,
       &mut fields,
       &mut groups,
+      &mut stack,
+      &mut self.visits,
     );
     if let Err(fault) = collected {
       // Nothing was collected, so no child slot exists to leak. The scratch vectors go back before
@@ -918,6 +1013,8 @@ where
       self.scratch_fields = fields;
       self.scratch_groups = groups;
       self.scratch_visited = visited;
+      stack.clear();
+      self.scratch_stack = stack;
       self.fail_at(slot, fault.raw, fault.location);
       return;
     }
@@ -942,7 +1039,12 @@ where
       // The two `as u32` below are made total by the same comparison rather than by an argument
       // about the ceiling: the conversion is attempted, and a length that will not narrow is
       // refused through the same door as a length that will not fit.
-      let room = u64::from(self.limits.max_merged_selections.get());
+      // One ceiling over one population. Charging `merged` and `locations` separately against the
+      // same number, as this did before, made it neither bound it claimed: `fail_at` fed
+      // `locations` without ever consulting it, so error spans could exhaust the *merged* ceiling
+      // and the message would name merged selections when what filled it was error locations.
+      // Counting the two together, and charging every writer, is the only version of this that
+      // does not lie.
       let (Ok(start), Ok(located)) = (
         u32::try_from(self.merged.len()),
         u32::try_from(self.locations.len()),
@@ -950,9 +1052,7 @@ where
         exhausted = Some(Exhausted::Selections);
         break;
       };
-      if self.merged.len() as u64 + u64::from(group.len) > room
-        || self.locations.len() as u64 + u64::from(group.len) > room
-      {
+      if !self.metadata_room(u64::from(group.len) * 2) {
         exhausted = Some(Exhausted::Selections);
         break;
       }
@@ -973,7 +1073,13 @@ where
       let typename = match self.typename {
         Some(meta) if meta == sym => {
           let name = self.schema.type_def(object_type).name();
-          Some(self.interner.intern(self.schema.name_bytes(name)))
+          // A `__typename` whose answer cannot be stored must not become a field with no name or
+          // a name that is somebody else's: the position simply cannot be built.
+          let Some(interned) = self.interner.intern(self.schema.name_bytes(name)) else {
+            exhausted = Some(Exhausted::Names);
+            break;
+          };
+          Some(interned)
         }
         _ => None,
       };
@@ -1004,6 +1110,8 @@ where
     self.scratch_fields = fields;
     self.scratch_groups = groups;
     self.scratch_visited = visited;
+    stack.clear();
+    self.scratch_stack = stack;
 
     // Recorded after the scratch is home, and at the object rather than at the field that could
     // not be created: the field has no slot, so there is no position to hang a path on, and the
@@ -1020,7 +1128,10 @@ where
         Exhausted::Selections => Raw::SelectionBudget {
           parent,
           field,
-          limit: self.limits.max_merged_selections.get(),
+          limit: self.limits.max_response_metadata.get(),
+        },
+        Exhausted::Names => Raw::NameStorage {
+          limit: self.interner.cap(),
         },
       };
       self.fail(slot, raw);
@@ -1111,8 +1222,12 @@ where
         }
         match variable {
           Some((name, _)) => {
-            let variable = self.interner.intern(name.as_bytes());
             let location = value_span.unwrap_or(*node.span());
+            let Some(variable) = self.interner.intern(name.as_bytes()) else {
+              let limit = self.interner.cap();
+              self.fail_at(slot, Raw::NameStorage { limit }, location);
+              return false;
+            };
             self.fail_at(
               slot,
               Raw::ArgumentVariableMissing {
@@ -1199,9 +1314,36 @@ where
   /// argument error over a merged group carries one location where a resolver error over the same
   /// group carries every field's.
   fn fail_at(&mut self, slot: u32, raw: Raw, location: SimpleSpan) {
-    let start = self.locations.len() as u32;
+    // An argument error's own span is one more metadata entry, so it is charged like any other.
+    // When there is no room the error is still raised — a refusal to record *where* something went
+    // wrong must never become a refusal to say that it did — and it falls back to the field's own
+    // locations, which are already stored. That is the same range `fail` uses and the same one
+    // §6.4.3's errors carry, so the degradation is a loss of precision and not of meaning.
+    //
+    // The root is the one position whose stored range is empty, and it can fail at most once per
+    // operation, so the fallback below overshoots the ceiling by at most a single entry.
+    let stored = self.meta[slot as usize].locations;
+    if !self.metadata_room(1) && stored.1 > 0 {
+      self.record(slot, raw, stored);
+      return;
+    }
+    let Ok(start) = u32::try_from(self.locations.len()) else {
+      self.record(slot, raw, stored);
+      return;
+    };
     self.locations.push(location);
     self.record(slot, raw, (start, 1));
+  }
+
+  /// Whether `more` metadata entries fit under [`Limits::max_response_metadata`].
+  ///
+  /// The population is `merged` and `locations` together, because they are one resource: both are
+  /// per-response-key bookkeeping, both are written by `expand`, and a ceiling that counted only
+  /// one of them would be a ceiling on half a thing.
+  #[inline]
+  fn metadata_room(&self, more: u64) -> bool {
+    let used = self.merged.len() as u64 + self.locations.len() as u64;
+    used + more <= u64::from(self.limits.max_response_metadata.get())
   }
 
   fn record(&mut self, slot: u32, raw: Raw, locations: (u32, u32)) {
@@ -1384,7 +1526,9 @@ where
     self.meta.clear();
     self.merged.clear();
     self.locations.clear();
+    self.visits = Visits::new(self.limits.max_selection_visits.get());
     self.interner.clear();
+    self.interner.set_cap(self.limits.max_interned_bytes.get());
     self.errors.clear();
     self.inflight.clear();
     self.retire_arguments();

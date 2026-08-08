@@ -2701,7 +2701,7 @@ fn a_response_inside_the_budget_is_unchanged() {
 }
 
 // ------------------------------------------------------------------------------------------
-// `Limits::max_merged_selections`: the ceiling on the product, not on either factor
+// `Limits::max_response_metadata`: the ceiling on the product, not on either factor
 // ------------------------------------------------------------------------------------------
 //
 // Draft §6.3 merges every selection sharing a response key into one field, and the group has to be
@@ -2730,7 +2730,7 @@ fn merged_selections_are_charged_against_their_own_ceiling() {
   // four rows x eight duplicate selections.
   let limits = Limits {
     max_response_slots: NonZeroU32::new(64).expect("not zero"),
-    max_merged_selections: NonZeroU32::new(16).expect("not zero"),
+    max_response_metadata: NonZeroU32::new(16).expect("not zero"),
     ..Limits::default()
   };
   let rows = J::Phantom(4);
@@ -2750,7 +2750,7 @@ fn merged_selections_are_charged_against_their_own_ceiling() {
   assert!(
     errors
       .iter()
-      .any(|(_, message, _)| message.contains("16 merged selections")),
+      .any(|(_, message, _)| message.contains("16 metadata entries")),
     "the message names the ceiling that was reached, not the other one: {errors:?}"
   );
 }
@@ -2764,7 +2764,7 @@ fn merged_selections_are_charged_against_their_own_ceiling() {
 fn the_position_ceiling_alone_does_not_bound_the_metadata() {
   let generous_positions = Limits {
     max_response_slots: NonZeroU32::new(1024).expect("not zero"),
-    max_merged_selections: NonZeroU32::new(24).expect("not zero"),
+    max_response_metadata: NonZeroU32::new(24).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
@@ -2792,18 +2792,19 @@ fn the_position_ceiling_alone_does_not_bound_the_metadata() {
 /// entries a refused expansion left behind are gone before a second request could trip over them.
 /// The observation has to happen *inside* one response.
 ///
-/// So the fixture spends the ceiling deliberately. The root's three keys cost 3, `a`'s group of
-/// eight brings it to 11, and `b`'s group of five would need 16 against a ceiling of 14 — so `b`
-/// is refused. `c`'s group of two then needs 13, which fits. Under decide-then-append `c`
-/// succeeds and `b` is the only error; under append-then-refuse `b` leaves 16 behind, `c` needs 18,
-/// and `c` is refused too. The difference is a field in `data`, which an assertion can see.
+/// So the fixture spends the ceiling deliberately. One selection costs two entries — a merged
+/// selection and its location — so the root's three keys cost 6, `a`'s group of eight brings it to
+/// 22, and `b`'s group of five would need 32 against a ceiling of 28, so `b` is refused. `c`'s
+/// group of two then needs 26, which fits. Under decide-then-append `c` succeeds and `b` is the
+/// only error; under append-then-refuse `b` leaves 32 behind, `c` would need 36, and `c` is
+/// refused too. The difference is a field in `data`, which an assertion can see.
 #[test]
 fn a_refused_expansion_leaves_the_room_a_later_sibling_is_owed() {
   let sdl = "type Query { a: A b: B c: C } type A { x: String } type B { y: String } \
              type C { z: String }";
   let query = "{ a { x x x x x x x x } b { y y y y y } c { z z } }";
   let limits = Limits {
-    max_merged_selections: NonZeroU32::new(14).expect("not zero"),
+    max_response_metadata: NonZeroU32::new(28).expect("not zero"),
     ..Limits::default()
   };
   let root = J::Obj(
@@ -2833,7 +2834,7 @@ fn a_refused_expansion_leaves_the_room_a_later_sibling_is_owed() {
 #[test]
 fn merging_inside_the_ceiling_is_unchanged() {
   let limits = Limits {
-    max_merged_selections: NonZeroU32::new(64).expect("not zero"),
+    max_response_metadata: NonZeroU32::new(64).expect("not zero"),
     ..Limits::default()
   };
   let bounded = run_bounded(
@@ -2854,4 +2855,206 @@ fn merging_inside_the_ceiling_is_unchanged() {
     bounded, default,
     "the ceiling changes nothing it does not refuse"
   );
+}
+
+// ------------------------------------------------------------------------------------------
+// `Limits::max_selection_visits`: the walk is charged, and the walk has no native frames
+// ------------------------------------------------------------------------------------------
+//
+// Two resources at once. A named fragment chain is flat in the document, so no parser depth limit
+// sees it; a recursive walk spent one native frame per link and a measured 1,500 links aborted the
+// process with SIGABRT. The walk now runs on an explicit stack, which turns depth into heap, and
+// the visit budget is what bounds that heap *and* the collection work. Both plants are below.
+
+/// `{ ...F0 }` with `F0 → F1 → … → Fn`, every definition at nesting depth one.
+fn fragment_chain(links: usize) -> String {
+  let mut query = std::string::String::from("{ ...F0 }\n");
+  for i in 0..links {
+    query.push_str(&std::format!(
+      "fragment F{i} on Query {{ ...F{} }}\n",
+      i + 1
+    ));
+  }
+  query.push_str(&std::format!("fragment F{links} on Query {{ a }}\n"));
+  query
+}
+
+/// A fragment chain deep enough to have aborted the process now answers.
+///
+/// This is the regression for the abort, and it is the one case here that cannot be written as a
+/// red-first assertion: against a recursive walk it does not fail, it terminates the test binary
+/// with `SIGABRT`, taking every other case in the file with it. Measured before the change: 1,000
+/// links survived, 1,500 aborted. Ten thousand is comfortably past that and still runs in
+/// milliseconds, because the work was never the problem — the frames were.
+#[test]
+fn a_flat_fragment_chain_no_longer_ends_the_process() {
+  let (data, errors) = run_bounded(
+    "type Query { a: String }",
+    &fragment_chain(10_000),
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    Limits::default(),
+  );
+
+  assert_eq!(
+    errors.len(),
+    0,
+    "a chain is valid, not an error: {errors:?}"
+  );
+  assert_eq!(
+    data, r#"{"a":"A"}"#,
+    "and it collects the field at the end of it"
+  );
+}
+
+/// The visit budget charges a walk that appends nothing.
+///
+/// The appending path is charged by the metadata ceiling too, so a plant on the counter has to be
+/// caught by something *only* the counter can catch. This document collects a single field and
+/// walks thousands of fragments to reach it: with the counter removed the metadata ceiling sees
+/// two entries and is content, and the walk is free.
+#[test]
+fn collection_that_appends_nothing_is_still_charged() {
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(64).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    "type Query { a: String }",
+    &fragment_chain(4_000),
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    limits,
+  );
+
+  assert!(
+    errors
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "4,000 spreads cannot be walked within 64 visits, though they append two entries in total"
+  );
+  assert!(
+    errors
+      .iter()
+      .any(|(_, message, _)| message.contains("64 selection visits")),
+    "and the message names the budget that stopped it: {errors:?}"
+  );
+}
+
+/// The same budget charges a walk that appends on every step.
+///
+/// The other half of the pair. Here every selection survives collection, so the metadata ceiling
+/// would also refuse this document eventually — which is exactly why it is not enough on its own
+/// to pin the counter, and why both plants are needed to prove the counter is load-bearing.
+#[test]
+fn collection_that_appends_on_every_step_is_charged_by_the_same_budget() {
+  let mut query = std::string::String::from("{");
+  for i in 0..200 {
+    query.push_str(&std::format!(" k{i}: a"));
+  }
+  query.push_str(" }");
+
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(32).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    "type Query { a: String }",
+    &query,
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    limits,
+  );
+
+  assert!(
+    errors
+      .iter()
+      .any(|(_, message, _)| message.contains("32 selection visits")),
+    "200 aliased selections cannot be examined within 32 visits: {errors:?}"
+  );
+}
+
+/// A document inside the budget is untouched.
+#[test]
+fn collection_inside_the_visit_budget_is_unchanged() {
+  let bounded = run_bounded(
+    "type Query { a: String }",
+    &fragment_chain(8),
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    Limits {
+      max_selection_visits: NonZeroU32::new(1024).expect("not zero"),
+      ..Limits::default()
+    },
+  );
+  let default = run_bounded(
+    "type Query { a: String }",
+    &fragment_chain(8),
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    Limits::default(),
+  );
+
+  assert_eq!(bounded.1.len(), 0);
+  assert_eq!(bounded.0, r#"{"a":"A"}"#);
+  assert_eq!(
+    bounded, default,
+    "the budget changes nothing it does not refuse"
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// `Limits::max_interned_bytes`: a correctness ceiling before it is a resource one
+// ------------------------------------------------------------------------------------------
+
+/// A driver message that will not fit loses its text and keeps its error.
+///
+/// The alternative this replaces was not a larger allocation, it was silent corruption: arena
+/// offsets are `u32`, so an arena past four gigabytes truncates and every name interned afterwards
+/// reads back somebody else's bytes. The field still fails, the reader is told the text is
+/// missing, and — the part that matters — the response key beside it is still its own.
+#[test]
+fn a_driver_message_too_large_to_store_still_reports_its_error() {
+  let limits = Limits {
+    max_interned_bytes: NonZeroU32::new(16).expect("not zero"),
+    ..Limits::default()
+  };
+  let long = "x".repeat(4096);
+  let (data, errors) = run_bounded(
+    "type Query { a: String b: String }",
+    "{ a b }",
+    obj(vec![
+      ("a", J::Fail(std::boxed::Box::leak(long.into_boxed_str()))),
+      ("b", J::Str("B".to_owned())),
+    ]),
+    limits,
+  );
+
+  assert_eq!(
+    errors.len(),
+    1,
+    "the driver's failure is still reported: {errors:?}"
+  );
+  assert_eq!(
+    errors[0].0,
+    Kind::Resolver,
+    "and still as the driver's, not as a budget"
+  );
+  assert!(
+    errors[0].1.contains("exceeded the executor's storage"),
+    "the reader is told the text was dropped rather than shown the wrong text: {}",
+    errors[0].1
+  );
+  assert_eq!(
+    data, r#"{"a":null,"b":"B"}"#,
+    "and `b`'s response key is still `b`, which is the property the ceiling exists for"
+  );
+}
+
+/// Interning inside the ceiling is untouched, message text included.
+#[test]
+fn a_driver_message_inside_the_ceiling_keeps_its_text() {
+  let (_, errors) = run(
+    "type Query { a: String }",
+    "{ a }",
+    obj(vec![("a", J::Fail("the resolver said no"))]),
+  );
+
+  assert_eq!(errors.len(), 1);
+  assert_eq!(errors[0].1, "the resolver said no");
 }

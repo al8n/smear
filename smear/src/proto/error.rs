@@ -95,13 +95,35 @@ pub(super) enum Raw {
     field: Sym,
     limit: u32,
   },
-  /// Not a specification failure: recording this object's merged selections would have taken the
-  /// response past [`Limits::max_merged_selections`](super::Limits::max_merged_selections).
+  /// Not a specification failure: recording this object's response metadata would have taken it
+  /// past [`Limits::max_response_metadata`](super::Limits::max_response_metadata).
   SelectionBudget {
     parent: TypeId,
     field: Sym,
     limit: u32,
   },
+  /// Not a specification failure: draft §6.3's collection ran past
+  /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
+  ///
+  /// No field is named, because collection is what *discovers* the fields — this is raised inside
+  /// the walk, before the position that would have been blamed exists.
+  CollectionBudget { limit: u32 },
+  /// Not a specification failure: a name would have taken the interner past
+  /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
+  ///
+  /// Distinct from [`ResolverUnstorable`](Raw::ResolverUnstorable), which is the same refusal on a
+  /// message the *driver* supplied: that one loses text from an error that is still reported, and
+  /// this one means a response key or a type name could not be recorded, so the position it
+  /// belongs to cannot be built at all.
+  NameStorage { limit: u32 },
+  /// The driver reported a field error whose message could not be stored.
+  ///
+  /// The failure is the driver's and is reported; only its text is missing, which is why this is
+  /// [`Kind::Resolver`] and not a budget kind. Losing the text is strictly better than the
+  /// alternative it replaces: storing it would have narrowed an arena offset that no longer fits a
+  /// `u32`, and every name interned afterwards — every response key, every `__typename` — would
+  /// have read back the wrong bytes.
+  ResolverUnstorable,
 }
 
 /// Which way a `@skip`/`@include` condition failed to be a boolean.
@@ -174,7 +196,7 @@ pub enum Kind {
   DirectiveCondition,
   /// The response reached one of [`Limits`](super::Limits)'s two response ceilings — positions
   /// ([`max_response_slots`](super::Limits::max_response_slots)) or merged selections
-  /// ([`max_merged_selections`](super::Limits::max_merged_selections)). Not a draft §6 failure.
+  /// ([`max_response_metadata`](super::Limits::max_response_metadata)). Not a draft §6 failure.
   ///
   /// One kind for both, because a driver's remedy is identical: ask for less, or raise the ceiling
   /// that the message names. Two kinds would ask a caller to distinguish cases it would handle the
@@ -206,7 +228,11 @@ impl Raw {
       Self::ArgumentNull { .. } => Kind::ArgumentNull,
       Self::ArgumentVariableMissing { .. } => Kind::ArgumentVariableMissing,
       Self::DirectiveCondition { .. } => Kind::DirectiveCondition,
-      Self::ResponseBudget { .. } | Self::SelectionBudget { .. } => Kind::ResponseBudget,
+      Self::ResponseBudget { .. }
+      | Self::SelectionBudget { .. }
+      | Self::CollectionBudget { .. }
+      | Self::NameStorage { .. } => Kind::ResponseBudget,
+      Self::ResolverUnstorable => Kind::Resolver,
     }
   }
 }
@@ -430,9 +456,22 @@ impl<V> fmt::Display for Error<'_, V> {
         owner(f, parent, field)?;
         write!(
           f,
-          ": the response would exceed the executor's limit of {limit} merged selections."
+          ": the response would exceed the executor's limit of {limit} metadata entries."
         )
       }
+      Raw::CollectionBudget { limit } => write!(
+        f,
+        "Collecting this operation's fields would exceed the executor's limit of {limit} \
+         selection visits."
+      ),
+      Raw::NameStorage { limit } => write!(
+        f,
+        "A name in this response would exceed the executor's limit of {limit} interned bytes."
+      ),
+      Raw::ResolverUnstorable => f.write_str(
+        "The driver reported a field error whose message exceeded the executor's storage and was \
+         not recorded.",
+      ),
     }
   }
 }

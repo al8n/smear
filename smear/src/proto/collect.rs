@@ -46,6 +46,50 @@ pub(super) struct Fault {
   pub(super) location: SimpleSpan,
 }
 
+/// What is left of [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
+///
+/// # It is per operation, and that is the whole point
+///
+/// A per-*call* budget would bound one selection set and nothing else, and `collect_fields` runs
+/// once per object position — so the total would be `positions × budget`, with positions coming
+/// from the driver's list lengths. That is the product shape that has already cost this module two
+/// rounds. Counting down across the whole operation means a driver **cannot** amplify collection
+/// work at all: the query alone decides how much walking there is to do.
+///
+/// It bounds [`walk`]'s explicit stack too, since a frame is only ever pushed by a selection that
+/// was charged — which is why deleting the recursion needed no depth knob of its own.
+///
+/// What it does *not* bound is the cost of *one* visit: `fragment_index` scans the definitions and
+/// [`Interner::intern`] scans the names, both linear. Those are al8n/smear#141, and they are a
+/// query quantity multiplying a query quantity — which is the property that matters here, because
+/// with this budget in place no driver answer multiplies them.
+pub(super) struct Visits {
+  left: u32,
+  limit: u32,
+}
+
+impl Visits {
+  #[inline]
+  pub(super) const fn new(limit: u32) -> Self {
+    Self { left: limit, limit }
+  }
+
+  /// Charges one examined selection, or refuses once the operation has spent its budget.
+  #[inline]
+  fn spend(&mut self, location: SimpleSpan) -> Result<(), Fault> {
+    match self.left.checked_sub(1) {
+      Some(left) => {
+        self.left = left;
+        Ok(())
+      }
+      None => Err(Fault {
+        raw: Raw::CollectionBudget { limit: self.limit },
+        location,
+      }),
+    }
+  }
+}
+
 /// One response key's group of selections.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Group {
@@ -63,24 +107,70 @@ pub(super) struct Group {
 /// thousand-element list a thousand copies of the same handful of names. Slots carry a `u32` into
 /// this table instead. It also keeps the source type `S` out of the response types entirely: a
 /// [`Node`](super::Node) is generic only over the driver's value.
-#[derive(Debug, Default)]
+///
+/// # Why this one refuses instead of growing
+///
+/// Every other table here holds something the document or the schema produced, and both are
+/// already in memory before the executor exists. This one also holds **driver** text:
+/// [`Executor::handle_field_error`](super::Executor::handle_field_error) interns the message it is
+/// given, once per failed position, and neither the message's length nor the number of failures is
+/// anything the query bounds.
+///
+/// Left alone that is not merely unbounded memory, it is **silent corruption**. Offsets into the
+/// arena are `u32`; an arena past four gigabytes does not fail to allocate, it *truncates*, and
+/// every name interned afterwards reads back somebody else's bytes — wrong response keys, wrong
+/// `__typename`, in a response that still looks well formed. A refusal is a contract a caller can
+/// act on; that is not. So the narrowing is checked rather than argued, and the ceiling is what
+/// keeps the check from ever being the thing that fires.
+#[derive(Debug)]
 pub(super) struct Interner {
   bytes: std::vec::Vec<u8>,
   spans: std::vec::Vec<(u32, u32)>,
+  /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
+  cap: u32,
 }
 
 impl Interner {
-  /// Returns the id for `bytes`, adding it if it is not already there.
-  pub(super) fn intern(&mut self, bytes: &[u8]) -> u32 {
+  #[inline]
+  pub(super) const fn new(cap: u32) -> Self {
+    Self {
+      bytes: std::vec::Vec::new(),
+      spans: std::vec::Vec::new(),
+      cap,
+    }
+  }
+
+  /// The ceiling this table refuses at, for the message that reports the refusal.
+  #[inline]
+  pub(super) const fn cap(&self) -> u32 {
+    self.cap
+  }
+
+  /// Returns the id for `bytes`, adding it if it is not already there, or `None` when it will not
+  /// fit.
+  ///
+  /// `None` is a storage refusal and never a lookup failure: a name already present is always
+  /// returned, whatever the ceiling says, so a full arena degrades what it *records* and never
+  /// what it can still *read*.
+  pub(super) fn intern(&mut self, bytes: &[u8]) -> Option<u32> {
     for (index, &(start, len)) in self.spans.iter().enumerate() {
       if &self.bytes[start as usize..(start + len) as usize] == bytes {
-        return index as u32;
+        return Some(index as u32);
       }
     }
-    let start = self.bytes.len() as u32;
+    // Checked, not reasoned about. The ceiling below makes each of these unreachable, and they
+    // stay because "unreachable given the ceiling" is exactly the kind of claim that stops being
+    // true when somebody sets a different ceiling.
+    let start = u32::try_from(self.bytes.len()).ok()?;
+    let len = u32::try_from(bytes.len()).ok()?;
+    let end = start.checked_add(len)?;
+    if end > self.cap {
+      return None;
+    }
+    let id = u32::try_from(self.spans.len()).ok()?;
     self.bytes.extend_from_slice(bytes);
-    self.spans.push((start, bytes.len() as u32));
-    (self.spans.len() - 1) as u32
+    self.spans.push((start, len));
+    Some(id)
   }
 
   #[inline]
@@ -96,6 +186,10 @@ impl Interner {
   pub(super) fn clear(&mut self) {
     self.bytes.clear();
     self.spans.clear();
+  }
+
+  pub(super) fn set_cap(&mut self, cap: u32) {
+    self.cap = cap;
   }
 }
 
@@ -118,6 +212,8 @@ pub(super) fn collect_fields<'a, S, V>(
   visited: &mut std::vec::Vec<u32>,
   fields: &mut std::vec::Vec<(u32, &'a Field<S>)>,
   groups: &mut std::vec::Vec<Group>,
+  stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+  visits: &mut Visits,
 ) -> Result<(), Fault>
 where
   S: AsRef<[u8]>,
@@ -137,6 +233,8 @@ where
       visited,
       fields,
       groups,
+      stack,
+      visits,
     )?;
   }
   // Stable, so document order inside a group survives; by group, so every group is contiguous.
@@ -153,6 +251,33 @@ where
   Ok(())
 }
 
+/// Draft §6.3's descent, over an explicit stack rather than the call stack.
+///
+/// # Why this is not recursive
+///
+/// A named fragment chain is **flat in the document**: `fragment F0 … ...F1`, each definition at
+/// nesting depth one, so no parser depth limit sees it and none can. A recursive walk spends one
+/// native frame per link, and measured on this tree a chain of 1,500 fragments — well under
+/// 200 KB of perfectly valid text — overflowed the stack and took the process down with
+/// `SIGABRT`. That is not a catchable panic: a server cannot turn it into a `400`, and one request
+/// kills every other in flight.
+///
+/// So the frame is gone rather than counted. A depth *ceiling* on a recursive walk would still be
+/// a ceiling whose right value depends on the deployment's stack size, its build profile and its
+/// frame layout; an explicit stack makes the question disappear, because depth is heap the visit
+/// budget already bounds.
+///
+/// Inline fragments recurse in the document rather than through definitions, and are **not** the
+/// reachable case: the parser aborts on its own at around sixty levels (al8n/smear#61), so no
+/// document deep enough to trouble this walk survives to reach it. The flat chain is the one that
+/// gets here.
+///
+/// # The order is the recursion's, exactly
+///
+/// Draft §6.3 fixes response-key order to document order, and `MergeSelectionSets` concatenates in
+/// document order within a key — so this has to be pre-order depth-first, entering a fragment
+/// where its spread sits and resuming at the *next sibling* afterwards. That is why the stack
+/// holds `(set, index)` and not just `set`: the index is where the recursion would have resumed.
 #[allow(clippy::too_many_arguments)]
 fn walk<'a, S, V>(
   schema: &Schema,
@@ -164,12 +289,30 @@ fn walk<'a, S, V>(
   visited: &mut std::vec::Vec<u32>,
   fields: &mut std::vec::Vec<(u32, &'a Field<S>)>,
   groups: &mut std::vec::Vec<Group>,
+  stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+  visits: &mut Visits,
 ) -> Result<(), Fault>
 where
   S: AsRef<[u8]>,
   V: Values,
 {
-  for selection in set.selections() {
+  stack.clear();
+  stack.push((set, 0));
+
+  while let Some(&mut (set, ref mut cursor)) = stack.last_mut() {
+    let selections = set.selections();
+    let Some(selection) = selections.get(*cursor) else {
+      stack.pop();
+      continue;
+    };
+    *cursor += 1;
+
+    // Charged here, before the arms, so that *every* selection examined costs the same whether or
+    // not it survives. Charging what is appended instead — which is what the metadata ceiling
+    // does — leaves a document made of fragments that collect nothing walking for free, and that
+    // document is as cheap to write as one that collects everything.
+    visits.spend(*set.as_span())?;
+
     match selection {
       Selection::Field(field) => {
         if !included(field.directives(), ctx, interner)? {
@@ -179,7 +322,14 @@ where
           Some(alias) => alias.name().source().as_ref(),
           None => field.name().source().as_ref(),
         };
-        let key = interner.intern(key);
+        let Some(key) = interner.intern(key) else {
+          return Err(Fault {
+            raw: Raw::NameStorage {
+              limit: interner.cap(),
+            },
+            location: *field.name().as_span(),
+          });
+        };
         let group = match groups.iter().position(|g| g.key == key) {
           Some(index) => index as u32,
           None => {
@@ -218,17 +368,7 @@ where
         if !applies(schema, condition, object_type) {
           continue;
         }
-        walk(
-          schema,
-          document,
-          object_type,
-          fragment.selection_set(),
-          ctx,
-          interner,
-          visited,
-          fields,
-          groups,
-        )?;
+        stack.push((fragment.selection_set(), 0));
       }
       Selection::InlineFragment(inline) => {
         if !included(inline.directives(), ctx, interner)? {
@@ -239,17 +379,7 @@ where
         {
           continue;
         }
-        walk(
-          schema,
-          document,
-          object_type,
-          inline.selection_set(),
-          ctx,
-          interner,
-          visited,
-          fields,
-          groups,
-        )?;
+        stack.push((inline.selection_set(), 0));
       }
     }
   }
@@ -378,9 +508,18 @@ where
         .ok()
         .and_then(|name| ctx.variable(name))
       {
-        None => Err(unreadable(ConditionFault::VariableMissing {
-          variable: interner.intern(spelling),
-        })),
+        None => match interner.intern(spelling) {
+          Some(variable) => Err(unreadable(ConditionFault::VariableMissing { variable })),
+          // The condition is unreadable either way; with nowhere to keep the variable's spelling
+          // the message loses the `$name` and keeps the rest, which is the same degradation
+          // `fail_at` makes when it cannot store a span.
+          None => Err(Fault {
+            raw: Raw::NameStorage {
+              limit: interner.cap(),
+            },
+            location,
+          }),
+        },
         Some(value) if ctx.is_null(&value) => Err(unreadable(ConditionFault::Null)),
         Some(value) => ctx
           .as_bool(&value)
