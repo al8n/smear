@@ -52,13 +52,39 @@ mod tests;
 
 /// What the executor will not do, whatever the document or the driver asks.
 ///
-/// Two knobs, and they bound two different things: how much work is *outstanding*
-/// ([`max_in_flight`](Limits::max_in_flight)) and how much response has been *built*
-/// ([`max_response_slots`](Limits::max_response_slots)). Selection depth needs neither — it is
-/// bounded by the document, which the validator has already accepted with acyclic fragments
-/// (draft 5.5.2.2) — and list *nesting* is bounded at
+/// Three knobs, bounding three different things: how much work is *outstanding*
+/// ([`max_in_flight`](Limits::max_in_flight)), how many positions the response *has*
+/// ([`max_response_slots`](Limits::max_response_slots)), and how much per-position bookkeeping
+/// those positions *cost* ([`max_merged_selections`](Limits::max_merged_selections)). Selection
+/// depth needs none of them — it is bounded by the document, which the validator has already
+/// accepted with acyclic fragments (draft 5.5.2.2) — and list *nesting* is bounded at
 /// [`MAX_WRAPPERS`](crate::validator::schema::MAX_WRAPPERS) by the schema, so a limit on either
 /// could never fire and a limit that cannot fire is not a limit.
+///
+/// # A budget on one factor of a product bounds nothing
+///
+/// The rule the third knob exists for, and the one a later phase should check itself against
+/// before claiming a resource is bounded. `max_response_slots` bounds positions. It does not bound
+/// **memory**, because the executor's cost is `positions × per-position bookkeeping`, and the
+/// second factor is the *document's*: draft §6.3 merges every selection sharing a response key
+/// into one field, and `{ rows { x x x … } }` gives one position a group of as many selections as
+/// the query cares to write. Each is bounded on its own — the driver's list length by the position
+/// ceiling, the query's duplicate selections by the document's size — and **neither bound reaches
+/// their product**, so a list of `N` elements over a group of `G` selections costs `N × G` while
+/// consuming `N` of the position budget.
+///
+/// The shape recurs wherever a *driver* quantity multiplies a *query* quantity, which is exactly
+/// what draft §6.2.3's per-event collection and draft §6.3's mutation path both do. The remedy is
+/// not a cleverer bound on either factor; it is a ceiling on the product itself, which is what
+/// this knob is.
+///
+/// Sharing the group between the elements of one list was considered and is **not** a substitute.
+/// The collection is not identical per element: `applies` resolves a fragment's type condition
+/// against the element's own concrete type, so an abstract element type collects different fields
+/// per element, and `@skip`/`@include` are re-read through
+/// [`Values::variable`](super::Values::variable), which takes `&mut self` and may legitimately
+/// answer differently per position. An attacker picks the varying case, so sharing removes waste in
+/// the common case and bounds nothing in the adversarial one.
 ///
 /// # Why the second knob is not the first one spelled differently
 ///
@@ -79,7 +105,7 @@ mod tests;
 /// to create one inherits the bound rather than having to remember it — the design's standing rule
 /// that a wrong answer should be unrepresentable rather than guarded at each call.
 ///
-/// # Why both ceilings are a [`NonZeroU32`]
+/// # Why every ceiling is a [`NonZeroU32`]
 ///
 /// A ceiling of zero is not a strict limit, it is a stopped machine: `poll_resolve` withholds
 /// because the ceiling is reached, `poll_response` withholds because the ready chain is not empty,
@@ -146,11 +172,46 @@ pub struct Limits {
   /// response large*: the position that happens to cross the line is blamed, and a driver reading
   /// the path should treat it as the point of exhaustion rather than the cause.
   ///
-  /// It also makes two narrowings safe by arithmetic rather than by argument. A slot index and a
-  /// list index are both `u32`, and `u32::MAX` is the tree's "no such slot" sentinel; because a
-  /// position is only created while the count is strictly below this ceiling, the largest index
-  /// reachable is `max_response_slots - 1`, which is never the sentinel and never truncates.
+  /// It also makes the two *position* narrowings exact: a slot index and a list index are both
+  /// `u32`, and `u32::MAX` is the tree's "no such slot" sentinel, so because a position is only
+  /// created while the count is strictly below this ceiling, the largest index reachable is
+  /// `max_response_slots - 1` — never the sentinel and never truncated.
+  ///
+  /// **Only those two, and the module has more.** A blanket claim about every `as u32` here would
+  /// be false, so the sites are enumerated instead and each is answered by name:
+  ///
+  /// | site | what bounds it |
+  /// |---|---|
+  /// | the slot index in `push_child` | this ceiling |
+  /// | a list element's `Key::Index` | this ceiling, via a `try_from` on the same decision |
+  /// | the two metadata range starts in `expand` | [`max_merged_selections`](Limits::max_merged_selections), via a `try_from` on the same decision |
+  /// | the in-flight slab index | [`max_in_flight`](Limits::max_in_flight) |
+  /// | `fail_at`'s location index | `max_merged_selections + max_response_slots`, since an error contributes at most one span and a position fails at most once — exact for every configuration whose two ceilings sum below `u32::MAX`, which both defaults do by three orders of magnitude |
+  /// | the operation index in `operation_index` | the document's own length, which no ceiling here bounds and nothing in this module creates |
   pub max_response_slots: NonZeroU32,
+
+  /// How many merged field selections the executor will record across the whole response.
+  ///
+  /// Draft §6.3 collects every selection sharing a response key into one field, and the group has
+  /// to survive until that field's value comes back so draft §6.4's `MergeSelectionSets` can read
+  /// it. One position therefore costs one entry *per selection in its group*, not one entry — and
+  /// that count is the document's, while the number of positions is the driver's. This ceiling is
+  /// on their product, for the reason the type's own documentation gives at length.
+  ///
+  /// Reaching it is the same field error as reaching the position ceiling
+  /// ([`Kind::ResponseBudget`](super::Kind::ResponseBudget)) and for the same reasons: it is raised
+  /// once execution is under way, so §7.1.2 leaves no other shape, and it names the object whose
+  /// selection set could not be recorded rather than diagnosing what made the response expensive.
+  ///
+  /// The check happens **before** anything is appended, so a refused expansion leaves the metadata
+  /// vectors exactly as it found them. A budget that appended first and refused afterwards would
+  /// leak on every near-miss, which under a client that retries is the same denial of service
+  /// wearing a slower coat.
+  ///
+  /// The default is four times the position ceiling rather than equal to it: a group of one is the
+  /// ordinary case, so this is only reached by a document that merges heavily, and a response of
+  /// legitimately merged selections should not be refused for being tidy.
+  pub max_merged_selections: NonZeroU32,
 }
 
 /// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
@@ -166,14 +227,34 @@ const DEFAULT_IN_FLIGHT: NonZeroU32 = NonZeroU32::new(256).expect("256 is not ze
 /// slot plus one metadata row, and a slot holds the driver's own `V` inline.
 const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20 is not zero");
 
+/// Four entries per position, which is generous for a document that merges and unreachable for one
+/// that does not: a group of one is the ordinary case, so an ordinary response spends this at the
+/// same rate it spends positions and runs out of positions first.
+const DEFAULT_MERGED_SELECTIONS: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
+
 impl Default for Limits {
   #[inline]
   fn default() -> Self {
     Self {
       max_in_flight: DEFAULT_IN_FLIGHT,
       max_response_slots: DEFAULT_RESPONSE_SLOTS,
+      max_merged_selections: DEFAULT_MERGED_SELECTIONS,
     }
   }
+}
+
+/// Which of [`Limits`]'s two response ceilings `expand` ran into.
+///
+/// Carried out of the loop rather than reported inside it, because recording a failure borrows the
+/// whole executor while the scratch vectors are still moved out of it.
+///
+/// Two variants and one [`Kind`](super::Kind): a driver branching on the outcome only needs to know
+/// that a ceiling was reached, and the remedy is the same either way, but the two *messages* have
+/// to name the right knob — a single message would be wrong half the time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Exhausted {
+  Positions,
+  Selections,
 }
 
 /// Why [`Executor::start`] refused.
@@ -841,7 +922,7 @@ where
       return;
     }
 
-    let mut exhausted = false;
+    let mut exhausted: Option<Exhausted> = None;
     for group in &groups {
       let selections = &fields[group.start as usize..(group.start + group.len) as usize];
       let first = selections[0].1;
@@ -853,8 +934,28 @@ where
       let Some(definition) = self.schema.field(object_type, sym) else {
         continue;
       };
-      let start = self.merged.len() as u32;
-      let located = self.locations.len() as u32;
+      // Decided before a single entry is appended, and it has to be: a group that is refused
+      // halfway leaves entries no slot points at, and nothing ever reclaims them, so a client
+      // repeating a near-miss request would grow the executor without ever tripping a ceiling.
+      // Checking first also means there is nothing to roll back.
+      //
+      // The two `as u32` below are made total by the same comparison rather than by an argument
+      // about the ceiling: the conversion is attempted, and a length that will not narrow is
+      // refused through the same door as a length that will not fit.
+      let room = u64::from(self.limits.max_merged_selections.get());
+      let (Ok(start), Ok(located)) = (
+        u32::try_from(self.merged.len()),
+        u32::try_from(self.locations.len()),
+      ) else {
+        exhausted = Some(Exhausted::Selections);
+        break;
+      };
+      if self.merged.len() as u64 + u64::from(group.len) > room
+        || self.locations.len() as u64 + u64::from(group.len) > room
+      {
+        exhausted = Some(Exhausted::Selections);
+        break;
+      }
       for &(_, field) in selections {
         self.merged.push(field);
         self.locations.push(*field.span());
@@ -883,7 +984,7 @@ where
       let Some(child) = self.push_child(slot, Key::Field(group.key), definition.ty(), state) else {
         // The scratch vectors have to go home before the failure is recorded, because recording it
         // borrows the whole executor — the same reason the collection failure above restores first.
-        exhausted = true;
+        exhausted = Some(Exhausted::Positions);
         break;
       };
       self.meta[child as usize] = Meta {
@@ -908,17 +1009,21 @@ where
     // not be created: the field has no slot, so there is no position to hang a path on, and the
     // object is the position that could not be assembled. That is the same choice an unreadable
     // `@skip` condition makes two doc comments up, for the same reason.
-    if exhausted {
+    if let Some(which) = exhausted {
       let (parent, field) = self.owner(slot);
-      let limit = self.limits.max_response_slots.get();
-      self.fail(
-        slot,
-        Raw::ResponseBudget {
+      let raw = match which {
+        Exhausted::Positions => Raw::ResponseBudget {
           parent,
           field,
-          limit,
+          limit: self.limits.max_response_slots.get(),
         },
-      );
+        Exhausted::Selections => Raw::SelectionBudget {
+          parent,
+          field,
+          limit: self.limits.max_merged_selections.get(),
+        },
+      };
+      self.fail(slot, raw);
     }
   }
 

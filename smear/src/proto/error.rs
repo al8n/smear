@@ -95,6 +95,13 @@ pub(super) enum Raw {
     field: Sym,
     limit: u32,
   },
+  /// Not a specification failure: recording this object's merged selections would have taken the
+  /// response past [`Limits::max_merged_selections`](super::Limits::max_merged_selections).
+  SelectionBudget {
+    parent: TypeId,
+    field: Sym,
+    limit: u32,
+  },
 }
 
 /// Which way a `@skip`/`@include` condition failed to be a boolean.
@@ -165,8 +172,14 @@ pub enum Kind {
   /// this one is raised at the enclosing object and nulls that. At the root selection set there is
   /// no enclosing field at all and the error's path is empty.
   DirectiveCondition,
-  /// The response reached [`Limits::max_response_slots`](super::Limits::max_response_slots)
-  /// (not a draft §6 failure).
+  /// The response reached one of [`Limits`](super::Limits)'s two response ceilings — positions
+  /// ([`max_response_slots`](super::Limits::max_response_slots)) or merged selections
+  /// ([`max_merged_selections`](super::Limits::max_merged_selections)). Not a draft §6 failure.
+  ///
+  /// One kind for both, because a driver's remedy is identical: ask for less, or raise the ceiling
+  /// that the message names. Two kinds would ask a caller to distinguish cases it would handle the
+  /// same way; one message would name the wrong knob half the time, which is why the *messages*
+  /// differ and the classification does not.
   ///
   /// The only kind here that is the *executor's* refusal rather than a fault in the document or in
   /// the driver's answer, and the only one whose path names where execution stopped rather than
@@ -193,7 +206,7 @@ impl Raw {
       Self::ArgumentNull { .. } => Kind::ArgumentNull,
       Self::ArgumentVariableMissing { .. } => Kind::ArgumentVariableMissing,
       Self::DirectiveCondition { .. } => Kind::DirectiveCondition,
-      Self::ResponseBudget { .. } => Kind::ResponseBudget,
+      Self::ResponseBudget { .. } | Self::SelectionBudget { .. } => Kind::ResponseBudget,
     }
   }
 }
@@ -406,6 +419,18 @@ impl<V> fmt::Display for Error<'_, V> {
         write!(
           f,
           ": the response would exceed the executor's limit of {limit} positions."
+        )
+      }
+      Raw::SelectionBudget {
+        parent,
+        field,
+        limit,
+      } => {
+        f.write_str("Cannot complete field ")?;
+        owner(f, parent, field)?;
+        write!(
+          f,
+          ": the response would exceed the executor's limit of {limit} merged selections."
         )
       }
     }

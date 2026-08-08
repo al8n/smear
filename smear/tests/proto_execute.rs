@@ -2699,3 +2699,159 @@ fn a_response_inside_the_budget_is_unchanged() {
     "the budget changes nothing it does not refuse"
   );
 }
+
+// ------------------------------------------------------------------------------------------
+// `Limits::max_merged_selections`: the ceiling on the product, not on either factor
+// ------------------------------------------------------------------------------------------
+//
+// Draft §6.3 merges every selection sharing a response key into one field, and the group has to be
+// recorded so `MergeSelectionSets` can read it when the value comes back. So one *position* costs
+// one entry per *selection* in its group: the first count is the driver's, the second is the
+// document's, each is bounded on its own, and `max_response_slots` bounds only the first. A list of
+// N elements over a group of G selections therefore costs N x G metadata entries while spending N
+// of the position budget — which is why the ceiling below is on the product.
+
+/// `{ rows { x x … } }` — one response key, `duplicates` selections of it, over a list.
+fn merged_query(duplicates: usize) -> String {
+  let mut query = std::string::String::from("{ rows {");
+  for _ in 0..duplicates {
+    query.push_str(" x");
+  }
+  query.push_str(" } }");
+  query
+}
+
+const MERGED_SDL: &str = "type Query { rows: [Row] } type Row { x: String }";
+
+/// The metadata a merged group costs is charged, so the product cannot outrun the position budget.
+#[test]
+fn merged_selections_are_charged_against_their_own_ceiling() {
+  // Twenty positions is ample for four rows; sixteen merged selections is not ample for
+  // four rows x eight duplicate selections.
+  let limits = Limits {
+    max_response_slots: NonZeroU32::new(64).expect("not zero"),
+    max_merged_selections: NonZeroU32::new(16).expect("not zero"),
+    ..Limits::default()
+  };
+  let rows = J::Phantom(4);
+  let (_, errors) = run_bounded(
+    MERGED_SDL,
+    &merged_query(8),
+    obj(vec![("rows", rows)]),
+    limits,
+  );
+
+  assert!(
+    errors
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "4 rows x 8 selections cannot be recorded in 16 entries, though 4 rows fit in 64 positions"
+  );
+  assert!(
+    errors
+      .iter()
+      .any(|(_, message, _)| message.contains("16 merged selections")),
+    "the message names the ceiling that was reached, not the other one: {errors:?}"
+  );
+}
+
+/// The position ceiling alone does not bound the metadata, which is the whole finding.
+///
+/// The same document under a position ceiling generous enough to admit every row must still be
+/// refused, because it is the product that is too large and not either factor. Without the merged
+/// ceiling this passes silently while the two metadata vectors grow as rows x selections.
+#[test]
+fn the_position_ceiling_alone_does_not_bound_the_metadata() {
+  let generous_positions = Limits {
+    max_response_slots: NonZeroU32::new(1024).expect("not zero"),
+    max_merged_selections: NonZeroU32::new(24).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    MERGED_SDL,
+    &merged_query(16),
+    obj(vec![("rows", J::Phantom(8))]),
+    generous_positions,
+  );
+
+  assert!(
+    errors
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "8 rows x 16 selections is 128 entries and the ceiling is 24, whatever the position budget says"
+  );
+}
+
+/// A refused expansion appends nothing, so a later sibling still gets the room it was owed.
+///
+/// This is the ordering property — decide, then append — and it needs a fixture built to make it
+/// *visible*, because a refusal that appended first would produce the same `data` and the same
+/// `errors` for the request that was refused. Two things make it observable.
+///
+/// It cannot be seen across runs: `start` calls `reset`, which clears both metadata vectors, so
+/// entries a refused expansion left behind are gone before a second request could trip over them.
+/// The observation has to happen *inside* one response.
+///
+/// So the fixture spends the ceiling deliberately. The root's three keys cost 3, `a`'s group of
+/// eight brings it to 11, and `b`'s group of five would need 16 against a ceiling of 14 — so `b`
+/// is refused. `c`'s group of two then needs 13, which fits. Under decide-then-append `c`
+/// succeeds and `b` is the only error; under append-then-refuse `b` leaves 16 behind, `c` needs 18,
+/// and `c` is refused too. The difference is a field in `data`, which an assertion can see.
+#[test]
+fn a_refused_expansion_leaves_the_room_a_later_sibling_is_owed() {
+  let sdl = "type Query { a: A b: B c: C } type A { x: String } type B { y: String } \
+             type C { z: String }";
+  let query = "{ a { x x x x x x x x } b { y y y y y } c { z z } }";
+  let limits = Limits {
+    max_merged_selections: NonZeroU32::new(14).expect("not zero"),
+    ..Limits::default()
+  };
+  let root = J::Obj(
+    "Query",
+    vec![
+      ("a", J::Obj("A", vec![("x", J::Str("X".to_owned()))])),
+      ("b", J::Obj("B", vec![("y", J::Str("Y".to_owned()))])),
+      ("c", J::Obj("C", vec![("z", J::Str("Z".to_owned()))])),
+    ],
+  );
+  let (data, errors) = run_bounded(sdl, query, root, limits);
+
+  assert_eq!(
+    errors.len(),
+    1,
+    "only `b` is over the ceiling; a second error means the refusal left its entries behind: \
+     {errors:?}"
+  );
+  assert_eq!(errors[0].2, "b", "and the one error is `b`'s");
+  assert_eq!(
+    data, r#"{"a":{"x":"X"},"b":null,"c":{"z":"Z"}}"#,
+    "`c` still fits, which it would not if the refusal had spent the room first"
+  );
+}
+
+/// A document that merges within the ceiling is untouched, so this is a bound and not a rewrite.
+#[test]
+fn merging_inside_the_ceiling_is_unchanged() {
+  let limits = Limits {
+    max_merged_selections: NonZeroU32::new(64).expect("not zero"),
+    ..Limits::default()
+  };
+  let bounded = run_bounded(
+    MERGED_SDL,
+    &merged_query(3),
+    obj(vec![("rows", J::Phantom(2))]),
+    limits,
+  );
+  let default = run_bounded(
+    MERGED_SDL,
+    &merged_query(3),
+    obj(vec![("rows", J::Phantom(2))]),
+    Limits::default(),
+  );
+
+  assert_eq!(bounded.1.len(), 0, "nothing is refused inside the ceiling");
+  assert_eq!(
+    bounded, default,
+    "the ceiling changes nothing it does not refuse"
+  );
+}
