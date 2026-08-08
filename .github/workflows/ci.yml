@@ -644,6 +644,28 @@ jobs:
     # hard error here instead of a `--test` filter that matches nothing and exits 0.
     - name: cargo test -p smear --no-run (default features)
       run: cargo test -p smear --no-run
+
+    # The two rows the step above cannot reach, and could not have reached before #136.
+    #
+    # `default` turns BOTH dialects on, so a `#![cfg(all(feature = "rowan", feature = "graphql"))]`
+    # header holding GraphQLx items is satisfied by it and the items compile. The selection that
+    # separates them is one dialect at a time — and until #136 that selection did not exist for a
+    # test target at all: `smear`'s self dev-dependency omitted `default-features = false`, so
+    # `graphql`, `graphqlx`, `std`, `parser` and `smallvec` were unioned in from the library's
+    # `default` no matter what the command line said. `cargo test -p smear --no-default-features
+    # --features "std,parser,rowan" --test lossless_wiring` ran seven tests over both dialects,
+    # and `cargo tree -e features -i smear` over that selection attributed the two dialects to
+    # `smear feature "default"` under the `[dev-dependencies]` edge while marking only the typed
+    # features `(command-line)`.
+    #
+    # With the manifest fixed these two rows are the ones that fail when a dialect's guard sits
+    # under the other dialect's header — which is what `lossless_x_wiring.rs` exists to keep true.
+    # Compile only, for the same reason as the row above; `Run test` is still where the suite runs.
+    - name: cargo test -p smear --no-run (rowan + graphql only)
+      run: cargo test -p smear --no-run --no-default-features --features "std,parser,rowan,graphql"
+    - name: cargo test -p smear --no-run (rowan + graphqlx only)
+      run: cargo test -p smear --no-run --no-default-features --features "std,parser,rowan,graphqlx"
+
     - name: Run test
       run: cargo test --all-features -- --quiet
 
