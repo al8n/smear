@@ -1,0 +1,448 @@
+//! The contract exemptions, as data with a reason on every one of them.
+//!
+//! Same shape and same guards as `crate::exempt`, and for the same argument: an omission is
+//! invisible, so a type that does not answer the contract is *recorded* here — printed on every
+//! run, argued for in writing, and failing the run if the argument is missing — rather than
+//! quietly absent from a check.
+//!
+//! # What the four kinds mean
+//!
+//! [`Kind::Aggregate`] and [`Kind::Verdict`] are the two al8n/smear#126's design names: "never by
+//! aggregates or verdicts". An aggregate holds diagnostics and is not one, so it must say which
+//! element answers, and the census then requires that element to be a contract row — an aggregate
+//! of an exempt type answers nothing, and the chain reads fine one record at a time. A verdict is
+//! not a diagnostic either: it says *that* something failed, and the diagnostics that say what
+//! went somewhere else, usually to a sink.
+//!
+//! [`Kind::Unresolved`] is the design's other half — "implemented by the resolved views". A
+//! diagnostic whose spans and symbols mean nothing without the schema they index cannot answer on
+//! its own; the value that pairs the two can, and this record names it.
+//!
+//! [`Kind::Tracked`] is a family that has not joined the contract and is expected to. Every one of
+//! them today is al8n/smear#126's phase E — the parser and lexer families, sequenced after the
+//! validator ones deliberately — and it must name its issue, so it is debt with a home rather than
+//! debt with an excuse.
+//!
+//! [`Kind::NotDiagnostic`] is the name pattern misfiring: a type whose name ends in `Error` and
+//! which is not an error a consumer is ever handed. It is counted separately in the run's own
+//! output, because if it stops being a handful the pattern is wrong and recording will not fix
+//! that. There is none today, and the kind exists so that the first one is a record rather than a
+//! change to the pattern.
+
+use crate::exempt::reason_problems;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+  /// A collection whose elements are the diagnostics. Must name the element type.
+  Aggregate,
+  /// An outcome rather than a diagnostic: it reports *that* something failed, and the values that
+  /// say what went to a sink or to an accessor.
+  Verdict,
+  /// A diagnostic that cannot answer alone. Must name the resolved view that can.
+  Unresolved,
+  /// A family that owes the contract and has not paid yet. Must name its issue.
+  Tracked,
+  /// The name pattern misfired: not an error a consumer is handed at all.
+  NotDiagnostic,
+}
+
+/// One type recorded as not answering [`Diagnose`](super::TRAIT).
+#[derive(Clone, Copy)]
+pub struct Exemption {
+  /// The path a consumer names the type by, exactly as the census prints it.
+  ///
+  /// The path and not the ident: this crate declares `LexerError`, `FloatError`, `Errors` and
+  /// `Diagnostic` twice each, and a table keyed by name would record one of every pair and
+  /// quietly exempt the other.
+  pub path: &'static str,
+  pub kind: Kind,
+  /// What answers instead, by its own path. Required for [`Kind::Aggregate`] and
+  /// [`Kind::Unresolved`], forbidden elsewhere, and required to be a contract row.
+  pub element: Option<&'static str>,
+  /// The issue that owns it. Required for [`Kind::Tracked`], forbidden elsewhere.
+  pub issue: Option<u32>,
+  pub reason: &'static str,
+}
+
+/// The lexer families: draft §2 lexical refusals, one per numeric and string shape.
+const LEXER_FAMILY: &str = "A draft §2 lexical refusal. al8n/smear#126 sequences the parser and \
+   lexer families into phase E, after the validator families and after the draft §3 layering memo \
+   that phase writes: the `Code` namespace has to settle where a lexical refusal sits relative to \
+   a syntactic one and to a validation rule before either family can be given codes meant to \
+   outlive a rewording, and that ordering is the issue's, not this table's. Recorded, not \
+   accepted.";
+
+/// The parser families: draft §2 syntactic refusals, and the lossless tower's own reports.
+const PARSER_FAMILY: &str = "A draft §2 syntactic refusal. Phase E of al8n/smear#126 owns it \
+   together with the lexer families, and for the same reason: the §3 question of which \
+   obligations a parser discharges and which a validation rule does is the one the contract was \
+   built to make rigorous, so codes assigned before that memo would be the guess the issue exists \
+   to stop making. Recorded, not accepted.";
+
+/// Every type the D1 inventory finds that does not answer the contract, each with its argument.
+///
+/// It is long, and its length is the finding rather than a defect in the table: thirty-two of the
+/// thirty-six are the lexer and parser families that phase E owns, and this is the first artifact
+/// in the repository that states how many there are. The three rows it does *not* cover are the
+/// three Phase A implemented, and D2 proves those with the compiler.
+pub const EXEMPTIONS: &[Exemption] = &[
+  // ── Aggregates: the elements answer ──────────────────────────────────────────────────────────
+  Exemption {
+    path: "smear::validator::SchemaErrors",
+    kind: Kind::Aggregate,
+    element: Some("smear::validator::SchemaError"),
+    issue: None,
+    reason: "The `Vec<SchemaError>` a refused build hands back, with the interning arena those \
+             errors' symbols index. A collection is not a diagnostic — it has no code, no primary \
+             span and no severity of its own — and the design says so: implemented by the \
+             resolved views, never by aggregates. Its elements are `SchemaError`, which is a \
+             contract row and which D2 asserts.",
+  },
+  // ── Unresolved: the resolved view answers ────────────────────────────────────────────────────
+  Exemption {
+    path: "smear::validator::Diagnostic",
+    kind: Kind::Unresolved,
+    element: Some("smear::validator::DiagnosticDisplay"),
+    issue: None,
+    reason: "A draft §5 diagnostic holds a `Rule`, spans and a `Context` of interned `Sym`s, and a \
+             `Sym` is an index into one particular `Schema`. On its own it cannot render its own \
+             message, so it cannot satisfy the `Display` supertrait meaningfully and cannot answer \
+             `primary_label` at all. `Diagnostic::display(schema)` pairs the two, and that pair is \
+             what implements the contract — which is the design's rule, not an exception to it.",
+  },
+  // ── Verdicts: an outcome, carrying or counting the diagnostics rather than being one ─────────
+  Exemption {
+    path: "smear::validator::Invalid",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "The verdict of a failed executable validation: how many diagnostics were emitted, \
+             whether the sink stopped early, whether a budget refused the document. The \
+             diagnostics themselves went to the sink and never enter this value, so there is no \
+             code to answer and no span to point at — asking it for a primary location would mean \
+             inventing one for a counter.",
+  },
+  Exemption {
+    path: "smear::validator::LosslessInvalid",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "`Invalid` paired with the `Recovery` the successful arm carries, so a caller learns \
+             what was wrong and how much of the document had an AST image from one value. It is a \
+             verdict for its inner verdict's reason, and adding a recovery fraction to a counter \
+             does not make either of them a diagnostic.",
+  },
+  Exemption {
+    path: "smear::validator::LosslessSchemaErrors",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "`LosslessInvalid`'s twin on the SDL side: the `SchemaErrors` draft §3 produced, \
+             paired with the parse's `Recovery`. Recorded as a verdict rather than as an \
+             aggregate because its element is `SchemaErrors`, which is itself an aggregate — the \
+             contract rows are two levels down, reachable through `errors()`, and a record \
+             claiming a direct element would be claiming something untrue.",
+  },
+  Exemption {
+    path: "smear::validator::IntrospectionError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "The two ways `Schema::from_introspection` can refuse, as a sum: `Response` carries a \
+             `ResponseError` and `Schema` carries the whole `SchemaErrors` draft §3 produced. It \
+             is the door's return type rather than a diagnostic, and the two arms answer through \
+             their own payloads — one a contract row, the other an aggregate of one. A `Diagnose` \
+             on the sum would have to invent a primary location for a variant holding a hundred of \
+             them.",
+  },
+  // ── The lexer families — al8n/smear#126 phase E ──────────────────────────────────────────────
+  Exemption {
+    path: "smear::lexer::error::LengthError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::error::StringError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::error::StringErrors",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::error::UnicodeError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::error::BracedUnicodeEscapeError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::error::FixedUnicodeEscapeError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphql::error::LexerError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphql::error::LexerErrors",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphql::error::FloatError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphql::error::DecimalError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::LexerError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::LexerErrors",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::FloatError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::HexFloatError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::DecimalError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::HexError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::OctalError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::BinaryError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  // ── The parser families — al8n/smear#126 phase E ─────────────────────────────────────────────
+  Exemption {
+    path: "smear::parser::graphql::error::Error",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphql::error::Errors",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphql::syntactic::GraphqlError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphql::lossless::GraphqlLosslessError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphql::lossless::GraphqlLosslessErrors",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphqlx::error::Error",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphqlx::error::Errors",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphqlx::syntactic::GraphqlxError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphqlx::lossless::GraphqlxLosslessError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::graphqlx::lossless::GraphqlxLosslessErrors",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: PARSER_FAMILY,
+  },
+  Exemption {
+    path: "smear::parser::lossless::project::ProjectError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "The projection's refusal: the caller's buffer does not match the green tree the \
+             projection was asked to re-slice it by. Phase E of al8n/smear#126 owns it with the \
+             rest of the parser families. It is also the one refusal in this group that is about \
+             a caller's mistake rather than a document's, which is a distinction the phase's \
+             `Code` namespace has to make and cannot make before it exists.",
+  },
+  Exemption {
+    path: "smear::parser::lossless::runner::Diagnostic",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "What a lossless parse recorded: a byte range, a severity, and the token count of a \
+             recovery hole. It is deliberately payload-free — carrying the typed error would give \
+             `Parse` the parse's lifetime and stop a consumer caching one per file — so joining \
+             the contract means deciding which `Code` a lifetime-free record can honestly answer \
+             with, and that is phase E's question rather than a line missing here.",
+  },
+];
+
+/// Refuses a table that would let a type through without an argument.
+pub fn validate() -> Vec<String> {
+  EXEMPTIONS
+    .iter()
+    .enumerate()
+    .flat_map(|(index, exemption)| check_one(exemption, index))
+    .collect()
+}
+
+/// The guards, on one record. Public so the selftest can hand it a deliberately broken one.
+pub fn check_one(exemption: &Exemption, index: usize) -> Vec<String> {
+  let at = format!("contract exemption {index} ({})", exemption.path);
+  let mut problems = reason_problems(exemption.reason, &at);
+
+  let delegates = matches!(exemption.kind, Kind::Aggregate | Kind::Unresolved);
+  match (delegates, exemption.element) {
+    (true, None) => problems.push(format!(
+      "{at}: it is recorded as {:?}, which is a claim that something *else* answers the contract, \
+       so it must name what. Without one the record claims nothing and cannot be checked",
+      exemption.kind
+    )),
+    (false, Some(element)) => problems.push(format!(
+      "{at}: it is recorded as {:?} and yet names `{element}` as what answers instead. Only an \
+       aggregate or an unresolved view delegates to one",
+      exemption.kind
+    )),
+    _ => {}
+  }
+
+  match (exemption.kind, exemption.issue) {
+    (Kind::Tracked, None) => problems.push(format!(
+      "{at}: a tracked family must name the issue that owns it, or it is debt with nowhere to be \
+       paid"
+    )),
+    (Kind::Tracked, Some(_)) => {}
+    (_, Some(issue)) => problems.push(format!(
+      "{at}: it is recorded as {:?} — nothing anyone closes — and yet names issue #{issue}. One \
+       of the two is wrong",
+      exemption.kind
+    )),
+    (_, None) => {}
+  }
+
+  if exemption.path.is_empty() {
+    problems.push(format!("{at}: the type must be named"));
+  }
+  problems
+}
+
+impl Exemption {
+  /// Whether this record claims some other type answers on its behalf.
+  pub fn delegates(&self) -> bool {
+    matches!(self.kind, Kind::Aggregate | Kind::Unresolved)
+  }
+
+  pub fn label(&self) -> String {
+    match (self.kind, self.element, self.issue) {
+      (Kind::Aggregate, Some(element), _) => format!("AGGREGATE of {element}"),
+      (Kind::Unresolved, Some(element), _) => format!("RESOLVED BY {element}"),
+      (Kind::Aggregate | Kind::Unresolved, None, _) => {
+        "DELEGATES (to nothing — invalid)".to_string()
+      }
+      (Kind::Verdict, ..) => "VERDICT".to_string(),
+      (Kind::Tracked, _, Some(issue)) => format!("TRACKED al8n/smear#{issue}"),
+      (Kind::Tracked, _, None) => "TRACKED (no issue — invalid)".to_string(),
+      (Kind::NotDiagnostic, ..) => "NOT A DIAGNOSTIC — the pattern misfired".to_string(),
+    }
+  }
+}

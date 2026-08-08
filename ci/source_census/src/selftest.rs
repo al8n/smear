@@ -254,8 +254,8 @@ pub fn run() -> Result<usize, Vec<String>> {
       problems.push(format!("{}: {message}", case.name));
       continue;
     }
-    let report = match census::detect(&dir.join("lib.rs"), "probe") {
-      Ok(report) => report,
+    let surface = match crate::surface::load(&dir.join("lib.rs"), "probe") {
+      Ok(surface) => surface,
       Err(message) => {
         problems.push(format!(
           "{}: the census could not read it: {message}",
@@ -264,6 +264,7 @@ pub fn run() -> Result<usize, Vec<String>> {
         continue;
       }
     };
+    let report = census::detect(&surface);
     for (entry, param, want, because) in case.wants {
       let found = report
         .observations

@@ -32,7 +32,7 @@
 //!   does, and that declaration is read.
 
 use std::{
-  collections::BTreeSet,
+  collections::{BTreeMap, BTreeSet},
   path::{Path, PathBuf},
 };
 
@@ -56,6 +56,29 @@ impl Module {
   }
 }
 
+/// One `pub use`, kept as the edge it is so a path can be followed across it.
+///
+/// [`Surface::item_is_public`] only ever needs to know *whether* an item is reachable, and the two
+/// sets below answer that. Spelling a type in generated code needs the other half — *by what path*
+/// — and a re-export chain has to be walked for it: `SchemaError` is declared in
+/// `validator::schema::error`, re-exported by `validator::schema`, and a consumer writes neither.
+#[derive(Clone)]
+pub struct Reexport {
+  /// The module the `pub use` is written in.
+  pub at: Vec<String>,
+  /// The name it publishes under, which `as` can make differ from the target's own.
+  pub published: String,
+  /// The absolute path of what it names; for a glob, the module taken whole.
+  pub target: Vec<String>,
+  pub glob: bool,
+  /// The target is in another crate, so nothing in this one declares it.
+  ///
+  /// It is recorded rather than dropped because a trait can be *defined* elsewhere and reach a
+  /// consumer through this crate's name — al8n/tokora#240 does exactly that to `Diagnose` — and a
+  /// walk that only starts from declarations would then find no path to it at all.
+  pub foreign: bool,
+}
+
 /// Everything the census needs to know about who can call what.
 pub struct Surface {
   pub modules: Vec<Module>,
@@ -63,6 +86,10 @@ pub struct Surface {
   exported_items: BTreeSet<Vec<String>>,
   /// Modules taken whole by a `pub use m::*` in a reachable module.
   glob_exported: BTreeSet<Vec<String>>,
+  /// Every `pub use` in the crate, reachable or not — a chain runs through private modules.
+  pub reexports: Vec<Reexport>,
+  /// Whether every `mod` from the crate root to this one is `pub`, by module path.
+  reachable: BTreeMap<Vec<String>, bool>,
   /// Idents of publicly nameable types, for matching inherent `impl` blocks against.
   pub public_types: BTreeSet<String>,
   /// Files read, and item-position macro invocations found in them.
@@ -101,9 +128,14 @@ pub fn load(lib_rs: &Path, crate_name: &str) -> Result<Surface, String> {
       .map(|m| m.file.clone())
       .collect::<BTreeSet<_>>()
       .len(),
+    reachable: modules
+      .iter()
+      .map(|m| (m.path.clone(), m.named_by_path))
+      .collect(),
     modules,
     exported_items: BTreeSet::new(),
     glob_exported: BTreeSet::new(),
+    reexports: Vec::new(),
     public_types: BTreeSet::new(),
     macro_invocations,
   };
@@ -237,16 +269,18 @@ fn resolve_module_file(dir: &Path, m: &syn::ItemMod) -> Result<(PathBuf, PathBuf
 }
 
 impl Surface {
-  /// Walks every `pub use` in a reachable module and records what it makes public.
+  /// Walks every `pub use` in the crate, recording the edge and what it makes public.
+  ///
+  /// The two sets are built from reachable modules only, because that is what publicity means.
+  /// The edge list is built from all of them, because a chain of re-exports out of a private
+  /// module is how most of this crate's public names arrive.
   fn resolve_reexports(&mut self) {
     let known: BTreeSet<Vec<String>> = self.modules.iter().map(|m| m.path.clone()).collect();
     let mut items = BTreeSet::new();
     let mut globs = BTreeSet::new();
+    let mut edges = Vec::new();
 
     for module in &self.modules {
-      if !module.named_by_path {
-        continue;
-      }
       for item in &module.items {
         let Item::Use(u) = item else { continue };
         if !matches!(u.vis, Visibility::Public(_)) {
@@ -255,17 +289,34 @@ impl Surface {
         let mut leaves = Vec::new();
         walk_use(&u.tree, &mut Vec::new(), &mut leaves);
         for (prefix, leaf) in leaves {
-          let Some(base) = resolve_path(&prefix, &module.path, &known) else {
-            continue;
-          };
+          let inside = resolve_path(&prefix, &module.path, &known);
+          let base = inside.clone().unwrap_or_else(|| prefix.clone());
           match leaf {
             Leaf::Glob => {
-              globs.insert(base);
+              edges.push(Reexport {
+                at: module.path.clone(),
+                published: String::new(),
+                target: base.clone(),
+                glob: true,
+                foreign: inside.is_none(),
+              });
+              if module.named_by_path && inside.is_some() {
+                globs.insert(base);
+              }
             }
-            Leaf::Name(name) => {
+            Leaf::Name { target, published } => {
               let mut full = base;
-              full.push(name);
-              items.insert(full);
+              full.push(target);
+              edges.push(Reexport {
+                at: module.path.clone(),
+                published,
+                target: full.clone(),
+                glob: false,
+                foreign: inside.is_none(),
+              });
+              if module.named_by_path && inside.is_some() {
+                items.insert(full);
+              }
             }
           }
         }
@@ -274,6 +325,93 @@ impl Surface {
 
     self.exported_items = items;
     self.glob_exported = globs;
+    self.reexports = edges;
+  }
+
+  /// Every path a consumer can write to name the item declared as `module::ident`.
+  ///
+  /// Empty when there is none, which is the answer for a private item. Shortest first, then
+  /// alphabetical, so a caller that wants "the" path takes the first and gets the same one on
+  /// every run.
+  pub fn public_paths(&self, module: &[String], ident: &str) -> Vec<Vec<String>> {
+    let mut declared = module.to_vec();
+    declared.push(ident.to_string());
+    self.walk_paths(vec![declared])
+  }
+
+  /// Every path a consumer can write for `name`, counting a re-export of another crate's item.
+  ///
+  /// [`public_paths`](Self::public_paths) walks out from a declaration this crate makes, which is
+  /// the wrong starting point for a trait that has moved out of the crate and comes back through
+  /// `pub use tokora::diagnostic::Diagnose`. Both spellings have to resolve, so both walks exist
+  /// and the caller takes the union.
+  pub fn published_paths(&self, name: &str) -> Vec<Vec<String>> {
+    let seeds = self
+      .reexports
+      .iter()
+      .filter(|edge| !edge.glob && edge.published == name)
+      .map(|edge| {
+        let mut path = edge.at.clone();
+        path.push(edge.published.clone());
+        path
+      })
+      .collect();
+    self.walk_paths(seeds)
+  }
+
+  /// Follows `pub use` edges out of `seeds` and keeps the paths a consumer can name.
+  fn walk_paths(&self, seeds: Vec<Vec<String>>) -> Vec<Vec<String>> {
+    // Every path that names the item, publishable or not: a private module's alias is a step on
+    // the way to a public one, so it has to stay in the walk even though it is not an answer.
+    let mut seen: BTreeSet<Vec<String>> = BTreeSet::new();
+    let mut frontier = Vec::new();
+    for seed in seeds {
+      if seen.insert(seed.clone()) {
+        frontier.push(seed);
+      }
+    }
+
+    while let Some(path) = frontier.pop() {
+      let Some((leaf, parent)) = path.split_last() else {
+        continue;
+      };
+      for edge in &self.reexports {
+        // A foreign edge is a starting point, never a step: its target names another crate, so
+        // matching a path against it would be matching against a namespace this walk is not in.
+        if edge.foreign {
+          continue;
+        }
+        let candidate = if edge.glob {
+          if edge.target != parent {
+            continue;
+          }
+          let mut out = edge.at.clone();
+          out.push(leaf.clone());
+          out
+        } else {
+          if edge.target != path {
+            continue;
+          }
+          let mut out = edge.at.clone();
+          out.push(edge.published.clone());
+          out
+        };
+        if seen.insert(candidate.clone()) {
+          frontier.push(candidate);
+        }
+      }
+    }
+
+    let mut out: Vec<Vec<String>> = seen
+      .into_iter()
+      .filter(|path| {
+        path
+          .split_last()
+          .is_some_and(|(_, parent)| self.reachable.get(parent).copied().unwrap_or(false))
+      })
+      .collect();
+    out.sort_by_key(|path| (path.len(), path.join("::")));
+    out
   }
 
   /// Idents of every publicly nameable type, so an inherent `impl` can be matched to one.
@@ -321,7 +459,11 @@ impl Surface {
 }
 
 enum Leaf {
-  Name(String),
+  /// `target` is the item's own name and `published` the one `as` gave it, equal without one.
+  Name {
+    target: String,
+    published: String,
+  },
   Glob,
 }
 
@@ -333,8 +475,20 @@ fn walk_use(tree: &UseTree, prefix: &mut Vec<String>, out: &mut Vec<(Vec<String>
       walk_use(&p.tree, prefix, out);
       prefix.pop();
     }
-    UseTree::Name(n) => out.push((prefix.clone(), Leaf::Name(n.ident.to_string()))),
-    UseTree::Rename(r) => out.push((prefix.clone(), Leaf::Name(r.ident.to_string()))),
+    UseTree::Name(n) => out.push((
+      prefix.clone(),
+      Leaf::Name {
+        target: n.ident.to_string(),
+        published: n.ident.to_string(),
+      },
+    )),
+    UseTree::Rename(r) => out.push((
+      prefix.clone(),
+      Leaf::Name {
+        target: r.ident.to_string(),
+        published: r.rename.to_string(),
+      },
+    )),
     UseTree::Glob(_) => out.push((prefix.clone(), Leaf::Glob)),
     UseTree::Group(g) => {
       for tree in &g.items {
