@@ -14,6 +14,8 @@ use std::{boxed::Box, string::String, vec::Vec};
 
 use tokora::SimpleSpan;
 
+use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
+
 /// Which of draft §3's rules a [`SchemaError`] reports.
 ///
 /// Each variant carries the section it comes from in its documentation. The set is closed by the
@@ -438,6 +440,444 @@ impl SchemaErrorKind {
       Self::MissingRequiredInputObjectField => "required input object field is missing",
     }
   }
+
+  /// Returns the stable identifier for this kind.
+  ///
+  /// It is the [`Code`] every [`SchemaError`] of this kind answers, and it outlives every
+  /// rewording of [`message`](Self::message) — which is the whole reason a consumer keys off
+  /// this rather than off the text.
+  #[inline]
+  pub const fn code(&self) -> Code {
+    match self {
+      Self::DuplicateTypeName => Code::new("smear::schema::duplicate-type-name"),
+      Self::DuplicateDirectiveDefinition => {
+        Code::new("smear::schema::duplicate-directive-definition")
+      }
+      Self::DuplicateSchemaDefinition => Code::new("smear::schema::duplicate-schema-definition"),
+      Self::DuplicateRootOperationType => Code::new("smear::schema::duplicate-root-operation-type"),
+      Self::UndefinedRootOperationType => Code::new("smear::schema::undefined-root-operation-type"),
+      Self::RootOperationTypeNotObject => {
+        Code::new("smear::schema::root-operation-type-not-object")
+      }
+      Self::SharedRootOperationType => Code::new("smear::schema::shared-root-operation-type"),
+      Self::MissingQueryRootOperationType => {
+        Code::new("smear::schema::missing-query-root-operation-type")
+      }
+      Self::UndefinedExtensionTarget => Code::new("smear::schema::undefined-extension-target"),
+      Self::ExtensionKindMismatch => Code::new("smear::schema::extension-kind-mismatch"),
+      Self::RedefinedBuiltInType => Code::new("smear::schema::redefined-built-in-type"),
+      Self::ReservedTypeName => Code::new("smear::schema::reserved-type-name"),
+      Self::UndefinedType => Code::new("smear::schema::undefined-type"),
+      Self::TypeReferenceTooDeep => Code::new("smear::schema::type-reference-too-deep"),
+      Self::InvalidName => Code::new("smear::schema::invalid-name"),
+      Self::TooManyNames => Code::new("smear::schema::too-many-names"),
+      Self::EmptyFieldsDefinition => Code::new("smear::schema::empty-fields-definition"),
+      Self::DuplicateFieldName => Code::new("smear::schema::duplicate-field-name"),
+      Self::ReservedFieldName => Code::new("smear::schema::reserved-field-name"),
+      Self::FieldTypeNotOutputType => Code::new("smear::schema::field-type-not-output-type"),
+      Self::DuplicateArgumentName => Code::new("smear::schema::duplicate-argument-name"),
+      Self::ReservedArgumentName => Code::new("smear::schema::reserved-argument-name"),
+      Self::ArgumentTypeNotInputType => Code::new("smear::schema::argument-type-not-input-type"),
+      Self::DeprecatedRequiredArgument => Code::new("smear::schema::deprecated-required-argument"),
+      Self::InvalidDefaultValue => Code::new("smear::schema::invalid-default-value"),
+      Self::ImplementsNonInterface => Code::new("smear::schema::implements-non-interface"),
+      Self::UndefinedImplementsInterface => {
+        Code::new("smear::schema::undefined-implements-interface")
+      }
+      Self::DuplicateImplementsInterface => {
+        Code::new("smear::schema::duplicate-implements-interface")
+      }
+      Self::SelfImplementingInterface => Code::new("smear::schema::self-implementing-interface"),
+      Self::MissingTransitiveInterface => Code::new("smear::schema::missing-transitive-interface"),
+      Self::MissingInterfaceField => Code::new("smear::schema::missing-interface-field"),
+      Self::InvalidInterfaceFieldType => Code::new("smear::schema::invalid-interface-field-type"),
+      Self::MissingInterfaceFieldArgument => {
+        Code::new("smear::schema::missing-interface-field-argument")
+      }
+      Self::InvalidInterfaceFieldArgumentType => {
+        Code::new("smear::schema::invalid-interface-field-argument-type")
+      }
+      Self::UnexpectedRequiredArgument => Code::new("smear::schema::unexpected-required-argument"),
+      Self::InterfaceFieldNotDeprecated => {
+        Code::new("smear::schema::interface-field-not-deprecated")
+      }
+      Self::EmptyUnionMembers => Code::new("smear::schema::empty-union-members"),
+      Self::UnionMemberNotObject => Code::new("smear::schema::union-member-not-object"),
+      Self::UndefinedUnionMember => Code::new("smear::schema::undefined-union-member"),
+      Self::DuplicateUnionMember => Code::new("smear::schema::duplicate-union-member"),
+      Self::EmptyEnumValues => Code::new("smear::schema::empty-enum-values"),
+      Self::DuplicateEnumValue => Code::new("smear::schema::duplicate-enum-value"),
+      Self::ReservedEnumValueName => Code::new("smear::schema::reserved-enum-value-name"),
+      Self::EmptyInputFields => Code::new("smear::schema::empty-input-fields"),
+      Self::DuplicateInputFieldName => Code::new("smear::schema::duplicate-input-field-name"),
+      Self::ReservedInputFieldName => Code::new("smear::schema::reserved-input-field-name"),
+      Self::InputFieldTypeNotInputType => {
+        Code::new("smear::schema::input-field-type-not-input-type")
+      }
+      Self::DeprecatedRequiredInputField => {
+        Code::new("smear::schema::deprecated-required-input-field")
+      }
+      Self::OneOfFieldNotNullable => Code::new("smear::schema::one-of-field-not-nullable"),
+      Self::OneOfFieldHasDefault => Code::new("smear::schema::one-of-field-has-default"),
+      Self::CircularNonNullInputField => Code::new("smear::schema::circular-non-null-input-field"),
+      Self::InputObjectDefaultValueCycle => {
+        Code::new("smear::schema::input-object-default-value-cycle")
+      }
+      Self::OneOfOnInputObjectExtension => {
+        Code::new("smear::schema::one-of-on-input-object-extension")
+      }
+      Self::ReservedDirectiveName => Code::new("smear::schema::reserved-directive-name"),
+      Self::DuplicateDirectiveArgumentName => {
+        Code::new("smear::schema::duplicate-directive-argument-name")
+      }
+      Self::ReservedDirectiveArgumentName => {
+        Code::new("smear::schema::reserved-directive-argument-name")
+      }
+      Self::DirectiveArgumentTypeNotInputType => {
+        Code::new("smear::schema::directive-argument-type-not-input-type")
+      }
+      Self::SelfReferentialDirective => Code::new("smear::schema::self-referential-directive"),
+      Self::UndefinedDirective => Code::new("smear::schema::undefined-directive"),
+      Self::UnsupportedDirectiveLocation => {
+        Code::new("smear::schema::unsupported-directive-location")
+      }
+      Self::DuplicateDirectiveUse => Code::new("smear::schema::duplicate-directive-use"),
+      Self::UndefinedDirectiveArgument => Code::new("smear::schema::undefined-directive-argument"),
+      Self::MissingRequiredDirectiveArgument => {
+        Code::new("smear::schema::missing-required-directive-argument")
+      }
+      Self::InvalidDirectiveArgumentValue => {
+        Code::new("smear::schema::invalid-directive-argument-value")
+      }
+      Self::DuplicateDirectiveArgumentUse => {
+        Code::new("smear::schema::duplicate-directive-argument-use")
+      }
+      Self::UndefinedInputObjectField => Code::new("smear::schema::undefined-input-object-field"),
+      Self::MissingRequiredInputObjectField => {
+        Code::new("smear::schema::missing-required-input-object-field")
+      }
+    }
+  }
+
+  /// Returns how much this kind asks of its reader.
+  ///
+  /// Every draft §3 refusal is an [`Severity::Error`]: the build returns `Err` and there is no
+  /// schema. The arm is spelled out variant by variant rather than as a wildcard so that a kind
+  /// added for the deprecation-lint class has to say so here.
+  #[inline]
+  pub const fn severity(&self) -> Severity {
+    match self {
+      Self::DuplicateTypeName
+      | Self::DuplicateDirectiveDefinition
+      | Self::DuplicateSchemaDefinition
+      | Self::DuplicateRootOperationType
+      | Self::UndefinedRootOperationType
+      | Self::RootOperationTypeNotObject
+      | Self::SharedRootOperationType
+      | Self::MissingQueryRootOperationType
+      | Self::UndefinedExtensionTarget
+      | Self::ExtensionKindMismatch
+      | Self::RedefinedBuiltInType
+      | Self::ReservedTypeName
+      | Self::UndefinedType
+      | Self::TypeReferenceTooDeep
+      | Self::InvalidName
+      | Self::TooManyNames
+      | Self::EmptyFieldsDefinition
+      | Self::DuplicateFieldName
+      | Self::ReservedFieldName
+      | Self::FieldTypeNotOutputType
+      | Self::DuplicateArgumentName
+      | Self::ReservedArgumentName
+      | Self::ArgumentTypeNotInputType
+      | Self::DeprecatedRequiredArgument
+      | Self::InvalidDefaultValue
+      | Self::ImplementsNonInterface
+      | Self::UndefinedImplementsInterface
+      | Self::DuplicateImplementsInterface
+      | Self::SelfImplementingInterface
+      | Self::MissingTransitiveInterface
+      | Self::MissingInterfaceField
+      | Self::InvalidInterfaceFieldType
+      | Self::MissingInterfaceFieldArgument
+      | Self::InvalidInterfaceFieldArgumentType
+      | Self::UnexpectedRequiredArgument
+      | Self::InterfaceFieldNotDeprecated
+      | Self::EmptyUnionMembers
+      | Self::UnionMemberNotObject
+      | Self::UndefinedUnionMember
+      | Self::DuplicateUnionMember
+      | Self::EmptyEnumValues
+      | Self::DuplicateEnumValue
+      | Self::ReservedEnumValueName
+      | Self::EmptyInputFields
+      | Self::DuplicateInputFieldName
+      | Self::ReservedInputFieldName
+      | Self::InputFieldTypeNotInputType
+      | Self::DeprecatedRequiredInputField
+      | Self::OneOfFieldNotNullable
+      | Self::OneOfFieldHasDefault
+      | Self::CircularNonNullInputField
+      | Self::InputObjectDefaultValueCycle
+      | Self::OneOfOnInputObjectExtension
+      | Self::ReservedDirectiveName
+      | Self::DuplicateDirectiveArgumentName
+      | Self::ReservedDirectiveArgumentName
+      | Self::DirectiveArgumentTypeNotInputType
+      | Self::SelfReferentialDirective
+      | Self::UndefinedDirective
+      | Self::UnsupportedDirectiveLocation
+      | Self::DuplicateDirectiveUse
+      | Self::UndefinedDirectiveArgument
+      | Self::MissingRequiredDirectiveArgument
+      | Self::InvalidDirectiveArgumentValue
+      | Self::DuplicateDirectiveArgumentUse
+      | Self::UndefinedInputObjectField
+      | Self::MissingRequiredInputObjectField => Severity::Error,
+    }
+  }
+
+  /// Returns what the SDL author can do about it, where the rule has something actionable to
+  /// say beyond [`message`](Self::message).
+  ///
+  /// `None` is a real answer, not a gap: for a duplicate the two spans say everything, and a
+  /// help line repeating the message would be noise in every renderer that shows both.
+  #[inline]
+  pub const fn help(&self) -> Option<&'static str> {
+    match self {
+      Self::DuplicateTypeName => {
+        Some("rename one of the definitions, or make the second an `extend` of the first.")
+      }
+      Self::DuplicateDirectiveDefinition => Some(
+        "`repeatable` governs repeated *use*, not repeated definition; a directive is defined once.",
+      ),
+      Self::DuplicateSchemaDefinition => {
+        Some("a document holds at most one `schema` block; put the extra roots in `extend schema`.")
+      }
+      Self::RootOperationTypeNotObject => Some(
+        "a root operation type must be an object type: an interface or union has no concrete field set to resolve.",
+      ),
+      Self::SharedRootOperationType => Some(
+        "the three roots are the entry points of three different operation kinds, so each needs its own object type.",
+      ),
+      Self::MissingQueryRootOperationType => {
+        Some("define `type Query`, or name an existing object type with `schema { query: … }`.")
+      }
+      Self::UndefinedExtensionTarget => {
+        Some("`extend` adds to a type the document defines; define it, or drop the `extend`.")
+      }
+      Self::ExtensionKindMismatch => {
+        Some("the `extend` keyword has to match the kind of the definition it extends.")
+      }
+      Self::RedefinedBuiltInType => Some(
+        "the `__`-prefixed introspection types are injected by every build and cannot be replaced.",
+      ),
+      Self::ReservedTypeName => {
+        Some("a name beginning with `__` is reserved for introspection; rename it.")
+      }
+      Self::TypeReferenceTooDeep => Some(
+        "this implementation packs a bounded number of list and non-null wrappers into one type reference; flatten the type.",
+      ),
+      Self::InvalidName => Some("a GraphQL name is spelled `/[_A-Za-z][_0-9A-Za-z]*/`."),
+      Self::EmptyFieldsDefinition => {
+        Some("an object or interface type must define at least one field.")
+      }
+      Self::ReservedFieldName => {
+        Some("a name beginning with `__` is reserved for introspection; rename it.")
+      }
+      Self::FieldTypeNotOutputType => Some(
+        "a field's type must be a scalar, object, interface, union or enum; an input object appears only in argument and input-field positions.",
+      ),
+      Self::ReservedArgumentName => {
+        Some("a name beginning with `__` is reserved for introspection; rename it.")
+      }
+      Self::ArgumentTypeNotInputType => {
+        Some("an argument's type must be a scalar, enum or input object.")
+      }
+      Self::DeprecatedRequiredArgument => Some(
+        "to deprecate a required argument, first make it optional — give it a default, or drop the `!`.",
+      ),
+      Self::MissingTransitiveInterface => Some(
+        "a type that implements an interface must also declare everything that interface implements.",
+      ),
+      Self::MissingInterfaceField => {
+        Some("add the field, with a type valid for the interface field's.")
+      }
+      Self::InvalidInterfaceFieldType => Some(
+        "an implementing field may add `!` and narrow to a member or implementor; it may never widen.",
+      ),
+      Self::MissingInterfaceFieldArgument => {
+        Some("add the argument, with the interface field's exact type.")
+      }
+      Self::InvalidInterfaceFieldArgumentType => Some(
+        "argument types are invariant, so the implementing field's argument must match the interface field's exactly.",
+      ),
+      Self::UnexpectedRequiredArgument => Some(
+        "an argument the interface field does not declare must be optional — give it a default, or drop the `!`.",
+      ),
+      Self::InterfaceFieldNotDeprecated => Some(
+        "deprecate the interface field too, or undeprecate this one; the obligation runs outwards from the interface.",
+      ),
+      Self::UnionMemberNotObject => Some(
+        "a union's members must be object types: a union of interfaces or of unions has no concrete member set.",
+      ),
+      Self::ReservedEnumValueName => {
+        Some("a name beginning with `__` is reserved for introspection; rename it.")
+      }
+      Self::ReservedInputFieldName => {
+        Some("a name beginning with `__` is reserved for introspection; rename it.")
+      }
+      Self::InputFieldTypeNotInputType => {
+        Some("an input field's type must be a scalar, enum or input object.")
+      }
+      Self::DeprecatedRequiredInputField => Some(
+        "to deprecate a required input field, first make it optional — give it a default, or drop the `!`.",
+      ),
+      Self::OneOfFieldNotNullable => Some(
+        "every field of a `@oneOf` input object is one of the alternatives, so each one has to be nullable.",
+      ),
+      Self::OneOfFieldHasDefault => {
+        Some("a defaulted field would always be present, which is the one thing `@oneOf` forbids.")
+      }
+      Self::CircularNonNullInputField => Some(
+        "break the cycle with a nullable link or a list; as written, no finite value satisfies it.",
+      ),
+      Self::InputObjectDefaultValueCycle => {
+        Some("drop one of the defaults, or give it a value that does not refer back.")
+      }
+      Self::OneOfOnInputObjectExtension => Some(
+        "`@oneOf` changes what every existing field of the type means, so it belongs on the definition.",
+      ),
+      Self::ReservedDirectiveName => {
+        Some("a name beginning with `__` is reserved for introspection; rename it.")
+      }
+      Self::ReservedDirectiveArgumentName => {
+        Some("a name beginning with `__` is reserved for introspection; rename it.")
+      }
+      Self::DirectiveArgumentTypeNotInputType => {
+        Some("a directive argument's type must be a scalar, enum or input object.")
+      }
+      Self::SelfReferentialDirective => Some(
+        "a directive may not appear on its own definition, nor on any type that definition names.",
+      ),
+      Self::UnsupportedDirectiveLocation => {
+        Some("add the location to the directive's definition, or move the usage.")
+      }
+      Self::DuplicateDirectiveUse => Some(
+        "declare the directive `repeatable`, or apply it once; a type and its extensions are one location.",
+      ),
+      Self::MissingRequiredDirectiveArgument => Some(
+        "a required argument is non-null with no default: pass it, or give the definition a default.",
+      ),
+      Self::MissingRequiredInputObjectField => Some(
+        "a required field is non-null with no default: pass it, or give the definition a default.",
+      ),
+      Self::DuplicateRootOperationType
+      | Self::UndefinedRootOperationType
+      | Self::UndefinedType
+      | Self::TooManyNames
+      | Self::DuplicateFieldName
+      | Self::DuplicateArgumentName
+      | Self::InvalidDefaultValue
+      | Self::ImplementsNonInterface
+      | Self::UndefinedImplementsInterface
+      | Self::DuplicateImplementsInterface
+      | Self::SelfImplementingInterface
+      | Self::EmptyUnionMembers
+      | Self::UndefinedUnionMember
+      | Self::DuplicateUnionMember
+      | Self::EmptyEnumValues
+      | Self::DuplicateEnumValue
+      | Self::EmptyInputFields
+      | Self::DuplicateInputFieldName
+      | Self::DuplicateDirectiveArgumentName
+      | Self::UndefinedDirective
+      | Self::UndefinedDirectiveArgument
+      | Self::InvalidDirectiveArgumentValue
+      | Self::DuplicateDirectiveArgumentUse
+      | Self::UndefinedInputObjectField => None,
+    }
+  }
+
+  /// Returns the phrase for the second span a [`SchemaError`] of this kind points at.
+  ///
+  /// `Some` exactly for the kinds that are about a *relationship* between two places — a
+  /// duplicate and the definition it repeats, an implementing field and the interface field it
+  /// answers to. A kind that never attaches a related span answers `None`, and
+  /// `tests/diagnostic_codes.rs` pins the implication in the direction that matters: an error
+  /// carrying a related span whose kind has no phrase for it would drop the span silently.
+  #[inline]
+  pub const fn related_label(&self) -> Option<&'static str> {
+    match self {
+      Self::DuplicateTypeName => Some("first defined here"),
+      Self::DuplicateDirectiveDefinition => Some("first defined here"),
+      Self::DuplicateSchemaDefinition => Some("first defined here"),
+      Self::DuplicateRootOperationType => Some("first named here"),
+      Self::SharedRootOperationType => Some("already a root operation type here"),
+      Self::ExtensionKindMismatch => Some("the definition it extends"),
+      Self::DuplicateFieldName => Some("first defined here"),
+      Self::DuplicateArgumentName => Some("first declared here"),
+      Self::DuplicateImplementsInterface => Some("first implemented here"),
+      Self::InterfaceFieldNotDeprecated => Some("the interface field, which is not deprecated"),
+      Self::DuplicateUnionMember => Some("first named here"),
+      Self::DuplicateEnumValue => Some("first defined here"),
+      Self::DuplicateInputFieldName => Some("first defined here"),
+      Self::DuplicateDirectiveArgumentName => Some("first declared here"),
+      Self::DuplicateDirectiveUse => Some("first applied here"),
+      Self::DuplicateDirectiveArgumentUse => Some("first passed here"),
+      Self::UndefinedRootOperationType
+      | Self::RootOperationTypeNotObject
+      | Self::MissingQueryRootOperationType
+      | Self::UndefinedExtensionTarget
+      | Self::RedefinedBuiltInType
+      | Self::ReservedTypeName
+      | Self::UndefinedType
+      | Self::TypeReferenceTooDeep
+      | Self::InvalidName
+      | Self::TooManyNames
+      | Self::EmptyFieldsDefinition
+      | Self::ReservedFieldName
+      | Self::FieldTypeNotOutputType
+      | Self::ReservedArgumentName
+      | Self::ArgumentTypeNotInputType
+      | Self::DeprecatedRequiredArgument
+      | Self::InvalidDefaultValue
+      | Self::ImplementsNonInterface
+      | Self::UndefinedImplementsInterface
+      | Self::SelfImplementingInterface
+      | Self::MissingTransitiveInterface
+      | Self::MissingInterfaceField
+      | Self::InvalidInterfaceFieldType
+      | Self::MissingInterfaceFieldArgument
+      | Self::InvalidInterfaceFieldArgumentType
+      | Self::UnexpectedRequiredArgument
+      | Self::EmptyUnionMembers
+      | Self::UnionMemberNotObject
+      | Self::UndefinedUnionMember
+      | Self::EmptyEnumValues
+      | Self::ReservedEnumValueName
+      | Self::EmptyInputFields
+      | Self::ReservedInputFieldName
+      | Self::InputFieldTypeNotInputType
+      | Self::DeprecatedRequiredInputField
+      | Self::OneOfFieldNotNullable
+      | Self::OneOfFieldHasDefault
+      | Self::CircularNonNullInputField
+      | Self::InputObjectDefaultValueCycle
+      | Self::OneOfOnInputObjectExtension
+      | Self::ReservedDirectiveName
+      | Self::ReservedDirectiveArgumentName
+      | Self::DirectiveArgumentTypeNotInputType
+      | Self::SelfReferentialDirective
+      | Self::UndefinedDirective
+      | Self::UnsupportedDirectiveLocation
+      | Self::UndefinedDirectiveArgument
+      | Self::MissingRequiredDirectiveArgument
+      | Self::InvalidDirectiveArgumentValue
+      | Self::UndefinedInputObjectField
+      | Self::MissingRequiredInputObjectField => None,
+    }
+  }
 }
 
 impl core::fmt::Display for SchemaErrorKind {
@@ -528,6 +968,82 @@ impl SchemaError {
   #[inline]
   pub const fn document(&self) -> u32 {
     self.document
+  }
+
+  /// The related span paired with the phrase its kind gives it.
+  ///
+  /// Both halves are needed for a label to exist, and the pair is computed once here so that
+  /// [`Diagnose::labels`] and [`Diagnose::label`] cannot disagree about how many there are.
+  #[inline]
+  const fn secondary(&self) -> Option<Label> {
+    match (self.related, self.kind.related_label()) {
+      (Some(span), Some(text)) => Some(Label::new(Location::new(self.document, span), text)),
+      _ => None,
+    }
+  }
+}
+
+/// A draft §3 refusal, read as structure rather than as a sentence.
+///
+/// The primary position is the artifact the build rejected, in the document it came from — the
+/// builder accepts several and numbers them, which is what [`SchemaError::document`] carries and
+/// why the location is not a bare span.
+///
+/// There is at most one secondary label, and it is the kind's own phrase over
+/// [`SchemaError::related`]: a duplicate points back at the definition it repeats, an implementing
+/// field at the interface field it answers to.
+///
+/// **No path segments, ever.** A schema refusal is about SDL, and draft §7.1.2's `path` is a
+/// coordinate in a *response*. The dotted owner path this error renders — `User.pet.first` — is a
+/// schema coordinate that merely looks similar, and publishing it as a response path would put a
+/// `path` on the wire for an error that never had one.
+impl Diagnose for SchemaError {
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind.code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.kind.severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    Location::new(self.document, self.span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind.message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    usize::from(self.secondary().is_some())
+  }
+
+  #[inline]
+  fn label(&self, index: usize) -> Option<Label> {
+    match index {
+      0 => self.secondary(),
+      _ => None,
+    }
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.kind.help()
   }
 }
 
