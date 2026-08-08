@@ -20,11 +20,28 @@ A zero-copy lexer, parser and validator for standard GraphQL, built out of reusa
 
 ## Overview
 
-**Smear** is a GraphQL front end in three parts: a zero-copy **lexer**, a **parser** that produces
-either a plain AST or a lossless CST, and a **validator** for the draft specification's type-system
-and executable-document rules. Everything above the lexer is built from reusable combinators, so the
-same machinery serves standard GraphQL and GraphQL-like DSLs — GraphQLx, the extended dialect that
-ships alongside, is one of those DSLs rather than a special case.
+**Smear** is the I/O-free core of a GraphQL implementation. Today that core is a zero-copy **lexer**,
+a **parser** that produces either a plain AST or a lossless CST, and a **validator** for the draft
+specification's type-system and executable-document rules. Everything above the lexer is built from
+reusable combinators, so the same machinery serves standard GraphQL and GraphQL-like DSLs — GraphQLx,
+the extended dialect that ships alongside, is one of those DSLs rather than a special case.
+
+**I/O-free is a design constraint, not a euphemism for unfinished.** Nothing here opens a socket,
+spawns a task, or decides how you allocate; every layer is a library you call rather than a framework
+that calls you. That constraint is why the parser is generic over the source representation instead
+of taking `&str`, why the validator's steady state allocates nothing and keeps its scratch in a buffer
+you own, and why `no_std` is reachable at all.
+
+It is also what the rest of the plan rests on. Execution — draft §6 and §7 — is being built as a
+Sans-I/O state machine: `poll_*` and `handle_*` pairs, time passed in rather than read, and the
+resolved values owned by the caller behind a trait rather than copied into a `Value` enum of ours, so
+a handle from FFI or wasm is a first-class value and not a conversion step. A core shaped that way can
+be driven by a `tokio` server, a `compio` one, a wasm module or an editor without any of them being
+privileged — which is what lets the runtime adapters and the ergonomic macro layer be thin crates
+*above* the core instead of assumptions baked *into* it.
+
+None of that is here yet, and the table below says so line by line. The direction is stated because
+it explains the shape of what is here: those constraints cost something, and this is what they buy.
 
 ### What is implemented, and what is not
 

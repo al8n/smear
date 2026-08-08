@@ -6,7 +6,7 @@ rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
-description = "Zero-copy GraphQL and GraphQLx: parse to an AST or a lossless CST, build a schema, and validate it and your documents against the draft specification."
+description = "The I/O-free core of a GraphQL implementation: zero-copy parsing to an AST or a lossless CST, and draft-specification validation, for GraphQL and GraphQLx."
 
 # `smear/README.md` is a SYMLINK to the workspace-root `README.md`, and both halves of that
 # matter. `src/lib.rs` opens with `#![doc = include_str!("../README.md")]`, and until #101 that
