@@ -1,5 +1,3 @@
-use std::vec;
-
 use tokora::{
   span::{AsSpan, IntoSpan},
   utils::IntoComponents,
@@ -38,6 +36,12 @@ fn named_type_carrier_supports_custom_spans() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_carriers_support_custom_spans() {
+  // `vec` is imported here rather than at file scope because this is the only test that needs
+  // it, and at file scope a `--features "parser,graphql"` build — with `graphqlx` off, which
+  // #136 made reachable — sees an unused import. Function-scoped like the two `use` lines below
+  // it, so the import follows the `cfg` that decides whether it is compiled.
+  use std::vec;
+
   use crate::parser::path::Path;
 
   use super::{DefinitionTypePath, MapType, SetType, TypeGenerics};

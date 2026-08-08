@@ -1,7 +1,13 @@
-#![cfg(feature = "graphql")]
+#![cfg(all(feature = "graphql", feature = "parser"))]
 
 //! The syntactic span-extent gate for GraphQL: trivia injection, with a per-node-type
 //! discrimination counter.
+//!
+//! The header names `parser` as well as the dialect because the file reads
+//! `smear::parser::graphql`, and `parser` is a feature a consumer can turn off. It said `graphql`
+//! alone until #136 and compiled regardless: the self dev-dependency pulled the crate's defaults
+//! into every test target, so `parser` was on in every build there was and a header that omitted
+//! it had nothing to be wrong about.
 //!
 //! The invariant: **a composite node's span is the extent of the tokens it contains.** It opens at
 //! the start of its first token and closes at the end of its last one, and no ignorable byte on

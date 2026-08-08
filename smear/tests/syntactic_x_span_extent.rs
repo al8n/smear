@@ -1,6 +1,10 @@
-#![cfg(feature = "graphqlx")]
+#![cfg(all(feature = "graphqlx", feature = "parser"))]
 
 //! The syntactic span-extent gate for GraphQLx — the twin of `syntactic_span_extent.rs`.
+//!
+//! `parser` is in the header for the reason that file's header gives: the gate reads
+//! `smear::parser::graphqlx`, and until #136 no build existed in which a header could omit it and
+//! be caught.
 //!
 //! The invariant, the alphabet, the walk and the liveness floor are that file's; it carries the
 //! reasoning and this one carries the dialect. What is worth saying separately is why the dialect

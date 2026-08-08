@@ -188,7 +188,22 @@ serde_json = { version = "1", default-features = false, features = ["std"], opti
 # the library itself), and resolver v2/v3 keeps dev-only features out of a plain `cargo build`.
 # Path-only and version-less on purpose: cargo drops such a dependency when packaging, so the
 # published manifest does not name a version of itself.
-smear = { path = ".", features = ["test-support"] }
+#
+# `default-features = false` is load-bearing, and was missing until #136. Features are additive
+# and this edge is a second, independent request for the same package, so without it the
+# library's `default` — `std`, `graphql`, `graphqlx`, `parser`, `smallvec` — was unioned into
+# every test target's resolution and `--no-default-features` on the command line could not
+# subtract it. `cargo test -p smear --no-default-features --features "std,parser,rowan"` still
+# compiled both dialects; `cargo tree -e features -i smear` attributed `graphql` and `graphqlx`
+# to `smear feature "default"` beneath the `[dev-dependencies]` edge while marking only the
+# features actually typed `(command-line)`. Every dialect-isolating and `--each-feature` row ran
+# against the same default-features build, so a `#![cfg(...)]` header narrower than its file's
+# contents could not fail. With it off a narrowed selection narrows, and a header becomes a
+# claim the compiler can refute.
+#
+# A plain `cargo test` is unaffected: the library's own defaults still apply, and this edge asks
+# only for the one feature it exists to turn on.
+smear = { path = ".", default-features = false, features = ["test-support"] }
 
 # The projection gate builds a synthetic green tree by hand — a tree whose *text* re-parses to a
 # different structure — so that a "projection" which secretly re-parsed the source could not pass
