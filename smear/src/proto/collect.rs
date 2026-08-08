@@ -40,10 +40,19 @@ use super::{
 /// Collection stops at the first one, which is also what the reference implementation does — it
 /// throws out of `collectFields`, so a selection set with two unreadable conditions produces one
 /// error and not two.
-pub(super) struct Fault {
+pub(super) struct Fault<'a> {
   pub(super) raw: Raw,
   /// The `if` argument's value, or the directive itself when there is no `if` argument to point at.
   pub(super) location: SimpleSpan,
+  /// A name the message wants, still as the document's own bytes.
+  ///
+  /// Deliberately not an interner id. A fault means this collection is about to be *undone* —
+  /// every response key it interned goes back, because a key belonging to a field that never became
+  /// a position must not spend a later sibling's budget. An id minted before that restore would
+  /// point into bytes the restore removes, which is the truncation defect the checked interner
+  /// exists to refuse. So the caller interns this *after* restoring, when the arena has room again
+  /// and the id it gets back is one that will still be there.
+  pub(super) name: Option<&'a [u8]>,
 }
 
 /// What is left of [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
@@ -76,7 +85,7 @@ impl Visits {
 
   /// Charges one examined selection, or refuses once the operation has spent its budget.
   #[inline]
-  fn spend(&mut self, location: SimpleSpan) -> Result<(), Fault> {
+  fn spend(&mut self, location: SimpleSpan) -> Result<(), Fault<'static>> {
     match self.left.checked_sub(1) {
       Some(left) => {
         self.left = left;
@@ -85,6 +94,7 @@ impl Visits {
       None => Err(Fault {
         raw: Raw::CollectionBudget { limit: self.limit },
         location,
+        name: None,
       }),
     }
   }
@@ -191,6 +201,24 @@ impl Interner {
   pub(super) fn set_cap(&mut self, cap: u32) {
     self.cap = cap;
   }
+
+  /// Where the arena stands, so a failed collection or expansion can put it back.
+  #[inline]
+  pub(super) fn mark(&self) -> (usize, usize) {
+    (self.bytes.len(), self.spans.len())
+  }
+
+  /// Undoes every name interned since `mark`.
+  ///
+  /// Sound only because the ids handed out in between die with the structures being undone. The
+  /// one id that would have escaped — a variable's spelling inside a collection fault's message —
+  /// is minted after this runs and not before, which is why [`Fault::name`](super::collect::Fault)
+  /// carries bytes.
+  #[inline]
+  pub(super) fn restore(&mut self, (bytes, spans): (usize, usize)) {
+    self.bytes.truncate(bytes);
+    self.spans.truncate(spans);
+  }
 }
 
 /// Draft §6.3 `CollectFields`, over the concatenation of several selection sets.
@@ -214,7 +242,7 @@ pub(super) fn collect_fields<'a, S, V>(
   groups: &mut std::vec::Vec<Group>,
   stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
   visits: &mut Visits,
-) -> Result<(), Fault>
+) -> Result<(), Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
@@ -291,7 +319,7 @@ fn walk<'a, S, V>(
   groups: &mut std::vec::Vec<Group>,
   stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
   visits: &mut Visits,
-) -> Result<(), Fault>
+) -> Result<(), Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
@@ -315,7 +343,7 @@ where
 
     match selection {
       Selection::Field(field) => {
-        if !included(field.directives(), ctx, interner)? {
+        if !included(field.directives(), ctx)? {
           continue;
         }
         let key = match field.alias() {
@@ -328,6 +356,7 @@ where
               limit: interner.cap(),
             },
             location: *field.name().as_span(),
+            name: None,
           });
         };
         let group = match groups.iter().position(|g| g.key == key) {
@@ -344,7 +373,7 @@ where
         fields.push((group, field));
       }
       Selection::FragmentSpread(spread) => {
-        if !included(spread.directives(), ctx, interner)? {
+        if !included(spread.directives(), ctx)? {
           continue;
         }
         let name = spread.name().source().as_ref();
@@ -371,7 +400,7 @@ where
         stack.push((fragment.selection_set(), 0));
       }
       Selection::InlineFragment(inline) => {
-        if !included(inline.directives(), ctx, interner)? {
+        if !included(inline.directives(), ctx)? {
           continue;
         }
         if let Some(condition) = inline.type_condition()
@@ -408,11 +437,7 @@ fn applies(schema: &Schema, condition: &[u8], object_type: TypeId) -> bool {
 /// so whatever `@include` says — and once step 3.a has removed it, step 3.b never runs, so
 /// `{ f @include(if: $unreadable) @skip(if: true) }` produces no error. Reading them in document
 /// order would raise one, and the reference implementation does not.
-fn included<S, V>(
-  directives: Option<&Directives<S>>,
-  ctx: &mut V,
-  interner: &mut Interner,
-) -> Result<bool, Fault>
+fn included<'a, S, V>(directives: Option<&'a Directives<S>>, ctx: &mut V) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
@@ -421,15 +446,12 @@ where
     return Ok(true);
   };
   for directive in directives.directives() {
-    if directive.name().source().as_ref() == b"skip" && condition_is_true(directive, ctx, interner)?
-    {
+    if directive.name().source().as_ref() == b"skip" && condition_is_true(directive, ctx)? {
       return Ok(false);
     }
   }
   for directive in directives.directives() {
-    if directive.name().source().as_ref() == b"include"
-      && !condition_is_true(directive, ctx, interner)?
-    {
+    if directive.name().source().as_ref() == b"include" && !condition_is_true(directive, ctx)? {
       return Ok(false);
     }
   }
@@ -468,11 +490,7 @@ where
 /// non-`Boolean` variable at the `Boolean!` location — or a driver whose §6.1 did not coerce, so
 /// no conforming request can tell the two apart; and of the two answers only this one is safe
 /// under both senses.
-fn condition_is_true<S, V>(
-  directive: &Directive<S>,
-  ctx: &mut V,
-  interner: &mut Interner,
-) -> Result<bool, Fault>
+fn condition_is_true<'a, S, V>(directive: &'a Directive<S>, ctx: &mut V) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
@@ -489,6 +507,7 @@ where
         fault: ConditionFault::Missing,
       },
       location: *directive.span(),
+      name: None,
     });
   };
   // Every remaining failure is about the value, so it is what the error points at — the same node
@@ -497,6 +516,7 @@ where
   let unreadable = |fault| Fault {
     raw: Raw::DirectiveCondition { fault },
     location,
+    name: None,
   };
   match argument.value() {
     InputValue::Boolean(literal) => Ok(literal.value()),
@@ -509,10 +529,16 @@ where
         .and_then(|name| ctx.variable(name))
       {
         // The variable was not supplied, and that is the finding whether or not its spelling can
-        // be quoted — so an arena with no room shortens the message and keeps the diagnosis.
-        None => Err(unreadable(ConditionFault::VariableMissing {
-          variable: interner.intern(spelling),
-        })),
+        // be quoted — so an arena with no room shortens the message and keeps the diagnosis. The
+        // spelling travels as bytes because the caller has an arena to restore before it can mint
+        // an id that survives.
+        None => Err(Fault {
+          raw: Raw::DirectiveCondition {
+            fault: ConditionFault::VariableMissing { variable: None },
+          },
+          location,
+          name: Some(spelling),
+        }),
         Some(value) if ctx.is_null(&value) => Err(unreadable(ConditionFault::Null)),
         Some(value) => ctx
           .as_bool(&value)

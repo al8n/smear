@@ -42,7 +42,7 @@ use crate::{
 use super::{
   Argument, ArgumentSource, Error, FieldRequest, Leaf, Node, ReqId, Values,
   collect::{Group, Interner, Visits, collect_fields},
-  error::{Raw, Row},
+  error::{ConditionFault, Raw, Row},
   request::name_bytes,
   response::{Key, NONE, Slot, State, node},
 };
@@ -317,6 +317,42 @@ impl Default for Limits {
       max_interned_bytes: DEFAULT_INTERNED_BYTES,
     }
   }
+}
+
+/// Everything one `expand` call can grow, as it stood before the call.
+///
+/// # Why an expansion has to be all-or-nothing
+///
+/// `expand` commits a group at a time, and a later group can be refused after earlier ones are
+/// already in. The parent is then nulled — so those children never reach the response — but their
+/// **charges** used to stay: metadata entries no slot points at, positions nothing reads, arena
+/// bytes no key needs. The next sibling then met a smaller budget than it was owed and could be
+/// refused when it fitted. That is not a denial and not a degradation; it is a *wrong response* to a
+/// valid query, and the one outcome no ceiling is allowed to cause.
+///
+/// # What makes this list complete, rather than merely current
+///
+/// Not an inventory of the executor's fields — that would be a list to keep up to date, which is
+/// the failure this program keeps meeting. It is closed against the *defect*: the only harm a
+/// leaked charge can do is spend a ceiling, every ceiling reads the length of a table below, and a
+/// table no ceiling reads cannot cause it. So the set to restore is exactly "the tables a budget
+/// measures", and that set is enumerated by [`Limits`] rather than by memory.
+///
+/// [`Limits::max_selection_visits`] is the deliberate exception, and the reason states the rule.
+/// It counts *work already done*, not storage still held. A refused walk really did walk, and
+/// giving the budget back would let a client spend it again by faulting on purpose. Restore what a
+/// failure did not keep; never restore what a failure spent.
+#[derive(Debug, Clone, Copy)]
+struct Mark {
+  slots: usize,
+  meta: usize,
+  merged: usize,
+  locations: usize,
+  interner: (usize, usize),
+  first_child: u32,
+  last_child: u32,
+  ready_head: u32,
+  ready_tail: u32,
 }
 
 /// Which of [`Limits`]'s two response ceilings `expand` ran into.
@@ -988,6 +1024,9 @@ where
     if self.scratch_sets.is_empty() {
       return;
     }
+    // Taken before the collection, because the collection interns too: a response key belonging to
+    // a field that never becomes a position must not be left spending a later sibling's arena.
+    let mark = self.mark(slot);
     // `collect_fields` borrows the scratch vectors; move them out so the borrow checker can see
     // the fields are disjoint, and put them back afterwards.
     let mut sets = core::mem::take(&mut self.scratch_sets);
@@ -1009,8 +1048,8 @@ where
       &mut self.visits,
     );
     if let Err(fault) = collected {
-      // Nothing was collected, so no child slot exists to leak. The scratch vectors go back before
-      // the failure is recorded, because recording it borrows the whole executor.
+      // The scratch vectors go back before the failure is recorded, because recording it borrows
+      // the whole executor.
       sets.clear();
       self.scratch_sets = sets;
       self.scratch_fields = fields;
@@ -1018,7 +1057,26 @@ where
       self.scratch_visited = visited;
       stack.clear();
       self.scratch_stack = stack;
-      self.fail_at(slot, fault.raw, fault.location);
+      // No child slot exists yet, but the walk interned as it went, and those names belong to
+      // fields that will never be positions. Undoing them is what keeps the next sibling's arena
+      // the size it is owed.
+      self.restore(slot, mark);
+      // Only now is there room to spell the name the message wanted, and only now is an id one that
+      // will still be valid — which is why the fault carried bytes this far.
+      let raw = match (fault.raw, fault.name) {
+        (
+          Raw::DirectiveCondition {
+            fault: ConditionFault::VariableMissing { .. },
+          },
+          Some(bytes),
+        ) => Raw::DirectiveCondition {
+          fault: ConditionFault::VariableMissing {
+            variable: self.interner.intern(bytes),
+          },
+        },
+        (raw, _) => raw,
+      };
+      self.fail_at(slot, raw, fault.location);
       return;
     }
 
@@ -1121,6 +1179,10 @@ where
     // object is the position that could not be assembled. That is the same choice an unreadable
     // `@skip` condition makes two doc comments up, for the same reason.
     if let Some(which) = exhausted {
+      // Everything the groups before this one committed goes back. They were about to be nulled
+      // with the parent anyway, so the response is unchanged — what changes is that their charges
+      // stop being held against whatever the driver resolves next.
+      self.restore(slot, mark);
       let (parent, field) = self.owner(slot);
       let raw = match which {
         Exhausted::Positions => Raw::ResponseBudget {
@@ -1624,6 +1686,49 @@ where
     }
     self.slots[parent as usize].last_child = index;
     Some(index)
+  }
+
+  /// Where every budgeted table stood, so a refused expansion can be undone.
+  fn mark(&self, slot: u32) -> Mark {
+    Mark {
+      slots: self.slots.len(),
+      meta: self.meta.len(),
+      merged: self.merged.len(),
+      locations: self.locations.len(),
+      interner: self.interner.mark(),
+      first_child: self.slots[slot as usize].first_child,
+      last_child: self.slots[slot as usize].last_child,
+      ready_head: self.ready_head,
+      ready_tail: self.ready_tail,
+    }
+  }
+
+  /// Puts every budgeted table back to `mark`.
+  ///
+  /// Truncation is sound because one `expand` call appends a *contiguous suffix* to each of them:
+  /// it runs start to finish without another position being created in between, so there is no
+  /// interleaving to make a hole. That is a property of this call site and not of the executor —
+  /// `discard` cannot reclaim the same way, because a discarded subtree's positions are scattered
+  /// among positions created after them.
+  ///
+  /// The ready chain is a linked list rather than a vector, so it is restored by pointer: every
+  /// slot this expansion enqueued lies above `mark.slots` and disappears with the truncation, and
+  /// the tail that preceded them is below it and survives to be re-terminated.
+  fn restore(&mut self, slot: u32, mark: Mark) {
+    self.slots.truncate(mark.slots);
+    self.meta.truncate(mark.meta);
+    self.merged.truncate(mark.merged);
+    self.locations.truncate(mark.locations);
+    self.interner.restore(mark.interner);
+    self.slots[slot as usize].first_child = mark.first_child;
+    self.slots[slot as usize].last_child = mark.last_child;
+    if mark.ready_tail == NONE {
+      self.ready_head = NONE;
+    } else {
+      self.slots[mark.ready_tail as usize].next_ready = NONE;
+    }
+    self.ready_head = mark.ready_head;
+    self.ready_tail = mark.ready_tail;
   }
 
   fn enqueue(&mut self, slot: u32) {

@@ -3224,3 +3224,147 @@ fn an_unsupplied_variable_keeps_its_diagnosis_when_its_name_cannot_be_stored() {
     errors[0].1
   );
 }
+
+// ------------------------------------------------------------------------------------------
+// A refused expansion must cost its siblings nothing
+// ------------------------------------------------------------------------------------------
+//
+// `expand` commits one collected group at a time, so a later group can be refused with earlier
+// ones already in. The parent is nulled either way — but the charges those earlier groups made used
+// to stay, and the next sibling then met a budget smaller than it was owed. That is not a denial
+// and not a degradation: a valid query gets a *wrong response*, because a field that fitted is
+// nulled to pay for a field that did not.
+//
+// Sizing is the whole test in both cases below. The ceiling has to admit the *final correct
+// response* and refuse the *transient spend*, or the case cannot tell a leak from a limit — which
+// is the way the abstract-type fixture managed to pass against its own planted bug.
+
+const TXN_SDL: &str = r#"
+type Query {
+  bad: Bad
+  other: Other
+}
+type Bad {
+  a: String
+  b: String
+}
+type Other {
+  ok: String
+}
+"#;
+
+fn txn_root() -> J {
+  J::Obj(
+    "Query",
+    vec![
+      (
+        "bad",
+        J::Obj(
+          "Bad",
+          vec![("a", J::Str("A".to_owned())), ("b", J::Str("B".to_owned()))],
+        ),
+      ),
+      (
+        "other",
+        J::Obj("Other", vec![("ok", J::Str("OK".to_owned()))]),
+      ),
+    ],
+  )
+}
+
+/// A half-committed expansion gives its metadata back, so the next sibling gets what it is owed.
+///
+/// **Why seven.** A group of one selection costs two entries, one merged selection and one
+/// location. The root's two keys spend 4; `bad`'s first group takes it to 6 and its second would
+/// need 8, so `bad` is refused. The correct degraded response is root plus `other.ok` — 6 — and it
+/// fits under 7. `bad`'s abandoned first group would take the running total to 6 before `other` is
+/// even reached, and `other` would then need 8. So seven is the only interesting number here: it
+/// admits the right answer and refuses the leaked one, and any ceiling that admits both or refuses
+/// both would pass whether or not the charges came back.
+#[test]
+fn a_refused_expansion_costs_its_siblings_nothing() {
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(7).expect("not zero"),
+    ..Limits::default()
+  };
+  let (data, errors) = run_bounded(TXN_SDL, "{ bad { a b } other { ok } }", txn_root(), limits);
+
+  assert_eq!(
+    errors.len(),
+    1,
+    "only `bad` is over the ceiling; a second error means its charges were still being held: \
+     {errors:?}"
+  );
+  assert_eq!(errors[0].2, "bad", "and the one error is `bad`'s");
+  assert_eq!(
+    data, r#"{"bad":null,"other":{"ok":"OK"}}"#,
+    "`other` fitted and must be in the response, not nulled to pay for `bad`"
+  );
+}
+
+const TXN_ARENA_SDL: &str = r#"
+type Query {
+  bad: Bad
+  other: Other
+}
+type Bad {
+  a: String
+  boom: String
+}
+type Other {
+  ok: String
+}
+"#;
+
+/// A failed collection gives its interned keys back, so a later sibling can still name itself.
+///
+/// The medium's shape: the walk interns a response key, *then* meets an unreadable
+/// `@include` and faults. The key belongs to a field that will never be a position, and leaving it
+/// in the arena spends a sibling's storage.
+///
+/// **Why nineteen.** The keys the correct response emits are `bad` (3), `other` (5) and `ok` (2),
+/// and the fault's own message keeps `missing` (7) — 17 in all, which fits. The throwaway alias is
+/// ten bytes, so an arena that kept it would stand at 18 before `other` is reached and `ok` would
+/// need 20. Nineteen is between the two. It is also why the alias is spelled at length: with a
+/// short key the leaked and unleaked totals both fit under any ceiling that admits the answer, and
+/// the case would pass against the very defect it is for.
+#[test]
+fn a_failed_collection_gives_its_interned_keys_back() {
+  let limits = Limits {
+    max_interned_bytes: NonZeroU32::new(19).expect("not zero"),
+    ..Limits::default()
+  };
+  let (data, errors) = run_bounded(
+    TXN_ARENA_SDL,
+    "query ($missing: Boolean!) { bad { zzzzzzzzzz: a boom @include(if: $missing) } other { ok } }",
+    J::Obj(
+      "Query",
+      vec![
+        ("bad", J::Obj("Bad", vec![("a", J::Str("A".to_owned()))])),
+        (
+          "other",
+          J::Obj("Other", vec![("ok", J::Str("OK".to_owned()))]),
+        ),
+      ],
+    ),
+    limits,
+  );
+
+  assert_eq!(
+    errors.len(),
+    1,
+    "only `bad`'s condition is unreadable; a second error means the throwaway key was still \
+     holding storage: {errors:?}"
+  );
+  assert_eq!(errors[0].0, Kind::DirectiveCondition);
+  assert_eq!(errors[0].2, "bad");
+  assert!(
+    errors[0].1.contains("$missing"),
+    "and the restore left room to name the variable the message is about: {}",
+    errors[0].1
+  );
+  assert_eq!(
+    data, r#"{"bad":null,"other":{"ok":"OK"}}"#,
+    "`other` must still be able to intern its own key"
+  );
+}
