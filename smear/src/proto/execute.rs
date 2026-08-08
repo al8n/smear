@@ -82,6 +82,52 @@ mod tests;
 /// multiplying a query quantity, and the visit budget is what stops a driver answer from
 /// multiplying it as well.
 ///
+/// # The other half of the table: what is held, who can still read it, when it dies
+///
+/// The table above is a *spend* model — what is charged, and what would spend it unchecked. Four
+/// adversarial rounds each found one thing it does not say, and they were not four accidents: they
+/// were the four missing columns of one artifact. A resource has a bound, an acquisition point,
+/// **a reader set**, a death point, and a release on each fate, and a model written from the spend
+/// side alone can only see the first two. R5 was "the charge is not released when the work fails";
+/// R6 was "the value is not released when the work *succeeds*" — the same column, twice.
+///
+/// So the lifetimes are written down too. The last column is this table's falsifier, as "what would
+/// spend it unchecked" is the other's.
+///
+/// | member | bound | readers | dead at | released by | what would strand it |
+/// |---|---|---|---|---|---|
+/// | argument values | one field's arguments | the one offered `FieldRequest` | next entry point | `on_entry`, incl. the withhold exit | an entry point that skips retirement |
+/// | **object values** (root included) | object positions | `poll_resolve`'s `parent_value`, once per enqueued child | last enqueued child leaves Ready | the `Object` → `Expanded` transition; `discard`; `reset` | an enqueue or departure path that skips the count |
+/// | leaf values | positions | `Response` readers, repeatedly | next `start`/drop | `reset`/drop; `discard` | nothing — they *are* the response |
+/// | `TypeName` ids | interner ceiling | `Response` readers | next `start`/drop | `reset` | nothing: no `V`, no handle |
+/// | slots, metadata, interned text | their ceilings | tree walks, `Response` | next `start`/drop | `reset`; suffix-`restore` only | a creator that bypasses the sole creator |
+/// | error rows | one per position | `Response::errors` | next `start`/drop | `reset` | a position able to fail twice |
+/// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
+/// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
+///
+/// Three rules keep the table true as phases 2–8 add members, and each is a rule the rounds paid
+/// for:
+///
+/// 1. **Release is a state transition on the owner, never a call at a site.** Any state holding a
+///    `V` must name its transitions out, and every one of them drops the value. For
+///    `State::Object` they are exactly: last read reached → `Expanded`,
+///    discarded → `Null`, and `reset`. This is why there is no `release_object` to forget, and why
+///    a stale count is unrepresentable — the count lives inside the variant the transition
+///    overwrites.
+/// 2. **The reader column is the falsifier.** A member whose reader set is empty *while it is held*
+///    is a defect by inspection. That one sentence is R6, and it is the sweep a later phase runs:
+///    enumerate the states holding a `V` or an id, and for each, name the reader or name the defect.
+/// 3. **Attach death to the resource, not to a code path.** The root is stored by `start` and not by
+///    `complete`, and an object whose selection is only `__typename` enqueues nothing at all — so a
+///    release hung off "the completion path" misses the first and a release hung off "the last
+///    offer" misses the second. Hanging it off the state catches both by construction.
+///
+/// What none of this bounds is *peak*: draft §6.4.3 completes a list synchronously, so one
+/// `handle_resolved` can still momentarily own an element value per element with none of their
+/// children offered yet. That set now drains as the driver makes progress instead of persisting to
+/// the next `start`, and bounding the peak itself means making list completion resumable, which is
+/// backpressure by another name and belongs to the phase that adds it.
+///
 /// # A budget on one factor of a product bounds nothing
 ///
 /// The rule the third knob exists for, and the one a later phase should check itself against
@@ -173,6 +219,11 @@ pub struct Limits {
   /// `poll_resolve` returns `None` at the ceiling even when work remains. This is the whole of the
   /// executor's flow control and it is deliberately the only kind: a driver that resolves fields
   /// against a connection pool of eight sets this to eight and never has to model the pool twice.
+  ///
+  /// It bounds outstanding *requests* and deliberately not retained *values*: a completed object's
+  /// value is not in this slab, and what bounds its lifetime is the lifetime table's row 2, not this
+  /// knob. Before that row was enforced the two were confused, and a pool of eight could be facing
+  /// a hundred thousand live handles.
   ///
   /// Requests [`poll_abandoned`](Executor::poll_abandoned) has not yet retired count against it,
   /// so a driver that ignores that channel stops making progress rather than accumulating work
@@ -484,6 +535,18 @@ where
   ready_head: u32,
   ready_tail: u32,
 
+  /// The one object whose last reader departed during the offer being returned, or [`NONE`].
+  ///
+  /// `poll_resolve` cannot transition that object on the spot: the `FieldRequest` it is about to
+  /// return borrows the very value the transition would drop. So the slot is parked here and every
+  /// entry point settles it before doing anything else — the discipline `retire_arguments` already
+  /// implements, for the same reason, because the executor first learns a lend has ended when the
+  /// driver calls back in.
+  ///
+  /// One cell is enough: an offer takes one slot out of Ready, so at most one parent can reach zero
+  /// per offer.
+  deferred: u32,
+
   started: bool,
   delivered: bool,
 
@@ -555,6 +618,7 @@ where
       scratch_visited: std::vec::Vec::new(),
       scratch_sets: std::vec::Vec::new(),
       scratch_stack: std::vec::Vec::new(),
+      deferred: NONE,
       visits: Visits::new(limits.max_selection_visits.get()),
       scratch_args: std::vec::Vec::new(),
     }
@@ -617,6 +681,9 @@ where
       State::Object {
         value: root,
         ty: root_type,
+        // `expand` writes the real count on its way out, and does so for the root through the very
+        // same path it uses for every other object — which is why the root needed no special case.
+        pending: 0,
       },
     ));
     self.meta.push(Meta {
@@ -644,7 +711,7 @@ where
   /// Draft §6.4.1 runs *here*, before the request is handed out, so an argument the specification
   /// rejects becomes a field error and its field is never offered at all.
   pub fn poll_resolve(&mut self, ctx: &mut V) -> Option<FieldRequest<'_, 'a, S, V::Value>> {
-    self.retire_arguments();
+    self.on_entry();
     if !self.started {
       return None;
     }
@@ -656,6 +723,11 @@ where
         break None;
       };
       if self.discarded(slot) {
+        // No decrement, and the reason is load-bearing rather than an omission. A slot on the ready
+        // chain carrying the flag always has a flagged parent: a chain slot is flagged only by a
+        // discard rooted at itself or an ancestor, and it cannot be its own root, because the only
+        // path that fails a Ready slot pops it first. So the root is a proper ancestor and the
+        // parent was flagged with it — its state is already `Null`, holding no value and no count.
         continue;
       }
       if self.coerce_arguments(ctx, slot) {
@@ -663,6 +735,11 @@ where
       }
       // Argument coercion raised a field error, which nulled the field and may have nulled an
       // ancestor. There is nothing to hand the driver; take the next ready slot.
+      //
+      // This candidate left Ready without ever being offered, so it is a read that will not happen.
+      // Nothing borrows the parent's value here, so the expiry is immediate rather than parked.
+      let parent = self.slots[slot as usize].parent;
+      self.child_departed(parent, false);
     };
     let Some(slot) = found else {
       // Withholding is not offering, so there is no `FieldRequest` to read `scratch_args` and the
@@ -675,16 +752,40 @@ where
     let id = self.acquire(slot);
     self.slots[slot as usize].state = State::InFlight;
 
+    // The offered child is this parent's last read if the count reaches zero — but the request
+    // returned below borrows the value, so the expiry is parked for the next call in rather than
+    // done here.
+    let parent = self.slots[slot as usize].parent;
+    self.child_departed(parent, true);
+
     let meta = &self.meta[slot as usize];
     let (start, len) = meta.merged;
     let field = meta
       .field
       .expect("only the root has no field, and it is never ready");
-    let parent = self.slots[slot as usize].parent;
     let parent_value = match &self.slots[parent as usize].state {
       State::Object { value, .. } => value,
-      // A child slot exists only because its parent completed to an object.
-      _ => unreachable!("a field slot's parent is an object"),
+      // Enumerated rather than a `_`, and that is a decision. A wildcard here would have absorbed
+      // `Expanded` silently and handed the driver a `parent_value` from a different object; the
+      // compiler naming every variant is what makes a future one impossible to mishandle by
+      // omission.
+      //
+      // `Expanded` is unreachable *structurally*, not by hope: a parent transitions only when no
+      // child of its remains Ready, and this slot was Ready a moment ago, so no offer can name a
+      // parent that has already transitioned.
+      //
+      // **This panics in release, and that is intended.** `unreachable!` is `panic!`; it is not
+      // compiled out. The alternative on a wrong count is to lend the wrong object's value as a
+      // resolver's parent — a response that is silently, plausibly incorrect. A library panicking
+      // on its own accounting bug is defensible; a library corrupting a response is not, and this
+      // is the one place where the two are the choice.
+      State::Expanded
+      | State::Ready
+      | State::InFlight
+      | State::Null
+      | State::Leaf(_)
+      | State::TypeName(_)
+      | State::List => unreachable!("a field slot's parent is an object"),
     };
     Some(FieldRequest {
       id,
@@ -715,9 +816,16 @@ where
   /// Until the position leaves the response, which is not always the end of the operation. Three
   /// exits, and only the first is the long one:
   ///
-  /// - The position reaches the finished response, so the value is held until the next
-  ///   [`start`](Executor::start) or until the executor is dropped. A reader can still ask for it,
-  ///   which is what makes this the *response* rather than a copy of it.
+  /// - The position reaches the finished response **as a leaf**, so the value is held until the
+  ///   next [`start`](Executor::start) or until the executor is dropped. A reader can still ask for
+  ///   it, which is what makes this the *response* rather than a copy of it.
+  /// - The position reaches the finished response **as an object**, and that value is released far
+  ///   sooner — as soon as the last child the object enqueued has been offered. The justification
+  ///   above is *false* for it, and used to be given anyway: no reader can ask for an object's
+  ///   value. [`Node`](super::Node) has no variant that carries one, and the single reader in the
+  ///   program is the `parent_value` this executor lends to one request at a time. So an object's
+  ///   value dies when its reader set empties, which for a `__typename`-only selection is inside
+  ///   this very call. See [`Limits`]'s lifetime table, row 2.
   /// - Draft §6.4.4 later discards the position, at which point the value is released — including
   ///   when what §6.4.4 nulls is an *ancestor*, because the discard frees everything already
   ///   completed beneath it and not only the ancestor itself. A query that nulls a large subtree
@@ -729,7 +837,7 @@ where
   /// the resolver's value into [`Values::coerce_leaf`](super::Values::coerce_leaf), and the value
   /// that comes back is what the position then owns.
   pub fn handle_resolved(&mut self, ctx: &mut V, id: ReqId, value: V::Value) {
-    self.retire_arguments();
+    self.on_entry();
     let Some(slot) = self.release(id) else {
       return;
     };
@@ -745,7 +853,7 @@ where
   /// The message is the driver's; the response path and the location are the executor's, so a
   /// driver never has to track where it was.
   pub fn handle_field_error(&mut self, id: ReqId, message: &str) {
-    self.retire_arguments();
+    self.on_entry();
     let Some(slot) = self.release(id) else {
       return;
     };
@@ -771,7 +879,7 @@ where
   ///
   /// Answering a retired request afterwards is harmless: the id is stale and ignored.
   pub fn poll_abandoned(&mut self) -> Option<ReqId> {
-    self.retire_arguments();
+    self.on_entry();
     if self.abandoned == 0 {
       return None;
     }
@@ -806,7 +914,7 @@ where
   /// the moment its remaining work is zero. What that costs is a driver holding live-looking
   /// [`ReqId`]s across a restart, and [`ReqId`]'s epoch is what pays it.
   pub fn poll_response(&mut self) -> Option<Response<'_, V::Value>> {
-    self.retire_arguments();
+    self.on_entry();
     if !self.started || self.delivered {
       return None;
     }
@@ -814,6 +922,23 @@ where
     if self.live > 0 || self.ready_head != NONE {
       return None;
     }
+    // Invariant: at delivery no object value is still held — every one has expired on the success
+    // path or been overwritten by a discard. Stated as an assertion so a later phase that adds an
+    // enqueue or de-queue path and forgets the count gets a red test instead of a silent leak.
+    //
+    // `debug_assert` deliberately, and the reason is the scan: this is O(positions), and its whole
+    // purpose is to fail a test, which runs in debug. A release build gains nothing from paying for
+    // it on the success path. That is a different decision from the `unreachable!` on the offer
+    // path, which stays unconditional because *there* the alternative is handing a resolver the
+    // wrong object's value.
+    debug_assert!(
+      !self
+        .slots
+        .iter()
+        .any(|slot| matches!(slot.state, State::Object { .. })),
+      "a response was delivered with an object value still held: some enqueue or departure path \
+       is not accounted"
+    );
     self.delivered = true;
     Some(Response {
       schema: self.schema,
@@ -995,7 +1120,11 @@ where
       base
     };
 
-    self.slots[slot as usize].state = State::Object { value, ty: object };
+    self.slots[slot as usize].state = State::Object {
+      value,
+      ty: object,
+      pending: 0,
+    };
 
     // `MergeSelectionSets`: every field that shared this response key contributes its
     // sub-selections, and §6.3 collects over the concatenation.
@@ -1019,9 +1148,21 @@ where
   fn expand(&mut self, ctx: &mut V, slot: u32) {
     let object_type = match &self.slots[slot as usize].state {
       State::Object { ty, .. } => *ty,
-      _ => return,
+      // Enumerated for the reason the offer path is. `Expanded` cannot appear because a slot
+      // expands once; the rest are the not-an-object cases this always returned on.
+      State::Expanded
+      | State::Ready
+      | State::InFlight
+      | State::Null
+      | State::Leaf(_)
+      | State::TypeName(_)
+      | State::List => return,
     };
     if self.scratch_sets.is_empty() {
+      // An exit that leaves the slot live, so it settles the count like every other. Nothing was
+      // enqueued, so the value's reader set is empty the moment this returns and the object expires
+      // here rather than at the next `start`.
+      self.settle_pending(slot, 0);
       return;
     }
     // Taken before the collection, because the collection interns too: a response key belonging to
@@ -1080,7 +1221,11 @@ where
       return;
     }
 
-    let mut exhausted: Option<Exhausted> = None;
+    // Counted, not inferred from the group list: a `__typename` child is never enqueued and a
+    // group whose field the schema does not define is skipped, so "groups collected" and "reads
+    // that will happen" are different numbers.
+    let mut enqueued = 0u32;
+    let mut exhausted: Option<(Exhausted, SimpleSpan)> = None;
     for group in &groups {
       let selections = &fields[group.start as usize..(group.start + group.len) as usize];
       let first = selections[0].1;
@@ -1110,11 +1255,11 @@ where
         u32::try_from(self.merged.len()),
         u32::try_from(self.locations.len()),
       ) else {
-        exhausted = Some(Exhausted::Selections);
+        exhausted = Some((Exhausted::Selections, *first.span()));
         break;
       };
       if !self.metadata_room(u64::from(group.len) * 2) {
-        exhausted = Some(Exhausted::Selections);
+        exhausted = Some((Exhausted::Selections, *first.span()));
         break;
       }
       for &(_, field) in selections {
@@ -1137,7 +1282,7 @@ where
           // A `__typename` whose answer cannot be stored must not become a field with no name or
           // a name that is somebody else's: the position simply cannot be built.
           let Some(interned) = self.interner.intern(self.schema.name_bytes(name)) else {
-            exhausted = Some(Exhausted::Names);
+            exhausted = Some((Exhausted::Names, *first.span()));
             break;
           };
           Some(interned)
@@ -1151,7 +1296,7 @@ where
       let Some(child) = self.push_child(slot, Key::Field(group.key), definition.ty(), state) else {
         // The scratch vectors have to go home before the failure is recorded, because recording it
         // borrows the whole executor — the same reason the collection failure above restores first.
-        exhausted = Some(Exhausted::Positions);
+        exhausted = Some((Exhausted::Positions, *first.span()));
         break;
       };
       self.meta[child as usize] = Meta {
@@ -1163,6 +1308,7 @@ where
       };
       if typename.is_none() {
         self.enqueue(child);
+        enqueued += 1;
       }
     }
 
@@ -1174,11 +1320,18 @@ where
     stack.clear();
     self.scratch_stack = stack;
 
+    // The live exit. A refused expansion falls through to the block below instead, and needs no
+    // count: it ends in `fail` on this very object, and the discard that follows overwrites the
+    // state — value, count and all — so there is nothing left to account.
+    if exhausted.is_none() {
+      self.settle_pending(slot, enqueued);
+    }
+
     // Recorded after the scratch is home, and at the object rather than at the field that could
     // not be created: the field has no slot, so there is no position to hang a path on, and the
     // object is the position that could not be assembled. That is the same choice an unreadable
     // `@skip` condition makes two doc comments up, for the same reason.
-    if let Some(which) = exhausted {
+    if let Some((which, location)) = exhausted {
       // Everything the groups before this one committed goes back. They were about to be nulled
       // with the parent anyway, so the response is unchanged — what changes is that their charges
       // stop being held against whatever the driver resolves next.
@@ -1199,7 +1352,16 @@ where
           limit: self.interner.cap(),
         },
       };
-      self.fail(slot, raw);
+      // `fail_at` rather than `fail`, and the span is the refused selection's own.
+      //
+      // `fail` reads the slot's stored locations range, and the *root's* range is empty by
+      // construction — `start` builds it as `(0, 0)` because the root has no field to have a span.
+      // So a budget tripped at the top level reached the driver with `locations()` empty, against
+      // this crate's own contract that every observable error has at least one. Pointing at the
+      // selection that was refused fixes the root and sharpens every other budget error with it:
+      // the narrower node rather than the parent's whole merged group, which is the line draft
+      // §6.4.1's argument errors already draw.
+      self.fail_at(slot, raw, location);
     }
   }
 
@@ -1606,6 +1768,7 @@ where
     self.abandon_cursor = 0;
     self.ready_head = NONE;
     self.ready_tail = NONE;
+    self.deferred = NONE;
     self.started = false;
     self.delivered = false;
   }
@@ -1729,6 +1892,74 @@ where
     }
     self.ready_head = mark.ready_head;
     self.ready_tail = mark.ready_tail;
+  }
+
+  /// Writes an expansion's read count onto the object, expiring it at once when there are none.
+  ///
+  /// Zero is the case that matters and the one a release-at-last-offer scheme never reaches: an
+  /// object whose whole sub-selection is `__typename` enqueues nothing, so no offer will ever
+  /// arrive to notice its reader set is empty. Settling on *every* live exit of `expand` — this
+  /// one, and the empty-selection early return — is what catches it, and catches the root with it,
+  /// because `start` expands the root through the same path.
+  fn settle_pending(&mut self, slot: u32, enqueued: u32) {
+    if let State::Object { pending, .. } = &mut self.slots[slot as usize].state {
+      *pending = enqueued;
+    }
+    if enqueued == 0 {
+      self.expire(slot);
+    }
+  }
+
+  /// Everything a call in must release before it does anything else.
+  ///
+  /// Both members are lends that ended when the driver called back: the arguments of the request it
+  /// was answering, and the object value the last offer parked. They are one function rather than
+  /// two calls because a later phase's entry point — phase 2's mutation withholding, phase 5's
+  /// `handle_source_event` — should inherit the whole discipline by calling one thing, not
+  /// remember a list.
+  fn on_entry(&mut self) {
+    self.settle_deferred();
+    self.retire_arguments();
+  }
+
+  /// Drops the object value parked by the previous `poll_resolve`, now that its lend has ended.
+  ///
+  /// Total by construction: if the parked slot was discarded in between, its state is already
+  /// `Null` and there is nothing left to release.
+  fn settle_deferred(&mut self) {
+    let slot = core::mem::replace(&mut self.deferred, NONE);
+    if slot != NONE {
+      self.expire(slot);
+    }
+  }
+
+  /// Transitions an object whose last future read has departed, dropping its value.
+  ///
+  /// The transition **is** the release — `Expanded` holds no `V` — which is why there is no
+  /// `release_object` to forget to call. Writing the state is the whole operation.
+  fn expire(&mut self, slot: u32) {
+    if matches!(self.slots[slot as usize].state, State::Object { .. }) {
+      self.slots[slot as usize].state = State::Expanded;
+    }
+  }
+
+  /// Records that one enqueued child has left Ready, and expires the parent if it was the last.
+  ///
+  /// `deferred` is false when the caller still holds a borrow of the value — the offer path — and
+  /// true when it does not. Decrement-if-`Object` makes it total: a parent discarded by the very
+  /// propagation that removed this child is already `Null` and has nothing to account.
+  fn child_departed(&mut self, parent: u32, defer: bool) {
+    let State::Object { pending, .. } = &mut self.slots[parent as usize].state else {
+      return;
+    };
+    *pending = pending.saturating_sub(1);
+    if *pending == 0 {
+      if defer {
+        self.deferred = parent;
+      } else {
+        self.expire(parent);
+      }
+    }
   }
 
   fn enqueue(&mut self, slot: u32) {

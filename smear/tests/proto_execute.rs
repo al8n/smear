@@ -2239,8 +2239,9 @@ fn a_discarded_ancestor_releases_the_values_completed_beneath_it() {
   );
   assert_eq!(
     held.tree.get(),
-    2 + 2 * CELLS,
-    "the root, `nest`, and an object and a leaf for each of the {CELLS} cells"
+    CELLS,
+    "a leaf for each of the {CELLS} cells, and nothing else: the root, `nest` and every cell object \
+     expired when the last child each had enqueued was offered, which is the success-path release"
   );
 
   // `boom` is `String!` on a nullable `nest`, so §6.4.4 nulls `nest` and the whole `bulk` subtree
@@ -2248,16 +2249,19 @@ fn a_discarded_ancestor_releases_the_values_completed_beneath_it() {
   executor.handle_field_error(boom, "boom");
   assert_eq!(
     held.tree.get(),
-    1,
-    "only the root is still part of the response"
+    0,
+    "nothing at all. The subtree went with `nest`, and the root's own value expired when `nest` \
+     was offered — a finished response holds no object value, which is the invariant \
+     `poll_response` asserts"
   );
 
   let response = executor.poll_response().expect("nothing is outstanding");
   assert_eq!(response.error_count(), 1);
   assert_eq!(
     held.tree.get(),
-    1,
-    "and the response itself holds nothing the discard released"
+    0,
+    "and the delivered response holds nothing at all — not the discarded subtree, and not the root \
+     object either, whose value no reader of a `Response` has ever been able to reach"
   );
   let Node::Object(mut fields) = response.data() else {
     panic!("the root is an object")
@@ -2295,15 +2299,17 @@ fn a_discarded_list_element_releases_only_its_own_subtree() {
   executor.handle_resolved(&mut space, text, Counted::text(&held.tree, "T"));
   assert_eq!(
     held.tree.get(),
-    3 + CELLS,
-    "the root, `nest`, {CELLS} cells and one leaf"
+    1 + CELLS,
+    "{CELLS} cells and one leaf. The root and `nest` expired at their last read; the cells have \
+     not, because each still has a `boom` child that has never been offered"
   );
   let boom = executor.poll_resolve(&mut space).expect("boom").id();
   executor.handle_field_error(boom, "boom");
   assert_eq!(
     held.tree.get(),
-    1 + CELLS,
-    "the first cell's object and leaf are gone; the root, `nest` and the other cells are not"
+    CELLS - 1,
+    "the first cell's object and leaf are gone; the other cells are not, and the root and `nest` \
+     had already expired at their last read"
   );
 
   // The rest of the list completes normally.
@@ -2370,8 +2376,9 @@ fn a_discard_above_an_already_discarded_subtree_releases_only_the_rest() {
   executor.handle_field_error(inner, "boom");
   assert_eq!(
     held.tree.get(),
-    1 + CELLS,
-    "the root, `nest` and the {} cells the discard did not reach",
+    CELLS - 1,
+    "the {} cells the discard did not reach. The root and `nest` expired at their last read, and \
+     the first cell went with its own discard",
     CELLS - 1
   );
 
@@ -2383,8 +2390,8 @@ fn a_discard_above_an_already_discarded_subtree_releases_only_the_rest() {
   executor.handle_field_error(outer, "boom");
   assert_eq!(
     held.tree.get(),
-    1,
-    "only the root is still part of the response"
+    0,
+    "nothing at all: the rest of the subtree went with `nest`, and the root expired at its last read"
   );
 
   let response = executor.poll_response().expect("nothing is outstanding");
@@ -2434,15 +2441,18 @@ fn a_discard_releases_a_completed_subtree_and_the_request_racing_it() {
   );
   assert_eq!(
     held.tree.get(),
-    3 + 2 * CELLS,
-    "the root, `nest`, `deep`, and an object and a leaf for each of the {CELLS} cells"
+    1 + CELLS,
+    "`deep` and a leaf for each of the {CELLS} cells. The root, `nest` and the cells expired at \
+     their last read — `deep` has not, and that is the property that matters: its `echo` is the \
+     request being offered, so its value is still lent out and must still be readable"
   );
 
   executor.handle_field_error(boom, "boom");
   assert_eq!(
     held.tree.get(),
-    1,
-    "the completed subtree under `nest` is no longer part of the response"
+    0,
+    "the completed subtree under `nest` is gone, `deep` with it, and the root expired earlier — so \
+     the discard of an in-flight request's parent releases that parent's value too"
   );
   assert_eq!(
     held.arguments.get(),
@@ -2461,7 +2471,12 @@ fn a_discard_releases_a_completed_subtree_and_the_request_racing_it() {
 
   let response = executor.poll_response().expect("nothing is outstanding");
   assert_eq!(response.error_count(), 1);
-  assert_eq!(held.tree.get(), 1);
+  assert_eq!(
+    held.tree.get(),
+    0,
+    "the delivered response holds no object value, `deep` included: its `echo` was retired, so the \
+     last thing keeping that value readable is gone"
+  );
 }
 
 // ------------------------------------------------------------------------------------------
@@ -3366,5 +3381,270 @@ fn a_failed_collection_gives_its_interned_keys_back() {
   assert_eq!(
     data, r#"{"bad":null,"other":{"ok":"OK"}}"#,
     "`other` must still be able to intern its own key"
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// An object's value dies when its last reader departs, not at the next `start`
+// ------------------------------------------------------------------------------------------
+//
+// An object's `V` has exactly one reader in the whole program: `poll_resolve` lending it as
+// `parent_value` for the request it is returning. Rendering never touches it — `Node` has no
+// variant that carries an object's value — so once the last enqueued child has been offered it is
+// unreachable by any public API and unread by any internal path. Holding it to the next `start`
+// pinned one driver handle per object, bounded by `max_response_slots` rather than by
+// `max_in_flight`, and the whole of the `Drop` suite above pins only failure-path releases, so
+// nothing here observed the success path at all.
+//
+// These are the two directions. Releasing too late is the defect; releasing too early hands a
+// resolver another object's value, which is worse, so both are pinned.
+
+/// Every object value in a completed list is gone before the response is delivered.
+#[test]
+fn a_completed_list_holds_no_object_value_at_delivery() {
+  let query = "{ nest { bulk { text } } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, Counted::obj(&held.tree));
+  let bulk = executor.poll_resolve(&mut space).expect("bulk").id();
+  executor.handle_resolved(&mut space, bulk, Counted::list(&held.tree, CELLS));
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Counted::text(&held.tree, "T"));
+  }
+
+  assert_eq!(
+    held.tree.get(),
+    CELLS,
+    "the {CELLS} leaves, and not one of the {} object values — the root, `nest` and every cell — \
+     which before this fix were all still held here",
+    CELLS + 2
+  );
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(
+    held.tree.get(),
+    CELLS,
+    "and delivery changes nothing: the leaves are the response, the object values were not"
+  );
+}
+
+/// The root is an instance, and it is the one a completion-path fix would miss.
+///
+/// `start` stores the root's value, not `complete`, so a release attached to the completion code
+/// path never sees it. Attaching the release to the *state* catches it, because `start` expands the
+/// root through the same `expand` every other object goes through.
+#[test]
+fn the_root_object_value_is_released_when_its_last_child_is_offered() {
+  let query = r#"{ echo(text: "x") }"#;
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+  assert_eq!(held.tree.get(), 1, "the root's value, held by `start`");
+
+  let echo = executor.poll_resolve(&mut space).expect("echo").id();
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "still held while `echo` is the offered request, because `echo` is reading it"
+  );
+
+  executor.handle_resolved(&mut space, echo, Counted::text(&held.tree, "E"));
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "the leaf, and only the leaf: the root's value went at the entry point that ended its lend"
+  );
+}
+
+/// An object that enqueues nothing expires inside the call that completed it.
+///
+/// A sub-selection of only `__typename` is answered by the executor, so no child is ever enqueued
+/// and no offer will ever arrive to notice the reader set is empty. A release-at-last-offer scheme
+/// waits for an event that cannot happen; settling on every live exit of `expand` is what makes
+/// this case release at all.
+#[test]
+fn an_object_that_enqueues_nothing_expires_immediately() {
+  let query = "{ nest { __typename } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, Counted::obj(&held.tree));
+  assert_eq!(
+    held.tree.get(),
+    0,
+    "`nest` enqueued nothing, so its value died inside the `handle_resolved` that completed it — \
+     and the root's died at the same entry point"
+  );
+
+  assert!(executor.poll_resolve(&mut space).is_none());
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+}
+
+/// A child that fails argument coercion is a read that will not happen, and is accounted as one.
+///
+/// It leaves Ready without ever being offered, so nothing borrows the parent and the expiry is
+/// immediate rather than parked.
+#[test]
+fn a_child_that_never_gets_offered_still_releases_its_parent() {
+  let query = r#"query ($missing: String!) { pair(first: "a", second: $missing) }"#;
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+  assert_eq!(held.tree.get(), 1, "the root's value");
+
+  assert!(
+    executor.poll_resolve(&mut space).is_none(),
+    "the only candidate raises at draft §6.4.1 and is never offered"
+  );
+  assert_eq!(
+    held.tree.get(),
+    0,
+    "and the root's value goes with it, at that `poll_resolve` rather than at the next `start`"
+  );
+}
+
+/// The last offered child must still be able to read its parent's value.
+///
+/// The over-release direction, and the one a release-only suite would pass a broken fix on. When
+/// the last enqueued child is offered the parent's count reaches zero — but the `FieldRequest`
+/// being returned borrows that very value, so the expiry is parked for the next call in. Plant the
+/// transition one step early and this goes red two ways at once: the offer path's parent read hits
+/// its `unreachable!`, and if it did not, the payload below would not be the parent's.
+#[test]
+fn the_last_offered_child_still_reads_its_parents_value() {
+  let query = "{ nest { boom } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  // A tagged payload, so the assertion below is about *which* value is lent and not merely that
+  // some value is. The executor decides an object by the schema's type, never by the payload.
+  executor.handle_resolved(&mut space, nest, Counted::text(&held.tree, "PARENT"));
+
+  let request = executor
+    .poll_resolve(&mut space)
+    .expect("`boom`, the only child `nest` enqueued");
+  match &request.parent_value().payload {
+    Payload::Str(tag) => assert_eq!(
+      *tag, "PARENT",
+      "the last offered child reads its own parent's value"
+    ),
+    other => panic!("the parent's value must still be readable, and its own: {other:?}"),
+  }
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "and it is still alive while lent — an expiry one step early would have dropped it here"
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// A budget tripped at the top level is still a well-formed error
+// ------------------------------------------------------------------------------------------
+
+/// A root-level budget refusal carries a location and does not name a field that does not exist.
+///
+/// Two contract breaks at one site. `fail` reads the slot's stored locations range, and the root's
+/// is empty by construction — `start` builds it as `(0, 0)`, because the root has no field to have
+/// a span — so the error reached the driver with `locations()` empty, against this crate's own
+/// "always at least one entry for any error a driver can observe". The same row rendered through
+/// the root's owner, and `start` fills the root's `field_sym` with the root *type's* name, so the
+/// message named `Query.Query` — a field no schema has.
+#[test]
+fn a_root_budget_error_has_a_location_and_names_no_impossible_field() {
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let located = execute_bounded(
+    BUDGET_SDL,
+    "{ a b c }",
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    Vec::new(),
+    limits,
+    |response| {
+      response
+        .errors()
+        .map(|error| {
+          (
+            error.to_string(),
+            error
+              .locations()
+              .iter()
+              .map(|span| (span.start(), span.end()))
+              .collect::<Vec<_>>(),
+          )
+        })
+        .collect::<Vec<_>>()
+    },
+  );
+
+  assert_eq!(located.len(), 1, "one refusal at the root: {located:?}");
+  let (message, locations) = &located[0];
+  assert!(
+    !locations.is_empty(),
+    "an error a driver can observe always has at least one location: {message}"
+  );
+  assert!(
+    !message.contains("Query.Query"),
+    "the root has no field, so the `Type.field` form would name one that does not exist: {message}"
+  );
+  assert!(
+    message.contains("root selection set"),
+    "it names the position it could not complete, which at the root is the selection set: {message}"
+  );
+}
+
+/// A non-root budget refusal points at the selection it refused, not the whole parent group.
+#[test]
+fn a_budget_refusal_points_at_the_selection_it_refused() {
+  let query = "{ bad { a b } other { ok } }";
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(7).expect("not zero"),
+    ..Limits::default()
+  };
+  let located = execute_bounded(TXN_SDL, query, txn_root(), Vec::new(), limits, |response| {
+    response
+      .errors()
+      .map(|error| {
+        (
+          error.path().to_string(),
+          error
+            .locations()
+            .iter()
+            .map(|span| (span.start(), span.end()))
+            .collect::<Vec<_>>(),
+        )
+      })
+      .collect::<Vec<_>>()
+  });
+
+  assert_eq!(located.len(), 1);
+  let (path, locations) = &located[0];
+  assert_eq!(path, "bad");
+  assert_eq!(locations.len(), 1, "the one selection that was refused");
+  let (start, end) = locations[0];
+  assert_eq!(
+    &query[start..end],
+    "b",
+    "and it is `b`, the group that did not fit — not `bad`, whose group did"
   );
 }

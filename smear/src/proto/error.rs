@@ -342,6 +342,21 @@ impl<V> fmt::Display for Error<'_, V> {
         schema.name(field)
       )
     };
+    // How a budget refusal names the position it could not complete.
+    //
+    // The `Type.field` form is a lie at the root: `start` fills the root's `field_sym` with the
+    // root *type's* own name, so `owner` renders `Query.Query` — a field that does not exist. And
+    // `slot == 0` **is** the root, by construction, because `start` pushes it before anything else.
+    // A field genuinely named `Query` on `Query` still renders `Query.Query`, because its slot is
+    // not zero, so there is no sentinel to collide with.
+    let position = |f: &mut fmt::Formatter<'_>, parent: TypeId, field: Sym| -> fmt::Result {
+      if self.row.slot == 0 {
+        f.write_str("Cannot complete the query's root selection set")
+      } else {
+        f.write_str("Cannot complete field ")?;
+        owner(f, parent, field)
+      }
+    };
     let ty = |f: &mut fmt::Formatter<'_>, packed: PackedType| -> fmt::Result {
       packed.write(f, schema.name(packed.base()))
     };
@@ -479,8 +494,7 @@ impl<V> fmt::Display for Error<'_, V> {
         field,
         limit,
       } => {
-        f.write_str("Cannot complete field ")?;
-        owner(f, parent, field)?;
+        position(f, parent, field)?;
         write!(
           f,
           ": the response would exceed the executor's limit of {limit} positions."
@@ -491,8 +505,7 @@ impl<V> fmt::Display for Error<'_, V> {
         field,
         limit,
       } => {
-        f.write_str("Cannot complete field ")?;
-        owner(f, parent, field)?;
+        position(f, parent, field)?;
         write!(
           f,
           ": the response would exceed the executor's limit of {limit} metadata entries."

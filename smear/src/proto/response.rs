@@ -114,14 +114,67 @@ pub(super) enum State<V> {
   TypeName(u32),
   /// A list. The children are its elements, keyed by index.
   List,
-  /// An object. The children are the fields draft §6.3 collected on it.
+  /// An object whose value and resolved type are both dead.
+  ///
+  /// Renders exactly as [`Object`](State::Object) does — from `first_child`, which is what
+  /// rendering always read. Nothing ever rendered the value, and that is the whole of the finding
+  /// this variant exists for: an object's `V` has one reader in the program, `poll_resolve` lending
+  /// it as `parent_value`, so once the last enqueued child has been offered it is unreachable by
+  /// any public API and unread by any internal path. Holding it to the next `start` pinned one
+  /// driver handle per object — a database row, an FFI pointer, a wasm handle — bounded by
+  /// `max_response_slots` rather than by `max_in_flight`.
+  ///
+  /// So the value dies when its reader set empties, and the state records that it has. The
+  /// transition is the release: there is no separate call to forget.
+  Expanded,
+  /// An object whose value is still readable, because a child of it has yet to be offered.
   Object {
     /// The value the driver resolved, handed back as the parent value of every child request.
     value: V,
+    /// How many future reads of `value` remain: children enqueued by `expand` and not yet departed
+    /// from Ready.
+    ///
+    /// The count is *inside* the variant on purpose. A slot holding no object pays nothing for it,
+    /// and — the property that matters more — a stale count is unrepresentable, because `discard`
+    /// and `reset` overwrite the whole state and the number dies with the value it was counting
+    /// reads of. A parallel table would have to be kept in step with two paths that already forget
+    /// things for a living.
+    ///
+    /// Its *meaning* is "outstanding future reads", and that is what a later phase extends. Phase 6
+    /// making list completion resumable adds registered-but-uncreated readers to the meaning; it
+    /// does not redefine it. Carry the meaning, not the formula.
+    pending: u32,
     /// The concrete object type, after `ResolveAbstractType` where the position was abstract.
     ty: TypeId,
   },
 }
+
+/// What the read counter costs, measured rather than derived.
+///
+/// The design this implements predicted that `pending` would pack beside the type id for an
+/// eight-aligned driver value and cost nothing, growing the state only in the four-aligned case.
+/// **Half of that is wrong, and measuring is how it was caught.** On this target and toolchain:
+///
+/// | `V` | `State<V>` before | after | `Slot<V>` before | after |
+/// |---|---|---|---|---|
+/// | `u64` (align 8) | 16 | **24** | 64 | **72** |
+/// | `u32` (align 4) | 12 | **16** | 56 | **60** |
+///
+/// The four-aligned prediction held; the eight-aligned one did not, because the spare four bytes
+/// the counter was expected to occupy were already carrying the discriminant. So the real cost is
+/// eight bytes per slot for an eight-aligned value, not zero — about a ninth of a `Slot`, against a
+/// defect that pinned one driver handle per object for the whole response. Worth it, but worth it
+/// on the measured number rather than the hoped one.
+///
+/// Bounds rather than equalities, deliberately. `repr(Rust)` layout is unspecified, so a future
+/// compiler is entitled to pack this better and a `==` would fail a green tree for an improvement.
+/// A `<=` still fails the thing worth failing: a field added here that grows the slot again.
+const _: () = {
+  assert!(core::mem::size_of::<State<u64>>() <= 24);
+  assert!(core::mem::size_of::<Slot<u64>>() <= 72);
+  assert!(core::mem::size_of::<State<u32>>() <= 16);
+  assert!(core::mem::size_of::<Slot<u32>>() <= 60);
+};
 
 /// A slot's key in its parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,7 +460,9 @@ pub(super) fn node<'r, V>(
       name_spans,
       next: slot.first_child,
     }),
-    State::Object { .. } => Node::Object(Children {
+    // Both object states render the same way, because rendering never read the value or the
+    // resolved type — only `first_child`. `Expanded` is that fact made into a state.
+    State::Object { .. } | State::Expanded => Node::Object(Children {
       slots,
       names,
       name_spans,
