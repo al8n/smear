@@ -297,9 +297,12 @@ the source.
 Two limits on that claim, because they are the difference between "compiles" and "works". `smear`
 itself does **not** build for `thumbv6m-none-eabi`: its AST offers an `Arc`-backed list spelling that
 needs native atomics, which is why the no-atomic proof is about the schema representation rather than
-the crate. And per [#124], the `not(std)` arm is compile-checked but **executed** by nothing — the
-crate's dev-dependency on itself does not pass `default-features = false`, so every test build
-resolves `std` back on. Treat `no_std` as a supported build, not as a tested runtime.
+the crate. And per [#124], the `not(std)` arm is compile-checked but **executed** by nothing: the one
+row that runs the suite is `cargo test --all-features`, which has `std` on. Until [#136] a test build
+could not even *compile* it — the crate's dev-dependency on itself omitted
+`default-features = false`, so a `--no-default-features` selection resolved `std` back on, and every
+narrowed row was really the default build wearing a narrower name. Treat `no_std` as a supported
+build, not as a tested runtime.
 
 ## Benchmarks
 
@@ -393,3 +396,4 @@ shall be dual licensed as above, without any additional terms or conditions.
 [#103]: https://github.com/al8n/smear/issues/103
 [#121]: https://github.com/al8n/smear/issues/121
 [#124]: https://github.com/al8n/smear/issues/124
+[#136]: https://github.com/al8n/smear/issues/136
