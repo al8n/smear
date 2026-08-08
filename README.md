@@ -20,19 +20,27 @@ A zero-copy lexer, parser and validator for standard GraphQL, built out of reusa
 
 ## Overview
 
-**Smear** is the I/O-free core of a GraphQL implementation. Today that core is a zero-copy **lexer**,
-a **parser** that produces either a plain AST or a lossless CST, and a **validator** for the draft
-specification's type-system and executable-document rules. Everything above the lexer is built from
-reusable combinators, so the same machinery serves standard GraphQL and GraphQL-like DSLs — GraphQLx,
-the extended dialect that ships alongside, is one of those DSLs rather than a special case.
+**Smear** is a next-generation GraphQL implementation for Rust, built I/O-free from the bottom up.
+Today that means a zero-copy **lexer**, a **parser** that produces either a plain AST or a lossless
+CST, and a **validator** for the draft specification's type-system and executable-document rules.
+Everything above the lexer is built from reusable combinators, so the same machinery serves standard
+GraphQL and GraphQL-like DSLs — GraphQLx, the extended dialect that ships alongside, is one of those
+DSLs rather than a special case.
 
-**I/O-free is a design constraint, not a euphemism for unfinished.** Nothing here opens a socket,
-spawns a task, or decides how you allocate; every layer is a library you call rather than a framework
-that calls you. That constraint is why the parser is generic over the source representation instead
-of taking `&str`, why the validator's steady state allocates nothing and keeps its scratch in a buffer
+*Next generation* is a claim about what smear does **not** decide for you. Today's Rust GraphQL
+libraries each settle three things on their users' behalf: the **string type**, because the parser's
+entry point takes `&str`; the **control flow**, because you register resolvers and an executor calls
+them; and the **shape of a resolved value**, because the executor defines a `Value` enum to hold it.
+Each of those is a reasonable default, and each of them is the kind of default you cannot change
+afterwards. Smear declines all three.
+
+**I/O-free is the mechanism, not a euphemism for unfinished.** Nothing here opens a socket, spawns a
+task, or decides how you allocate; every layer is a library you call rather than a framework that
+calls you. That constraint is why the parser is generic over the source representation instead of
+taking `&str`, why the validator's steady state allocates nothing and keeps its scratch in a buffer
 you own, and why `no_std` is reachable at all.
 
-It is also what the rest of the plan rests on. Execution — draft §6 and §7 — is being built as a
+The same constraint shapes what comes next. Execution — draft §6 and §7 — is being built as a
 Sans-I/O state machine: `poll_*` and `handle_*` pairs, time passed in rather than read, and the
 resolved values owned by the caller behind a trait rather than copied into a `Value` enum of ours, so
 a handle from FFI or wasm is a first-class value and not a conversion step. A core shaped that way can
@@ -40,8 +48,8 @@ be driven by a `tokio` server, a `compio` one, a wasm module or an editor withou
 privileged — which is what lets the runtime adapters and the ergonomic macro layer be thin crates
 *above* the core instead of assumptions baked *into* it.
 
-None of that is here yet, and the table below says so line by line. The direction is stated because
-it explains the shape of what is here: those constraints cost something, and this is what they buy.
+None of that is here yet. The table below is the specification coverage as it stands, and the
+[roadmap](#roadmap) is the list of what is still missing, unchecked.
 
 ### What is implemented, and what is not
 
@@ -325,13 +333,37 @@ load average is not a usable signal for that — it reads around 3.3 at 80% idle
 - Anyone building a GraphQL-like DSL, who wants the combinators and the CST substrate rather than a
   fixed grammar
 
-Smear is **not** a GraphQL server: there is no execution engine and no response serialisation. It is
-the front end one would be built on.
+Smear is **not** a GraphQL server *yet*: there is no execution engine and no response serialisation.
+Today it is the front end one would be built on; the [roadmap](#roadmap) is the rest.
 
 Migration note: `smear-lexer` and `smear-parser` were merged into this crate in [#83]. Neither had
 ever been published, so nothing on crates.io moved; path and git dependents rename `smear_lexer::X`
 to `smear::lexer::X` and `smear_parser::X` to `smear::parser::X`, and select features per the table
 above.
+
+## Roadmap
+
+Every box below is unchecked, and unchecked means absent — not partial, not planned-and-half-landed.
+The list is what stands between the current front end and a complete implementation.
+
+- [ ] **§6 Execution** — the Sans-I/O engine described in the Overview. Query execution first, then
+      mutations, then subscription execution, then the connection state machine, backpressure and
+      timers that a long-lived operation needs.
+- [ ] **§7 Response** — assembling and serialising the result. Only the error half exists today, as
+      the §7.1.2 response paths already carried by `smear::diagnostic`.
+- [ ] **Introspection execution** — a schema can be *built* from an introspection response, and an
+      introspection query is *validated* like any other document, because the meta-schema is injected
+      into every schema. Nothing here **answers** `__schema` or `__type`.
+- [ ] **Runtime adapters** — separate crates that drive the core from a `tokio` server, a `compio`
+      one, or a wasm host. Thin is the point: each one is a driver, and the core stays runtime-free.
+- [ ] **Macro layer** — deriving schema types and resolver wiring from Rust types, so the ergonomic
+      surface sits *above* the core instead of being the only way in.
+- [ ] **`graphql-transport-ws`** — the subscription transport, once execution can produce a stream.
+- [ ] **Diagnostic rendering** — smear ships the contract and deliberately no renderer, so nothing
+      here turns an error into a rendered snippet. A companion crate for that is being built
+      separately.
+
+No dates. The order above is roughly the order in which each item unblocks the next.
 
 ## Contributing
 
