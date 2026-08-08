@@ -121,6 +121,15 @@ pub(super) enum Raw {
     field: Sym,
     limit: u32,
   },
+  /// Not a specification failure: collecting this selection set would take the response metadata
+  /// past [`Limits::max_response_metadata`](super::Limits::max_response_metadata).
+  ///
+  /// Raised one step earlier than [`SelectionBudget`](Raw::SelectionBudget), at the staging buffer
+  /// rather than at the commit, and `expand` rewrites it into that variant so the message can name
+  /// the position. The rewrite is an improvement to the message and not a correctness requirement:
+  /// if a future path forgets it, this renders a true sentence that is merely less specific, which
+  /// is the direction a forgotten step should fail in.
+  MetadataBudget { limit: u32 },
   /// Not a specification failure: draft §6.3's collection ran past
   /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
   ///
@@ -255,6 +264,7 @@ impl Raw {
       Self::ResponseBudget { .. }
       | Self::SelectionBudget { .. }
       | Self::CollectionBudget { .. }
+      | Self::MetadataBudget { .. }
       | Self::NameStorage { .. } => Kind::ResponseBudget,
       Self::ResolverUnstorable => Kind::Resolver,
     }
@@ -511,6 +521,11 @@ impl<V> fmt::Display for Error<'_, V> {
           ": the response would exceed the executor's limit of {limit} metadata entries."
         )
       }
+      Raw::MetadataBudget { limit } => write!(
+        f,
+        "Collecting this selection set would exceed the executor's limit of {limit} metadata \
+         entries."
+      ),
       Raw::CollectionBudget { limit } => write!(
         f,
         "Collecting this operation's fields would exceed the executor's limit of {limit} \

@@ -24,7 +24,9 @@ use crate::{
 // the prelude. The crate's other in-crate test modules that render a value spell it the same way.
 use std::string::ToString;
 
-use super::{Executor, State};
+use core::num::NonZeroU32;
+
+use super::{Executor, Limits, State};
 
 const SDL: &str = r#"
 type Query {
@@ -194,5 +196,76 @@ fn a_drained_subtree_is_not_walked_again() {
   assert!(
     matches!(value, Node::Null),
     "and the planted value is not readable, because `nest` answers null above it"
+  );
+}
+
+/// The collection scratch cannot grow past what the ceiling that refuses the request permits.
+///
+/// # What was wrong, and why it needed a test from inside
+///
+/// Collection stages every surviving selection into `scratch_fields` before `expand` checks
+/// `max_response_metadata`, so the buffer used to grow under the **visit** budget — the loosest
+/// ceiling on the path — while the operation was refused by the metadata budget. `reset` reuses the
+/// scratch rather than shrinking it, so one wide refused request left that capacity resident on a
+/// long-lived executor, and a wide enough one could exhaust memory before producing the very budget
+/// error that was going to refuse it.
+///
+/// Capacity is not observable through any public API — a leak and a limit produce the same response
+/// — so this is the same reason `a_drained_subtree_is_not_walked_again` lives in here.
+///
+/// # The numbers, and which one makes it fire
+///
+/// `max_response_metadata` is **8**, so the root's collection may stage four selections: each
+/// becomes two metadata entries when committed, and `(4 + 1) * 2 > 8` refuses the fifth. The query
+/// asks for **4096** aliases of one field, all valid.
+///
+/// **4096 against a bound of 64 is what makes this discriminate.** Before the charge the buffer
+/// reached the full width and its capacity with it, so the assertion fails by roughly sixty-four
+/// times; after it, the buffer never holds more than four. A narrower query — anything under the
+/// bound — would pass against the defect and prove nothing, which is the trap a sibling line hit
+/// tonight with a fixture that was wide but not wide enough.
+#[test]
+fn collection_scratch_cannot_outgrow_the_ceiling_that_refuses_it() {
+  const WIDTH: usize = 4096;
+  const CAPACITY_BOUND: usize = 64;
+
+  let mut query = std::string::String::from("{");
+  for i in 0..WIDTH {
+    query.push_str(&std::format!(" k{i}: nest {{ boom }}"));
+  }
+  query.push_str(" }");
+
+  let (schema, document) = compile(&query);
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(8).expect("eight is not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  // Scoped, so the borrow ends before the scratch is read — `Response` borrows the executor.
+  let errors = {
+    let response = executor.poll_response().expect("nothing is outstanding");
+    response.error_count()
+  };
+  assert_eq!(
+    errors, 1,
+    "the root's selection set is refused for metadata, which is the point of the fixture"
+  );
+
+  assert!(
+    executor.scratch_fields.capacity() <= CAPACITY_BOUND,
+    "the staging buffer grew to {} entries against a ceiling that admits four; before the charge \
+     it followed the {WIDTH}-wide selection set instead of the ceiling that refused it",
+    executor.scratch_fields.capacity()
+  );
+  assert!(
+    executor.scratch_groups.capacity() <= CAPACITY_BOUND,
+    "groups grows at most one per selection, so bounding the selections bounds it — {} says \
+     otherwise",
+    executor.scratch_groups.capacity()
   );
 }

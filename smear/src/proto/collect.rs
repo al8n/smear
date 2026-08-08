@@ -100,6 +100,46 @@ impl Visits {
   }
 }
 
+/// What the response metadata ceiling still has room for when a collection begins.
+///
+/// Collection is the metadata population's *first* writer — `expand`'s commit and `fail_at`'s spans
+/// are the other two — so it charges the same ceiling the other two do. That is not collection
+/// borrowing expansion's budget: the budget belongs to the population, and this is the earliest
+/// point at which growth in that population happens, which is where the module puts a charge.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Allowance {
+  /// Entries the ceiling still permits, after what is already committed.
+  room: u64,
+  /// The ceiling itself, for the message.
+  limit: u32,
+}
+
+impl Allowance {
+  #[inline]
+  pub(super) const fn new(room: u64, limit: u32) -> Self {
+    Self { room, limit }
+  }
+
+  /// Whether one more staged selection still fits.
+  ///
+  /// `staged` is `fields.len()` before the push, so the entry about to be added is the
+  /// `staged + 1`th, and each costs two entries.
+  #[inline]
+  fn admits<S>(self, staged: usize, field: &Field<S>) -> Result<(), Fault<'static>>
+  where
+    S: AsRef<[u8]>,
+  {
+    if (staged as u64 + 1) * 2 <= self.room {
+      return Ok(());
+    }
+    Err(Fault {
+      raw: Raw::MetadataBudget { limit: self.limit },
+      location: *field.name().as_span(),
+      name: None,
+    })
+  }
+}
+
 /// One response key's group of selections.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Group {
@@ -242,6 +282,7 @@ pub(super) fn collect_fields<'a, S, V>(
   groups: &mut std::vec::Vec<Group>,
   stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
   visits: &mut Visits,
+  metadata: Allowance,
 ) -> Result<(), Fault<'a>>
 where
   S: AsRef<[u8]>,
@@ -263,6 +304,7 @@ where
       groups,
       stack,
       visits,
+      metadata,
     )?;
   }
   // Stable, so document order inside a group survives; by group, so every group is contiguous.
@@ -319,6 +361,7 @@ fn walk<'a, S, V>(
   groups: &mut std::vec::Vec<Group>,
   stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
   visits: &mut Visits,
+  metadata: Allowance,
 ) -> Result<(), Fault<'a>>
 where
   S: AsRef<[u8]>,
@@ -370,6 +413,21 @@ where
             (groups.len() - 1) as u32
           }
         };
+        // Charged before the push, against the ceiling this staging buffer is staging *for*.
+        //
+        // Every surviving selection here becomes exactly two metadata entries when `expand`
+        // commits it — one merged selection and one location — so `fields` is response metadata in
+        // waiting, and the population it belongs to already has a ceiling. Without this the buffer
+        // grew under the *visit* budget instead: the loosest ceiling on the path rather than the
+        // one that decides the outcome, so a request refused for metadata could first grow the
+        // scratch by orders of magnitude more than the refusal permits, and `reset` reuses rather
+        // than shrinks.
+        //
+        // Reading lengths, not a counter: `fields.len()` is the staged half and the caller's
+        // allowance is the committed half. That is the module's standing rule, and it is what keeps
+        // this from drifting out of step with the commit-side charge — `expand` charges
+        // `2 * group.len` per group, which sums to exactly the `2 * fields.len()` measured here.
+        metadata.admits(fields.len(), field)?;
         fields.push((group, field));
       }
       Selection::FragmentSpread(spread) => {

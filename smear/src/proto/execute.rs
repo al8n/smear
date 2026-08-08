@@ -41,7 +41,7 @@ use crate::{
 
 use super::{
   Argument, ArgumentSource, Error, FieldRequest, Leaf, Node, ReqId, Values,
-  collect::{Group, Interner, Visits, collect_fields},
+  collect::{Allowance, Group, Interner, Visits, collect_fields},
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
   response::{Key, NONE, Slot, State, node},
@@ -104,6 +104,7 @@ mod tests;
 /// | error rows | one per position | `Response::errors` | next `start`/drop | `reset` | a position able to fail twice |
 /// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
+/// | collection scratch | `max_response_metadata`, charged before each push | `expand`, this call only | cleared at the next collection | cleared, never shrunk — capacity is reused | a staged population charged against a *different* ceiling than the one that refuses it |
 ///
 /// Three rules keep the table true as phases 2–8 add members, and each is a rule the rounds paid
 /// for:
@@ -117,7 +118,14 @@ mod tests;
 /// 2. **The reader column is the falsifier.** A member whose reader set is empty *while it is held*
 ///    is a defect by inspection. That one sentence is R6, and it is the sweep a later phase runs:
 ///    enumerate the states holding a `V` or an id, and for each, name the reader or name the defect.
-/// 3. **Attach death to the resource, not to a code path.** The root is stored by `start` and not by
+/// 3. **A staging buffer belongs to the population it is staging for.** The collection scratch is
+///    response metadata in waiting — every selection it holds becomes two metadata entries on
+///    commit — so it charges the metadata ceiling, at the push, and not the visit budget it happens
+///    to sit under. Getting this wrong does not look like a missing bound, because there *was* one:
+///    it looks like a bound that is orders of magnitude looser than the one that decides the
+///    outcome, so the buffer outgrows the refusal that was coming. Charge against the ceiling that
+///    will decide, not the one the code path is nearest to.
+/// 4. **Attach death to the resource, not to a code path.** The root is stored by `start` and not by
 ///    `complete`, and an object whose selection is only `__typename` enqueues nothing at all — so a
 ///    release hung off "the completion path" misses the first and a release hung off "the last
 ///    offer" misses the second. Hanging it off the state catches both by construction.
@@ -1187,6 +1195,13 @@ where
       &mut groups,
       &mut stack,
       &mut self.visits,
+      // The committed half of the population, so collection charges what is left of the same
+      // ceiling `expand` and `fail_at` charge.
+      Allowance::new(
+        u64::from(self.limits.max_response_metadata.get())
+          .saturating_sub(self.merged.len() as u64 + self.locations.len() as u64),
+        self.limits.max_response_metadata.get(),
+      ),
     );
     if let Err(fault) = collected {
       // The scratch vectors go back before the failure is recorded, because recording it borrows
@@ -1205,6 +1220,18 @@ where
       // Only now is there room to spell the name the message wanted, and only now is an id one that
       // will still be valid — which is why the fault carried bytes this far.
       let raw = match (fault.raw, fault.name) {
+        // Collection refused for the metadata ceiling; it knows the ceiling but not the position,
+        // so the position is attached here, where `owner` is in reach. Rendering then goes through
+        // exactly the path a commit-side refusal does — including the root's, which must not say
+        // `Query.Query`.
+        (Raw::MetadataBudget { limit }, _) => {
+          let (parent, field) = self.owner(slot);
+          Raw::SelectionBudget {
+            parent,
+            field,
+            limit,
+          }
+        }
         (
           Raw::DirectiveCondition {
             fault: ConditionFault::VariableMissing { .. },
@@ -1258,6 +1285,14 @@ where
         exhausted = Some((Exhausted::Selections, *first.span()));
         break;
       };
+      // Defence, not the live path, since collection began charging this ceiling at the staging
+      // buffer: collection admits a selection set only if `2 * fields.len()` fits, and the loop
+      // here charges `2 * group.len` per group, which sums to exactly that — so this cannot fire
+      // for a set that got past collection. It stays because the rule is that *every* writer of a
+      // population charges it, and because the guarantee upstream is an argument rather than a
+      // type. What is *not* defence is the position and name arms below, which collection cannot
+      // pre-empt; those are what `a_position_refusal_mid_expansion_costs_its_siblings_nothing`
+      // pins, after the metadata tests moved off this path and left it briefly untested.
       if !self.metadata_room(u64::from(group.len) * 2) {
         exhausted = Some((Exhausted::Selections, *first.span()));
         break;

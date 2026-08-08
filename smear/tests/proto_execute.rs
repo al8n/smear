@@ -3648,3 +3648,63 @@ fn a_budget_refusal_points_at_the_selection_it_refused() {
     "and it is `b`, the group that did not fit — not `bad`, whose group did"
   );
 }
+
+/// The *position* ceiling refuses mid-expansion, and its rollback owes the sibling the same thing.
+///
+/// Charging collection against the metadata ceiling moved every metadata refusal one step earlier,
+/// to the staging buffer — which is the point of it, and which left `expand`'s own refusal arm
+/// exercised by nothing. Planting a late mark or a location-less `fail` there went green against
+/// the whole suite. The arm is still live for the two ceilings collection cannot pre-empt, the slot
+/// ceiling and the `__typename` arena, so this pins it through the first.
+///
+/// **Why four.** The root plus `bad` and `other` is three positions; `bad`'s first child takes it to
+/// four and its second is refused. The correct degraded response is root, `bad`, `other` and
+/// `other.ok` — four — which fits exactly, while `bad`'s abandoned child would leave the count at
+/// four before `other` is reached and `other.ok` would need five. Any other ceiling admits both or
+/// refuses both.
+#[test]
+fn a_position_refusal_mid_expansion_costs_its_siblings_nothing() {
+  let query = "{ bad { a b } other { ok } }";
+  let limits = Limits {
+    max_response_slots: NonZeroU32::new(4).expect("not zero"),
+    ..Limits::default()
+  };
+  let located = execute_bounded(TXN_SDL, query, txn_root(), Vec::new(), limits, |response| {
+    (
+      render(&response.data()),
+      response
+        .errors()
+        .map(|error| {
+          (
+            error.path().to_string(),
+            error
+              .locations()
+              .iter()
+              .map(|span| (span.start(), span.end()))
+              .collect::<Vec<_>>(),
+          )
+        })
+        .collect::<Vec<_>>(),
+    )
+  });
+
+  let (data, errors) = located;
+  assert_eq!(
+    errors.len(),
+    1,
+    "only `bad` is over the ceiling; a second error means its positions were still charged: \
+     {errors:?}"
+  );
+  assert_eq!(errors[0].0, "bad");
+  assert_eq!(errors[0].1.len(), 1, "the refusal points at one selection");
+  let (start, end) = errors[0].1[0];
+  assert_eq!(
+    &query[start..end],
+    "b",
+    "and it is `b`, the child that did not fit"
+  );
+  assert_eq!(
+    data, r#"{"bad":null,"other":{"ok":"OK"}}"#,
+    "`other` fitted and must be in the response"
+  );
+}
