@@ -1,6 +1,6 @@
 //! The diagnostic-contract census: al8n/smear#126's D1–D4, over the same crate reader.
 //!
-//! Phase A gave the crate [`Diagnose`], and gave every kind enum a wildcard-free `match` per
+//! Phase A gave the crate `Diagnose`, and gave every kind enum a wildcard-free `match` per
 //! accessor, so a *variant* added without a code is a hard `E0004`. Two holes are left that the
 //! compiler cannot see, and this module is both of them:
 //!
