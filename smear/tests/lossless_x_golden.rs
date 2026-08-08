@@ -102,8 +102,9 @@
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
 //! [`CLOSES_ON_TRAILING_TRIVIA`], forty-eight pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
-//! twin's length for a reason the constant states: GraphQLx spells a name as a path, and a path
-//! ends by probing for a `::` that is usually not there.
+//! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
+//! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
+//! — where GraphQL's `NamedType` has no optional child after the name to probe for at all.
 
 use std::{collections::BTreeSet, fmt::Write as _, path::PathBuf};
 
@@ -160,10 +161,12 @@ const GAP_TILES_AT_ROOT: &[&str] = &[
 /// a claim this file re-measures every run rather than a sentence.
 ///
 /// The three GraphQLx name wrappers are where a repeat would be most expensive.
-/// [`DefinitionName`](K::DefinitionName), [`ExtensionName`](K::ExtensionName) and
-/// [`ExecutableDefinitionName`](K::ExecutableDefinitionName) exist to carry a path plus an optional
-/// generic list and nothing else, so their entire content *is* a range — a boundary on the wrong
-/// side of a space is the whole defect, with no kind change and no line moved to show for it.
+/// [`DefinitionName`](K::DefinitionName) and
+/// [`ExecutableDefinitionName`](K::ExecutableDefinitionName) carry a bare `Name` token plus an
+/// optional generic list, and [`ExtensionName`](K::ExtensionName) a [`Path`](K::Path) plus one;
+/// none of the three carries anything else, so their entire content *is* a range — a boundary on
+/// the wrong side of a space is the whole defect, with no kind change and no line moved to show
+/// for it.
 const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
@@ -202,31 +205,68 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///
 /// # GraphQLx's own, and it is most of the difference
 ///
-/// GraphQLx spells a name as a **path** — `Path` is segments joined by `::`, and
-/// [`DefinitionName`](K::DefinitionName), [`ExtensionName`](K::ExtensionName) and
-/// [`ExecutableDefinitionName`](K::ExecutableDefinitionName) wrap a path plus an optional generic
-/// list. Every one of those ends by probing for a continuation that usually is not there: `Path`
-/// peeks for another `::`, the wrappers peek for a `<`. The peek crosses the trivia, declines, and
-/// the trivia stays inside. So in `type T { f: Int }` the `DefinitionName` spans `"T "` and the
-/// `Path` under `f`'s type spans `"Int "` — which is `TypePath > Path` (77 witnesses),
-/// `DefinitionTypePath > Path` (68) and `ObjectTypeDefinition > DefinitionName` (43), the three
-/// commonest pairings in this list after `Root > Document`. `EnumValue > Path`,
-/// `NamedSpecifier > Path`, `WildcardSpecifier > Path`, `ExtensionName > Path`,
-/// `FragmentDefinition > ExecutableDefinitionName` and the eight remaining `> DefinitionName`
-/// pairings are the same production in other positions.
+/// The mechanism is one sentence — a production ends by probing for an optional continuation that
+/// usually is not there, and the peek crosses the trivia, declines, and leaves it inside — but it
+/// is **two** productions probing for **two different tokens**, and reading them as one gets the
+/// grammar wrong.
+///
+/// **A [`Path`](K::Path) probes for `::`.** `path` is `::? Name (:: Name)*`, and `path_tail` in
+/// `graphqlx/lossless/ty.rs` is a `while eat_if(PathSeparator)`, so its last act on every path in
+/// the corpus is a probe for a separator that is not there. `TypePath > Path` (77 witnesses) and
+/// `DefinitionTypePath > Path` (68) are the two commonest pairings in this list after
+/// `Root > Document`; `EnumValue > Path`, `NamedSpecifier > Path`, `WildcardSpecifier > Path` and
+/// `ExtensionName > Path` are the same node in four other positions. So in `type T { f: Int }` the
+/// `Path` under `f`'s type spans `"Int "`.
+///
+/// **A name wrapper probes for `<`, and two of the three hold no path at all.**
+/// [`DefinitionName`](K::DefinitionName) and
+/// [`ExecutableDefinitionName`](K::ExecutableDefinitionName) are an `expect(Identifier)` followed
+/// by a peek for `LAngle` — a **bare `Name` token** plus an optional generic list, with no `Path`
+/// node in either, which is why neither is ever the parent of a `> Path` pairing.
+/// [`ExtensionName`](K::ExtensionName) is the one of the three that does call `path`, and
+/// `graphqlx/lossless/generic.rs` states the divergence beside the production: "**A `Path`, where
+/// `definition_name` takes a bare `Name`**" — `extend type ns::T` names a qualified target and
+/// `type ns::T` does not. So in `type T { f: Int }` the `DefinitionName` spans `"T "`;
+/// `ObjectTypeDefinition > DefinitionName` (43) is the third commonest pairing here, and
+/// `FragmentDefinition > ExecutableDefinitionName` plus the eight remaining `> DefinitionName`
+/// pairings are the same shape in other positions.
+///
+/// `ExtensionName` appears here only as a *parent*, which is the census's shape rather than an
+/// exemption: [`only_the_recorded_nodes_close_on_their_trailing_trivia`] records a node whose last
+/// **direct token child** is trivia, and an `ExtensionName`'s last child is the `Path` that
+/// already took the space. Its range ends after the trivia exactly as a `DefinitionName`'s does.
 ///
 /// **This is the one family worth arguing about, and here is the argument.** It is the trailing
 /// mirror of the leading shape Phase A treated as a defect — `RootOperationTypeDefinition >
 /// NamedType`, where a `NamedType` spanned `" Q"` and "a consumer that highlighted or renamed
-/// through that range took the space with it". Three things separate them. The leading one was an
-/// **inconsistency**: six of `named_type`'s seven call sites crossed the trivia first and one did
-/// not, where this is uniform, every path in the dialect doing it because every path has the same
-/// optional continuation. GraphQL has no counterpart at all, its `NamedType` wrapping a bare `Name`
-/// token with nothing optional after it — so the difference is one of grammar rather than of
-/// discipline. And the range a consumer reads is not this one: `extent_of` computes an AST node's
-/// span from its first non-trivia token to its last, so the projected span of that `DefinitionName`
-/// is `"T"` either way. What is recorded here is the CST range, and recording it is what makes a
-/// *change* to it visible.
+/// through that range took the space with it". Three things separate them.
+///
+/// **It was an inconsistency and this is not.** Six of `named_type`'s seven call sites crossed the
+/// trivia first and one did not. Here every path and every name wrapper in the dialect does the
+/// same thing, because each of them ends on an optional continuation it has to probe for.
+///
+/// **GraphQL has no counterpart, and the reason is grammatical.** Its `named_type` is an
+/// `expect(Identifier)` and stops — a `NamedType` has no optional child after the name, so there
+/// is no probe, nothing crosses the trailing trivia, and there is nothing for the trivia to stay
+/// inside. That is a difference in the grammar, not in the discipline applied to it.
+///
+/// **Trailing attachment is already the policy a CST consumer has to handle**, uniformly, before
+/// any of this. All twenty-eight pairings in the GraphQL twin's `CLOSES_ON_TRAILING_TRIVIA` are
+/// this shape: `SelectionSet > Field` means that in `{ a\n  b }` — the positive control in
+/// [`only_the_recorded_nodes_close_on_their_trailing_trivia`] and in its GraphQL twin — the
+/// `Field` for `a` already contains the newline. `tests/golden/valid_executable_query.rast` has it
+/// on the page: `Field@12..14` over `Name@12..13 "f"` and `Newline@13..14`. So a consumer that
+/// renames or highlights through a CST range must **already** trim trailing trivia children, and
+/// it can, because the trivia is a distinct token child with its own kind rather than bytes fused
+/// into the name token's text. `DefinitionName` needs no handling that `Field` does not; it is the
+/// same policy reaching one more node kind.
+///
+/// The AST projection is a separate question with a separate answer, and it is worth keeping the
+/// two apart because the Phase A complaint was explicitly about the **CST** range. `extent_of`
+/// computes an AST node's span from its first non-trivia token to its last, so the *projected*
+/// span of that `DefinitionName` is `"T"` either way — which answers the AST consumer and only the
+/// AST consumer. What is recorded here is the CST range, and recording it is what makes a *change*
+/// to it visible.
 ///
 /// # Why this is an array and not a sentence
 ///

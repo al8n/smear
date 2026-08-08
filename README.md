@@ -347,21 +347,21 @@ Every box below is unchecked, and unchecked means absent — not partial, not pl
 The list is what stands between the current front end and a complete implementation.
 
 - [ ] **§6 Execution** — the Sans-I/O engine described in the Overview. Query execution first, then
-      mutations, then subscription execution, then the connection state machine, backpressure and
-      timers that a long-lived operation needs.
+  mutations, then subscription execution, then the connection state machine, backpressure and
+  timers that a long-lived operation needs.
 - [ ] **§7 Response** — assembling and serialising the result. Only the error half exists today, as
-      the §7.1.2 response paths already carried by `smear::diagnostic`.
+  the §7.1.2 response paths already carried by `smear::diagnostic`.
 - [ ] **Introspection execution** — a schema can be *built* from an introspection response, and an
-      introspection query is *validated* like any other document, because the meta-schema is injected
-      into every schema. Nothing here **answers** `__schema` or `__type`.
+  introspection query is *validated* like any other document, because the meta-schema is injected
+  into every schema. Nothing here **answers** `__schema` or `__type`.
 - [ ] **Runtime adapters** — separate crates that drive the core from a `tokio` server, a `compio`
-      one, or a wasm host. Thin is the point: each one is a driver, and the core stays runtime-free.
+  one, or a wasm host. Thin is the point: each one is a driver, and the core stays runtime-free.
 - [ ] **Macro layer** — deriving schema types and resolver wiring from Rust types, so the ergonomic
-      surface sits *above* the core instead of being the only way in.
+  surface sits *above* the core instead of being the only way in.
 - [ ] **`graphql-transport-ws`** — the subscription transport, once execution can produce a stream.
 - [ ] **Diagnostic rendering** — smear ships the contract and deliberately no renderer, so nothing
-      here turns an error into a rendered snippet. A companion crate for that is being built
-      separately.
+  here turns an error into a rendered snippet. A companion crate for that is being built
+  separately.
 
 No dates. The order above is roughly the order in which each item unblocks the next.
 
