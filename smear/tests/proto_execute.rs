@@ -49,6 +49,15 @@ enum J {
   Obj(&'static str, Vec<(&'static str, J)>),
   /// Resolving this field raises a field error carrying the message.
   Fail(&'static str),
+  /// A list that *claims* `n` elements while holding none, every element read as `"x"`.
+  ///
+  /// Not an exotic driver. A resolver over a cursor, a row count, a `Content-Length` or a remote
+  /// page total answers [`Values::list_len`] from metadata rather than from a materialised
+  /// `Vec`, and that is the whole point: the length the executor is handed is the driver's claim
+  /// about the driver's own value, so it is bounded by nothing in the schema and nothing in the
+  /// document. Building the plant out of a `Vec` instead would make the *test* pay the memory the
+  /// executor is being asked not to spend, which is exactly the shape of gate nobody keeps.
+  Phantom(usize),
   /// Resolving this field succeeds, and the value's *serialiser* answers [`J::Null`].
   ///
   /// Both halves are ordinary. Draft §6.4.3 steps 1 and 2 ask [`Values::is_null`] about the value
@@ -100,6 +109,7 @@ impl Values for Space {
   fn list_len(&self, value: &J) -> Option<usize> {
     match value {
       J::List(items) => Some(items.len()),
+      J::Phantom(len) => Some(*len),
       _ => None,
     }
   }
@@ -107,6 +117,7 @@ impl Values for Space {
   fn list_item(&mut self, value: &J, index: usize) -> J {
     match value {
       J::List(items) => items[index].clone(),
+      J::Phantom(_) => J::Str("x".to_owned()),
       _ => J::Null,
     }
   }
@@ -181,6 +192,18 @@ fn execute<T>(
   variables: Vec<(&'static str, J)>,
   take: impl FnOnce(&Response<'_, J>) -> T,
 ) -> T {
+  execute_bounded(sdl, query, root, variables, Limits::default(), take)
+}
+
+/// [`execute`] under a caller-chosen [`Limits`].
+fn execute_bounded<T>(
+  sdl: &str,
+  query: &str,
+  root: J,
+  variables: Vec<(&'static str, J)>,
+  limits: Limits,
+  take: impl FnOnce(&Response<'_, J>) -> T,
+) -> T {
   let schema_document = Parser::with_parser::<
     GraphqlLexer<'_, str>,
     TypeSystemDocument<&str>,
@@ -205,7 +228,7 @@ fn execute<T>(
     variables,
     consume_variables: false,
   };
-  let mut executor = Executor::new(&schema, &document);
+  let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
     .start(&mut space, None, root)
     .expect("the operation resolves");
@@ -1619,6 +1642,7 @@ fn the_in_flight_ceiling_withholds() {
     &document,
     Limits {
       max_in_flight: NonZeroU32::MIN,
+      ..Limits::default()
     },
   );
   executor
@@ -1752,6 +1776,7 @@ fn every_admissible_ceiling_finishes_a_valid_query() {
   for ceiling in [1u32, 2, 3, 256] {
     let limits = Limits {
       max_in_flight: NonZeroU32::new(ceiling).expect("the ceilings under test are not zero"),
+      ..Limits::default()
     };
     let mut space = Space::default();
     let mut executor = Executor::with_limits(&schema, &document, limits);
@@ -2493,5 +2518,184 @@ fn get_operation_refuses_what_it_cannot_run() {
       None
     ),
     StartError::NoOperation
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// `Limits::max_response_slots`: the executor's own ceiling on how much response it will build
+// ------------------------------------------------------------------------------------------
+//
+// Draft §6.4.3's list clause is completed *synchronously* inside `handle_resolved`, so
+// `max_in_flight` — which is only ever consulted by `poll_resolve` — bounds none of it. Every case
+// below is about the other ceiling, and each one is written to fail on a fixture small enough to
+// keep: the plants claim a length rather than materialising one, and the budgets are single
+// digits, so nothing here has to approach exhaustion to prove that exhaustion is refused.
+
+/// A budget low enough that the assertions read as arithmetic rather than as guesswork.
+fn budget(slots: u32) -> Limits {
+  Limits {
+    max_response_slots: NonZeroU32::new(slots).expect("the budgets under test are not zero"),
+    ..Limits::default()
+  }
+}
+
+fn run_bounded(
+  sdl: &str,
+  query: &str,
+  root: J,
+  limits: Limits,
+) -> (String, Vec<(Kind, String, String)>) {
+  execute_bounded(sdl, query, root, Vec::new(), limits, |response| {
+    let errors = response
+      .errors()
+      .map(|error| (error.kind(), error.to_string(), error.path().to_string()))
+      .collect();
+    (render(&response.data()), errors)
+  })
+}
+
+const BUDGET_SDL: &str = r#"
+type Query {
+  nullable: [String]
+  items: [String!]!
+  a: String
+  b: String
+  c: String
+}
+"#;
+
+/// A list longer than the budget is a field error at the list, not an allocation.
+#[test]
+fn a_list_past_the_budget_is_a_field_error() {
+  // Three positions: the root, `nullable`, and one element. The fourth element the driver claims
+  // is the one that cannot be represented.
+  let (data, errors) = run_bounded(
+    BUDGET_SDL,
+    "{ nullable }",
+    obj(vec![("nullable", J::Phantom(1000))]),
+    budget(3),
+  );
+
+  assert_eq!(errors.len(), 1, "one error, at the position that ran out");
+  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(
+    errors[0].1,
+    "Cannot complete field Query.nullable: the response would exceed the executor's limit of 3 \
+     positions."
+  );
+  assert_eq!(errors[0].2, "nullable", "the path names where it stopped");
+  // `[String]` is nullable, so §6.4.4 stops at the list itself rather than nulling `data`.
+  assert_eq!(data, r#"{"nullable":null}"#);
+}
+
+/// The same refusal propagates like any other field error when the position is non-null.
+#[test]
+fn a_list_past_the_budget_propagates_through_non_null() {
+  let (data, errors) = run_bounded(
+    BUDGET_SDL,
+    "{ items }",
+    obj(vec![("items", J::Phantom(1000))]),
+    budget(3),
+  );
+
+  assert_eq!(errors.len(), 1);
+  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(
+    data, "null",
+    "`[String!]!` cannot hold the null, so draft §6.4.4 takes `data` with it"
+  );
+}
+
+/// A length no `u32` can hold is refused by the budget, not truncated into a wrong path.
+///
+/// Before the budget existed this loop ran `usize::MAX` times, so there is no version of this case
+/// that fails by assertion against the old code — it fails by not terminating, which is the
+/// finding. The budget turns it into a single comparison.
+#[test]
+fn a_length_past_u32_is_refused_rather_than_narrowed() {
+  let absurd = u32::MAX as usize + 1;
+  let (data, errors) = run_bounded(
+    BUDGET_SDL,
+    "{ nullable }",
+    obj(vec![("nullable", J::Phantom(absurd))]),
+    budget(2),
+  );
+
+  assert_eq!(errors.len(), 1);
+  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(data, r#"{"nullable":null}"#);
+}
+
+/// The ceiling is on the response, so nesting cannot multiply its way past it.
+///
+/// This is the case a *per-list* cap would miss. Schema wrappers are bounded at 15, so a cap of
+/// `C` per list still admits `C¹⁵` positions; counting positions instead makes the depth
+/// irrelevant.
+#[test]
+fn nesting_cannot_multiply_past_the_budget() {
+  let sdl = "type Query { matrix: [[String]] }";
+  let rows = J::List(vec![
+    J::Phantom(50),
+    J::Phantom(50),
+    J::Phantom(50),
+    J::Phantom(50),
+  ]);
+  let (_, errors) = run_bounded(sdl, "{ matrix }", obj(vec![("matrix", rows)]), budget(16));
+
+  assert!(
+    errors
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "4 x 50 positions cannot fit in 16, whatever any single list's length is"
+  );
+}
+
+/// The ceiling covers the object fan-out too, not only the list clause.
+///
+/// `push_child` is the one function that creates a position and both callers go through it, so a
+/// selection set that cannot fit is refused by the same check for the same reason. Without this
+/// the bound would be a guard on one loop rather than a property of the tree.
+#[test]
+fn an_object_wider_than_the_budget_is_refused() {
+  // The root plus two of the three fields fit; the third does not.
+  let (_, errors) = run_bounded(
+    BUDGET_SDL,
+    "{ a b c }",
+    obj(vec![
+      ("a", J::Str("A".to_owned())),
+      ("b", J::Str("B".to_owned())),
+      ("c", J::Str("C".to_owned())),
+    ]),
+    budget(3),
+  );
+
+  assert!(
+    errors
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "the object could not be assembled within the ceiling"
+  );
+}
+
+/// A response that fits is untouched, so the ceiling is a bound and not a behaviour change.
+#[test]
+fn a_response_inside_the_budget_is_unchanged() {
+  let bounded = run_bounded(
+    BUDGET_SDL,
+    "{ nullable }",
+    obj(vec![("nullable", J::Phantom(3))]),
+    budget(8),
+  );
+  let default = run(
+    BUDGET_SDL,
+    "{ nullable }",
+    obj(vec![("nullable", J::Phantom(3))]),
+  );
+
+  assert_eq!(bounded.1.len(), 0, "nothing is refused inside the ceiling");
+  assert_eq!(bounded.0, r#"{"nullable":["x","x","x"]}"#);
+  assert_eq!(
+    bounded, default,
+    "the budget changes nothing it does not refuse"
   );
 }

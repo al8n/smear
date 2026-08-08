@@ -11,10 +11,18 @@
 //! anyway and there is no queue to grow.
 //!
 //! That is what "no unbounded queue anywhere in `proto`" means here, and it is worth stating what
-//! it does *not* mean. The tree itself grows with the response — a service that returns a million
-//! list elements gets a million slots — because that is the answer, not a buffer between a
-//! producer and a consumer. What `proto` refuses to do is accumulate work the driver has not asked
-//! for: `poll_resolve` withholds at the in-flight ceiling rather than reading ahead.
+//! it does *not* mean. The tree itself grows with the response — a service that returns a hundred
+//! thousand list elements gets a hundred thousand slots — because that is the answer, not a buffer
+//! between a producer and a consumer. What `proto` refuses to do is accumulate work the driver has
+//! not asked for: `poll_resolve` withholds at the in-flight ceiling rather than reading ahead.
+//!
+//! Growing *with the response* is not the same as growing *without bound*, and the difference is a
+//! ceiling rather than an argument.
+//! [`Limits::max_response_slots`](super::Limits::max_response_slots) caps how many positions this
+//! tree may hold and is checked before each one is created, because the length of a list is
+//! [`Values::list_len`](super::Values::list_len)'s answer and draft §6.4.3 completes the elements
+//! synchronously — so without it a single `handle_resolved` would allocate for as long as the
+//! driver claimed, with no poll in between at which a caller could push back.
 //!
 //! # Shape is `proto`'s, leaves are the driver's
 //!

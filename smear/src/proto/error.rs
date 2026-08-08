@@ -88,6 +88,13 @@ pub(super) enum Raw {
   },
   /// Draft §6.3 steps 3.a and 3.b: a `@skip`/`@include` condition that is not a readable boolean.
   DirectiveCondition { fault: ConditionFault },
+  /// Not a specification failure: completing this position would have taken the response past
+  /// [`Limits::max_response_slots`](super::Limits::max_response_slots).
+  ResponseBudget {
+    parent: TypeId,
+    field: Sym,
+    limit: u32,
+  },
 }
 
 /// Which way a `@skip`/`@include` condition failed to be a boolean.
@@ -158,6 +165,18 @@ pub enum Kind {
   /// this one is raised at the enclosing object and nulls that. At the root selection set there is
   /// no enclosing field at all and the error's path is empty.
   DirectiveCondition,
+  /// The response reached [`Limits::max_response_slots`](super::Limits::max_response_slots)
+  /// (not a draft §6 failure).
+  ///
+  /// The only kind here that is the *executor's* refusal rather than a fault in the document or in
+  /// the driver's answer, and the only one whose path names where execution stopped rather than
+  /// what went wrong. A driver matching on it is being told to ask for less or to raise the
+  /// ceiling, not that the position it names is bad.
+  ///
+  /// It is a field error and not a refusal of the whole request because draft §7.1.2 reserves the
+  /// request-error shape — a response with no `data` key — for a failure raised before execution
+  /// begins. By the time a list is being completed, resolvers have already answered.
+  ResponseBudget,
 }
 
 impl Raw {
@@ -174,6 +193,7 @@ impl Raw {
       Self::ArgumentNull { .. } => Kind::ArgumentNull,
       Self::ArgumentVariableMissing { .. } => Kind::ArgumentVariableMissing,
       Self::DirectiveCondition { .. } => Kind::DirectiveCondition,
+      Self::ResponseBudget { .. } => Kind::ResponseBudget,
     }
   }
 }
@@ -372,6 +392,22 @@ impl<V> fmt::Display for Error<'_, V> {
           f.write_str("Argument \"if\" of type \"Boolean!\" must be a Boolean.")
         }
       },
+      // No reference wording to follow: `graphql-js` has no such limit, so this message is this
+      // crate's own. It names the ceiling because that is the one thing a reader can act on — the
+      // number is static configuration rather than anything about the request, so saying it
+      // discloses nothing the operator did not choose to impose.
+      Raw::ResponseBudget {
+        parent,
+        field,
+        limit,
+      } => {
+        f.write_str("Cannot complete field ")?;
+        owner(f, parent, field)?;
+        write!(
+          f,
+          ": the response would exceed the executor's limit of {limit} positions."
+        )
+      }
     }
   }
 }

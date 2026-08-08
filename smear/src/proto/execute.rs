@@ -50,14 +50,36 @@ use super::{
 #[cfg(test)]
 mod tests;
 
-/// What the executor will not do, whatever the document asks.
+/// What the executor will not do, whatever the document or the driver asks.
 ///
-/// One knob, because one is what draft §6 needs. Selection depth is bounded by the document, which
-/// the validator has already accepted with acyclic fragments (draft 5.5.2.2), and list nesting is
-/// bounded at [`MAX_WRAPPERS`](crate::validator::schema::MAX_WRAPPERS) by the schema — so neither
-/// needs a limit here, and a limit that can never fire is not a limit.
+/// Two knobs, and they bound two different things: how much work is *outstanding*
+/// ([`max_in_flight`](Limits::max_in_flight)) and how much response has been *built*
+/// ([`max_response_slots`](Limits::max_response_slots)). Selection depth needs neither — it is
+/// bounded by the document, which the validator has already accepted with acyclic fragments
+/// (draft 5.5.2.2) — and list *nesting* is bounded at
+/// [`MAX_WRAPPERS`](crate::validator::schema::MAX_WRAPPERS) by the schema, so a limit on either
+/// could never fire and a limit that cannot fire is not a limit.
 ///
-/// # Why the ceiling is a [`NonZeroU32`]
+/// # Why the second knob is not the first one spelled differently
+///
+/// `max_in_flight` bounds what the driver has been *asked*, and it is checked in `poll_resolve`.
+/// Nothing about it bounds what one `handle_resolved` *builds*: draft §6.4.3's list clause is
+/// completed synchronously, so a single answer carrying a list of a million elements creates a
+/// million positions before the call returns and before the driver is offered another chance to
+/// stop. The length comes from [`Values::list_len`](super::Values::list_len) — the driver's answer
+/// about the driver's own value — so it is neither the document's size nor anything the schema
+/// bounds.
+///
+/// A *per-list* cap would not close it. List nesting is bounded at `MAX_WRAPPERS`, which is 15, so
+/// a cap of `C` on each list still admits `C¹⁵` positions from one answer; at `C = 4` that is
+/// already 10⁹. What has to be bounded is the total, which is why the knob counts **positions in
+/// the response tree** rather than elements in a list.
+///
+/// It is enforced inside the one function that creates a position, so a phase that adds a new way
+/// to create one inherits the bound rather than having to remember it — the design's standing rule
+/// that a wrong answer should be unrepresentable rather than guarded at each call.
+///
+/// # Why both ceilings are a [`NonZeroU32`]
 ///
 /// A ceiling of zero is not a strict limit, it is a stopped machine: `poll_resolve` withholds
 /// because the ceiling is reached, `poll_response` withholds because the ready chain is not empty,
@@ -68,9 +90,16 @@ mod tests;
 /// program runs, costs no branch, and keeps [`Executor::with_limits`] infallible:
 ///
 /// ```compile_fail,E0308
+/// use core::num::NonZeroU32;
+///
 /// use smear::proto::Limits;
 ///
-/// let stopped = Limits { max_in_flight: 0 };
+/// const EIGHT: NonZeroU32 = NonZeroU32::new(8).expect("eight is not zero");
+///
+/// let stopped = Limits {
+///   max_in_flight: 0,
+///   max_response_slots: EIGHT,
+/// };
 /// ```
 ///
 /// ```
@@ -82,6 +111,7 @@ mod tests;
 ///
 /// let pool_of_eight = Limits {
 ///   max_in_flight: EIGHT,
+///   ..Limits::default()
 /// };
 /// assert_eq!(pool_of_eight.max_in_flight.get(), 8);
 /// ```
@@ -98,17 +128,50 @@ pub struct Limits {
   /// nobody wants. That is a stall the driver can always clear — the channel is returning `Some`
   /// — which is what separates it from a ceiling of zero, and why the ceiling cannot be zero.
   pub max_in_flight: NonZeroU32,
+
+  /// How many positions the response tree may hold, counting the root.
+  ///
+  /// A position is one node of the response: the root, a field of an object, or an element of a
+  /// list. Reaching the ceiling is a draft §7.1.2 **field error** at the position that could not be
+  /// completed ([`Kind::ResponseBudget`](super::Kind::ResponseBudget)), so draft §6.4.4 nulls that
+  /// position and propagates from it exactly as it does for any other field error.
+  ///
+  /// A field error is the only shape available, and it is also the right one. The alternative —
+  /// abandoning the whole execution — is a *request* error, and draft §7.1.2 reserves that for a
+  /// failure raised **before** execution begins, which is why [`StartError`] is this module's only
+  /// non-field refusal. Once a resolver has answered, a response with no `data` key would be
+  /// telling the client the request never ran.
+  ///
+  /// What the error honestly says is *where execution could not continue*, not *what made the
+  /// response large*: the position that happens to cross the line is blamed, and a driver reading
+  /// the path should treat it as the point of exhaustion rather than the cause.
+  ///
+  /// It also makes two narrowings safe by arithmetic rather than by argument. A slot index and a
+  /// list index are both `u32`, and `u32::MAX` is the tree's "no such slot" sentinel; because a
+  /// position is only created while the count is strictly below this ceiling, the largest index
+  /// reachable is `max_response_slots - 1`, which is never the sentinel and never truncates.
+  pub max_response_slots: NonZeroU32,
 }
 
 /// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
 /// document cannot make the executor hand out unbounded work.
 const DEFAULT_IN_FLIGHT: NonZeroU32 = NonZeroU32::new(256).expect("256 is not zero");
 
+/// Larger than any response a schema designer meant to return, small enough to be a bound.
+///
+/// A million positions is far past a page of results and past most bulk exports; a response that
+/// genuinely needs more is a service that should say so by raising this. It is a ceiling on a
+/// pathological answer, not a tuning knob — which is why it is generous. A driver whose value type
+/// is large, or that runs where memory is tight, should lower it: the cost of a position is one
+/// slot plus one metadata row, and a slot holds the driver's own `V` inline.
+const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20 is not zero");
+
 impl Default for Limits {
   #[inline]
   fn default() -> Self {
     Self {
       max_in_flight: DEFAULT_IN_FLIGHT,
+      max_response_slots: DEFAULT_RESPONSE_SLOTS,
     }
   }
 }
@@ -600,7 +663,28 @@ where
       };
       self.slots[slot as usize].state = State::List;
       for index in 0..len {
-        let child = self.push_child(slot, Key::Index(index as u32), item, State::Ready);
+        // `len` is the driver's answer about the driver's own value, so it is bounded by nothing
+        // the schema or the document says. The budget is asked *before* the element is fetched, so
+        // an over-long list costs neither the allocation nor the `list_item` call for the part of
+        // it that cannot be represented. The narrowing rides on the same question: an index the
+        // budget admits is below a `u32` ceiling and cannot truncate, and one it does not admit
+        // never reaches `Key::Index`.
+        let Some(child) = u32::try_from(index)
+          .ok()
+          .and_then(|at| self.push_child(slot, Key::Index(at), item, State::Ready))
+        else {
+          let (parent, field) = self.owner(slot);
+          let limit = self.limits.max_response_slots.get();
+          self.fail(
+            slot,
+            Raw::ResponseBudget {
+              parent,
+              field,
+              limit,
+            },
+          );
+          return;
+        };
         let element = ctx.list_item(&value, index);
         self.complete(ctx, child, item, element);
         // An element of a `[T!]` that completed to null nulls the whole list, and there is no
@@ -757,6 +841,7 @@ where
       return;
     }
 
+    let mut exhausted = false;
     for group in &groups {
       let selections = &fields[group.start as usize..(group.start + group.len) as usize];
       let first = selections[0].1;
@@ -795,7 +880,12 @@ where
         Some(name) => State::TypeName(name),
         None => State::Ready,
       };
-      let child = self.push_child(slot, Key::Field(group.key), definition.ty(), state);
+      let Some(child) = self.push_child(slot, Key::Field(group.key), definition.ty(), state) else {
+        // The scratch vectors have to go home before the failure is recorded, because recording it
+        // borrows the whole executor — the same reason the collection failure above restores first.
+        exhausted = true;
+        break;
+      };
       self.meta[child as usize] = Meta {
         field: Some(first),
         merged: (start, group.len),
@@ -813,6 +903,23 @@ where
     self.scratch_fields = fields;
     self.scratch_groups = groups;
     self.scratch_visited = visited;
+
+    // Recorded after the scratch is home, and at the object rather than at the field that could
+    // not be created: the field has no slot, so there is no position to hang a path on, and the
+    // object is the position that could not be assembled. That is the same choice an unreadable
+    // `@skip` condition makes two doc comments up, for the same reason.
+    if exhausted {
+      let (parent, field) = self.owner(slot);
+      let limit = self.limits.max_response_slots.get();
+      self.fail(
+        slot,
+        Raw::ResponseBudget {
+          parent,
+          field,
+          limit,
+        },
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------------------
@@ -1222,7 +1329,30 @@ where
     }
   }
 
-  fn push_child(&mut self, parent: u32, key: Key, ty: PackedType, state: State<V::Value>) -> u32 {
+  /// Creates one position under `parent`, or `None` when
+  /// [`Limits::max_response_slots`] has no room for it.
+  ///
+  /// This is the *only* function that creates a position, and the ceiling is checked here rather
+  /// than at either caller on purpose. Draft §6.4.3's list clause completes synchronously, so the
+  /// caller that most needs bounding is a loop whose trip count is the driver's own
+  /// [`Values::list_len`](super::Values::list_len); a guard written into that loop would bound
+  /// that loop, and the next phase to grow a position — draft §6.3's mutation path, §6.2.3's
+  /// per-event collection — would have to remember to write it again. Returning `None` from here
+  /// makes forgetting impossible: a caller has to answer the empty case to get an index at all.
+  ///
+  /// The `as u32` below is exact for the same reason. `self.slots.len()` is strictly less than the
+  /// ceiling whenever this returns `Some`, and the ceiling is a `u32`, so the new index is at most
+  /// `max_response_slots - 1` — never [`NONE`], which is `u32::MAX` and means "no such slot".
+  fn push_child(
+    &mut self,
+    parent: u32,
+    key: Key,
+    ty: PackedType,
+    state: State<V::Value>,
+  ) -> Option<u32> {
+    if self.slots.len() as u64 >= u64::from(self.limits.max_response_slots.get()) {
+      return None;
+    }
     let index = self.slots.len() as u32;
     self.slots.push(Slot::new(parent, key, ty, state));
     // A list element inherits the field's metadata wholesale, which is what makes an error at
@@ -1243,7 +1373,7 @@ where
       self.slots[last as usize].next_sibling = index;
     }
     self.slots[parent as usize].last_child = index;
-    index
+    Some(index)
   }
 
   fn enqueue(&mut self, slot: u32) {
