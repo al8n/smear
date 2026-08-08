@@ -10,8 +10,9 @@
 //! IDE path does not have to parse the same bytes twice.
 //!
 //! This module owns everything about that door which is independent of a grammar: the error
-//! type, the span arithmetic, and the slice check. Everything that names a node kind, a
-//! wrapper or an AST target lives in a dialect's own `lossless::project`.
+//! type, the span arithmetic, and the two whole-tree checks a door makes before it walks.
+//! Everything that names a node kind, a wrapper or an AST target lives in a dialect's own
+//! `lossless::project`.
 //!
 //! # The span rule, in one sentence
 //!
@@ -25,12 +26,40 @@
 //! extent of everything committed *inside* it, trivia included: for `"type T  { f : Int }"`
 //! the tree's `FieldDefinition` runs `12..20` — it holds the space after `Int` — where the
 //! AST's is `12..19`. The document node is worse: its range covers the file's leading and
-//! trailing trivia, which no AST span ever does. [`node_extent`] is the correction, and it is
-//! the only span door a projection should use.
+//! trailing trivia, which no AST span ever does.
+//!
+//! # How a projection is expected to compute it, and why it matters
+//!
+//! [`node_extent`] answers the rule for one node by descending its whole subtree. That is the
+//! right shape for a node a projection reads *once* — an unread child whose bytes still belong
+//! to the parent's span — and the **wrong** shape for the projection's own recursion: a walk
+//! that calls it at every level re-visits every token once per ancestor, and rowan boxes each
+//! node and token it materialises, so the cost is a heap allocation per visit per level. Smear
+//! #120 measured that at 2,447 allocations and 96 ns per source byte for a document the
+//! syntactic parser builds in 18.
+//!
+//! A projection therefore **folds bottom-up**: each node function walks its own
+//! `children_with_tokens()` once, covers its non-trivia tokens' ranges, and covers the extents
+//! its children hand back — so every element is visited by exactly one parent and
+//! [`node_extent`] is left for the unread-child case it is right for.
+//!
+//! # The `(tree, source)` pair, checked once at the door
+//!
+//! The AST borrows `&'src str` from a buffer the *caller* supplies, because rowan's cursors
+//! cannot lend a `&str` that outlives them. [`Parse`](super::runner::Parse) is deliberately
+//! lifetime-free so a consumer can cache one per file, so nothing in the type system ties a
+//! parse to the bytes it was parsed from and the realistic misuse — an editor validating a
+//! stale buffer against a cached parse — is uncheckable except by comparing.
+//!
+//! [`verify_source`] is that comparison, made **once per door** against the green tree: a
+//! preorder walk with an offset accumulator, no cursor materialised, effectively a chunked
+//! `memcmp` over the whole file. Per-token access after it is plain slicing.
 
 use core::{fmt, ops::Range};
 
-use rowan::{Language, SyntaxElement, SyntaxNode, SyntaxToken, TextRange};
+use rowan::{
+  GreenNodeData, Language, NodeOrToken, SyntaxElement, SyntaxNode, SyntaxToken, TextRange,
+};
 use tokora::SimpleSpan;
 
 /// Why a projection refused.
@@ -74,9 +103,9 @@ pub enum ProjectErrorKind<K> {
   },
   /// `source` is not the text this tree was parsed from.
   ///
-  /// Every slice the projection takes is compared against the token's own text before it is
-  /// handed to a constructor, so a mismatched pair is refused rather than silently projected
-  /// into a wrong AST.
+  /// Every byte the tree holds is compared against `source` at the door, before any walk, so a
+  /// mismatched pair is refused rather than silently projected into a wrong AST. The span names
+  /// the first bytes that diverge.
   SourceMismatch,
   /// A grammar rule the tree records only as a diagnostic.
   ///
@@ -233,6 +262,11 @@ pub fn to_range(range: TextRange) -> Range<usize> {
 /// requires to have content is itself a finding and is why this returns an `Option` rather
 /// than falling back on [`SyntaxNode::text_range`].
 ///
+/// **This descends the whole subtree**, so it is for a node the caller reads once and does not
+/// project — a child the AST has no place for whose bytes still belong to the parent's span. A
+/// projection that calls it at every level pays the subtree again per ancestor; see this
+/// module's header for the fold that does not.
+///
 /// See this module's header for why the node's own range is the wrong answer.
 #[inline]
 pub fn node_extent<L: Language>(
@@ -280,11 +314,11 @@ where
 
 /// The source text under `token`, checked against the token's own text.
 ///
-/// The `(tree, source)` pair is a **caller** obligation — rowan's cursors cannot lend `&str`s
-/// that outlive them, so the AST's slices must come from the caller's buffer — and this is
-/// where that obligation is verified rather than trusted. The cost is a `memcmp` over bytes
-/// the projection was going to copy a pointer to anyway; the alternative is a silently wrong
-/// AST whose spans point into unrelated text.
+/// The one-token form of [`verify_source`], for a caller that holds a token and no tree. It is
+/// **not** what a projection door should use: checking per token leaves punctuation and trivia
+/// bytes — everything whose text no constructor reads — unexamined, so a same-length divergence
+/// in an unchecked position passes it, and one whole-tree comparison costs less than one of
+/// these per token over the same bytes.
 pub fn verify_slice<'src, L: Language>(
   source: &'src str,
   token: &SyntaxToken<L>,
@@ -294,4 +328,114 @@ pub fn verify_slice<'src, L: Language>(
     .get(usize::from(range.start())..usize::from(range.end()))
     .filter(|slice| *slice == token.text())
     .ok_or_else(|| ProjectError::new(ProjectErrorKind::SourceMismatch, to_range(range)))
+}
+
+/// Verify that `source` is the whole text `green` was parsed from, byte for byte.
+///
+/// The door check. It covers **every** byte the tree holds — punctuation, trivia and the leading
+/// and trailing bytes no node's extent reaches — where a per-token comparison only ever sees the
+/// tokens some constructor reads, and it is cheaper than that comparison because it walks the
+/// green tree: no cursor is materialised, so nothing is allocated.
+///
+/// A door that has run this may slice `source` by any token range in the tree directly: the
+/// ranges are in bounds and land on character boundaries by construction.
+///
+/// The refusal names the first bytes that diverge — the divergent token's range, or the length
+/// the two disagree about when one runs out first.
+pub fn verify_source<K>(green: &GreenNodeData, source: &str) -> Result<(), ProjectError<K>> {
+  let len = usize::from(green.text_len());
+  if len != source.len() {
+    return Err(ProjectError::new(
+      ProjectErrorKind::SourceMismatch,
+      len.min(source.len())..len.max(source.len()),
+    ));
+  }
+  verify_source_at(green, source, 0)
+}
+
+/// [`verify_source`] for a subtree: `green`'s text must be `source[base..]`'s leading bytes.
+///
+/// The compositional door's form — a caller projecting one node of a larger parse holds the whole
+/// file, so the node's text is checked where the node sits rather than against the whole buffer,
+/// and bytes outside it are neither read nor claimed.
+pub fn verify_source_at<K>(
+  green: &GreenNodeData,
+  source: &str,
+  base: usize,
+) -> Result<(), ProjectError<K>> {
+  // Recursive rather than an explicit stack, which would need a `Vec` this walk otherwise has no
+  // reason to allocate. The depth is the tree's, and the tree's is the lexer's bracket budget
+  // (tokora's `RecursionLimiter`, 500) plus a grammar constant — a few tens of KiB of frames.
+  fn walk(green: &GreenNodeData, source: &[u8], offset: &mut usize) -> Result<(), Range<usize>> {
+    for child in green.children() {
+      match child {
+        NodeOrToken::Node(node) => walk(node, source, offset)?,
+        NodeOrToken::Token(token) => {
+          let text = token.text().as_bytes();
+          let end = *offset + text.len();
+          if source.get(*offset..end) != Some(text) {
+            return Err(*offset..end);
+          }
+          *offset = end;
+        }
+      }
+    }
+    Ok(())
+  }
+
+  let mut offset = base;
+  walk(green, source.as_bytes(), &mut offset)
+    .map_err(|at| ProjectError::new(ProjectErrorKind::SourceMismatch, at))
+}
+
+/// Refuse a subtree that carries a node the AST has no image for, in preorder.
+///
+/// The recovery-hole scan. `is_hole` names the kinds — a dialect's error and gap tiles — and the
+/// refusal reports the first one document order reaches, its parent's kind, and its byte range,
+/// which is what [`ProjectErrorKind::UnexpectedChild`] wants.
+///
+/// Green rather than cursor, for [`verify_source`]'s reason: the same preorder over
+/// [`SyntaxNode::descendants`] boxes every node it yields, and this scan reads nothing but kinds
+/// and lengths. `base` is where the subtree starts in the source, so the range it reports is in
+/// the same coordinates every other span is.
+pub fn reject_holes<L: Language>(
+  green: &GreenNodeData,
+  base: usize,
+  is_hole: impl Fn(L::Kind) -> bool + Copy,
+) -> Result<(), ProjectError<L::Kind>> {
+  fn walk<L: Language>(
+    green: &GreenNodeData,
+    parent: L::Kind,
+    start: usize,
+    is_hole: impl Fn(L::Kind) -> bool + Copy,
+  ) -> Option<ProjectError<L::Kind>> {
+    let kind = L::kind_from_raw(green.kind());
+    if is_hole(kind) {
+      return Some(ProjectError::new(
+        ProjectErrorKind::UnexpectedChild {
+          parent,
+          found: kind,
+        },
+        start..start + usize::from(green.text_len()),
+      ));
+    }
+    let mut offset = start;
+    for child in green.children() {
+      match child {
+        NodeOrToken::Node(node) => {
+          if let Some(refusal) = walk::<L>(node, kind, offset, is_hole) {
+            return Some(refusal);
+          }
+          offset += usize::from(node.text_len());
+        }
+        NodeOrToken::Token(token) => offset += usize::from(token.text_len()),
+      }
+    }
+    None
+  }
+
+  match walk::<L>(green, L::kind_from_raw(green.kind()), base, is_hole) {
+    Some(refusal) => Err(refusal),
+    None => Ok(()),
+  }
 }
