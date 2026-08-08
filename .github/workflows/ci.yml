@@ -212,6 +212,51 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: bash ci/check_workflow_triggers.sh
 
+  # Check that no public entry has narrowed the source type to a concrete one
+  #
+  # The crate ships `bstr`, `bytes`, `hipstr`, `smallvec` and `smol-bytes` integrations so that a
+  # consumer picks its own source representation, and §3, syntactic §5 and §6/§7 all honour that
+  # with `S: AsRef<[u8]>`. Nothing failed when three public entries did not: they compile, they
+  # pass every test, they read naturally, and the narrowing is discovered by a consumer at a call
+  # site. That is #122, and the timing is the point — the §6/§7 line has seven phases still to
+  # come and every one of them adds public entries, so a gate that exists BEFORE them turns each
+  # future narrowing into an error at the moment it is written rather than into an audit later.
+  #
+  # TWO STEPS, BOTH NAMED, AND THE SELFTEST FIRST. `ci/miri_scope.py` is the local model: it runs
+  # its own selftest before the expensive work, because a guard that cannot fail is the defect the
+  # guard exists to catch. The census's selftest runs its verdict against synthetic crates and
+  # requires every branch to fire; if it cannot, this job is red before it has read `smear` at all.
+  #
+  # `-p source-census` NAMES THE PACKAGE. A cargo target *filter* that matches nothing warns and
+  # exits 0, which is exactly how a gate here becomes vacuous — measured on 1.97.1, `-p` on a
+  # package that does not exist is `error: package ID specification did not match any packages`,
+  # exit 101. The census additionally refuses to pass on a run that read zero public entries, and
+  # its exemption table fails on any entry that matches nothing, so a reader that stops finding
+  # the crate's surface reddens rather than reporting a clean one.
+  #
+  # In no `needs:` chain, and about twenty seconds once `syn` is cached, so it blocks nothing.
+  source-genericity:
+    name: source-genericity
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-source-census-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-source-census-
+    - name: source-census --selftest
+      run: cargo run -p source-census -- --selftest
+    - name: source-census
+      run: cargo run -p source-census -- --verbose
+
   # Check formatting
   rustfmt:
     name: rustfmt
@@ -278,12 +323,13 @@ jobs:
   # Fifteen targets, one question: does the crate a consumer installs build for them. That is
   # `smear` and only `smear` — it is the sole publishable member, which is a property of the
   # manifests rather than an opinion, and the step below re-reads it out of `cargo metadata` so
-  # the list cannot go stale in silence. The other four are `publish = false`: two criterion
-  # harnesses — one of which also carries the `apollo-compiler` differential oracle — and two
-  # tripwires, none of which any target here will ever run.
+  # the list cannot go stale in silence. The other five are `publish = false`: two criterion
+  # harnesses — one of which also carries the `apollo-compiler` differential oracle — two
+  # tripwires, and the `source-genericity` gate's `syn` reader, none of which any target here
+  # will ever run.
   #
   # This job said `cargo build --target ...` with no package selection until it was fixed, so it
-  # built all five, and one of them cannot be built for a 32-bit target at all:
+  # built every member, and one of them cannot be built for a 32-bit target at all:
   # `smear-apollo-bench` pins `apollo-compiler =1.32.0`, whose lib carries
   # `assert!(size_of::<Name>() == 24)`. At 32 bits that is false, it is a const assertion so it
   # fires during compilation, and `cross (i686-linux-android)` failed on `main` with
