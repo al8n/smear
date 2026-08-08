@@ -28,37 +28,52 @@
 //! AST's is `12..19`. The document node is worse: its range covers the file's leading and
 //! trailing trivia, which no AST span ever does.
 //!
-//! # How a projection is expected to compute it, and why it matters
+//! # What a projection walks: the green tree, not a cursor
+//!
+//! [`Node`] and [`Token`] are this module's traversal unit — a `&GreenNodeData` or
+//! `&GreenTokenData` paired with where it starts in the source. Two words, [`Copy`], nothing
+//! allocated.
+//!
+//! rowan's [`SyntaxNode`](rowan::SyntaxNode) is the other candidate, and what it buys over the
+//! green tree is a parent pointer and an absolute offset. A projection needs the second and gets
+//! the first from its own call frame: the parent a refusal names is the node whose walk reached
+//! the child. It pays for both with a heap allocation per element materialised — rowan boxes
+//! every node *and* token a cursor yields — which smear #120 measured at 2,447 allocations and
+//! 96 ns per source byte for a document the syntactic parser builds in 18.
+//!
+//! What the green tree does not carry is an absolute offset, so [`Node::children`] accumulates
+//! one: a child's start is the parent's start plus the lengths of its preceding siblings. That
+//! accumulator only runs forward, which is why [`Children`] is not a [`DoubleEndedIterator`].
+//!
+//! # How a projection is expected to compute the span rule, and why it matters
 //!
 //! [`node_extent`] answers the rule for one node by descending its whole subtree. That is the
 //! right shape for a node a projection reads *once* — an unread child whose bytes still belong
 //! to the parent's span — and the **wrong** shape for the projection's own recursion: a walk
-//! that calls it at every level re-visits every token once per ancestor, and rowan boxes each
-//! node and token it materialises, so the cost is a heap allocation per visit per level. Smear
-//! #120 measured that at 2,447 allocations and 96 ns per source byte for a document the
-//! syntactic parser builds in 18.
+//! that calls it at every level re-visits every token once per ancestor.
 //!
 //! A projection therefore **folds bottom-up**: each node function walks its own
-//! `children_with_tokens()` once, covers its non-trivia tokens' ranges, and covers the extents
-//! its children hand back — so every element is visited by exactly one parent and
+//! [`children`](Node::children) once, covers its non-trivia tokens' ranges, and covers the
+//! extents its children hand back — so every element is visited by exactly one parent and
 //! [`node_extent`] is left for the unread-child case it is right for.
 //!
 //! # The `(tree, source)` pair, checked once at the door
 //!
-//! The AST borrows `&'src str` from a buffer the *caller* supplies, because rowan's cursors
-//! cannot lend a `&str` that outlives them. [`Parse`](super::runner::Parse) is deliberately
-//! lifetime-free so a consumer can cache one per file, so nothing in the type system ties a
-//! parse to the bytes it was parsed from and the realistic misuse — an editor validating a
-//! stale buffer against a cached parse — is uncheckable except by comparing.
+//! The AST borrows `&'src str` from a buffer the *caller* supplies. A green token would lend its
+//! own text, but that text belongs to the parse, and [`Parse`](super::runner::Parse) is
+//! deliberately lifetime-free so a consumer can cache one per file and drop it on the next
+//! keystroke. So nothing in the type system ties a parse to the bytes it was parsed from, and the
+//! realistic misuse — an editor validating a stale buffer against a cached parse — is uncheckable
+//! except by comparing.
 //!
-//! [`verify_source`] is that comparison, made **once per door** against the green tree: a
-//! preorder walk with an offset accumulator, no cursor materialised, effectively a chunked
-//! `memcmp` over the whole file. Per-token access after it is plain slicing.
+//! [`verify_source`] is that comparison, made **once per door**: a preorder walk with an offset
+//! accumulator, effectively a chunked `memcmp` over the whole file. Per-token access after it is
+//! plain slicing.
 
-use core::{fmt, ops::Range};
+use core::{fmt, iter::FusedIterator, marker::PhantomData, ops::Range};
 
 use rowan::{
-  GreenNodeData, Language, NodeOrToken, SyntaxElement, SyntaxNode, SyntaxToken, TextRange,
+  GreenNodeData, GreenTokenData, Language, NodeOrToken, SyntaxToken, TextRange, TextSize,
 };
 use tokora::SimpleSpan;
 
@@ -256,11 +271,238 @@ pub fn to_range(range: TextRange) -> Range<usize> {
   usize::from(range.start())..usize::from(range.end())
 }
 
+/// A node of a green tree, and where it starts in the source.
+///
+/// See this module's header for why the traversal is green rather than a cursor, and for the
+/// offset accumulation that stands in for what a cursor would have carried.
+pub struct Node<'g, L> {
+  green: &'g GreenNodeData,
+  start: TextSize,
+  // `PhantomData<fn() -> L>` rather than `PhantomData<L>`, for the reason
+  // [`Parse`](super::runner::Parse) has: the covariant function-pointer form imposes no
+  // `L`-shaped auto-trait or drop obligation on a view that never holds an `L`.
+  language: PhantomData<fn() -> L>,
+}
+
+impl<L> Clone for Node<'_, L> {
+  #[inline]
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
+impl<L> Copy for Node<'_, L> {}
+
+impl<L: Language> fmt::Debug for Node<'_, L> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{:?}@{:?}", self.kind(), self.text_range())
+  }
+}
+
+impl<'g, L> Node<'g, L> {
+  /// Views `green` as a node starting at `start` bytes into the source.
+  #[inline]
+  pub const fn new(green: &'g GreenNodeData, start: TextSize) -> Self {
+    Self {
+      green,
+      start,
+      language: PhantomData,
+    }
+  }
+
+  /// The green node this views.
+  #[inline]
+  pub const fn green(self) -> &'g GreenNodeData {
+    self.green
+  }
+
+  /// Where this node starts in the source.
+  #[inline]
+  pub const fn start(self) -> TextSize {
+    self.start
+  }
+
+  /// The bytes this node covers, **trivia included** — see this module's header for why that is
+  /// not a span.
+  #[inline]
+  pub fn text_range(self) -> TextRange {
+    TextRange::at(self.start, self.green.text_len())
+  }
+
+  /// This node's direct children, each carrying its own absolute start.
+  #[inline]
+  pub fn children(self) -> Children<'g, L> {
+    Children {
+      raw: self.green.children(),
+      offset: self.start,
+      language: PhantomData,
+    }
+  }
+}
+
+impl<'g, L: Language> Node<'g, L> {
+  /// The green node under a cursor, at the offset the cursor already knows.
+  ///
+  /// The bridge from rowan's API into this one, for a caller that holds a
+  /// [`SyntaxNode`](rowan::SyntaxNode) — a typed CST wrapper, say — and wants the walk below it
+  /// to materialise nothing further.
+  #[inline]
+  pub fn of(node: &'g rowan::SyntaxNode<L>) -> Self {
+    Self::new(node.green(), node.text_range().start())
+  }
+
+  /// This node's kind, in `L`'s vocabulary.
+  #[inline]
+  pub fn kind(self) -> L::Kind {
+    L::kind_from_raw(self.green.kind())
+  }
+}
+
+/// A token of a green tree, and where it starts in the source.
+///
+/// [`Node`]'s other half; see it for why the traversal is green.
+pub struct Token<'g, L> {
+  green: &'g GreenTokenData,
+  start: TextSize,
+  language: PhantomData<fn() -> L>,
+}
+
+impl<L> Clone for Token<'_, L> {
+  #[inline]
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
+impl<L> Copy for Token<'_, L> {}
+
+impl<L: Language> fmt::Debug for Token<'_, L> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{:?}@{:?}", self.kind(), self.text_range())
+  }
+}
+
+impl<'g, L> Token<'g, L> {
+  /// Views `green` as a token starting at `start` bytes into the source.
+  #[inline]
+  pub const fn new(green: &'g GreenTokenData, start: TextSize) -> Self {
+    Self {
+      green,
+      start,
+      language: PhantomData,
+    }
+  }
+
+  /// The green token this views.
+  #[inline]
+  pub const fn green(self) -> &'g GreenTokenData {
+    self.green
+  }
+
+  /// Where this token starts in the source.
+  #[inline]
+  pub const fn start(self) -> TextSize {
+    self.start
+  }
+
+  /// The token's own text, as the tree recorded it.
+  ///
+  /// A door that has run [`verify_source`] holds the same bytes in `source`, and everything the
+  /// AST keeps is sliced from **there** so it borrows the caller's buffer rather than the parse.
+  /// This is for a read that does not escape the walk — classifying a contextual keyword against
+  /// the lexer's own table is the one the GraphQL projection makes.
+  #[inline]
+  pub fn text(self) -> &'g str {
+    self.green.text()
+  }
+
+  /// The bytes this token covers.
+  #[inline]
+  pub fn text_range(self) -> TextRange {
+    TextRange::at(self.start, self.green.text_len())
+  }
+}
+
+impl<L: Language> Token<'_, L> {
+  /// This token's kind, in `L`'s vocabulary.
+  #[inline]
+  pub fn kind(self) -> L::Kind {
+    L::kind_from_raw(self.green.kind())
+  }
+}
+
+/// One child of a [`Node`]: another node, or a token.
+pub type Element<'g, L> = NodeOrToken<Node<'g, L>, Token<'g, L>>;
+
+/// [`Node::children`]'s iterator.
+///
+/// **Forward only.** Each item's start is the running sum of its preceding siblings' lengths, so
+/// there is no [`DoubleEndedIterator`] to be had without a second accumulator running the other
+/// way — and a reversed walk is not something the span fold or the hole scan wants.
+pub struct Children<'g, L> {
+  raw: rowan::Children<'g>,
+  offset: TextSize,
+  language: PhantomData<fn() -> L>,
+}
+
+impl<L> Clone for Children<'_, L> {
+  #[inline]
+  fn clone(&self) -> Self {
+    Self {
+      raw: self.raw.clone(),
+      offset: self.offset,
+      language: PhantomData,
+    }
+  }
+}
+
+impl<L: Language> fmt::Debug for Children<'_, L> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("Children")
+      .field("remaining", &self.raw.len())
+      .field("offset", &self.offset)
+      .finish()
+  }
+}
+
+impl<'g, L> Iterator for Children<'g, L> {
+  type Item = Element<'g, L>;
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    let start = self.offset;
+    Some(match self.raw.next()? {
+      NodeOrToken::Node(green) => {
+        self.offset += green.text_len();
+        NodeOrToken::Node(Node::new(green, start))
+      }
+      NodeOrToken::Token(green) => {
+        self.offset += green.text_len();
+        NodeOrToken::Token(Token::new(green, start))
+      }
+    })
+  }
+
+  #[inline]
+  fn size_hint(&self) -> (usize, Option<usize>) {
+    self.raw.size_hint()
+  }
+}
+
+impl<L> ExactSizeIterator for Children<'_, L> {
+  #[inline]
+  fn len(&self) -> usize {
+    self.raw.len()
+  }
+}
+
+impl<L> FusedIterator for Children<'_, L> {}
+
 /// The token extent of `node` — its first non-trivia token's start to its last one's end.
 ///
 /// `None` when the subtree holds no non-trivia token at all, which for a node the grammar
 /// requires to have content is itself a finding and is why this returns an `Option` rather
-/// than falling back on [`SyntaxNode::text_range`].
+/// than falling back on [`Node::text_range`].
 ///
 /// **This descends the whole subtree**, so it is for a node the caller reads once and does not
 /// project — a child the AST has no place for whose bytes still belong to the parent's span. A
@@ -270,10 +512,10 @@ pub fn to_range(range: TextRange) -> Range<usize> {
 /// See this module's header for why the node's own range is the wrong answer.
 #[inline]
 pub fn node_extent<L: Language>(
-  node: &SyntaxNode<L>,
+  node: Node<'_, L>,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
 ) -> Option<TextRange> {
-  extent_of(node.children_with_tokens(), is_trivia)
+  extent_of(node.children(), is_trivia)
 }
 
 /// The token extent of a run of elements, descending into every node it contains.
@@ -281,23 +523,23 @@ pub fn node_extent<L: Language>(
 /// The general form [`node_extent`] is written in terms of. A projection that has to exclude
 /// one constituent — the description a definition node holds but the AST hoists out — folds
 /// the filtered child stream through here rather than reaching for the node's range.
-pub fn extent_of<L: Language, I>(
+pub fn extent_of<'g, L: Language, I>(
   elements: I,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
 ) -> Option<TextRange>
 where
-  I: IntoIterator<Item = SyntaxElement<L>>,
+  I: IntoIterator<Item = Element<'g, L>>,
 {
   let mut extent: Option<TextRange> = None;
   for element in elements {
     let piece = match element {
-      SyntaxElement::Token(token) => {
+      NodeOrToken::Token(token) => {
         if is_trivia(token.kind()) {
           continue;
         }
         Some(token.text_range())
       }
-      SyntaxElement::Node(node) => node_extent(&node, is_trivia),
+      NodeOrToken::Node(node) => node_extent(node, is_trivia),
     };
     if let Some(piece) = piece {
       extent = Some(match extent {
@@ -330,30 +572,30 @@ pub fn verify_slice<'src, L: Language>(
     .ok_or_else(|| ProjectError::new(ProjectErrorKind::SourceMismatch, to_range(range)))
 }
 
-/// Verify that `source` is the whole text `green` was parsed from, byte for byte.
+/// Verify that `source` is the whole text `root` was parsed from, byte for byte.
 ///
 /// The door check. It covers **every** byte the tree holds — punctuation, trivia and the leading
 /// and trailing bytes no node's extent reaches — where a per-token comparison only ever sees the
-/// tokens some constructor reads, and it is cheaper than that comparison because it walks the
-/// green tree: no cursor is materialised, so nothing is allocated.
+/// tokens some constructor reads, and it is cheaper than that comparison because it reads the
+/// green tree: nothing is materialised, so nothing is allocated.
 ///
 /// A door that has run this may slice `source` by any token range in the tree directly: the
 /// ranges are in bounds and land on character boundaries by construction.
 ///
 /// The refusal names the first bytes that diverge — the divergent token's range, or the length
 /// the two disagree about when one runs out first.
-pub fn verify_source<K>(green: &GreenNodeData, source: &str) -> Result<(), ProjectError<K>> {
-  let len = usize::from(green.text_len());
+pub fn verify_source<K>(root: &GreenNodeData, source: &str) -> Result<(), ProjectError<K>> {
+  let len = usize::from(root.text_len());
   if len != source.len() {
     return Err(ProjectError::new(
       ProjectErrorKind::SourceMismatch,
       len.min(source.len())..len.max(source.len()),
     ));
   }
-  verify_source_at(green, source, 0)
+  verify_source_at(root, source, 0)
 }
 
-/// [`verify_source`] for a subtree: `green`'s text must be `source[base..]`'s leading bytes.
+/// [`verify_source`] for a subtree: `node`'s text must be the bytes of `source` it sits over.
 ///
 /// The compositional door's form — a caller projecting one node of a larger parse holds the whole
 /// file, so the node's text is checked where the node sits rather than against the whole buffer,
@@ -394,47 +636,41 @@ pub fn verify_source_at<K>(
 /// refusal reports the first one document order reaches, its parent's kind, and its byte range,
 /// which is what [`ProjectErrorKind::UnexpectedChild`] wants.
 ///
-/// Green rather than cursor, for [`verify_source`]'s reason: the same preorder over
-/// [`SyntaxNode::descendants`] boxes every node it yields, and this scan reads nothing but kinds
-/// and lengths. `base` is where the subtree starts in the source, so the range it reports is in
-/// the same coordinates every other span is.
+/// **A separate pass, deliberately.** Folding it into the projection's own node dispatch would
+/// scan strictly less: the walk a door makes starts at the *document* node, and a hole the parser
+/// left as a sibling of that node — the shape smear #57 produces — is never a child of anything
+/// the walk descends into. A hole anywhere in the scanned subtree is a region with no AST image,
+/// and a projection that silently omitted one would be losing data under a success type.
 pub fn reject_holes<L: Language>(
-  green: &GreenNodeData,
-  base: usize,
+  node: Node<'_, L>,
   is_hole: impl Fn(L::Kind) -> bool + Copy,
 ) -> Result<(), ProjectError<L::Kind>> {
   fn walk<L: Language>(
-    green: &GreenNodeData,
+    node: Node<'_, L>,
     parent: L::Kind,
-    start: usize,
     is_hole: impl Fn(L::Kind) -> bool + Copy,
   ) -> Option<ProjectError<L::Kind>> {
-    let kind = L::kind_from_raw(green.kind());
+    let kind = node.kind();
     if is_hole(kind) {
       return Some(ProjectError::new(
         ProjectErrorKind::UnexpectedChild {
           parent,
           found: kind,
         },
-        start..start + usize::from(green.text_len()),
+        to_range(node.text_range()),
       ));
     }
-    let mut offset = start;
-    for child in green.children() {
-      match child {
-        NodeOrToken::Node(node) => {
-          if let Some(refusal) = walk::<L>(node, kind, offset, is_hole) {
-            return Some(refusal);
-          }
-          offset += usize::from(node.text_len());
-        }
-        NodeOrToken::Token(token) => offset += usize::from(token.text_len()),
+    for child in node.children() {
+      if let NodeOrToken::Node(child) = child
+        && let Some(refusal) = walk(child, kind, is_hole)
+      {
+        return Some(refusal);
       }
     }
     None
   }
 
-  match walk::<L>(green, L::kind_from_raw(green.kind()), base, is_hole) {
+  match walk(node, node.kind(), is_hole) {
     Some(refusal) => Err(refusal),
     None => Ok(()),
   }

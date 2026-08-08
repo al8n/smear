@@ -266,17 +266,42 @@ pub const EXEMPTIONS: &[Exemption] = &[
     param: "source",
     kind: Kind::Tracked,
     issue: Some(121),
-    reason: "The dialect-independent helper the projections above call, and the narrowest place \
-             the rowan constraint could bind: it compares the caller's slice against \
-             `SyntaxToken::text()`, which rowan returns as `&str`. If al8n/smear#121 concludes \
-             that the constraint is genuinely rowan's rather than the door's, this is the entry \
-             the conclusion is about, and it becomes STRUCTURAL rather than being deleted.",
+    reason: "The dialect-independent one-token form of the check the projections above make, and \
+             the narrowest place the rowan constraint could bind: it compares the caller's slice \
+             against `SyntaxToken::text()`, which rowan returns as `&str`. If al8n/smear#121 \
+             concludes that the constraint is genuinely rowan's rather than the door's, this is \
+             the entry the conclusion is about, and it becomes STRUCTURAL rather than deleted.",
+  },
+  Exemption {
+    module: "smear::parser::lossless::project",
+    entry: "verify_source",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "The whole-tree form of `verify_slice`, and the one every projection door above \
+             actually calls since al8n/smear#127 hoisted the check out of the per-token path. It \
+             compares `source` against the green tree's own token text, which rowan stores as \
+             `&str`, so it narrows for `verify_slice`'s reason at the door rather than at a \
+             token — and it reaches al8n/smear#121's conclusion by the same route.",
+  },
+  Exemption {
+    module: "smear::parser::lossless::project",
+    entry: "verify_source_at",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "`verify_source` for a subtree, which the compositional `to_ast` doors and the \
+             recovering door's per-definition check call. Recorded separately because widening \
+             one and not the other would leave half the projection's doors narrow under a table \
+             that had stopped naming them.",
   },
   // ── Not narrowings: the rule's default-convict misfiring ─────────────────────────────────────
   //
-  // Two, out of 22 narrowed parameters over 864 public entries. The count is the evidence for the
-  // rule rather than a note about it: a rule needing an exemption for every second entry would be
-  // the wrong rule, and this is the number that says whether it is.
+  // Two, out of the two dozen narrowed parameters this table records over a public surface of
+  // several hundred entries. The proportion is the evidence for the rule rather than a note about
+  // it: a rule needing an exemption for every second entry would be the wrong rule. The exact
+  // counts are deliberately not written here — the run prints both on its own summary line, and a
+  // pair copied into a comment goes stale on the next public item anyone adds, as this one had.
   Exemption {
     module: "smear::validator::schema::repr::location",
     entry: "DirectiveLocation::from_name",
