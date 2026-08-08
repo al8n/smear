@@ -67,6 +67,19 @@ pub(super) enum Raw {
   /// abstract type — including a name the schema does not know at all, and a name that is known
   /// but is not an object type.
   AbstractNotPossible { abstract_ty: TypeId, runtime: u32 },
+  /// [`AbstractNotPossible`](Raw::AbstractNotPossible) with the offending name unquotable.
+  ///
+  /// The same failure, and deliberately not a different one: the driver still named a type the
+  /// position cannot hold, and that is what the reader needs to know. What is missing is the
+  /// *spelling*, because storing it would have taken the interner past
+  /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
+  ///
+  /// It exists rather than a placeholder because there is no honest placeholder. An empty string
+  /// renders as `Runtime Object type "" is not a possible type`, and `<unknown>` renders as a type
+  /// that could plausibly be in someone's schema — both invite a reader to go looking for a type
+  /// that was never named. Saying the name could not be stored, and how, is the only version that
+  /// does not lie about what the driver said.
+  AbstractNotPossibleUnnamed { abstract_ty: TypeId, limit: u32 },
   /// Draft §6.4.1 step 5.b: a required argument was not provided.
   ArgumentMissing {
     field: Sym,
@@ -84,7 +97,13 @@ pub(super) enum Raw {
     field: Sym,
     argument: Sym,
     ty: PackedType,
-    variable: u32,
+    /// The variable's spelling, or `None` when the interner had no room for it.
+    ///
+    /// The finding does not depend on the spelling: the request did not supply the variable, and
+    /// that is true whether or not its name can be quoted. So an exhausted arena shortens this
+    /// message and leaves the error saying the same thing, rather than swapping it for one about
+    /// storage — which would report a resource problem where the caller has an argument problem.
+    variable: Option<u32>,
   },
   /// Draft §6.3 steps 3.a and 3.b: a `@skip`/`@include` condition that is not a readable boolean.
   DirectiveCondition { fault: ConditionFault },
@@ -138,8 +157,11 @@ pub(super) enum Raw {
 pub(super) enum ConditionFault {
   /// The directive carries no `if` argument at all.
   Missing,
-  /// `if` names a variable the request did not supply. The name is held out of line.
-  VariableMissing { variable: u32 },
+  /// `if` names a variable the request did not supply. The name is held out of line, and is
+  /// `None` when the interner had no room for it — see
+  /// [`Raw::ArgumentVariableMissing`](Raw::ArgumentVariableMissing) for why the message shortens
+  /// rather than the error changing.
+  VariableMissing { variable: Option<u32> },
   /// `if`'s value is `null`.
   Null,
   /// `if`'s value is neither null nor a boolean.
@@ -223,7 +245,9 @@ impl Raw {
       Self::NotAList { .. } => Kind::NotAList,
       Self::LeafCoercion { .. } => Kind::LeafCoercion,
       Self::AbstractUnresolved { .. } => Kind::AbstractUnresolved,
-      Self::AbstractNotPossible { .. } => Kind::AbstractNotPossible,
+      Self::AbstractNotPossible { .. } | Self::AbstractNotPossibleUnnamed { .. } => {
+        Kind::AbstractNotPossible
+      }
       Self::ArgumentMissing { .. } => Kind::ArgumentMissing,
       Self::ArgumentNull { .. } => Kind::ArgumentNull,
       Self::ArgumentVariableMissing { .. } => Kind::ArgumentVariableMissing,
@@ -365,6 +389,12 @@ impl<V> fmt::Display for Error<'_, V> {
         self.name(runtime),
         schema.name(schema.type_def(abstract_ty).name())
       ),
+      Raw::AbstractNotPossibleUnnamed { abstract_ty, limit } => write!(
+        f,
+        "The runtime Object type is not a possible type for \"{}\", and its name could not be \
+         stored within the executor's limit of {limit} interned bytes.",
+        schema.name(schema.type_def(abstract_ty).name())
+      ),
       Raw::ArgumentMissing {
         field: _,
         argument,
@@ -403,11 +433,14 @@ impl<V> fmt::Display for Error<'_, V> {
           schema.name(argument)
         )?;
         ty(f, packed)?;
-        write!(
-          f,
-          "\" was provided the variable \"${}\" which was not provided a runtime value.",
-          self.name(variable)
-        )
+        match variable {
+          Some(variable) => write!(
+            f,
+            "\" was provided the variable \"${}\" which was not provided a runtime value.",
+            self.name(variable)
+          ),
+          None => f.write_str("\" was provided a variable which was not provided a runtime value."),
+        }
       }
       // Draft §6.3 reads the condition from an argument it names `if`, and draft §3.13 declares
       // both directives with that one argument at type `Boolean!`. Both names are therefore the
@@ -418,11 +451,17 @@ impl<V> fmt::Display for Error<'_, V> {
         ConditionFault::Missing => {
           f.write_str("Argument \"if\" of required type \"Boolean!\" was not provided.")
         }
-        ConditionFault::VariableMissing { variable } => write!(
+        ConditionFault::VariableMissing {
+          variable: Some(variable),
+        } => write!(
           f,
           "Argument \"if\" of required type \"Boolean!\" was provided the variable \"${}\" \
            which was not provided a runtime value.",
           self.name(variable)
+        ),
+        ConditionFault::VariableMissing { variable: None } => f.write_str(
+          "Argument \"if\" of required type \"Boolean!\" was provided a variable which was not \
+           provided a runtime value.",
         ),
         ConditionFault::Null => {
           f.write_str("Argument \"if\" of non-null type \"Boolean!\" must not be null.")

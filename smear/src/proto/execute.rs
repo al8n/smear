@@ -912,45 +912,48 @@ where
     // `ResolveAbstractType`: only an interface or a union asks the driver, because an object
     // position's runtime type is the one the schema already declared.
     let object = if kind.is_abstract() {
-      let resolved = match ctx.type_name(&value) {
-        None => None,
-        Some(name) => {
-          let id = self
-            .schema
-            .sym(name.as_bytes())
-            .and_then(|sym| self.schema.type_of_sym(sym))
-            .filter(|&id| self.schema.type_def(id).kind() == TypeKind::Object)
-            .filter(|&id| self.schema.is_possible_object(base, id));
-          self
-            .interner
-            .intern(name.as_bytes())
-            .map(|runtime| (id, runtime))
-        }
+      let Some(name) = ctx.type_name(&value) else {
+        let (parent, field) = self.owner(slot);
+        self.fail(
+          slot,
+          Raw::AbstractUnresolved {
+            abstract_ty: base,
+            parent,
+            field,
+          },
+        );
+        return;
       };
+      let resolved = self
+        .schema
+        .sym(name.as_bytes())
+        .and_then(|sym| self.schema.type_of_sym(sym))
+        .filter(|&id| self.schema.type_def(id).kind() == TypeKind::Object)
+        .filter(|&id| self.schema.is_possible_object(base, id));
       match resolved {
+        // The success path does not intern, and must not. The runtime spelling is wanted for one
+        // thing only — quoting it in the error below — so interning it here would put a *storage*
+        // ceiling on a path that needs no storage, and an exhausted arena would turn a resolvable
+        // interface position into `AbstractUnresolved` plus a null while the right answer sat in
+        // this very binding. A resource check belongs where running out means the operation cannot
+        // proceed; where the resource is only wanted for a diagnostic, running out degrades the
+        // diagnostic.
+        Some(id) => id,
         None => {
-          let (parent, field) = self.owner(slot);
-          self.fail(
-            slot,
-            Raw::AbstractUnresolved {
-              abstract_ty: base,
-              parent,
-              field,
-            },
-          );
-          return;
-        }
-        Some((None, runtime)) => {
-          self.fail(
-            slot,
-            Raw::AbstractNotPossible {
+          // Here, and only here, the name has to be said out loud.
+          let raw = match self.interner.intern(name.as_bytes()) {
+            Some(runtime) => Raw::AbstractNotPossible {
               abstract_ty: base,
               runtime,
             },
-          );
+            None => Raw::AbstractNotPossibleUnnamed {
+              abstract_ty: base,
+              limit: self.interner.cap(),
+            },
+          };
+          self.fail(slot, raw);
           return;
         }
-        Some((Some(id), _)) => id,
       }
     } else {
       base
@@ -1223,11 +1226,9 @@ where
         match variable {
           Some((name, _)) => {
             let location = value_span.unwrap_or(*node.span());
-            let Some(variable) = self.interner.intern(name.as_bytes()) else {
-              let limit = self.interner.cap();
-              self.fail_at(slot, Raw::NameStorage { limit }, location);
-              return false;
-            };
+            // Not `let Some(..) else`: the argument is missing either way, and an arena with no
+            // room must shorten this message rather than replace it with one about storage.
+            let variable = self.interner.intern(name.as_bytes());
             self.fail_at(
               slot,
               Raw::ArgumentVariableMissing {

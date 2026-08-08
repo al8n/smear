@@ -3058,3 +3058,169 @@ fn a_driver_message_inside_the_ceiling_keeps_its_text() {
   assert_eq!(errors.len(), 1);
   assert_eq!(errors[0].1, "the resolver said no");
 }
+
+// ------------------------------------------------------------------------------------------
+// A resource check must sit where exhaustion means the operation cannot proceed
+// ------------------------------------------------------------------------------------------
+//
+// The ceilings above bound resources. A ceiling placed on a path that does not need the resource
+// stops being a resource limit and becomes a correctness defect: the engine has the right answer
+// and discards it because an arena it never needed is full. The cases below pin the two halves of
+// that rule at draft §6.4.3 step 5, where the runtime type's *spelling* is wanted for exactly one
+// thing — quoting it in the error when the type is not possible — and for nothing at all when it
+// is.
+
+/// A schema whose concrete type name is far longer than its response keys.
+///
+/// The length is the instrument: it lets one ceiling admit every key the response emits and still
+/// refuse the runtime type's spelling, which is the only way to tell a path that *needs* the arena
+/// from one that merely passed through it. A fixture whose names all fit proves nothing — the
+/// first version of these cases had that defect and stayed green against the planted bug.
+const ARENA_SDL: &str = r#"
+type Query {
+  pet: Pet
+}
+interface Pet {
+  n: String
+}
+type AbsurdlyLongConcreteTypeNameForTheArena implements Pet {
+  n: String
+}
+"#;
+
+/// The concrete type name, 39 bytes, against ceilings chosen to admit keys and refuse it.
+const LONG_TYPE: &str = "AbsurdlyLongConcreteTypeNameForTheArena";
+
+/// A resolvable abstract position does not touch the interner, so no arena ceiling can null it.
+///
+/// `ResolveAbstractType` has the concrete type id from the schema before any name is stored.
+/// Interning on the way past turned a full arena into `AbstractUnresolved` plus a null on a query
+/// that was answerable — the right answer was already in hand and was thrown away.
+///
+/// Eight bytes admits `pet` and `n`, the two keys this response emits, and comes nowhere near the
+/// thirty-nine the type name would need.
+#[test]
+fn a_resolvable_abstract_type_does_not_need_the_interner() {
+  let limits = Limits {
+    max_interned_bytes: NonZeroU32::new(8).expect("not zero"),
+    ..Limits::default()
+  };
+  let (data, errors) = run_bounded(
+    ARENA_SDL,
+    "{ pet { n } }",
+    obj(vec![(
+      "pet",
+      J::Obj(LONG_TYPE, vec![("n", J::Str("Rex".to_owned()))]),
+    )]),
+    limits,
+  );
+
+  assert_eq!(
+    errors.len(),
+    0,
+    "the concrete type resolved from the schema, and answering it stores nothing: {errors:?}"
+  );
+  assert_eq!(data, r#"{"pet":{"n":"Rex"}}"#);
+}
+
+/// The same position with `__typename` selected *does* need the interner, and refusing is right.
+///
+/// The other half of the rule, and the reason the fix is not "never intern": here the stored name
+/// **is** the answer, so an arena with no room for it cannot produce one. Twenty bytes admits both
+/// keys — `pet` and `__typename` — and still refuses the thirty-nine-byte value.
+#[test]
+fn a_typename_on_an_abstract_type_does_need_the_interner() {
+  let limits = Limits {
+    max_interned_bytes: NonZeroU32::new(20).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    ARENA_SDL,
+    "{ pet { __typename } }",
+    obj(vec![("pet", J::Obj(LONG_TYPE, vec![]))]),
+    limits,
+  );
+
+  assert!(
+    errors
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "`__typename`'s value is the stored name, so running out is the correct answer: {errors:?}"
+  );
+}
+
+/// An impossible runtime type whose name cannot be stored keeps its diagnosis and loses its quote.
+///
+/// The degraded message is a decision rather than a fallback. An empty quote renders as
+/// `Runtime Object type ""`, and a placeholder like `<unknown>` reads like a type somebody could go
+/// looking for; both invite a reader to hunt for a type the driver never named. Naming the ceiling
+/// instead says exactly what happened.
+#[test]
+fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
+  let limits = Limits {
+    max_interned_bytes: NonZeroU32::new(20).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    ARENA_SDL,
+    "{ pet { n } }",
+    obj(vec![(
+      "pet",
+      J::Obj(
+        "AnEquallyLongNameThatIsNotAPetAtAllHere",
+        vec![("n", J::Str("Buck".to_owned()))],
+      ),
+    )]),
+    limits,
+  );
+
+  assert_eq!(errors.len(), 1);
+  assert_eq!(
+    errors[0].0,
+    Kind::AbstractNotPossible,
+    "still the same failure — the driver named a type the position cannot hold: {errors:?}"
+  );
+  assert!(
+    errors[0].1.contains("its name could not be stored"),
+    "and it says the name is missing rather than quoting something: {}",
+    errors[0].1
+  );
+  assert!(
+    !errors[0].1.contains("\"\""),
+    "in particular it renders no empty type name: {}",
+    errors[0].1
+  );
+}
+
+/// A missing variable reports a missing variable, whether or not its name can be quoted.
+///
+/// The third site of the same shape. The request did not supply the variable — that is the
+/// finding, and it does not depend on storage — so an exhausted arena shortens the sentence and
+/// leaves the diagnosis, rather than swapping it for one about the interner.
+#[test]
+fn an_unsupplied_variable_keeps_its_diagnosis_when_its_name_cannot_be_stored() {
+  let limits = Limits {
+    max_interned_bytes: NonZeroU32::new(8).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    "type Query { needs(flag: Boolean!): String }",
+    "query ($absent: Boolean!) { needs(flag: $absent) }",
+    obj(vec![("needs", J::Str("x".to_owned()))]),
+    limits,
+  );
+
+  assert_eq!(errors.len(), 1);
+  assert_eq!(
+    errors[0].0,
+    Kind::ArgumentVariableMissing,
+    "an argument problem, not a storage problem"
+  );
+  assert!(
+    errors[0]
+      .1
+      .contains("was provided a variable which was not provided a runtime value"),
+    "and the sentence shortens rather than changing: {}",
+    errors[0].1
+  );
+}

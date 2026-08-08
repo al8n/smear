@@ -508,18 +508,11 @@ where
         .ok()
         .and_then(|name| ctx.variable(name))
       {
-        None => match interner.intern(spelling) {
-          Some(variable) => Err(unreadable(ConditionFault::VariableMissing { variable })),
-          // The condition is unreadable either way; with nowhere to keep the variable's spelling
-          // the message loses the `$name` and keeps the rest, which is the same degradation
-          // `fail_at` makes when it cannot store a span.
-          None => Err(Fault {
-            raw: Raw::NameStorage {
-              limit: interner.cap(),
-            },
-            location,
-          }),
-        },
+        // The variable was not supplied, and that is the finding whether or not its spelling can
+        // be quoted — so an arena with no room shortens the message and keeps the diagnosis.
+        None => Err(unreadable(ConditionFault::VariableMissing {
+          variable: interner.intern(spelling),
+        })),
         Some(value) if ctx.is_null(&value) => Err(unreadable(ConditionFault::Null)),
         Some(value) => ctx
           .as_bool(&value)
