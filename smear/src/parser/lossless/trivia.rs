@@ -30,12 +30,20 @@
 //! `apollo-parser` queues ignored tokens in a `pending` buffer and flushes them into the tree
 //! at the *next real token's* `eat` (`push_ignored`, `parser/mod.rs:243`), so trivia can land
 //! inside a node that was opened after the trivia was read. These atoms commit trivia the
-//! moment they cross it, which attaches it to whatever node is open **at the decision point** —
-//! the outer one. That is the placement a formatter wants (the blank line before a field
-//! belongs to the selection set, not to the field), and it is the placement tokora's sink gives
-//! for free: a committed token lands in the innermost node open at its commit. Reproducing
-//! apollo's deferral would mean a second buffering layer beside the sink's own mark/rollback
-//! discipline, for a placement this suite does not want.
+//! moment they cross it, which attaches it to whatever node is open **at the decision point**,
+//! and tokora's sink gives that for free: a committed token lands in the innermost node open at
+//! its commit. Reproducing apollo's deferral would mean a second buffering layer beside the
+//! sink's own mark/rollback discipline, for a placement this suite does not want.
+//!
+//! **Which node that is depends on who made the peek, and it is not always the outer one.** A
+//! production about to open a node crosses the trivia in front of it at a dispatch peek made
+//! before the mark, so *leading* trivia lands outside — that is what
+//! `lossless_golden.rs::OPENS_ON_LEADING_TRIVIA` has one entry rather than dozens. *Trailing*
+//! trivia has no such moment: the peek that crosses it is the peek that discovers a node is
+//! over, and that peek is made from inside. So in `{ a\n b }` the newline before `b` is the last
+//! child of the `Field` for `a` — committed by `a`'s own probe for arguments — and not a child
+//! of the `SelectionSet`. The full set of pairings this produces is recorded, and re-derived on
+//! every run, by `lossless_golden.rs::CLOSES_ON_TRAILING_TRIVIA` and its GraphQLx twin.
 //!
 //! # Why the atoms are `pub`
 //!
