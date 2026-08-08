@@ -154,13 +154,17 @@ fn definition_fused_dispatches_each_root_family() {
 }
 
 #[test]
-fn described_definitions_cover_sdl_and_compatibility_executable_forms() {
+fn described_definitions_cover_sdl_and_executable_forms() {
   fn described_sdl<S: AsRef<[u8]>>(value: DescribedDefinition<S>) {
     assert!(value.description().is_some());
     assert!(value.node().is_type_system());
   }
   fn described_executable<S: AsRef<[u8]>>(value: DescribedDefinition<S>) {
     assert!(value.description().is_some());
+    assert!(value.node().is_executable());
+  }
+  fn undescribed_shorthand<S: AsRef<[u8]>>(value: DescribedDefinition<S>) {
+    assert!(value.description().is_none());
     assert!(value.node().is_executable());
   }
 
@@ -176,9 +180,24 @@ fn described_definitions_cover_sdl_and_compatibility_executable_forms() {
   );
   accept_all!(
     described_definition,
-    "\"shorthand documentation\" { id }",
+    "\"fragment documentation\" fragment F on T { id }",
     described_executable
   );
+
+  // `OperationDefinition : SelectionSet` carries no `Description?` slot, so the shorthand is
+  // accepted bare and refused the moment a description precedes it — from both roots that
+  // read one.
+  accept_all!(described_definition, "{ id }", undescribed_shorthand);
+  reject_all!(described_definition, "\"shorthand documentation\" { id }");
+  reject_all!(
+    definition_or_extension,
+    "\"shorthand documentation\" { id }"
+  );
+  reject_all!(
+    definition_or_extension,
+    "\"\"\"shorthand documentation\"\"\" { id }"
+  );
+  reject_all!(document, "type User { id: ID } \"shorthand\" { id }");
 }
 
 #[test]

@@ -167,27 +167,35 @@ fn an_extension_union_where_clause_requires_its_members() {
 // Divergence 22 — who may carry a description.
 // ---------------------------------------------------------------------------------------------
 
-/// A description may precede an **executable or type-system definition**, and nothing else.
+/// A description may precede a **keyworded executable or type-system definition**, and nothing
+/// else.
 ///
-/// `entry_after_description` commits to a definition and never reaches an import or an extension
-/// (`graphqlx/syntactic/document.rs:210-221`), so `"doc" import * from "x"` and
-/// `"doc" extend type T @d` are documents `syntactic/` rejects. Both re-print byte for byte and
-/// both build every node they would have built undescribed, so only the verdict moves — which is
-/// exactly why the mutation "allow a description before an import" is invisible to a round-trip
-/// gate and to a golden tree alike.
+/// `entry_after_description` commits to a keyworded definition and never reaches an import, an
+/// extension, or the shorthand `OperationDefinition : SelectionSet`, so
+/// `"doc" import * from "x"`, `"doc" extend type T @d` and `"doc" { f }` are all documents
+/// `syntactic/` rejects. Each re-prints byte for byte and each builds every node it would have
+/// built undescribed, so only the verdict moves — which is exactly why the mutation "allow a
+/// description before an import" is invisible to a round-trip gate and to a golden tree alike.
 #[test]
-fn a_description_may_precede_a_definition_and_not_an_import_or_an_extension() {
+fn a_description_may_precede_a_keyworded_definition_and_nothing_else() {
   for src in [
     "\"doc\" scalar S",
     "\"doc\" query Q { f }",
     "\"doc\" fragment F on T { g }",
+    "\"doc\" mutation M { f }",
+    "query Q(\"doc\" $v: Int) { f }",
+    "{ f }",
   ] {
     assert!(
       !parse_document(src).has_errors(),
-      "a description belongs on a definition: {src}"
+      "a description belongs on a keyworded definition: {src}"
     );
   }
-  for src in ["\"doc\" import * from \"x\"", "\"doc\" extend type T @d"] {
+  for src in [
+    "\"doc\" import * from \"x\"",
+    "\"doc\" extend type T @d",
+    "\"doc\" { f }",
+  ] {
     let parse = parse_document(src);
     assert!(
       parse.has_errors(),

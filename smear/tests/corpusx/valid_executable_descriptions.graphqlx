@@ -1,0 +1,11 @@
+"a description before an executable definition: OperationDefinition : Description? OperationType"
+query Q("a description before a variable: VariableDefinition : Description? Variable" $v: Int) {
+  f
+}
+
+"""
+a description before a fragment: FragmentDefinition : Description? fragment
+"""
+fragment info on T {
+  g
+}

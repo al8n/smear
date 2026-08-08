@@ -26,13 +26,18 @@
 //!
 //! # Every definition here is a retro-wrap, because of the description
 //!
-//! `syntactic/`'s `executable_definition` takes an optional leading string as a frozen-parser
-//! compatibility extension, which is not in the GraphQL grammar but which the acceptance-parity
-//! gate compares. A leading string says only that *some* definition follows, and the atom set
-//! has no two-token peek, so the dispatcher mints a mark, commits the description, reads the
-//! keyword, and hands the mark to the production it chose — which spends it, putting the
-//! `Description` inside the definition it describes. `definition.rs`'s module docs give the full
-//! reasoning; this file follows it.
+//! Every keyworded executable definition opens with `Description?`. A leading string says only
+//! that *some* definition follows, and the atom set has no two-token peek, so the dispatcher
+//! mints a mark, commits the description, reads the keyword, and hands the mark to the production
+//! it chose — which spends it, putting the `Description` inside the definition it describes.
+//! `definition.rs`'s module docs give the full reasoning; this file follows it.
+//!
+//! # The shorthand is the one alternative with no `Description?`
+//!
+//! `OperationDefinition : Description? OperationType … | SelectionSet`. The dispatcher therefore
+//! carries a `described` flag into its `{` arm and reports there. The operation is still parsed
+//! and the description still lands inside it, so **only the verdict moves** — no round-trip gate
+//! and no golden tree can see the difference, which is why the rule is tested by verdict.
 //!
 //! # Divergences, decided rather than inherited
 //!
@@ -56,7 +61,10 @@ use super::{
   definition::{description, operation_type, starts_description},
   directive::directives,
   recover,
-  recover::{EXECUTABLE_DEFINITION_HEADS, NAME_HEADS, VARIABLE_DEFINITION_HEADS, opener_span},
+  recover::{
+    DESCRIBED_DEFINITION_HEADS, EXECUTABLE_DEFINITION_HEADS, NAME_HEADS, VARIABLE_DEFINITION_HEADS,
+    opener_span,
+  },
   selection::{selection_set, type_condition},
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::type_ref,
@@ -68,17 +76,29 @@ use crate::parser::lossless::{lossless_drivers, lossless_production};
 lossless_production! {
   dialect = graphql::lossless;
 
-  /// `Variable : Type DefaultValue? Directives[Const]?`
+  /// `Description? Variable : Type DefaultValue? Directives[Const]?`
   ///
-  /// **Precondition: the head is `$`.** [`variables_definition`] decides that.
+  /// **Precondition: the head is `$` or a string.** [`variables_definition`] decides that.
   ///
   /// **The directives here are const**, and that is the one place in an executable document
-  /// where they are: the spec writes `VariableDefinition: Variable : Type DefaultValue?
-  /// Directives[Const]?`, and `syntactic/`'s `variable_definition` calls `const_directives`
-  /// where its `operation_definition` and `fragment_definition` call plain `directives`. Reading
-  /// the split as "SDL is const, executable is not" gets this production wrong.
+  /// where they are: the spec writes `VariableDefinition: Description? Variable : Type
+  /// DefaultValue? Directives[Const]?`, and `syntactic/`'s `variable_definition` calls
+  /// `const_directives` where its `operation_definition` and `fragment_definition` call plain
+  /// `directives`. Reading the split as "SDL is const, executable is not" gets this production
+  /// wrong.
   fn variable_definition<'inp, Src, Ctx>(inp) {
-    node(
+    // Minted before the description so the retro-wrap covers it; here it is always spent.
+    let mark = inp.cst_mark();
+    if starts_description(peek_kind::<Src, Ctx>(inp)?) {
+      description::<Src, Ctx>(inp)?;
+      // The peek is what commits the trivia between the description and the `$`. Without it the
+      // space lands *inside* `Variable`, because `variable`'s `node` opens where it is called —
+      // the defect `only_the_recorded_nodes_open_on_their_leading_trivia` pins, and the ruling
+      // `named_type` already records.
+      peek_kind::<Src, Ctx>(inp)?;
+    }
+    node_at(
+      mark,
       K::VariableDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         // The `$name` is a `Variable` node, the same one a value position builds: a variable is
@@ -122,7 +142,11 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
-            Some(Kind::Dollar) => variable_definition::<Src, Ctx>(inp)?,
+            // A string head is the definition's description — `VariableDefinition` carries a
+            // `Description?` like every other executable definition does.
+            Some(Kind::Dollar | Kind::InlineString | Kind::BlockString) => {
+              variable_definition::<Src, Ctx>(inp)?
+            }
             // The head is checked here rather than left to `variable_definition`'s own
             // `expect`, because that `expect` would return `Err` and abort the whole list — the
             // ruling `arguments` and `object_value` both record.
@@ -213,12 +237,22 @@ lossless_production! {
     // that shows the ordering is currently redundant, every caller being a loop that peeks.
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
-    if starts_description(head) {
+    let described = starts_description(head);
+    if described {
       description::<Src, Ctx>(inp)?;
     }
     match peek_kind::<Src, Ctx>(inp)? {
-      // The shorthand operation, which has no keyword at all.
-      Some(Kind::LBrace) => operation_definition::<Src, Ctx>(inp, mark),
+      // The shorthand operation, which has no keyword at all — and which a description may not
+      // precede: `OperationDefinition : SelectionSet` is the one alternative with no
+      // `Description?` slot, so `syntactic/` rejects the combination and gate 1 compares
+      // verdicts. The operation is still parsed, with the description inside it: a lossless
+      // consumer needs the nodes to point the diagnostic at.
+      Some(Kind::LBrace) => {
+        if described {
+          recover::report_unexpected::<Src, Ctx>(inp, DESCRIBED_DEFINITION_HEADS)?;
+        }
+        operation_definition::<Src, Ctx>(inp, mark)
+      }
       Some(Kind::Identifier) => match peek_as::<Src, Ctx, ContextualKeyword>(inp)? {
         Some(
           ContextualKeyword::Query | ContextualKeyword::Mutation | ContextualKeyword::Subscription,

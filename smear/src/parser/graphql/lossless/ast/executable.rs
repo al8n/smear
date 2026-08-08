@@ -29,6 +29,8 @@ ast_node!(
   lang = crate::parser::graphql::kinds::GraphQLLang;
   /// One variable definition, `$v : T = default @directives`.
   VariableDefinition => K::VariableDefinition {
+    /// The definition's description, if one was written before it.
+    description: opt Description,
     /// The variable being defined.
     variable: opt Variable,
     /// The variable's type, when it is a named type.
@@ -59,8 +61,8 @@ ast_node!(
   OperationDefinition => K::OperationDefinition {
     /// The operation's description, if one was written before it.
     ///
-    /// Not in the GraphQL grammar; `syntactic/` accepts a leading string here as a
-    /// frozen-parser compatibility extension and the acceptance-parity gate compares the two.
+    /// Only the keyworded form can have one: `OperationDefinition : Description? OperationType
+    /// … | SelectionSet` gives the shorthand no `Description?` slot.
     description: opt Description,
     /// The operation's keyword, absent in the shorthand form.
     operation_type: opt OperationType,

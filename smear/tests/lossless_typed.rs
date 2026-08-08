@@ -1053,8 +1053,8 @@ wrapper_table! {
   FragmentSpread { tok name, opt directives }
   InlineFragment { opt type_condition, opt directives, opt selection_set }
   VariableDefinition {
-    opt variable, opt named_type, opt list_type, opt non_null_type, opt default_value,
-    opt directives,
+    opt description, opt variable, opt named_type, opt list_type, opt non_null_type,
+    opt default_value, opt directives,
   }
   VariablesDefinition { many variable_definitions }
   OperationDefinition {
@@ -1260,8 +1260,8 @@ fn corpus() -> Vec<(String, String)> {
 
 /// Sources this gate adds on top of the corpus, and what each one is for.
 ///
-/// The corpus reaches **every one of the 59 wrappers** on its own and calls all 204 getters, but
-/// 31 of those getters had nothing to project from it: a getter is only exercised by a document
+/// The corpus reaches **every one of the 59 wrappers** on its own and calls all 205 getters, but
+/// 30 of those getters had nothing to project from it: a getter is only exercised by a document
 /// that writes the shape it reaches for, and no corpus entry writes an enum default, a boolean
 /// inside a list, a described union or an interface extension that implements. The first three
 /// fixtures are that complement, and nothing else — they were written against the measured list
@@ -1295,7 +1295,7 @@ const FIXTURES: &[(&str, &str)] = &[
      \"directive\" directive @dd(x: Int) on FIELD \
      \"schema\" schema @d { query: Q } \
      \"fragment\" fragment F on T { a } \
-     \"query\" query Q @dq { f }",
+     \"query\" query Q(\"variable\" $v: Int) @dq { f }",
   ),
   // The interface extension's `implements`, and a bare list type in an input value definition —
   // the corpus writes `[String!]!`, whose outer node is a `NonNullType`.
@@ -1516,12 +1516,12 @@ fn the_probe_table_is_exactly_the_shipped_inventory() {
   // every comparison below vacuous, so the counts are pinned before they are used.
   assert_eq!(
     shipped.len(),
-    204,
-    "the wrapper sources should declare 204 getters"
+    205,
+    "the wrapper sources should declare 205 getters"
   );
   let shipped_wrappers: BTreeSet<&str> = shipped.iter().map(|g| g.wrapper.as_str()).collect();
   assert_eq!(shipped_wrappers.len(), 59, "…over 59 wrappers");
-  assert_eq!(DECLARED.len(), 204, "the table declares 204 getters");
+  assert_eq!(DECLARED.len(), 205, "the table declares 205 getters");
   assert_eq!(TABLE_WRAPPERS.len(), 59, "…over 59 wrappers");
 
   let table: BTreeSet<(&str, &str, &str)> = DECLARED.iter().copied().collect();
@@ -1673,7 +1673,7 @@ fn every_getter_is_called_and_projects_something() {
      them from a getter pointed at a kind that cannot occur:{}",
     listed(reg.unanswered())
   );
-  assert_eq!(reg.getters.len(), 204);
+  assert_eq!(reg.getters.len(), 205);
 }
 
 #[test]
@@ -1725,7 +1725,6 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("DefaultValue", "string_value"),
   ("DirectiveDefinition", "description"),
   ("EnumTypeDefinition", "description"),
-  ("FragmentDefinition", "description"),
   ("InputObjectTypeDefinition", "description"),
   ("InputValueDefinition", "list_type"),
   ("InterfaceTypeDefinition", "description"),
@@ -1820,17 +1819,17 @@ const RECOVERY_FIXTURES: &[(&str, &str)] = &[
 
 /// The getters no tree this gate sweeps ever separates from a kind-blind rival, and why.
 ///
-/// 24 of 204. Every other getter is **measured** to answer differently, at least once, from a
+/// 23 of 205. Every other getter is **measured** to answer differently, at least once, from a
 /// getter of the same arity that ignored kinds entirely — which is the property that makes the
 /// sweep's fixtures worth anything: over `"{ a }"` a `cast::child` is indistinguishable from
 /// "take the first child", and a suite built out of fixtures like that reports full coverage of a
 /// layer it never tested.
 ///
-/// The 24 fall into three shapes, and none of them is a weak fixture:
+/// The 23 fall into three shapes, and none of them is a weak fixture:
 ///
 /// - **The wanted element is always the node's first one.** An `Alias` is `name :`, an `Argument`
-///   is `name : value`, a `VariableDefinition` opens on its `Variable`. "The first token" and
-///   "the `Name` token" are the same token in every tree the grammar builds.
+///   is `name : value`. "The first token" and "the `Name` token" are the same token in every tree
+///   the grammar builds.
 /// - **The node holds exactly one token, and the getter wants it.** `IntValue`, `FloatValue`,
 ///   `StringValue`, `Description`, `BooleanValue`, `NullValue`, `EnumValue`, `OperationType`,
 ///   `NamedType`.
@@ -1885,7 +1884,6 @@ const UNDISCRIMINATED: &[(&str, &str)] = &[
   ("ScalarTypeExtension", "directives"),
   ("StringValue", "string_token"),
   ("UnionMemberTypes", "member_types"),
-  ("VariableDefinition", "variable"),
   ("VariablesDefinition", "variable_definitions"),
 ];
 
@@ -1910,8 +1908,8 @@ fn every_getter_but_these_answers_differently_from_a_kind_blind_rival() {
   );
   assert_eq!(
     DECLARED.len() - undiscriminated.len(),
-    180,
-    "180 of the 204 getters are proved to beat a kind-blind rival"
+    182,
+    "182 of the 205 getters are proved to beat a kind-blind rival"
   );
 }
 

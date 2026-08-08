@@ -2,14 +2,16 @@
 //!
 //! The conventions are `value.rs`'s and are not repeated here.
 //!
-//! # Divergence 22: a description may precede a **definition**, and nothing else
+//! # Divergence 22: a description may precede a **keyworded definition**, and nothing else
 //!
-//! `entry_after_description` commits to a *definition* — executable or type-system — and never
-//! reaches an import or an extension (`graphqlx/syntactic/document.rs:210-221`), so
-//! `"doc" import * from "x"` and `"doc" extend type T @d` are grammar errors. Both re-print byte
-//! for byte and both build every node they would have built undescribed, so **only the verdict
-//! moves**: no round-trip gate and no golden tree can see the difference, which is why the rule is
-//! written out at each of the three dispatchers and tested by verdict.
+//! `entry_after_description` commits to a *keyworded definition* — executable or type-system —
+//! and never reaches an import, an extension, or the shorthand operation, so
+//! `"doc" import * from "x"`, `"doc" extend type T @d` and `"doc" { f }` are all grammar errors.
+//! The last of the three is the grammar's own: `OperationDefinition : Description? OperationType
+//! … | SelectionSet` gives the second alternative no `Description?` slot. All three re-print byte
+//! for byte and all three build every node they would have built undescribed, so **only the
+//! verdict moves**: no round-trip gate and no golden tree can see the difference, which is why
+//! the rule is written out at each dispatcher and tested by verdict.
 //!
 //! The offending entry is still parsed in full. A lossless consumer needs the nodes to point the
 //! diagnostic at, and the alternative — refusing the entry — would cost the rest of the document to
@@ -50,7 +52,8 @@ use super::{
   import::import_definition,
   recover,
   recover::{
-    DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, TYPE_SYSTEM_ENTRY_HEADS, starts_description,
+    DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, TYPE_SYSTEM_ENTRY_HEADS,
+    starts_description,
   },
   trivia::{peek_as, peek_kind},
 };
@@ -92,17 +95,21 @@ lossless_production! {
         super::trivia::expect::<Src, Ctx>(inp, Kind::Identifier)?;
         type_system_extension::<Src, Ctx>(inp, extend_mark)
       }
-      _ => definition_after_description::<Src, Ctx>(inp, mark),
+      _ => definition_after_description::<Src, Ctx>(inp, mark, described),
     }
   }
 
   /// The definition half of the mixed entry dispatcher: executable or type-system, spending
   /// `mark`. Opens no node of its own.
-  fn definition_after_description<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn definition_after_description<'inp, Src, Ctx>(inp, mark: EventMark, described: bool) {
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
-      // The shorthand operation, which has no keyword at all — and which a description may still
-      // precede, because `syntactic/`'s described path routes through the definition dispatcher
-      // whose own first check is for the `{`.
+      // The shorthand operation, which has no keyword at all — and which a description may not
+      // precede: `OperationDefinition : SelectionSet` is the one definition alternative with no
+      // `Description?` slot, so `syntactic/`'s described path rejects the combination and this
+      // one must. The operation is still parsed, for the reason the two arms above record.
+      if described {
+        recover::report_unexpected::<Src, Ctx>(inp, DESCRIBED_DEFINITION_HEADS)?;
+      }
       return executable_definition_at::<Src, Ctx>(inp, mark);
     }
     let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
@@ -132,6 +139,11 @@ lossless_production! {
         recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_ENTRY_HEADS)?;
       }
       return import_definition::<Src, Ctx>(inp);
+    }
+    // The shorthand operation carries no `Description?` slot — see
+    // [`definition_after_description`], which refuses the same pair from the mixed root.
+    if described && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
+      recover::report_unexpected::<Src, Ctx>(inp, DESCRIBED_DEFINITION_HEADS)?;
     }
     executable_definition_at::<Src, Ctx>(inp, mark)
   }

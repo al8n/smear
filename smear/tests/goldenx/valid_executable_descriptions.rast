@@ -1,0 +1,60 @@
+Root@0..313
+  Document@0..313
+    OperationDefinition@0..200
+      InlineString@0..97 "\"a description before an executable definition: OperationDefinition : Description? OperationType\""
+      Newline@97..98 "\n"
+      Name@98..103 "query"
+      Space@103..104 " "
+      DefinitionName@104..105
+        Name@104..105 "Q"
+      VariablesDefinition@105..192
+        LParen@105..106 "("
+        VariableDefinition@106..191
+          InlineString@106..183 "\"a description before a variable: VariableDefinition : Description? Variable\""
+          Space@183..184 " "
+          VariableValue@184..186
+            Dollar@184..185 "$"
+            Name@185..186 "v"
+          Colon@186..187 ":"
+          Space@187..188 " "
+          DefinitionTypePath@188..191
+            Path@188..191
+              Name@188..191 "Int"
+        RParen@191..192 ")"
+      Space@192..193 " "
+      SelectionSet@193..200
+        LBrace@193..194 "{"
+        Newline@194..195 "\n"
+        Space@195..196 " "
+        Space@196..197 " "
+        Field@197..199
+          Name@197..198 "f"
+          Newline@198..199 "\n"
+        RBrace@199..200 "}"
+    Newline@200..201 "\n"
+    Newline@201..202 "\n"
+    FragmentDefinition@202..312
+      BlockString@202..285 "\"\"\"\na description before a fragment: FragmentDefinition : Description? fragment\n\"\"\""
+      Newline@285..286 "\n"
+      Name@286..294 "fragment"
+      Space@294..295 " "
+      ExecutableDefinitionName@295..300
+        Name@295..299 "info"
+        Space@299..300 " "
+      TypeCondition@300..305
+        Name@300..302 "on"
+        Space@302..303 " "
+        TypePath@303..305
+          Path@303..305
+            Name@303..304 "T"
+            Space@304..305 " "
+      SelectionSet@305..312
+        LBrace@305..306 "{"
+        Newline@306..307 "\n"
+        Space@307..308 " "
+        Space@308..309 " "
+        Field@309..311
+          Name@309..310 "g"
+          Newline@310..311 "\n"
+        RBrace@311..312 "}"
+    Newline@312..313 "\n"

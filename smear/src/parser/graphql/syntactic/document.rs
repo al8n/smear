@@ -112,6 +112,31 @@ where
   }
 }
 
+/// Refuses the shorthand operation in a position a description has already committed to.
+///
+/// `OperationDefinition : SelectionSet` is the one definition alternative the grammar
+/// gives no `Description?` slot, and both root dispatchers reach it through a `{`
+/// predispatch that would otherwise swallow the token. The `{` is reported where it
+/// stands and left unconsumed, so a caller resumes at the selection set rather than
+/// inside it.
+fn refuse_described_shorthand<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  expected: Expectation,
+) -> Result<(), GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  if peeks_where(inp, |token| token.is_l_brace())? {
+    return expected_document_phase(inp, expected);
+  }
+  Ok(())
+}
+
 /// Enters a full-definition tail after a contextual keyword was fused and
 /// consumed from the input.
 fn definition_after_keyword<'inp, Src, Ctx>(
@@ -243,9 +268,10 @@ document_parser!(
 document_parser!(
   /// Parses one full GraphQL definition with an optional leading description.
   ///
-  /// A description commits the next production to a definition, never an
-  /// extension. Descriptions on executable definitions are frozen-parser/dialect
-  /// compatibility rather than standard executable GraphQL syntax.
+  /// A description commits the next production to a *keyworded* definition. It
+  /// never reaches a type-system extension, and it never reaches the shorthand
+  /// `OperationDefinition : SelectionSet`, which is the one definition
+  /// alternative the grammar gives no `Description?` slot.
   ///
   /// See the [GraphQL Description specification](https://spec.graphql.org/draft/#Description)
   /// and [Definition specification](https://spec.graphql.org/draft/#Definition).
@@ -258,6 +284,11 @@ document_parser!(
       ParseAttempt::Accept(value) => Some(value),
       ParseAttempt::Decline => None,
     };
+    // `Keyword("definition")` is the expectation the described-`extend` rejection already
+    // raises from this root: after a description, one of the twelve definition keywords.
+    if description.is_some() {
+      refuse_described_shorthand(inp, Expectation::Keyword("definition"))?;
+    }
     let definition = definition(inp)?;
     Ok(Described::new(
       extent_since(inp, node_start),
@@ -296,6 +327,7 @@ document_parser!(
        inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
         GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
           let description = StringValue::new(span, value.into());
+          refuse_described_shorthand(inp, Expectation::Keyword("definition or extension"))?;
           let definition = definition(inp)?;
           let span = SimpleSpan::new(span.start(), definition.as_span().end());
           Ok(DefinitionOrExtension::Definition(Described::new(
@@ -311,6 +343,7 @@ document_parser!(
        inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
         GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
           let description = StringValue::new(span, value.into());
+          refuse_described_shorthand(inp, Expectation::Keyword("definition or extension"))?;
           let definition = definition(inp)?;
           let span = SimpleSpan::new(span.start(), definition.as_span().end());
           Ok(DefinitionOrExtension::Definition(Described::new(
@@ -391,8 +424,8 @@ document_parser!(
   /// Parses a nonempty full GraphQL document.
   ///
   /// A document may mix executable definitions, type-system definitions, and
-  /// type-system extensions. Leading executable descriptions remain accepted
-  /// for frozen-parser/dialect compatibility.
+  /// type-system extensions. Every keyworded definition may open with its own
+  /// description; the shorthand operation and the extensions may not.
   ///
   /// See the [GraphQL Document specification](https://spec.graphql.org/draft/#Document).
   pub document,

@@ -169,6 +169,31 @@ where
   }))
 }
 
+/// Refuses the shorthand operation in a position a description has already committed to.
+///
+/// `OperationDefinition : Description? OperationType … | SelectionSet` — the second
+/// alternative has no `Description?` slot, so a described definition must open with a
+/// keyword. The `{` is reported where it stands and left unconsumed, so a caller resumes
+/// at the selection set rather than inside it.
+#[inline]
+pub(crate) fn refuse_described_shorthand<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+  expected: Expectation,
+) -> Result<(), GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  if super::peek_kind(inp)? == Some(SyntacticTokenKind::LBrace) {
+    return unexpected_here(inp, expected);
+  }
+  Ok(())
+}
+
 #[inline]
 fn operation_type_from_head(head: OperationHead, span: SimpleSpan) -> OperationType {
   match head {
@@ -702,8 +727,9 @@ executable_parser!(
   ///
   /// A description is accepted only as the leading atom; after it is consumed,
   /// the definition head is committed to a deterministic executable branch.
-  /// Descriptions are a GraphQLx extension of the standard executable
-  /// definition grammar.
+  /// GraphQLx tracks the GraphQL executable grammar here: the keyworded
+  /// alternatives carry a `Description?` and the shorthand
+  /// `OperationDefinition : SelectionSet` does not.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   pub executable_definition,
@@ -716,6 +742,9 @@ executable_parser!(
       ParseAttempt::Accept(description) => Some(description),
       ParseAttempt::Decline => None,
     };
+    if description.is_some() {
+      refuse_described_shorthand(inp, Expectation::OperationTypeOrFragment)?;
+    }
     let definition = executable_definition_core(inp)?;
     Ok(DescribedExecutableDefinition::new(
       extent_since(inp, node_start),
@@ -739,6 +768,7 @@ executable_parser!(
   {
     match try_description(inp)? {
       ParseAttempt::Accept(description) => {
+        refuse_described_shorthand(inp, Expectation::OperationTypeOrFragment)?;
         let definition = executable_definition_core(inp)?;
         Ok(ImportOrExecutableDefinition::Definition(
           DescribedExecutableDefinition::new(
@@ -790,7 +820,8 @@ executable_parser!(
   /// Each entry may be an import or a described executable definition. The
   /// document has no enclosing delimiter, so every remaining token continues
   /// into the committed entry parser and receives that parser's local error.
-  /// Imports and leading definition descriptions are GraphQLx extensions.
+  /// `import` is the GraphQLx extension; a leading definition description is
+  /// ordinary GraphQL, and never decorates an import or a shorthand operation.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   pub executable_document,
@@ -855,7 +886,8 @@ impl_executable_api!(
 impl_executable_api!(
   /// Parses a GraphQLx variable definition with its optional description.
   ///
-  /// The leading description is a GraphQLx extension.
+  /// `VariableDefinition : Description? Variable : Type DefaultValue?
+  /// Directives[Const]?`.
   ///
   /// See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables).
   S,
@@ -909,7 +941,8 @@ impl_executable_api!(
 impl_executable_api!(
   /// Parses one GraphQLx executable definition with an optional description.
   ///
-  /// The leading description is a GraphQLx extension.
+  /// The shorthand `OperationDefinition : SelectionSet` has no `Description?`
+  /// slot and is refused once one was read.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   S,
@@ -931,7 +964,8 @@ impl_executable_api!(
 impl_executable_api!(
   /// Parses a nonempty GraphQLx executable document.
   ///
-  /// Imports and leading definition descriptions are GraphQLx extensions.
+  /// `import` is the GraphQLx extension; a leading definition description is
+  /// ordinary GraphQL.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   S,

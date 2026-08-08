@@ -134,6 +134,10 @@ lossless_production! {
     let mark = inp.cst_mark();
     if starts_description(peek_kind::<Src, Ctx>(inp)?) {
       description::<Src, Ctx>(inp)?;
+      // The peek is what commits the trivia between the description and the `$`. Without it the
+      // space lands *inside* `VariableValue`, because `variable`'s `node` opens where it is
+      // called.
+      peek_kind::<Src, Ctx>(inp)?;
     }
     node_at(
       mark,

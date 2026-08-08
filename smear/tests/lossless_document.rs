@@ -199,9 +199,8 @@ fn a_document_mixes_executable_and_type_system_definitions() {
 
 #[test]
 fn a_described_executable_definition_is_accepted() {
-  // `syntactic/`'s `executable_definition` takes an optional leading string as a frozen-parser
-  // compatibility extension. Task 7 could not accept it — `Description` is this task's kind —
-  // and gate 1 would have seen the divergence.
+  // `OperationDefinition : Description? OperationType …`. Task 7 could not accept the leading
+  // string — `Description` is this task's kind — and gate 1 would have seen the divergence.
   let parse = parse_document("\"doc\" query Q { a }");
   assert_eq!(
     kinds(&parse),

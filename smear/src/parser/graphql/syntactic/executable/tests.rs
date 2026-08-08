@@ -555,15 +555,11 @@ fn executable_definition_dispatches_without_description() {
 }
 
 #[test]
-fn executable_definition_accepts_compatibility_descriptions() {
+fn executable_definition_accepts_descriptions_on_the_keyworded_forms() {
   fn operation<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
     assert!(d.description().is_some());
     assert!(d.node().is_operation());
     assert!(d.node().unwrap_operation_ref().is_named());
-  }
-  fn shorthand<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
-    assert!(d.description().is_some());
-    assert!(d.node().unwrap_operation_ref().is_shorthand());
   }
   fn fragment<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
     assert!(d.description().is_some());
@@ -580,11 +576,15 @@ fn executable_definition_accepts_compatibility_descriptions() {
     "\"\"\"description\"\"\" query Q { id }",
     operation
   );
-  accept_all!(executable_definition, "\"description\" { id }", shorthand);
   accept_all!(
     executable_definition,
-    "\"\"\"description\"\"\" { id }",
-    shorthand
+    "\"description\" mutation M { setThing }",
+    operation
+  );
+  accept_all!(
+    executable_definition,
+    "\"description\" subscription S { onThing }",
+    operation
   );
   accept_all!(
     executable_definition,
@@ -599,10 +599,46 @@ fn executable_definition_accepts_compatibility_descriptions() {
 }
 
 #[test]
+fn a_description_may_not_precede_the_shorthand_operation() {
+  // `OperationDefinition : Description? OperationType Name? VariablesDefinition? Directives?
+  // SelectionSet | SelectionSet`. The second alternative carries no `Description?` slot, so a
+  // description commits the definition to a keyworded head.
+  reject_all!(executable_definition, "\"desc\" { id }");
+  reject_all!(executable_definition, "\"\"\"desc\"\"\" { id }");
+  reject_all!(executable_document, "\"desc\" { id }");
+  reject_all!(
+    executable_document,
+    "query A { a } \"desc\" { b } fragment F on T { c }"
+  );
+
+  // The `{` is reported and left unconsumed, so a caller resumes at the selection set the
+  // description should not have decorated rather than inside it.
+  let result = drive_str(
+    |inp| {
+      let result = executable_definition(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("the rejected `{` remains available for recovery");
+      assert_eq!(tail.span, SimpleSpan::new(7, 8));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::LBrace));
+      Ok(result)
+    },
+    "\"desc\" { id }",
+  )
+  .expect("inspection parser should consume the retained `{`");
+
+  assert_str_expectation(
+    result,
+    Expectation::OperationTypeOrFragment,
+    SimpleSpan::new(7, 8),
+  );
+}
+
+#[test]
 fn described_executable_definition_span_includes_description() {
   for source in [
     "\"desc\" query { id }",
-    "\"desc\"  # compatibility description\n  query { id }",
+    "\"desc\"  # a comment between the description and its definition\n  query { id }",
   ] {
     let definition = drive_str(executable_definition, source).expect("described definition");
     let keyword_start = source.find("query").expect("operation keyword");
@@ -695,23 +731,28 @@ fn executable_document_accepts_single_and_multiple() {
 }
 
 #[test]
-fn executable_document_keeps_independent_compatibility_descriptions() {
+fn executable_document_keeps_independent_descriptions() {
   fn check<S: AsRef<[u8]>>(d: ExecutableDocument<S>) {
     let definitions = d.definitions();
-    assert_eq!(definitions.len(), 3);
+    assert_eq!(definitions.len(), 4);
     assert!(
       definitions
         .iter()
+        .take(3)
         .all(|definition| definition.description().is_some())
     );
     assert!(definitions[0].node().is_operation());
-    assert!(definitions[1].node().unwrap_operation_ref().is_shorthand());
+    assert!(definitions[1].node().unwrap_operation_ref().is_named());
     assert!(definitions[2].node().is_fragment());
+    // The shorthand carries no description, and its neighbours' descriptions do not leak
+    // onto it.
+    assert!(definitions[3].description().is_none());
+    assert!(definitions[3].node().unwrap_operation_ref().is_shorthand());
   }
 
   accept_all!(
     executable_document,
-    "\"operation\" query A { a } \"\"\"shorthand\"\"\" { b } \"fragment\" fragment F on T { c }",
+    "\"operation\" query A { a } \"\"\"mutation\"\"\" mutation M { b } \"fragment\" fragment F on T { c } { d }",
     check
   );
 }
@@ -836,12 +877,12 @@ fn associated_executable_apis_infer_str_and_byte_slice_sources() {
 
   let _: DescribedExecutableDefinition<&str> = drive_str(
     DescribedExecutableDefinition::<&str>::graphql,
-    "\"desc\" { id }",
+    "\"desc\" query { id }",
   )
   .expect("str described definition");
   let _: DescribedExecutableDefinition<&[u8]> = drive_slice(
     DescribedExecutableDefinition::<&[u8]>::graphql,
-    b"\"desc\" { id }",
+    b"\"desc\" query { id }",
   )
   .expect("slice described definition");
 
