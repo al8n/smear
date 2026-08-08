@@ -9,6 +9,8 @@
 //! a subset — a linter checking only the fragment rules, say — hands one to
 //! [`validate_executable_with`](super::validate_executable_with).
 
+use crate::diagnostic::{Code, Severity};
+
 /// One draft §5 validation rule.
 ///
 /// Every variant carries its specification section in its documentation, and the section numbers
@@ -312,6 +314,228 @@ impl Rule {
       Self::AllVariableUsagesAreAllowed => "All Variable Usages Are Allowed",
       Self::MergeDepthBudget => "Merge Depth Budget Exceeded",
       Self::MergeWorkBudget => "Merge Work Budget Exceeded",
+    }
+  }
+
+  /// Returns the stable identifier for this rule.
+  ///
+  /// Not [`section`](Self::section), which looks like one and is not: it is unique only inside
+  /// this enum, the two budget rules had to invent fake sections to keep it so, and a renderer
+  /// holding schema, validation and execution diagnostics at once needs one flat namespace across
+  /// all of them.
+  #[inline]
+  pub const fn code(&self) -> Code {
+    match self {
+      Self::OperationTypeExistence => Code::new("smear::validation::operation-type-existence"),
+      Self::OperationNameUniqueness => Code::new("smear::validation::operation-name-uniqueness"),
+      Self::LoneAnonymousOperation => Code::new("smear::validation::lone-anonymous-operation"),
+      Self::SingleRootField => Code::new("smear::validation::single-root-field"),
+      Self::FieldSelections => Code::new("smear::validation::field-selections"),
+      Self::FieldSelectionMerging => Code::new("smear::validation::field-selection-merging"),
+      Self::LeafFieldSelections => Code::new("smear::validation::leaf-field-selections"),
+      Self::ArgumentNames => Code::new("smear::validation::argument-names"),
+      Self::ArgumentUniqueness => Code::new("smear::validation::argument-uniqueness"),
+      Self::RequiredArguments => Code::new("smear::validation::required-arguments"),
+      Self::FragmentNameUniqueness => Code::new("smear::validation::fragment-name-uniqueness"),
+      Self::FragmentSpreadTypeExistence => {
+        Code::new("smear::validation::fragment-spread-type-existence")
+      }
+      Self::FragmentsOnCompositeTypes => {
+        Code::new("smear::validation::fragments-on-composite-types")
+      }
+      Self::FragmentsMustBeUsed => Code::new("smear::validation::fragments-must-be-used"),
+      Self::FragmentSpreadTargetDefined => {
+        Code::new("smear::validation::fragment-spread-target-defined")
+      }
+      Self::FragmentSpreadsMustNotFormCycles => {
+        Code::new("smear::validation::fragment-spreads-must-not-form-cycles")
+      }
+      Self::FragmentSpreadIsPossible => Code::new("smear::validation::fragment-spread-is-possible"),
+      Self::ValuesOfCorrectType => Code::new("smear::validation::values-of-correct-type"),
+      Self::InputObjectFieldNames => Code::new("smear::validation::input-object-field-names"),
+      Self::InputObjectFieldUniqueness => {
+        Code::new("smear::validation::input-object-field-uniqueness")
+      }
+      Self::InputObjectRequiredFields => {
+        Code::new("smear::validation::input-object-required-fields")
+      }
+      Self::DirectivesAreDefined => Code::new("smear::validation::directives-are-defined"),
+      Self::DirectivesAreInValidLocations => {
+        Code::new("smear::validation::directives-are-in-valid-locations")
+      }
+      Self::DirectivesAreUniquePerLocation => {
+        Code::new("smear::validation::directives-are-unique-per-location")
+      }
+      Self::VariableUniqueness => Code::new("smear::validation::variable-uniqueness"),
+      Self::VariablesAreInputTypes => Code::new("smear::validation::variables-are-input-types"),
+      Self::AllVariableUsesDefined => Code::new("smear::validation::all-variable-uses-defined"),
+      Self::AllVariablesUsed => Code::new("smear::validation::all-variables-used"),
+      Self::AllVariableUsagesAreAllowed => {
+        Code::new("smear::validation::all-variable-usages-are-allowed")
+      }
+      Self::MergeDepthBudget => Code::new("smear::validation::merge-depth-budget"),
+      Self::MergeWorkBudget => Code::new("smear::validation::merge-work-budget"),
+    }
+  }
+
+  /// Returns how much this rule asks of its reader.
+  ///
+  /// Every draft §5 rule is an [`Severity::Error`]: a document that trips one is invalid and is
+  /// not executed. Spelled out variant by variant rather than as a wildcard so that the first
+  /// rule of the deprecation-lint class — a selected field that is `@deprecated`, which changes
+  /// no verdict — has to declare itself here.
+  #[inline]
+  pub const fn severity(&self) -> Severity {
+    match self {
+      Self::OperationTypeExistence
+      | Self::OperationNameUniqueness
+      | Self::LoneAnonymousOperation
+      | Self::SingleRootField
+      | Self::FieldSelections
+      | Self::FieldSelectionMerging
+      | Self::LeafFieldSelections
+      | Self::ArgumentNames
+      | Self::ArgumentUniqueness
+      | Self::RequiredArguments
+      | Self::FragmentNameUniqueness
+      | Self::FragmentSpreadTypeExistence
+      | Self::FragmentsOnCompositeTypes
+      | Self::FragmentsMustBeUsed
+      | Self::FragmentSpreadTargetDefined
+      | Self::FragmentSpreadsMustNotFormCycles
+      | Self::FragmentSpreadIsPossible
+      | Self::ValuesOfCorrectType
+      | Self::InputObjectFieldNames
+      | Self::InputObjectFieldUniqueness
+      | Self::InputObjectRequiredFields
+      | Self::DirectivesAreDefined
+      | Self::DirectivesAreInValidLocations
+      | Self::DirectivesAreUniquePerLocation
+      | Self::VariableUniqueness
+      | Self::VariablesAreInputTypes
+      | Self::AllVariableUsesDefined
+      | Self::AllVariablesUsed
+      | Self::AllVariableUsagesAreAllowed
+      | Self::MergeDepthBudget
+      | Self::MergeWorkBudget => Severity::Error,
+    }
+  }
+
+  /// Returns what the document's author can do about it, where the rule has something
+  /// actionable to say beyond its title.
+  ///
+  /// `None` where the rule's own name is the instruction: nothing useful is added to "argument
+  /// names" by a line saying to check the argument's name.
+  #[inline]
+  pub const fn help(&self) -> Option<&'static str> {
+    match self {
+      Self::OperationTypeExistence => Some(
+        "the schema defines no root operation type of this kind; add one, or send a different operation.",
+      ),
+      Self::LoneAnonymousOperation => Some("name every operation, or send only one."),
+      Self::SingleRootField => Some(
+        "a subscription's root selection set must collect exactly one field, and that field must not be an introspection field nor carry `@skip` or `@include`.",
+      ),
+      Self::FieldSelections => Some(
+        "check the type in scope: a union defines no fields of its own, so `__typename` is the only thing selectable directly on one.",
+      ),
+      Self::FieldSelectionMerging => {
+        Some("give one of the two selections an alias, so the response key is no longer shared.")
+      }
+      Self::LeafFieldSelections => Some(
+        "a scalar or enum field takes no subselection; an object, interface or union field requires one.",
+      ),
+      Self::RequiredArguments => Some(
+        "a required argument is non-null with no default, and an explicit `null` does not satisfy one.",
+      ),
+      Self::FragmentsOnCompositeTypes => Some(
+        "a type condition must name an object, interface or union type; a scalar or enum has no selection set to spread into.",
+      ),
+      Self::FragmentsMustBeUsed => Some("spread it from an operation, or delete it."),
+      Self::FragmentSpreadsMustNotFormCycles => {
+        Some("break the cycle; expanding it would never terminate.")
+      }
+      Self::FragmentSpreadIsPossible => Some(
+        "the type condition and the type in scope have no object type in common, so the fragment could never apply.",
+      ),
+      Self::InputObjectRequiredFields => Some(
+        "a required field is non-null with no default, and an explicit `null` does not satisfy one.",
+      ),
+      Self::DirectivesAreInValidLocations => Some(
+        "the directive's definition lists where it may be used, and this is not one of those places.",
+      ),
+      Self::DirectivesAreUniquePerLocation => {
+        Some("declare the directive `repeatable` in the schema, or apply it once here.")
+      }
+      Self::VariablesAreInputTypes => Some(
+        "a variable's type must be a scalar, enum or input object; an object, interface or union cannot be sent as input.",
+      ),
+      Self::AllVariableUsesDefined => Some(
+        "declare it on the operation — including when the use is inside a fragment the operation spreads.",
+      ),
+      Self::AllVariablesUsed => Some("use it, or drop the declaration."),
+      Self::AllVariableUsagesAreAllowed => Some(
+        "a nullable variable may stand in a non-null position only if it has a default; otherwise widen the position or narrow the variable.",
+      ),
+      Self::MergeDepthBudget => Some(
+        "raise `Budget::merge_depth`, or refuse the document: the depth is this crate's bound on draft 5.3.2, which the specification leaves unbounded.",
+      ),
+      Self::MergeWorkBudget => Some(
+        "raise `Budget::merge_work`, or refuse the document: breadth times fragment reuse is what actually bounds draft 5.3.2.",
+      ),
+      Self::OperationNameUniqueness
+      | Self::ArgumentNames
+      | Self::ArgumentUniqueness
+      | Self::FragmentNameUniqueness
+      | Self::FragmentSpreadTypeExistence
+      | Self::FragmentSpreadTargetDefined
+      | Self::ValuesOfCorrectType
+      | Self::InputObjectFieldNames
+      | Self::InputObjectFieldUniqueness
+      | Self::DirectivesAreDefined
+      | Self::VariableUniqueness => None,
+    }
+  }
+
+  /// Returns the phrase for the second span a [`Diagnostic`](super::Diagnostic) of this rule
+  /// points at.
+  ///
+  /// `Some` exactly for the rules that are about a *relationship* between two places: the eight
+  /// uniqueness and cycle rules, plus draft 5.3.2, whose whole subject is a pair of selections.
+  #[inline]
+  pub const fn related_label(&self) -> Option<&'static str> {
+    match self {
+      Self::OperationNameUniqueness => Some("first defined here"),
+      Self::FieldSelectionMerging => Some("the other selection"),
+      Self::ArgumentUniqueness => Some("first passed here"),
+      Self::FragmentNameUniqueness => Some("first defined here"),
+      Self::FragmentSpreadsMustNotFormCycles => Some("the fragment the cycle returns to"),
+      Self::InputObjectFieldUniqueness => Some("first given here"),
+      Self::DirectivesAreUniquePerLocation => Some("first applied here"),
+      Self::VariableUniqueness => Some("first declared here"),
+      Self::OperationTypeExistence
+      | Self::LoneAnonymousOperation
+      | Self::SingleRootField
+      | Self::FieldSelections
+      | Self::LeafFieldSelections
+      | Self::ArgumentNames
+      | Self::RequiredArguments
+      | Self::FragmentSpreadTypeExistence
+      | Self::FragmentsOnCompositeTypes
+      | Self::FragmentsMustBeUsed
+      | Self::FragmentSpreadTargetDefined
+      | Self::FragmentSpreadIsPossible
+      | Self::ValuesOfCorrectType
+      | Self::InputObjectFieldNames
+      | Self::InputObjectRequiredFields
+      | Self::DirectivesAreDefined
+      | Self::DirectivesAreInValidLocations
+      | Self::VariablesAreInputTypes
+      | Self::AllVariableUsesDefined
+      | Self::AllVariablesUsed
+      | Self::AllVariableUsagesAreAllowed
+      | Self::MergeDepthBudget
+      | Self::MergeWorkBudget => None,
     }
   }
 }

@@ -11,6 +11,7 @@ use super::{
   Rule,
   schema::{DirectiveLocation, PackedType, RootOperation, Schema, Sym},
 };
+use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
 /// The schema-side half of a diagnostic: what the rule expected, in the schema's own vocabulary.
 ///
@@ -204,10 +205,103 @@ impl<S> Diagnostic<S> {
 }
 
 /// The rendering of a [`Diagnostic`] against its schema, from [`Diagnostic::display`].
+///
+/// It is also the value that implements
+/// [`Diagnose`](crate::diagnostic::Diagnose), and for the same reason it exists at all: a
+/// [`Diagnostic`] alone cannot answer, because its [`Context`] is interned symbols and its message
+/// needs the schema those symbols index. Pairing the two is what makes a resolved view, so the
+/// door into the contract is the door that was already there —
+/// [`display`](Diagnostic::display).
 #[derive(Debug, Clone, Copy)]
 pub struct DiagnosticDisplay<'a, S> {
   diagnostic: &'a Diagnostic<S>,
   schema: &'a Schema,
+}
+
+impl<S> DiagnosticDisplay<'_, S> {
+  /// The related span paired with the phrase its rule gives it.
+  ///
+  /// Computed once so that [`Diagnose::labels`] and [`Diagnose::label`] cannot disagree about how
+  /// many there are.
+  #[inline]
+  const fn secondary(&self) -> Option<Label> {
+    match (
+      self.diagnostic.related,
+      self.diagnostic.rule.related_label(),
+    ) {
+      (Some(span), Some(text)) => Some(Label::new(Location::new(SOURCE, span), text)),
+      _ => None,
+    }
+  }
+}
+
+/// The one document an executable validation reads.
+///
+/// [`validate_executable`](super::validate_executable) is handed a single
+/// `ExecutableDocument`, so every span it reports indexes the same input and there is nothing for
+/// [`Location::source`] to distinguish. The schema is a separate coordinate space that the spans
+/// never point into — a [`Sym`] is an index, not an offset — so it is not a second source here.
+const SOURCE: u32 = 0;
+
+/// A draft §5 diagnostic, read as structure rather than as a sentence.
+///
+/// The bound is the same one [`Display`](core::fmt::Display) carries, because
+/// [`Diagnose`](crate::diagnostic::Diagnose) has it as a supertrait: rendering a diagnostic means
+/// writing the document's own spelling of a name, and that spelling is `S`.
+///
+/// No path segments. Draft §5 runs before execution begins, so there is no response tree for a
+/// path to be a coordinate in.
+impl<S> Diagnose for DiagnosticDisplay<'_, S>
+where
+  S: AsRef<[u8]>,
+{
+  #[inline]
+  fn code(&self) -> Code {
+    self.diagnostic.rule.code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.diagnostic.rule.severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    Location::new(SOURCE, self.diagnostic.span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.diagnostic.rule.title())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    usize::from(self.secondary().is_some())
+  }
+
+  #[inline]
+  fn label(&self, index: usize) -> Option<Label> {
+    match index {
+      0 => self.secondary(),
+      _ => None,
+    }
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.diagnostic.rule.help()
+  }
 }
 
 impl<S> core::fmt::Display for DiagnosticDisplay<'_, S>

@@ -32,6 +32,7 @@ use std::{
 };
 
 use smear::{
+  diagnostic::{Diagnose, DiagnoseExt},
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
     GraphQL,
@@ -454,4 +455,143 @@ fn only_rendering_allocates() {
     std::hint::black_box(&owned);
   });
   assert!(rendering >= 1, "`to_string` should allocate");
+
+  // -------------------------------------------------------------------------------------------
+  // the same claim for the whole diagnostic contract, read through `&dyn Diagnose`
+  // -------------------------------------------------------------------------------------------
+  //
+  // The claim `smear::diagnostic` makes is stronger than "rendering is the caller's decision": it
+  // is that a renderer can read a diagnostic's ENTIRE structure — code, severity, primary,
+  // primary label, every secondary label, every response-path segment, help — and write the
+  // message out, without touching the allocator. That is what makes `&dyn Diagnose` usable in a
+  // request path at all, and it holds only because every vocabulary type is `Copy` and every
+  // label and help string is `&'static`.
+  //
+  // Three things about the measurement below, each load-bearing:
+  //
+  //   * **No warm-up.** Nothing here is read before the window opens. A warm-up pass is what the
+  //     validation gates above need, because the caller's buffers have a high-water mark to
+  //     reach; the contract has no working set to fill, so needing one would itself be the
+  //     finding.
+  //   * **Erased.** Every subject goes in as `&dyn Diagnose`, because a concrete call could be
+  //     inlined into nothing and prove less than it appears to. Vtable dispatch is what a server
+  //     rendering three families in one pass actually executes.
+  //   * **The gate discriminates.** `the_gate_counts` at the top of this file is what says a zero
+  //     here means "nothing allocated" rather than "nothing was looking", and the `to_string`
+  //     assertion immediately above shows the same counter reporting a real allocation a few
+  //     lines earlier in this very test.
+  let duplicate = parse_sdl("type Query { ok: Int } type Query { ok: Int }");
+  let refusals = Schema::build(&duplicate).expect_err("a duplicate type name is a refusal");
+  let refusal = refusals.errors().first().expect("a refusal");
+  let view = diagnostic.display(&schema);
+
+  #[cfg(feature = "introspection")]
+  let response = {
+    let refusal = Schema::from_introspection("{ not a response").expect_err("not JSON");
+    let smear::validator::IntrospectionError::Response(error) = refusal else {
+      panic!("expected a shape refusal");
+    };
+    error
+  };
+
+  // Assembled outside the window: the storage is the harness's, not the contract's.
+  let mut contract: Vec<&dyn Diagnose> = Vec::with_capacity(4);
+  contract.push(refusal);
+  contract.push(&view);
+  #[cfg(feature = "introspection")]
+  contract.push(&response);
+  let mut sink = StackBuffer::<512>::new();
+
+  let counted = allocations(|| {
+    for subject in &contract {
+      read_the_whole_contract(*subject, &mut sink);
+    }
+  });
+  assert_eq!(
+    counted,
+    0,
+    "reading {} diagnostics through `&dyn Diagnose` and rendering them into a stack buffer \
+     allocated {counted} times",
+    contract.len()
+  );
+  assert!(sink.len() > 0, "the last message rendered to nothing");
+}
+
+/// A `core::fmt::Write` sink over a fixed stack buffer.
+///
+/// A `String` would allocate once and then never again, which is the wrong instrument: it would
+/// make a contract accessor that allocated on every call indistinguishable from one that did not,
+/// as long as the buffer was warm. This one cannot allocate at all, so anything the counter sees
+/// came from the contract.
+struct StackBuffer<const N: usize> {
+  bytes: [u8; N],
+  len: usize,
+}
+
+impl<const N: usize> StackBuffer<N> {
+  const fn new() -> Self {
+    Self {
+      bytes: [0; N],
+      len: 0,
+    }
+  }
+
+  const fn len(&self) -> usize {
+    self.len
+  }
+
+  const fn clear(&mut self) {
+    self.len = 0;
+  }
+}
+
+impl<const N: usize> core::fmt::Write for StackBuffer<N> {
+  fn write_str(&mut self, text: &str) -> core::fmt::Result {
+    let end = self.len + text.len();
+    if end > N {
+      return Err(core::fmt::Error);
+    }
+    self.bytes[self.len..end].copy_from_slice(text.as_bytes());
+    self.len = end;
+    Ok(())
+  }
+}
+
+/// Reads every method of the contract, including the indices one past each collection, and writes
+/// the message out.
+///
+/// Exhaustive by hand rather than by macro: a method added to `Diagnose` and not read here would
+/// leave the claim covering less than it says, and there is nothing that could notice.
+fn read_the_whole_contract(subject: &dyn Diagnose, sink: &mut StackBuffer<512>) {
+  use core::{fmt::Write as _, hint::black_box};
+
+  black_box(subject.code());
+  black_box(subject.severity());
+  black_box(subject.primary());
+  black_box(subject.primary_label());
+  black_box(subject.help());
+
+  let labels = subject.labels();
+  black_box(labels);
+  for index in 0..=labels {
+    black_box(subject.label(index));
+  }
+  let segments = subject.path_segments();
+  black_box(segments);
+  for index in 0..=segments {
+    black_box(subject.path_segment(index));
+  }
+
+  // The provided iterators too: they are the door most renderers will actually use, and one that
+  // allocated would leave the indexed measurement above technically true and practically wrong.
+  for label in subject.labels_iter() {
+    black_box(label);
+  }
+  for segment in subject.path_segments_iter() {
+    black_box(segment);
+  }
+
+  sink.clear();
+  write!(sink, "{subject}").expect("the message fits the buffer");
+  black_box(sink.len());
 }
