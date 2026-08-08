@@ -1,0 +1,26 @@
+[package]
+name = "source-census"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# A workspace member with NO edge to `smear`, which is the property that keeps the arithmetic in
+# the root manifest's header unchanged: it adds no feature to the resolve, so nothing about which
+# `smear` features a workspace-wide command turns on moves because this crate exists. It is a
+# member so that `cargo fmt --all`, `cargo clippy --workspace` and `cargo test --workspace` reach
+# it — a gate that its own repository's gates do not check is a gate that rots.
+
+[dependencies]
+# `span-locations` is what turns a `syn` span into a file/line, and the census reports one per
+# finding: a narrowing named without a line is a narrowing someone has to grep for. Feature
+# resolver 3 keeps normal-dependency features apart from proc-macro ones, so enabling it here
+# does not reach the `proc-macro2` that `thiserror` and `derive_more` build against.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+syn = { version = "2", features = ["full", "parsing", "printing", "clone-impls", "extra-traits"] }
+
+[lints]
+workspace = true
