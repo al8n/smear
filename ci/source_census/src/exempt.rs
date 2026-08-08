@@ -336,14 +336,14 @@ pub fn validate() -> Vec<String> {
     .collect()
 }
 
-/// The guards, on one record. Public so the selftest can hand it a deliberately broken one.
-pub fn check_one(exemption: &Exemption, index: usize) -> Vec<String> {
+/// The two guards on a written reason, wherever a table records one.
+///
+/// Shared with the diagnostic census's own table rather than restated there: what makes an
+/// exemption an argument is one decision, and a second copy of it is a second threshold that
+/// drifts from this one.
+pub fn reason_problems(reason: &str, at: &str) -> Vec<String> {
   let mut problems = Vec::new();
-  let at = format!(
-    "exemption {} ({}::{} / {})",
-    index, exemption.module, exemption.entry, exemption.param
-  );
-  let reason = exemption.reason.trim();
+  let reason = reason.trim();
   if reason.len() < MIN_REASON {
     problems.push(format!(
       "{at}: the reason is {} bytes and the census requires at least {MIN_REASON}. An exemption \
@@ -358,6 +358,16 @@ pub fn check_one(exemption: &Exemption, index: usize) -> Vec<String> {
        looks like when someone has to fill a required field"
     ));
   }
+  problems
+}
+
+/// The guards, on one record. Public so the selftest can hand it a deliberately broken one.
+pub fn check_one(exemption: &Exemption, index: usize) -> Vec<String> {
+  let at = format!(
+    "exemption {} ({}::{} / {})",
+    index, exemption.module, exemption.entry, exemption.param
+  );
+  let mut problems = reason_problems(exemption.reason, &at);
   match (exemption.kind, exemption.issue) {
     (Kind::Tracked, None) => problems.push(format!(
       "{at}: a tracked narrowing must name the issue that owns it, or it is debt with nowhere to \

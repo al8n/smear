@@ -16,6 +16,8 @@ use crate::{
 /// One public function or inherent method the census read.
 pub struct Entry {
   pub module: String,
+  /// The same module, unjoined, for a resolver that has to compare it segment by segment.
+  pub module_path: Vec<String>,
   pub name: String,
   pub file: String,
   pub line: usize,
@@ -75,15 +77,14 @@ pub struct Report {
   pub table_problems: Vec<String>,
 }
 
-/// Reads the crate at `lib_rs` and classifies every concrete text parameter on its public surface.
+/// Classifies every concrete text parameter on the crate's public surface.
 ///
 /// Detection only: the exemption table is applied by [`reconcile`], so that the selftest can
 /// exercise the rule against synthetic crates the table knows nothing about.
-pub fn detect(lib_rs: &std::path::Path, crate_name: &str) -> Result<Report, String> {
-  let surface = surface::load(lib_rs, crate_name)?;
-  let crate_types = declared_types(&surface);
-  let source_positions = derive_source_positions(&surface, &crate_types);
-  let entries = collect_entries(&surface);
+pub fn detect(surface: &Surface) -> Report {
+  let crate_types = declared_types(surface);
+  let source_positions = derive_source_positions(surface, &crate_types);
+  let entries = collect_entries(surface);
 
   let mut observations = Vec::new();
   let mut params_read = 0usize;
@@ -140,7 +141,7 @@ pub fn detect(lib_rs: &std::path::Path, crate_name: &str) -> Result<Report, Stri
     ))
   });
 
-  let macro_templates = surface::macro_templates(&surface);
+  let macro_templates = surface::macro_templates(surface);
   let public_modules = surface
     .modules
     .iter()
@@ -148,7 +149,7 @@ pub fn detect(lib_rs: &std::path::Path, crate_name: &str) -> Result<Report, Stri
     .map(|m| m.display_path())
     .collect();
 
-  Ok(Report {
+  Report {
     entries_read: entries.len(),
     params_read,
     observations,
@@ -161,7 +162,7 @@ pub fn detect(lib_rs: &std::path::Path, crate_name: &str) -> Result<Report, Stri
     recorded: Vec::new(),
     stale: Vec::new(),
     table_problems: Vec::new(),
-  })
+  }
 }
 
 /// Matches every narrowing against the exemption table, and the table against the crate.
@@ -372,7 +373,7 @@ fn derive_source_positions(surface: &Surface, crate_types: &BTreeSet<String>) ->
 }
 
 /// Every public function, inherent method and trait method the crate exposes.
-fn collect_entries(surface: &Surface) -> Vec<Entry> {
+pub fn collect_entries(surface: &Surface) -> Vec<Entry> {
   let mut out = Vec::new();
   for module in &surface.modules {
     let module_path = module.display_path();
@@ -389,6 +390,7 @@ fn collect_entries(surface: &Surface) -> Vec<Entry> {
           scope.extend_from(&f.sig.generics);
           out.push(Entry {
             module: module_path.clone(),
+            module_path: module.path.clone(),
             name: f.sig.ident.to_string(),
             file: module.file.display().to_string(),
             line: line_of(&f.sig.ident),
@@ -415,6 +417,7 @@ fn collect_entries(surface: &Surface) -> Vec<Entry> {
             scope.extend_from(&f.sig.generics);
             out.push(Entry {
               module: module_path.clone(),
+              module_path: module.path.clone(),
               name: format!("{}::{}", t.ident, f.sig.ident),
               file: module.file.display().to_string(),
               line: line_of(&f.sig.ident),
@@ -445,6 +448,7 @@ fn collect_entries(surface: &Surface) -> Vec<Entry> {
             scope.extend_from(&f.sig.generics);
             out.push(Entry {
               module: module_path.clone(),
+              module_path: module.path.clone(),
               name: format!("{}::{}", type_name, f.sig.ident),
               file: module.file.display().to_string(),
               line: line_of(&f.sig.ident),
