@@ -125,6 +125,15 @@ mod tests;
 ///    it looks like a bound that is orders of magnitude looser than the one that decides the
 ///    outcome, so the buffer outgrows the refusal that was coming. Charge against the ceiling that
 ///    will decide, not the one the code path is nearest to.
+///
+///    Moving a refusal earlier is only safe if the earlier site reports what the later one would,
+///    and that is a claim about *every* observable, not the ones a suite happens to exercise. This
+///    one shipped reporting the field **name's** span where the commit reports the **field's**,
+///    which differ only when the selection is aliased — `q: b` against `b` — so eighty-nine passing
+///    cases said nothing, none of them having an alias at the crossing selection. Both collection
+///    refusals now use `field.span()`, and the pair of alias cases is the evidence. **When two paths
+///    are claimed observably identical, the evidence has to include an input on which they could
+///    have differed.**
 /// 4. **Attach death to the resource, not to a code path.** The root is stored by `start` and not by
 ///    `complete`, and an object whose selection is only `__typename` enqueues nothing at all — so a
 ///    release hung off "the completion path" misses the first and a release hung off "the last

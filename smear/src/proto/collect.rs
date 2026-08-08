@@ -134,7 +134,12 @@ impl Allowance {
     }
     Err(Fault {
       raw: Raw::MetadataBudget { limit: self.limit },
-      location: *field.name().as_span(),
+      // The *field's* span, not the name's, because that is what the path this replaces reports:
+      // `expand`'s own refusal points at `first.span()` and every committed location comes from
+      // `field.span()`. Both cover the alias, so `p: boom` reports `p: boom` — and the name's span
+      // would have reported `boom`, silently pointing at the schema field instead of the response
+      // key the client asked for.
+      location: *field.span(),
       name: None,
     })
   }
@@ -398,7 +403,9 @@ where
             raw: Raw::NameStorage {
               limit: interner.cap(),
             },
-            location: *field.name().as_span(),
+            // The field's span for the reason the staging charge uses it: a collection-side refusal
+            // reports where a commit-side one would, and a commit-side location includes the alias.
+            location: *field.span(),
             name: None,
           });
         };

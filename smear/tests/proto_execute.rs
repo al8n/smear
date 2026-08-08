@@ -3708,3 +3708,109 @@ fn a_position_refusal_mid_expansion_costs_its_siblings_nothing() {
     "`other` fitted and must be in the response"
   );
 }
+
+// ------------------------------------------------------------------------------------------
+// A collection-side refusal points where a commit-side one would
+// ------------------------------------------------------------------------------------------
+//
+// Charging the staging buffer moved every metadata refusal from the commit to the collection, and
+// the two paths had to stay observably identical for that to be a safe move. Eighty-nine cases
+// passing was offered as the evidence and it was not evidence: **none of them has an alias as the
+// crossing selection**, and an alias is the only input on which the two spans can differ at all.
+// The commit path reports `field.span()`, which covers `p: boom`; the collection path was reporting
+// the *name's* span, which covers only `boom`.
+//
+// So these two are shaped rather than sized. There is no quantity to tune — the crossing selection
+// simply has to be aliased, and without that the case cannot fail no matter how wide it is.
+
+/// A metadata refusal on an aliased selection names the alias, not the schema field behind it.
+///
+/// **Why two.** One selection costs two metadata entries, so a ceiling of two admits exactly one
+/// and the second crosses. The second is written `q: b`, which is the whole point: the field it
+/// resolves is `b`, and reporting `b` would send a client looking at a response key it never asked
+/// for.
+#[test]
+fn a_metadata_refusal_on_an_alias_points_at_the_alias() {
+  let query = "{ p: a q: b }";
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let located = execute_bounded(
+    BUDGET_SDL,
+    query,
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    Vec::new(),
+    limits,
+    |response| {
+      response
+        .errors()
+        .map(|error| {
+          error
+            .locations()
+            .iter()
+            .map(|span| (span.start(), span.end()))
+            .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
+    },
+  );
+
+  assert_eq!(located.len(), 1, "one refusal at the root");
+  assert_eq!(located[0].len(), 1);
+  let (start, end) = located[0][0];
+  assert_eq!(
+    &query[start..end],
+    "q: b",
+    "the whole aliased selection, exactly as the commit path reports it — the field name alone \
+     would be `b`, which is not what the client asked for"
+  );
+}
+
+/// The interner refusal on a response key does the same, and for the same reason.
+///
+/// The other collection-side site the staging charge sits beside. It had the same span from an
+/// earlier round, so it had the same defect and no case that could see it.
+///
+/// **Why one.** A one-byte arena admits no key at all, so the very first selection crosses — and it
+/// is written `zz: a`, so the two spans differ.
+#[test]
+fn a_name_storage_refusal_on_an_alias_points_at_the_alias() {
+  let query = "{ zz: a }";
+  let limits = Limits {
+    max_interned_bytes: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+  let located = execute_bounded(
+    BUDGET_SDL,
+    query,
+    obj(vec![("a", J::Str("A".to_owned()))]),
+    Vec::new(),
+    limits,
+    |response| {
+      response
+        .errors()
+        .map(|error| {
+          (
+            error.kind(),
+            error
+              .locations()
+              .iter()
+              .map(|span| (span.start(), span.end()))
+              .collect::<Vec<_>>(),
+          )
+        })
+        .collect::<Vec<_>>()
+    },
+  );
+
+  assert_eq!(located.len(), 1);
+  assert_eq!(located[0].0, Kind::ResponseBudget);
+  assert_eq!(located[0].1.len(), 1);
+  let (start, end) = located[0].1[0];
+  assert_eq!(
+    &query[start..end],
+    "zz: a",
+    "the aliased selection whose key could not be stored, not the field behind it"
+  );
+}
