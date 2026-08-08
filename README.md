@@ -175,11 +175,52 @@ published, so nothing on crates.io moved; this affects path and git dependents o
 
 ## Benchmarks
 
-All benchmarks compare **smear** against [`apollo-parser`](https://crates.io/crates/apollo-parser), [`graphql-parser`](https://crates.io/crates/graphql-parser), [`async-graphql-parser`](https://crates.io/crates/async-graphql-parser), and [`cynic-parser`](https://crates.io/crates/cynic-parser). Lower is better.
+Lower is better throughout. Three harnesses across two packages produce these numbers, and they
+measure different things:
 
-Run with: `cargo bench --package smear-benches --bench <name> -- --quick`
+| Harness | Package | What it measures |
+|---|---|---|
+| `executables`, `type_system` | `smear-benches` | Parsing, against four other Rust GraphQL parsers |
+| `validator_comparison` | `smear-apollo-bench` (`benchmarks/`) | Draft §5 validation and `Schema::build`, against `apollo-compiler` |
+| `apollo_comparison` | `smear-apollo-bench` (`benchmarks/`) | The lossless CST tower against `apollo-parser`, tier by tier |
+
+Every bench sets `harness = false` and runs under criterion, so a run must name its target:
+
+```sh
+cargo bench --package smear-benches      --bench executables          -- --quick
+cargo bench --package smear-benches      --bench type_system          -- --quick
+cargo bench --package smear-apollo-bench --bench validator_comparison -- --quick
+cargo bench --package smear-apollo-bench --bench apollo_comparison    -- --quick
+```
+
+### Provenance
+
+> **The tables below are stale, and nothing in CI will tell you so.** They predate #116 (fused
+> field-tail dispatch), #118 (`Schema::build`'s fixed cost) and #120 (the lossless projection),
+> each of which moved smear's own timings in its favour; the competitors' columns were not
+> re-measured either. Treat the ratios as a lower bound on smear's current standing rather than as
+> a current measurement.
+>
+> Their provenance — the commit, the date, the machine, the criterion invocation — was never
+> recorded, which is exactly why the drift went unnoticed for three releases. A benchmark gate in
+> CI is too flaky to be worth having, so the cheap honest substitute is this block: **anyone
+> refreshing a table below must replace this paragraph with the four facts**, in the shape
+>
+> ```text
+> Measured on <commit> · <date> · <machine, cores, OS> · <exact criterion invocation>
+> Host state: <idle % before / after, and whether any compiler was running>
+> ```
+>
+> so the next reader can judge staleness and reproduce the run. Numbers on a shared or compiling
+> host are worth less than no numbers at all: verify the host is idle before and after, and note
+> that macOS load average is not a usable signal here — it reads around 3.3 at 80% idle.
 
 ### Schema Parsing
+
+Against [`apollo-parser`](https://crates.io/crates/apollo-parser),
+[`graphql-parser`](https://crates.io/crates/graphql-parser),
+[`async-graphql-parser`](https://crates.io/crates/async-graphql-parser) and
+[`cynic-parser`](https://crates.io/crates/cynic-parser).
 
 | Schema | smear | apollo-parser | graphql-parser | async-graphql-parser | cynic-parser |
 |---|---|---|---|---|---|
@@ -206,7 +247,33 @@ Run with: `cargo bench --package smear-benches --bench <name> -- --quick`
 | many_aliases | **30.9 µs** | 44.6 µs | 58.8 µs | 99.7 µs | 27.3 µs |
 | huge_comprehensive | **34.9 µs** | 66.3 µs | 61.0 µs | 176 µs | 34.8 µs |
 
-**Summary:** smear is consistently the fastest GraphQL parser across all benchmarks — **1.4-6.5x faster** than alternatives depending on the workload. On schema parsing, smear is **2-2.7x faster** than apollo-parser, **1.4-2x faster** than graphql-parser, **4-6.5x faster** than async-graphql-parser, and **~1.3x faster** than cynic-parser. On query parsing, smear matches or beats cynic-parser (the closest competitor) on every benchmark while being **2-5x faster** than apollo-parser and graphql-parser.
+**Summary, as of the un-provenanced run these two tables record:** smear is consistently the fastest GraphQL parser across all benchmarks — **1.4-6.5x faster** than alternatives depending on the workload. On schema parsing, smear is **2-2.7x faster** than apollo-parser, **1.4-2x faster** than graphql-parser, **4-6.5x faster** than async-graphql-parser, and **~1.3x faster** than cynic-parser. On query parsing, smear matches or beats cynic-parser (the closest competitor) on every benchmark while being **2-5x faster** than apollo-parser and graphql-parser.
+
+### Validation
+
+Parsing is only half of what a GraphQL front end does, and it is the half these tables have always
+covered. Validation is measured too, by `benchmarks/benches/validator_comparison.rs`, against
+[`apollo-compiler`](https://crates.io/crates/apollo-compiler) as both oracle and baseline — but it
+has never been tabulated here, and this section is the shape that table takes rather than the
+table itself. **No number below has been filled in, because no run on a verified-idle host was
+available; see the provenance block above for what a run has to record.**
+
+Two workloads, both `(schema, query)` pairs: `realistic`, the design spec's own baseline, and
+`supergraph`, a real federated schema two orders of magnitude larger behind a query of the same
+size — and an *invalid* one, so that row also times the path a server takes when it rejects.
+
+Three groups, because they answer three different questions:
+
+| Group | Rows | The question |
+|---|---|---|
+| `validator/<workload>` | `smear/validate`, `smear/validate_lossless`, `apollo/to_executable_validate` | Validate-only, over an already-parsed document |
+| `validator/<workload>` | `smear/parse_and_validate`, `smear/parse_and_validate_lossless`, `apollo/parse_and_validate` | End to end, which is what a server actually pays |
+| `schema_build/<workload>` | `smear`, `smear_lossless`, `apollo` | Building the schema once, which a server pays at startup |
+
+Both of smear's doors appear in every group. The **syntactic** door parses to an AST and validates
+the AST; the **lossless** door parses to a CST, projects it, and validates that — the door an IDE
+or a formatter wants, and the one with the projection to pay for. Reporting only the syntactic row
+would flatter the crate by hiding the door most tools would actually use.
 
 ## Who Should Use Smear?
 
