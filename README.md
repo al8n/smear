@@ -3,7 +3,7 @@
 </div>
 <div align="center">
 
-Blazing fast, fully spec-compliant, reusable parser combinators for standard GraphQL and GraphQL-like DSLs.
+A zero-copy lexer, parser and validator for standard GraphQL, built out of reusable combinators so the same machinery serves GraphQL-like DSLs.
 
 [<img alt="github" src="https://img.shields.io/badge/github-al8n/smear-8da0cb?style=for-the-badge&logo=Github" height="22">][Github-url]
 <img alt="LoC" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fal8n%2F327b2a8aef9003246e45c6e47fe63937%2Fraw%2Fsmear" height="22">
@@ -20,171 +20,266 @@ Blazing fast, fully spec-compliant, reusable parser combinators for standard Gra
 
 ## Overview
 
-**Smear** is a high-performance GraphQL parser library built on parser combinators. It provides zero-copy parsing for the GraphQL draft specification and is designed to enable anyone to develop GraphQL-like Domain Specific Languages (DSLs) using reusable parser combinators.
+**Smear** is a GraphQL front end in three parts: a zero-copy **lexer**, a **parser** that produces
+either a plain AST or a lossless CST, and a **validator** for the draft specification's type-system
+and executable-document rules. Everything above the lexer is built from reusable combinators, so the
+same machinery serves standard GraphQL and GraphQL-like DSLs — GraphQLx, the extended dialect that
+ships alongside, is one of those DSLs rather than a special case.
 
-### Key Features
+### What is implemented, and what is not
 
-- **Thread-Safe & Concurrent**: AST is `Send + Sync` when using thread-safe source types, enabling parallel schema compilation and batched query processing across multiple threads
-- **True Zero-Copy**: All tokens and AST nodes hold slices into the original source—no string allocations, minimal memory footprint, maximum performance
-- **Dual Token Streams**: Choose `SyntacticToken` (fast, skips trivia) for servers or `LosslessToken` (complete, preserves all formatting) for tooling
-- **Generic Over Source Types**: Works seamlessly with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, and custom source types
-- **Highly Customizable**: Three-layer scaffold architecture with reusable combinators for building custom GraphQL-like DSLs
-- **Draft Spec Compliant**: Fully implements the GraphQL draft specification with comprehensive error reporting
-- **GraphQLx Included**: Extended dialect with generics, imports, map types, namespacing, and type paths
-- **`no_std` Compatible**: Works in embedded environments and WASM with optional `alloc` support
+The specification is large, and smear covers the front half of it. Where a row below says a thing is
+absent, it is absent — not partial.
 
-## Why Smear Over Other Rust GraphQL Parsers?
+| Draft section | State |
+|---|---|
+| §2 Language | Parsed in full, by two token streams and into two tree shapes |
+| §3 Type System | Validated inside `Schema::build`: 67 distinct refusals, each with a schema in the test suite that makes it fire |
+| §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. There is no introspection **execution** |
+| §5 Validation | All 30 executable-document rules |
+| §6 Execution | **Not implemented.** Smear parses and validates a request; running it is the caller's |
+| §7 Response | **Not implemented.** `smear::diagnostic` does carry §7.1.2 response paths, so an executor built on top of smear can attach them |
 
-Smear's architecture offers unique advantages that set it apart from other Rust GraphQL parsers like `apollo-parser`, `graphql-parser`, `async-graphql-parser`, and `cynic-parser`:
+Both counts are enumerable rather than asserted. `Rule::ALL` holds 31 entries — the 29 §5 rules that
+need a runtime check, plus two non-specification resource budgets; §5.1.1 needs no entry because the
+grammar gives an executable document no type-system branch to begin with. `SchemaErrorKind::ALL`
+holds 67. Three floors in the test suite keep those numbers meaningful instead of decorative:
+`liveness_floor` demands every rule have a document that fires it *and* a valid twin that does not,
+`refusal_floor` demands the same of every schema refusal, and `branch_floor` adds 31 further rows
+pinning sub-clauses that a single fixture per rule would leave unreached.
 
-### Thread-Safe AST by Design
+## What Smear Does That Other Rust GraphQL Parsers Do Not
 
-Smear's AST is **generic over the source type** `S`. This means when you use a `Send + Sync + 'static` source type (like `bytes::Bytes`, or `hipstr::{HipStr, HipByt}`), the entire AST automatically becomes `Send + Sync + 'static`:
+Compared with `apollo-parser`, `graphql-parser`, `async-graphql-parser` and `cynic-parser`:
 
-This unlocks powerful real-world capabilities:
+### One validator, reached three ways
 
-**For Schemas (TypeSystemDocument)**:
+Validation is not a separate tool bolted on after parsing. Draft §3 runs inside `Schema::build`, so a
+malformed schema is refused once at startup rather than rediscovered on every request, and there is
+exactly one implementation of it behind three entrances:
 
-- **Parallel schema compilation**: Parse and validate multiple schema files concurrently
-- **Concurrent schema analysis**: Run multiple linters/validators on the same schema in parallel
-- **Zero-copy schema sharing**: Share parsed schemas across worker threads in GraphQL servers
+- **SDL** — `Schema::build`, over a parsed `TypeSystemDocument`.
+- **An introspection response** — `Schema::from_introspection` renders a draft §4 response as SDL and
+  hands it to the same builder.
+- **A lossless CST** — `validate_schema_lossless` projects the tree and hands *that* to the same
+  builder, which is what lets an editor validate a schema it is in the middle of typing.
 
-**For Queries (ExecutableDocument)**:
+The three do not carry identical guarantees, and the difference is worth knowing before you pick one.
+An introspection response has no field for applied directives, so the directive-*usage* checks have
+nothing to run on through that door — the type-structure rules run identically, the usage rules
+cannot. The lossless doors recover per definition and return a `Recovery`; a caller that ignores it is
+reading a partial verdict as a total one.
 
-- **Batched query processing**: Parse a batch of queries, then spawn a task/thread for each query to handle them in parallel
-- **Concurrent request handling**: Multi-threaded GraphQL servers can parse incoming queries on different threads simultaneously
-- **Parallel query analysis**: Run validation, complexity analysis, and cost calculation concurrently
+For executable documents, `validate_executable` and its lossless twin `validate_executable_lossless`
+run the same complete §5 rule set, and `RuleSet` selects any subset of it.
 
-### Source Type Flexibility
+### Two token streams, two tree shapes
 
-Choose the source type that fits your use case:
+Most Rust GraphQL parsers give you one. Smear's lexer has a `syntactic` stream that skips trivia —
+whitespace, commas, comments — for servers and query execution, and a `lossless` stream that keeps
+every byte of it, for formatters, linters and IDEs. The parser mirrors the split: an AST from the
+first, and a rowan CST from the second, behind the `rowan` feature.
 
-- `&str` - Borrowed strings for single-threaded performance
-- `&[u8]` - Byte slices for binary protocols
-- `bytes::Bytes`, `hipstr::{HipStr, HipByt}` - Cheap cloning with Arc-backed storage for concurrent processing
+### Zero-copy, and a steady state that allocates nothing
 
-### Designed for DSL Creation
+Tokens and AST nodes hold slices into the original source; no token or node copies the text it spans.
+The validator goes further: once its caller-owned `Scratch` and sink have seen a request the size of
+the ones to come, validating performs **zero heap allocations**. That is measured rather than
+asserted — `smear/tests/validator_allocation.rs` counts with a global allocator, and its
+`the_gate_counts` test proves the counter moves, so a green reading means "nothing allocated" rather
+than "nothing was looking".
 
-The three-layer scaffold architecture provides reusable generic AST node definitions, making it straightforward to build custom GraphQL-like domain-specific languages. GraphQLx (included) demonstrates this by adding generics, imports, type paths, and namespacing to GraphQL.
+### A source type you choose — on the syntactic half
 
-### Dual Token Streams: Syntactic and Lossless
+The syntactic doors are generic over the source type: `&str`, `&[u8]`, `bytes::Bytes`,
+`bstr::BStr`, `hipstr::{HipStr, HipByt}`, `smol_bytes::SmolBytes`, or your own. Pick a
+`Send + Sync + 'static` one and the AST becomes `Send + Sync + 'static` with it, which is what makes
+parallel schema compilation and batched query processing straightforward.
 
-Unlike other Rust GraphQL parsers that only provide one token type, smear offers **two complementary token streams** to suit different use cases:
+**This is not yet true of the whole crate.** The lossless doors and the introspection door take
+`&str`, because rowan stores token text as `&str` and an introspection response is parsed from one.
+A consumer holding `bytes::Bytes` can use the syntactic doors and not those. The narrowings are not
+folklore: `cargo run -p source-census -- --verbose` walks the public surface and prints every one of
+them with a written reason — at this commit, 24 narrowed parameters out of 663, of which 22 are
+tracked against issues [#121] and [#103] as things to widen rather than accepted shapes.
 
-**SyntacticToken (Fast)** - For performance-critical execution:
+### A diagnostic contract, not a `Display` string
 
-- **Skips trivia**: Automatically filters out whitespace, comments, and commas
-- **Optimized for speed**: Minimal memory footprint and fast parsing
-- **Use cases**: GraphQL servers, query execution, schema compilation
-- **Zero-copy**: All tokens reference the original source with no allocations
+`smear::diagnostic` is what every error family in the crate answers: a stable machine `Code`, a
+`Severity`, a primary source `Location` and any number of secondary `Label`s, plus `PathSegment` for
+a §7.1.2 response path. So a consumer can render into `miette`, `ariadne`, `codespan-reporting`, an
+LSP diagnostic or a GraphQL error response without re-deriving structure from a formatted sentence.
+It is `core` plus a span type — no allocation, no dependency, and not behind a feature.
 
-**LosslessToken (Complete)** - For tooling that preserves formatting:
+### A kit for building GraphQL-like languages
 
-- **Preserves trivia**: Includes all whitespace, comments, commas, and formatting
-- **Complete fidelity**: Every character from the source is represented
-- **Use cases**: Code formatters, linters, IDEs, syntax highlighters, refactoring tools
-- **CST-ready**: Build Concrete Syntax Trees with perfect source reconstruction
+The combinators, the generic AST nodes and the CST substrate are the reusable part, and GraphQLx is
+the proof that they are: **113 syntax kinds against standard GraphQL's 87**, adding generics, `where`
+clauses, type paths, map and set types, imports and wildcard specifiers. It is a different language
+built on the same substrate, not GraphQL with a few extras — and it is where you would start in
+building your own.
 
-```rust,ignore
-// SyntacticToken for servers - fast execution
-use smear::lexer::graphql::syntactic::{SyntacticToken, SyntacticLexer};
+GraphQLx tracks a moving dialect specification, so its surface is **semver-exempt** until that
+stabilises. It deliberately has no validator: its extensions have no specification semantics to
+validate against, so checking them would be language design rather than conformance.
 
-let source = "query { user { id } }";
-let lexer = SyntacticLexer::<&str>::new(source);
-// Only syntactically significant tokens (whitespace skipped)
+## Quick Start
 
-// LosslessToken for tooling - preserves formatting
-use smear::lexer::graphql::lossless::{LosslessToken, LosslessLexer};
-
-let lexer = LosslessLexer::<&str>::new(source);
-// ALL tokens including spaces, comments, exact formatting
+```toml
+[dependencies]
+smear = "0.0.0"
 ```
 
-**The Bottom Line**: Use `SyntacticToken` when you need speed (servers, execution engines), and `LosslessToken` when you need perfect source preservation (formatters, linters, IDEs).
+The validator is not a default feature yet — it flips into `default` alongside a minor bump, once its
+API has settled. Until then:
 
-This dual-token architecture makes smear suitable for **both GraphQL servers** (using SyntacticToken for performance) **and development tools** (using LosslessToken for accurate code manipulation).
+```toml
+[dependencies]
+smear = { version = "0.0.0", features = ["validator"] }
+```
+
+### Parsing
+
+```rust
+use smear::{
+  lexer::tokora::{Parse as _, Parser},
+  parser::graphql::{
+    GraphQL,
+    ast::ExecutableDocument,
+    error::GraphqlErrors,
+    syntactic::{GraphqlLexer, executable_document},
+  },
+};
+
+let document = Parser::with_parser::<
+  GraphqlLexer<'_, str>,
+  ExecutableDocument<&str>,
+  GraphqlErrors<&str>,
+  _,
+  GraphQL,
+>(executable_document)
+.parse_str("query Hero { hero { name } }")
+.expect("the query parses");
+
+assert_eq!(document.definitions().len(), 1);
+```
+
+### Validating
+
+Build the schema once, then validate each request against it. The `Scratch` and the `Budget` belong
+to the caller and are reused across requests — that is what makes the steady state allocation-free.
+
+```rust
+# #[cfg(feature = "validator")] {
+use smear::{
+  lexer::tokora::{Parse as _, Parser},
+  parser::graphql::{
+    GraphQL,
+    ast::{ExecutableDocument, TypeSystemDocument},
+    error::GraphqlErrors,
+    syntactic::{GraphqlLexer, executable_document, type_system_document},
+  },
+  validator::{Budget, First, Rule, Schema, Scratch, validate_executable},
+};
+
+let schema = Schema::build(
+  &Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str("type Query { hero: Character } interface Character { name: String! }")
+  .expect("the SDL parses"),
+)
+.expect("the SDL is a schema");
+
+let mut scratch = Scratch::new();
+let budget = Budget::default();
+
+let request = Parser::with_parser::<
+  GraphqlLexer<'_, str>,
+  ExecutableDocument<&str>,
+  GraphqlErrors<&str>,
+  _,
+  GraphQL,
+>(executable_document)
+.parse_str("{ hero { title } }")
+.expect("the query parses");
+
+let mut sink = First::new();
+let invalid = validate_executable(&schema, &request, &mut scratch, &budget, &mut sink)
+  .expect_err("`title` is not a field of `Character`");
+assert_eq!(invalid.emitted(), 1);
+
+let diagnostic = sink.get().expect("a diagnostic");
+assert_eq!(diagnostic.rule(), Rule::FieldSelections);
+assert_eq!(diagnostic.subject_source(), Some(&"title"));
+# }
+```
 
 ## Architecture
 
-Smear follows a three-layer architecture designed for maximum reusability:
+Four layers. The lower two are generic over the source type and the dialect; the upper two are
+standard GraphQL only.
 
-### Layer 1: Lexer (Tokenization)
-
-- Converts source code into zero-copy tokens
-- Supports both GraphQL and GraphQLx tokens
-- Generic over source type (`&str`, `&[u8]`, etc.)
-
-### Layer 2: Parser (AST or CST Construction)
-
-- Uses parser combinators to build Abstract Syntax Trees or Concrete Syntax Trees
-- Provides traits: `ParseStr`, `ParseBytesSlice`, `ParseBytes`
-- Efficient error recovery and reporting
-
-### Layer 3: Scaffold (Reusable Structures)
-
-- Generic, reusable AST node definitions
-- The foundation for building custom DSLs
-- Shared between GraphQL and GraphQLx
+| Layer | Module | What it is |
+|---|---|---|
+| Lexer | `smear::lexer` | Source text to zero-copy tokens, in a syntactic or a lossless stream. The irreducible base — it has no feature of its own because the parser cannot exist without it |
+| Parser | `smear::parser` | Combinators that build an AST from the syntactic stream, and the rowan CST tower from the lossless one, plus the generic node definitions a new dialect reuses |
+| Validator | `smear::validator` | The built-once `Schema`, draft §3 inside its build, and the draft §5 rules over a parsed request |
+| Diagnostic | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice |
 
 ## Feature Flags
 
-Twelve features, one crate. The lexer is not one of them: it is the irreducible base, the parser
-cannot exist without it, and a gate that can only ever be on is not a gate.
+Fourteen features. The lexer is not one of them: it is the irreducible base, the parser cannot exist
+without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
 |---------|-------------|---------|
 | `std` | Standard library support; off is `no_std`, and `alloc` is required either way | ✓ |
-| `graphql` | Standard GraphQL, in both layers | ✓ |
-| `graphqlx` | Extended GraphQL, in both layers. Tracks a moving dialect spec, so the GraphQLx surface is **semver-exempt** until it stabilises | ✓ |
-| `parser` | `smear::parser` — the combinators, the ASTs and (with `rowan`) the lossless CST tower. Off, the crate is the lexer alone | ✓ |
+| `graphql` | Standard GraphQL, in every layer | ✓ |
+| `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
+| `parser` | `smear::parser` — the combinators and the ASTs. Off, the crate is the lexer alone | ✓ |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
-| `bytes` | Support `bytes::Bytes` source type | |
-| `bstr` | Support `bstr::BStr` source type | |
-| `hipstr` | Support `hipstr::{HipStr, HipByt}` source type | |
-| `smol-bytes` | Support `smol_bytes::SmolBytes` source type | |
-| `rowan` | The lossless CST tower. Implies `parser` and `std` | |
+| `validator` | `smear::validator` — the built-once `Schema`, draft §3 inside its build, and the draft §5 rules. Implies `parser` and `graphql`. Adds no dependency | |
+| `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator` and `std`, and is the one validator feature that costs a dependency (`serde`, `serde_json`) | |
+| `rowan` | The lossless CST tower, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
+| `bytes` | Support the `bytes::Bytes` source type | |
+| `bstr` | Support the `bstr::BStr` source type | |
+| `hipstr` | Support the `hipstr::{HipStr, HipByt}` source types | |
+| `smol-bytes` | Support the `smol_bytes::SmolBytes` source type | |
 | `lossless-coverage` | Per-node-kind hit counters for the lossless gates. Implies `rowan` | |
-| `test-support` | The lossless suites' `test_support` scaffolding. Implies nothing | |
+| `test-support` | The lossless suites' `test_support` scaffolding | |
 
-A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns
-the parser off:
+A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns the
+parser off:
 
 ```toml
 [dependencies]
 smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
 ```
 
-## Migrating from `smear-lexer` / `smear-parser`
+### `no_std`
 
-`smear-lexer` and `smear-parser` were merged into this crate (#83). Neither had ever been
-published, so nothing on crates.io moved; this affects path and git dependents only.
+With `std` off the crate is `no_std` and requires `alloc`. CI cross-compiles `smear` with
+`--all-features` for fourteen targets including five WebAssembly ones, and builds the validator's
+schema representation for `thumbv6m-none-eabi` — a core with no compare-and-swap — through the
+`smear-noatomic` member, which `#[path]`-includes smear's own files so the proof cannot drift from
+the source.
 
-| Before | After |
-|---|---|
-| `smear-lexer = "…"` / `smear-parser = "…"` | `smear = { default-features = false, features = [...] }`, per the table above |
-| `use smear_lexer::X` | `use smear::lexer::X` |
-| `use smear_parser::X` | `use smear::parser::X` |
-| `smear_lexer::keyword!` | `smear::keyword!` |
-| `smear_parser::ast_node!`, `smear_parser::typed_keyword_atom!` | `smear::ast_node!`, `smear::typed_keyword_atom!` |
-| `features = ["alloc"]` | remove — it gated no code, and `alloc` is unconditionally required |
-| `features = ["unstable"]` | remove — it gated no code; `graphqlx` no longer implies it |
-| `smear-lexer` with its defaults | `smear`'s default also compiles the parser; opt out by omitting `parser` |
-
-`smear::parser::lexer::X`, `smear::lexer::tokora::X` and every `smear::lexer::…` /
-`smear::parser::…` path resolve exactly as before.
+Two limits on that claim, because they are the difference between "compiles" and "works". `smear`
+itself does **not** build for `thumbv6m-none-eabi`: its AST offers an `Arc`-backed list spelling that
+needs native atomics, which is why the no-atomic proof is about the schema representation rather than
+the crate. And per [#124], the `not(std)` arm is compile-checked but **executed** by nothing — the
+crate's dev-dependency on itself does not pass `default-features = false`, so every test build
+resolves `std` back on. Treat `no_std` as a supported build, not as a tested runtime.
 
 ## Benchmarks
 
-Lower is better throughout. Three harnesses across two packages produce these numbers, and they
-measure different things:
-
-| Harness | Package | What it measures |
-|---|---|---|
-| `executables`, `type_system` | `smear-benches` | Parsing, against four other Rust GraphQL parsers |
-| `validator_comparison` | `smear-apollo-bench` (`benchmarks/`) | Draft §5 validation and `Schema::build`, against `apollo-compiler` |
-| `apollo_comparison` | `smear-apollo-bench` (`benchmarks/`) | The lossless CST tower against `apollo-parser`, tier by tier |
-
-Every bench sets `harness = false` and runs under criterion, so a run must name its target:
+Two packages carry the benchmark suites. Every target sets `harness = false` and runs under criterion,
+so a run must name its target:
 
 ```sh
 cargo bench --package smear-benches      --bench executables          -- --quick
@@ -193,97 +288,33 @@ cargo bench --package smear-apollo-bench --bench validator_comparison -- --quick
 cargo bench --package smear-apollo-bench --bench apollo_comparison    -- --quick
 ```
 
-### Provenance
+`smear-benches` measures parsing against four other Rust GraphQL parsers, and `smear-apollo-bench`
+measures the lossless CST tower and draft §5 validation against `apollo-parser` and
+`apollo-compiler`.
 
-> **The tables below are stale, and nothing in CI will tell you so.** They predate #116 (fused
-> field-tail dispatch), #118 (`Schema::build`'s fixed cost) and #120 (the lossless projection),
-> each of which moved smear's own timings in its favour; the competitors' columns were not
-> re-measured either. Treat the ratios as a lower bound on smear's current standing rather than as
-> a current measurement.
->
-> Their provenance — the commit, the date, the machine, the criterion invocation — was never
-> recorded, which is exactly why the drift went unnoticed for three releases. A benchmark gate in
-> CI is too flaky to be worth having, so the cheap honest substitute is this block: **anyone
-> refreshing a table below must replace this paragraph with the four facts**, in the shape
->
-> ```text
-> Measured on <commit> · <date> · <machine, cores, OS> · <exact criterion invocation>
-> Host state: <idle % before / after, and whether any compiler was running>
-> ```
->
-> so the next reader can judge staleness and reproduce the run. Numbers on a shared or compiling
-> host are worth less than no numbers at all: verify the host is idle before and after, and note
-> that macOS load average is not a usable signal here — it reads around 3.3 at 80% idle.
-
-### Schema Parsing
-
-Against [`apollo-parser`](https://crates.io/crates/apollo-parser),
-[`graphql-parser`](https://crates.io/crates/graphql-parser),
-[`async-graphql-parser`](https://crates.io/crates/async-graphql-parser) and
-[`cynic-parser`](https://crates.io/crates/cynic-parser).
-
-| Schema | smear | apollo-parser | graphql-parser | async-graphql-parser | cynic-parser |
-|---|---|---|---|---|---|
-| minimal | **318 ns** | 900 ns | 1.67 µs | 1.27 µs | 443 ns |
-| simple_object | **427 ns** | 1.16 µs | 2.37 µs | 2.05 µs | 614 ns |
-| kitchen-sink (canonical) | **19.2 µs** | 34.5 µs | 38.9 µs | 76.3 µs | 20.1 µs |
-| supergraph | **79.5 µs** | 123 µs | 114 µs | 263 µs | 82.4 µs |
-| github_schema | **1.23 ms** | 2.66 ms | 1.72 ms | 8.07 ms | — |
-| apollo_studio | **2.50 ms** | 5.21 ms | 3.51 ms | 15.5 ms | 3.24 ms |
-| gitlab_schema | **8.28 ms** | 18.4 ms | 11.7 ms | 54.5 ms | 10.6 ms |
-
-### Executable (Query) Parsing
-
-| Query | smear | apollo-parser | graphql-parser | async-graphql-parser | cynic-parser |
-|---|---|---|---|---|---|
-| tiny_simple | **281 ns** | 665 ns | 918 ns | 1.44 µs | 346 ns |
-| small_simple | **610 ns** | 1.53 µs | 1.65 µs | 3.36 µs | 797 ns |
-| small_variables | **1.29 µs** | 3.03 µs | 2.73 µs | 5.42 µs | 1.53 µs |
-| medium_nested | **3.12 µs** | 7.19 µs | 6.08 µs | 14.8 µs | 3.72 µs |
-| medium_fragments | **2.80 µs** | 6.87 µs | 5.62 µs | 13.3 µs | 3.51 µs |
-| large_complex | **11.5 µs** | 22.5 µs | 20.0 µs | 57.6 µs | 12.4 µs |
-| large_deep_nesting | **4.33 µs** | 9.51 µs | 8.20 µs | 27.4 µs | 4.69 µs |
-| many_fields | **11.1 µs** | 23.3 µs | 19.3 µs | 57.4 µs | 11.2 µs |
-| many_aliases | **30.9 µs** | 44.6 µs | 58.8 µs | 99.7 µs | 27.3 µs |
-| huge_comprehensive | **34.9 µs** | 66.3 µs | 61.0 µs | 176 µs | 34.8 µs |
-
-**Summary, as of the un-provenanced run these two tables record:** smear is consistently the fastest GraphQL parser across all benchmarks — **1.4-6.5x faster** than alternatives depending on the workload. On schema parsing, smear is **2-2.7x faster** than apollo-parser, **1.4-2x faster** than graphql-parser, **4-6.5x faster** than async-graphql-parser, and **~1.3x faster** than cynic-parser. On query parsing, smear matches or beats cynic-parser (the closest competitor) on every benchmark while being **2-5x faster** than apollo-parser and graphql-parser.
-
-### Validation
-
-Parsing is only half of what a GraphQL front end does, and it is the half these tables have always
-covered. Validation is measured too, by `benchmarks/benches/validator_comparison.rs`, against
-[`apollo-compiler`](https://crates.io/crates/apollo-compiler) as both oracle and baseline — but it
-has never been tabulated here, and this section is the shape that table takes rather than the
-table itself. **No number below has been filled in, because no run on a verified-idle host was
-available; see the provenance block above for what a run has to record.**
-
-Two workloads, both `(schema, query)` pairs: `realistic`, the design spec's own baseline, and
-`supergraph`, a real federated schema two orders of magnitude larger behind a query of the same
-size — and an *invalid* one, so that row also times the path a server takes when it rejects.
-
-Three groups, because they answer three different questions:
-
-| Group | Rows | The question |
-|---|---|---|
-| `validator/<workload>` | `smear/validate`, `smear/validate_lossless`, `apollo/to_executable_validate` | Validate-only, over an already-parsed document |
-| `validator/<workload>` | `smear/parse_and_validate`, `smear/parse_and_validate_lossless`, `apollo/parse_and_validate` | End to end, which is what a server actually pays |
-| `schema_build/<workload>` | `smear`, `smear_lossless`, `apollo` | Building the schema once, which a server pays at startup |
-
-Both of smear's doors appear in every group. The **syntactic** door parses to an AST and validates
-the AST; the **lossless** door parses to a CST, projects it, and validates that — the door an IDE
-or a formatter wants, and the one with the projection to pay for. Reporting only the syntactic row
-would flatter the crate by hiding the door most tools would actually use.
+**No tables here.** The ones this file used to carry were measured on an unrecorded commit, date and
+machine, and had drifted far enough to understate the crate — so they were removed rather than
+annotated, because a stale table with a caveat above it still reads as data. They go back when there
+is a run worth publishing, and a run is worth publishing when it records the commit, the date, the
+machine and the exact invocation, taken on a host verified idle before and after. Note that macOS
+load average is not a usable signal for that — it reads around 3.3 at 80% idle.
 
 ## Who Should Use Smear?
 
-**Ideal for:**
-
-- High-performance GraphQL tools (IDEs, linters, formatters)
+- GraphQL tooling — IDEs, linters, formatters — which want the lossless tree and the recovering doors
+- GraphQL servers, which want the syntactic tree, the built-once schema and the allocation-free
+  steady state
 - Schema analysis and validation tools
-- GraphQL servers needing fast query parsing
-- **Building custom GraphQL-like DSLs for domain-specific use cases**
-- Research projects exploring advanced type systems
+- Anyone building a GraphQL-like DSL, who wants the combinators and the CST substrate rather than a
+  fixed grammar
+
+Smear is **not** a GraphQL server: there is no execution engine and no response serialisation. It is
+the front end one would be built on.
+
+Migration note: `smear-lexer` and `smear-parser` were merged into this crate in [#83]. Neither had
+ever been published, so nothing on crates.io moved; path and git dependents rename `smear_lexer::X`
+to `smear::lexer::X` and `smear_parser::X` to `smear::parser::X`, and select features per the table
+above.
 
 ## Contributing
 
@@ -309,3 +340,7 @@ shall be dual licensed as above, without any additional terms or conditions.
 [codecov-url]: https://app.codecov.io/gh/al8n/smear
 [doc-url]: https://docs.rs/smear
 [crates-url]: https://crates.io/crates/smear
+[#83]: https://github.com/al8n/smear/pull/83
+[#103]: https://github.com/al8n/smear/issues/103
+[#121]: https://github.com/al8n/smear/issues/121
+[#124]: https://github.com/al8n/smear/issues/124
