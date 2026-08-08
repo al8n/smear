@@ -24,6 +24,7 @@
 use std::{boxed::Box, string::String};
 
 use super::super::error::SchemaErrors;
+use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
 /// Which rule of the draft §4 shape a [`ResponseError`] reports.
 ///
@@ -119,6 +120,32 @@ impl ResponseErrorKind {
       Self::UnparsableSdl => "the rendered SDL does not parse",
     }
   }
+
+  /// Returns the stable identifier for this kind.
+  ///
+  /// Third family, one namespace: a consumer that renders a schema refusal beside a door failure
+  /// compares `smear::introspection::…` with `smear::schema::…` without knowing which enum either
+  /// came from.
+  #[inline]
+  pub const fn code(&self) -> Code {
+    match self {
+      Self::MalformedJson => Code::new("smear::introspection::malformed-json"),
+      Self::MalformedResponse => Code::new("smear::introspection::malformed-response"),
+      Self::MissingSchema => Code::new("smear::introspection::missing-schema"),
+      Self::UnknownTypeKind => Code::new("smear::introspection::unknown-type-kind"),
+      Self::NotANamedType => Code::new("smear::introspection::not-a-named-type"),
+      Self::MissingItemType => Code::new("smear::introspection::missing-item-type"),
+      Self::DoubleNonNull => Code::new("smear::introspection::double-non-null"),
+      Self::UnnamedType => Code::new("smear::introspection::unnamed-type"),
+      Self::InvalidName => Code::new("smear::introspection::invalid-name"),
+      Self::InvalidEnumValue => Code::new("smear::introspection::invalid-enum-value"),
+      Self::UnknownDirectiveLocation => {
+        Code::new("smear::introspection::unknown-directive-location")
+      }
+      Self::MalformedDefaultValue => Code::new("smear::introspection::malformed-default-value"),
+      Self::UnparsableSdl => Code::new("smear::introspection::unparsable-sdl"),
+    }
+  }
 }
 
 impl core::fmt::Display for ResponseErrorKind {
@@ -180,6 +207,87 @@ impl ResponseError {
     self.owner.as_deref()
   }
 }
+
+/// A door failure, read as structure rather than as a sentence.
+///
+/// # The one implementor of [`Location::entire`]
+///
+/// Everything else in this crate points at bytes somebody typed. This does not, and the type's own
+/// documentation says why: the input is a machine-generated JSON blob, and a byte offset into it
+/// would name a position in something no human wrote and nobody will edit. A synthetic `0..len`
+/// would render as a span, sort as a span and mislead as a span. [`Location::entire`] says the
+/// diagnostic is about the response as a whole, which is the truth.
+///
+/// The consequence is a real loss, not a technicality — an editor gets no underline out of this
+/// family — and it is the price of not fabricating one. The locator a reader actually uses is the
+/// owner path in the message.
+///
+/// # No labels, and no path
+///
+/// Nothing to relate a second position to, since there is no first one. And no path: the dotted
+/// owner path this error renders — `User.pet.first` — is a coordinate in the *schema the response
+/// describes*, not in a response tree, so publishing it through
+/// [`path_segment`](Diagnose::path_segment) would make a §7.1.2 writer emit `errors[].path` for an
+/// error that has no field of a result to point at.
+///
+/// # Severity and help are answered here rather than per kind
+///
+/// All thirteen kinds are refusals, and all thirteen have the same instruction for the same
+/// audience: whoever wired up the transport, whose server did not return a draft §4 result. A
+/// per-kind table would be thirteen ways of writing that sentence.
+impl Diagnose for ResponseError {
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind.code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    Severity::Error
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    Location::entire(SOURCE)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind.message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn label(&self, _: usize) -> Option<Label> {
+    None
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    None
+  }
+}
+
+/// The one response body the door reads.
+///
+/// [`Schema::from_introspection`](crate::validator::schema::Schema::from_introspection) takes a
+/// single `&str`, so there is no second input for [`Location::source`] to distinguish — only the
+/// question of whether there is a position within it, which there is not.
+const SOURCE: u32 = 0;
 
 impl core::fmt::Display for ResponseError {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
