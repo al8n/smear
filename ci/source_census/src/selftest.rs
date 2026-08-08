@@ -2,7 +2,7 @@
 //!
 //! A check that has only ever been green proves nothing, and this repository has shipped several
 //! (al8n/smear#73, #122). So the cases below are written as crates and run through the same
-//! [`census::detect`](crate::census::detect) a real run uses — the file walk, the re-export
+//! [`crate::census::detect`] a real run uses — the file walk, the re-export
 //! resolution, the source-position derivation and the four tests, end to end. Nothing is stubbed;
 //! if the reader stops finding public entries, these fail first.
 //!
