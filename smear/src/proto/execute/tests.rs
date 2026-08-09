@@ -410,6 +410,69 @@ fn a_flat_fragment_chain_is_linear() {
   );
 }
 
+/// A second operation on one executor charges exactly what the first charged.
+///
+/// # Why this is the general form of the escape, and the response-level fixture is not
+///
+/// `a_refused_request_is_refused_again_on_the_same_executor` in `tests/proto_execute.rs` is the
+/// regression for the defect that was found: the fragment index survived `reset` and so did the
+/// charge for building it, so the second `start` skipped the pass and a refused request was served.
+/// That fixture compares *answers*, which means it can only fire when the budget happens to sit
+/// between the two totals — it is tuned to one discrepancy, and it had to be, because the answer is
+/// all a client can see.
+///
+/// This compares the totals. A charge that moves between operations turns it red whether or not any
+/// ceiling is close enough for a caller to notice today, which is the difference between pinning
+/// the bug that was found and pinning the class it belongs to: everything an operation pays for has
+/// to be paid again by the next one, and the tables that *survive* `reset` are exactly where that
+/// stops being automatic. Phases 2–8 will add more of them.
+///
+/// The fixture exercises all three charged populations at once — the index pass over the
+/// definitions, a fragment lookup per spread, and both a distinct and a repeated response key per
+/// selection — so a table that starts charging asymmetrically has to be a new one.
+#[test]
+fn a_second_operation_charges_what_the_first_did() {
+  const LINKS: u32 = 64;
+  const KEYS: u32 = 64;
+
+  let mut query = std::string::String::from("{ ...F0 a a");
+  for index in 0..KEYS {
+    query.push_str(&std::format!(" k{index}: a"));
+  }
+  query.push_str(" }\n");
+  for index in 0..LINKS {
+    query.push_str(&std::format!(
+      "fragment F{index} on Query {{ ...F{} }}\n",
+      index + 1
+    ));
+  }
+  query.push_str(&std::format!("fragment F{LINKS} on Query {{ a }}\n"));
+
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let first = executor.collection_work();
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves a second time");
+  let second = executor.collection_work();
+
+  assert!(
+    first > 3 * LINKS,
+    "the fixture has to cost something: {first}"
+  );
+  assert_eq!(
+    second, first,
+    "the second operation spent {second} where the first spent {first}. Something this executor \
+     kept from the first run is being reused by the second without being charged for, which makes \
+     the ceiling a request meets depend on what the executor was asked before it"
+  );
+}
+
 /// `{ ...F0 }` with `F0 → F1 → … → Fn`, every definition at nesting depth one.
 fn fragment_chain(links: u32) -> std::string::String {
   let mut query = std::string::String::from("{ ...F0 }\n");

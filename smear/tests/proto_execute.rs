@@ -171,13 +171,19 @@ fn run_with(
   root: J,
   variables: Vec<(&'static str, J)>,
 ) -> (String, Vec<(Kind, String, String)>) {
-  execute(sdl, query, root, variables, |response| {
-    let errors = response
-      .errors()
-      .map(|error| (error.kind(), error.to_string(), error.path().to_string()))
-      .collect();
-    (render(&response.data()), errors)
-  })
+  execute(sdl, query, root, variables, data_and_errors)
+}
+
+/// A finished response as `data` and every error, which is what most cases here compare.
+///
+/// Named rather than repeated inline because the fixture that runs an operation twice compares two
+/// of them, and two answers are only comparable if they were read the same way.
+fn data_and_errors(response: &Response<'_, J>) -> (String, Vec<(Kind, String, String)>) {
+  let errors = response
+    .errors()
+    .map(|error| (error.kind(), error.to_string(), error.path().to_string()))
+    .collect();
+  (render(&response.data()), errors)
 }
 
 /// Runs a query to completion and hands the finished response to `take`.
@@ -229,11 +235,25 @@ fn execute_bounded<T>(
     consume_variables: false,
   };
   let mut executor = Executor::with_limits(&schema, &document, limits);
+  drive(&mut executor, &mut space, root, take)
+}
+
+/// Runs one operation on `executor` to completion and hands the finished response to `take`.
+///
+/// Split out of [`execute_bounded`] so that a fixture can run **two** operations on one executor,
+/// which is what any property about state surviving `reset` needs and what a per-run executor
+/// cannot express.
+fn drive<T>(
+  executor: &mut Executor<'_, &str, Space>,
+  space: &mut Space,
+  root: J,
+  take: impl FnOnce(&Response<'_, J>) -> T,
+) -> T {
   executor
-    .start(&mut space, None, root)
+    .start(space, None, root)
     .expect("the operation resolves");
 
-  while let Some(request) = executor.poll_resolve(&mut space) {
+  while let Some(request) = executor.poll_resolve(space) {
     let id = request.id();
     let name = request.name();
     // The driver lies about `__typename`, on purpose. Every assertion below that names a concrete
@@ -249,7 +269,7 @@ fn execute_bounded<T>(
       }
     };
     match answer {
-      Ok(value) => executor.handle_resolved(&mut space, id, value),
+      Ok(value) => executor.handle_resolved(space, id, value),
       Err(message) => executor.handle_field_error(id, message),
     }
     while executor.poll_abandoned().is_some() {}
@@ -2560,13 +2580,7 @@ fn run_bounded(
   root: J,
   limits: Limits,
 ) -> (String, Vec<(Kind, String, String)>) {
-  execute_bounded(sdl, query, root, Vec::new(), limits, |response| {
-    let errors = response
-      .errors()
-      .map(|error| (error.kind(), error.to_string(), error.path().to_string()))
-      .collect();
-    (render(&response.data()), errors)
-  })
+  execute_bounded(sdl, query, root, Vec::new(), limits, data_and_errors)
 }
 
 const BUDGET_SDL: &str = r#"
@@ -3017,6 +3031,80 @@ fn collection_inside_the_visit_budget_is_unchanged() {
   assert_eq!(
     bounded, default,
     "the budget changes nothing it does not refuse"
+  );
+}
+
+/// A refused request is refused again on the **same** executor, which is the property a budget is.
+///
+/// # The escape this closes
+///
+/// The fragment index is built on the first spread and kept across `reset`, because it is a
+/// function of the document. The *charge* for building it used to be kept with it — so the second
+/// operation on an executor found the table already there and paid nothing for it:
+///
+/// 1. the first `start` pays for the index pass, runs out of budget in the walk that follows, and
+///    is refused, leaving the table built;
+/// 2. the second `start` — same executor, same document, same limits — skips the pass entirely;
+/// 3. the request that was **refused** is now **served**.
+///
+/// The objection to calling that a defect is that the accounting is sound: the work really was done
+/// once, and the document cannot change underneath it. Both halves are true and neither is the
+/// point. What a client observes is not the work, it is the answer, and the answer moved between
+/// call one and call two. A ceiling that a client clears by sending the request a second time is
+/// not a ceiling.
+///
+/// # Why this fixture reuses an executor when no other one does
+///
+/// Every other case in this file and in `src/proto/execute/tests.rs` constructs a fresh executor,
+/// which is precisely the shape that cannot see this: a fresh executor has an unbuilt table, so its
+/// first operation always pays. The reuse *is* the fixture. Rewriting it to run twice through
+/// [`run_bounded`] would make it green against the defect.
+///
+/// # The numbers
+///
+/// A chain of `LINKS` links defines `LINKS + 1` fragments in `LINKS + 2` definitions, so the index
+/// pass costs `2 · LINKS + 3`, and walking it afterwards costs about the same again — one visit per
+/// selection and about one comparison per spread. The ceiling is the pass plus `LINKS`: comfortably
+/// past the pass, so the first run reaches the walk and leaves the table built, and comfortably
+/// short of pass-plus-walk, so it is refused. A second run that skipped the pass would have the
+/// whole walk inside what is left.
+#[test]
+fn a_refused_request_is_refused_again_on_the_same_executor() {
+  const LINKS: usize = 16;
+  /// One unit per definition walked and one per fragment pushed.
+  const INDEX: u32 = 2 * LINKS as u32 + 3;
+
+  let query = fragment_chain(LINKS);
+  let (schema, document) = compile("type Query { a: String }", &query);
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(INDEX + LINKS as u32).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+
+  let root = || obj(vec![("a", J::Str("A".to_owned()))]);
+  let first = drive(&mut executor, &mut space, root(), data_and_errors);
+  let second = drive(&mut executor, &mut space, root(), data_and_errors);
+
+  assert!(
+    first
+      .1
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "the fixture only says anything if the first run is refused: {first:?}"
+  );
+  assert!(
+    first
+      .1
+      .iter()
+      .any(|(_, message, _)| message.contains("selection visits")),
+    "and refused by the visit budget rather than by some other ceiling: {first:?}"
+  );
+  assert_eq!(
+    second, first,
+    "the same request, on the same executor, under the same limits, answered differently the \
+     second time it was asked"
   );
 }
 

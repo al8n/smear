@@ -173,12 +173,39 @@ pub(super) struct Fault<'a> {
 pub(super) struct Visits {
   left: u32,
   limit: u32,
+  /// Whether this operation has already paid for [`Fragments::build`]'s index pass.
+  ///
+  /// # It lives in the budget because the budget is the thing that is per operation
+  ///
+  /// The fragment table outlives the operation that paid for it — it is a function of the document,
+  /// which does not change between operations — and a charge remembered beside it would be a charge
+  /// the *next* operation never pays. [`Fragments::build`] says what that costs. The ledger
+  /// therefore sits in the object a new operation always brings with it: `Executor::reset` builds a
+  /// new [`Visits`], so the pass is re-armed by the same statement that refills the budget, and
+  /// there is no second line for a later phase to forget.
+  fragments_charged: bool,
 }
 
 impl Visits {
   #[inline]
   pub(super) const fn new(limit: u32) -> Self {
-    Self { left: limit, limit }
+    Self {
+      left: limit,
+      limit,
+      fragments_charged: false,
+    }
+  }
+
+  /// Whether this operation still owes [`Fragments::build`]'s index pass its charge.
+  #[inline]
+  const fn owes_fragment_pass(&self) -> bool {
+    !self.fragments_charged
+  }
+
+  /// Records that this operation has paid for [`Fragments::build`]'s index pass.
+  #[inline]
+  fn fragment_pass_charged(&mut self) {
+    self.fragments_charged = true;
   }
 
   /// Charges `work` units **before** the work they pay for, answering whether there was room.
@@ -301,6 +328,10 @@ impl Allowance {
 /// `executions × definitions` before any ceiling existed; now every execution pays it out of its
 /// own budget. And a document whose fragments are never spread pays nothing at all.
 ///
+/// *Every* execution, including the ones that reuse an executor and find the table already built —
+/// see [`build`](Fragments::build), where the charge and the table were separated because keeping
+/// them together let a refused request pass on the retry.
+///
 /// **The rule this leaves behind, for the structures phases 2–8 will add:** asking whether a
 /// lookup is charged is half the question. The other half is whether the thing being looked *in*
 /// was built inside the budget or outside it, because a bound on the lookup is worth nothing over
@@ -327,6 +358,9 @@ pub(super) struct Fragments<'a, S> {
   chain: std::vec::Vec<u32>,
   /// Whether the pass has run. Distinct from `defs.is_empty()`, which is also true of a document
   /// that defines no fragments and must not be indexed again on every spread it does not have.
+  ///
+  /// It is **not** the record of who has paid: this outlives the operation and the charge does not.
+  /// That one is [`Visits::fragments_charged`].
   built: bool,
   /// Entries compared, over the executor's whole life.
   ///
@@ -355,7 +389,7 @@ where
     }
   }
 
-  /// Runs the indexing pass once, charging it before it runs.
+  /// Runs the indexing pass once per executor, and charges it once per **operation**.
   ///
   /// Two charges rather than one, because the second quantity is not known until the first pass has
   /// happened: `definitions` for the walk that finds the fragments, then `fragments` for the pushes
@@ -364,8 +398,31 @@ where
   ///
   /// A refusal leaves the table unbuilt rather than half built. Nothing here can fail after the
   /// second charge, so "charged" and "complete" are the same state.
+  ///
+  /// # The table survives `reset` and the charge does not, because the answer must not move
+  ///
+  /// `Executor::reset` keeps this table: it is a function of the document, and the document does
+  /// not change between operations. The charge used to be kept with it, and that made the outcome
+  /// of a request depend on what the executor had been asked before.
+  ///
+  /// **A request refused on the first `start` was served on the second.** The first pays for the
+  /// pass, runs out of budget in the lookup that follows, and is refused — leaving the table built.
+  /// The second, on the same executor with the same document and the same limits, finds the table
+  /// already there, spends nothing on it, and now has room to finish. Same request, two answers. A
+  /// ceiling a client clears by sending the request twice is not a ceiling, and the objection that
+  /// the accounting was sound because the work really was done once prices the *work* while the
+  /// observable that matters is the *answer*.
+  ///
+  /// So the pass is charged whether or not it runs, in the same two amounts, in the same order, at
+  /// the same point in the walk — which makes the budget's remainder at every instant a function of
+  /// the operation alone and never of the executor's history. What a cached table saves is the
+  /// walking and the hashing. What it must not save is the verdict.
+  ///
+  /// The once-per-operation ledger is [`Visits::fragments_charged`], and it is there rather than
+  /// here for the reason that field gives: a new operation is a new [`Visits`], so nothing has to
+  /// remember to re-arm it.
   fn build(&mut self, visits: &mut Visits, location: SimpleSpan) -> Result<(), Fault<'static>> {
-    if self.built {
+    if !visits.owes_fragment_pass() {
       return Ok(());
     }
     let definitions = self.document.definitions();
@@ -373,6 +430,14 @@ where
       u32::try_from(definitions.len()).unwrap_or(u32::MAX),
       location,
     )?;
+    if self.built {
+      // The second charge, in the amount the pass would cost if it ran now. `defs` holds exactly
+      // the fragments the filter below would find again, so this is the same number the build path
+      // spends and not an estimate of it.
+      visits.spend(u32::try_from(self.defs.len()).unwrap_or(u32::MAX), location)?;
+      visits.fragment_pass_charged();
+      return Ok(());
+    }
     self.defs.extend(
       definitions
         .iter()
@@ -409,6 +474,7 @@ where
       }
     }
     self.built = true;
+    visits.fragment_pass_charged();
     Ok(())
   }
 

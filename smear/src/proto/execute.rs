@@ -391,6 +391,11 @@ pub struct Limits {
   /// Per operation rather than per call, because `collect_fields` runs once per object position: a
   /// per-call budget would leave the total at `positions × budget`, and positions are the driver's.
   /// Counting down across the operation means no driver answer multiplies collection work.
+  ///
+  /// Per operation also means *every* operation. An executor reused for a second run of the same
+  /// document re-pays the fragment index pass it built the first time, even though the table is
+  /// still there — so the verdict on a request is a function of the request and this number, and
+  /// never of what the executor happened to be asked before it.
   pub max_selection_visits: NonZeroU32,
 
   /// How many bytes of interned text the response may hold.
@@ -627,6 +632,11 @@ where
   /// execution pay `executions × definitions` before any ceiling existed, and filling a table from
   /// names the *document* chooses without charging for it is a hole a charged lookup does not
   /// close. See `collect::Fragments`.
+  ///
+  /// The **table** survives a reset; the **charge** does not. Every operation pays the pass, and an
+  /// operation that finds the table already built pays exactly what building it would have cost, so
+  /// a request's answer does not depend on what this executor was asked before it. See
+  /// `collect::Fragments::build` for the retry that used to be admitted.
   fragments: Fragments<'a, S>,
   limits: Limits,
   /// `__typename`'s symbol in this schema, resolved once so that `expand` recognises the
