@@ -1953,6 +1953,17 @@ where
     self.interner.compares()
   }
 
+  /// Entries the fragment index has reserved room for, which no ceiling bounds and
+  /// [`reset`](Self::reset) does not clear.
+  ///
+  /// The table is *meant* to outlive an operation, so its capacity is not a quantity two runs have
+  /// to agree on. What must hold is narrower — a **refused** pass reserves none of it. See
+  /// `collect::table`.
+  #[cfg(test)]
+  fn fragment_reserved(&self) -> usize {
+    self.fragments.reserved()
+  }
+
   fn reset(&mut self) {
     self.slots.clear();
     self.meta.clear();

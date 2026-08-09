@@ -40,8 +40,8 @@ use tokora::{SimpleSpan, span::AsSpan};
 
 use crate::{
   parser::graphql::ast::{
-    Directive, Directives, ExecutableDefinition, ExecutableDocument, Field, FragmentDefinition,
-    InputValue, Selection, SelectionSet,
+    Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
+    SelectionSet,
   },
   validator::schema::{Schema, TypeId, bucket, hash_bytes},
 };
@@ -52,6 +52,7 @@ use super::{
 };
 
 use groups::{Appending, Groups};
+use table::Table;
 
 /// Why [`Interner::intern`] could not store a name, and the ceiling that refused it.
 ///
@@ -139,22 +140,31 @@ pub(super) struct Fault<'a> {
 /// one bucket is constructible rather than unlucky — charging makes that spend the client's budget
 /// instead of the server's time, and is why the bound does not rest on the hash behaving.
 ///
-/// # Charged before the work, and over the population as well as the lookup
+/// # Charged before the work, over the population as well as the lookup, and before the storage
 ///
-/// Two properties, and the first version of this had neither for one of the two tables.
+/// Three properties, one per round that found the previous list short.
 ///
-/// **Before.** [`spend`](Visits::spend) is called ahead of the work it pays for, so a probe run is
-/// abandoned in the middle of a bucket rather than at the end of one. A charge taken afterwards
-/// bounds nothing by itself: the run is already walked when the refusal arrives.
+/// **Before the work.** [`spend`](Visits::spend) is called ahead of the work it pays for, so a
+/// probe run is abandoned in the middle of a bucket rather than at the end of one. A charge taken
+/// afterwards bounds nothing by itself: the run is already walked when the refusal arrives.
 ///
 /// **Over the population.** [`Interner`] is filled *during* collection, so a client that builds a
 /// collision pays for building it. [`Fragments`] was filled at executor construction, outside this
 /// budget entirely, from names the document chooses — so the same argument was simply false there:
 /// the collision came free and one cheap valid spread walked it. Its pass is now charged too.
 ///
-/// **The question to ask of every structure phases 2–8 add is therefore both halves:** is the
-/// lookup charged, *and* was the thing being looked in built inside the budget or outside it. A
-/// bound on the lookup is worth nothing over a table an adversary filled for free.
+/// **Before the storage.** Charging before the *work* is not yet charging before the *allocation*,
+/// and [`Fragments::build`] had the first without the second: it learnt the fragment count by
+/// populating the table, charged for what it had populated, and cleared the vector when the charge
+/// was refused. A cleared vector keeps its capacity and the table outlives the operation, so the
+/// refusal left an allocation nothing would reclaim. The answer was right on every call — which is
+/// the point worth carrying, because a fixture that reads the answer cannot see this at all.
+///
+/// **The question to ask of every structure phases 2–8 add is therefore all three:** is the lookup
+/// charged, *was the thing being looked in built inside the budget or outside it*, and is the
+/// charge taken before the storage or merely before the work. A bound on the lookup is worth
+/// nothing over a table an adversary filled for free, and a refusal that still reserves is a
+/// ceiling on the answer and not on the cost.
 ///
 /// # It is not "collection only" any more, and the reason is a lesson about residuals
 ///
@@ -362,6 +372,15 @@ impl Allowance {
 /// see [`build`](Fragments::build), where the charge and the table were separated because keeping
 /// them together let a refused request pass on the retry.
 ///
+/// **Charged before the storage exists, not merely before the lookup.** The count the second charge
+/// needs is only known once something has walked the definitions, and the first version walked them
+/// by *populating* the table and charged for what it had populated. The refusal path cleared the
+/// vector, which returns no capacity — so a refused operation left a fragment-sized allocation on
+/// an executor that keeps this table across `reset`. That does not move the verdict, and it is
+/// still the property broken: a ceiling that refuses and charges the server memory anyway has not
+/// bounded what it says it bounds. The count now comes from a walk that allocates nothing, and the
+/// storage is behind a type only an accepted charge produces. See [`mod table`](table).
+///
 /// **The rule this leaves behind, for the structures phases 2–8 will add:** asking whether a
 /// lookup is charged is half the question. The other half is whether the thing being looked *in*
 /// was built inside the budget or outside it, because a bound on the lookup is worth nothing over
@@ -379,27 +398,8 @@ impl Allowance {
 /// where open addressing would have had nowhere to put the entry.
 pub(super) struct Fragments<'a, S> {
   document: &'a ExecutableDocument<S>,
-  /// The named fragments in document order, empty until [`build`](Fragments::build) has run. An
-  /// index into this is a *fragment ordinal*, which is what [`Visited`] is a bitset over.
-  defs: std::vec::Vec<&'a FragmentDefinition<S>>,
-  /// The newest ordinal in each bucket, or [`NONE`]. Power-of-two length.
-  heads: std::vec::Vec<u32>,
-  /// The ordinal pushed into the same bucket before this one, or [`NONE`]. Parallel to `defs`.
-  chain: std::vec::Vec<u32>,
-  /// Whether the pass has run. Distinct from `defs.is_empty()`, which is also true of a document
-  /// that defines no fragments and must not be indexed again on every spread it does not have.
-  ///
-  /// It is **not** the record of who has paid: this outlives the operation and the charge does not.
-  /// That one is [`Visits::fragments_charged`].
-  built: bool,
-  /// Entries compared, over the executor's whole life.
-  ///
-  /// The gate for "a refused probe run stops at the refusal" reads this. It cannot be read from the
-  /// budget: every comparison is charged before it happens, so the charge and the comparison count
-  /// agree by construction and a version that charged afterwards would agree with itself too. Only
-  /// a count taken independently of the charge can tell the two apart.
-  #[cfg(test)]
-  compares: u64,
+  /// The index itself, and the three vectors this type cannot reach. See [`mod table`](table).
+  table: Table<'a, S>,
 }
 
 impl<'a, S> Fragments<'a, S>
@@ -407,27 +407,38 @@ where
   S: AsRef<[u8]>,
 {
   /// An index over `document`'s named fragments, which does not read `document` yet.
-  pub(super) fn new(document: &'a ExecutableDocument<S>) -> Self {
+  pub(super) const fn new(document: &'a ExecutableDocument<S>) -> Self {
     Self {
       document,
-      defs: std::vec::Vec::new(),
-      heads: std::vec::Vec::new(),
-      chain: std::vec::Vec::new(),
-      built: false,
-      #[cfg(test)]
-      compares: 0,
+      table: Table::new(),
     }
   }
 
   /// Runs the indexing pass once per executor, and charges it once per **operation**.
   ///
-  /// Two charges rather than one, because the second quantity is not known until the first pass has
-  /// happened: `definitions` for the walk that finds the fragments, then `fragments` for the pushes
-  /// that index them. Both are known **before** the work they pay for — the first is a slice
-  /// length, and the second is exact because chaining has no data-dependent insertion loop.
+  /// Two charges rather than one, because the second quantity is not known until something has
+  /// walked the definitions: `definitions` for the walk that finds the fragments, then `fragments`
+  /// for the pushes that index them. Both are known **before** the work they pay for — the first is
+  /// a slice length, and the second is exact because chaining has no data-dependent insertion loop.
   ///
-  /// A refusal leaves the table unbuilt rather than half built. Nothing here can fail after the
-  /// second charge, so "charged" and "complete" are the same state.
+  /// # The second charge is taken before the storage it pays for exists
+  ///
+  /// The count is produced by [`table::charge`]'s counting pass — `filter().count()` over a slice
+  /// already in memory — and not, as it once was, by populating the table and reading its length.
+  /// Populating first made the charge a charge *after* the work, and the refusal path cleared the
+  /// vector, which hands back no capacity: this table is owned by the executor and kept across
+  /// `reset`, so a refused operation left a fragment-sized allocation nothing would ever reclaim.
+  ///
+  /// The verdict was never wrong there — the same document under the same limits is refused on
+  /// every call, because [`Visits`] is rebuilt by `reset` and the two charges are the same two
+  /// amounts each time. That is what makes it worth writing down: an adversary could not change the
+  /// answer, only make a refusal cost memory that outlived it, and a fixture keyed on the answer is
+  /// green over exactly that. The ordering is now enforced by [`mod table`](table) rather than by
+  /// this function keeping to it.
+  ///
+  /// Nothing can fail after [`Table::fill`] begins, because nothing that can fail is left: both
+  /// charges have been accepted. So "charged" and "complete" are the same state, and there is no
+  /// half-built table to undo.
   ///
   /// # The table survives `reset` and the charge does not, because the answer must not move
   ///
@@ -460,50 +471,22 @@ where
       u32::try_from(definitions.len()).unwrap_or(u32::MAX),
       location,
     )?;
-    if self.built {
-      // The second charge, in the amount the pass would cost if it ran now. `defs` holds exactly
-      // the fragments the filter below would find again, so this is the same number the build path
+    if self.table.is_indexed() {
+      // The second charge, in the amount the pass would cost if it ran now. The table holds exactly
+      // the fragments the counting pass would find again, so this is the same number the build path
       // spends and not an estimate of it.
-      visits.spend(u32::try_from(self.defs.len()).unwrap_or(u32::MAX), location)?;
+      visits.spend(
+        u32::try_from(self.table.count()).unwrap_or(u32::MAX),
+        location,
+      )?;
       visits.fragment_pass_charged();
       return Ok(());
     }
-    self.defs.extend(
-      definitions
-        .iter()
-        .filter_map(|described| match described.node() {
-          ExecutableDefinition::Fragment(fragment) => Some(fragment),
-          ExecutableDefinition::Operation(_) => None,
-        }),
-    );
-    let count = self.defs.len();
-    if let Err(refusal) = visits.spend(u32::try_from(count).unwrap_or(u32::MAX), location) {
-      // Back to unbuilt, so a later collection sees a table that was never indexed rather than one
-      // indexed halfway. The pass this discards was charged and stays charged: it happened.
-      self.defs.clear();
-      return Err(refusal);
-    }
-    if count > 0 {
-      // Load factor a half, as `NameIndex` uses. Clamped rather than checked, because a chained
-      // table with fewer buckets than entries is slower and still correct — there is no capacity
-      // this can fail to have.
-      let buckets = count
-        .next_power_of_two()
-        .saturating_mul(2)
-        .min(1usize << 31);
-      let mask = (buckets - 1) as u32;
-      self.heads.resize(buckets, NONE);
-      self.chain.resize(count, NONE);
-      for ordinal in 0..count {
-        let at = bucket(
-          hash_bytes(self.defs[ordinal].name().source().as_ref()),
-          mask,
-        ) as usize;
-        self.chain[ordinal] = self.heads[at];
-        self.heads[at] = ordinal as u32;
-      }
-    }
-    self.built = true;
+    // Count, charge, populate — in that order, and in no other order this crate can be written to
+    // take: the receipt `charge` returns on acceptance is the only argument `fill` has.
+    self
+      .table
+      .fill(table::charge(definitions, visits, location)?);
     visits.fragment_pass_charged();
     Ok(())
   }
@@ -523,30 +506,260 @@ where
     visits: &mut Visits,
     location: SimpleSpan,
   ) -> Result<Option<(u32, &'a FragmentDefinition<S>)>, Fault<'static>> {
-    if self.heads.is_empty() {
-      return Ok(None);
-    }
-    let mask = (self.heads.len() - 1) as u32;
-    let mut ordinal = self.heads[bucket(hash_bytes(name), mask) as usize];
-    while ordinal != NONE {
-      visits.spend(1, location)?;
-      #[cfg(test)]
-      {
-        self.compares += 1;
-      }
-      let fragment = self.defs[ordinal as usize];
-      if fragment.name().source().as_ref() == name {
-        return Ok(Some((ordinal, fragment)));
-      }
-      ordinal = self.chain[ordinal as usize];
-    }
-    Ok(None)
+    self.table.get(name, visits, location)
   }
 
-  /// Entries this executor's fragment lookups have compared. See the field.
+  /// Entries this executor's fragment lookups have compared. See [`Table`]'s field.
   #[cfg(test)]
   pub(super) const fn compares(&self) -> u64 {
-    self.compares
+    self.table.compares()
+  }
+
+  /// Entries the index has reserved room for. See [`Table::reserved`].
+  #[cfg(test)]
+  pub(super) fn reserved(&self) -> usize {
+    self.table.reserved()
+  }
+}
+
+/// The fragment index's storage, and the receipt that is the only way to reserve it.
+///
+/// # What this is defending against
+///
+/// [`Fragments::build`] pays for the index pass in two charges, and the second — one unit per
+/// fragment — is a number nothing knows until the definitions have been walked. The first version
+/// walked them by *populating* `defs`, charged `defs.len()`, and cleared the vector when that
+/// charge was refused.
+///
+/// Clearing a vector returns no capacity, and this table is owned by the executor and deliberately
+/// kept across `reset`. So a refused operation left a fragment-sized allocation behind, and every
+/// retry — also refused — found it still there and freed nothing. **The verdict never moved**,
+/// which is precisely what makes the defect easy to be green over: a fixture comparing answers
+/// passes against it on the first call and on all of them after. What moved is what a refusal
+/// *costs*, and a ceiling whose refusal still spends the server's memory is not bounding the thing
+/// it names.
+///
+/// # Why a module and a receipt rather than a rule about ordering
+///
+/// [`mod groups`](groups) is the precedent: a property about what a caller may do, and when, is a
+/// type here rather than a sentence in a doc comment. The property is *no storage is reserved
+/// before its charge is accepted*, and it is enforced the same way. The three vectors are private
+/// to this module, so the only thing in the crate that can grow them is [`Table::fill`] — and
+/// `fill` takes a [`Paid`], whose fields are private to this module and whose only constructor is
+/// [`charge`], which returns one only when [`Visits::spend`](super::Visits::spend) has said yes.
+///
+/// Populating after the charge is therefore not a discipline `build` keeps. It is the only program
+/// that compiles: there is no other argument for `fill` and no second way to the vectors. Putting
+/// the defect back means adding a writer to this module, which is a diff that says what it is
+/// doing.
+///
+/// **The receipt carries the definitions it counted, and `fill` takes nothing else.** A receipt
+/// holding only a number would leave the caller free to pay for one slice and populate from
+/// another — the count and the population agreeing by argument again. This one leaves the caller
+/// holding no slice at all once it has paid, so the two are the same walk over the same data by
+/// construction.
+mod table {
+  use tokora::SimpleSpan;
+
+  use crate::{
+    parser::graphql::ast::{
+      DescribedExecutableDefinition, ExecutableDefinition, FragmentDefinition,
+    },
+    validator::schema::{bucket, hash_bytes},
+  };
+
+  use super::{Fault, NONE, Visits};
+
+  /// One accepted charge, and the definitions it was counted over.
+  ///
+  /// Neither [`Copy`] nor [`Clone`], and [`Table::fill`] takes it by value, so one charge admits
+  /// one population and a second needs a second charge.
+  pub(super) struct Paid<'a, S> {
+    /// The slice the count was taken over, which is also the slice the population reads.
+    definitions: &'a [DescribedExecutableDefinition<S>],
+    /// How many of them are fragments, which is the amount that was charged.
+    fragments: usize,
+  }
+
+  /// Counts the fragments in `definitions`, charges for them, and answers with the receipt that
+  /// admits populating a [`Table`] from them.
+  ///
+  /// The counting pass is `filter().count()` over a slice already in memory: it reserves nothing,
+  /// which is the whole reason it is a separate walk from the population it sizes. A refusal here
+  /// leaves the table not cleared but *untouched* — there is nothing yet to clear.
+  ///
+  /// The count is exact rather than an upper bound, because chaining has no data-dependent
+  /// insertion loop: `fragments` entries is what the population costs whatever the names are.
+  pub(super) fn charge<'a, S>(
+    definitions: &'a [DescribedExecutableDefinition<S>],
+    visits: &mut Visits,
+    location: SimpleSpan,
+  ) -> Result<Paid<'a, S>, Fault<'static>> {
+    let fragments = definitions
+      .iter()
+      .filter(|described| matches!(described.node(), ExecutableDefinition::Fragment(_)))
+      .count();
+    visits.spend(u32::try_from(fragments).unwrap_or(u32::MAX), location)?;
+    Ok(Paid {
+      definitions,
+      fragments,
+    })
+  }
+
+  /// A document's named fragments, chained by the hash of their names.
+  pub(super) struct Table<'a, S> {
+    /// The named fragments in document order, empty until [`fill`](Table::fill) has run. An index
+    /// into this is a *fragment ordinal*, which is what [`Visited`](super::Visited) is a bitset
+    /// over.
+    defs: std::vec::Vec<&'a FragmentDefinition<S>>,
+    /// The newest ordinal in each bucket, or [`NONE`]. Power-of-two length.
+    heads: std::vec::Vec<u32>,
+    /// The ordinal pushed into the same bucket before this one, or [`NONE`]. Parallel to `defs`.
+    chain: std::vec::Vec<u32>,
+    /// Whether the pass has run. Distinct from `defs.is_empty()`, which is also true of a document
+    /// that defines no fragments and must not be indexed again on every spread it does not have.
+    ///
+    /// It is **not** the record of who has paid: this outlives the operation and the charge does
+    /// not. That one is `Visits::fragments_charged`.
+    indexed: bool,
+    /// Entries compared, over the executor's whole life.
+    ///
+    /// The gate for "a refused probe run stops at the refusal" reads this. It cannot be read from
+    /// the budget: every comparison is charged before it happens, so the charge and the comparison
+    /// count agree by construction and a version that charged afterwards would agree with itself
+    /// too. Only a count taken independently of the charge can tell the two apart.
+    #[cfg(test)]
+    compares: u64,
+  }
+
+  impl<S> Table<'_, S> {
+    /// A table that has read nothing and reserved nothing.
+    pub(super) const fn new() -> Self {
+      Self {
+        defs: std::vec::Vec::new(),
+        heads: std::vec::Vec::new(),
+        chain: std::vec::Vec::new(),
+        indexed: false,
+        #[cfg(test)]
+        compares: 0,
+      }
+    }
+
+    /// Whether the pass has run. See the field.
+    #[inline]
+    pub(super) const fn is_indexed(&self) -> bool {
+      self.indexed
+    }
+
+    /// How many fragments it holds, which is what the population cost.
+    #[inline]
+    pub(super) fn count(&self) -> usize {
+      self.defs.len()
+    }
+
+    /// Entries this executor's fragment lookups have compared. See the field.
+    #[cfg(test)]
+    #[inline]
+    pub(super) const fn compares(&self) -> u64 {
+      self.compares
+    }
+
+    /// Entries the three vectors have reserved room for.
+    ///
+    /// *Capacity* and not length, because the defect this module closes populated the table and
+    /// then cleared it: every length reads zero and every allocation is exactly where it was.
+    #[cfg(test)]
+    pub(super) fn reserved(&self) -> usize {
+      self.defs.capacity() + self.heads.capacity() + self.chain.capacity()
+    }
+  }
+
+  impl<'a, S> Table<'a, S>
+  where
+    S: AsRef<[u8]>,
+  {
+    /// Reserves and indexes the fragments `paid` paid for.
+    ///
+    /// Infallible, and that is the property rather than a convenience: everything able to refuse
+    /// has refused before a [`Paid`] exists, so no failure survives into the population — and
+    /// therefore no half-built table to undo, and no `clear` leaving behind a capacity a refusal
+    /// has no way to give back.
+    pub(super) fn fill(&mut self, paid: Paid<'a, S>) {
+      debug_assert!(
+        !self.indexed,
+        "the table is being populated a second time; `fill` appends, so the first pass's ordinals \
+         would be duplicated rather than replaced"
+      );
+      let Paid {
+        definitions,
+        fragments,
+      } = paid;
+      self.indexed = true;
+      if fragments == 0 {
+        return;
+      }
+      self.defs.reserve_exact(fragments);
+      self.defs.extend(
+        definitions
+          .iter()
+          .filter_map(|described| match described.node() {
+            ExecutableDefinition::Fragment(fragment) => Some(fragment),
+            ExecutableDefinition::Operation(_) => None,
+          }),
+      );
+      let count = self.defs.len();
+      debug_assert_eq!(
+        count, fragments,
+        "the population found a different number of fragments than the charge counted, over the \
+         same slice and the same predicate"
+      );
+      // Load factor a half, as `NameIndex` uses. Clamped rather than checked, because a chained
+      // table with fewer buckets than entries is slower and still correct — there is no capacity
+      // this can fail to have.
+      let buckets = count
+        .next_power_of_two()
+        .saturating_mul(2)
+        .min(1usize << 31);
+      let mask = (buckets - 1) as u32;
+      self.heads.resize(buckets, NONE);
+      self.chain.resize(count, NONE);
+      for ordinal in 0..count {
+        let at = bucket(
+          hash_bytes(self.defs[ordinal].name().source().as_ref()),
+          mask,
+        ) as usize;
+        self.chain[ordinal] = self.heads[at];
+        self.heads[at] = ordinal as u32;
+      }
+    }
+
+    /// The fragment `name` denotes and its ordinal, charging **before** each entry compared. See
+    /// [`Fragments::get`](super::Fragments::get).
+    pub(super) fn get(
+      &mut self,
+      name: &[u8],
+      visits: &mut Visits,
+      location: SimpleSpan,
+    ) -> Result<Option<(u32, &'a FragmentDefinition<S>)>, Fault<'static>> {
+      if self.heads.is_empty() {
+        return Ok(None);
+      }
+      let mask = (self.heads.len() - 1) as u32;
+      let mut ordinal = self.heads[bucket(hash_bytes(name), mask) as usize];
+      while ordinal != NONE {
+        visits.spend(1, location)?;
+        #[cfg(test)]
+        {
+          self.compares += 1;
+        }
+        let fragment = self.defs[ordinal as usize];
+        if fragment.name().source().as_ref() == name {
+          return Ok(Some((ordinal, fragment)));
+        }
+        ordinal = self.chain[ordinal as usize];
+      }
+      Ok(None)
+    }
   }
 }
 

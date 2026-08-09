@@ -490,6 +490,102 @@ fn fragment_chain(links: u32) -> std::string::String {
 // The fragment table's population, which is where a charged lookup was resting on nothing
 // ------------------------------------------------------------------------------------------
 
+/// A refused index pass reserves no storage, which is a different property from refusing.
+///
+/// # The verdict is not what moves, so a fixture keyed on the verdict cannot see this
+///
+/// `Fragments::build` charges twice — the definitions, then the fragments — and a document can put
+/// a ceiling between them. When the second charge is refused the answer is a refusal, on this call
+/// and on every retry: `reset` rebuilds `Visits`, so the same document under the same limits pays
+/// the same two amounts in the same order and hears the same no. Every assertion about the
+/// *response* is therefore already satisfied by the defect, including
+/// `a_refused_request_is_refused_again_on_the_same_executor`, which was written for the escape one
+/// round earlier and passes over this one.
+///
+/// What moved was memory. `build` used to learn the fragment count by **populating** the table and
+/// charging for what it had populated, clearing the vector when the charge was refused — and a
+/// cleared vector keeps its capacity. The table is owned by the executor and kept across `reset` by
+/// design, so a refused operation left a fragment-sized allocation that no ceiling had admitted,
+/// no later operation could use, and no retry would free. An adversary could not change the answer;
+/// it could make a refusal cost memory that outlived it.
+///
+/// So this reads capacity, and it reads it on both sides of the ceiling. The refused half is the
+/// regression. **The served half is what keeps the refused half from being vacuous**: it says
+/// `fragment_reserved()` is an observable that moves, so `== 0` is a statement about this run and
+/// not about an accessor that always answers zero.
+///
+/// # The numbers
+///
+/// `fragment_chain(LINKS)` is `LINKS + 1` fragments in `LINKS + 2` definitions, spread from a root
+/// selection set of one selection. The walk charges that selection, then the pass charges
+/// `LINKS + 2` for the definitions and `LINKS + 1` for the fragments. A ceiling of `LINKS + 3`
+/// admits the selection and the definitions **exactly**, leaving nothing for the population — which
+/// is the one refusal this fixture is about. `spent()` is asserted to have reached the definitions
+/// charge, so a fixture mis-tuned low enough to be refused at the *first* charge fails instead of
+/// passing for the wrong reason.
+#[test]
+fn a_refused_index_pass_reserves_no_fragment_storage() {
+  const LINKS: u32 = 256;
+  /// One selection, then one unit per definition walked. The fragment charge is what will not fit.
+  const UP_TO_THE_POPULATION: u32 = 1 + LINKS + 2;
+
+  let query = fragment_chain(LINKS);
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+
+  let mut space = Space;
+  let mut refused = Executor::with_limits(
+    &schema,
+    &document,
+    Limits {
+      max_selection_visits: NonZeroU32::new(UP_TO_THE_POPULATION).expect("not zero"),
+      ..Limits::default()
+    },
+  );
+  refused
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  let spent = refused.collection_work();
+  assert!(
+    spent >= LINKS + 2,
+    "the fixture only says anything if the definitions charge was accepted and the fragment charge \
+     was the one refused; {spent} units spent is short of the {} the definitions cost, so this run \
+     was refused before the population was ever priced",
+    LINKS + 2
+  );
+  let errors = {
+    let response = refused.poll_response().expect("nothing is outstanding");
+    response.error_count()
+  };
+  assert_eq!(
+    errors, 1,
+    "and the request is refused, which is the state whose cost is under test"
+  );
+  assert_eq!(
+    refused.fragment_reserved(),
+    0,
+    "the refused pass left room for {} fragment-table entries on an executor that keeps this table \
+     across `reset`. The verdict is right and stays right — the retry is refused too — so nothing \
+     about the response can show this: what a refusal costs is what moved, and it outlives every \
+     retry",
+    refused.fragment_reserved()
+  );
+
+  // The other side of the same ceiling, so that the zero above is a fact about a refusal rather
+  // than about an accessor that cannot report anything else.
+  let mut served = Executor::new(&schema, &document);
+  served
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  assert!(
+    served.fragment_reserved() >= (LINKS + 1) as usize,
+    "an admitted pass indexes {} fragments, so it has to reserve at least that much; {} says the \
+     capacity this fixture watches is not the capacity the pass allocates",
+    LINKS + 1,
+    served.fragment_reserved()
+  );
+}
+
 /// How many fragments the colliding fixtures define.
 ///
 /// Small because finding them costs about `COLLIDING × buckets` trial hashes, and the property
