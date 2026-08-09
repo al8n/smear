@@ -98,7 +98,7 @@ pub const MAX_SYMBOLS: u32 = 1 << 30;
 /// Names are identifiers — a handful of bytes each — so an 8-byte-at-a-time fold with one
 /// multiply is all the mixing the index needs, and it costs no dependency.
 ///
-/// # It is unkeyed, and a caller has to say why that is safe for its keys
+/// # It is unkeyed, and every caller has to say why that is safe for its keys
 ///
 /// The low bits of `v.wrapping_mul(K)` depend only on the low bits of `v`, and `K` is odd, so
 /// `v ≡ target · K⁻¹ (mod 2ᵐ)` inverts the fold for any bucket count `2ᵐ`. Colliding keys are
@@ -106,10 +106,11 @@ pub const MAX_SYMBOLS: u32 = 1 << 30;
 /// to a linear scan against an adversary who can choose the keys it holds.
 ///
 /// [`NameIndex`] holds the **schema's** names, which the operator wrote, so nothing an adversary
-/// sends can lengthen one of its probe runs. A table over names an adversary chooses would owe a
-/// different argument.
+/// sends can lengthen a probe run. The execution module's tables hold the **document's**, which an
+/// adversary does choose — so they charge every entry a probe compares against a work budget, and a
+/// constructed pile-up spends that budget instead of the server's time.
 #[inline]
-fn hash_bytes(bytes: &[u8]) -> u64 {
+pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
   const K: u64 = 0x517c_c1b7_2722_0a95;
   let mut h: u64 = 0;
   let (chunks, rest) = bytes.as_chunks::<8>();
@@ -129,16 +130,17 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
 ///
 /// A multiply-fold pushes entropy **upward**: bit `i` of `v · K` depends only on bits `0..=i` of
 /// `v`, so the low bits are the least mixed word in the product and masking them keeps whichever
-/// bits of the key happened to be low. That is not a tail risk, it is what ordinary names do.
-/// Take `F0 … F4095`: the five-byte spellings put their first digit in bits 8–12 and everything
-/// that tells them apart above bit 13, so a 13-bit mask of the *low* half reaches **ten** distinct
-/// buckets for three thousand names, and every lookup walks a probe run hundreds long. Shifting
-/// first costs one instruction and spreads the same set across the table.
+/// bits of the key happened to be low. That is not a tail risk, it is what ordinary names do. A
+/// document naming `F0 … F4095` puts its 5-byte names' first digit in bits 8–12 and everything
+/// that distinguishes them above bit 13, so a 13-bit mask of the low half saw **ten** buckets for
+/// three thousand names: resolving a 4,096-link fragment chain compared 1.9 million entries, against
+/// the 8.4 million of the linear scan the index replaced. Shifting first costs one instruction and
+/// brings the same chain to 4,472 — about one comparison per lookup.
 ///
 /// It does not make [`hash_bytes`] keyed, and nothing here claims it does — a caller whose keys an
 /// adversary chooses still owes the argument that function's documentation asks for.
 #[inline]
-fn bucket(hash: u64, mask: u32) -> u32 {
+pub(crate) fn bucket(hash: u64, mask: u32) -> u32 {
   ((hash >> 32) as u32) & mask
 }
 

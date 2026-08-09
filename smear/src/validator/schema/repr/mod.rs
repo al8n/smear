@@ -22,7 +22,11 @@
 //! inside it.
 
 mod location;
-mod name;
+/// Crate-visible rather than private so that the module's hash is reachable from the one other
+/// place in `smear` that indexes names by bytes — draft §6.3's collection. Deliberately not a
+/// `#[cfg(feature = …)]` re-export: this directory is compiled standalone by `smear-noatomic`,
+/// which declares no features at all, and a gate naming one would warn there.
+pub(crate) mod name;
 mod table;
 mod ty;
 

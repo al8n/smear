@@ -2898,9 +2898,16 @@ fn fragment_chain(links: usize) -> String {
 ///
 /// This is the regression for the abort, and it is the one case here that cannot be written as a
 /// red-first assertion: against a recursive walk it does not fail, it terminates the test binary
-/// with `SIGABRT`, taking every other case in the file with it. Measured before the change: 1,000
-/// links survived, 1,500 aborted. Ten thousand is comfortably past that and still runs in
-/// milliseconds, because the work was never the problem — the frames were.
+/// with `SIGABRT`, taking every other case in the file with it. Measured when the recursion was
+/// deleted: 1,000 links survived, 1,500 aborted. **Re-measured by restoring the recursion, release
+/// build, different platform: 1,500 answered in 1.9 ms and 10,000 aborted with `SIGABRT`** — so the
+/// fixture is ten thousand, and a threshold that moves that far with the frame layout is the reason
+/// there is no depth ceiling to set.
+///
+/// Surviving the walk and walking it in *linear time* were two defects, and this closed only the
+/// first: the same chain still scanned every definition once per spread. The second is pinned by
+/// `a_flat_fragment_chain_is_linear` in `src/proto/execute/tests.rs`, from inside the crate,
+/// because the cost of a collection is not observable from out here.
 #[test]
 fn a_flat_fragment_chain_no_longer_ends_the_process() {
   let (data, errors) = run_bounded(

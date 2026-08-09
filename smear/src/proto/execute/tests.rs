@@ -92,6 +92,10 @@ impl Values for Space {
 }
 
 fn compile(query: &str) -> (Schema, ExecutableDocument<&str>) {
+  compile_against(SDL, query)
+}
+
+fn compile_against<'q>(sdl: &str, query: &'q str) -> (Schema, ExecutableDocument<&'q str>) {
   let schema_document = Parser::with_parser::<
     GraphqlLexer<'_, str>,
     TypeSystemDocument<&str>,
@@ -99,7 +103,7 @@ fn compile(query: &str) -> (Schema, ExecutableDocument<&str>) {
     _,
     GraphQL,
   >(type_system_document)
-  .parse_str(SDL)
+  .parse_str(sdl)
   .expect("the SDL parses");
   let schema = Schema::build(&schema_document).expect("the SDL is a schema");
   let document = Parser::with_parser::<
@@ -257,15 +261,409 @@ fn collection_scratch_cannot_outgrow_the_ceiling_that_refuses_it() {
   );
 
   assert!(
-    executor.scratch_fields.capacity() <= CAPACITY_BOUND,
+    executor.scratch.fields.capacity() <= CAPACITY_BOUND,
     "the staging buffer grew to {} entries against a ceiling that admits four; before the charge \
      it followed the {WIDTH}-wide selection set instead of the ceiling that refused it",
-    executor.scratch_fields.capacity()
+    executor.scratch.fields.capacity()
   );
   assert!(
-    executor.scratch_groups.capacity() <= CAPACITY_BOUND,
+    executor.scratch.groups.capacity() <= CAPACITY_BOUND,
     "groups grows at most one per selection, so bounding the selections bounds it — {} says \
      otherwise",
-    executor.scratch_groups.capacity()
+    executor.scratch.groups.capacity()
   );
+}
+
+// ------------------------------------------------------------------------------------------
+// Collection costs what it charges, and it charges what it costs
+// ------------------------------------------------------------------------------------------
+//
+// al8n/smear#141 and the flat fragment chain are one defect wearing three faces: the response
+// key's interner entry, the key's group and a spread's fragment were each found by a linear scan,
+// once per selection, so `n` selections over `n` names cost `n²` before the first field request
+// existed. Measured on this tree beforehand: 8,000 distinct keys spent 61 ms inside `start()` and
+// a 50,000-link chain spent 2.1 s.
+//
+// # Why the gate is two-sided, and why it lives in here
+//
+// A quadratic collection and a linear one return the same response, so nothing outside the crate
+// can tell them apart except a clock. What *is* observable from inside is the visit budget, whose
+// unit is now one per selection examined, one per entry a name lookup compares, and one per
+// definition and fragment the index pass handles — so the counter is the work count, and the
+// fixtures below pin it from both directions:
+//
+// - the **upper** bound is red if a lookup goes back to scanning, because a scan charges what it
+//   compares and a scan compares the document;
+// - the **lower** bound is red if a lookup or a table's *population* stops charging — including a
+//   scan that was reintroduced *and* left uncharged, which is the regression an upper bound alone
+//   cannot see, since removing the count is the cheapest way to satisfy it.
+//
+// # Charging a lookup is half the question; the other half is where the table came from
+//
+// The fragment table was filled at executor construction, from names the document chooses, outside
+// the budget entirely — so a charged lookup bounded a run an adversary had built for free, and the
+// bound was hollow. Three of the fixtures below are about the population rather than the lookup:
+// that indexing is charged, that its cost does not depend on the names, and that a run is
+// abandoned at the ceiling instead of after it.
+//
+// The one lookup no bound reaches is the group, which is a direct index with no loop to charge. No
+// counter can see work that declines to count itself; that one is held by review and by the
+// timings, not by a gate.
+
+/// A schema with one field, so a document can be as wide or as deep as the fixture wants.
+const ONE_FIELD: &str = "type Query { a: String }";
+
+/// Collects `query`'s root selection set and returns what it charged the visit budget.
+fn collection_work(sdl: &str, query: &str) -> u32 {
+  let (schema, document) = compile_against(sdl, query);
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  executor.collection_work()
+}
+
+/// `n` repeats of one response key charge exactly `2n - 1`, and the second term is the interner.
+///
+/// The exact-value case, and it is exact rather than bounded because nothing about it depends on
+/// the hash: one key means one bucket with one entry, so the first selection interns after
+/// comparing nothing and every later one matches on its first comparison. `n` selections examined
+/// plus `n - 1` comparisons is the whole of it.
+///
+/// **This is the plant against an uncharged lookup.** Deleting the charge leaves `n`, and nothing
+/// about the response changes.
+#[test]
+fn a_repeated_response_key_charges_one_comparison_each_time() {
+  const REPEATS: u32 = 1024;
+
+  let mut query = std::string::String::from("{");
+  for _ in 0..REPEATS {
+    query.push_str(" a");
+  }
+  query.push_str(" }");
+
+  assert_eq!(
+    collection_work(ONE_FIELD, &query),
+    2 * REPEATS - 1,
+    "{REPEATS} selections examined, and {} comparisons to find the one interned key each time \
+     after the first; a smaller total means a name lookup is not charging what it compares",
+    REPEATS - 1
+  );
+}
+
+/// `n` *distinct* response keys stay linear, which is the whole of al8n/smear#141.
+///
+/// Distinct on purpose, and a fixture edited to repeat a key destroys the case. A repeated key
+/// interns once and then finds a one-entry table, so it measures like a fix whether or not
+/// anything was fixed — against all three scans at once.
+#[test]
+fn distinct_response_keys_are_linear() {
+  const KEYS: u32 = 4096;
+
+  let mut query = std::string::String::from("{");
+  for i in 0..KEYS {
+    query.push_str(&std::format!(" k{i}: a"));
+  }
+  query.push_str(" }");
+
+  let work = collection_work(ONE_FIELD, &query);
+  assert!(
+    work > KEYS,
+    "a successful or failing probe still compares something, so {KEYS} keys cannot cost only \
+     {work}; that total says the interner lookup is not charged"
+  );
+  assert!(
+    work <= 3 * KEYS,
+    "{work} units for {KEYS} distinct keys. Scanning the names instead of probing them costs \
+     about {} — the ceiling here is a linear multiple, so a quadratic lookup misses it by three \
+     orders of magnitude",
+    u64::from(KEYS) * u64::from(KEYS) / 2
+  );
+}
+
+/// A flat fragment chain stays linear, which is the other half of the same defect.
+///
+/// The chain's *depth* is already pinned by `a_flat_fragment_chain_no_longer_ends_the_process` in
+/// `smear/tests/proto_execute.rs`, which is the regression for the abort. This is its *cost*: the
+/// walk stopped spending native frames but still scanned every definition in the document once per
+/// spread, so a chain that no longer killed the process still took quadratic time to answer.
+///
+/// Four terms, all linear in the chain: the index pass over the definitions, one push per fragment,
+/// one visit per selection, and about one comparison per spread.
+#[test]
+fn a_flat_fragment_chain_is_linear() {
+  const LINKS: u32 = 4096;
+
+  let work = collection_work(ONE_FIELD, &fragment_chain(LINKS));
+  assert!(
+    work >= 3 * LINKS,
+    "the index pass alone is a definition and a fragment each, and every spread then compares at \
+     least the entry it returns; {work} units for {LINKS} links is short of that, which is what an \
+     unindexed table or an uncharged one reads as"
+  );
+  assert!(
+    work <= 6 * LINKS,
+    "{work} units for a {LINKS}-link chain. Scanning the definitions per spread costs about {} \
+     instead",
+    u64::from(LINKS) * u64::from(LINKS) / 2
+  );
+}
+
+/// `{ ...F0 }` with `F0 → F1 → … → Fn`, every definition at nesting depth one.
+fn fragment_chain(links: u32) -> std::string::String {
+  let mut query = std::string::String::from("{ ...F0 }\n");
+  for i in 0..links {
+    query.push_str(&std::format!(
+      "fragment F{i} on Query {{ ...F{} }}\n",
+      i + 1
+    ));
+  }
+  query.push_str(&std::format!("fragment F{links} on Query {{ a }}\n"));
+  query
+}
+
+// ------------------------------------------------------------------------------------------
+// The fragment table's population, which is where a charged lookup was resting on nothing
+// ------------------------------------------------------------------------------------------
+
+/// How many fragments the colliding fixtures define.
+///
+/// Small because finding them costs about `COLLIDING × buckets` trial hashes, and the property
+/// under test does not get truer with more of them: one bucket holding every name is the worst
+/// case at any size.
+const COLLIDING: usize = 512;
+
+/// Definitions in a colliding fixture: its fragments, plus the operation that spreads one.
+const COLLIDING_DEFINITIONS: u32 = COLLIDING as u32 + 1;
+
+/// The index pass's charge for a colliding fixture: one per definition walked, one per fragment
+/// pushed.
+const COLLIDING_INDEX: u32 = COLLIDING_DEFINITIONS + COLLIDING as u32;
+
+/// `COLLIDING` fragment names that the index puts in **one** bucket, in the order it will see them.
+fn colliding_fragment_names() -> std::vec::Vec<std::string::String> {
+  colliding_names("f", (COLLIDING.next_power_of_two() * 2 - 1) as u32)
+}
+
+/// `COLLIDING` names beginning `prefix` that all land in one bucket of a table masked by `mask`.
+///
+/// Derived from the index's own hash rather than hardcoded, so it stays a colliding set if the hash
+/// changes. That is the point: a list of literal names would silently stop colliding and the
+/// fixtures would go on passing against a table they no longer stress.
+///
+/// **A set colliding under `mask` collides under every smaller one**, since a narrower mask keeps a
+/// subset of the same bits. That is what lets the interner fixture pick one `mask` and have it hold
+/// through every rehash the table does on its way to that size.
+fn colliding_names(prefix: &str, mask: u32) -> std::vec::Vec<std::string::String> {
+  let mut by_bucket: std::vec::Vec<std::vec::Vec<std::string::String>> =
+    std::vec::from_elem(std::vec::Vec::new(), mask as usize + 1);
+  for candidate in 0u64.. {
+    let name = std::format!("{prefix}{candidate}");
+    let at =
+      crate::validator::schema::bucket(crate::validator::schema::hash_bytes(name.as_bytes()), mask)
+        as usize;
+    by_bucket[at].push(name);
+    if by_bucket[at].len() == COLLIDING {
+      return core::mem::take(&mut by_bucket[at]);
+    }
+  }
+  unreachable!("the search is over an unbounded range")
+}
+
+/// A document defining every name in `names` as a fragment, whose operation spreads `spread`.
+fn colliding_document(names: &[std::string::String], spread: &str) -> std::string::String {
+  let mut query = std::format!("{{ ...{spread} }}\n");
+  for name in names {
+    query.push_str(&std::format!("fragment {name} on Query {{ a }}\n"));
+  }
+  query
+}
+
+/// Indexing the document's fragments is charged, so a budget too small to hold it refuses.
+///
+/// **The plant for the finding this section exists for.** The table used to be filled in
+/// `Executor::with_limits`, outside every ceiling, which meant a service building an executor per
+/// execution paid `executions × definitions` unbudgeted — and, worse, that the charged *lookup*
+/// below was bounding a probe run an adversary had been allowed to build for free.
+///
+/// Delete the charge in `Fragments::build` and the first half goes green while the document is
+/// indexed for nothing, which is exactly the state this closed.
+#[test]
+fn indexing_the_documents_fragments_is_charged() {
+  let names = colliding_fragment_names();
+  // The last name defined is the head of the bucket, so the one spread below finds it on its first
+  // comparison and the total is the index pass plus a constant.
+  let head = names.last().expect("the set is not empty").clone();
+  let query = colliding_document(&names, &head);
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+
+  let refused = collected_under(&schema, &document, COLLIDING_INDEX - 1);
+  assert!(
+    refused.is_some(),
+    "a budget one unit short of the index pass must refuse rather than index for free"
+  );
+
+  let served = collected_under(&schema, &document, COLLIDING_INDEX + 8);
+  assert_eq!(
+    served, None,
+    "and eight units past it is enough for the spread, its one comparison and the field it reaches"
+  );
+}
+
+/// The index pass costs the same whatever the names are, which is what chaining buys.
+///
+/// Open addressing made the *build* the sharper half of the same defect: inserting `n` colliding
+/// names probes `n²/2` slots, in a constructor no ceiling watched. Chaining pushes at a bucket head
+/// and never probes, so this total is exact and every term in it is a count of something the
+/// document has — not of something the names did to each other.
+#[test]
+fn a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment() {
+  let names = colliding_fragment_names();
+  let head = names.last().expect("the set is not empty").clone();
+  let query = colliding_document(&names, &head);
+
+  // The index pass, the root's one selection, the one comparison that finds the bucket head, and
+  // the one field inside the fragment. Interning that field's key compares nothing: it is the first
+  // name in an empty arena.
+  let expected = COLLIDING_INDEX + 3;
+  assert_eq!(
+    collection_work(ONE_FIELD, &query),
+    expected,
+    "{COLLIDING} fragment names in one bucket must cost one unit each to index and no more; a \
+     total above this is an insertion whose cost depends on the names"
+  );
+}
+
+/// A probe run that runs out of budget stops where the budget did, not at the end of the bucket.
+///
+/// **The plant against charging after the fact.** The charge used to be taken once, for the whole
+/// run, after the run had finished — so a single valid spread into the tail of a 512-entry bucket
+/// compared all 512 and only then heard it had no budget. Charging before each comparison abandons
+/// it at the ceiling.
+///
+/// The budget cannot show this: comparisons are charged one for one, so the charge and the count
+/// agree by construction under either version. Only a count taken independently of the charge —
+/// `Fragments::compares` — can separate them, which is what it exists for.
+#[test]
+fn a_refused_probe_run_stops_at_the_refusal() {
+  /// Units left for probing once the index pass and the root's selection are paid for.
+  const SLACK: u32 = 8;
+
+  let names = colliding_fragment_names();
+  // The *first* name defined sits at the tail of the bucket's chain, so finding it needs every
+  // comparison the bucket can offer.
+  let tail = names.first().expect("the set is not empty").clone();
+  let query = colliding_document(&names, &tail);
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+
+  let mut space = Space;
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(COLLIDING_INDEX + 1 + SLACK).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  let compares = executor.fragment_compares();
+  assert!(
+    compares <= u64::from(SLACK),
+    "the run compared {compares} entries against a budget with {SLACK} units left for it; a run \
+     charged at its end walks the whole {COLLIDING}-entry bucket before the refusal arrives"
+  );
+  let errors = {
+    let response = executor.poll_response().expect("nothing is outstanding");
+    response.error_count()
+  };
+  assert_eq!(
+    errors, 1,
+    "and the request is refused, rather than served by a run nobody paid for"
+  );
+}
+
+/// A name interned out of the *document* is charged like any other, so a colliding set of them
+/// cannot outrun the budget.
+///
+/// **The regression for the residual that was wrong in its justification.** The uncharged interner
+/// entry point was documented as being reached only by schema and driver bytes — a universal over
+/// callers, and two callers falsified it: both spellings of "the variable this argument wanted"
+/// come out of the executable document. A client that names its variables into one bucket, then
+/// makes every sibling field fail draft §6.4.1 with a distinct one, walks that bucket once per
+/// failure. None of it is collection, so `max_selection_visits` never saw it.
+///
+/// The repair is not a better sentence. `Interner::intern` takes `&mut Visits`, so there is no
+/// uncharged path for a future caller to find — and this fixture is what says the charge is
+/// actually taken on the path that was missed.
+///
+/// Charging every insertion's probe run bounds the chain as well as the walk: an `L`th name into a
+/// bucket first walks the `L - 1` there, so the run this document can build is `√(2 · budget)`
+/// rather than one per field.
+#[test]
+fn a_colliding_set_of_document_variables_cannot_outrun_the_budget() {
+  /// Wide enough that the uncharged version's `n²/2` is two orders of magnitude past the ceiling.
+  const BUDGET: u32 = 4096;
+
+  // Masked for a table twice the size this document can grow — `COLLIDING` response keys plus
+  // `COLLIDING` variable spellings — so the set still shares a bucket at the end.
+  let names = colliding_names("v", (4 * COLLIDING.next_power_of_two() - 1) as u32);
+  let mut query = std::string::String::from("query (");
+  for name in &names {
+    query.push_str(&std::format!("${name}: String! "));
+  }
+  query.push_str(") {");
+  for (index, name) in names.iter().enumerate() {
+    query.push_str(&std::format!(" k{index}: arg(to: ${name})"));
+  }
+  query.push_str(" }");
+
+  let (schema, document) = compile_against("type Query { arg(to: String!): String }", &query);
+  let mut space = Space;
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  // No variable is supplied, so every field fails draft §6.4.1 step 5.f and interns the spelling it
+  // could not find. `poll_resolve` moves to the next ready slot after each, which is what made this
+  // a per-field cost rather than a one-off.
+  while executor.poll_resolve(&mut space).is_some() {}
+
+  let compares = executor.interner_compares();
+  assert!(
+    u64::from(BUDGET) >= compares,
+    "the name table compared {compares} entries against a ceiling of {BUDGET}. Interning a \
+     document-derived name without charging lets {COLLIDING} colliding spellings cost about {} \
+     comparisons, none of them collection and none of them seen by any ceiling",
+    COLLIDING * COLLIDING / 2
+  );
+}
+
+/// Runs `document` under a chosen visit budget, returning the refusal message if there was one.
+fn collected_under(
+  schema: &Schema,
+  document: &ExecutableDocument<&str>,
+  visits: u32,
+) -> Option<std::string::String> {
+  let mut space = Space;
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(visits).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut executor = Executor::with_limits(schema, document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  // Drained, because the served case reaches a field and offers it: a response is only available
+  // once nothing is outstanding, and a refused collection simply offers nothing to drain.
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let response = executor.poll_response().expect("nothing is outstanding");
+  response.errors().next().map(|error| error.to_string())
 }

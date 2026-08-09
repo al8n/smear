@@ -7,11 +7,27 @@
 //! response object (draft §7.1.1 requires it to follow the query), and the list order is what
 //! `MergeSelectionSets` concatenates.
 //!
-//! Neither is stored as a map. Selections are appended to a flat vector as `(group, field)`, with
-//! the group discovered by scanning the groups collected so far — a linear scan, over a set whose
-//! size is the number of *distinct response keys in one selection set*, which is small and
-//! bounded by the document. A stable sort by group then makes every group a contiguous range,
-//! preserving document order inside each. One vector, one sort, no allocation per key and no hash.
+//! Neither is stored as a map. Selections are appended to a flat vector as `(group, field)`, and a
+//! stable sort by group then makes every group a contiguous range, preserving document order inside
+//! each. One vector, one sort, and no allocation per response key.
+//!
+//! # Every lookup here is a probe, and it used to be a scan
+//!
+//! Three of them, all on the same path and all linear in the document: the response key's entry in
+//! [`Interner`], its group among the groups collected so far, and a fragment spread's definition
+//! among the document's. They grew together — one group per newly interned key — so a selection set
+//! of `n` distinct response keys cost `n²`, and **fixing one of them would have changed nothing**,
+//! because the two left behind would still have been scanned once per selection. That is
+//! al8n/smear#141, and the flat fragment chain it shares a path with; measured on this tree, 8,000
+//! distinct keys spent 61 ms inside `start()` and a 50,000-link chain spent 2.1 s, both before the
+//! first field request exists for a driver to refuse.
+//!
+//! All three are now indexed, and every entry a name lookup compares is charged to [`Visits`]
+//! before it is compared — so [`Limits::max_selection_visits`](super::Limits::max_selection_visits)
+//! bounds the **work** and not merely the number of selections looked at. There is no uncharged way
+//! into either table: the budget is a parameter of [`Interner::intern`], which is what turned "no
+//! document-derived name is interned for free" from a claim into a signature. See [`Visits`] for
+//! what that closes and the one thing it cannot.
 //!
 //! # `visitedFragments` is per collection, not per operation
 //!
@@ -24,16 +40,37 @@ use tokora::{SimpleSpan, span::AsSpan};
 
 use crate::{
   parser::graphql::ast::{
-    Directive, Directives, ExecutableDefinition, ExecutableDocument, Field, InputValue, Selection,
-    SelectionSet,
+    Directive, Directives, ExecutableDefinition, ExecutableDocument, Field, FragmentDefinition,
+    InputValue, Selection, SelectionSet,
   },
-  validator::schema::{Schema, TypeId},
+  validator::schema::{Schema, TypeId, bucket, hash_bytes},
 };
 
 use super::{
   Values,
   error::{ConditionFault, Raw},
 };
+
+/// Why [`Interner::intern`] could not store a name.
+///
+/// Two, because the two degrade differently at the one caller that does not simply fail: a name is
+/// still *readable* when the arena is full, and the collection path has a different message for
+/// each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Unstored {
+  /// [`max_interned_bytes`](super::Limits::max_interned_bytes) has no room for the bytes.
+  Arena,
+  /// [`max_selection_visits`](super::Limits::max_selection_visits) had no room for the lookup.
+  Budget,
+}
+
+/// An empty open-addressing slot, an unterminated chain, and "this key has no group yet".
+///
+/// One sentinel for all three because all three are `u32` indexes into a table this module bounds
+/// below `u32::MAX` — the interner by
+/// [`max_interned_bytes`](super::Limits::max_interned_bytes), the groups by the visit budget, and
+/// the fragment table by the document a parser already accepted.
+const NONE: u32 = u32::MAX;
 
 /// A `@skip`/`@include` condition that could not be read, and where in the document to point.
 ///
@@ -68,10 +105,71 @@ pub(super) struct Fault<'a> {
 /// It bounds [`walk`]'s explicit stack too, since a frame is only ever pushed by a selection that
 /// was charged — which is why deleting the recursion needed no depth knob of its own.
 ///
-/// What it does *not* bound is the cost of *one* visit: `fragment_index` scans the definitions and
-/// [`Interner::intern`] scans the names, both linear. Those are al8n/smear#141, and they are a
-/// query quantity multiplying a query quantity — which is the property that matters here, because
-/// with this budget in place no driver answer multiplies them.
+/// # A unit of one selection was a budget on one factor of a product
+///
+/// Charging one unit per selection bounded how many selections were *examined* and said nothing
+/// about what examining one costs, and the cost was linear in the document three separate ways —
+/// the interner scan, the group scan and the fragment scan. `n` selections over `n` names is `n²`
+/// of work under a budget that reads `n`. **Each factor was the query's and neither bound reached
+/// their product**, which is the same shape [`max_response_slots`] met from the driver's side.
+///
+/// So the unit is now *work*: one for a selection examined, one for every entry a name lookup
+/// compares, and one for every definition and fragment [`Fragments::build`] handles. Both indexes
+/// hash text an adversary writes, and [`hash_bytes`]'s multiply-fold is invertible, so a pile-up in
+/// one bucket is constructible rather than unlucky — charging makes that spend the client's budget
+/// instead of the server's time, and is why the bound does not rest on the hash behaving.
+///
+/// # Charged before the work, and over the population as well as the lookup
+///
+/// Two properties, and the first version of this had neither for one of the two tables.
+///
+/// **Before.** [`spend`](Visits::spend) is called ahead of the work it pays for, so a probe run is
+/// abandoned in the middle of a bucket rather than at the end of one. A charge taken afterwards
+/// bounds nothing by itself: the run is already walked when the refusal arrives.
+///
+/// **Over the population.** [`Interner`] is filled *during* collection, so a client that builds a
+/// collision pays for building it. [`Fragments`] was filled at executor construction, outside this
+/// budget entirely, from names the document chooses — so the same argument was simply false there:
+/// the collision came free and one cheap valid spread walked it. Its pass is now charged too.
+///
+/// **The question to ask of every structure phases 2–8 add is therefore both halves:** is the
+/// lookup charged, *and* was the thing being looked in built inside the budget or outside it. A
+/// bound on the lookup is worth nothing over a table an adversary filled for free.
+///
+/// # It is not "collection only" any more, and the reason is a lesson about residuals
+///
+/// It was, and the sentence that said so was: *"`expand`'s `__typename` and `handle_field_error`'s
+/// message intern uncharged, and neither reads bytes a client chooses, so neither can lengthen a
+/// run on purpose."* That is a **universal over callers**, and there were three callers, not two:
+/// two more sites interned a variable's spelling out of the *executable document*, so a client
+/// could name its variables into one bucket and walk an attacker-sized run per failed argument
+/// coercion — after collection had already been admitted.
+///
+/// Writing a more careful universal would have been the wrong repair, because a universal over
+/// callers does not survive new callers and phases 2–8 add them. **The uncharged entry point is
+/// gone instead.** [`Interner::intern`] takes `&mut Visits`, so a caller who has no budget to give
+/// cannot reach the probe loop, and "no document-derived name is interned uncharged" stopped being
+/// a claim to verify and became a signature.
+///
+/// The form generalises: a residual worth writing down says *X is prevented by the type of Y*, not
+/// *no caller does X*. Two of this module's three residuals have now been falsified by the round
+/// that followed them, both of them universals.
+///
+/// # What it does not bound, in the form that survives a new caller
+///
+/// **The group lookup, and this one cannot be made a type.** It is a direct index with no loop, so
+/// there is nothing to charge — and equally nothing a counter could see if a scan came back. Hiding
+/// `groups` behind a lookup-only API would prevent it, but `expand` iterates that very vector to
+/// commit the groups, so the type it would need is one that both permits and forbids the same
+/// access. Held by review and by the timings, and stated as unenforceable rather than as safe.
+///
+/// **`Schema::sym`, which is examined and cleared rather than left unsaid.** `expand` and
+/// [`applies`] probe the schema's [`NameIndex`](crate::validator::NameIndex) with *document* bytes,
+/// uncharged. The rule above is what clears it: the table is populated from the **schema**, which
+/// the operator wrote, so a client chooses the lookup key and never the run it walks. That is the
+/// same question that condemned [`Fragments`], answered the other way.
+///
+/// [`max_response_slots`]: super::Limits::max_response_slots
 pub(super) struct Visits {
   left: u32,
   limit: u32,
@@ -83,20 +181,63 @@ impl Visits {
     Self { left: limit, limit }
   }
 
-  /// Charges one examined selection, or refuses once the operation has spent its budget.
+  /// Charges `work` units **before** the work they pay for, answering whether there was room.
+  ///
+  /// A selection examined is one unit, an entry a name lookup compares is one unit, and a
+  /// definition or fragment the index pass handles is one unit.
+  ///
+  /// # Every caller charges first, and that is a property and not a convention
+  ///
+  /// A charge taken *after* the work bounds nothing on its own: the work is already spent when the
+  /// refusal arrives, so the ceiling is exceeded by whatever that one call cost. Charging first
+  /// makes "units spent" equal to "work done" at every instant, which is what lets a probe run be
+  /// abandoned in the middle of a bucket instead of at the end of one.
+  ///
+  /// A refusal therefore leaves the remainder **unspent**, because a refused caller does not do its
+  /// work. An earlier version zeroed it, which was right while a lookup charged for a run it had
+  /// already walked and is over-charging now.
+  ///
+  /// This is the shape the callers that *degrade* need: an error message that cannot be charged is
+  /// shortened, not raised, so they have no selection to point at and no fault to build.
   #[inline]
-  fn spend(&mut self, location: SimpleSpan) -> Result<(), Fault<'static>> {
-    match self.left.checked_sub(1) {
+  #[must_use]
+  pub(super) fn take(&mut self, work: u32) -> bool {
+    match self.left.checked_sub(work) {
       Some(left) => {
         self.left = left;
-        Ok(())
+        true
       }
-      None => Err(Fault {
-        raw: Raw::CollectionBudget { limit: self.limit },
-        location,
-        name: None,
-      }),
+      None => false,
     }
+  }
+
+  /// [`take`](Visits::take), as the collection fault a walk returns.
+  #[inline]
+  fn spend(&mut self, work: u32, location: SimpleSpan) -> Result<(), Fault<'static>> {
+    if self.take(work) {
+      return Ok(());
+    }
+    Err(Fault {
+      raw: Raw::CollectionBudget { limit: self.limit },
+      location,
+      name: None,
+    })
+  }
+
+  /// The ceiling, for the message that reports a refusal.
+  #[inline]
+  pub(super) const fn limit(&self) -> u32 {
+    self.limit
+  }
+
+  /// How much of the budget this operation has spent.
+  ///
+  /// The gate that pins collection's cost reads this: it is the only observable that separates a
+  /// linear walk from a quadratic one without a clock, and a clock is not a gate.
+  #[cfg(test)]
+  #[inline]
+  pub(super) const fn spent(&self) -> u32 {
+    self.limit - self.left
   }
 }
 
@@ -134,6 +275,230 @@ impl Allowance {
       location,
       name: None,
     })
+  }
+}
+
+/// A document's named fragments, indexed by name once instead of scanned once per spread.
+///
+/// # Why it holds the definition and not the definition's index
+///
+/// A spread used to be resolved twice: `fragment_index` scanned `definitions()` for the name and
+/// returned a position, and the walk then went back to `definitions()` with that position and
+/// re-matched `ExecutableDefinition::Fragment` — an arm that cannot fail, guarded by a `continue`
+/// that cannot run. Carrying the definition itself deletes the second lookup and the impossible
+/// arm with it, which is the module's standing preference for a checked value over a key to one.
+///
+/// # It is populated under the budget, which is a different question from being read under it
+///
+/// The first version of this table was filled in `Executor::with_limits`, from names the
+/// *document* chooses, entirely outside [`Visits`]. That is the hole: an adversary got the
+/// collision built for free and one cheap, perfectly valid spread walked it. The same reasoning
+/// that made the interner safe — "a client that fills a bucket pays for filling it" — was simply
+/// **false here**, because nothing charged the filling.
+///
+/// So the pass is charged and it happens on the first spread, not at construction. That fixes two
+/// things at once. A service that caches parsing and builds an executor per execution used to pay
+/// `executions × definitions` before any ceiling existed; now every execution pays it out of its
+/// own budget. And a document whose fragments are never spread pays nothing at all.
+///
+/// **The rule this leaves behind, for the structures phases 2–8 will add:** asking whether a
+/// lookup is charged is half the question. The other half is whether the thing being looked *in*
+/// was built inside the budget or outside it, because a bound on the lookup is worth nothing over
+/// a table an adversary filled for free.
+///
+/// # Chaining, so that filling it cannot be quadratic
+///
+/// Open addressing made the *build* the sharper edge of the same defect: inserting `n` names that
+/// collide probes `n²/2` slots, so the constructor was quadratic in a quantity the document chose.
+/// Chaining pushes at a bucket head and never probes, so the pass is `O(definitions + fragments)`
+/// **whatever the names are** — which is what makes its cost knowable before it is paid, and
+/// therefore chargeable in advance rather than discovered afterwards.
+///
+/// It degrades gracefully too: a bucket count clamped below the fragment count lengthens chains,
+/// where open addressing would have had nowhere to put the entry.
+pub(super) struct Fragments<'a, S> {
+  document: &'a ExecutableDocument<S>,
+  /// The named fragments in document order, empty until [`build`](Fragments::build) has run. An
+  /// index into this is a *fragment ordinal*, which is what [`Visited`] is a bitset over.
+  defs: std::vec::Vec<&'a FragmentDefinition<S>>,
+  /// The newest ordinal in each bucket, or [`NONE`]. Power-of-two length.
+  heads: std::vec::Vec<u32>,
+  /// The ordinal pushed into the same bucket before this one, or [`NONE`]. Parallel to `defs`.
+  chain: std::vec::Vec<u32>,
+  /// Whether the pass has run. Distinct from `defs.is_empty()`, which is also true of a document
+  /// that defines no fragments and must not be indexed again on every spread it does not have.
+  built: bool,
+  /// Entries compared, over the executor's whole life.
+  ///
+  /// The gate for "a refused probe run stops at the refusal" reads this. It cannot be read from the
+  /// budget: every comparison is charged before it happens, so the charge and the comparison count
+  /// agree by construction and a version that charged afterwards would agree with itself too. Only
+  /// a count taken independently of the charge can tell the two apart.
+  #[cfg(test)]
+  compares: u64,
+}
+
+impl<'a, S> Fragments<'a, S>
+where
+  S: AsRef<[u8]>,
+{
+  /// An index over `document`'s named fragments, which does not read `document` yet.
+  pub(super) fn new(document: &'a ExecutableDocument<S>) -> Self {
+    Self {
+      document,
+      defs: std::vec::Vec::new(),
+      heads: std::vec::Vec::new(),
+      chain: std::vec::Vec::new(),
+      built: false,
+      #[cfg(test)]
+      compares: 0,
+    }
+  }
+
+  /// Runs the indexing pass once, charging it before it runs.
+  ///
+  /// Two charges rather than one, because the second quantity is not known until the first pass has
+  /// happened: `definitions` for the walk that finds the fragments, then `fragments` for the pushes
+  /// that index them. Both are known **before** the work they pay for — the first is a slice
+  /// length, and the second is exact because chaining has no data-dependent insertion loop.
+  ///
+  /// A refusal leaves the table unbuilt rather than half built. Nothing here can fail after the
+  /// second charge, so "charged" and "complete" are the same state.
+  fn build(&mut self, visits: &mut Visits, location: SimpleSpan) -> Result<(), Fault<'static>> {
+    if self.built {
+      return Ok(());
+    }
+    let definitions = self.document.definitions();
+    visits.spend(
+      u32::try_from(definitions.len()).unwrap_or(u32::MAX),
+      location,
+    )?;
+    self.defs.extend(
+      definitions
+        .iter()
+        .filter_map(|described| match described.node() {
+          ExecutableDefinition::Fragment(fragment) => Some(fragment),
+          ExecutableDefinition::Operation(_) => None,
+        }),
+    );
+    let count = self.defs.len();
+    if let Err(refusal) = visits.spend(u32::try_from(count).unwrap_or(u32::MAX), location) {
+      // Back to unbuilt, so a later collection sees a table that was never indexed rather than one
+      // indexed halfway. The pass this discards was charged and stays charged: it happened.
+      self.defs.clear();
+      return Err(refusal);
+    }
+    if count > 0 {
+      // Load factor a half, as `NameIndex` uses. Clamped rather than checked, because a chained
+      // table with fewer buckets than entries is slower and still correct — there is no capacity
+      // this can fail to have.
+      let buckets = count
+        .next_power_of_two()
+        .saturating_mul(2)
+        .min(1usize << 31);
+      let mask = (buckets - 1) as u32;
+      self.heads.resize(buckets, NONE);
+      self.chain.resize(count, NONE);
+      for ordinal in 0..count {
+        let at = bucket(
+          hash_bytes(self.defs[ordinal].name().source().as_ref()),
+          mask,
+        ) as usize;
+        self.chain[ordinal] = self.heads[at];
+        self.heads[at] = ordinal as u32;
+      }
+    }
+    self.built = true;
+    Ok(())
+  }
+
+  /// Returns the fragment `name` denotes and its ordinal, charging **before** each entry compared.
+  ///
+  /// Before, not after: the run is as long as the document's collisions make it, so a charge taken
+  /// at the end lets one spread walk the whole bucket and only then hear that it had no budget for
+  /// it. Charging first abandons the run at the ceiling.
+  ///
+  /// `Ok(None)` is an undefined spread, which draft 5.5.2.1 makes a validation failure — so it is
+  /// unreachable for a validated document, and skipping is the only behaviour that cannot invent a
+  /// field.
+  fn get(
+    &mut self,
+    name: &[u8],
+    visits: &mut Visits,
+    location: SimpleSpan,
+  ) -> Result<Option<(u32, &'a FragmentDefinition<S>)>, Fault<'static>> {
+    if self.heads.is_empty() {
+      return Ok(None);
+    }
+    let mask = (self.heads.len() - 1) as u32;
+    let mut ordinal = self.heads[bucket(hash_bytes(name), mask) as usize];
+    while ordinal != NONE {
+      visits.spend(1, location)?;
+      #[cfg(test)]
+      {
+        self.compares += 1;
+      }
+      let fragment = self.defs[ordinal as usize];
+      if fragment.name().source().as_ref() == name {
+        return Ok(Some((ordinal, fragment)));
+      }
+      ordinal = self.chain[ordinal as usize];
+    }
+    Ok(None)
+  }
+
+  /// Entries this executor's fragment lookups have compared. See the field.
+  #[cfg(test)]
+  pub(super) const fn compares(&self) -> u64 {
+    self.compares
+  }
+}
+
+/// Draft §6.3's `visitedFragments`, as a bitset over fragment ordinals.
+///
+/// # The membership test and the reset are bounded separately
+///
+/// This was a vector scanned with `contains`, which is linear in the fragments already visited and
+/// runs once per spread — the third of the collection scans. A bitset answers in one word read.
+///
+/// Clearing is the half that is easy to get wrong: `collect_fields` runs once per object position,
+/// so a `fill(0)` over the whole bitset would be `positions × fragments`, and positions are the
+/// driver's. The ordinals actually set are therefore kept as a list, and clearing costs what the
+/// last collection marked — work the visit budget already charged for.
+#[derive(Default)]
+pub(super) struct Visited {
+  /// One bit per fragment ordinal, grown on demand.
+  bits: std::vec::Vec<u64>,
+  /// The ordinals whose bit is set, so the reset costs what was set and not what could have been.
+  seen: std::vec::Vec<u32>,
+}
+
+impl Visited {
+  fn clear(&mut self) {
+    for ordinal in self.seen.drain(..) {
+      self.bits[ordinal as usize / 64] &= !(1u64 << (ordinal % 64));
+    }
+  }
+
+  /// Marks `ordinal`, returning whether it was already there.
+  ///
+  /// It grows to reach the ordinal rather than being sized up front, because the fragment table it
+  /// indexes is not built until the first spread and a size taken before that would be a guess.
+  /// Growth is bounded by the document's fragment count, since every ordinal comes from that table,
+  /// and the alternative to the length compare is a panic on a path nothing can catch.
+  fn visited(&mut self, ordinal: u32) -> bool {
+    let index = ordinal as usize / 64;
+    if index >= self.bits.len() {
+      self.bits.resize(index + 1, 0);
+    }
+    let word = &mut self.bits[index];
+    let bit = 1u64 << (ordinal % 64);
+    if *word & bit != 0 {
+      return true;
+    }
+    *word |= bit;
+    self.seen.push(ordinal);
+    false
   }
 }
 
@@ -184,13 +549,51 @@ pub(super) struct Group {
 /// `__typename`, in a response that still looks well formed. A refusal is a contract a caller can
 /// act on; that is not. So the narrowing is checked rather than argued, and the ceiling is what
 /// keeps the check from ever being the thing that fires.
+///
+/// # The index, and what suffix-`restore` costs it
+///
+/// Finding an existing name used to be a scan of every name, which is one of the three scans that
+/// made a selection set of `n` distinct keys cost `n²`. It is now a chained hash: `heads[bucket]`
+/// holds the newest id in that bucket and `chain[id]` the one interned before it.
+///
+/// **Chaining rather than open addressing, because of [`restore`](Interner::restore).** A failed
+/// collection unwinds a contiguous *suffix* of ids, and open addressing has no cheap way to remove
+/// scattered entries without tombstones or a backward shift. With ids pushed at the head of their
+/// bucket, a bucket's chain is in decreasing id order — so every id in the suffix is the head of
+/// its own bucket when it is removed, and unwinding in reverse costs one pointer write each. That
+/// is the property `restore` asserts rather than assumes.
+///
+/// # Its memory is a multiple of the byte ceiling, not the byte ceiling
+///
+/// [`max_interned_bytes`](super::Limits::max_interned_bytes) bounds the arena's *bytes*, and every
+/// entry carries bookkeeping on top: eight bytes of `spans`, four of `chain`, up to eight of
+/// `heads`, and four of the caller's key-to-group scratch. A GraphQL name is at least one byte, so
+/// an arena of `B` bytes can hold `B` entries and cost about `25 · B`, where before this index it
+/// cost about `9 · B`. That is a constant and not a second factor, which is what keeps it a memory
+/// *cost* rather than the product shape this module refuses — but it is a constant a caller
+/// choosing the ceiling is choosing too, so [`max_interned_bytes`] says so as well.
+///
+/// [`max_interned_bytes`]: super::Limits::max_interned_bytes
 #[derive(Debug)]
 pub(super) struct Interner {
   bytes: std::vec::Vec<u8>,
   spans: std::vec::Vec<(u32, u32)>,
+  /// Entries compared, over the executor's whole life. See [`Fragments::compares`].
+  #[cfg(test)]
+  compares: u64,
+  /// The newest id in each bucket, or [`NONE`]. Power-of-two length; empty until the first intern.
+  heads: std::vec::Vec<u32>,
+  /// The id interned before `id` in the same bucket, or [`NONE`]. Parallel to `spans`.
+  chain: std::vec::Vec<u32>,
   /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
   cap: u32,
 }
+
+/// Buckets the first growth allocates.
+///
+/// Small because most responses intern a handful of names and the table doubles from here; the
+/// vector's capacity survives [`clear`](Interner::clear), so a reused executor pays for it once.
+const FIRST_BUCKETS: usize = 16;
 
 impl Interner {
   #[inline]
@@ -198,6 +601,10 @@ impl Interner {
     Self {
       bytes: std::vec::Vec::new(),
       spans: std::vec::Vec::new(),
+      #[cfg(test)]
+      compares: 0,
+      heads: std::vec::Vec::new(),
+      chain: std::vec::Vec::new(),
       cap,
     }
   }
@@ -208,18 +615,67 @@ impl Interner {
     self.cap
   }
 
-  /// Returns the id for `bytes`, adding it if it is not already there, or `None` when it will not
-  /// fit.
+  /// Returns the id for `bytes`, adding it if it is not already there, charging `visits` before
+  /// **each** entry it compares.
   ///
-  /// `None` is a storage refusal and never a lookup failure: a name already present is always
-  /// returned, whatever the ceiling says, so a full arena degrades what it *records* and never
-  /// what it can still *read*.
-  pub(super) fn intern(&mut self, bytes: &[u8]) -> Option<u32> {
-    for (index, &(start, len)) in self.spans.iter().enumerate() {
-      if &self.bytes[start as usize..(start + len) as usize] == bytes {
-        return Some(index as u32);
+  /// # There is no uncharged way in, and that is the point
+  ///
+  /// This used to have an uncharged sibling, documented as being for callers whose bytes are the
+  /// schema's or the driver's — a claim about *every* caller, asserted from inspection. A review
+  /// found the counterexample immediately: two sites interned a **variable's spelling out of the
+  /// executable document**, so a client could name its variables to fill one bucket, fail argument
+  /// coercion once per sibling field, and walk an attacker-sized run per failure, all of it after
+  /// collection had been admitted.
+  ///
+  /// A more careful claim would have been the wrong repair, because the next phase adds callers
+  /// nobody has read. So the sibling is gone: the budget is a parameter, and a caller who has no
+  /// budget to give cannot reach the probe loop. What was a sentence to re-audit is now a signature.
+  ///
+  /// # What that buys, beyond the one site
+  ///
+  /// Charging every insertion's probe run bounds the **chain** and not just the walk. Putting an
+  /// `L`th name into a bucket first walks the `L - 1` already there, so building a run of length
+  /// `L` costs about `L²/2` — an adversary reaches `√(2 · budget)` and no further, and walking what
+  /// they built costs the budget again. The whole table is bounded by
+  /// [`max_selection_visits`](super::Limits::max_selection_visits), for every population it holds.
+  ///
+  /// [`Unstored::Arena`] is a storage refusal and never a lookup failure: a name already present is
+  /// always returned, whatever the ceiling says, so a full arena degrades what it *records* and
+  /// never what it can still *read*.
+  pub(super) fn intern(&mut self, bytes: &[u8], visits: &mut Visits) -> Result<u32, Unstored> {
+    let hash = hash_bytes(bytes);
+    if !self.heads.is_empty() {
+      let mut id = self.heads[self.bucket(hash)];
+      while id != NONE {
+        if !visits.take(1) {
+          return Err(Unstored::Budget);
+        }
+        #[cfg(test)]
+        {
+          self.compares += 1;
+        }
+        let (start, len) = self.spans[id as usize];
+        if &self.bytes[start as usize..(start + len) as usize] == bytes {
+          return Ok(id);
+        }
+        id = self.chain[id as usize];
       }
     }
+    self.insert(bytes, hash).ok_or(Unstored::Arena)
+  }
+
+  /// Entries this executor's name lookups have compared. See [`Fragments::compares`] for why a
+  /// count kept beside the charge is the only witness for charging before rather than after.
+  #[cfg(test)]
+  pub(super) const fn compares(&self) -> u64 {
+    self.compares
+  }
+
+  /// Appends `bytes` and links it, or `None` when the arena has no room.
+  ///
+  /// Unbudgeted, and it does not need to be: it runs at most once per selection, which the caller
+  /// has already charged, and the rehash it may trigger is amortised over those same insertions.
+  fn insert(&mut self, bytes: &[u8], hash: u64) -> Option<u32> {
     // Checked, not reasoned about. The ceiling below makes each of these unreachable, and they
     // stay because "unreachable given the ceiling" is exactly the kind of claim that stops being
     // true when somebody sets a different ceiling.
@@ -232,7 +688,44 @@ impl Interner {
     let id = u32::try_from(self.spans.len()).ok()?;
     self.bytes.extend_from_slice(bytes);
     self.spans.push((start, len));
+    self.chain.push(NONE);
+    if self.spans.len() > self.heads.len() {
+      self.rehash();
+    } else {
+      let bucket = self.bucket(hash);
+      self.chain[id as usize] = self.heads[bucket];
+      self.heads[bucket] = id;
+    }
     Some(id)
+  }
+
+  /// The bucket `hash` lands in. Never called with `heads` empty.
+  #[inline]
+  fn bucket(&self, hash: u64) -> usize {
+    bucket(hash, (self.heads.len() - 1) as u32) as usize
+  }
+
+  /// Doubles the bucket table and relinks every entry.
+  ///
+  /// **In increasing id order**, so that each bucket's chain comes out in decreasing id order
+  /// again. That ordering is not cosmetic: it is exactly what lets [`restore`](Interner::restore)
+  /// unwind a suffix by taking heads, and a rehash that reversed it would leave the unwind removing
+  /// entries that are not heads.
+  fn rehash(&mut self) {
+    let buckets = self
+      .heads
+      .len()
+      .max(FIRST_BUCKETS)
+      .max(self.spans.len().next_power_of_two());
+    self.heads.clear();
+    self.heads.resize(buckets, NONE);
+    for id in 0..self.spans.len() {
+      let (start, len) = self.spans[id];
+      let hash = hash_bytes(&self.bytes[start as usize..(start + len) as usize]);
+      let bucket = self.bucket(hash);
+      self.chain[id] = self.heads[bucket];
+      self.heads[bucket] = id as u32;
+    }
   }
 
   #[inline]
@@ -248,6 +741,12 @@ impl Interner {
   pub(super) fn clear(&mut self) {
     self.bytes.clear();
     self.spans.clear();
+    self.chain.clear();
+    // Emptied rather than refilled with the sentinel: writing `NONE` over every bucket would be
+    // linear in the *largest* table this executor ever grew, once per operation, and an operation
+    // that interns two names would pay for one that interned a million. The first intern grows it
+    // back into the capacity this leaves behind, so the allocation is still made once.
+    self.heads.clear();
   }
 
   pub(super) fn set_cap(&mut self, cap: u32) {
@@ -266,10 +765,67 @@ impl Interner {
   /// one id that would have escaped — a variable's spelling inside a collection fault's message —
   /// is minted after this runs and not before, which is why [`Fault::name`](super::collect::Fault)
   /// carries bytes.
-  #[inline]
+  ///
+  /// The index is unwound before the arena, because unlinking an entry needs the bytes the
+  /// truncation is about to remove.
   pub(super) fn restore(&mut self, (bytes, spans): (usize, usize)) {
+    for id in (spans..self.spans.len()).rev() {
+      let (start, len) = self.spans[id];
+      let hash = hash_bytes(&self.bytes[start as usize..(start + len) as usize]);
+      let bucket = self.bucket(hash);
+      debug_assert_eq!(
+        self.heads[bucket], id as u32,
+        "an id being unwound was not the head of its bucket; the chain is no longer in decreasing \
+         id order, so this removal is dropping somebody else's entry"
+      );
+      self.heads[bucket] = self.chain[id];
+    }
     self.bytes.truncate(bytes);
     self.spans.truncate(spans);
+    self.chain.truncate(spans);
+  }
+}
+
+/// Everything one collection reuses from the last, in one struct so that the executor moves it in
+/// and out with a single `take` and a new member cannot be forgotten at one of the two call sites.
+///
+/// Cleared, never shrunk: capacity is what makes a steady-state response allocate nothing.
+pub(super) struct Scratch<'a, S> {
+  /// `(group, selection)` for every selection that survived, sorted by group at the end.
+  pub(super) fields: std::vec::Vec<(u32, &'a Field<S>)>,
+  /// One entry per distinct response key, in the order the keys were first seen.
+  pub(super) groups: std::vec::Vec<Group>,
+  /// The group each interned key landed in, or [`NONE`] — indexed by the key's interner id.
+  ///
+  /// This replaces a scan of `groups` per field selection. It is a *sparse* table over interner
+  /// ids, so it cannot be cleared by length: `collect_fields` unmarks exactly the keys the previous
+  /// collection recorded, which the previous collection's `groups` enumerate.
+  ///
+  /// **The invariant is `keys[i] != NONE` if and only if some entry of `groups` has key `i`**, and
+  /// it holds across `reset` because neither table is emptied there — the next collection unmarks
+  /// from the groups it finds, whether or not an operation ended in between.
+  keys: std::vec::Vec<u32>,
+  /// Draft §6.3's `visitedFragments`.
+  visited: Visited,
+  /// The descent, as heap rather than as native frames. See [`walk`].
+  stack: std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+}
+
+impl<S> Default for Scratch<'_, S> {
+  /// Scratch that allocates nothing, which is also the placeholder [`core::mem::take`] leaves
+  /// behind while the real one is being written to.
+  ///
+  /// One constructor rather than two, because every member grows on demand — [`Visited`] included,
+  /// since the fragment table it indexes is not built until the first spread. There is no size to
+  /// hint at here and therefore no wrong hint to leave behind.
+  fn default() -> Self {
+    Self {
+      fields: std::vec::Vec::new(),
+      groups: std::vec::Vec::new(),
+      keys: std::vec::Vec::new(),
+      visited: Visited::default(),
+      stack: std::vec::Vec::new(),
+    }
   }
 }
 
@@ -284,15 +840,12 @@ impl Interner {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn collect_fields<'a, S, V>(
   schema: &Schema,
-  document: &'a ExecutableDocument<S>,
+  fragments: &mut Fragments<'a, S>,
   object_type: TypeId,
   sets: &[&'a SelectionSet<S>],
   ctx: &mut V,
   interner: &mut Interner,
-  visited: &mut std::vec::Vec<u32>,
-  fields: &mut std::vec::Vec<(u32, &'a Field<S>)>,
-  groups: &mut std::vec::Vec<Group>,
-  stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+  scratch: &mut Scratch<'a, S>,
   visits: &mut Visits,
   metadata: Allowance,
 ) -> Result<(), Fault<'a>>
@@ -300,31 +853,40 @@ where
   S: AsRef<[u8]>,
   V: Values,
 {
-  fields.clear();
-  groups.clear();
-  visited.clear();
+  // Before `groups` is emptied, because `groups` is the list of what to unmark.
+  for group in &scratch.groups {
+    scratch.keys[group.key as usize] = NONE;
+  }
+  scratch.fields.clear();
+  scratch.groups.clear();
+  scratch.visited.clear();
   for set in sets {
-    walk(
+    let walked = walk(
       schema,
-      document,
+      fragments,
       object_type,
       set,
       ctx,
       interner,
-      visited,
-      fields,
-      groups,
-      stack,
+      scratch,
       visits,
       metadata,
-    )?;
+    );
+    if let Err(fault) = walked {
+      // Hygiene, not lifetime: the descent's borrows outlive the executor, so leaving them costs
+      // nothing but a reader's time. Done here rather than at the caller so the field stays private
+      // to this module and neither exit can forget it.
+      scratch.stack.clear();
+      return Err(fault);
+    }
   }
+  scratch.stack.clear();
   // Stable, so document order inside a group survives; by group, so every group is contiguous.
-  fields.sort_by_key(|&(group, _)| group);
+  scratch.fields.sort_by_key(|&(group, _)| group);
   let mut cursor = 0usize;
-  for (index, group) in groups.iter_mut().enumerate() {
+  for (index, group) in scratch.groups.iter_mut().enumerate() {
     let start = cursor;
-    while cursor < fields.len() && fields[cursor].0 as usize == index {
+    while cursor < scratch.fields.len() && scratch.fields[cursor].0 as usize == index {
       cursor += 1;
     }
     group.start = start as u32;
@@ -339,20 +901,32 @@ where
 ///
 /// A named fragment chain is **flat in the document**: `fragment F0 … ...F1`, each definition at
 /// nesting depth one, so no parser depth limit sees it and none can. A recursive walk spends one
-/// native frame per link, and measured on this tree a chain of 1,500 fragments — well under
-/// 200 KB of perfectly valid text — overflowed the stack and took the process down with
-/// `SIGABRT`. That is not a catchable panic: a server cannot turn it into a `400`, and one request
-/// kills every other in flight.
+/// native frame per link, and a chain of a few thousand fragments — a couple of hundred kilobytes
+/// of perfectly valid text — overflowed the stack and took the process down with `SIGABRT`. That is
+/// not a catchable panic: a server cannot turn it into a `400`, and one request kills every other
+/// in flight.
 ///
-/// So the frame is gone rather than counted. A depth *ceiling* on a recursive walk would still be
-/// a ceiling whose right value depends on the deployment's stack size, its build profile and its
-/// frame layout; an explicit stack makes the question disappear, because depth is heap the visit
-/// budget already bounds.
+/// **"A few thousand" is as precise as the number can honestly be, and that is the argument.** It
+/// was measured at 1,500 links when the recursion was deleted; re-measured by restoring the
+/// recursion on this tree, 1,500 links answered in 1.9 ms and 10,000 aborted — a release build on a
+/// different platform with a different frame layout. So the frame is gone rather than counted: a
+/// depth *ceiling* would be a ceiling whose right value is a function of each deployment's stack
+/// size, build profile and frame layout, and an explicit stack makes the question disappear,
+/// because depth is heap the visit budget already bounds.
 ///
 /// Inline fragments recurse in the document rather than through definitions, and are **not** the
 /// reachable case: the parser aborts on its own at around sixty levels (al8n/smear#61), so no
 /// document deep enough to trouble this walk survives to reach it. The flat chain is the one that
 /// gets here.
+///
+/// # Every lookup is charged, including the ones a hash usually makes free
+///
+/// A spread's fragment, a response key's interner entry and that key's group were three linear
+/// scans, one per selection, and together they made a selection set of `n` distinct keys cost `n²`
+/// — under a budget whose unit was one *selection*, which read `n`. The group is now a direct index
+/// by interner id, and the other two are hash probes whose comparisons are charged to that budget,
+/// so the ceiling bounds collection's work rather than its trip count. [`Visits`] carries the
+/// argument and its limits.
 ///
 /// # The order is the recursion's, exactly
 ///
@@ -363,15 +937,12 @@ where
 #[allow(clippy::too_many_arguments)]
 fn walk<'a, S, V>(
   schema: &Schema,
-  document: &'a ExecutableDocument<S>,
+  fragments: &mut Fragments<'a, S>,
   object_type: TypeId,
   set: &'a SelectionSet<S>,
   ctx: &mut V,
   interner: &mut Interner,
-  visited: &mut std::vec::Vec<u32>,
-  fields: &mut std::vec::Vec<(u32, &'a Field<S>)>,
-  groups: &mut std::vec::Vec<Group>,
-  stack: &mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+  scratch: &mut Scratch<'a, S>,
   visits: &mut Visits,
   metadata: Allowance,
 ) -> Result<(), Fault<'a>>
@@ -379,6 +950,13 @@ where
   S: AsRef<[u8]>,
   V: Values,
 {
+  let Scratch {
+    fields,
+    groups,
+    keys,
+    visited,
+    stack,
+  } = scratch;
   stack.clear();
   stack.push((set, 0));
 
@@ -394,39 +972,56 @@ where
     // not it survives. Charging what is appended instead — which is what the metadata ceiling
     // does — leaves a document made of fragments that collect nothing walking for free, and that
     // document is as cheap to write as one that collects everything.
-    visits.spend(*set.as_span())?;
+    visits.spend(1, *set.as_span())?;
 
     match selection {
       Selection::Field(field) => {
         if !included(field.directives(), ctx)? {
           continue;
         }
-        let key = match field.alias() {
+        let name = match field.alias() {
           Some(alias) => alias.name().source().as_ref(),
           None => field.name().source().as_ref(),
         };
-        let Some(key) = interner.intern(key) else {
-          return Err(Fault {
-            raw: Raw::NameStorage {
-              limit: interner.cap(),
-            },
-            // The field's span for the reason the staging charge uses it: a collection-side refusal
-            // reports where a commit-side one would, and a commit-side location includes the alias.
-            location: *field.span(),
-            name: None,
-          });
+        let key = match interner.intern(name, visits) {
+          Ok(key) => key,
+          Err(unstored) => {
+            return Err(Fault {
+              raw: match unstored {
+                Unstored::Arena => Raw::NameStorage {
+                  limit: interner.cap(),
+                },
+                Unstored::Budget => Raw::CollectionBudget {
+                  limit: visits.limit(),
+                },
+              },
+              // The field's span for the reason the staging charge uses it: a collection-side
+              // refusal reports where a commit-side one would, and a commit-side location includes
+              // the alias.
+              location: *field.span(),
+              name: None,
+            });
+          }
         };
-        let group = match groups.iter().position(|g| g.key == key) {
-          Some(index) => index as u32,
-          None => {
+        // One index, where this used to scan the groups. `keys` is sparse over interner ids, so it
+        // is grown to reach the id rather than to the arena's size — an id is only ever minted by
+        // the call above, so growth here is one entry at a time and cannot outrun the arena.
+        if keys.len() <= key as usize {
+          keys.resize(key as usize + 1, NONE);
+        }
+        let group = match keys[key as usize] {
+          NONE => {
+            let index = groups.len() as u32;
             groups.push(Group {
               key,
               start: 0,
               len: 0,
               first: *field.span(),
             });
-            (groups.len() - 1) as u32
+            keys[key as usize] = index;
+            index
           }
+          index => index,
         };
         // Charged before the push, against the ceiling this staging buffer is staging *for*.
         //
@@ -452,23 +1047,18 @@ where
         if !included(spread.directives(), ctx)? {
           continue;
         }
-        let name = spread.name().source().as_ref();
-        let Some(index) = fragment_index(document, name) else {
+        // Indexed here rather than at construction, and charged. A document whose fragments are
+        // never spread never reaches this line and never pays for them.
+        fragments.build(visits, *spread.span())?;
+        let found = fragments.get(spread.name().source().as_ref(), visits, *spread.span())?;
+        let Some((ordinal, fragment)) = found else {
           // Draft 5.5.2.1 makes an undefined spread a validation failure, so this is unreachable
           // for a validated document. Skipping is the only behaviour that cannot invent a field.
           continue;
         };
-        if visited.contains(&index) {
+        if visited.visited(ordinal) {
           continue;
         }
-        visited.push(index);
-        let Some(ExecutableDefinition::Fragment(fragment)) = document
-          .definitions()
-          .get(index as usize)
-          .map(|described| described.node())
-        else {
-          continue;
-        };
         let condition = fragment.type_condition().name().source().as_ref();
         if !applies(schema, condition, object_type) {
           continue;
@@ -624,18 +1214,4 @@ where
     InputValue::Null(_) => Err(unreadable(ConditionFault::Null)),
     _ => Err(unreadable(ConditionFault::NotABoolean)),
   }
-}
-
-fn fragment_index<S>(document: &ExecutableDocument<S>, name: &[u8]) -> Option<u32>
-where
-  S: AsRef<[u8]>,
-{
-  document
-    .definitions()
-    .iter()
-    .position(|described| match described.node() {
-      ExecutableDefinition::Fragment(fragment) => fragment.name().source().as_ref() == name,
-      ExecutableDefinition::Operation(_) => false,
-    })
-    .map(|index| index as u32)
 }
