@@ -3814,3 +3814,111 @@ fn a_name_storage_refusal_on_an_alias_points_at_the_alias() {
     "the aliased selection whose key could not be stored, not the field behind it"
   );
 }
+
+// ------------------------------------------------------------------------------------------
+// A refused list costs its siblings nothing either
+// ------------------------------------------------------------------------------------------
+//
+// The list arm appends elements one at a time and a later one can be refused, so it is a branch
+// that fails after allocating — the shape the expansion rollback was added for, in the one path
+// that rollback never reached. Both cases below need the *element* slots released, and the second
+// needs something the first cannot see.
+
+const LIST_TXN_SDL: &str = r#"
+type Query {
+  bad: [String]
+  other: Other
+}
+type Other {
+  ok: String
+}
+"#;
+
+fn list_txn_root(bad: J) -> J {
+  J::Obj(
+    "Query",
+    vec![
+      ("bad", bad),
+      (
+        "other",
+        J::Obj("Other", vec![("ok", J::Str("OK".to_owned()))]),
+      ),
+    ],
+  )
+}
+
+/// A list refused mid-way releases the elements it had already built.
+///
+/// **Why four.** The root, `bad` and `other` are three positions; `bad`'s first element is the
+/// fourth and its second is refused. The correct degraded response is those three plus `other.ok`
+/// — four — so it fits exactly, while a retained element leaves the count at four before `other` is
+/// reached and `other.ok` would need five. Any other ceiling admits both or refuses both.
+#[test]
+fn a_refused_list_costs_its_siblings_nothing() {
+  let limits = Limits {
+    max_response_slots: NonZeroU32::new(4).expect("not zero"),
+    ..Limits::default()
+  };
+  let (data, errors) = run_bounded(
+    LIST_TXN_SDL,
+    "{ bad other { ok } }",
+    list_txn_root(J::List(vec![
+      J::Str("x".to_owned()),
+      J::Str("y".to_owned()),
+    ])),
+    limits,
+  );
+
+  assert_eq!(
+    errors.len(),
+    1,
+    "only `bad` is over the ceiling; a second error means its elements were still charged: \
+     {errors:?}"
+  );
+  assert_eq!(errors[0].2, "bad");
+  assert_eq!(
+    data, r#"{"bad":null,"other":{"ok":"OK"}}"#,
+    "`other` fitted in the correct degraded response and must be in it"
+  );
+}
+
+/// The same refusal over a list whose earlier element had already failed.
+///
+/// The inverse of the rollback, and the half the case above cannot reach. A nullable element type
+/// means an element's own field error does *not* null the list, so the loop continues carrying an
+/// error row that names that element's slot. Restoring the slots without the row does not crash,
+/// which is what makes it dangerous: the next sibling to expand takes the index the element gave
+/// up, so the stale row re-points at a real position that is not its own. Planted, the leaf error
+/// from `bad`'s element comes back with the path `other.ok` — releasing something that is still
+/// read, reported against a field that never failed. That is the failure a release-only test never
+/// sees, and the mark covers the error rows for exactly this reason.
+#[test]
+fn a_refused_list_takes_its_elements_errors_with_it() {
+  let limits = Limits {
+    max_response_slots: NonZeroU32::new(4).expect("not zero"),
+    ..Limits::default()
+  };
+  // The first element serialises to null, which draft §6.4.3 step 4 makes a field error at
+  // `bad.0`; `[String]` is nullable per element, so the list survives it and reaches the refusal.
+  let (data, errors) = run_bounded(
+    LIST_TXN_SDL,
+    "{ bad other { ok } }",
+    list_txn_root(J::List(vec![J::Vanishes, J::Str("y".to_owned())])),
+    limits,
+  );
+
+  assert_eq!(
+    errors.len(),
+    1,
+    "the element's error went back with the element that no longer exists: {errors:?}"
+  );
+  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(
+    errors[0].2, "bad",
+    "and the surviving error is the refusal, at the list"
+  );
+  assert_eq!(
+    data, r#"{"bad":null,"other":{"ok":"OK"}}"#,
+    "`other` still fits, and reading the response did not walk a slot that was truncated away"
+  );
+}

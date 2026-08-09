@@ -139,6 +139,36 @@ mod tests;
 ///    release hung off "the completion path" misses the first and a release hung off "the last
 ///    offer" misses the second. Hanging it off the state catches both by construction.
 ///
+/// # Every path that can fail after allocating
+///
+/// The table above says how each member is released; this says which failures actually do it. The
+/// sweep exists because the expansion rollback was added without one, and the list arm — the same
+/// shape, a branch that appends and can then refuse — went another two rounds unfixed.
+///
+/// | failure | allocated before it | restores |
+/// |---|---|---|
+/// | §6.4.3 step 1 non-null null, step 3 not-a-list, step 4 leaf coercion, step 5 unresolved abstract | nothing in this call | n/a |
+/// | step 5 impossible abstract | the runtime name, if it could be interned | no, and correctly: the error's own message reads it |
+/// | **list element over the position ceiling** | element slots and metadata, plus every subtree those elements completed | **yes** — the fix this note is attached to |
+/// | `expand` collection fault | interned response keys | yes |
+/// | `expand` exhausted | committed groups, their slots and metadata | yes |
+/// | §6.4.1 argument errors | earlier checked arguments; the variable's name; the error's own span | the arguments, at the next entry point; the name and span are the error's and stay |
+/// | `poll_resolve` withhold | a coerced argument set | yes, `retire_arguments` at the exit |
+///
+/// One path deliberately does **not** restore, and it is worth stating so it is not read as a
+/// missing row: when draft §6.4.4 nulls a list from one of its own elements, the elements already
+/// built keep their charge. That is not a refusal — the executor did not decline to represent
+/// anything, it built a subtree and the response then said null about it — and the ceilings bound
+/// cumulative allocation by an argument this design froze. The line is *refusals restore, outcomes
+/// do not*, and it is the line row 5's release column already draws by naming reset and
+/// suffix-restore as the only two releases.
+///
+/// The inverse is checked too, because an over-eager restore is the worse defect and no
+/// release-only test can see it: a restore must not free something still read. Two things could
+/// point into a truncated region — an error row, whose slot index the mark now covers, and the
+/// deferral cell, which every entry point settles before any of this runs and which `restore`
+/// asserts is empty.
+///
 /// What none of this bounds is *peak*: draft §6.4.3 completes a list synchronously, so one
 /// `handle_resolved` can still momentarily own an element value per element with none of their
 /// children offered yet. That set now drains as the driver makes progress instead of persisting to
@@ -417,6 +447,19 @@ struct Mark {
   merged: usize,
   locations: usize,
   interner: (usize, usize),
+  /// Error rows, because a row names the slot it happened at.
+  ///
+  /// Not present until a restore could reach a path that had already failed. `expand`'s two restore
+  /// sites record nothing between mark and restore, so for them this is a no-op — but the list arm
+  /// can: with a nullable element type an element's own field error is recorded and the list keeps
+  /// going, so a later element's refusal restores over a slot an error row still points at.
+  /// `Error::path` reads `slots[row.slot]`, and the damage is not the out-of-bounds it looks
+  /// like: the next sibling to expand takes the index the truncated element gave up, so the stale
+  /// row silently re-points at *that* position. Measured, the leaf error from `bad`'s element came
+  /// back reading `other.ok` — a real field, the wrong one, and nothing crashes. Keeping the slot
+  /// to preserve the row is the leak; keeping the row is a lie. Both go, together: a refused branch
+  /// is one that did not happen, errors included.
+  errors: usize,
   first_child: u32,
   last_child: u32,
   ready_head: u32,
@@ -1010,6 +1053,12 @@ where
         return;
       };
       self.slots[slot as usize].state = State::List;
+      // Elements are appended one at a time and a later one can be refused, so the arm is a branch
+      // that fails after allocating — the shape `expand`'s rollback was added for, in a path that
+      // rollback never reached. Without this an over-budget list nulled itself and went on holding
+      // the positions of the elements it had already built, so a sibling that fitted in the correct
+      // degraded response was refused to pay for a list that is not in the response at all.
+      let mark = self.mark(slot);
       for index in 0..len {
         // `len` is the driver's answer about the driver's own value, so it is bounded by nothing
         // the schema or the document says. The budget is asked *before* the element is fetched, so
@@ -1021,6 +1070,10 @@ where
           .ok()
           .and_then(|at| self.push_child(slot, Key::Index(at), item, State::Ready))
         else {
+          // Everything this list built goes back before the refusal is recorded. The elements were
+          // about to be nulled with the list, so `data` is unchanged; what changes is that their
+          // positions stop being charged against whatever the driver resolves next.
+          self.restore(slot, mark);
           let (parent, field) = self.owner(slot);
           let limit = self.limits.max_response_slots.get();
           self.fail(
@@ -1903,6 +1956,7 @@ where
       merged: self.merged.len(),
       locations: self.locations.len(),
       interner: self.interner.mark(),
+      errors: self.errors.len(),
       first_child: self.slots[slot as usize].first_child,
       last_child: self.slots[slot as usize].last_child,
       ready_head: self.ready_head,
@@ -1922,6 +1976,15 @@ where
   /// slot this expansion enqueued lies above `mark.slots` and disappears with the truncation, and
   /// the tail that preceded them is below it and survives to be re-terminated.
   fn restore(&mut self, slot: u32, mark: Mark) {
+    // Nothing outside the truncated region may point into it. Two things could: an error row,
+    // which the mark now covers, and the deferral cell — which is always settled at the entry
+    // point before any of this runs, so it is empty rather than merely unlikely.
+    debug_assert_eq!(
+      self.deferred, NONE,
+      "a restore ran with an object value parked for release; the parked slot may be inside the \
+       region about to be truncated"
+    );
+    self.errors.truncate(mark.errors);
     self.slots.truncate(mark.slots);
     self.meta.truncate(mark.meta);
     self.merged.truncate(mark.merged);
