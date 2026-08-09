@@ -159,8 +159,8 @@ concurrency:
   # Keyed on the EVENT rather than on `github.ref == 'refs/heads/main'`, which is what it said
   # until #74; see `ci.yml`'s concurrency comment for why that literal was both wrong and the
   # thing that would have quietly halved this fix.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}
+  cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
 # Every `run:` here is bash — the same block `ci.yml` and `macos.yml` carry, and `ci.yml`'s has
 # the full account of what it is for. The construct at risk in this file is the
