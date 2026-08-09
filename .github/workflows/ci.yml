@@ -323,8 +323,8 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
-        # `rowan`, `lossless-coverage`, `validator` and `introspection` are excluded because they
-        # already imply `parser`, so their pass-1 cells ARE pairs; `default`,
+        # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
+        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
         # `--no-default-features` and `--all-features` are excluded because those three runs would
         # duplicate pass-1 exactly.
         #
@@ -334,7 +334,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack clippy -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,default \
+          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
           --exclude-no-default-features --exclude-all-features
 
   # ── WHAT CROSS-COMPILES, AND FOR WHOM ───────────────────────────────────────────────────────
@@ -524,8 +524,8 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
-        # `rowan`, `lossless-coverage`, `validator` and `introspection` are excluded because they
-        # already imply `parser`, so their pass-1 cells ARE pairs; `default`,
+        # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
+        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
         # `--no-default-features` and `--all-features` are excluded because those three runs would
         # duplicate pass-1 exactly.
         #
@@ -535,7 +535,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack build -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,default \
+          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
           --exclude-no-default-features --exclude-all-features
         # Pass 3 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
         #
@@ -1141,6 +1141,60 @@ jobs:
       # each whitelist class and each open gap accounted for. A green tick alone would not say
       # whether the oracle checked five hundred documents or five.
       run: cargo test -p smear-apollo-bench --test validator_oracle -- --nocapture
+
+  # smear's draft §6.4.4 null propagation against `graphql-js`'s own `nonnull-test.ts`, case by
+  # case (`smear/tests/proto_nonnull_oracle.rs`).
+  #
+  # WHY A SEPARATE JOB, WHEN `test` ALREADY RUNS THIS TARGET. `cargo test --all-features` runs the
+  # seventeen ported cases wherever it runs, and it will keep passing with the transcription stale:
+  # a hand-ported corpus is only as good as its provenance, and provenance is the one thing a
+  # committed file cannot check about itself. `SMEAR_GRAPHQL_JS` is the door that makes it
+  # checkable — with it set, `upstream_has_not_drifted` re-reads every recorded line of the
+  # upstream file and fails if an anchor has moved, if the schema has changed, or if upstream has
+  # ADDED a case that is not ported. Without it that test prints a notice and returns.
+  #
+  # WHY NOT VENDORED, and why a tarball into `$RUNNER_TEMP`: both for the reasons the
+  # `validator-oracle` job above records. The pin is the `v16.11.0` tag's commit, and
+  # `UPSTREAM_COMMIT` in the test file carries the same SHA — bumping one without the other is
+  # what the drift gate exists to catch.
+  proto-oracle:
+    name: proto-oracle
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Fetch graphql-js at the pinned oracle release
+      run: |
+        mkdir -p "$RUNNER_TEMP/graphql-js"
+        curl -sSfL https://github.com/graphql/graphql-js/archive/c18e9f6aada9ae086ddf836e4d822cf1426f3868.tar.gz \
+          | tar -xz -C "$RUNNER_TEMP/graphql-js" --strip-components=1
+        # Fail here, loudly, rather than let the drift gate take its unset-variable branch and
+        # report a green run over a lane that fetched nothing.
+        test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/nonnull-test.ts"
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-proto-oracle-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-proto-oracle-
+    - name: cargo test --test proto_nonnull_oracle --test proto_execute
+      env:
+        SMEAR_GRAPHQL_JS: ${{ runner.temp }}/graphql-js
+      # `--nocapture` because the counts are the artifact: how many cases reached a comparison, how
+      # many error entries, paths and locations were compared, and how many anchors were verified
+      # against upstream. A green tick alone would not say whether the oracle compared 29 entries
+      # or none.
+      #
+      # Both targets by name, not `-p smear --tests`: a cargo target *filter* warns and exits 0
+      # when it matches nothing, so a renamed file would silently empty this job.
+      run: |
+        cargo test -p smear --features proto --test proto_nonnull_oracle --test proto_execute \
+          -- --nocapture
 
   # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
   # `macos-latest` cell, so on a run where those cells never got a runner this job was never

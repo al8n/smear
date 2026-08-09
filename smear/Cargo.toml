@@ -82,6 +82,18 @@ parser = []
 # `thumbv6m-none-eabi` with an empty `[dependencies]` table.
 validator = ["parser", "graphql"]
 
+# Draft §6 execution (`smear::proto`): the Sans-I/O query executor.
+#
+# It implies `validator`, and not the other way round, because execution is entered with a document
+# the §5 rules have already accepted against a schema `Schema::build` has already accepted — draft
+# §7.1.2's whole *request*-error phase is over before an `Executor` exists, which is why no method
+# on one returns a validation failure.
+#
+# It adds NO dependency and defines no value type of its own: the driver's representation reaches
+# it through the `proto::Values` trait, so the module is `core` + `alloc` for the same reason the
+# schema representation is.
+proto = ["validator"]
+
 # The second construction door: building a `Schema` out of a draft §4 introspection response
 # instead of out of SDL (`Schema::from_introspection`).
 #

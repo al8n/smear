@@ -19,9 +19,11 @@
 //! its own; the value that pairs the two can, and this record names it.
 //!
 //! [`Kind::Tracked`] is a family that has not joined the contract and is expected to. Every one of
-//! them today is al8n/smear#126's phase E — the parser and lexer families, sequenced after the
-//! validator ones deliberately — and it must name its issue, so it is debt with a home rather than
-//! debt with an excuse.
+//! them today is al8n/smear#126's, and each must name its issue, so it is debt with a home rather
+//! than debt with an excuse. Two of that issue's phases are represented: **phase E**, the parser
+//! and lexer families, sequenced after the validator ones deliberately; and **phase D**, the §7
+//! writer and proto's adoption of the contract, which the issue sequences *strictly after*
+//! `feat/proto-execute-query` merges. Neither ordering is this table's — it records them.
 //!
 //! [`Kind::NotDiagnostic`] is the name pattern misfiring: a type whose name ends in `Error` and
 //! which is not an error a consumer is ever handed. It is counted separately in the run's own
@@ -81,10 +83,15 @@ const PARSER_FAMILY: &str = "A draft §2 syntactic refusal. Phase E of al8n/smea
 
 /// Every type the D1 inventory finds that does not answer the contract, each with its argument.
 ///
-/// It is long, and its length is the finding rather than a defect in the table: thirty-two of the
-/// thirty-six are the lexer and parser families that phase E owns, and this is the first artifact
-/// in the repository that states how many there are. The three rows it does *not* cover are the
-/// three Phase A implemented, and D2 proves those with the compiler.
+/// It is long, and its length is the finding rather than a defect in the table: almost all of it is
+/// the lexer and parser families phase E owns. The rows it does *not* cover are the ones phase A
+/// implemented, and D2 proves those with the compiler.
+///
+/// The counts are deliberately not written out here. The run's own summary line is the first place
+/// in the repository that states how many there are, and it recomputes them; a pair copied into a
+/// comment goes stale on the next public type anybody adds, as the pair that used to be here had —
+/// it read thirty-two where the run printed thirty. `crate::exempt`'s misfire group records the
+/// same lesson about the same kind of sentence.
 pub const EXEMPTIONS: &[Exemption] = &[
   // ── Aggregates: the elements answer ──────────────────────────────────────────────────────────
   Exemption {
@@ -154,6 +161,48 @@ pub const EXEMPTIONS: &[Exemption] = &[
              their own payloads — one a contract row, the other an aggregate of one. A `Diagnose` \
              on the sum would have to invent a primary location for a variant holding a hundred of \
              them.",
+  },
+  // ── §6 execution — al8n/smear#126 phase D ────────────────────────────────────────────────────
+  //
+  // The two are recorded separately and for different reasons, because they are different animals:
+  // one is a draft §7.1.2 *field* error, which is the shape the contract's response-path axis was
+  // added for, and the other is a §6.1 refusal that never reaches a response at all.
+  Exemption {
+    path: "smear::proto::Error",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "One entry of a draft §7.1.2 `errors` array, and the only type in this crate that has \
+             a response path to answer with — `path_segments` exists on the contract because of \
+             this shape, so the axis has exactly one candidate implementor and it is this. \
+             al8n/smear#126 sequences it into phase D, the §7 writer together with proto's \
+             adoption, *strictly after* `feat/proto-execute-query` merges, and the ordering is \
+             load-bearing rather than administrative: phase D decides whether the path is \
+             published through `Diagnose::path_segment` — which would make `proto::Segment` and \
+             `diagnostic::PathSegment` one type instead of two spellings of the same two \
+             variants — or stays behind `Error::path()`. Assigning codes and an accessor shape \
+             before that decision would be the guess the phase exists to stop making. Everything \
+             else it needs is already here: `Display` renders the specified message, `locations()` \
+             is non-empty for every error a driver can observe, and `Path::get` is already an \
+             indexed accessor. Recorded, not accepted.",
+  },
+  Exemption {
+    path: "smear::proto::StartError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "How `Executor::start` refuses: draft §6.1's `GetOperation` failures — no operation, \
+             no operation of that name, more than one and none named — plus this phase's \
+             query-only scope and a schema with no query root. Phase D of al8n/smear#126 owns it \
+             with `proto::Error`, and it carries a question of its own that phase has to answer \
+             first: unlike every other row here it is a *request* error, refused before execution \
+             begins, so it has no response path, and it is refused on a property of the whole \
+             document or of the schema rather than at a position in the text, so it has no span \
+             either. Its `primary()` would therefore be the second user of `Location::entire`, \
+             and `only_the_introspection_door_answers_entire` in \
+             `smear/tests/diagnostic_codes.rs` pins that there is exactly one — so joining the \
+             contract here means changing a gate deliberately, which is the reviewed decision \
+             al8n/smear#126's own first correction asks for. Recorded, not accepted.",
   },
   // ── The lexer families — al8n/smear#126 phase E ──────────────────────────────────────────────
   Exemption {
