@@ -111,6 +111,23 @@ pub mod parser;
 #[cfg_attr(docsrs, doc(cfg(feature = "validator")))]
 pub mod validator;
 
+/// Draft §6 execution, as a Sans-I/O state machine.
+///
+/// Runs a validated query against a built [`Schema`](validator::Schema) and produces a draft §7.1
+/// response, performing no I/O and calling no resolver: it says which field it needs and waits to
+/// be told the answer.
+///
+/// It defines no value type. The driver keeps values in its own representation and answers
+/// structural questions about them through [`Values`](proto::Values) — the same choice [`lexer`]
+/// makes about its source, made for the same reason: an owned enum would force an allocation per
+/// leaf and would make a wasm or FFI handle second-class.
+///
+/// Requires `validator`, because execution is entered with a document the draft §5 rules have
+/// already accepted.
+#[cfg(feature = "proto")]
+#[cfg_attr(docsrs, doc(cfg(feature = "proto")))]
+pub mod proto;
+
 #[doc(hidden)]
 pub mod __private {
   pub use tokora;

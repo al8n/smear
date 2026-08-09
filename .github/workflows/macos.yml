@@ -138,8 +138,8 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
-        # `rowan`, `lossless-coverage`, `validator` and `introspection` are excluded because they
-        # already imply `parser`, so their pass-1 cells ARE pairs; `default`,
+        # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
+        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
         # `--no-default-features` and `--all-features` are excluded because those three runs would
         # duplicate pass-1 exactly.
         #
@@ -149,7 +149,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack clippy -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,default \
+          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
           --exclude-no-default-features --exclude-all-features
 
   build:
@@ -189,8 +189,8 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
-        # `rowan`, `lossless-coverage`, `validator` and `introspection` are excluded because they
-        # already imply `parser`, so their pass-1 cells ARE pairs; `default`,
+        # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
+        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
         # `--no-default-features` and `--all-features` are excluded because those three runs would
         # duplicate pass-1 exactly.
         #
@@ -200,7 +200,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack build -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,default \
+          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
           --exclude-no-default-features --exclude-all-features
 
   test:
