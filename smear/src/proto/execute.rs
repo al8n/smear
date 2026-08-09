@@ -139,11 +139,19 @@ mod tests;
 ///    release hung off "the completion path" misses the first and a release hung off "the last
 ///    offer" misses the second. Hanging it off the state catches both by construction.
 ///
-/// # Every path that can fail after allocating
+/// # Every event that reaches a death point
 ///
-/// The table above says how each member is released; this says which failures actually do it. The
-/// sweep exists because the expansion rollback was added without one, and the list arm — the same
-/// shape, a branch that appends and can then refuse — went another two rounds unfixed.
+/// The table above says how each member is released; this says which events actually do it. **Ask
+/// it in that form, and not as "every path that can fail".** The narrower question was asked once
+/// and it missed a whole quadrant: an answer arriving for a request draft §6.4.4 had already
+/// discarded does not *fail* — it succeeds, on something that is gone — and it was holding the
+/// in-flight ceiling because nothing retired it. Release-on-success is the same quadrant that
+/// produced the object-value finding, in a different resource, and a failure-shaped sweep cannot
+/// see either.
+///
+/// So for each member: what are **all** the events that end its life — an answer, a withhold, a
+/// retirement, a reset, a discard, a refusal, and an event that would have been an answer if its
+/// subject still existed — and does each one release?
 ///
 /// | failure | allocated before it | restores |
 /// |---|---|---|
@@ -154,6 +162,7 @@ mod tests;
 /// | `expand` exhausted | committed groups, their slots and metadata | yes |
 /// | §6.4.1 argument errors | earlier checked arguments; the variable's name; the error's own span | the arguments, at the next entry point; the name and span are the error's and stay |
 /// | `poll_resolve` withhold | a coerced argument set | yes, `retire_arguments` at the exit |
+/// | **an answer for an already-abandoned request** | the in-flight entry, still counted against the ceiling | **yes** — it retires like any other answer, and the value is still dropped |
 ///
 /// One path deliberately does **not** restore, and it is worth stating so it is not read as a
 /// missing row: when draft §6.4.4 nulls a list from one of its own elements, the elements already
@@ -1344,7 +1353,7 @@ where
         u32::try_from(self.merged.len()),
         u32::try_from(self.locations.len()),
       ) else {
-        exhausted = Some((Exhausted::Selections, *first.span()));
+        exhausted = Some((Exhausted::Selections, group.first));
         break;
       };
       // Defence, not the live path, since collection began charging this ceiling at the staging
@@ -1356,7 +1365,7 @@ where
       // pre-empt; those are what `a_position_refusal_mid_expansion_costs_its_siblings_nothing`
       // pins, after the metadata tests moved off this path and left it briefly untested.
       if !self.metadata_room(u64::from(group.len) * 2) {
-        exhausted = Some((Exhausted::Selections, *first.span()));
+        exhausted = Some((Exhausted::Selections, group.first));
         break;
       }
       for &(_, field) in selections {
@@ -1379,7 +1388,7 @@ where
           // A `__typename` whose answer cannot be stored must not become a field with no name or
           // a name that is somebody else's: the position simply cannot be built.
           let Some(interned) = self.interner.intern(self.schema.name_bytes(name)) else {
-            exhausted = Some((Exhausted::Names, *first.span()));
+            exhausted = Some((Exhausted::Names, group.first));
             break;
           };
           Some(interned)
@@ -1393,7 +1402,7 @@ where
       let Some(child) = self.push_child(slot, Key::Field(group.key), definition.ty(), state) else {
         // The scratch vectors have to go home before the failure is recorded, because recording it
         // borrows the whole executor — the same reason the collection failure above restores first.
-        exhausted = Some((Exhausted::Positions, *first.span()));
+        exhausted = Some((Exhausted::Positions, group.first));
         break;
       };
       self.meta[child as usize] = Meta {
@@ -2148,9 +2157,22 @@ where
         Some(slot)
       }
       Slotted::Abandoned => {
-        // The driver answered a request §6.4.4 already discarded. Retiring it here rather than
-        // waiting for `poll_abandoned` would let the id be reissued while the driver still holds
-        // it, so it stays abandoned and the answer is dropped.
+        // The driver answered a request draft §6.4.4 had already discarded. The value is still
+        // dropped — the position it belonged to is gone — but the *entry* retires here, because an
+        // answer is one of the events that ends a request's life and this is one.
+        //
+        // It used to stay abandoned, on the reasoning that retiring early would let the id be
+        // reissued while the driver still held it. That reasoning was wrong, and `poll_abandoned`
+        // is the proof: it retires an entry and hands the driver the id it just invalidated,
+        // because `release_entry` bumps the generation and a stale id no longer matches. The same
+        // mechanism covers this path.
+        //
+        // What the old behaviour cost: `poll_resolve` gates on `live + abandoned`, so a request the
+        // driver had already completed went on consuming the in-flight ceiling until the driver
+        // polled an abandonment for work that was finished. A driver that never polls that channel
+        // is documented as stalling; it should not stall on requests it has answered.
+        self.abandoned -= 1;
+        self.release_entry(id.index);
         None
       }
       Slotted::Free { .. } => None,

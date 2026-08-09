@@ -3922,3 +3922,121 @@ fn a_refused_list_takes_its_elements_errors_with_it() {
     "`other` still fits, and reading the response did not walk a slot that was truncated away"
   );
 }
+
+// ------------------------------------------------------------------------------------------
+// An answer retires the request, even when the request was already abandoned
+// ------------------------------------------------------------------------------------------
+
+/// Answering an abandoned request frees its in-flight entry instead of holding the ceiling.
+///
+/// `poll_resolve` gates on `live + abandoned`, and an answer for a slot draft §6.4.4 had already
+/// discarded used to return without freeing the entry or decrementing the count. The work was
+/// finished and the ceiling still believed it was outstanding, so a driver that had answered
+/// everything it was asked could still be withheld from — until it polled an abandonment for work
+/// it had already done.
+///
+/// **Why two.** With an in-flight ceiling of two, `echo` abandoned plus one live cell request is
+/// exactly the ceiling, so the second cell is withheld. Answering `echo` is the only thing that can
+/// free a slot, and a ceiling of three would have admitted the second cell without it.
+#[test]
+fn answering_an_abandoned_request_frees_its_in_flight_entry() {
+  let query = r#"{ nest { deep { boom echo(text: "e") } bulk { text } } }"#;
+  let (schema, document) = compile(HOLD_SDL, query);
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("nest").id();
+  executor.handle_resolved(&mut space, nest, J::Obj("Wrap", vec![]));
+  let deep = executor.poll_resolve(&mut space).expect("deep").id();
+  executor.handle_resolved(&mut space, deep, J::Obj("Wrap", vec![]));
+  let bulk = executor.poll_resolve(&mut space).expect("bulk").id();
+  executor.handle_resolved(
+    &mut space,
+    bulk,
+    J::List(vec![
+      J::Obj("Cell", vec![("text", J::Str("A".to_owned()))]),
+      J::Obj("Cell", vec![("text", J::Str("B".to_owned()))]),
+    ]),
+  );
+
+  let boom = executor.poll_resolve(&mut space).expect("boom").id();
+  let echo = executor.poll_resolve(&mut space).expect("echo").id();
+  assert!(
+    executor.poll_resolve(&mut space).is_none(),
+    "two in flight is the ceiling"
+  );
+
+  // `boom` is `String!` on a nullable `deep`, so §6.4.4 nulls `deep` and the still-outstanding
+  // `echo` underneath it becomes abandoned rather than live.
+  executor.handle_field_error(boom, "boom");
+  let first_cell = executor
+    .poll_resolve(&mut space)
+    .expect("a cell's `text`, now that `boom` has been answered")
+    .id();
+  assert!(
+    executor.poll_resolve(&mut space).is_none(),
+    "one abandoned plus one live is the ceiling again"
+  );
+
+  // The driver answers the request it was never told to stop working on.
+  executor.handle_resolved(&mut space, echo, J::Str("late".to_owned()));
+  let second_cell = executor.poll_resolve(&mut space).expect(
+    "the abandoned request was answered, so its entry retires and the ceiling has room — without \
+     that it stays charged until the driver polls an abandonment for finished work",
+  );
+  assert_ne!(second_cell.id(), first_cell);
+}
+
+/// A merged response key refused during collection points at the group's first selection.
+///
+/// The commit path reports the group's first selection and collection crosses on a later duplicate,
+/// so `{ nullable nullable }` reported the second where the commit would report the first. The two
+/// no longer compute a span each: the group stores the span of the selection that created it and
+/// both read that field, so there is one value rather than two that have to agree.
+///
+/// **Why two.** One selection costs two metadata entries, so a ceiling of two admits the first
+/// duplicate and the second crosses — which is the only arrangement in which the two spans could
+/// differ at all.
+#[test]
+fn a_merged_key_refused_during_collection_points_at_the_first_selection() {
+  let query = "{ nullable nullable }";
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let located = execute_bounded(
+    BUDGET_SDL,
+    query,
+    obj(vec![]),
+    Vec::new(),
+    limits,
+    |response| {
+      response
+        .errors()
+        .map(|error| {
+          error
+            .locations()
+            .iter()
+            .map(|span| (span.start(), span.end()))
+            .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
+    },
+  );
+
+  assert_eq!(located.len(), 1);
+  assert_eq!(located[0].len(), 1);
+  let first = query.find("nullable").expect("the first duplicate");
+  assert_eq!(
+    located[0][0],
+    (first, first + "nullable".len()),
+    "the group's first selection at byte {first}, not the duplicate that happened to cross"
+  );
+}

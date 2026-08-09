@@ -125,21 +125,13 @@ impl Allowance {
   /// `staged` is `fields.len()` before the push, so the entry about to be added is the
   /// `staged + 1`th, and each costs two entries.
   #[inline]
-  fn admits<S>(self, staged: usize, field: &Field<S>) -> Result<(), Fault<'static>>
-  where
-    S: AsRef<[u8]>,
-  {
+  fn admits(self, staged: usize, location: SimpleSpan) -> Result<(), Fault<'static>> {
     if (staged as u64 + 1) * 2 <= self.room {
       return Ok(());
     }
     Err(Fault {
       raw: Raw::MetadataBudget { limit: self.limit },
-      // The *field's* span, not the name's, because that is what the path this replaces reports:
-      // `expand`'s own refusal points at `first.span()` and every committed location comes from
-      // `field.span()`. Both cover the alias, so `p: boom` reports `p: boom` — and the name's span
-      // would have reported `boom`, silently pointing at the schema field instead of the response
-      // key the client asked for.
-      location: *field.span(),
+      location,
       name: None,
     })
   }
@@ -154,6 +146,21 @@ pub(super) struct Group {
   pub(super) start: u32,
   /// How many selections it holds. Always at least one.
   pub(super) len: u32,
+  /// The span of the selection that created this group, which is also the span of
+  /// `selections[0]` after the stable sort — the group's first selection in document order.
+  ///
+  /// # This exists so that a claim can stop being a claim
+  ///
+  /// A budget refusal names the position it refuses, and the refusal can now happen at two places:
+  /// during collection, when the staged total crosses the ceiling, and at the commit, for the two
+  /// ceilings collection cannot pre-empt. Those two were supposed to report the same span, and the
+  /// assertion that they did was wrong twice — first reporting the field's *name* where the commit
+  /// reports the whole aliased selection, then reporting the *crossing duplicate* where the commit
+  /// reports the group's first. Each time the evidence offered could not reach the counterexample.
+  ///
+  /// So the span is stored once, here, at the moment the group is created, and both paths read this
+  /// field. There is no longer an equivalence to establish: there is one value.
+  pub(super) first: SimpleSpan,
 }
 
 /// The response keys and type names a response refers to, held once as bytes.
@@ -416,6 +423,7 @@ where
               key,
               start: 0,
               len: 0,
+              first: *field.span(),
             });
             (groups.len() - 1) as u32
           }
@@ -434,7 +442,10 @@ where
         // allowance is the committed half. That is the module's standing rule, and it is what keeps
         // this from drifting out of step with the commit-side charge — `expand` charges
         // `2 * group.len` per group, which sums to exactly the `2 * fields.len()` measured here.
-        metadata.admits(fields.len(), field)?;
+        // The group's first selection, not this one. A merged response key — `{ x x }` — crosses
+        // on its later duplicate while the commit path reports the first, and reading the stored
+        // span is what makes the two the same value rather than two computations that agree.
+        metadata.admits(fields.len(), groups[group as usize].first)?;
         fields.push((group, field));
       }
       Selection::FragmentSpread(spread) => {
