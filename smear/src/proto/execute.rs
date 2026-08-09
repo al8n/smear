@@ -1374,7 +1374,7 @@ where
     // that will happen" are different numbers.
     let mut enqueued = 0u32;
     let mut exhausted: Option<(Exhausted, SimpleSpan)> = None;
-    for group in &scratch.groups {
+    for group in scratch.groups() {
       let selections = &scratch.fields[group.start as usize..(group.start + group.len) as usize];
       let first = selections[0].1;
       let Some(sym) = self.schema.sym(name_bytes(first)) else {

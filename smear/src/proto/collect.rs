@@ -51,6 +51,8 @@ use super::{
   error::{ConditionFault, Raw},
 };
 
+use groups::{Appending, Groups};
+
 /// Why [`Interner::intern`] could not store a name.
 ///
 /// Two, because the two degrade differently at the one caller that does not simply fail: a name is
@@ -157,11 +159,21 @@ pub(super) struct Fault<'a> {
 ///
 /// # What it does not bound, in the form that survives a new caller
 ///
-/// **The group lookup, and this one cannot be made a type.** It is a direct index with no loop, so
-/// there is nothing to charge — and equally nothing a counter could see if a scan came back. Hiding
-/// `groups` behind a lookup-only API would prevent it, but `expand` iterates that very vector to
-/// commit the groups, so the type it would need is one that both permits and forbids the same
-/// access. Held by review and by the timings, and stated as unenforceable rather than as safe.
+/// **The group lookup, which is not charged and is guarded by a capability instead.** It is a
+/// direct index with no loop, so there is nothing to charge — and, equally, nothing a counter could
+/// see if a scan came back: replace `keys[key as usize]` with a `position` over the groups and
+/// `spent()` reads exactly what it read before, so `distinct_response_keys_are_linear` passes over
+/// an uncharged quadratic. A charge cannot guard this one.
+///
+/// A **type** can, and this residual used to say otherwise — that hiding the vector was impossible
+/// because `expand` iterates it to commit the groups. It does, but not at the same time. The two
+/// uses are phase-disjoint: [`walk`] only appends and reads one entry back by the index it was just
+/// handed, while every iteration ([`collect_fields`]'s unmark and range-assign, and `expand`'s
+/// commit) happens strictly before the walk begins or after it ends. Different capabilities in
+/// disjoint phases are two types, not one contradictory one — so the walk is handed
+/// [`Appending`], which has no iterator, no length and no path to the vector
+/// behind it, and a scan by key is no longer something a walk can be written to do. See
+/// [`Groups`].
 ///
 /// **`Schema::sym`, which is examined and cleared rather than left unsaid.** `expand` and
 /// [`applies`] probe the schema's [`NameIndex`](crate::validator::NameIndex) with *document* bytes,
@@ -594,6 +606,122 @@ pub(super) struct Group {
   pub(super) first: SimpleSpan,
 }
 
+/// The group list, and the phase split that keeps a scan out of the walk.
+///
+/// # What this is defending against
+///
+/// Finding a response key's group used to be a scan of the groups collected so far, which is one of
+/// the three linear lookups that made a selection set of `n` distinct keys cost `n²`. It is now a
+/// direct index through [`Scratch`]'s `keys` table, and the danger is that somebody puts the scan back:
+/// `groups.iter().position(|group| group.key == key)` is one line, is obviously correct, and on
+/// `{ k0: a k1: a … k4095: a }` walks about 8.4 million entries.
+///
+/// **No gate in this crate can see that.** The other two lookups are probe loops, so a scan charges
+/// [`Visits`] what it compares and both the upper and the lower bound in
+/// `a_repeated_response_key_charges_one_comparison_each_time`'s section move. This one has no loop
+/// to charge: `visits.spent()` reads the same either way, and `distinct_response_keys_are_linear`
+/// goes green over the quadratic. A counter cannot guard work that declines to count itself.
+///
+/// # Why it is two types
+///
+/// The residual that stood here said the vector could not be hidden, because `expand` iterates it
+/// to commit the groups — so the type would have to permit and forbid the same access. It does
+/// iterate it, but not at the same time, and *when* is the whole of the argument:
+///
+/// - **During the walk**, the only operations are appending a group and reading one back by the
+///   index that append just returned. No iteration, no length, no search.
+/// - **Before and after the walk**, everything is iteration: `collect_fields` unmarks the previous
+///   collection's keys, assigns each group its contiguous range, and `expand` commits them. See
+///   [`collect_fields`].
+///
+/// Two capabilities in disjoint phases are two types. [`Groups`] is the whole list, and
+/// [`Appending`] is what a walk is handed: it can `push` and it can read a group's `first` span, and
+/// it holds the only reference to the vector while it exists. The vector is private to *this
+/// module* rather than to `collect`, so the restriction binds [`walk`] too — a scan by
+/// key is not something the walk can be written to do, whatever a future editor believes about it.
+///
+/// The cost is this module and a `push` that returns its index. That buys a guarantee where there
+/// was a sentence.
+mod groups {
+  use tokora::SimpleSpan;
+
+  use super::Group;
+
+  /// One response key's group of selections, in the order the keys were first seen.
+  ///
+  /// Cleared, never shrunk, like the rest of [`Scratch`](super::Scratch).
+  #[derive(Default)]
+  pub(super) struct Groups {
+    inner: std::vec::Vec<Group>,
+  }
+
+  impl Groups {
+    /// The walk's view: append, and read back what was appended. See the module.
+    pub(super) fn appending(&mut self) -> Appending<'_> {
+      Appending {
+        inner: &mut self.inner,
+      }
+    }
+
+    /// Every group, for the phases that are allowed to enumerate them.
+    #[inline]
+    pub(super) fn as_slice(&self) -> &[Group] {
+      &self.inner
+    }
+
+    /// Every group, mutably, for the range assignment that follows the walk.
+    #[inline]
+    pub(super) fn iter_mut(&mut self) -> core::slice::IterMut<'_, Group> {
+      self.inner.iter_mut()
+    }
+
+    #[inline]
+    pub(super) fn clear(&mut self) {
+      self.inner.clear();
+    }
+
+    /// What the vector is holding, for the gate that pins the scratch against the ceiling that
+    /// refuses it.
+    #[cfg(test)]
+    #[inline]
+    pub(super) fn capacity(&self) -> usize {
+      self.inner.capacity()
+    }
+  }
+
+  /// The groups, as a walk may touch them: append one, and read one back by its index.
+  ///
+  /// The field is private to this module, so nothing in `collect` — [`walk`](super::walk)
+  /// included — can reach the vector through it. That is the mechanism; see the module for why the
+  /// alternative guards do not work here.
+  pub(super) struct Appending<'g> {
+    inner: &'g mut std::vec::Vec<Group>,
+  }
+
+  impl Appending<'_> {
+    /// Appends `group` and answers with its index, which is the only index a walk ever has.
+    ///
+    /// Returning it rather than making the caller read `len()` first is what leaves this type with
+    /// no length: a search needs a bound to walk to, and there is none to ask for.
+    #[inline]
+    pub(super) fn push(&mut self, group: Group) -> u32 {
+      let index = self.inner.len() as u32;
+      self.inner.push(group);
+      index
+    }
+
+    /// The span of the group's first selection. See [`Group::first`].
+    ///
+    /// One field rather than the whole group, because one field is what the walk reads — and a span
+    /// carries no response key, so even a caller with an index cannot compare its way through the
+    /// list.
+    #[inline]
+    pub(super) fn first(&self, index: u32) -> SimpleSpan {
+      self.inner[index as usize].first
+    }
+  }
+}
+
 /// The response keys and type names a response refers to, held once as bytes.
 ///
 /// A response key repeats on every element of a list, so storing the bytes per slot would make a
@@ -860,7 +988,10 @@ pub(super) struct Scratch<'a, S> {
   /// `(group, selection)` for every selection that survived, sorted by group at the end.
   pub(super) fields: std::vec::Vec<(u32, &'a Field<S>)>,
   /// One entry per distinct response key, in the order the keys were first seen.
-  pub(super) groups: std::vec::Vec<Group>,
+  ///
+  /// Private, and reached through [`groups`](Scratch::groups) and [`walking`](Scratch::walking),
+  /// because the walk and the commit are allowed different things. See [`mod groups`](groups).
+  groups: Groups,
   /// The group each interned key landed in, or [`NONE`] — indexed by the key's interner id.
   ///
   /// This replaces a scan of `groups` per field selection. It is a *sparse* table over interner
@@ -877,6 +1008,46 @@ pub(super) struct Scratch<'a, S> {
   stack: std::vec::Vec<(&'a SelectionSet<S>, usize)>,
 }
 
+/// What [`walk`] is handed, with the group list restricted to the two things a walk does with it.
+///
+/// One struct rather than five more parameters, and the restriction is the point: [`walk`] never
+/// holds a [`Scratch`], so it has no way to reach the group vector other than the [`Appending`] in
+/// here — which cannot enumerate. See [`mod groups`](groups).
+struct Walking<'s, 'a, S> {
+  fields: &'s mut std::vec::Vec<(u32, &'a Field<S>)>,
+  groups: Appending<'s>,
+  keys: &'s mut std::vec::Vec<u32>,
+  visited: &'s mut Visited,
+  stack: &'s mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+}
+
+impl<'a, S> Scratch<'a, S> {
+  /// The groups the last collection produced, for the commit that reads them.
+  #[inline]
+  pub(super) fn groups(&self) -> &[Group] {
+    self.groups.as_slice()
+  }
+
+  /// What the group vector is holding. See [`Groups::capacity`](groups::Groups::capacity).
+  #[cfg(test)]
+  #[inline]
+  pub(super) fn groups_capacity(&self) -> usize {
+    self.groups.capacity()
+  }
+
+  /// The walk's view of the scratch.
+  #[inline]
+  fn walking(&mut self) -> Walking<'_, 'a, S> {
+    Walking {
+      fields: &mut self.fields,
+      groups: self.groups.appending(),
+      keys: &mut self.keys,
+      visited: &mut self.visited,
+      stack: &mut self.stack,
+    }
+  }
+}
+
 impl<S> Default for Scratch<'_, S> {
   /// Scratch that allocates nothing, which is also the placeholder [`core::mem::take`] leaves
   /// behind while the real one is being written to.
@@ -887,7 +1058,7 @@ impl<S> Default for Scratch<'_, S> {
   fn default() -> Self {
     Self {
       fields: std::vec::Vec::new(),
-      groups: std::vec::Vec::new(),
+      groups: Groups::default(),
       keys: std::vec::Vec::new(),
       visited: Visited::default(),
       stack: std::vec::Vec::new(),
@@ -920,7 +1091,7 @@ where
   V: Values,
 {
   // Before `groups` is emptied, because `groups` is the list of what to unmark.
-  for group in &scratch.groups {
+  for group in scratch.groups.as_slice() {
     scratch.keys[group.key as usize] = NONE;
   }
   scratch.fields.clear();
@@ -934,7 +1105,7 @@ where
       set,
       ctx,
       interner,
-      scratch,
+      scratch.walking(),
       visits,
       metadata,
     );
@@ -994,6 +1165,10 @@ where
 /// so the ceiling bounds collection's work rather than its trip count. [`Visits`] carries the
 /// argument and its limits.
 ///
+/// The group index is the one of the three a charge cannot guard, and it is guarded by this
+/// function's *arguments* instead: what arrives is a [`Walking`], whose [`Appending`] can append a
+/// group and read one back and cannot enumerate. [`mod groups`](groups) has the reasoning.
+///
 /// # The order is the recursion's, exactly
 ///
 /// Draft §6.3 fixes response-key order to document order, and `MergeSelectionSets` concatenates in
@@ -1008,7 +1183,7 @@ fn walk<'a, S, V>(
   set: &'a SelectionSet<S>,
   ctx: &mut V,
   interner: &mut Interner,
-  scratch: &mut Scratch<'a, S>,
+  scratch: Walking<'_, 'a, S>,
   visits: &mut Visits,
   metadata: Allowance,
 ) -> Result<(), Fault<'a>>
@@ -1016,9 +1191,9 @@ where
   S: AsRef<[u8]>,
   V: Values,
 {
-  let Scratch {
+  let Walking {
     fields,
-    groups,
+    mut groups,
     keys,
     visited,
     stack,
@@ -1077,8 +1252,7 @@ where
         }
         let group = match keys[key as usize] {
           NONE => {
-            let index = groups.len() as u32;
-            groups.push(Group {
+            let index = groups.push(Group {
               key,
               start: 0,
               len: 0,
@@ -1106,7 +1280,7 @@ where
         // The group's first selection, not this one. A merged response key — `{ x x }` — crosses
         // on its later duplicate while the commit path reports the first, and reading the stored
         // span is what makes the two the same value rather than two computations that agree.
-        metadata.admits(fields.len(), groups[group as usize].first)?;
+        metadata.admits(fields.len(), groups.first(group))?;
         fields.push((group, field));
       }
       Selection::FragmentSpread(spread) => {

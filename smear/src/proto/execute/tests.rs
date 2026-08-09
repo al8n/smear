@@ -267,10 +267,10 @@ fn collection_scratch_cannot_outgrow_the_ceiling_that_refuses_it() {
     executor.scratch.fields.capacity()
   );
   assert!(
-    executor.scratch.groups.capacity() <= CAPACITY_BOUND,
+    executor.scratch.groups_capacity() <= CAPACITY_BOUND,
     "groups grows at most one per selection, so bounding the selections bounds it — {} says \
      otherwise",
-    executor.scratch.groups.capacity()
+    executor.scratch.groups_capacity()
   );
 }
 
