@@ -457,10 +457,21 @@ where
   /// for the pushes that index them. Both are known **before** the work they pay for — the first is
   /// a slice length, and the second is exact because chaining has no data-dependent insertion loop.
   ///
+  /// # One walk, and both charges are for that walk
+  ///
+  /// The two amounts are two costs of a **single** pass over the definitions: reading them, and
+  /// indexing the ones that turned out to be fragments. [`Table::charge`] keeps what it reads, so
+  /// the receipt it hands back is the selection itself and [`Table::fill`] never sees the slice.
+  ///
+  /// Two earlier versions each made the same walk twice. The first learnt the count by *populating*
+  /// the table, which put the second charge after the work it paid for; the version that fixed that
+  /// counted with `filter().count()` and then let `fill` sieve the fragments out of the slice
+  /// again, which put a full scan of the document's operations under a charge that prices only its
+  /// fragments. `definitions` is the same number in both charges, but only one of the two costs is
+  /// bounded by the fragment count, and a document is free to be all operations.
+  ///
   /// # The second charge is taken before the storage it pays for exists
   ///
-  /// The count is produced by [`table::charge`]'s counting pass — `filter().count()` over a slice
-  /// already in memory — and not, as it once was, by populating the table and reading its length.
   /// Populating first made the charge a charge *after* the work, and the refusal path cleared the
   /// vector, which hands back no capacity: this table is owned by the executor and kept across
   /// `reset`, so a refused operation left a fragment-sized allocation nothing would ever reclaim.
@@ -518,11 +529,11 @@ where
       visits.fragment_pass_charged();
       return Ok(());
     }
-    // Count, charge, populate — in that order, and in no other order this crate can be written to
-    // take: the receipt `charge` returns on acceptance is the only argument `fill` has.
-    self
-      .table
-      .fill(table::charge(definitions, visits, location)?);
+    // Select, charge, populate — in that order, and in no other order this crate can be written to
+    // take: the receipt `charge` returns on acceptance is the only argument `fill` has, and it is
+    // the selection, so there is no second walk for `fill` to make.
+    let paid = self.table.charge(definitions, visits, location)?;
+    self.table.fill(paid);
     visits.fragment_pass_charged();
     Ok(())
   }
@@ -549,6 +560,12 @@ where
   #[cfg(test)]
   pub(super) const fn compares(&self) -> u64 {
     self.table.compares()
+  }
+
+  /// Definitions this executor's index pass has read. See [`Table`]'s field.
+  #[cfg(test)]
+  pub(super) const fn walked(&self) -> u64 {
+    self.table.walked()
   }
 
   /// Entries the index has reserved room for. See [`Table::reserved`].
@@ -579,21 +596,39 @@ where
 ///
 /// [`mod groups`](groups) is the precedent: a property about what a caller may do, and when, is a
 /// type here rather than a sentence in a doc comment. The property is *no storage is reserved
-/// before its charge is accepted*, and it is enforced the same way. The three vectors are private
-/// to this module, so the only thing in the crate that can grow them is [`Table::fill`] — and
-/// `fill` takes a [`Paid`], whose fields are private to this module and whose only constructor is
-/// [`charge`], which returns one only when [`Visits::spend`](super::Visits::spend) has said yes.
+/// before a charge that bounds it has been accepted*, and it is enforced the same way. The three
+/// vectors are private to this module, so nothing in the crate outside it can put an entry in one —
+/// and inside it, both of the things that fill them sit behind a charge that bounds what they fill.
+/// [`Table::charge`] builds the selection that becomes `defs`, at most one pointer per definition,
+/// after [`Fragments::build`] has spent one unit per definition. [`Table::fill`] sizes `heads` and
+/// `chain`, both functions of the fragment count alone, and takes a [`Paid`](table::Paid) — whose
+/// fields are private to this module and whose only constructor is `charge`, which returns one only
+/// when [`Visits::spend`] has said yes to the fragment charge.
 ///
 /// Populating after the charge is therefore not a discipline `build` keeps. It is the only program
 /// that compiles: there is no other argument for `fill` and no second way to the vectors. Putting
 /// the defect back means adding a writer to this module, which is a diff that says what it is
 /// doing.
 ///
-/// **The receipt carries the definitions it counted, and `fill` takes nothing else.** A receipt
-/// holding only a number would leave the caller free to pay for one slice and populate from
-/// another — the count and the population agreeing by argument again. This one leaves the caller
-/// holding no slice at all once it has paid, so the two are the same walk over the same data by
-/// construction.
+/// # The receipt carries the fragments, which is what stops the population walking again
+///
+/// A receipt holding only a *number* would leave the caller free to pay for one slice and populate
+/// from another — the count and the population agreeing by argument again. A receipt holding the
+/// *slice* closed that, and left a second hole in the same accounting: `fill` sieved the fragments
+/// back out of it, so the pass walked every definition **twice** while the second charge priced
+/// only the fragments. The definitions charge bought one walk and two were taken, and the extra one
+/// is a scan of the document's *operations* — a quantity the fragment count says nothing about. A
+/// document of 4,000 named operations spreading one fragment paid 4,001 units for the walk and
+/// spent 8,002.
+///
+/// So the walk that counts is the walk that selects: it keeps what it finds, the receipt carries
+/// that, and `fill` cannot walk the definitions because it is not given them. The count and the
+/// population are the same walk over the same data and now over the same *selection*, by
+/// construction rather than by argument.
+///
+/// The vector that walk builds is the vector the table keeps — moved into `defs` where the old
+/// version reserved a second one, and dropped with the receipt when the fragment charge is refused,
+/// which is how a refusal still ends with nothing reserved.
 mod table {
   use tokora::SimpleSpan;
 
@@ -606,40 +641,14 @@ mod table {
 
   use super::{Fault, NONE, Visits};
 
-  /// One accepted charge, and the definitions it was counted over.
+  /// One accepted charge, and the fragments it was taken over.
   ///
   /// Neither [`Copy`] nor [`Clone`], and [`Table::fill`] takes it by value, so one charge admits
   /// one population and a second needs a second charge.
   pub(super) struct Paid<'a, S> {
-    /// The slice the count was taken over, which is also the slice the population reads.
-    definitions: &'a [DescribedExecutableDefinition<S>],
-    /// How many of them are fragments, which is the amount that was charged.
-    fragments: usize,
-  }
-
-  /// Counts the fragments in `definitions`, charges for them, and answers with the receipt that
-  /// admits populating a [`Table`] from them.
-  ///
-  /// The counting pass is `filter().count()` over a slice already in memory: it reserves nothing,
-  /// which is the whole reason it is a separate walk from the population it sizes. A refusal here
-  /// leaves the table not cleared but *untouched* — there is nothing yet to clear.
-  ///
-  /// The count is exact rather than an upper bound, because chaining has no data-dependent
-  /// insertion loop: `fragments` entries is what the population costs whatever the names are.
-  pub(super) fn charge<'a, S>(
-    definitions: &'a [DescribedExecutableDefinition<S>],
-    visits: &mut Visits,
-    location: SimpleSpan,
-  ) -> Result<Paid<'a, S>, Fault<'static>> {
-    let fragments = definitions
-      .iter()
-      .filter(|described| matches!(described.node(), ExecutableDefinition::Fragment(_)))
-      .count();
-    visits.spend(u32::try_from(fragments).unwrap_or(u32::MAX), location)?;
-    Ok(Paid {
-      definitions,
-      fragments,
-    })
+    /// The fragments the charged walk selected, which is also what the population indexes — not a
+    /// count of them, and not the slice they were selected out of. See the module.
+    fragments: std::vec::Vec<&'a FragmentDefinition<S>>,
   }
 
   /// A document's named fragments, chained by the hash of their names.
@@ -666,9 +675,18 @@ mod table {
     /// too. Only a count taken independently of the charge can tell the two apart.
     #[cfg(test)]
     compares: u64,
+    /// Definitions the index pass has read, over the executor's whole life.
+    ///
+    /// Counted here for the same reason `compares` is, one step further out. The pass is charged
+    /// one unit per definition and one per fragment, and *that total does not move* when the
+    /// population walks the definitions a second time to sieve the fragments out of them: the
+    /// budget is spent up front, from a slice length, so it reads the same over one walk and over
+    /// two. Only a count taken at the read itself can say how many walks there were.
+    #[cfg(test)]
+    walked: u64,
   }
 
-  impl<S> Table<'_, S> {
+  impl<'a, S> Table<'a, S> {
     /// A table that has read nothing and reserved nothing.
     pub(super) const fn new() -> Self {
       Self {
@@ -678,7 +696,43 @@ mod table {
         indexed: false,
         #[cfg(test)]
         compares: 0,
+        #[cfg(test)]
+        walked: 0,
       }
+    }
+
+    /// Walks `definitions` once keeping the fragments, charges for indexing them, and answers with
+    /// the receipt that admits populating this table from what the walk kept.
+    ///
+    /// The walk retains at most one pointer per definition, which is what
+    /// [`Fragments::build`](super::Fragments::build) has already spent before it calls this — so
+    /// the selection is storage a charge has already admitted, and it is the *only* storage: it is
+    /// moved into `defs` rather than copied into a second vector. What that costs is a `defs`
+    /// capacity grown to reach the count instead of reserved exactly for it: at most one spare
+    /// pointer per fragment, in a table that already keeps up to five `u32` slots for each. A
+    /// refusal drops the vector and leaves the table not cleared but *untouched*, there being
+    /// nothing in it yet to clear.
+    ///
+    /// The charge is exact rather than an upper bound, because chaining has no data-dependent
+    /// insertion loop: indexing what the walk selected costs one push each whatever the names are.
+    pub(super) fn charge(
+      &mut self,
+      definitions: &'a [DescribedExecutableDefinition<S>],
+      visits: &mut Visits,
+      location: SimpleSpan,
+    ) -> Result<Paid<'a, S>, Fault<'static>> {
+      let mut fragments = std::vec::Vec::new();
+      for described in definitions {
+        #[cfg(test)]
+        {
+          self.walked += 1;
+        }
+        if let ExecutableDefinition::Fragment(fragment) = described.node() {
+          fragments.push(fragment);
+        }
+      }
+      visits.spend(u32::try_from(fragments.len()).unwrap_or(u32::MAX), location)?;
+      Ok(Paid { fragments })
     }
 
     /// Whether the pass has run. See the field.
@@ -700,6 +754,13 @@ mod table {
       self.compares
     }
 
+    /// Definitions this executor's index pass has read. See the field.
+    #[cfg(test)]
+    #[inline]
+    pub(super) const fn walked(&self) -> u64 {
+      self.walked
+    }
+
     /// Entries the three vectors have reserved room for.
     ///
     /// *Capacity* and not length, because the defect this module closes populated the table and
@@ -714,41 +775,29 @@ mod table {
   where
     S: AsRef<[u8]>,
   {
-    /// Reserves and indexes the fragments `paid` paid for.
+    /// Indexes the fragments `paid` paid for, over one entry each and no walk of the document.
     ///
     /// Infallible, and that is the property rather than a convenience: everything able to refuse
     /// has refused before a [`Paid`] exists, so no failure survives into the population — and
     /// therefore no half-built table to undo, and no `clear` leaving behind a capacity a refusal
     /// has no way to give back.
+    ///
+    /// It costs what the fragment charge bought and nothing else. The receipt is the selection, so
+    /// there is no definitions slice here to sieve a second time and no second allocation to fill:
+    /// the vector is moved in, and every term left is one per fragment.
     pub(super) fn fill(&mut self, paid: Paid<'a, S>) {
       debug_assert!(
         !self.indexed,
-        "the table is being populated a second time; `fill` appends, so the first pass's ordinals \
-         would be duplicated rather than replaced"
+        "the table is being populated a second time; the second selection would replace `defs` \
+         while `heads` and `chain` still chain the ordinals of the first"
       );
-      let Paid {
-        definitions,
-        fragments,
-      } = paid;
+      let Paid { fragments } = paid;
       self.indexed = true;
-      if fragments == 0 {
+      let count = fragments.len();
+      if count == 0 {
         return;
       }
-      self.defs.reserve_exact(fragments);
-      self.defs.extend(
-        definitions
-          .iter()
-          .filter_map(|described| match described.node() {
-            ExecutableDefinition::Fragment(fragment) => Some(fragment),
-            ExecutableDefinition::Operation(_) => None,
-          }),
-      );
-      let count = self.defs.len();
-      debug_assert_eq!(
-        count, fragments,
-        "the population found a different number of fragments than the charge counted, over the \
-         same slice and the same predicate"
-      );
+      self.defs = fragments;
       // Load factor a half, as `NameIndex` uses. Clamped rather than checked, because a chained
       // table with fewer buckets than entries is slower and still correct — there is no capacity
       // this can fail to have.

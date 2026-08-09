@@ -620,6 +620,104 @@ fn a_refused_index_pass_reserves_no_fragment_storage() {
   );
 }
 
+/// The index pass reads each definition once, so a document of operations is not scanned twice.
+///
+/// # The totals cannot see this, for the same reason the refusal above could not
+///
+/// `Fragments::build` spends `definitions` for the walk that finds the fragments and `fragments`
+/// for the pushes that index them, and it spends both **up front** — out of a slice length and a
+/// count taken before either is used. The total is therefore a function of the document alone: it
+/// reads the same whether the pass walks the definitions once or twice. The population used to walk
+/// them a second time, `fill` taking the slice and sieving the fragments back out of it, and every
+/// gate here was green over that — including the two exact-total ones, which are exact about a
+/// number that did not move.
+///
+/// What moved is the work, and the second walk is the half of it that no charge bounds. A document
+/// is free to be nearly all operations, so `definitions` and `fragments` can be as far apart as the
+/// client likes: below, `DEFINITIONS + FRAGMENTS` units admit a pass that reads `2 × DEFINITIONS`
+/// definitions — more definition reads than the entire operation has budget for.
+///
+/// `Fragments::walked` is the count taken at the read, and it is the only thing that separates the
+/// two versions. That is the role `Fragments::compares` plays for a probe run charged after the
+/// fact, one step further out: there, the charge and the count agreed under both versions; here the
+/// charge is not even taken per item, so it agrees with itself twice over.
+///
+/// # The document and the ceiling
+///
+/// `OPERATIONS` named operations and one fragment, spread by the operation the run selects — which
+/// is the first, so draft §6.1's lookup stops at it and contributes nothing to the walk under test.
+/// The ceiling is what the request costs to the unit: the root's one spread, the pass, the one
+/// comparison that finds the fragment, and the one field inside it. It sits in the window the
+/// defect lives in — above `DEFINITIONS + FRAGMENTS`, so the pass is admitted and the request is
+/// served, and far below `2 × DEFINITIONS + FRAGMENTS`, so the second walk is one nobody paid for.
+///
+/// **The plant.** Give `Paid` the definitions slice back and let `fill` filter it into `defs`
+/// instead of moving the selection in, counting what it reads as every reader in that module does.
+/// `walked` doubles, and the response, all four totals in `Charges` and `fragment_reserved()` stay
+/// exactly as they are.
+#[test]
+fn the_index_pass_reads_each_definition_once() {
+  /// Named operations, so that what the pass walks is overwhelmingly not fragments.
+  const OPERATIONS: u32 = 512;
+  /// The one fragment the selected operation spreads.
+  const FRAGMENTS: u32 = 1;
+  /// What one walk of the document reads.
+  const DEFINITIONS: u32 = OPERATIONS + FRAGMENTS;
+  /// The whole request: the root's spread, the pass, the comparison that finds the fragment, and
+  /// the field inside it.
+  const BUDGET: u32 = DEFINITIONS + FRAGMENTS + 3;
+
+  let mut query = std::string::String::from("query Op0 { ...F }\n");
+  for index in 1..OPERATIONS {
+    query.push_str(&std::format!("query Op{index} {{ a }}\n"));
+  }
+  query.push_str("fragment F on Query { a }\n");
+
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+  let mut space = Space;
+  let mut executor = Executor::with_limits(
+    &schema,
+    &document,
+    Limits {
+      max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
+      ..Limits::default()
+    },
+  );
+  executor
+    .start(&mut space, Some("Op0"), Value::Obj)
+    .expect("the operation resolves");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+
+  let spent = executor.collection_work();
+  let walked = executor.fragment_definitions_walked();
+  assert_eq!(
+    spent, BUDGET,
+    "the ceiling is meant to be this request's own cost to the unit, so that being served says the \
+     budget was enough and not that it had slack; {spent} spent against {BUDGET} means the fixture \
+     is no longer tuned to what it is watching"
+  );
+  let errors = {
+    let response = executor.poll_response().expect("nothing is outstanding");
+    response.error_count()
+  };
+  assert_eq!(
+    errors, 0,
+    "the request costs exactly what it was given, so it has to be served; a refusal here would \
+     leave the count below measuring a pass that was abandoned rather than one that walked once"
+  );
+  assert_eq!(
+    walked,
+    u64::from(DEFINITIONS),
+    "the pass read {walked} definitions under a ceiling of {BUDGET} units, every one of which this \
+     request spent somewhere. One walk is what the `definitions` charge buys; a second is a scan of \
+     the document's {OPERATIONS} operations, priced by nothing and bounded by nothing the fragment \
+     count can express"
+  );
+}
+
 /// How many fragments the colliding fixtures define.
 ///
 /// Small because finding them costs about `COLLIDING × buckets` trial hashes, and the property

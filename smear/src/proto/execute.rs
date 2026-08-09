@@ -1980,6 +1980,17 @@ where
     self.fragments.compares()
   }
 
+  /// Definitions the fragment index pass has read, counted independently of what it charged.
+  ///
+  /// One walk is what the pass is charged for, and the charge is spent up front out of a slice
+  /// length — so the budget reads the same over one walk and over two, and a version that walked
+  /// the definitions again to sieve the fragments out of them agrees with itself. This count is the
+  /// only thing that separates them. See `collect::table`.
+  #[cfg(test)]
+  fn fragment_definitions_walked(&self) -> u64 {
+    self.fragments.walked()
+  }
+
   /// Entries the name lookups have compared, counted independently of what they charged.
   #[cfg(test)]
   fn interner_compares(&self) -> u64 {
