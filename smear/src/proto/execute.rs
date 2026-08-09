@@ -517,22 +517,23 @@ struct Mark {
   ready_tail: u32,
 }
 
-/// Which of [`Limits`]'s two response ceilings `expand` ran into.
+/// Which of [`Limits`]'s ceilings `expand` ran into.
 ///
 /// Carried out of the loop rather than reported inside it, because recording a failure borrows the
 /// whole executor while the scratch vectors are still moved out of it.
 ///
-/// Two variants and one [`Kind`](super::Kind): a driver branching on the outcome only needs to know
-/// that a ceiling was reached, and the remedy is the same either way, but the two *messages* have
-/// to name the right knob — a single message would be wrong half the time.
+/// Several variants and one [`Kind`](super::Kind): a driver branching on the outcome only needs to
+/// know that a ceiling was reached, and the remedy is the same in every case, but the *messages*
+/// have to name the right knob — one message would be wrong most of the time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Exhausted {
+  /// [`max_response_slots`](Limits::max_response_slots) has no room for the position.
   Positions,
+  /// [`max_response_metadata`](Limits::max_response_metadata) has no room for the group.
   Selections,
-  Names,
-  /// The name lookup had no visit budget left. Distinct from `Names` because a message naming the
-  /// arena's ceiling when the *work* ceiling refused would send an operator to tune the wrong knob.
-  Work,
+  /// A `__typename` answer could not be interned. Which ceiling refused, and the number that
+  /// belongs to it, travel together — see [`Unstored`].
+  Unstored(Unstored),
 }
 
 /// Why [`Executor::start`] refused.
@@ -992,9 +993,13 @@ where
     // a loss; letting it push the arena past what a `u32` offset can address would corrupt every
     // name interned after it, which is not — and the same is true of a lookup nobody paid for, so
     // the budget refuses through the same door the arena does.
+    //
+    // Through the same door, but not with the same message. The refusal is carried rather than
+    // discarded, because the two doors are two different knobs and an operator told the wrong one
+    // resizes an arena that was never the constraint.
     let raw = match self.interner.intern(message.as_bytes(), &mut self.visits) {
       Ok(message) => Raw::Resolver { message },
-      Err(_) => Raw::ResolverUnstorable,
+      Err(unstored) => Raw::ResolverUnstorable { unstored },
     };
     self.fail(slot, raw);
   }
@@ -1241,14 +1246,18 @@ where
         Some(id) => id,
         None => {
           // Here, and only here, the name has to be said out loud.
+          //
+          // And when it cannot be, the message says which ceiling silenced it. This arm used to
+          // render the arena's cap whatever had refused, so a visit budget exhausted by the probe
+          // run reported itself as a full arena.
           let raw = match self.interner.intern(name.as_bytes(), &mut self.visits) {
             Ok(runtime) => Raw::AbstractNotPossible {
               abstract_ty: base,
               runtime,
             },
-            Err(_) => Raw::AbstractNotPossibleUnnamed {
+            Err(unstored) => Raw::AbstractNotPossibleUnnamed {
               abstract_ty: base,
-              limit: self.interner.cap(),
+              unstored,
             },
           };
           self.fail(slot, raw);
@@ -1360,6 +1369,10 @@ where
           Some(bytes),
         ) => Raw::DirectiveCondition {
           fault: ConditionFault::VariableMissing {
+            // `.ok()` on purpose, and the only kind of site where discarding the refusal is right:
+            // the spelling is decoration on a finding that does not depend on it, so both ceilings
+            // shorten the same sentence and the reader is not told about a resource at all. The
+            // sites that *name* a ceiling carry the refusal instead — see `Unstored`.
             variable: self.interner.intern(bytes, &mut self.visits).ok(),
           },
         },
@@ -1443,13 +1456,7 @@ where
           {
             Ok(interned) => interned,
             Err(unstored) => {
-              exhausted = Some((
-                match unstored {
-                  Unstored::Arena => Exhausted::Names,
-                  Unstored::Budget => Exhausted::Work,
-                },
-                group.first,
-              ));
+              exhausted = Some((Exhausted::Unstored(unstored), group.first));
               break;
             }
           };
@@ -1512,12 +1519,10 @@ where
           field,
           limit: self.limits.max_response_metadata.get(),
         },
-        Exhausted::Names => Raw::NameStorage {
-          limit: self.interner.cap(),
-        },
-        Exhausted::Work => Raw::CollectionBudget {
-          limit: self.limits.max_selection_visits.get(),
-        },
+        // The ceiling arrived with the refusal, so there is no second place for the number to come
+        // from and no way to take it from the wrong one.
+        Exhausted::Unstored(Unstored::Arena { limit }) => Raw::NameStorage { limit },
+        Exhausted::Unstored(Unstored::Budget { limit }) => Raw::CollectionBudget { limit },
       };
       // `fail_at` rather than `fail`, and the span is the refused selection's own.
       //
@@ -1623,6 +1628,11 @@ where
             // The spelling is the *document's*, which is what made this the counterexample to the
             // claim that only schema and driver bytes reached the uncharged path. There is no
             // uncharged path now, so the site charges like any other and shortens when it cannot.
+            //
+            // Which ceiling refused is deliberately dropped here, as at the condition fault above:
+            // the argument is missing whatever the answer, so there is no knob to recommend and
+            // nothing to say about a resource. That is the whole set of sites where `.ok()` is the
+            // decision rather than an omission.
             let variable = self.interner.intern(name.as_bytes(), &mut self.visits).ok();
             self.fail_at(
               slot,

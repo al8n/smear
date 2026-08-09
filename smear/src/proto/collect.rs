@@ -53,17 +53,35 @@ use super::{
 
 use groups::{Appending, Groups};
 
-/// Why [`Interner::intern`] could not store a name.
+/// Why [`Interner::intern`] could not store a name, and the ceiling that refused it.
 ///
 /// Two, because the two degrade differently at the one caller that does not simply fail: a name is
 /// still *readable* when the arena is full, and the collection path has a different message for
 /// each.
+///
+/// # The ceiling travels with the cause, and that is what stops them being mismatched
+///
+/// Every diagnostic about a refusal names a number for the operator to act on, and that number is
+/// only useful if it is the number that actually refused. Two call sites got that wrong in the same
+/// way: they discarded the variant and reported the *arena's* ceiling whatever had happened, so a
+/// caller whose `max_selection_visits` ran out was told to raise `max_interned_bytes`. Both had the
+/// arena's cap in easy reach and the budget's limit somewhere else, which is the shape of mistake a
+/// pairing invites.
+///
+/// So the limit is carried here, from the branch that knows which one it is. A render site cannot
+/// pair the wrong number with the wrong cause, because it is not given a choice of numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Unstored {
   /// [`max_interned_bytes`](super::Limits::max_interned_bytes) has no room for the bytes.
-  Arena,
+  Arena {
+    /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes)'s value.
+    limit: u32,
+  },
   /// [`max_selection_visits`](super::Limits::max_selection_visits) had no room for the lookup.
-  Budget,
+  Budget {
+    /// [`Visits::limit`]'s value.
+    limit: u32,
+  },
 }
 
 /// An empty open-addressing slot, an unterminated chain, and "this key has no group yet".
@@ -803,12 +821,6 @@ impl Interner {
     }
   }
 
-  /// The ceiling this table refuses at, for the message that reports the refusal.
-  #[inline]
-  pub(super) const fn cap(&self) -> u32 {
-    self.cap
-  }
-
   /// Returns the id for `bytes`, adding it if it is not already there, charging `visits` before
   /// **each** entry it compares.
   ///
@@ -842,7 +854,9 @@ impl Interner {
       let mut id = self.heads[self.bucket(hash)];
       while id != NONE {
         if !visits.take(1) {
-          return Err(Unstored::Budget);
+          return Err(Unstored::Budget {
+            limit: visits.limit(),
+          });
         }
         #[cfg(test)]
         {
@@ -855,7 +869,9 @@ impl Interner {
         id = self.chain[id as usize];
       }
     }
-    self.insert(bytes, hash).ok_or(Unstored::Arena)
+    self
+      .insert(bytes, hash)
+      .ok_or(Unstored::Arena { limit: self.cap })
   }
 
   /// Entries this executor's name lookups have compared. See [`Fragments::compares`] for why a
@@ -1229,12 +1245,8 @@ where
           Err(unstored) => {
             return Err(Fault {
               raw: match unstored {
-                Unstored::Arena => Raw::NameStorage {
-                  limit: interner.cap(),
-                },
-                Unstored::Budget => Raw::CollectionBudget {
-                  limit: visits.limit(),
-                },
+                Unstored::Arena { limit } => Raw::NameStorage { limit },
+                Unstored::Budget { limit } => Raw::CollectionBudget { limit },
               },
               // The field's span for the reason the staging charge uses it: a collection-side
               // refusal reports where a commit-side one would, and a commit-side location includes

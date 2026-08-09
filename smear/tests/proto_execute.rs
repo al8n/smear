@@ -3300,6 +3300,93 @@ fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
     "in particular it renders no empty type name: {}",
     errors[0].1
   );
+  assert!(
+    errors[0].1.contains("20 interned bytes"),
+    "and names the ceiling that actually refused: {}",
+    errors[0].1
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// The refusal and its ceiling travel together
+// ------------------------------------------------------------------------------------------
+//
+// `Interner::intern` refuses for two resources: the arena has no room for the bytes, or the visit
+// budget has none for the probe run that looks for them. Every diagnostic about a refusal names a
+// number, and the two sites below used to name the *arena's* whichever had happened — so a caller
+// whose `max_selection_visits` ran out was told to raise `max_interned_bytes`, a knob that was
+// never the constraint. The pairing is now unwritable: `Unstored` carries its own ceiling.
+//
+// Both fixtures spend the budget to zero during collection and then reach an intern whose bucket is
+// already occupied, which is what makes the probe loop run and the charge fall due. The name they
+// hand it is one the collection already interned, so the bucket is occupied by construction rather
+// than by luck about a hash.
+
+/// A driver message the *work* ceiling refused says so, rather than blaming the arena.
+#[test]
+fn a_driver_message_refused_for_work_names_the_work_ceiling() {
+  // Exactly what `{ a }` costs: one selection examined, and an intern into an empty table that
+  // compares nothing. So the budget is spent when the driver's failure arrives.
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    "type Query { a: String }",
+    "{ a }",
+    obj(vec![("a", J::Fail("a"))]),
+    limits,
+  );
+
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(
+    errors[0].0,
+    Kind::Resolver,
+    "the driver's failure is still the finding, whichever ceiling ate the text: {errors:?}"
+  );
+  assert!(
+    errors[0].1.contains("1 selection visits"),
+    "and the message names the ceiling that refused, which is the knob an operator can move: {}",
+    errors[0].1
+  );
+  assert!(
+    !errors[0].1.contains("interned bytes"),
+    "not the arena's, which had room for three bytes and was never consulted: {}",
+    errors[0].1
+  );
+}
+
+/// An impossible runtime type the *work* ceiling could not quote says so too.
+#[test]
+fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
+  // One selection at the root and an intern that compares nothing, as above. The driver then names
+  // `pet` as the runtime type: the schema knows the spelling — it is a field — so `sym` answers and
+  // `type_of_sym` does not, which is the "not a possible type" branch, and the name it wants to
+  // quote is the response key already sitting in that bucket.
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    ARENA_SDL,
+    "{ pet { n } }",
+    obj(vec![("pet", J::Obj("pet", vec![("n", J::Null)]))]),
+    limits,
+  );
+
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(
+    errors[0].0,
+    Kind::AbstractNotPossible,
+    "still the driver naming a type the position cannot hold: {errors:?}"
+  );
+  assert!(
+    errors[0].1.contains("1 selection visits"),
+    "and it names the ceiling that silenced the quote; this arm used to render the arena's cap \
+     unconditionally, so it read `16777216 interned bytes` against an arena that was empty: {}",
+    errors[0].1
+  );
+  assert!(!errors[0].1.contains("interned bytes"), "{}", errors[0].1);
 }
 
 /// A missing variable reports a missing variable, whether or not its name can be quoted.
