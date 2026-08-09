@@ -427,9 +427,31 @@ fn a_flat_fragment_chain_is_linear() {
 /// to be paid again by the next one, and the tables that *survive* `reset` are exactly where that
 /// stops being automatic. Phases 2–8 will add more of them.
 ///
-/// The fixture exercises all three charged populations at once — the index pass over the
-/// definitions, a fragment lookup per spread, and both a distinct and a repeated response key per
-/// selection — so a table that starts charging asymmetrically has to be a new one.
+/// # It reads every cumulative ceiling, because reading one of them was a claim about four
+///
+/// The first version of this compared `collection_work()` — `max_selection_visits`, and nothing
+/// else — under a residual that claimed the whole class. Three ceilings were outside it:
+/// `max_response_slots`, `max_response_metadata` and `max_interned_bytes`. A structure kept across
+/// `reset` that let a second operation reuse *positions*, *metadata* or *arena bytes* it had not
+/// paid for was a defect of exactly the shape this fixture is named after, and every gate in the
+/// suite was green on it. Comparing one number and asserting a property over four is the residual
+/// form this program has lost the most rounds to.
+///
+/// So the comparison is `Charges`, which is one field per ceiling that accumulates, each read as
+/// the quantity that ceiling's own check tests. `max_in_flight` is the one that is absent, and
+/// `collect::Visits` says why and what else is left to review.
+///
+/// # Every row has to be able to move
+///
+/// A row whose value is zero in both runs cannot fail, so widening the comparison would otherwise
+/// buy three assertions that always hold. The lower bounds below are what keep them live, and they
+/// are also the fixture's maintenance obligation: this document is what decides which populations
+/// the gate reaches, and a structure phases 2–8 add that no selection here exercises needs a
+/// selection adding, or a gate of its own.
+///
+/// The document exercises the index pass over the definitions, a fragment lookup per spread, and
+/// both a distinct and a repeated response key per selection — so every position, every metadata
+/// entry and every arena byte the two runs compare is one this query asked for.
 #[test]
 fn a_second_operation_charges_what_the_first_did() {
   const LINKS: u32 = 64;
@@ -455,21 +477,33 @@ fn a_second_operation_charges_what_the_first_did() {
   executor
     .start(&mut space, None, Value::Obj)
     .expect("the operation resolves");
-  let first = executor.collection_work();
+  let first = executor.charges();
   executor
     .start(&mut space, None, Value::Obj)
     .expect("the operation resolves a second time");
-  let second = executor.collection_work();
+  let second = executor.charges();
 
   assert!(
-    first > 3 * LINKS,
-    "the fixture has to cost something: {first}"
+    first.visits > 3 * LINKS,
+    "the fixture has to cost something: {first:?}"
+  );
+  assert!(
+    first.slots > 0,
+    "no position was created, so the slots row cannot tell two operations apart: {first:?}"
+  );
+  assert!(
+    first.metadata > 0,
+    "no metadata was committed, so that row cannot tell two operations apart: {first:?}"
+  );
+  assert!(
+    first.interned > 0,
+    "no name was interned, so the arena row cannot tell two operations apart: {first:?}"
   );
   assert_eq!(
     second, first,
-    "the second operation spent {second} where the first spent {first}. Something this executor \
-     kept from the first run is being reused by the second without being charged for, which makes \
-     the ceiling a request meets depend on what the executor was asked before it"
+    "the second operation charged {second:?} where the first charged {first:?}. Something this \
+     executor kept from the first run is being reused by the second without being charged for, \
+     which makes the ceiling a request meets depend on what the executor was asked before it"
   );
 }
 

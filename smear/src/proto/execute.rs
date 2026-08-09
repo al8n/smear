@@ -517,6 +517,39 @@ struct Mark {
   ready_tail: u32,
 }
 
+/// What one operation charged against each of the ceilings that accumulate.
+///
+/// # It is enumerated from [`Limits`], for the reason [`Mark`] is
+///
+/// The gate this exists for compares two runs of one request on one executor and requires them to
+/// have cost the same, which is the general form of "nothing an executor keeps across
+/// [`reset`](Executor::reset) may make the second cheaper". A gate like that is only as wide as the
+/// quantities it reads, and the first version read [`Limits::max_selection_visits`] alone — so a
+/// table kept across a reset that fed slots, metadata or the arena instead was invisible to it,
+/// while the sentence next to it claimed the whole class.
+///
+/// So the fields are the ceilings, one each, and each is the quantity that ceiling's own check
+/// compares against rather than a count kept alongside it: `slots.len()` is what `push_child`
+/// tests, `merged.len() + locations.len()` is what `metadata_room` tests, and the arena's length is
+/// what `Interner::intern` tests. Reading the check's own input is what keeps this from drifting
+/// into a second accounting that agrees with itself.
+///
+/// [`Limits::max_in_flight`] is absent and that is not an omission: it bounds requests outstanding
+/// at an instant rather than a population that accumulates, so there is no total for two operations
+/// to disagree about. `collect::Visits` records it, with what else the gate does not reach.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Charges {
+  /// Units of [`Limits::max_selection_visits`].
+  visits: u32,
+  /// Positions, against [`Limits::max_response_slots`].
+  slots: usize,
+  /// Merged selections and location spans together, against [`Limits::max_response_metadata`].
+  metadata: usize,
+  /// Arena bytes, against [`Limits::max_interned_bytes`].
+  interned: usize,
+}
+
 /// Which of [`Limits`]'s ceilings `expand` ran into.
 ///
 /// Carried out of the loop rather than reported inside it, because recording a failure borrows the
@@ -1953,17 +1986,48 @@ where
     self.interner.compares()
   }
 
+  /// What this operation has charged against each of the four cumulative ceilings.
+  ///
+  /// One value rather than four accessors, so the gate compares all four in one `assert_eq!` and
+  /// cannot quietly compare three. Nothing here makes a *fifth* ceiling automatic: adding one to
+  /// [`Limits`] still means adding a field, and `collect::Visits` records that obligation with the
+  /// rest of what the gate does not reach on its own.
+  #[cfg(test)]
+  fn charges(&self) -> Charges {
+    Charges {
+      visits: self.visits.spent(),
+      slots: self.slots.len(),
+      metadata: self.merged.len() + self.locations.len(),
+      interned: self.interner.bytes().len(),
+    }
+  }
+
   /// Entries the fragment index has reserved room for, which no ceiling bounds and
   /// [`reset`](Self::reset) does not clear.
   ///
-  /// The table is *meant* to outlive an operation, so its capacity is not a quantity two runs have
-  /// to agree on. What must hold is narrower — a **refused** pass reserves none of it. See
-  /// `collect::table`.
+  /// Not part of [`Charges`], and deliberately: the table is *meant* to outlive an operation, so
+  /// its capacity is not a quantity two operations have to agree on. What must hold is narrower —
+  /// a **refused** pass reserves none of it. See `collect::table`.
   #[cfg(test)]
   fn fragment_reserved(&self) -> usize {
     self.fragments.reserved()
   }
 
+  /// Puts every per-operation population back to empty, keeping only what is a function of the
+  /// document or the schema.
+  ///
+  /// # What must not survive is the answer, and the gate for that is a totals comparison
+  ///
+  /// Some state here is kept on purpose — the fragment index, the interner's and the scratch's
+  /// capacities, the epoch — because it is either a function of the document or an allocation a
+  /// reused executor should not repay. The rule that keeps that from becoming a defect is that
+  /// **nothing kept may make a second operation cheaper than the first**: a ceiling a client clears
+  /// by sending the same request twice is not a ceiling.
+  ///
+  /// It has already been broken once, by the charge for the fragment pass being remembered beside
+  /// the table it paid for. `a_second_operation_charges_what_the_first_did` is the general gate for
+  /// the class, and it reads all four cumulative ceilings — see `collect::Visits` for what that
+  /// covers and, precisely, what it does not.
   fn reset(&mut self) {
     self.slots.clear();
     self.meta.clear();

@@ -209,7 +209,43 @@ pub(super) struct Fault<'a> {
 /// the operator wrote, so a client chooses the lookup key and never the run it walks. That is the
 /// same question that condemned [`Fragments`], answered the other way.
 ///
+/// # State that survives `reset`, and exactly how much of it is enforced
+///
+/// The residual left by the round that separated the fragment charge from the fragment table said
+/// *no state surviving `reset` moves a verdict*, and it was broader than what any gate could see:
+/// the fragment charge was prevented by this type, and the rest was an enumeration of `reset` under
+/// a totals gate that read `max_selection_visits` alone. A table kept across `reset` that fed one
+/// of the other three ceilings would have passed everything in the suite. The claim is narrowed to
+/// what is checked, and the check is widened to meet it.
+///
+/// **Enforced.** `a_second_operation_charges_what_the_first_did` runs one operation twice on one
+/// executor and requires the two to agree on **every cumulative ceiling**, not just this one:
+/// [`max_selection_visits`], [`max_response_slots`], [`max_response_metadata`] and
+/// [`max_interned_bytes`], each read as the quantity its own check compares against. Any state a
+/// second operation inherits and does not pay for turns one of those four rows red, whether or not
+/// a ceiling happens to sit close enough for a caller to notice today.
+///
+/// **Named, and guarded by review.** Three things that gate does not reach.
+///
+/// [`max_in_flight`] has no cumulative total to compare: it bounds requests outstanding at an
+/// instant, `reset` empties the slab, and the epoch bump that voids the previous operation's ids is
+/// pinned separately. There is no population to inherit.
+///
+/// A **fifth** ceiling is not picked up on its own. `Charges` holds one field per accumulating
+/// ceiling and nothing derives that list from [`Limits`](super::Limits), so a ceiling phases 2–8
+/// add needs a field adding beside the others, or the gate silently stays four wide.
+///
+/// And the gate is a fixture, so it covers the state *its* document creates — fragments, the
+/// interner, the groups, the slots and the metadata. A structure added by phases 2–8 and exercised
+/// by no selection this query writes is not in it. That is the maintenance obligation the fixture
+/// carries, and it is written on the fixture: a new table kept across `reset` needs a selection in
+/// that document, or a gate of its own.
+///
 /// [`max_response_slots`]: super::Limits::max_response_slots
+/// [`max_response_metadata`]: super::Limits::max_response_metadata
+/// [`max_selection_visits`]: super::Limits::max_selection_visits
+/// [`max_interned_bytes`]: super::Limits::max_interned_bytes
+/// [`max_in_flight`]: super::Limits::max_in_flight
 pub(super) struct Visits {
   left: u32,
   limit: u32,
