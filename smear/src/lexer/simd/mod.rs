@@ -57,7 +57,7 @@ pub(crate) enum Delegated<'inp, T: Token<'inp>> {
 /// lexer holds by construction: nothing here constructs an error itself. The
 /// caller supplies the token type `T` (its own `SyntacticToken`) and folds the
 /// returned [`Delegated`] outcome back into its cursor/span/state.
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 pub(crate) fn delegate_to_logos<'inp, T>(
   scan_primitive: &'inp LogosSourceOf<'inp, T>,
   cursor: usize,
@@ -102,7 +102,7 @@ where
 /// case — most identifiers are < 16 bytes) on a tight inlined scalar loop,
 /// while long idents (e.g. enum value names in schemas) get the SIMD
 /// dispatcher. The caller advances its own cursor by the returned length.
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 pub(crate) fn scan_identifier(bytes: &[u8]) -> usize {
   let total = bytes.len();
   let mut end = 1;
