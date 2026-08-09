@@ -33,7 +33,7 @@ use super::{LitComplexInlineStr, LitInlineStr, LitPlainStr, utf8_len_for_scalar}
 
 type Span = SimpleSpan;
 
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 const fn hex_val(b: u8) -> Option<u32> {
   Some(match b {
     b'0'..=b'9' => (b - b'0') as u32,
@@ -43,7 +43,7 @@ const fn hex_val(b: u8) -> Option<u32> {
   })
 }
 
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 fn parse_u4(hex: &[u8]) -> Option<u32> {
   debug_assert_eq!(hex.len(), 4);
 
@@ -52,18 +52,18 @@ fn parse_u4(hex: &[u8]) -> Option<u32> {
   )
 }
 
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 const fn is_high_surrogate(cp: u32) -> bool {
   matches!(cp, 0xD800..=0xDBFF)
 }
 
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 const fn is_low_surrogate(cp: u32) -> bool {
   matches!(cp, 0xDC00..=0xDFFF)
 }
 
 /// Peek ahead for a `\uXXXX` low-surrogate starting in `remainder`.
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 fn try_parse_low_surrogate(remainder: &[u8]) -> Option<u32> {
   if remainder.len() < 6 {
     return None;
