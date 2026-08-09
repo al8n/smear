@@ -533,12 +533,12 @@ where
 
   type Offset = usize;
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn new(src: &'inp Self::Source) -> Self {
     Self::with_state(src, Self::State::default())
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn with_state(src: &'inp Self::Source, state: Self::State) -> Self {
     Self {
       src,
@@ -549,37 +549,37 @@ where
     }
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn check(&self) -> Result<(), <Self::Token as tokora::Token<'inp>>::Error> {
     self.state.check().map_err(Into::into)
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn state(&self) -> &Self::State {
     &self.state
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn state_mut(&mut self) -> &mut Self::State {
     &mut self.state
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn into_state(self) -> Self::State {
     self.state
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn source(&self) -> &'inp Self::Source {
     self.src
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn span(&self) -> Self::Span {
     self.last_span
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn slice(&self) -> <Self::Source as Source<Self::Offset>>::Slice<'inp> {
     self
       .src
@@ -587,7 +587,7 @@ where
       .unwrap()
   }
 
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
     // Bracket-close: decrement the depth, then re-check the limit *post-decrease*
     // (a decrease can bring an over-limit stream back under the limit). Because
@@ -879,7 +879,7 @@ where
   /// Panics with `"Invalid Lexer bump"` if the new end is not a boundary of
   /// the source — past its byte length, or (for `str` sources) in the middle
   /// of a UTF-8 code point — exactly as `logos::Lexer::bump` does.
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn bump(&mut self, n: &Self::Offset) {
     let new_end = self.last_span.end() + *n;
     self.last_span = SimpleSpan::new(self.last_span.start(), new_end);
@@ -969,7 +969,7 @@ where
   // shape; clippy can't see through the associated-type projections, so silence
   // its type-complexity lint here.
   #[allow(clippy::type_complexity)]
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn delegate_number_to_logos(
     &mut self,
     token_start: usize,
@@ -1030,7 +1030,7 @@ where
   ///
   /// [`delegate_number_to_logos`]: Self::delegate_number_to_logos
   #[allow(clippy::type_complexity)]
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn delegate_string_error(
     &mut self,
     token_start: usize,
@@ -1056,7 +1056,7 @@ where
 impl<S: ?Sized> SyntacticLexer<'_, S> {
   /// Span of the most recently returned error token, or `None` if no error
   /// has been returned yet.
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   pub fn error_span(&self) -> Option<SimpleSpan> {
     self.last_error_span
   }
@@ -1070,7 +1070,7 @@ where
   /// at the cursor. Comment bodies and the UTF-8 BOM are handled in
   /// the dispatch loop so this stays a single SIMD scan with no per-call
   /// branchy interpretation overhead.
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn skip_ws_and_comma(&mut self) {
     let Some(rest) = self.src.slice(&self.cursor..) else {
       return;
@@ -1080,7 +1080,7 @@ where
   }
 
   /// Skip a `#…\n|\r` comment body. Cursor is positioned at the `#`.
-  #[cfg_attr(not(tarpaulin), inline(always))]
+  #[inline(always)]
   fn skip_comment(&mut self) {
     let Some(rest) = self.src.slice(&self.cursor..) else {
       return;

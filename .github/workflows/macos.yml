@@ -72,8 +72,8 @@ on:
 concurrency:
   # Identical to `CI`'s and `Miri`'s; see the comment in `miri.yml` for why `${{ github.workflow }}`
   # leads the group and why a push is keyed on the commit SHA.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}
+  cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
 # Every `run:` here is bash — the same block `ci.yml` carries, for the same reason, and read
 # that one for the full account. It is stated in this file even though nothing here runs on a

@@ -139,8 +139,8 @@ concurrency:
   #
   # `${{ github.workflow }}` leading the group is what keeps the three lanes apart: `CI-...`,
   # `Miri-...` and `macOS-...` are different groups, so no lane can cancel another's run.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}
+  cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
 # ── EVERY `run:` IN THIS FILE IS BASH ───────────────────────────────────────────────────────
 #
@@ -1212,15 +1212,19 @@ jobs:
       - test
     steps:
       - uses: actions/checkout@v7
-      - name: Install latest nightly
-        uses: actions-rs/toolchain@v1
+      - name: Install nightly + llvm-tools-preview
+        # `cargo-llvm-cov` requires the `llvm-tools-preview` rustup component for
+        # `llvm-profdata` / `llvm-cov`. Nightly is required because doc-test coverage
+        # (`--doctests` below) depends on nightly-only rustdoc instrumentation
+        # (taiki-e/cargo-llvm-cov#2).
+        run: |
+          rustup update nightly --no-self-update
+          rustup default nightly
+          rustup component add llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
         with:
-          toolchain: nightly
-          override: true
-      - uses: actions-rs/install@v0.1
-        with:
-          crate: cargo-tarpaulin
-          version: latest
+          tool: cargo-llvm-cov
       - name: Cache ~/.cargo
         uses: actions/cache@v6
         with:
@@ -1231,16 +1235,27 @@ jobs:
         with:
           path: target
           key: ${{ runner.os }}-coverage-cargo-build-target
-      - name: Run tarpaulin
-        uses: actions-rs/cargo@v1
-        with:
-          command: tarpaulin
-          # `parser` is NOT optional here. With the crates merged it is a feature, and with it
-          # off every parser test cfgs itself out while tarpaulin still exits 0 — the parser's
-          # entire suite would vanish from coverage under a green tick. Before the merge the
-          # parser was a crate and came in unconditionally; do not lean on the bench member's
-          # dependency to force it back, which is unification and not a decision.
-          args: --no-default-features --features graphql,parser --run-types tests --run-types doctests --workspace --out xml -- --quiet
+      - name: Generate coverage
+        # `cargo-llvm-cov` replaces this workspace's former coverage tool. LLVM's
+        # source-based instrumentation is applied before inlining and so attributes
+        # coverage to inlined code correctly; the former tool's line table could not,
+        # which is what the (now deleted) conditional `inline(always)` workaround on
+        # hot lexer functions existed to route around.
+        #
+        # `parser` is NOT optional here. With the crates merged it is a feature, and with it
+        # off every parser test cfgs itself out while the coverage tool still exits 0 — the
+        # parser's entire suite would vanish from coverage under a green tick. Before the merge
+        # the parser was a crate and came in unconditionally; do not lean on the bench member's
+        # dependency to force it back, which is unification and not a decision.
+        #
+        # No `--tests` alongside `--doctests`: cargo-llvm-cov rejects that combination
+        # outright ("--tests may not be used together with --doctests"). `--doctests` alone
+        # already runs the default set (lib unit tests + `tests/*`) in addition to doc tests,
+        # which is the full equivalent of the old lib+tests+doctests selection.
+        run: |
+          cargo llvm-cov --no-default-features --features graphql,parser \
+            --doctests --workspace \
+            --cobertura --output-path cobertura.xml
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v7
         with:

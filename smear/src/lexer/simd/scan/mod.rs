@@ -49,7 +49,7 @@ pub(crate) enum NumberKind {
 const LONG_DIGIT_RUN: usize = 32;
 
 /// Length of the maximal leading run of ASCII digits (`0..=9`) in `bytes`.
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 fn digit_run_len(bytes: &[u8]) -> usize {
   if bytes.len() >= LONG_DIGIT_RUN {
     memspan::skip::skip_digits(bytes)
@@ -73,7 +73,7 @@ fn digit_run_len(bytes: &[u8]) -> usize {
 /// run is already maximally consumed by the int/frac/exp scan below), and
 /// every other punctuation byte, EOF, and any non-ASCII (UTF-8
 /// continuation/lead) byte legally ends the number.
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 const fn is_legal_terminator(b: u8) -> bool {
   !matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.')
 }
@@ -91,7 +91,7 @@ const fn is_legal_terminator(b: u8) -> bool {
 /// a number immediately followed by a digit/`.`/ident byte — in every case
 /// the caller must delegate the token to Logos, which produces the exact
 /// GraphQL error.
-#[cfg_attr(not(tarpaulin), inline(always))]
+#[inline(always)]
 pub(crate) fn scan_number(src: &[u8]) -> Option<(NumberKind, usize)> {
   let mut pos = 0;
 
