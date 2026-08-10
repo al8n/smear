@@ -61,7 +61,7 @@ smallvec = { version = "1", default-features = false, features = ["const_new"] }
 rowan = "0.17"
 
 [dev-dependencies]
-toml = "0.8"
+toml = "1.1"
 
 [lints]
 workspace = true
