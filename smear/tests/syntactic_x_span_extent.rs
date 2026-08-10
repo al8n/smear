@@ -1,6 +1,12 @@
-#![cfg(all(feature = "graphqlx", feature = "parser"))]
+#![cfg(all(feature = "graphqlx", feature = "parser", not(miri)))]
 
 //! The syntactic span-extent gate for GraphQLx — the twin of `syntactic_span_extent.rs`.
+//!
+//! `not(miri)` is that file's too, for that file's reason and one of its own: this gate's sweep is
+//! the LARGER of the pair — 90 corpus entries against its 56, over a dialect with three times as
+//! many span-carrying productions. No Miri cell has ever reached it, because cargo runs test
+//! binaries in name order and its twin sits immediately before it, unfinished. Read that file's
+//! `not(miri)` section for the measurement and the argument; `cargo test` runs both in full.
 //!
 //! `parser` is in the header for the reason that file's header gives: the gate reads
 //! `smear::parser::graphqlx`, and until #136 no build existed in which a header could omit it and

@@ -1,7 +1,33 @@
-#![cfg(all(feature = "graphql", feature = "parser"))]
+#![cfg(all(feature = "graphql", feature = "parser", not(miri)))]
 
 //! The syntactic span-extent gate for GraphQL: trivia injection, with a per-node-type
 //! discrimination counter.
+//!
+//! # `not(miri)`, and what the Miri matrix gives up for it
+//!
+//! This target is the reason `.github/workflows/miri.yml` had never produced a verdict. On CI run
+//! 31318425279 the `x86_64-unknown-linux-gnu` Tree Borrows cell reached
+//! [`trivia_injection_leaves_every_span_on_its_own_tokens`] at 14:47:15Z and was still inside it
+//! when the job was killed at 20:27Z — **five hours forty minutes in one test**, after the whole
+//! lib suite had taken 10m16s and `tests/oracle.rs` 8m01s. That was not one unlucky run: five
+//! consecutive runs on that branch were cancelled by the next push, and of ten cells the only two
+//! that ever concluded were the i686 pair, which run `--lib` alone and so never build this. The
+//! header in `ci/miri_tb.sh` predicted exactly this before it was measured and declined to cut on
+//! an estimate; the measurement is now on the record, so the cut is no longer one.
+//!
+//! The cost is small **for the question Miri answers**, and that is the whole argument. Miri
+//! decides whether an execution path has undefined behaviour. The sweep below varies the INPUT —
+//! 56 corpus entries times eight ignorable forms, 504 parses — over paths the lib unit tests,
+//! `oracle.rs` and `tokora_conformance.rs` already interpret in the same cell, and it spends most
+//! of that time in `format!("{:#?}")` and a string walk that are this file's own safe code, with
+//! nothing in them for Miri to find. What is given up is not a UB path; it is 504 re-traversals of
+//! one.
+//!
+//! Nothing else changes. `cargo test` runs this in full on every push in
+//! `.github/workflows/ci.yml`, which is where a span-extent regression is meant to be caught.
+//! `ci/miri_scope.py` reads this attribute, prints the target in the Miri cell's NOT COVERED list
+//! with this reason, and fails the cell if it ever runs there anyway — so the omission is audited
+//! rather than silent, in both directions.
 //!
 //! The header names `parser` as well as the dialect because the file reads
 //! `smear::parser::graphql`, and `parser` is a feature a consumer can turn off. It said `graphql`
