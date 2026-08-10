@@ -130,7 +130,7 @@ smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
 # `ci/miri_scope.py` will fail the Miri matrix if this feature ever resolves ON inside it, so
 # turning it on there is not something that can happen by accident again.
 #
-# This says nothing against the feature — it is a headline capability and its 33 integration
+# This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
 rowan = ["dep:rowan", "tokora/rowan", "std", "parser"]
 
