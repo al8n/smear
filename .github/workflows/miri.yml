@@ -49,7 +49,7 @@ name: Miri
 
 # ── WHY THE APPLE CELLS NO LONGER RUN ON A macOS HOST ───────────────────────────────────────
 #
-# Every cell below runs on `ubuntu-latest`, the two apple targets included, and this repository
+# Every cell below runs on `ubuntu-latest`, the apple target included, and this repository
 # now asks this workflow for no macOS runner at all. Miri interprets a TARGET, so the host was
 # always supposed to be irrelevant; until #77 it was not, and the reason had nothing to do with
 # Miri.
@@ -72,35 +72,92 @@ name: Miri
 # `apollo-parser` went with them, which also takes `rowan` out of `smear`'s dev graph entirely.
 #
 # Do not reintroduce a `criterion` — or anything else with a `cc` build script — into `smear`'s
-# `[dev-dependencies]`. It will not fail here; it will silently make these four cells
-# unschedulable on Linux again, and the symptom will look like a compiler error in C.
+# `[dev-dependencies]`. It will not fail here; it will silently make the two
+# `aarch64-apple-darwin` cells unschedulable on Linux again, and the symptom will look like a
+# compiler error in C.
 #
-# WHAT THE TARGET AXIS BUYS, separately from the host. This workspace contains no `target_arch`,
+# ── WHAT THE TARGET AXIS BUYS, AND WHY ONE CELL WAS DROPPED ─────────────────────────────────
+#
+# The previous revision of this comment said: "this workspace contains no `target_arch`,
 # `target_os`, `target_vendor`, `target_pointer_width` or `target_endian` cfg anywhere, so every
-# cell interprets the same source and what varies is only what Miri models: word size, byte
-# order and layout. On that axis `i686-unknown-linux-gnu` (32-bit) and
-# `powerpc64-unknown-linux-gnu` (big-endian) are each unique, and `x86_64-unknown-linux-gnu`,
-# `x86_64-apple-darwin` and `aarch64-apple-darwin` are all 64-bit little-endian. The two apple
-# cells are therefore the weakest of the five. They are kept because dropping coverage is a
-# different decision from moving it, and the reason to spend them first is now weaker than it
-# was: they no longer cost a macOS runner, only wall clock on the same host class as every
-# other cell.
+# cell interprets the same source", and concluded that the two apple cells were the weakest of
+# the five. The premise is true of this WORKSPACE and false of the PROGRAM Miri interprets, and
+# with it the conclusion inverts.
+#
+# `memspan 0.1.0` is the SIMD substrate under the lexer — `smear/src/lexer/simd/*` and
+# `string_lexer/*` call `memspan::skip::{skip_until, skip_digits, skip_ident}` on every lex — and
+# it is where essentially all of the `unsafe` in the interpreted program lives: 302 sites, of
+# which `needles/arch/aarch64.rs` has 49, `skip/neon.rs` 44, `skip/sse42.rs` 26, `skip/avx2.rs`
+# 23, `skip/avx512.rs` 22, `needles/arch/x86.rs` 7 — and the scalar fallback has none. Those
+# modules are `#[cfg(target_arch = ...)]`-partitioned, and WHICH of them runs is decided at
+# runtime by `std::arch::is_aarch64_feature_detected!` / `is_x86_feature_detected!`, which Miri
+# answers for itself. So the axis is real, and it is not the one the old paragraph named.
+#
+# Measured 2026-08-10, a standalone `cargo miri run` probe per target, printing exactly what
+# `memspan::utils` asks:
+#
+#   aarch64-apple-darwin        neon = TRUE      -> NEON path interpreted (93 unsafe sites)
+#   x86_64-apple-darwin         sse4.2 = false, avx2 = false  -> scalar fallback
+#   x86_64-unknown-linux-gnu    sse4.2 = false, avx2 = false  -> scalar fallback
+#   i686-unknown-linux-gnu      sse4.2 = false, avx2 = false  -> scalar fallback, 32-bit
+#   powerpc64-unknown-linux-gnu  (no x86/aarch64 detection)   -> scalar fallback, big-endian
+#
+# `aarch64-apple-darwin` is therefore the ONLY cell in this matrix that interprets any of the
+# project's SIMD `unsafe` at all. It is the strongest cell here, not the weakest, and it stays.
+#
+# `x86_64-apple-darwin` is the redundant one, and it is dropped. Against
+# `x86_64-unknown-linux-gnu` it has the same `target_arch`, the same pointer width, the same byte
+# order, the same aliasing model, and — measured above — the same feature-detection result, so it
+# executes the same code. What is left between them is `target_os` / `target_vendor` /
+# `target_env`, and neither `smear`, nor `memspan`, nor `tokora` contains a single cfg on any of
+# the three; vendor is not something Miri models. Ten cells become eight.
+#
+# ONE GAP THIS LEAVES, recorded rather than assumed away: because Miri reports SSE4.2 and AVX2 as
+# absent, `memspan`'s x86 SIMD modules — 71 of those 302 `unsafe` sites — are interpreted by no
+# cell in this file. Recovering them means a `-C target-feature=+sse4.2` (or `+avx2`) x86 cell,
+# which is an ADDITION and was not made here; this file's problem was that no cell could finish.
 
 # ── WHAT THIS MATRIX DOES NOT COVER, AND WHY IT IS STATED HERE ──────────────────────────────
 #
-# The 33 `#![cfg(feature = "rowan")]` integration targets in `smear/tests/` — the entire lossless
-# CST tower — are NOT interpreted by any cell in this file, on any target, under either aliasing
-# model. `rowan` itself has undefined behaviour reachable from its ordinary public API, live in
-# every published version including `0.17.0` (2026-08-02), reported upstream since 2021 and
-# unfixed; `ci/miri_sb.sh` and `ci/miri_tb.sh` carry the two sites, the reproduction and the
-# upstream references, and #77 carries the decision.
+# Of the 50 integration targets in `smear/tests/`, 46 are NOT built with anything in them by any
+# cell in this file, on any target, under either aliasing model, and 4 of the tests inside the
+# ones that ARE built are skipped. All of it is derived and all of it is printed by
+# `ci/miri_scope.py` at the end of every cell:
 #
-# This is an exclusion, not a silence. `ci/miri_scope.py` runs at the end of every cell, prints
-# the excluded set with its reason, and FAILS the cell in either direction: if a target that is
-# not `rowan`-gated ran zero tests (#73's mechanism — a built, linked, passing, empty harness),
-# or if a `rowan`-gated one ran any test at all (#77's mechanism — a new workspace member
-# unifying `smear/rowan` back into the resolve). The matrix is therefore allowed to be narrower
-# than the test tree, and not allowed to be narrower than it says.
+#   37  `#![cfg(feature = "rowan")]` — the entire lossless CST tower. `rowan` itself has
+#       undefined behaviour reachable from its ordinary public API, live in every published
+#       version including `0.17.0` (2026-08-02), reported upstream since 2021 and unfixed.
+#       `ci/miri_sb.sh` and `ci/miri_tb.sh` carry the two sites, the reproduction and the
+#       upstream references, and #77 carries the decision.
+#    9  gated on `validator`, `proto` or `introspection` — features `smear` does not default to
+#       and these scripts do not pass. They are `core` + `alloc` rule engines with no `unsafe`
+#       reachable from them that the lib tests do not already interpret, so the cost of turning
+#       the features on is minutes per cell for nothing Miri can answer.
+#    4  individual tests, not targets: the two corpus sweeps in each of
+#       `tests/syntactic_span_extent.rs` and `tests/syntactic_x_span_extent.rs`, each carrying
+#       `#[cfg_attr(miri, ignore)]`. These are why this workflow had never produced a verdict on
+#       any 64-bit target — `trivia_injection_leaves_every_span_on_its_own_tokens` spent 5h40m
+#       inside itself on CI run 31318425279 and hit the six-hour job ceiling without returning.
+#       The four witnesses in each file still run here. The files' headers carry the measurement.
+#
+# It is a per-test exclusion precisely so the interpretable tests survive it, and it is audited
+# rather than counted on trust: `ci/miri_scope.py` derives the number of `#[ignore]`s from the
+# sources and fails the cell if a run reports a different one, or if a target ends up with every
+# test ignored — the case where the per-test form has quietly become the per-file one.
+#
+# What is left in a cell is the lib unit tests, `tests/oracle.rs`,
+# `tests/tokora_conformance.rs` and the eight span-extent witnesses — the SIMD lexer over a
+# corpus, and tokora's own input-layer conformance kit. That is where this project's `unsafe`
+# is, and it is what the job exists for.
+#
+# This is an exclusion, not a silence. `ci/miri_scope.py` derives every line above by parsing
+# each target's crate-level `#![cfg(...)]` and evaluating it against the feature set it reads out
+# of `smear/Cargo.toml`, prints the result with its reason, and FAILS the cell in either
+# direction: if a target this cell DOES compile ran zero tests (#73's mechanism — a built,
+# linked, passing, empty harness), or if an excluded one ran any test at all (#77's mechanism — a
+# new workspace member unifying `smear/rowan` back into the resolve), or if the `ignored` count a
+# target reports is not the one its source declares. The matrix is therefore allowed to be
+# narrower than the test tree, and not allowed to be narrower than it says.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
 # `.github/workflows/ci.yml` and `.github/workflows/macos.yml`; read the comment there for why the
@@ -198,12 +255,19 @@ jobs:
         # pairing each target to the only host that could build it — a 2 x 5 product carved back
         # down to 5. The two apple targets needed `macos-latest` because `criterion` put a C
         # build script in `smear`'s dev graph; `smear-benches` took it out, so every target now
-        # builds on the same host and the product is the list. See the header.
+        # builds on the same host and the product is the list.
+        #
+        # FOUR entries, not five: `x86_64-apple-darwin` was dropped because it is the one target
+        # here that interprets the same program as another — same arch, width, endianness and
+        # SIMD dispatch as `x86_64-unknown-linux-gnu`, differing only in a `target_os` /
+        # `target_vendor` / `target_env` axis on which this dependency graph has no cfg at all.
+        # The header carries the measurement. `aarch64-apple-darwin` is NOT redundant with it and
+        # is the most valuable cell in the file: it is the only one that reaches `memspan`'s NEON
+        # `unsafe`.
         target:
           - x86_64-unknown-linux-gnu
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
-          - x86_64-apple-darwin
           - aarch64-apple-darwin
     runs-on: ubuntu-latest
     steps:
@@ -255,12 +319,19 @@ jobs:
         # pairing each target to the only host that could build it — a 2 x 5 product carved back
         # down to 5. The two apple targets needed `macos-latest` because `criterion` put a C
         # build script in `smear`'s dev graph; `smear-benches` took it out, so every target now
-        # builds on the same host and the product is the list. See the header.
+        # builds on the same host and the product is the list.
+        #
+        # FOUR entries, not five: `x86_64-apple-darwin` was dropped because it is the one target
+        # here that interprets the same program as another — same arch, width, endianness and
+        # SIMD dispatch as `x86_64-unknown-linux-gnu`, differing only in a `target_os` /
+        # `target_vendor` / `target_env` axis on which this dependency graph has no cfg at all.
+        # The header carries the measurement. `aarch64-apple-darwin` is NOT redundant with it and
+        # is the most valuable cell in the file: it is the only one that reaches `memspan`'s NEON
+        # `unsafe`.
         target:
           - x86_64-unknown-linux-gnu
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
-          - x86_64-apple-darwin
           - aarch64-apple-darwin
     runs-on: ubuntu-latest
     steps:

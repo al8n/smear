@@ -39,7 +39,10 @@ use tokora::SimpleSpan;
 
 use crate::validator::schema::{PackedType, Schema, Sym, TypeId};
 
-use super::response::{Path, Slot};
+use super::{
+  collect::Unstored,
+  response::{Path, Slot},
+};
 
 /// What went wrong, with everything the message needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,15 +74,20 @@ pub(super) enum Raw {
   ///
   /// The same failure, and deliberately not a different one: the driver still named a type the
   /// position cannot hold, and that is what the reader needs to know. What is missing is the
-  /// *spelling*, because storing it would have taken the interner past
-  /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
+  /// *spelling*, because recording it would have taken the executor past one of two ceilings —
+  /// which one is [`Unstored`], and it is carried rather than assumed. This variant used to render
+  /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes) whichever ceiling had
+  /// refused, so an operator whose visit budget ran out was sent to resize the arena.
   ///
   /// It exists rather than a placeholder because there is no honest placeholder. An empty string
   /// renders as `Runtime Object type "" is not a possible type`, and `<unknown>` renders as a type
   /// that could plausibly be in someone's schema — both invite a reader to go looking for a type
-  /// that was never named. Saying the name could not be stored, and how, is the only version that
-  /// does not lie about what the driver said.
-  AbstractNotPossibleUnnamed { abstract_ty: TypeId, limit: u32 },
+  /// that was never named. Saying the name could not be recorded, and which ceiling stopped it, is
+  /// the only version that does not lie about what the driver said.
+  AbstractNotPossibleUnnamed {
+    abstract_ty: TypeId,
+    unstored: Unstored,
+  },
   /// Draft §6.4.1 step 5.b: a required argument was not provided.
   ArgumentMissing {
     field: Sym,
@@ -97,12 +105,14 @@ pub(super) enum Raw {
     field: Sym,
     argument: Sym,
     ty: PackedType,
-    /// The variable's spelling, or `None` when the interner had no room for it.
+    /// The variable's spelling, or `None` when it could not be interned — for either reason.
     ///
     /// The finding does not depend on the spelling: the request did not supply the variable, and
-    /// that is true whether or not its name can be quoted. So an exhausted arena shortens this
-    /// message and leaves the error saying the same thing, rather than swapping it for one about
-    /// storage — which would report a resource problem where the caller has an argument problem.
+    /// that is true whether or not its name can be quoted. So an exhausted arena *or* an exhausted
+    /// visit budget shortens this message and leaves the error saying the same thing, rather than
+    /// swapping it for one about a resource — which would report a resource problem where the
+    /// caller has an argument problem. This is why [`Unstored`] is discarded here and carried at
+    /// the two sites whose message names a ceiling.
     variable: Option<u32>,
   },
   /// Draft §6.3 steps 3.a and 3.b: a `@skip`/`@include` condition that is not a readable boolean.
@@ -144,14 +154,19 @@ pub(super) enum Raw {
   /// this one means a response key or a type name could not be recorded, so the position it
   /// belongs to cannot be built at all.
   NameStorage { limit: u32 },
-  /// The driver reported a field error whose message could not be stored.
+  /// The driver reported a field error whose message could not be recorded.
   ///
   /// The failure is the driver's and is reported; only its text is missing, which is why this is
-  /// [`Kind::Resolver`] and not a budget kind. Losing the text is strictly better than the
-  /// alternative it replaces: storing it would have narrowed an arena offset that no longer fits a
-  /// `u32`, and every name interned afterwards — every response key, every `__typename` — would
-  /// have read back the wrong bytes.
-  ResolverUnstorable,
+  /// [`Kind::Resolver`] and not a budget kind **whichever ceiling refused** — the finding is that
+  /// the resolver failed, and that is true either way. Losing the text is strictly better than the
+  /// alternative the arena case replaces: storing it would have narrowed an arena offset that no
+  /// longer fits a `u32`, and every name interned afterwards — every response key, every
+  /// `__typename` — would have read back the wrong bytes.
+  ///
+  /// [`Unstored`] is carried so the message names the ceiling that actually refused. Both are
+  /// reachable here: the message is the driver's text, so its length is the arena's problem, and
+  /// finding it in the table is the visit budget's.
+  ResolverUnstorable { unstored: Unstored },
 }
 
 /// Which way a `@skip`/`@include` condition failed to be a boolean.
@@ -167,9 +182,9 @@ pub(super) enum ConditionFault {
   /// The directive carries no `if` argument at all.
   Missing,
   /// `if` names a variable the request did not supply. The name is held out of line, and is
-  /// `None` when the interner had no room for it — see
+  /// `None` when it could not be interned — see
   /// [`Raw::ArgumentVariableMissing`](Raw::ArgumentVariableMissing) for why the message shortens
-  /// rather than the error changing.
+  /// rather than the error changing, and why the ceiling that refused is not reported here.
   VariableMissing { variable: Option<u32> },
   /// `if`'s value is `null`.
   Null,
@@ -266,7 +281,7 @@ impl Raw {
       | Self::CollectionBudget { .. }
       | Self::MetadataBudget { .. }
       | Self::NameStorage { .. } => Kind::ResponseBudget,
-      Self::ResolverUnstorable => Kind::Resolver,
+      Self::ResolverUnstorable { .. } => Kind::Resolver,
     }
   }
 }
@@ -414,12 +429,27 @@ impl<V> fmt::Display for Error<'_, V> {
         self.name(runtime),
         schema.name(schema.type_def(abstract_ty).name())
       ),
-      Raw::AbstractNotPossibleUnnamed { abstract_ty, limit } => write!(
-        f,
-        "The runtime Object type is not a possible type for \"{}\", and its name could not be \
-         stored within the executor's limit of {limit} interned bytes.",
-        schema.name(schema.type_def(abstract_ty).name())
-      ),
+      Raw::AbstractNotPossibleUnnamed {
+        abstract_ty,
+        unstored,
+      } => {
+        let abstract_name = schema.name(schema.type_def(abstract_ty).name());
+        // One sentence per ceiling rather than one sentence with the number swapped: the arena had
+        // no room to *keep* the name and the budget had none to *look it up*, and a reader deciding
+        // which knob to move is being told two different things.
+        match unstored {
+          Unstored::Arena { limit } => write!(
+            f,
+            "The runtime Object type is not a possible type for \"{abstract_name}\", and its name \
+             could not be stored within the executor's limit of {limit} interned bytes."
+          ),
+          Unstored::Budget { limit } => write!(
+            f,
+            "The runtime Object type is not a possible type for \"{abstract_name}\", and its name \
+             could not be looked up within the executor's limit of {limit} selection visits."
+          ),
+        }
+      }
       Raw::ArgumentMissing {
         field: _,
         argument,
@@ -535,10 +565,18 @@ impl<V> fmt::Display for Error<'_, V> {
         f,
         "A name in this response would exceed the executor's limit of {limit} interned bytes."
       ),
-      Raw::ResolverUnstorable => f.write_str(
-        "The driver reported a field error whose message exceeded the executor's storage and was \
-         not recorded.",
-      ),
+      Raw::ResolverUnstorable { unstored } => match unstored {
+        Unstored::Arena { limit } => write!(
+          f,
+          "The driver reported a field error whose message exceeded the executor's storage limit \
+           of {limit} interned bytes and was not recorded."
+        ),
+        Unstored::Budget { limit } => write!(
+          f,
+          "The driver reported a field error whose message could not be recorded within the \
+           executor's limit of {limit} selection visits."
+        ),
+      },
     }
   }
 }

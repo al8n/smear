@@ -41,7 +41,7 @@ use crate::{
 
 use super::{
   Argument, ArgumentSource, Error, FieldRequest, Leaf, Node, ReqId, Values,
-  collect::{Allowance, Group, Interner, Visits, collect_fields},
+  collect::{Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields},
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
   response::{Key, NONE, Slot, State, node},
@@ -65,7 +65,7 @@ mod tests;
 /// | outstanding work | requests | [`max_in_flight`](Limits::max_in_flight) | `poll_resolve` withholds, and the slab reuses freed entries | — |
 /// | response positions | positions | [`max_response_slots`](Limits::max_response_slots) | `push_child`, the only creator | — |
 /// | response metadata | merged selections **and** location spans, counted as one | [`max_response_metadata`](Limits::max_response_metadata) | `expand` before appending, and `fail_at` | a writer appending spans without charging — which `fail_at` did, making the ceiling neither bound it claimed |
-/// | collection work | selections **examined**, surviving or not | [`max_selection_visits`](Limits::max_selection_visits) | `walk`, once per selection looked at | charging appends instead of visits, which lets a document of fragments that collect nothing walk free |
+/// | collection work | selections **examined**, name-table entries **compared**, and the fragment index's pass, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; and leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
@@ -77,10 +77,21 @@ mod tests;
 /// returns after its first `fail_at` and a failed position is discarded, so one position
 /// contributes one row.
 ///
-/// What none of them bounds is the cost of a *single* visit — `fragment_index` and
-/// `Interner::intern` both scan linearly, which is al8n/smear#141. That is a query quantity
-/// multiplying a query quantity, and the visit budget is what stops a driver answer from
-/// multiplying it as well.
+/// **The fourth row's unit is the second time this table met the product shape, and this one came
+/// from the query on both sides.** Charging one unit per selection said nothing about what
+/// examining a selection *costs*, and it cost the document three times over: `Interner::intern`
+/// scanned every interned name, the group lookup scanned every group collected so far, and a
+/// fragment spread scanned every definition. They grew together — one group per newly interned key
+/// — so `n` selections over `n` names was `n²` of work under a ceiling that read `n`, and **fixing
+/// one of the three would have changed nothing**, because the other two still ran once per
+/// selection. Measured before: 8,000 distinct response keys spent 61 ms inside `start()`, and a
+/// 50,000-link fragment chain 2.1 s, all of it before the first request a driver could refuse.
+///
+/// The group is now a direct index by interner id, and the other two are hash probes whose
+/// comparisons are charged — so the ceiling bounds the work and not the trip count. Two residuals
+/// are recorded on `collect::Visits` rather than argued away here: a lookup is charged after it
+/// answers, and `expand`'s `__typename` and `handle_field_error`'s message intern without charging
+/// this budget at all.
 ///
 /// # The other half of the table: what is held, who can still read it, when it dies
 ///
@@ -346,22 +357,45 @@ pub struct Limits {
   /// legitimately merged selections should not be refused for being tidy.
   pub max_response_metadata: NonZeroU32,
 
-  /// How many selections draft §6.3's collection may examine, across the whole operation.
+  /// How much work draft §6.3's collection may do, across the whole operation.
   ///
-  /// Charged per selection *looked at*, surviving or not. That is the difference between this and
-  /// every other ceiling here, and it is deliberate: the others count what was produced, and a
-  /// document built out of fragments that collect nothing produces nothing while walking as far as
-  /// it likes.
+  /// Charged per selection *looked at*, surviving or not; per entry a name lookup compares, before
+  /// it compares it; and per definition and fragment the fragment index's one pass handles. The
+  /// first is the difference between this and every other ceiling here, and it is deliberate: the
+  /// others count what was produced, and a document built out of fragments that collect nothing
+  /// produces nothing while walking as far as it likes.
+  ///
+  /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
+  /// text the *document* chose, and the shared multiply-fold is unkeyed and invertible, so a client
+  /// can put every one of its names in one bucket deliberately. Charging each comparison first
+  /// means it spends this ceiling doing so, and the guarantee does not rest on the hash behaving.
+  /// In the ordinary case a lookup compares about one entry, so a document spends roughly twice
+  /// what it used to — against a default of sixteen million.
+  ///
+  /// **It is not "collection work" in the narrow sense, and the widening was a defect repair.**
+  /// Every name the executor interns charges this, including the ones only a *diagnostic* wants: a
+  /// driver's error message, an unresolvable runtime type name, the spelling of a variable an
+  /// argument did not get. Two of those are the document's own text, and while they interned
+  /// uncharged a client could name its variables into one bucket and walk it once per failed
+  /// field — after collection had been admitted, so nothing here saw it. A name that cannot be
+  /// charged is now dropped from its message rather than fatal, exactly as one that will not fit
+  /// the arena already was.
   ///
   /// It is also what replaced a recursion. `walk` used to descend the native stack once per named
   /// fragment in a chain, and a chain is flat in the document, so no parser depth limit could see
-  /// it — a measured 1,500 links aborted the process with `SIGABRT`. The walk now runs on an
-  /// explicit stack, which turns depth into heap that this budget already bounds, so there is no
-  /// depth knob to get wrong per deployment.
+  /// it — a few thousand links aborted the process with `SIGABRT`, at a count that moves with the
+  /// platform and the build profile, which `collect::walk` records with both measurements. The walk
+  /// now runs on an explicit stack, which turns depth into heap that this budget already bounds, so
+  /// there is no depth knob to get wrong per deployment.
   ///
   /// Per operation rather than per call, because `collect_fields` runs once per object position: a
   /// per-call budget would leave the total at `positions × budget`, and positions are the driver's.
   /// Counting down across the operation means no driver answer multiplies collection work.
+  ///
+  /// Per operation also means *every* operation. An executor reused for a second run of the same
+  /// document re-pays the fragment index pass it built the first time, even though the table is
+  /// still there — so the verdict on a request is a function of the request and this number, and
+  /// never of what the executor happened to be asked before it.
   pub max_selection_visits: NonZeroU32,
 
   /// How many bytes of interned text the response may hold.
@@ -381,6 +415,14 @@ pub struct Limits {
   /// A refusal degrades rather than propagates. A driver message that will not fit is reported as
   /// a field error without its text; a *name* that will not fit cannot be degraded that way — a
   /// response key is the position — so that one refuses the position.
+  ///
+  /// **It bounds bytes, and the memory is a multiple of them.** Every entry carries bookkeeping the
+  /// arena's length does not count — its span, its hash-chain link, its share of the bucket table
+  /// and its slot in collection's key-to-group scratch — and a GraphQL name is at least one byte,
+  /// so `B` bytes of ceiling can be `B` entries costing about `25 · B`. That is a constant multiple
+  /// and not a second factor, which is the difference between a cost to know about and the product
+  /// shape this module refuses; it is stated because a caller choosing this number is choosing
+  /// twenty-five times it.
   pub max_interned_bytes: NonZeroU32,
 }
 
@@ -475,19 +517,56 @@ struct Mark {
   ready_tail: u32,
 }
 
-/// Which of [`Limits`]'s two response ceilings `expand` ran into.
+/// What one operation charged against each of the ceilings that accumulate.
+///
+/// # It is enumerated from [`Limits`], for the reason [`Mark`] is
+///
+/// The gate this exists for compares two runs of one request on one executor and requires them to
+/// have cost the same, which is the general form of "nothing an executor keeps across
+/// [`reset`](Executor::reset) may make the second cheaper". A gate like that is only as wide as the
+/// quantities it reads, and the first version read [`Limits::max_selection_visits`] alone — so a
+/// table kept across a reset that fed slots, metadata or the arena instead was invisible to it,
+/// while the sentence next to it claimed the whole class.
+///
+/// So the fields are the ceilings, one each, and each is the quantity that ceiling's own check
+/// compares against rather than a count kept alongside it: `slots.len()` is what `push_child`
+/// tests, `merged.len() + locations.len()` is what `metadata_room` tests, and the arena's length is
+/// what `Interner::intern` tests. Reading the check's own input is what keeps this from drifting
+/// into a second accounting that agrees with itself.
+///
+/// [`Limits::max_in_flight`] is absent and that is not an omission: it bounds requests outstanding
+/// at an instant rather than a population that accumulates, so there is no total for two operations
+/// to disagree about. `collect::Visits` records it, with what else the gate does not reach.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Charges {
+  /// Units of [`Limits::max_selection_visits`].
+  visits: u32,
+  /// Positions, against [`Limits::max_response_slots`].
+  slots: usize,
+  /// Merged selections and location spans together, against [`Limits::max_response_metadata`].
+  metadata: usize,
+  /// Arena bytes, against [`Limits::max_interned_bytes`].
+  interned: usize,
+}
+
+/// Which of [`Limits`]'s ceilings `expand` ran into.
 ///
 /// Carried out of the loop rather than reported inside it, because recording a failure borrows the
 /// whole executor while the scratch vectors are still moved out of it.
 ///
-/// Two variants and one [`Kind`](super::Kind): a driver branching on the outcome only needs to know
-/// that a ceiling was reached, and the remedy is the same either way, but the two *messages* have
-/// to name the right knob — a single message would be wrong half the time.
+/// Several variants and one [`Kind`](super::Kind): a driver branching on the outcome only needs to
+/// know that a ceiling was reached, and the remedy is the same in every case, but the *messages*
+/// have to name the right knob — one message would be wrong most of the time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Exhausted {
+  /// [`max_response_slots`](Limits::max_response_slots) has no room for the position.
   Positions,
+  /// [`max_response_metadata`](Limits::max_response_metadata) has no room for the group.
   Selections,
-  Names,
+  /// A `__typename` answer could not be interned. Which ceiling refused, and the number that
+  /// belongs to it, travel together — see [`Unstored`].
+  Unstored(Unstored),
 }
 
 /// Why [`Executor::start`] refused.
@@ -578,6 +657,21 @@ where
 {
   schema: &'a Schema,
   document: &'a ExecutableDocument<S>,
+  /// The document's named fragments, indexed by name so that a spread costs a probe rather than a
+  /// scan of every definition.
+  ///
+  /// Indexed on the first fragment spread and **charged against
+  /// [`max_selection_visits`](Limits::max_selection_visits) when it is**, then kept across every
+  /// [`reset`](Self::reset). Indexing in the constructor instead made an executor built per
+  /// execution pay `executions × definitions` before any ceiling existed, and filling a table from
+  /// names the *document* chooses without charging for it is a hole a charged lookup does not
+  /// close. See `collect::Fragments`.
+  ///
+  /// The **table** survives a reset; the **charge** does not. Every operation pays the pass, and an
+  /// operation that finds the table already built pays exactly what building it would have cost, so
+  /// a request's answer does not depend on what this executor was asked before it. See
+  /// `collect::Fragments::build` for the retry that used to be admitted.
+  fragments: Fragments<'a, S>,
   limits: Limits,
   /// `__typename`'s symbol in this schema, resolved once so that `expand` recognises the
   /// meta-field with an integer comparison rather than a name lookup per collected group.
@@ -619,12 +713,9 @@ where
   started: bool,
   delivered: bool,
 
-  scratch_fields: std::vec::Vec<(u32, &'a Field<S>)>,
-  scratch_groups: std::vec::Vec<Group>,
-  scratch_visited: std::vec::Vec<u32>,
+  /// Everything one draft §6.3 collection reuses from the last. See `collect::Scratch`.
+  scratch: Scratch<'a, S>,
   scratch_sets: std::vec::Vec<&'a SelectionSet<S>>,
-  /// Draft §6.3's descent, as heap rather than as native frames. See `collect::walk`.
-  scratch_stack: std::vec::Vec<(&'a SelectionSet<S>, usize)>,
   /// What is left of [`Limits::max_selection_visits`] for this operation.
   visits: Visits,
   /// Draft §6.4.1's surviving arguments, for the one request `poll_resolve` is offering.
@@ -647,9 +738,13 @@ where
 {
   /// Creates an executor over a validated document and the schema it was validated against.
   ///
-  /// Nothing happens until [`start`](Executor::start). Both borrows outlive the executor, so the
-  /// document is never copied and every literal a driver reads out of an
-  /// [`ArgumentSource`](super::ArgumentSource) points into it.
+  /// Nothing happens until [`start`](Executor::start), and nothing is allocated here. The one thing
+  /// that could reasonably have happened here — indexing the document's named fragments — happens
+  /// on the first fragment spread instead, so that its cost is charged to the operation that needs
+  /// it rather than paid once per executor outside every ceiling.
+  ///
+  /// Both borrows outlive the executor, so the document is never copied and every literal a driver
+  /// reads out of an [`ArgumentSource`](super::ArgumentSource) points into it.
   #[inline]
   pub fn new(schema: &'a Schema, document: &'a ExecutableDocument<S>) -> Self {
     Self::with_limits(schema, document, Limits::default())
@@ -664,6 +759,8 @@ where
     Self {
       schema,
       document,
+      scratch: Scratch::default(),
+      fragments: Fragments::new(document),
       limits,
       typename: schema.sym(builtin::TYPENAME_FIELD.as_bytes()),
       slots: std::vec::Vec::new(),
@@ -682,11 +779,7 @@ where
       ready_tail: NONE,
       started: false,
       delivered: false,
-      scratch_fields: std::vec::Vec::new(),
-      scratch_groups: std::vec::Vec::new(),
-      scratch_visited: std::vec::Vec::new(),
       scratch_sets: std::vec::Vec::new(),
-      scratch_stack: std::vec::Vec::new(),
       deferred: NONE,
       visits: Visits::new(limits.max_selection_visits.get()),
       scratch_args: std::vec::Vec::new(),
@@ -931,10 +1024,15 @@ where
     }
     // The driver's failure is reported whether or not its text can be kept. Dropping the text is
     // a loss; letting it push the arena past what a `u32` offset can address would corrupt every
-    // name interned after it, which is not.
-    let raw = match self.interner.intern(message.as_bytes()) {
-      Some(message) => Raw::Resolver { message },
-      None => Raw::ResolverUnstorable,
+    // name interned after it, which is not — and the same is true of a lookup nobody paid for, so
+    // the budget refuses through the same door the arena does.
+    //
+    // Through the same door, but not with the same message. The refusal is carried rather than
+    // discarded, because the two doors are two different knobs and an operator told the wrong one
+    // resizes an arena that was never the constraint.
+    let raw = match self.interner.intern(message.as_bytes(), &mut self.visits) {
+      Ok(message) => Raw::Resolver { message },
+      Err(unstored) => Raw::ResolverUnstorable { unstored },
     };
     self.fail(slot, raw);
   }
@@ -1181,14 +1279,18 @@ where
         Some(id) => id,
         None => {
           // Here, and only here, the name has to be said out loud.
-          let raw = match self.interner.intern(name.as_bytes()) {
-            Some(runtime) => Raw::AbstractNotPossible {
+          //
+          // And when it cannot be, the message says which ceiling silenced it. This arm used to
+          // render the arena's cap whatever had refused, so a visit budget exhausted by the probe
+          // run reported itself as a full arena.
+          let raw = match self.interner.intern(name.as_bytes(), &mut self.visits) {
+            Ok(runtime) => Raw::AbstractNotPossible {
               abstract_ty: base,
               runtime,
             },
-            None => Raw::AbstractNotPossibleUnnamed {
+            Err(unstored) => Raw::AbstractNotPossibleUnnamed {
               abstract_ty: base,
-              limit: self.interner.cap(),
+              unstored,
             },
           };
           self.fail(slot, raw);
@@ -1247,24 +1349,18 @@ where
     // Taken before the collection, because the collection interns too: a response key belonging to
     // a field that never becomes a position must not be left spending a later sibling's arena.
     let mark = self.mark(slot);
-    // `collect_fields` borrows the scratch vectors; move them out so the borrow checker can see
-    // the fields are disjoint, and put them back afterwards.
+    // `collect_fields` borrows the scratch; move it out so the borrow checker can see the fields
+    // are disjoint, and put it back afterwards.
     let mut sets = core::mem::take(&mut self.scratch_sets);
-    let mut fields = core::mem::take(&mut self.scratch_fields);
-    let mut groups = core::mem::take(&mut self.scratch_groups);
-    let mut visited = core::mem::take(&mut self.scratch_visited);
-    let mut stack = core::mem::take(&mut self.scratch_stack);
+    let mut scratch = core::mem::take(&mut self.scratch);
     let collected = collect_fields(
       self.schema,
-      self.document,
+      &mut self.fragments,
       object_type,
       &sets,
       ctx,
       &mut self.interner,
-      &mut visited,
-      &mut fields,
-      &mut groups,
-      &mut stack,
+      &mut scratch,
       &mut self.visits,
       // The committed half of the population, so collection charges what is left of the same
       // ceiling `expand` and `fail_at` charge.
@@ -1275,15 +1371,11 @@ where
       ),
     );
     if let Err(fault) = collected {
-      // The scratch vectors go back before the failure is recorded, because recording it borrows
-      // the whole executor.
+      // The scratch goes back before the failure is recorded, because recording it borrows the
+      // whole executor.
       sets.clear();
       self.scratch_sets = sets;
-      self.scratch_fields = fields;
-      self.scratch_groups = groups;
-      self.scratch_visited = visited;
-      stack.clear();
-      self.scratch_stack = stack;
+      self.scratch = scratch;
       // No child slot exists yet, but the walk interned as it went, and those names belong to
       // fields that will never be positions. Undoing them is what keeps the next sibling's arena
       // the size it is owed.
@@ -1310,7 +1402,11 @@ where
           Some(bytes),
         ) => Raw::DirectiveCondition {
           fault: ConditionFault::VariableMissing {
-            variable: self.interner.intern(bytes),
+            // `.ok()` on purpose, and the only kind of site where discarding the refusal is right:
+            // the spelling is decoration on a finding that does not depend on it, so both ceilings
+            // shorten the same sentence and the reader is not told about a resource at all. The
+            // sites that *name* a ceiling carry the refusal instead — see `Unstored`.
+            variable: self.interner.intern(bytes, &mut self.visits).ok(),
           },
         },
         (raw, _) => raw,
@@ -1324,8 +1420,8 @@ where
     // that will happen" are different numbers.
     let mut enqueued = 0u32;
     let mut exhausted: Option<(Exhausted, SimpleSpan)> = None;
-    for group in &groups {
-      let selections = &fields[group.start as usize..(group.start + group.len) as usize];
+    for group in scratch.groups() {
+      let selections = &scratch.fields[group.start as usize..(group.start + group.len) as usize];
       let first = selections[0].1;
       let Some(sym) = self.schema.sym(name_bytes(first)) else {
         // Draft 5.3.1 makes a field the type does not define a validation failure, so a validated
@@ -1387,9 +1483,15 @@ where
           let name = self.schema.type_def(object_type).name();
           // A `__typename` whose answer cannot be stored must not become a field with no name or
           // a name that is somebody else's: the position simply cannot be built.
-          let Some(interned) = self.interner.intern(self.schema.name_bytes(name)) else {
-            exhausted = Some((Exhausted::Names, group.first));
-            break;
+          let interned = match self
+            .interner
+            .intern(self.schema.name_bytes(name), &mut self.visits)
+          {
+            Ok(interned) => interned,
+            Err(unstored) => {
+              exhausted = Some((Exhausted::Unstored(unstored), group.first));
+              break;
+            }
           };
           Some(interned)
         }
@@ -1420,11 +1522,7 @@ where
 
     sets.clear();
     self.scratch_sets = sets;
-    self.scratch_fields = fields;
-    self.scratch_groups = groups;
-    self.scratch_visited = visited;
-    stack.clear();
-    self.scratch_stack = stack;
+    self.scratch = scratch;
 
     // The live exit. A refused expansion falls through to the block below instead, and needs no
     // count: it ends in `fail` on this very object, and the discard that follows overwrites the
@@ -1454,9 +1552,10 @@ where
           field,
           limit: self.limits.max_response_metadata.get(),
         },
-        Exhausted::Names => Raw::NameStorage {
-          limit: self.interner.cap(),
-        },
+        // The ceiling arrived with the refusal, so there is no second place for the number to come
+        // from and no way to take it from the wrong one.
+        Exhausted::Unstored(Unstored::Arena { limit }) => Raw::NameStorage { limit },
+        Exhausted::Unstored(Unstored::Budget { limit }) => Raw::CollectionBudget { limit },
       };
       // `fail_at` rather than `fail`, and the span is the refused selection's own.
       //
@@ -1556,9 +1655,18 @@ where
         match variable {
           Some((name, _)) => {
             let location = value_span.unwrap_or(*node.span());
-            // Not `let Some(..) else`: the argument is missing either way, and an arena with no
+            // Not `let Some(..) else`: the argument is missing either way, and a table with no
             // room must shorten this message rather than replace it with one about storage.
-            let variable = self.interner.intern(name.as_bytes());
+            //
+            // The spelling is the *document's*, which is what made this the counterexample to the
+            // claim that only schema and driver bytes reached the uncharged path. There is no
+            // uncharged path now, so the site charges like any other and shortens when it cannot.
+            //
+            // Which ceiling refused is deliberately dropped here, as at the condition fault above:
+            // the argument is missing whatever the answer, so there is no knob to recommend and
+            // nothing to say about a resource. That is the whole set of sites where `.ok()` is the
+            // decision rather than an omission.
+            let variable = self.interner.intern(name.as_bytes(), &mut self.visits).ok();
             self.fail_at(
               slot,
               Raw::ArgumentVariableMissing {
@@ -1852,6 +1960,85 @@ where
     self.scratch_args.clear();
   }
 
+  /// How many units of [`Limits::max_selection_visits`] this operation has spent.
+  ///
+  /// The gate that pins collection's *cost* reads this. Nothing outside the crate can: a quadratic
+  /// collection and a linear one produce the same response, so the only black-box separator is a
+  /// clock, and a clock is a flaky gate rather than a strict one.
+  #[cfg(test)]
+  fn collection_work(&self) -> u32 {
+    self.visits.spent()
+  }
+
+  /// Entries the fragment lookups have compared, counted independently of what they charged.
+  ///
+  /// The two agree whenever the charge is taken *before* the comparison, which is the property — so
+  /// the budget cannot be the witness for it, a version charging afterwards agreeing with itself
+  /// just as well. This count is the only thing that separates them.
+  #[cfg(test)]
+  fn fragment_compares(&self) -> u64 {
+    self.fragments.compares()
+  }
+
+  /// Definitions the fragment index pass has read, counted independently of what it charged.
+  ///
+  /// One walk is what the pass is charged for, and the charge is spent up front out of a slice
+  /// length — so the budget reads the same over one walk and over two, and a version that walked
+  /// the definitions again to sieve the fragments out of them agrees with itself. This count is the
+  /// only thing that separates them. See `collect::table`.
+  #[cfg(test)]
+  fn fragment_definitions_walked(&self) -> u64 {
+    self.fragments.walked()
+  }
+
+  /// Entries the name lookups have compared, counted independently of what they charged.
+  #[cfg(test)]
+  fn interner_compares(&self) -> u64 {
+    self.interner.compares()
+  }
+
+  /// What this operation has charged against each of the four cumulative ceilings.
+  ///
+  /// One value rather than four accessors, so the gate compares all four in one `assert_eq!` and
+  /// cannot quietly compare three. Nothing here makes a *fifth* ceiling automatic: adding one to
+  /// [`Limits`] still means adding a field, and `collect::Visits` records that obligation with the
+  /// rest of what the gate does not reach on its own.
+  #[cfg(test)]
+  fn charges(&self) -> Charges {
+    Charges {
+      visits: self.visits.spent(),
+      slots: self.slots.len(),
+      metadata: self.merged.len() + self.locations.len(),
+      interned: self.interner.bytes().len(),
+    }
+  }
+
+  /// Entries the fragment index has reserved room for, which no ceiling bounds and
+  /// [`reset`](Self::reset) does not clear.
+  ///
+  /// Not part of [`Charges`], and deliberately: the table is *meant* to outlive an operation, so
+  /// its capacity is not a quantity two operations have to agree on. What must hold is narrower —
+  /// a **refused** pass reserves none of it. See `collect::table`.
+  #[cfg(test)]
+  fn fragment_reserved(&self) -> usize {
+    self.fragments.reserved()
+  }
+
+  /// Puts every per-operation population back to empty, keeping only what is a function of the
+  /// document or the schema.
+  ///
+  /// # What must not survive is the answer, and the gate for that is a totals comparison
+  ///
+  /// Some state here is kept on purpose — the fragment index, the interner's and the scratch's
+  /// capacities, the epoch — because it is either a function of the document or an allocation a
+  /// reused executor should not repay. The rule that keeps that from becoming a defect is that
+  /// **nothing kept may make a second operation cheaper than the first**: a ceiling a client clears
+  /// by sending the same request twice is not a ceiling.
+  ///
+  /// It has already been broken once, by the charge for the fragment pass being remembered beside
+  /// the table it paid for. `a_second_operation_charges_what_the_first_did` is the general gate for
+  /// the class, and it reads all four cumulative ceilings — see `collect::Visits` for what that
+  /// covers and, precisely, what it does not.
   fn reset(&mut self) {
     self.slots.clear();
     self.meta.clear();

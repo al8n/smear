@@ -59,6 +59,12 @@ pub(crate) mod literal;
 #[cfg_attr(docsrs, doc(cfg(feature = "introspection")))]
 pub use introspection::IntrospectionError;
 
+/// Draft §6.3's collection indexes the *document's* names the way [`NameIndex`] indexes the
+/// schema's, and one hash for both is one hash to reason about. See [`NameIndex`] for why the two
+/// callers owe different arguments about it being unkeyed.
+#[cfg(feature = "proto")]
+pub(crate) use repr::name::{bucket, hash_bytes};
+
 pub use builder::SchemaBuilder;
 pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};
 pub use repr::{

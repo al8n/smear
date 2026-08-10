@@ -339,6 +339,11 @@ pub fn text_hits(ty: &Type) -> Vec<TextHit> {
     }
   }
 
+  // `<'a>` is single-use, which the workspace lints warn on, but eliding it needs an anonymous
+  // lifetime in `impl Trait` argument position — unstable on the declared MSRV (E0658 on 1.95).
+  // The two spellings are mutually exclusive there, so the lint is allowed rather than the MSRV
+  // raised: this binary is `publish = false` and the MSRV is a promise about the shipped crates.
+  #[allow(single_use_lifetimes)]
   fn walk_bounds<'a>(
     bounds: impl Iterator<Item = &'a TypeParamBound>,
     out_param: bool,
@@ -522,6 +527,9 @@ fn walk_children(ty: &Type, f: &mut impl FnMut(&Type)) {
   }
 }
 
+// Single-use `<'a>`, kept for the same reason as `walk_bounds` above: eliding it is unstable on
+// the declared MSRV.
+#[allow(single_use_lifetimes)]
 fn bound_types<'a>(bounds: impl Iterator<Item = &'a TypeParamBound>, f: &mut impl FnMut(&Type)) {
   for bound in bounds {
     let TypeParamBound::Trait(t) = bound else {
