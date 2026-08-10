@@ -171,13 +171,19 @@ fn run_with(
   root: J,
   variables: Vec<(&'static str, J)>,
 ) -> (String, Vec<(Kind, String, String)>) {
-  execute(sdl, query, root, variables, |response| {
-    let errors = response
-      .errors()
-      .map(|error| (error.kind(), error.to_string(), error.path().to_string()))
-      .collect();
-    (render(&response.data()), errors)
-  })
+  execute(sdl, query, root, variables, data_and_errors)
+}
+
+/// A finished response as `data` and every error, which is what most cases here compare.
+///
+/// Named rather than repeated inline because the fixture that runs an operation twice compares two
+/// of them, and two answers are only comparable if they were read the same way.
+fn data_and_errors(response: &Response<'_, J>) -> (String, Vec<(Kind, String, String)>) {
+  let errors = response
+    .errors()
+    .map(|error| (error.kind(), error.to_string(), error.path().to_string()))
+    .collect();
+  (render(&response.data()), errors)
 }
 
 /// Runs a query to completion and hands the finished response to `take`.
@@ -229,11 +235,25 @@ fn execute_bounded<T>(
     consume_variables: false,
   };
   let mut executor = Executor::with_limits(&schema, &document, limits);
+  drive(&mut executor, &mut space, root, take)
+}
+
+/// Runs one operation on `executor` to completion and hands the finished response to `take`.
+///
+/// Split out of [`execute_bounded`] so that a fixture can run **two** operations on one executor,
+/// which is what any property about state surviving `reset` needs and what a per-run executor
+/// cannot express.
+fn drive<T>(
+  executor: &mut Executor<'_, &str, Space>,
+  space: &mut Space,
+  root: J,
+  take: impl FnOnce(&Response<'_, J>) -> T,
+) -> T {
   executor
-    .start(&mut space, None, root)
+    .start(space, None, root)
     .expect("the operation resolves");
 
-  while let Some(request) = executor.poll_resolve(&mut space) {
+  while let Some(request) = executor.poll_resolve(space) {
     let id = request.id();
     let name = request.name();
     // The driver lies about `__typename`, on purpose. Every assertion below that names a concrete
@@ -249,7 +269,7 @@ fn execute_bounded<T>(
       }
     };
     match answer {
-      Ok(value) => executor.handle_resolved(&mut space, id, value),
+      Ok(value) => executor.handle_resolved(space, id, value),
       Err(message) => executor.handle_field_error(id, message),
     }
     while executor.poll_abandoned().is_some() {}
@@ -2560,13 +2580,7 @@ fn run_bounded(
   root: J,
   limits: Limits,
 ) -> (String, Vec<(Kind, String, String)>) {
-  execute_bounded(sdl, query, root, Vec::new(), limits, |response| {
-    let errors = response
-      .errors()
-      .map(|error| (error.kind(), error.to_string(), error.path().to_string()))
-      .collect();
-    (render(&response.data()), errors)
-  })
+  execute_bounded(sdl, query, root, Vec::new(), limits, data_and_errors)
 }
 
 const BUDGET_SDL: &str = r#"
@@ -2898,9 +2912,16 @@ fn fragment_chain(links: usize) -> String {
 ///
 /// This is the regression for the abort, and it is the one case here that cannot be written as a
 /// red-first assertion: against a recursive walk it does not fail, it terminates the test binary
-/// with `SIGABRT`, taking every other case in the file with it. Measured before the change: 1,000
-/// links survived, 1,500 aborted. Ten thousand is comfortably past that and still runs in
-/// milliseconds, because the work was never the problem — the frames were.
+/// with `SIGABRT`, taking every other case in the file with it. Measured when the recursion was
+/// deleted: 1,000 links survived, 1,500 aborted. **Re-measured by restoring the recursion, release
+/// build, different platform: 1,500 answered in 1.9 ms and 10,000 aborted with `SIGABRT`** — so the
+/// fixture is ten thousand, and a threshold that moves that far with the frame layout is the reason
+/// there is no depth ceiling to set.
+///
+/// Surviving the walk and walking it in *linear time* were two defects, and this closed only the
+/// first: the same chain still scanned every definition once per spread. The second is pinned by
+/// `a_flat_fragment_chain_is_linear` in `src/proto/execute/tests.rs`, from inside the crate,
+/// because the cost of a collection is not observable from out here.
 #[test]
 fn a_flat_fragment_chain_no_longer_ends_the_process() {
   let (data, errors) = run_bounded(
@@ -3010,6 +3031,80 @@ fn collection_inside_the_visit_budget_is_unchanged() {
   assert_eq!(
     bounded, default,
     "the budget changes nothing it does not refuse"
+  );
+}
+
+/// A refused request is refused again on the **same** executor, which is the property a budget is.
+///
+/// # The escape this closes
+///
+/// The fragment index is built on the first spread and kept across `reset`, because it is a
+/// function of the document. The *charge* for building it used to be kept with it — so the second
+/// operation on an executor found the table already there and paid nothing for it:
+///
+/// 1. the first `start` pays for the index pass, runs out of budget in the walk that follows, and
+///    is refused, leaving the table built;
+/// 2. the second `start` — same executor, same document, same limits — skips the pass entirely;
+/// 3. the request that was **refused** is now **served**.
+///
+/// The objection to calling that a defect is that the accounting is sound: the work really was done
+/// once, and the document cannot change underneath it. Both halves are true and neither is the
+/// point. What a client observes is not the work, it is the answer, and the answer moved between
+/// call one and call two. A ceiling that a client clears by sending the request a second time is
+/// not a ceiling.
+///
+/// # Why this fixture reuses an executor when no other one does
+///
+/// Every other case in this file and in `src/proto/execute/tests.rs` constructs a fresh executor,
+/// which is precisely the shape that cannot see this: a fresh executor has an unbuilt table, so its
+/// first operation always pays. The reuse *is* the fixture. Rewriting it to run twice through
+/// [`run_bounded`] would make it green against the defect.
+///
+/// # The numbers
+///
+/// A chain of `LINKS` links defines `LINKS + 1` fragments in `LINKS + 2` definitions, so the index
+/// pass costs `2 · LINKS + 3`, and walking it afterwards costs about the same again — one visit per
+/// selection and about one comparison per spread. The ceiling is the pass plus `LINKS`: comfortably
+/// past the pass, so the first run reaches the walk and leaves the table built, and comfortably
+/// short of pass-plus-walk, so it is refused. A second run that skipped the pass would have the
+/// whole walk inside what is left.
+#[test]
+fn a_refused_request_is_refused_again_on_the_same_executor() {
+  const LINKS: usize = 16;
+  /// One unit per definition walked and one per fragment pushed.
+  const INDEX: u32 = 2 * LINKS as u32 + 3;
+
+  let query = fragment_chain(LINKS);
+  let (schema, document) = compile("type Query { a: String }", &query);
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(INDEX + LINKS as u32).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+
+  let root = || obj(vec![("a", J::Str("A".to_owned()))]);
+  let first = drive(&mut executor, &mut space, root(), data_and_errors);
+  let second = drive(&mut executor, &mut space, root(), data_and_errors);
+
+  assert!(
+    first
+      .1
+      .iter()
+      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+    "the fixture only says anything if the first run is refused: {first:?}"
+  );
+  assert!(
+    first
+      .1
+      .iter()
+      .any(|(_, message, _)| message.contains("selection visits")),
+    "and refused by the visit budget rather than by some other ceiling: {first:?}"
+  );
+  assert_eq!(
+    second, first,
+    "the same request, on the same executor, under the same limits, answered differently the \
+     second time it was asked"
   );
 }
 
@@ -3205,6 +3300,93 @@ fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
     "in particular it renders no empty type name: {}",
     errors[0].1
   );
+  assert!(
+    errors[0].1.contains("20 interned bytes"),
+    "and names the ceiling that actually refused: {}",
+    errors[0].1
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// The refusal and its ceiling travel together
+// ------------------------------------------------------------------------------------------
+//
+// `Interner::intern` refuses for two resources: the arena has no room for the bytes, or the visit
+// budget has none for the probe run that looks for them. Every diagnostic about a refusal names a
+// number, and the two sites below used to name the *arena's* whichever had happened — so a caller
+// whose `max_selection_visits` ran out was told to raise `max_interned_bytes`, a knob that was
+// never the constraint. The pairing is now unwritable: `Unstored` carries its own ceiling.
+//
+// Both fixtures spend the budget to zero during collection and then reach an intern whose bucket is
+// already occupied, which is what makes the probe loop run and the charge fall due. The name they
+// hand it is one the collection already interned, so the bucket is occupied by construction rather
+// than by luck about a hash.
+
+/// A driver message the *work* ceiling refused says so, rather than blaming the arena.
+#[test]
+fn a_driver_message_refused_for_work_names_the_work_ceiling() {
+  // Exactly what `{ a }` costs: one selection examined, and an intern into an empty table that
+  // compares nothing. So the budget is spent when the driver's failure arrives.
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    "type Query { a: String }",
+    "{ a }",
+    obj(vec![("a", J::Fail("a"))]),
+    limits,
+  );
+
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(
+    errors[0].0,
+    Kind::Resolver,
+    "the driver's failure is still the finding, whichever ceiling ate the text: {errors:?}"
+  );
+  assert!(
+    errors[0].1.contains("1 selection visits"),
+    "and the message names the ceiling that refused, which is the knob an operator can move: {}",
+    errors[0].1
+  );
+  assert!(
+    !errors[0].1.contains("interned bytes"),
+    "not the arena's, which had room for three bytes and was never consulted: {}",
+    errors[0].1
+  );
+}
+
+/// An impossible runtime type the *work* ceiling could not quote says so too.
+#[test]
+fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
+  // One selection at the root and an intern that compares nothing, as above. The driver then names
+  // `pet` as the runtime type: the schema knows the spelling — it is a field — so `sym` answers and
+  // `type_of_sym` does not, which is the "not a possible type" branch, and the name it wants to
+  // quote is the response key already sitting in that bucket.
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    ARENA_SDL,
+    "{ pet { n } }",
+    obj(vec![("pet", J::Obj("pet", vec![("n", J::Null)]))]),
+    limits,
+  );
+
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(
+    errors[0].0,
+    Kind::AbstractNotPossible,
+    "still the driver naming a type the position cannot hold: {errors:?}"
+  );
+  assert!(
+    errors[0].1.contains("1 selection visits"),
+    "and it names the ceiling that silenced the quote; this arm used to render the arena's cap \
+     unconditionally, so it read `16777216 interned bytes` against an arena that was empty: {}",
+    errors[0].1
+  );
+  assert!(!errors[0].1.contains("interned bytes"), "{}", errors[0].1);
 }
 
 /// A missing variable reports a missing variable, whether or not its name can be quoted.

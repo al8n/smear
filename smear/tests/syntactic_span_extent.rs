@@ -3,6 +3,35 @@
 //! The syntactic span-extent gate for GraphQL: trivia injection, with a per-node-type
 //! discrimination counter.
 //!
+//! # The two sweeps are `#[cfg_attr(miri, ignore)]`, and the other four tests are not
+//!
+//! [`trivia_injection_leaves_every_span_on_its_own_tokens`] is the single reason
+//! `.github/workflows/miri.yml` had never produced a verdict on any 64-bit target. On CI run
+//! 31318425279 the `x86_64-unknown-linux-gnu` Tree Borrows cell entered it at 14:47:15Z and was
+//! still inside it when the job hit GitHub's six-hour ceiling at 20:27Z — **five hours forty
+//! minutes in one test**, with the whole lib suite behind it at 10m16s and `tests/oracle.rs` at
+//! 8m01s. Confirmed locally on 2026-08-10 under `--test-threads=1` on `aarch64-apple-darwin`: the
+//! other five tests in this file finish, and that one does not return.
+//!
+//! It is not a hang and not a defect in what it exercises.
+//! [`recovered_spans_are_token_extents_over_the_invalid_corpus`] runs the same four-part check,
+//! the same eight-form alphabet and the same span walk over 216 padded variants and terminates —
+//! so the machinery halts, and what separates the two is quantity: 504 parses over the `valid_`
+//! corpus, whose entries are five times the size of the `invalid_` ones. Natively this whole file
+//! is 0.19s; the lib suite's Miri factor is ~2,700x, and 0.19s x 2,700 is eight minutes, so the
+//! sweep is running some forty times worse than this project's own interpreter cost. That excess
+//! is `core::fmt` and allocation churn belonging to the TEST — a `{:#?}` of the whole document
+//! per parse, two `format!`s per span in `extent::check`, and a `BTreeSet<String>` of owners —
+//! none of it product code and none of it reachable to any `unsafe`.
+//!
+//! So the two corpus sweeps carry `#[cfg_attr(miri, ignore)]` and the four witnesses below do
+//! not. That is deliberate: the witnesses are hand-written inputs that cost nothing to interpret,
+//! and excluding a free test buys the matrix nothing. `cargo test` runs all six in full on every
+//! push in `.github/workflows/ci.yml`, which is where a span-extent regression is meant to be
+//! caught, and `ci/miri_scope.py` cross-checks the `ignored` count this target reports in a Miri
+//! cell against the number of `cfg_attr(miri, ignore)` attributes in this file — so a third one
+//! appearing, or a plain `#[ignore]`, fails the cell rather than passing quietly.
+//!
 //! The header names `parser` as well as the dialect because the file reads
 //! `smear::parser::graphql`, and `parser` is a feature a consumer can turn off. It said `graphql`
 //! alone until #136 and compiled regardless: the self dev-dependency pulled the crate's defaults
@@ -458,6 +487,11 @@ fn the_checker_can_answer_no() {
 
 /// The gate proper: every span in every padded parse is the extent of its own tokens, and every
 /// node type reached was reached somewhere the two span rules disagree.
+#[cfg_attr(
+  miri,
+  ignore = "504 parses of the valid_ corpus; see the file header. Miri cannot finish it: five \
+            hours forty minutes without returning on CI run 31318425279"
+)]
 #[test]
 fn trivia_injection_leaves_every_span_on_its_own_tokens() {
   let entries = valid_corpus();
@@ -621,6 +655,11 @@ fn trivia_injection_leaves_every_span_on_its_own_tokens() {
 /// emitter, so a recovering context rescues only the parses whose miss is a *tokora-owned*
 /// close-miss — and the counters below say how many, so a change that quietly stops recovering
 /// turns this red instead of leaving a smaller green number.
+#[cfg_attr(
+  miri,
+  ignore = "216 padded parses of the invalid_ corpus; minutes under Miri for span arithmetic no \
+            `unsafe` is reachable from. See the file header"
+)]
 #[test]
 fn recovered_spans_are_token_extents_over_the_invalid_corpus() {
   let entries = invalid_corpus();
