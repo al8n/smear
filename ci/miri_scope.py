@@ -67,6 +67,15 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # `     Running unittests src/lib.rs (/path/to/binary)`.
 RUNNING = re.compile(r"^\s+Running (?:unittests )?(\S+)")
 COUNT = re.compile(r"^running (\d+) tests?$")
+# `test result: ok. 4 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 1.2s`
+IGNORED = re.compile(r"^test result:.*?(\d+) ignored")
+# A real `#[cfg_attr(miri, ignore ...)]` — anchored at column 0 modulo indentation so the several
+# mentions of the construct in these files' module docs, which begin `//!`, cannot be counted. The
+# attribute is written across four lines, so `\s` has to be allowed to cross them.
+MIRI_IGNORE = re.compile(r"^\s*#\[cfg_attr\(\s*miri\s*,\s*ignore", re.M)
+# Any other `#[ignore]`, which is NOT a Miri decision and must still be accounted for, or the
+# cross-check below would read one as the other.
+PLAIN_IGNORE = re.compile(r"^\s*#\[ignore", re.M)
 # A test file's crate-level `#![cfg(...)]`. Anchored to column 0 with `^`, which is what makes
 # this a CRATE-level attribute rather than any inner attribute: a `mod x { #![cfg(...)] }` is
 # indented and must not be read as gating the whole target. Non-greedy up to the closing `)]` so
@@ -262,6 +271,21 @@ def resolved_features(manifest: pathlib.Path, extra: list[str], defaults: bool) 
     return out
 
 
+def declared_ignores(tests_dir: pathlib.Path) -> dict[str, int]:
+    """Per target, how many of its tests the SOURCE says a Miri cell will skip.
+
+    A whole target excluded by its `#![cfg(...)]` is loud — it vanishes from the covered list and
+    `check` prints it with a reason. A single test carrying `#[cfg_attr(miri, ignore)]` is not: it
+    becomes one digit in `2 ignored` that nobody reads, which is #73's mechanism one level down.
+    So the count is derived from the files and required to match what the run reports.
+    """
+    out: dict[str, int] = {}
+    for path in sorted(tests_dir.glob("*.rs")):
+        text = path.read_text(encoding="utf-8")
+        out[path.stem] = len(MIRI_IGNORE.findall(text)) + len(PLAIN_IGNORE.findall(text))
+    return out
+
+
 def partition(
     tests_dir: pathlib.Path, features: set[str]
 ) -> tuple[dict[str, str], list[str]]:
@@ -311,14 +335,17 @@ def ran_counts(log: pathlib.Path) -> tuple[dict[str, int], list[tuple[str, int]]
     """
     counts: dict[str, int] = {}
     libs: list[tuple[str, int]] = []
+    ignored: dict[str, int] = {}
     current: str | None = None
+    binary: str | None = None
     current_path: str = ""
     for raw in log.read_text(encoding="utf-8", errors="replace").splitlines():
         line = ANSI.sub("", raw)
         running = RUNNING.match(line)
         if running:
             target = running.group(1)
-            current = "<lib>" if target.endswith("lib.rs") else pathlib.Path(target).stem
+            binary = "<lib>" if target.endswith("lib.rs") else pathlib.Path(target).stem
+            current = binary
             tail = line.split("(", 1)
             current_path = tail[1].rstrip(") ") if len(tail) == 2 else "<unknown path>"
             continue
@@ -332,7 +359,11 @@ def ran_counts(log: pathlib.Path) -> tuple[dict[str, int], list[tuple[str, int]]
                 # re-run appended to the same log cannot overwrite it.
                 counts.setdefault(current, n)
             current = None
-    return counts, libs
+            continue
+        skipped = IGNORED.match(line.strip())
+        if skipped and binary is not None:
+            ignored.setdefault(binary, int(skipped.group(1)))
+    return counts, libs, ignored
 
 
 def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
@@ -363,19 +394,33 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
         return 1
     a_excluded, a_compiled = sorted(excluded)[0], sorted(compiled)[0]
 
+    declared = declared_ignores(tests_dir)
+
     def log(entries: list[tuple[str, int | None]]) -> str:
         out = []
         for i, (name, count) in enumerate(entries):
             path = "unittests src/lib.rs" if name == "<lib>" else f"tests/{name}.rs"
             out.append(f"     Running {path} (/tmp/build/pkg{i}/{name}-deadbeef)")
             if count is not None:
+                skip = declared.get(name, 0)
                 out.append(f"running {count} tests")
-                out.append(f"test result: ok. {count} passed; 0 failed")
+                out.append(
+                    f"test result: ok. {count - skip} passed; 0 failed; {skip} ignored; "
+                    "0 measured; 0 filtered out; finished in 0.1s"
+                )
         return "\n".join(out) + "\n"
 
+    # Every compiled target's synthetic count has to leave at least one test running after its
+    # declared `#[ignore]`s, or the "all of them are ignored" branch fires on the clean case.
+    floor = max(declared.get(n, 0) for n in compiled) + 1
+    # A compiled target that actually declares a Miri skip, so the two per-test cases below name a
+    # real one rather than a hypothetical. If none does, they still work: `a_declared` is 0 and the
+    # first case moves a target from 0 ignored to 1, which is the same finding.
+    a_skipping = next((n for n in sorted(compiled) if declared.get(n, 0)), a_compiled)
+    a_declared = declared.get(a_skipping, 0)
     clean = ([("<lib>", 400)]
              + [(n, 0) for n in sorted(excluded)]
-             + [(n, 7) for n in sorted(compiled)])
+             + [(n, floor) for n in sorted(compiled)])
     cases: list[tuple[str, str, bool, int, int]] = [
         # (name, log text, tests_selected, miri_status, expected exit)
         ("a correct run passes", log(clean), True, 0, 0),
@@ -404,6 +449,18 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
          log([("<lib>", 400), ("<lib>", 0)] + clean[1:]), True, 0, 1),
         ("a colourised log parses the same as a plain one",
          log(clean).replace("     Running", "\x1b[1m\x1b[32m     Running\x1b[0m"), True, 0, 0),
+        # The per-test half of the same property. `#[cfg_attr(miri, ignore)]` skips a test without
+        # removing the target, so the target still runs and still passes; only the `ignored` digit
+        # moves. Both directions are findings: one more than the files declare is an undocumented
+        # skip, and one fewer means this guard's count is stale.
+        ("one more ignored test than the source declares fails",
+         log(clean).replace(f"{floor - a_declared} passed; 0 failed; {a_declared} ignored",
+                            f"{floor - a_declared - 1} passed; 0 failed; {a_declared + 1} ignored",
+                            1),
+         True, 0, 1),
+        ("a target whose every test is ignored fails",
+         log([(n, declared.get(n, 0)) if n == a_skipping else (n, c) for n, c in clean]),
+         True, 0, 1),
     ]
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="miri-scope-selftest-"))
@@ -484,7 +541,8 @@ def check(
               "pass by having nothing to check, which is the defect it exists to catch")
         return 1
 
-    counts, libs = ran_counts(log)
+    counts, libs, ignored = ran_counts(log)
+    declared = declared_ignores(tests_dir)
 
     print()
     print("── Miri scope ──────────────────────────────────────────────────────────────────")
@@ -498,7 +556,9 @@ def check(
     print(f"COVERED: the lib unit tests plus {len(compiled)} integration targets"
           + ("" if tests_selected else " (this cell runs `--lib` only; see the script header)"))
     for name in compiled:
-        print(f"    + {name}")
+        skip = declared.get(name, 0)
+        note = f"  ({skip} of its tests carry `#[ignore]` here)" if skip else ""
+        print(f"    + {name}{note}")
     print("────────────────────────────────────────────────────────────────────────────────")
     print()
 
@@ -542,6 +602,28 @@ def check(
                 "in its crate-level `#![cfg(...)]`, which is what this guard reads — or its tests "
                 "were removed"
             )
+        else:
+            skipped = ignored.get(name)
+            want = declared.get(name, 0)
+            if skipped is None:
+                (notes if aborted else failures).append(
+                    f"{name}: ran {got} tests but printed no `test result:` line, so this guard "
+                    "cannot tell how many of them were skipped"
+                )
+            elif skipped != want:
+                failures.append(
+                    f"{name}: reported {skipped} ignored test(s) and the source declares {want}. "
+                    "A per-test `#[cfg_attr(miri, ignore)]` is a coverage decision that shows up "
+                    "as one digit nobody reads, so it is counted out of the file and required to "
+                    "match. Either an `#[ignore]` was added without the file's header saying why, "
+                    "or one was removed and this count is stale"
+                )
+            elif skipped == got:
+                failures.append(
+                    f"{name}: all {got} of its tests are ignored here, so the target runs and "
+                    "proves nothing. Exclude it at the crate level instead, where this guard "
+                    "prints it with a reason"
+                )
 
     for name in sorted(excluded):
         got = counts.get(name)

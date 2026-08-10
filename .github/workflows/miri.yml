@@ -119,8 +119,9 @@ name: Miri
 
 # ── WHAT THIS MATRIX DOES NOT COVER, AND WHY IT IS STATED HERE ──────────────────────────────
 #
-# Of the 50 integration targets in `smear/tests/`, 48 are NOT interpreted by any cell in this
-# file, on any target, under either aliasing model. Three reasons, all derived and all printed by
+# Of the 50 integration targets in `smear/tests/`, 46 are NOT built with anything in them by any
+# cell in this file, on any target, under either aliasing model, and 4 of the tests inside the
+# ones that ARE built are skipped. All of it is derived and all of it is printed by
 # `ci/miri_scope.py` at the end of every cell:
 #
 #   37  `#![cfg(feature = "rowan")]` — the entire lossless CST tower. `rowan` itself has
@@ -132,22 +133,31 @@ name: Miri
 #       and these scripts do not pass. They are `core` + `alloc` rule engines with no `unsafe`
 #       reachable from them that the lib tests do not already interpret, so the cost of turning
 #       the features on is minutes per cell for nothing Miri can answer.
-#    2  `tests/syntactic_span_extent.rs` and `tests/syntactic_x_span_extent.rs`, which exclude
-#       themselves with `not(miri)`. These are why this workflow had never produced a verdict:
-#       one test in the first spent 5h40m on CI run 31318425279 without finishing. Their headers
-#       and the two scripts carry the measurement and the argument.
+#    4  individual tests, not targets: the two corpus sweeps in each of
+#       `tests/syntactic_span_extent.rs` and `tests/syntactic_x_span_extent.rs`, each carrying
+#       `#[cfg_attr(miri, ignore)]`. These are why this workflow had never produced a verdict on
+#       any 64-bit target — `trivia_injection_leaves_every_span_on_its_own_tokens` spent 5h40m
+#       inside itself on CI run 31318425279 and hit the six-hour job ceiling without returning.
+#       The four witnesses in each file still run here. The files' headers carry the measurement.
 #
-# What is left in a cell is the lib unit tests, `tests/oracle.rs` and
-# `tests/tokora_conformance.rs` — the SIMD lexer over a corpus, and tokora's own input-layer
-# conformance kit. That is where this project's `unsafe` is, and it is what the job exists for.
+# It is a per-test exclusion precisely so the interpretable tests survive it, and it is audited
+# rather than counted on trust: `ci/miri_scope.py` derives the number of `#[ignore]`s from the
+# sources and fails the cell if a run reports a different one, or if a target ends up with every
+# test ignored — the case where the per-test form has quietly become the per-file one.
+#
+# What is left in a cell is the lib unit tests, `tests/oracle.rs`,
+# `tests/tokora_conformance.rs` and the eight span-extent witnesses — the SIMD lexer over a
+# corpus, and tokora's own input-layer conformance kit. That is where this project's `unsafe`
+# is, and it is what the job exists for.
 #
 # This is an exclusion, not a silence. `ci/miri_scope.py` derives every line above by parsing
 # each target's crate-level `#![cfg(...)]` and evaluating it against the feature set it reads out
 # of `smear/Cargo.toml`, prints the result with its reason, and FAILS the cell in either
 # direction: if a target this cell DOES compile ran zero tests (#73's mechanism — a built,
 # linked, passing, empty harness), or if an excluded one ran any test at all (#77's mechanism — a
-# new workspace member unifying `smear/rowan` back into the resolve). The matrix is therefore
-# allowed to be narrower than the test tree, and not allowed to be narrower than it says.
+# new workspace member unifying `smear/rowan` back into the resolve), or if the `ignored` count a
+# target reports is not the one its source declares. The matrix is therefore allowed to be
+# narrower than the test tree, and not allowed to be narrower than it says.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
 # `.github/workflows/ci.yml` and `.github/workflows/macos.yml`; read the comment there for why the

@@ -69,17 +69,26 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # push, and of the ten cells the ONLY two that have ever concluded are the i686 pair — which run
 # `--lib` alone, and therefore never build these two targets at all.
 #
-# The cut is written in those two FILES, as `#![cfg(..., not(miri))]`, and deliberately not here.
-# Three reasons: `cargo test` is untouched and still runs them in full on every push;
-# `ci/miri_scope.py` DERIVES the exclusion from that attribute, prints it with its reason, and
-# fails the cell if the target ever runs here anyway; and a `--test`-level list in this script
-# would be a second statement of the same fact, free to drift from the first.
+# The cut is PER TEST, not per file, and it is written in the two files rather than here. Each
+# carries `#[cfg_attr(miri, ignore)]` on its two corpus sweeps and on nothing else: the four
+# witnesses in each are hand-written inputs that cost an interpreter nothing, and excluding a free
+# test buys this cell nothing. Confirmed locally on 2026-08-10, `--test-threads=1` on
+# `aarch64-apple-darwin`: five of `syntactic_span_extent.rs`'s six tests finish and
+# `trivia_injection_leaves_every_span_on_its_own_tokens` does not return.
+#
+# In the files because `cargo test` is then untouched and still runs all six on every push;
+# because `ci/miri_scope.py` DERIVES the count from those attributes and fails the cell if the
+# reported `ignored` disagrees with it, or if every test in a target ends up ignored; and because
+# a `--test`-level list in this script would be a second statement of the same fact, free to
+# drift from the first.
 #
 # What it costs is small for the question Miri answers. Miri decides whether an execution path has
-# undefined behaviour; those two sweep the INPUT — 56 and 90 corpus entries times eight ignorable
-# forms — over paths the lib tests, `tests/oracle.rs` and `tests/tokora_conformance.rs` interpret
-# in this same cell, and they spend most of their time in `format!("{:#?}")` and a string walk
-# that are the tests' own safe code. Their headers carry the full argument.
+# undefined behaviour; those four sweeps vary the INPUT — 56 and 90 corpus entries times eight
+# ignorable forms — over paths the lib tests, `tests/oracle.rs` and `tests/tokora_conformance.rs`
+# interpret in this same cell, and they spend most of their time in `format!("{:#?}")` and a
+# string walk that are the tests' own safe code. Their headers carry the full argument, including
+# why this is a cost model incompatible with an interpreter rather than a defect: the sibling
+# sweep over the smaller `invalid_` corpus runs the same machinery and terminates.
 #
 # ── AND A SECOND THING THAT WOULD HAVE KEPT THE CELL RED AT ZERO WALL CLOCK ─────────────────
 #
