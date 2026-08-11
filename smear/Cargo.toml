@@ -51,7 +51,7 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec"]
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["smear-lexer/std", "smear-parser?/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
+std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -85,7 +85,7 @@ parser = ["dep:smear-parser"]
 # It adds NO dependency. The schema representation is `core` + `alloc` and nothing else, which the
 # `smear-noatomic` workspace member holds to by compiling those very files for
 # `thumbv6m-none-eabi` with an empty `[dependencies]` table.
-validator = ["parser", "graphql"]
+validator = ["parser", "graphql", "smear-schema/build"]
 
 # Draft §6 execution (`smear::proto`): the Sans-I/O query executor.
 #
@@ -115,7 +115,7 @@ proto = ["validator"]
 # `std` is not decoration. `serde_json`'s `alloc`-only mode exists, but the door parses a
 # `&str` from a network response and reports through `std::error::Error`, and the whole point of
 # the no-atomic tier is the *representation*, which this feature does not touch.
-introspection = ["validator", "std", "dep:serde", "dep:serde_json"]
+introspection = ["validator", "std", "smear-schema/introspection", "dep:serde", "dep:serde_json"]
 
 # The five source backings. Each forwards to `smear-lexer`, which is where the `Source`
 # implementations live; the `dep:` half survives only for the three this package's own test
@@ -188,6 +188,14 @@ smear-lexer.workspace = true
 # switches off. It brings `smear-lexer` with it; the edge above is separate because the lexer is
 # unconditional.
 smear-parser = { workspace = true, optional = true }
+
+# UNCONDITIONAL, and that is a decision rather than an oversight. `smear::diagnostic` is an ungated
+# public module today and the vocabulary behind it moved into `smear-schema`, so an optional edge
+# would make that path appear and disappear with a feature — an API change this split is not
+# allowed. What it costs a `--no-default-features` build is this crate's ungated half: the
+# representation, `builtin`, and `diagnostic`. The builder and the introspection door are behind
+# `smear-schema/build`, which `validator` above turns on.
+smear-schema.workspace = true
 
 # `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
 # package's own `tests/` name those types directly to build a source of each backing.

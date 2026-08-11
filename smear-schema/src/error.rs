@@ -258,9 +258,10 @@ pub enum SchemaErrorKind {
   //
   // Draft §3.13 admits an input object as a directive argument type, so an SDL constant position
   // can hold an input-object literal — and the two rules that govern one are draft 5.6.2 and
-  // 5.6.4, which the executable side already runs per request as
-  // [`Rule::InputObjectFieldNames`](crate::validator::Rule::InputObjectFieldNames) and
-  // [`Rule::InputObjectRequiredFields`](crate::validator::Rule::InputObjectRequiredFields). The
+  // 5.6.4, which the executable side already runs per request as `smear-compiler`'s
+  // `Rule::InputObjectFieldNames` and `Rule::InputObjectRequiredFields`. Named rather than
+  // linked: `Rule` is in a crate above this one, so the link would point upward and rustdoc
+  // could not resolve it. The
   // use-site pass descends into such a literal to type-check the fields the input object
   // *declares*; these two are what it used to say nothing about.
   /// An input-object literal names a field the input object type does not declare (draft §3.10.1

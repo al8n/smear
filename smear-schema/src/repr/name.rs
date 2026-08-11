@@ -110,7 +110,7 @@ pub const MAX_SYMBOLS: u32 = 1 << 30;
 /// adversary does choose — so they charge every entry a probe compares against a work budget, and a
 /// constructed pile-up spends that budget instead of the server's time.
 #[inline]
-pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
+pub fn hash_bytes(bytes: &[u8]) -> u64 {
   const K: u64 = 0x517c_c1b7_2722_0a95;
   let mut h: u64 = 0;
   let (chunks, rest) = bytes.as_chunks::<8>();
@@ -140,7 +140,7 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
 /// It does not make [`hash_bytes`] keyed, and nothing here claims it does — a caller whose keys an
 /// adversary chooses still owes the argument that function's documentation asks for.
 #[inline]
-pub(crate) fn bucket(hash: u64, mask: u32) -> u32 {
+pub fn bucket(hash: u64, mask: u32) -> u32 {
   ((hash >> 32) as u32) & mask
 }
 

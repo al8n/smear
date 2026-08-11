@@ -29,7 +29,7 @@ use std::string::{String, ToString};
 
 use tokora::{Parse as _, Parser};
 
-use crate::parser::graphql::{
+use smear_parser::graphql::{
   GraphQL,
   ast::{
     TypeDefinition, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,

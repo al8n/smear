@@ -22,7 +22,7 @@
 //! # What is deliberately not here
 //!
 //! `description`, `isDeprecated`, `deprecationReason` and `specifiedByURL` are read by nothing,
-//! because [`Schema`](crate::validator::schema::Schema) retains none of them — it is the substrate
+//! because [`Schema`](crate::Schema) retains none of them — it is the substrate
 //! validation rules stand on, and no draft §5 rule asks whether a field is deprecated. Declaring
 //! them would be declaring that the door drops them, which is
 //! [the module header's](super) job, not the model's.
@@ -79,7 +79,7 @@ pub(super) struct IntrospectedType {
   #[serde(rename = "possibleTypes")]
   pub(super) possible_types: Option<Vec<TypeRef>>,
   /// `@oneOf`, the one applied directive introspection reports that
-  /// [`Schema`](crate::validator::schema::Schema) retains.
+  /// [`Schema`](crate::Schema) retains.
   #[serde(rename = "isOneOf", default)]
   pub(super) is_one_of: Option<bool>,
 }
@@ -102,7 +102,7 @@ pub(super) struct IntrospectedInputValue {
   pub(super) ty: TypeRef,
   /// The server's printed spelling of the default, or null for no default.
   ///
-  /// `Schema` keeps only [`DefaultKind`](crate::validator::schema::DefaultKind) — presence and
+  /// `Schema` keeps only [`DefaultKind`](crate::DefaultKind) — presence and
   /// null-ness — so the spelling matters exactly twice: it must parse, and it must be
   /// distinguishable from `null`. Both fall out of handing it back to the const-value parser.
   #[serde(rename = "defaultValue")]

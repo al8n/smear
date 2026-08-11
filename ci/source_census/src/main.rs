@@ -78,6 +78,7 @@ const DEFAULT_ROOTS: &[(&str, &str)] = &[
   ("smear/src/lib.rs", "smear"),
   ("smear-lexer/src/lib.rs", "smear::lexer"),
   ("smear-parser/src/lib.rs", "smear::parser"),
+  ("smear-schema/src/lib.rs", "smear::validator::schema"),
 ];
 
 fn main() -> ExitCode {

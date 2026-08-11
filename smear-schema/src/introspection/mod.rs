@@ -1,7 +1,7 @@
 //! The second construction door: a [`Schema`] built from a draft §4 introspection response.
 //!
 //! ```
-//! use smear::validator::schema::Schema;
+//! use smear_schema::Schema;
 //!
 //! let response = r#"{"data":{"__schema":{
 //!   "queryType": {"name": "Query"},
@@ -46,8 +46,9 @@
 //! already validated its own schema, so re-checking it is work nobody asked for. It is refused
 //! anyway, for a reason that outweighs the work:
 //!
-//! - **A `Schema` that exists is a `Schema` you can trust.** Every rule in
-//!   [`validate_executable`](crate::validator::validate_executable) reads the tables assuming draft
+//! - **A `Schema` that exists is a `Schema` you can trust.** Every rule in `smear-compiler`'s
+//!   `validate_executable` — named rather than linked, because it is in a crate above this one —
+//!   reads the tables assuming draft
 //!   §3 holds — that a union's members are objects, that an implementor has its interface's fields,
 //!   that no input-object cycle is unsatisfiable. A door that skipped the check would produce a
 //!   value indistinguishable from a checked one and violate an invariant the rules do not re-test.
@@ -100,7 +101,7 @@ use std::string::String;
 
 use tokora::{Parse as _, Parser};
 
-use crate::parser::graphql::{
+use smear_parser::graphql::{
   GraphQL, ast::TypeSystemDocument, error::GraphqlErrors, syntactic::GraphqlLexer,
 };
 
@@ -137,7 +138,7 @@ impl Schema {
 /// introspection meta-schema, the five built-in scalars and the five specified directives.
 ///
 /// ```
-/// use smear::validator::schema::introspection;
+/// use smear_schema::introspection;
 ///
 /// let response = r#"{"__schema":{
 ///   "queryType": {"name": "Query"},
@@ -172,7 +173,7 @@ fn parse(sdl: &str) -> Result<TypeSystemDocument<&'_ str>, IntrospectionError> {
     GraphqlErrors<&str>,
     _,
     GraphQL,
-  >(crate::parser::graphql::syntactic::type_system_document)
+  >(smear_parser::graphql::syntactic::type_system_document)
   .parse_str(sdl)
   .map_err(|errors| {
     IntrospectionError::Response(ResponseError::new(

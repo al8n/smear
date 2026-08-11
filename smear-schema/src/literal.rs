@@ -12,9 +12,11 @@
 //! decision, reduced to what it depends on: the shape of the literal ([`LiteralShape`]), which
 //! built-in scalar it is being offered to ([`BuiltInScalar`]), and — for the two numeric ranges —
 //! the literal's retained spelling. The executable rules answer the same question in
-//! [`validator::executable::values`](crate::validator)'s `scalar_accepts`, over the syntactic AST
-//! and against interned `Sym`s rather than names, with its own copies of [`fits_i32`], [`fits_id`]
-//! and [`is_finite`]. Its only caller is
+//! `smear-compiler`'s `executable::values::scalar_accepts`, over the syntactic AST and against
+//! interned `Sym`s rather than names, with its own copies of [`fits_i32`], [`fits_id`] and
+//! [`is_finite`]. Plain prose and not a link: that module is in a crate ABOVE this one, so
+//! rustdoc cannot resolve it from here and a dev-dependency added to make it resolve would put a
+//! cycle in the dev graph to satisfy a comment. Its only caller is
 //! [`SchemaBuilder`](super::builder)'s constant-value check.
 //!
 //! Two implementations of one paragraph can drift, and the drift is invisible from either side —

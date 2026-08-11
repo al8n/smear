@@ -27,7 +27,7 @@ use std::{
 
 use tokora::{Parse as _, Parser, SimpleSpan, span::AsSpan};
 
-use crate::parser::graphql::{
+use smear_parser::graphql::{
   GraphQL,
   ast::{
     ConstDirectives, ConstInputValue, DirectiveDefinition, EnumTypeDefinition,

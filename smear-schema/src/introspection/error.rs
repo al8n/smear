@@ -12,7 +12,7 @@
 //! - [`IntrospectionError::Schema`] is *it is a result, and the schema it describes is not a
 //!   schema* — draft §3 refused it. This is [`SchemaErrors`] unchanged, every reason at once,
 //!   because it is literally the value
-//!   [`Schema::build`](crate::validator::schema::Schema::build) returned: the door renders SDL and
+//!   [`Schema::build`](crate::Schema::build) returned: the door renders SDL and
 //!   hands it to the same builder, so a bad schema is refused by the same code with the same kinds
 //!   in the same order as the SDL that describes it.
 //!
@@ -162,7 +162,7 @@ impl core::fmt::Display for ResponseErrorKind {
 /// span: the response has no SDL positions to point at, and a JSON offset would point into a blob
 /// no human wrote. The owner path is the locator.
 ///
-/// [`SchemaError`]: crate::validator::schema::SchemaError
+/// [`SchemaError`]: crate::SchemaError
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseError {
   kind: ResponseErrorKind,
@@ -284,7 +284,7 @@ impl Diagnose for ResponseError {
 
 /// The one response body the door reads.
 ///
-/// [`Schema::from_introspection`](crate::validator::schema::Schema::from_introspection) takes a
+/// [`Schema::from_introspection`](crate::Schema::from_introspection) takes a
 /// single `&str`, so there is no second input for [`Location::source`] to distinguish — only the
 /// question of whether there is a position within it, which there is not.
 const SOURCE: u32 = 0;
@@ -303,7 +303,7 @@ impl core::error::Error for ResponseError {}
 
 /// Why [`Schema::from_introspection`] refused.
 ///
-/// [`Schema::from_introspection`]: crate::validator::schema::Schema::from_introspection
+/// [`Schema::from_introspection`]: crate::Schema::from_introspection
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IntrospectionError {
@@ -311,12 +311,12 @@ pub enum IntrospectionError {
   Response(ResponseError),
   /// It is one, and draft §3 refused the schema it describes.
   ///
-  /// These are [`Schema::build`](crate::validator::schema::Schema::build)'s own refusals, not a
+  /// These are [`Schema::build`](crate::Schema::build)'s own refusals, not a
   /// re-implementation of them: the door renders SDL and hands it to that builder, so an
   /// introspection response describing a schema with an undefined type is refused by the same rule
   /// and with the same [`SchemaErrorKind`] as the SDL would be.
   ///
-  /// [`SchemaErrorKind`]: crate::validator::schema::SchemaErrorKind
+  /// [`SchemaErrorKind`]: crate::SchemaErrorKind
   Schema(SchemaErrors),
 }
 

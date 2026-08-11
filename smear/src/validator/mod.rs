@@ -117,7 +117,14 @@
 //!   `u32` mask, and an interface's implementors are a bitset — so draft 5.5.2.3, all four of its
 //!   subsections, is one word-`AND`.
 
-pub mod schema;
+/// The built-once schema, and the draft §3 "Type Validation" pass that runs while building it.
+///
+/// The layer is the `smear-schema` crate; this is the name it has always had inside `smear` and
+/// the path every consumer already writes. Its `build` feature — which is what carries
+/// [`Schema::build`](crate::validator::schema::Schema::build) — is turned on by this crate's
+/// `validator` feature, so a `smear` that has a validator has a builder.
+#[doc(inline)]
+pub use smear_schema as schema;
 
 mod diagnostic;
 mod executable;

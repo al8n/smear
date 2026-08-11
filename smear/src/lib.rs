@@ -21,15 +21,20 @@ extern crate alloc as std;
 #[allow(unused_extern_crates)]
 extern crate std;
 
-// Deliberately no outer doc comment, unlike the three modules below. Rustdoc resolves the MERGED
+// Deliberately no outer doc comment, unlike the modules below. Rustdoc resolves the MERGED
 // fragments of a module's documentation in the scope of whichever attribute came from outside, so
-// an outer comment here would reinterpret every link in `diagnostic/mod.rs` as one rooted in
+// an outer comment here would reinterpret every link in the module's own header as one rooted in
 // `smear` — sixteen `unresolved link` errors under `RUSTDOCFLAGS="-D warnings"`, all of them for
 // items that are right there in the module. `validator/mod.rs` pays for its outer comment by
 // spelling every link crate-absolute; this module does not, because it is written to be lifted
 // into `tokora` unchanged and a `crate::`-rooted link is the one thing in it that would not
 // survive the move. The module's own header supplies the summary line the crate index shows.
-pub mod diagnostic;
+//
+// It lives in `smear-schema` now, not because it is about schemas but because that is the LOWEST
+// crate that needs it: `schema::error` and `schema::introspection::error` implement `Diagnose`.
+// The re-export is what keeps `smear::diagnostic` the ungated path it has always been, and it is
+// why `smear-schema` is an unconditional dependency below rather than one behind `validator`.
+pub use smear_schema::diagnostic;
 
 /// Lexers for GraphQL and GraphQL-like DSLs.
 ///

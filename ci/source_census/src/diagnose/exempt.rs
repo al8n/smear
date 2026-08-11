@@ -92,12 +92,18 @@ const PARSER_FAMILY: &str = "A draft §2 syntactic refusal. Phase E of al8n/smea
 /// comment goes stale on the next public type anybody adds, as the pair that used to be here had —
 /// it read thirty-two where the run printed thirty. `crate::exempt`'s misfire group records the
 /// same lesson about the same kind of sentence.
+// SPELL A PATH AT THE CRATE THAT DECLARES THE TYPE, not at a re-export of it. `syn` cannot follow
+// `pub use smear_schema as schema;` from the umbrella into another package, so since the split the
+// canonical path a mounted root produces is the DECLARING member's — `smear::validator::schema::
+// SchemaErrors`, not the `smear::validator::SchemaErrors` that `validator/mod.rs` also publishes.
+// Both are real paths for a consumer; only one is the one this table matches on. The split moved
+// two entries this way and the table said so on the same run, which is what it is for.
 pub const EXEMPTIONS: &[Exemption] = &[
   // ── Aggregates: the elements answer ──────────────────────────────────────────────────────────
   Exemption {
-    path: "smear::validator::SchemaErrors",
+    path: "smear::validator::schema::SchemaErrors",
     kind: Kind::Aggregate,
-    element: Some("smear::validator::SchemaError"),
+    element: Some("smear::validator::schema::SchemaError"),
     issue: None,
     reason: "The `Vec<SchemaError>` a refused build hands back, with the interning arena those \
              errors' symbols index. A collection is not a diagnostic — it has no code, no primary \
@@ -151,7 +157,7 @@ pub const EXEMPTIONS: &[Exemption] = &[
              claiming a direct element would be claiming something untrue.",
   },
   Exemption {
-    path: "smear::validator::IntrospectionError",
+    path: "smear::validator::schema::IntrospectionError",
     kind: Kind::Verdict,
     element: None,
     issue: None,

@@ -154,13 +154,15 @@ MIRI_IGNORE_BUDGET = 4
 # entire lossless tower entered a Miri cell that nobody widened. `smear-lexer` declares no `rowan`
 # feature at all, so it cannot do that — check the same of anything added here. `smear-parser`
 # DOES declare `rowan`, and is safe for a different reason: it is not in its `default`, and the
-# scripts pass no `--features`, so the resolve over these three leaves it off exactly as it does
-# for `smear` itself. `ci/miri_scope.py`'s own feature-set guard prints what resolved.
+# scripts pass no `--features`, so the resolve over these packages leaves it off exactly as it does
+# for `smear` itself. `smear-schema` declares no `rowan` either; its heaviest feature is `build`,
+# which pulls `smear-parser` and is likewise not in its `default`.
+# `ci/miri_scope.py`'s own feature-set guard prints what resolved.
 #
 # `ci/feature_reachability.py` reads this tuple out of this file and fails when a publishable
 # workspace member is absent from it, so the list grows with the workspace instead of being
 # remembered.
-MIRI_PACKAGES = ("smear", "smear-lexer", "smear-parser")
+MIRI_PACKAGES = ("smear", "smear-lexer", "smear-parser", "smear-schema")
 
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.
