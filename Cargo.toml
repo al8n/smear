@@ -11,7 +11,7 @@ members = [
   "smear-smoke",
 ]
 
-# ── ONE OF THE FOUR MEMBERS PULLS `smear` PAST ITS DEFAULT FEATURE SET ───────────────────────
+# ── ONE MEMBER PULLS `smear` PAST ITS DEFAULT FEATURE SET ────────────────────────────────────
 #
 # `smear-smoke` enables `smear/rowan`, `lossless-coverage` and `test-support`. Cargo unifies
 # features across the SELECTED packages, so a bare workspace-wide command resolves `smear` with
@@ -24,6 +24,12 @@ members = [
 # criterion and the comparison parsers are on this package's inner loop now — and it does not
 # change this arithmetic, because a package's own dev-dependencies are not another member's
 # feature request.
+#
+# THE SPLIT DID NOT CHANGE THIS ARITHMETIC, and it is worth saying why not: the five member crates
+# below `smear` are reached only THROUGH it, so `smear-smoke`'s request travels down the same edges
+# a dependent's does. What the split does change is that a bare workspace command now also selects
+# those five directly, each at its own default — which is a wider build, not a wider resolve of
+# `smear`.
 #
 # TWO members this arithmetic does not reach, both deliberately and for different reasons.
 #

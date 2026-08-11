@@ -326,7 +326,7 @@ mod tests {
   /// [`LosslessToken`], i.e. by some arm of [`LosslessToken::kind`].
   ///
   /// See the graphql (non-x) twin of this test
-  /// (`smear/src/lexer/graphql/lossless/mod.rs`) for why: that dialect shipped a
+  /// (`smear-lexer/src/graphql/lossless/mod.rs`) for why: that dialect shipped a
   /// `LosslessTokenKind::Boolean` with no `LosslessToken` able to produce it. GraphQLx's kind
   /// enum has no such gap today, but nothing previously stopped one from being added the same
   /// way, silently.

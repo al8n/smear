@@ -320,7 +320,7 @@ fn the_graphqlx_kind_space_is_well_formed() {
 /// Every kind the space declares has a GraphQLx source anchor, and every anchor has a kind.
 ///
 /// **This is the "derived, not diffed" check.** [`source_node_names`] reads
-/// `smear/src/parser/graphqlx/ast/**` and `smear/src/parser/graphqlx/syntactic/**` and extracts the
+/// `smear-parser/src/graphqlx/ast/**` and `smear-parser/src/graphqlx/syntactic/**` and extracts the
 /// names GraphQLx's own grammar uses; the kind space is compared against *that*, never against
 /// GraphQL's. A kind copied from GraphQL for a production GraphQLx does not have lands in
 /// `kinds_without_a_source`; a GraphQLx production with no kind lands in `sources_without_a_kind`

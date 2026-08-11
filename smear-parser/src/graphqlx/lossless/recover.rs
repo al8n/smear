@@ -14,7 +14,7 @@
 //!
 //! GraphQL's `delimiters` classifier has three pairs. GraphQLx's has four, because its lexer
 //! depth-counts `<` and `>` alongside the other three (`increase_recursion!` / `decrease_recursion!`
-//! on `b'<'` and `b'>'`, `smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`). Without the fourth
+//! on `b'<'` and `b'>'`, `smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`). Without the fourth
 //! pair a recovery inside `type T<A` would treat the `<` as neutral and the *first* `>` it met at
 //! any nesting as an ordinary token, so a skip that started inside a generic list would run past
 //! the list's own closer. The pair is not decoration: it is what makes recovery inside the whole

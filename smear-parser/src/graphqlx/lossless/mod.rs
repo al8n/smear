@@ -8,7 +8,7 @@
 //! # The four places this dialect is genuinely different, not merely renamed
 //!
 //! - **A fourth balanced pair.** GraphQLx's `<>` is depth-counted by the lexer alongside `()`,
-//!   `[]` and `{}` (`smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
+//!   `[]` and `{}` (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
 //!   below has four entries and [`crate::graphqlx::error::Unclosed`] a fourth variant.
 //! - **A wider image space.** Seven images GraphQL has no counterpart for — `<`, `>`, `::`, `=>`,
 //!   `*`, `+`, `-` — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be GraphQL's space
@@ -65,7 +65,7 @@ pub type GraphqlxLosslessSlice<'inp, Src: Source<usize> + ?Sized> =
 /// The concrete lexer used by GraphQLx lossless productions over `Src`.
 ///
 /// **Note the argument.** `LosslessLexer<'a, S = &'a str> = LogosLexer<'a, LosslessToken<S>>`
-/// (`smear/src/lexer/graphqlx/lossless/mod.rs:17`) is parameterised by the **slice** type, not by
+/// (`smear-lexer/src/graphqlx/lossless/mod.rs:17`) is parameterised by the **slice** type, not by
 /// the source type — unlike `SyntacticLexer`, which takes the source. Writing
 /// `LosslessLexer<'inp, Src>` here compiles into a lexer over the wrong token and then fails far
 /// away, at the first `Lexer<'inp>` obligation.
@@ -167,7 +167,7 @@ crate::lossless::lossless_error_impls! {
   expectation  = expectation_of;
   // **Four pairs, and the fourth is not decoration.** GraphQLx's lexer depth-counts `<` and `>`
   // alongside the other three (`increase_recursion!`/`decrease_recursion!`,
-  // `smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`), so `<…>` is a genuinely balanced pair
+  // `smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so `<…>` is a genuinely balanced pair
   // and an unterminated one has a real report to make. `unclosed_angle` already existed on the
   // dialect error (`graphqlx/error.rs:252`), so the fourth pair costs nothing here and does not
   // fall through to the catch-all's `ErrorData::Other("unclosed delimiter")`.

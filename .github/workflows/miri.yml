@@ -106,7 +106,7 @@ name: Miri
 # the five. The premise is true of this WORKSPACE and false of the PROGRAM Miri interprets, and
 # with it the conclusion inverts.
 #
-# `memspan 0.1.0` is the SIMD substrate under the lexer — `smear/src/lexer/simd/*` and
+# `memspan 0.1.0` is the SIMD substrate under the lexer — `smear-lexer/src/simd/*` and
 # `string_lexer/*` call `memspan::skip::{skip_until, skip_digits, skip_ident}` on every lex — and
 # it is where essentially all of the `unsafe` in the interpreted program lives: 302 sites, of
 # which `needles/arch/aarch64.rs` has 49, `skip/neon.rs` 44, `skip/sse42.rs` 26, `skip/avx2.rs`

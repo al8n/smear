@@ -69,13 +69,19 @@ on:
     branches:
       - main
       - feat/proto
-    # `**.md` used to sit in these lists. It cannot: `README.md`,
-    # `smear/src/lexer/README.md` and `smear/src/parser/README.md` are
-    # `include_str!`-ed into the crate's rustdoc, so editing one is a compile-time
-    # change to the documentation, and a broken reference-style link in a README
-    # fails the `docs` job below. Ignoring them meant the one job that can catch such a
-    # break never ran for the one change class that causes it. Only the markdown no crate
-    # compiles is ignored, which is the root `docs/` notes tree.
+    # `**.md` used to sit in these lists. It cannot: three READMEs are `include_str!`-ed into a
+    # crate's rustdoc — the root `README.md` through `smear/README.md`, which is a symlink to it,
+    # plus `smear-lexer/README.md` and `smear-parser/README.md` — so editing one is a compile-time
+    # change to the documentation, and a broken reference-style link in it fails the `docs` job
+    # below. Ignoring them meant the one job that can catch such a break never ran for the one
+    # change class that causes it.
+    #
+    # `smear-schema`, `smear-compiler` and `graphql-proto` carry a README that is NOT included:
+    # their crate roots have hand-written `//!` headers, as the modules they came from did. Those
+    # three are crates.io landing pages only, and nothing compiles them — a stated bound, not a
+    # claim that the `docs` job covers them.
+    #
+    # Only the markdown no crate compiles is ignored, which is the root `docs/` notes tree.
     #
     # `docs/**.md` stays even though `.gitignore`'s root-anchored `/docs/` keeps a docs-only
     # commit out of reach of an ordinary `git add`. The two agree rather than duplicate, and

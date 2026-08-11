@@ -43,7 +43,7 @@ pub type GraphqlLosslessSlice<'inp, Src: Source<usize> + ?Sized> =
 /// The concrete lexer used by GraphQL lossless productions over `Src`.
 ///
 /// **Note the argument.** `LosslessLexer<'a, S = &'a str> = LogosLexer<'a, LosslessToken<S>>`
-/// (`smear/src/lexer/graphql/lossless/mod.rs:16`) is parameterised by the **slice** type, not by
+/// (`smear-lexer/src/graphql/lossless/mod.rs:16`) is parameterised by the **slice** type, not by
 /// the source type — unlike `SyntacticLexer`, which takes the source. Writing
 /// `LosslessLexer<'inp, Src>` here compiles into a lexer over the wrong token and then fails far
 /// away, at the first `Lexer<'inp>` obligation.

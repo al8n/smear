@@ -43,7 +43,7 @@
 //!
 //! And what it *lacks*: GraphQLx has no non-null node. `graphqlx::syntactic::ty` folds a trailing
 //! `!` into the type node it follows — `DefinitionTypePath`, `ListType`, `SetType` and `MapType`
-//! each carry their own `required` flag (`smear/src/parser/ty.rs`) — so the `!` is a
+//! each carry their own `required` flag (`smear-parser/src/ty.rs`) — so the `!` is a
 //! [`Bang`](SyntaxKind::Bang) token child of the type it modifies rather than a wrapper around it.
 //! It likewise has no bare named-type node: every type head is a `::`-separated
 //! [`Path`](SyntaxKind::Path) with optional generic arguments, which is

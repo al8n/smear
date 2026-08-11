@@ -26,7 +26,7 @@
 //! # The radix is not a kind distinction
 //!
 //! GraphQLx's numeric tokens carry payloads GraphQL's do not: `LitInt(LitInt<S>)` where `LitInt<S>
-//! = Decimal | Hex | Binary | Octal` (`smear/src/lexer/graphqlx/mod.rs:55`), and
+//! = Decimal | Hex | Binary | Octal` (`smear-lexer/src/graphqlx/mod.rs:55`), and
 //! `LitFloat(LitFloat<S>)` where `LitFloat<S> = Decimal | Hex` (`:134`). The kind space derived in
 //! Task 8 has a single [`Int`](crate::graphqlx::kinds::SyntaxKind::Int) image and a single
 //! [`Float`](crate::graphqlx::kinds::SyntaxKind::Float), so **all four radices map to one image
@@ -38,7 +38,7 @@
 //!
 //! GraphQL's `kind_map` is wildcard-free, and that is the property the plan asked for here too. It
 //! cannot be had: `smear_lexer::graphqlx::lossless::LosslessToken` is `#[non_exhaustive]`
-//! (`smear/src/lexer/graphqlx/lossless/mod.rs:90`) and GraphQL's is not, and `#[non_exhaustive]`
+//! (`smear-lexer/src/graphqlx/lossless/mod.rs:90`) and GraphQL's is not, and `#[non_exhaustive]`
 //! binds across the **crate** boundary — `smear-parser` is a different crate from `smear-lexer`,
 //! so rustc requires a wildcard arm no matter what this file wants. Task 8's
 //! `the_image_block_matches_the_graphqlx_lexer` recorded the same limitation for its own
