@@ -722,7 +722,7 @@ fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
 ///
 /// Applied repeatedly, so `TryConstX` reaches `X`.
 fn source_node_names() -> BTreeSet<String> {
-  let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/parser/graphqlx");
+  let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../smear-parser/src/graphqlx");
   let ast = rust_files(&root.join("ast"));
   let syntactic = rust_files(&root.join("syntactic"));
   assert!(
@@ -790,12 +790,14 @@ fn rust_files(dir: &Path) -> Vec<PathBuf> {
 fn bound_carriers(line: &str) -> Vec<String> {
   let mut out = Vec::new();
   let mut search = 0;
-  // `crate::parser::` and not `crate::`: the parser moved one module below the crate root when
-  // the crates merged, so every in-tree path gained that hop. Matching the bare `crate::` here
-  // would read `parser` as the first module segment and defeat both rules below — the
-  // "at least one lowercase module" test and the `graphqlx`-names-itself exclusion.
-  while let Some(hit) = line[search..].find("crate::parser::") {
-    let mut cursor = search + hit + "crate::parser::".len();
+  // `crate::` and not `crate::parser::`. The parser was one module below the crate root while the
+  // crates were merged, so every in-tree path carried that hop and matching the bare `crate::`
+  // would have read `parser` as the first module segment — defeating both rules below, the
+  // "at least one lowercase module" test and the `graphqlx`-names-itself exclusion. The split
+  // makes the parser its own crate root again and the hop stops occurring, so the bare prefix is
+  // the correct one and the two rules read the segments they were written for.
+  while let Some(hit) = line[search..].find("crate::") {
+    let mut cursor = search + hit + "crate::".len();
     search = cursor;
     let mut modules = 0usize;
     while let Some(segment) = leading_ident(&line[cursor..]) {

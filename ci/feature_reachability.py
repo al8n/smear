@@ -47,12 +47,33 @@ not the property. The three are named in `PLANTS` so `check()` and `selftest()` 
 An exemption that matches nothing is also a failure, for the reason `ci/source_census` records
 about its own tables: a stale exemption is either a feature that no longer exists or a reader that
 has stopped seeing it, and both are the gate quietly not working.
+
+# The second check: every publishable member is inside every selection that must cover it
+
+The split has now produced the same defect twice by GROWTH rather than by edit. `-p smear --lib`
+stopped covering the lexer's 130 unit tests and all four of this project's `unsafe` sites the day
+`smear-lexer` moved out, and `ci/source_census` stopped reading the same crate's surface in the
+same commit. Both gates went on passing; one was caught because its exemption table went stale in
+the same instant, the other only by reading the scripts' own prose against the tree.
+
+So the selections are read out of the files that hold them and checked against `cargo metadata`:
+
+  for each publishable workspace member M:
+    for each selection S that must cover every member:
+      assert M is in S, or (S, M) is in EXEMPT_SELECTION with a written reason
+
+A selection whose table cannot be FOUND in its file is a failure too, not an empty set — that is
+the reader-stopped-seeing-it direction, and reporting "nothing is missing" from a table nobody
+located is exactly how this gate would become the thing it exists to catch.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import pathlib
+import re
 import subprocess
 import sys
 
@@ -76,6 +97,19 @@ EXEMPT_MEMBERS = {
 # Member features the umbrella deliberately does not forward, each with the argument for it.
 # Empty today. An entry that matches nothing fails the run.
 EXEMPT: dict[tuple[str, str], str] = {}
+
+# Selections that must contain every publishable workspace member, each read out of the file that
+# owns it so the two cannot drift. The mount NAME a selection uses is not derivable — `smear-lexer`
+# is published by the umbrella as `lexer` — so what is derived is completeness, not content.
+#
+# Each reader returns the set of package names the selection covers, or raises with why it could
+# not read it. `None` is not an allowed answer: a table that cannot be located is a finding.
+SELECTIONS = ("miri", "census", "cross")
+
+# (selection, member) pairs deliberately outside a selection, each with the argument. Empty today.
+# An entry that matches nothing — because the member is gone, or is in the selection after all —
+# is a failure, exactly like a stale feature exemption.
+EXEMPT_SELECTION: dict[tuple[str, str], str] = {}
 
 # The three shapes `--selftest` plants, named once so the verdict and the selftest cannot drift.
 PLANTS = {
@@ -183,6 +217,117 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
   return findings
 
 
+# ── the second check: selection completeness ────────────────────────────────────────────────
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+# Anchored on the declaration itself rather than on a line number or a neighbouring comment, and
+# each raises if it matches nothing: a rename must be a hard error here, because a reader that
+# silently finds an empty table would report every member as missing — or, worse, report nothing
+# missing from a set it never read.
+def _read_miri_packages() -> set[str]:
+  """`MIRI_PACKAGES` out of `ci/miri_scope.py`, by importing it rather than by scraping."""
+  path = REPO_ROOT / "ci" / "miri_scope.py"
+  # Importing a file writes a `ci/__pycache__/` beside it, which nothing in this repository
+  # ignores; running that same file as a script does not. Suppressed rather than gitignored, so a
+  # gate leaves no trace in the tree it is reading.
+  previous = sys.dont_write_bytecode
+  sys.dont_write_bytecode = True
+  try:
+    spec = importlib.util.spec_from_file_location("_miri_scope_for_reachability", path)
+    return _load_miri_packages(spec, path)
+  finally:
+    sys.dont_write_bytecode = previous
+
+
+def _load_miri_packages(spec, path: pathlib.Path) -> set[str]:
+  if spec is None or spec.loader is None:
+    raise RuntimeError(f"{path} could not be loaded as a module")
+  module = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(module)
+  packages = getattr(module, "MIRI_PACKAGES", None)
+  if not packages:
+    raise RuntimeError(f"{path} declares no non-empty MIRI_PACKAGES")
+  return set(packages)
+
+
+def _read_census_roots() -> set[str]:
+  """The package names behind `DEFAULT_ROOTS` in `ci/source_census/src/main.rs`.
+
+  The const holds crate-root PATHS, not package names — `("smear-lexer/src/lib.rs", …)` — so the
+  package is the first path segment. That is exact for this workspace's layout, where a member's
+  directory is its package name, and it is checked: a segment that is not a member is reported
+  rather than silently ignored.
+  """
+  path = REPO_ROOT / "ci" / "source_census" / "src" / "main.rs"
+  text = path.read_text()
+  block = re.search(r"const DEFAULT_ROOTS:[^=]*=\s*&\[(.*?)\];", text, re.S)
+  if block is None:
+    raise RuntimeError(f"{path} has no `const DEFAULT_ROOTS` block this reader can find")
+  roots = re.findall(r'\(\s*"([^"]+)"\s*,\s*"[^"]*"\s*\)', block.group(1))
+  if not roots:
+    raise RuntimeError(f"{path}'s DEFAULT_ROOTS block held no (path, name) pairs")
+  return {root.split("/", 1)[0] for root in roots}
+
+
+def _read_cross_packages() -> set[str]:
+  """The publishable-member literal the `cross` job compares against, out of `ci.yml`.
+
+  That job's tripwire is a frozen literal on purpose — see its own comment — so this reads the
+  literal, which is the thing that has to grow, and not the `-p` list beside it. The two are
+  required to agree by the job itself: the literal is what fails the run.
+  """
+  path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+  text = path.read_text()
+  found = re.search(r'\[ "\$PUBLISHABLE" != "([^"]+)" \]', text)
+  if found is None:
+    raise RuntimeError(f"{path} has no $PUBLISHABLE comparison this reader can find")
+  return set(found.group(1).split(","))
+
+
+READERS = {
+  "miri": ("ci/miri_scope.py MIRI_PACKAGES", _read_miri_packages),
+  "census": ("ci/source_census DEFAULT_ROOTS", _read_census_roots),
+  "cross": (".github/workflows/ci.yml cross-job publishable literal", _read_cross_packages),
+}
+
+
+def check_selections(publishable: set[str]) -> list[str]:
+  """Every publishable member is inside every selection, or exempt with a reason."""
+  findings: list[str] = []
+  used: set[tuple[str, str]] = set()
+
+  if not publishable:
+    return [
+      "cargo metadata reported no publishable workspace member, so this check compared nothing"
+    ]
+
+  for key in SELECTIONS:
+    label, reader = READERS[key]
+    try:
+      covered = reader()
+    except Exception as err:  # noqa: BLE001 — the message is the finding
+      findings.append(f"{label} could not be read ({err}), so its coverage is unknown, not empty")
+      continue
+    for member in sorted(publishable):
+      if member in covered:
+        continue
+      if (key, member) in EXEMPT_SELECTION:
+        used.add((key, member))
+        continue
+      findings.append(
+        f"`{member}` is a publishable workspace member and is not in {label}: that selection has "
+        f"stopped covering it, and every gate built on it will go on passing over less"
+      )
+
+  for pair, why in sorted(EXEMPT_SELECTION.items()):
+    if pair not in used:
+      findings.append(
+        f"the selection exemption for `{pair[1]}` in `{pair[0]}` matches nothing ({why})"
+      )
+  return findings
+
+
 # ── the selftest ────────────────────────────────────────────────────────────────────────────
 
 _BASE = {
@@ -244,13 +389,49 @@ def selftest() -> int:
   problems.append(_case("plant (e) a live exemption suppresses its finding", planted, False))
   del EXEMPT[("smear-lexer", "rowan")]
 
+  # ── the selection check, planted the same way ─────────────────────────────────────────────
+  #
+  # (f) a publishable member outside a selection is the defect this half exists for, and (g) a
+  # table the reader cannot find must fail rather than read as an empty set — the second is the
+  # direction that would otherwise let a rename turn this gate off in silence.
+  real = check_selections({"smear", "smear-lexer", "smear-parser"})
+  if real:
+    problems.append(f"the real tree should have no selection finding and had: {real}")
+
+  planted_member = check_selections({"smear", "zzz-planted-member"})
+  if len(planted_member) != len(SELECTIONS):
+    problems.append(
+      f"plant (f) a publishable member outside every selection: expected one finding per "
+      f"selection ({len(SELECTIONS)}) and got {len(planted_member)}: {planted_member}"
+    )
+
+  saved = READERS["miri"]
+  def _unreadable() -> set[str]:
+    raise RuntimeError("planted: the table was renamed")
+  READERS["miri"] = (saved[0], _unreadable)
+  planted_reader = check_selections({"smear"})
+  READERS["miri"] = saved
+  if not any("could not be read" in f for f in planted_reader):
+    problems.append(
+      f"plant (g) an unreadable selection table: the reader failing must be a finding, got "
+      f"{planted_reader}"
+    )
+
+  EXEMPT_SELECTION[("miri", "no-such-member")] = "planted"
+  stale = check_selections({"smear", "smear-lexer", "smear-parser"})
+  del EXEMPT_SELECTION[("miri", "no-such-member")]
+  if not any("matches nothing" in f for f in stale):
+    problems.append(f"plant (h) a stale selection exemption must fail, got {stale}")
+
   problems = [p for p in problems if p]
   if problems:
     print("::error::feature_reachability selftest: the gate does not implement its sentence")
     for p in problems:
       print(f"  - {p}")
     return 1
-  print("feature_reachability selftest OK: 6 cases, 3 planted defect shapes")
+  print(
+    "feature_reachability selftest OK: 10 cases, 5 planted defect shapes across both checks"
+  )
   return 0
 
 
@@ -263,7 +444,13 @@ def main() -> int:
   if args.selftest:
     return selftest()
 
-  tables = members(metadata())
+  meta = metadata()
+  tables = members(meta)
+  ids = set(meta["workspace_members"])
+  publishable = {
+    p["name"] for p in meta["packages"] if p["id"] in ids and p.get("publish") != []
+  }
+
   findings = check(tables, args.verbose)
   if findings:
     print("::error::feature_reachability: the umbrella cannot reach every member feature")
@@ -276,6 +463,21 @@ def main() -> int:
     )
     return 1
 
+  if args.verbose:
+    for key in SELECTIONS:
+      print(f"  ok        {READERS[key][0]}")
+  selection_findings = check_selections(publishable)
+  if selection_findings:
+    print("::error::feature_reachability: a gate's selection has stopped covering every member")
+    for f in selection_findings:
+      print(f"  - {f}")
+    print(
+      "  A gate that narrows as the workspace grows keeps passing over less, which is how Miri "
+      "lost the lexer and how the source census went blind. Add the member to the selection, or "
+      "add an entry to EXEMPT_SELECTION with the argument for leaving it out."
+    )
+    return 1
+
   counted = sum(
     1
     for m, t in tables.items()
@@ -283,7 +485,10 @@ def main() -> int:
     for f in t
     if f != "default"
   )
-  print(f"feature_reachability OK: {counted} member features, all reachable through `{UMBRELLA}`")
+  print(
+    f"feature_reachability OK: {counted} member features, all reachable through `{UMBRELLA}`; "
+    f"{len(publishable)} publishable members, all inside {len(SELECTIONS)} gate selections"
+  )
   return 0
 
 

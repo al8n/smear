@@ -3,10 +3,22 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
+// The alias the crate's own modules are written against: they spell their allocations
+// `std::boxed::Box`, which resolves to `alloc` in a `no_std` build and to the real `std`
+// otherwise.
+//
+// `#[allow(unused_extern_crates)]` because THIS CRATE IS BECOMING AN UMBRELLA. With
+// `--no-default-features` the only module left compiled here is `diagnostic`, which names nothing
+// under `std::` — so `cargo hack clippy --each-feature` reaches a configuration in which the alias
+// is genuinely unused, while every configuration that turns on `validator` or `proto` needs it.
+// The lint has no `cfg` to key on that is not just a restatement of the module list, and it goes
+// away by deletion when the last module leaves for its own crate, not by a narrower predicate.
 #[cfg(not(feature = "std"))]
+#[allow(unused_extern_crates)]
 extern crate alloc as std;
 
 #[cfg(feature = "std")]
+#[allow(unused_extern_crates)]
 extern crate std;
 
 // Deliberately no outer doc comment, unlike the three modules below. Rustdoc resolves the MERGED
@@ -77,12 +89,31 @@ pub use smear_lexer::keyword;
   doc = "- [`graphqlx`](parser::graphqlx) — adds imports, generics, where-clauses, map and set \
          types, and namespaced paths on top of GraphQL."
 )]
+///
+/// The layer is the `smear-parser` crate; this is the name it has always had inside `smear` and
+/// the path every consumer already writes.
 #[cfg(feature = "parser")]
 #[cfg_attr(docsrs, doc(cfg(feature = "parser")))]
-// Scoped here rather than crate-wide: it was `#![allow(clippy::type_complexity)]` on the
-// `smear-parser` crate root, and the merge is the moment it stops covering the lexer too.
-#[allow(clippy::type_complexity)]
-pub mod parser;
+#[doc(inline)]
+pub use smear_parser as parser;
+
+/// Declares a typed keyword atom.
+///
+/// Re-exported for the reason [`keyword!`](keyword) is: `#[macro_export]` puts a macro at its
+/// defining crate's root, so `smear::typed_keyword_atom!` would otherwise have moved out from
+/// under every caller when the parser became its own crate.
+#[cfg(feature = "parser")]
+#[cfg_attr(docsrs, doc(cfg(feature = "parser")))]
+pub use smear_parser::typed_keyword_atom;
+
+/// Declares a typed wrapper over a lossless CST node.
+///
+/// Re-exported for the reason [`keyword!`](keyword) is. Gated on `rowan` rather than on `parser`
+/// because the module that defines it is: a `#[macro_export]` macro exists exactly when the file
+/// holding it is compiled.
+#[cfg(feature = "rowan")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rowan")))]
+pub use smear_parser::ast_node;
 
 /// GraphQL document validation, and the built-once schema every rule reads.
 ///

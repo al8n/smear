@@ -68,14 +68,16 @@ use rule::Cost;
 /// census's question is "what can a dependent reach", a dependent reaches all of this through
 /// `smear`, and both exemption tables and D2's generated probe are written in that vocabulary.
 ///
-/// DERIVED FROM NOTHING, and that is the one weakness of this table: a member added to the
-/// workspace and not added here is a surface the census stops reading. What stops that being
-/// silent is the same canary that already guards the tables — an exemption matching nothing is a
-/// hard error — plus `ci/feature_reachability.py`, which enumerates the members out of `cargo
-/// metadata` and would fail on a member the umbrella does not forward.
+/// NOT DERIVED, because the mount name cannot be: `smear-lexer` is published by the umbrella as
+/// `lexer`, and only the umbrella's `lib.rs` knows that. What IS derived is the table's
+/// COMPLETENESS — `ci/feature_reachability.py` reads this const out of this file and fails when a
+/// publishable workspace member is missing from it, so a member added and not mounted here is a
+/// red gate rather than a surface the census quietly stops reading. Miri losing the lexer, and
+/// this census going blind, were both that defect; the check exists so neither recurs by growth.
 const DEFAULT_ROOTS: &[(&str, &str)] = &[
   ("smear/src/lib.rs", "smear"),
   ("smear-lexer/src/lib.rs", "smear::lexer"),
+  ("smear-parser/src/lib.rs", "smear::parser"),
 ];
 
 fn main() -> ExitCode {

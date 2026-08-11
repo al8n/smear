@@ -228,8 +228,8 @@ fn the_only_fold_is_the_line_terminator() {
 /// of variants the mapper must name for its wildcard to be genuinely dead.
 #[test]
 fn the_mapper_wildcard_arm_panics_rather_than_classifying() {
-  let path =
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/parser/graphqlx/lossless/kind_map.rs");
+  let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("../smear-parser/src/graphqlx/lossless/kind_map.rs");
   let text =
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
 

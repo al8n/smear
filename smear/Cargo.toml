@@ -51,9 +51,9 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec"]
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["smear-lexer/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
+std = ["smear-lexer/std", "smear-parser?/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
-graphql = ["smear-lexer/graphql"]
+graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
 # stabilises. This comment is the successor to the deleted `unstable` marker feature, which gated
 # no code anywhere in the workspace and was auto-enabled by this one — cargo features are
@@ -61,7 +61,7 @@ graphql = ["smear-lexer/graphql"]
 # GraphQLx. `alloc` went the same way and for the same reason: nothing read
 # `cfg(feature = "alloc")`, both layers unconditionally `extern crate alloc as std` when `std` is
 # off, and there is no core-only tier for it to select.
-graphqlx = ["smear-lexer/graphqlx"]
+graphqlx = ["smear-lexer/graphqlx", "smear-parser?/graphqlx"]
 
 # The parser tower (`smear::parser`). Off, this crate is the lexer alone — the configuration that
 # used to be the `smear-lexer` crate, for the consumers it existed to serve: syntax highlighters,
@@ -72,7 +72,7 @@ graphqlx = ["smear-lexer/graphqlx"]
 # There is deliberately NO `lexer` feature to pair with it. The lexer is the irreducible base —
 # the parser cannot exist without it and a build with both off is an empty crate — and a gate that
 # can only ever be on is not a gate.
-parser = []
+parser = ["dep:smear-parser"]
 
 # GraphQL document validation (`smear::validator`), including the built-once `Schema` and the
 # draft §3 "Type Validation" pass that runs inside its build.
@@ -123,11 +123,11 @@ introspection = ["validator", "std", "dep:serde", "dep:serde_json"]
 # to `smear-lexer` to supply, because `smear-smoke`'s header records that losing that half is
 # silent — cargo falls back to the implicit feature an optional dependency creates and resolution
 # still succeeds.
-smallvec = ["smear-lexer/smallvec"]
-bytes = ["dep:bytes", "smear-lexer/bytes", "tokora/bytes_1"]
-bstr = ["dep:bstr", "smear-lexer/bstr", "tokora/bstr_1"]
-hipstr = ["dep:hipstr", "smear-lexer/hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["smear-lexer/smol-bytes", "tokora/smol_bytes_0_1"]
+smallvec = ["smear-lexer/smallvec", "smear-parser?/smallvec"]
+bytes = ["dep:bytes", "smear-lexer/bytes", "smear-parser?/bytes", "tokora/bytes_1"]
+bstr = ["dep:bstr", "smear-lexer/bstr", "smear-parser?/bstr", "tokora/bstr_1"]
+hipstr = ["dep:hipstr", "smear-lexer/hipstr", "smear-parser?/hipstr", "tokora/hipstr_0_8"]
+smol-bytes = ["smear-lexer/smol-bytes", "smear-parser?/smol-bytes", "tokora/smol_bytes_0_1"]
 
 # The lossless CST tower. Reachable through the crate named `smear` for the first time here (#81).
 # `parser` because the tower lives in that module; `std` because the runner needs it.
@@ -143,7 +143,7 @@ smol-bytes = ["smear-lexer/smol-bytes", "tokora/smol_bytes_0_1"]
 #
 # This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
-rowan = ["dep:rowan", "tokora/rowan", "std", "parser"]
+rowan = ["dep:rowan", "smear-parser/rowan", "tokora/rowan", "std", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting
@@ -151,7 +151,7 @@ rowan = ["dep:rowan", "tokora/rowan", "std", "parser"]
 # separate lanes keyed by `KindSpace::NAME`, so one gate's reset cannot clear the other's
 # measurement. Test-only: it changes no behaviour, and without it the instrumentation is not
 # compiled at all.
-lossless-coverage = ["rowan"]
+lossless-coverage = ["rowan", "smear-parser/lossless-coverage"]
 
 # Compiles the lossless suites' `test_support` scaffolding: the substrate's kind-space
 # conformance assertion, the two dialects' sink and trivia probes, and the per-production
@@ -171,7 +171,7 @@ lossless-coverage = ["rowan"]
 # parser-internal, so the feature being on is inert for them — as it is for any target with
 # `rowan` off. The suites' own tests get it from that dev-dependency, not from a
 # `required-features` entry; see that block for why.
-test-support = []
+test-support = ["smear-parser?/test-support"]
 
 [dependencies]
 derive_more.workspace = true
@@ -183,6 +183,11 @@ tokora.workspace = true
 # dependencies this manifest used to hold for it and no longer does — `thiserror`, `memspan`,
 # `smallvec` and `smol-bytes` — each removed because nothing outside `smear-lexer/src` names it.
 smear-lexer.workspace = true
+
+# The parser tower, optional because `smear`'s `parser` feature is the gate a lexer-only consumer
+# switches off. It brings `smear-lexer` with it; the edge above is separate because the lexer is
+# unconditional.
+smear-parser = { workspace = true, optional = true }
 
 # `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
 # package's own `tests/` name those types directly to build a source of each backing.

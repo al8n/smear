@@ -1,0 +1,84 @@
+[package]
+name = "smear-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Zero-copy parsers for GraphQL and GraphQLx: atomic combinators over `smear-lexer`'s token streams, building an AST or a lossless rowan CST."
+keywords = ["graphql", "parser", "cst", "zero-copy", "no-std"]
+categories = ["parsing", "parser-implementations", "no-std"]
+
+# A real file, not a symlink: this crate has its own README. `smear/README.md` is a symlink
+# because that one IS the workspace-root landing page.
+readme = "README.md"
+
+# The tower above `smear-lexer`, and the crate `smear`'s `parser` feature used to gate. The gate
+# survives the split as the dependency edge itself: a consumer who wants tokens and nothing else
+# depends on `smear-lexer` directly and never resolves this package. Measured on a fresh
+# crate-only compile over warm deps before the split: lexer 3.4s, parser +12.7s at default
+# features and +19.6s with `rowan`.
+
+[features]
+# The subset of `smear`'s own default that reaches this layer. `smear` names every member feature
+# explicitly with `default-features = false`, so this list governs a DIRECT dependent only.
+default = ["std", "graphql", "graphqlx", "smallvec"]
+
+std = ["smear-lexer/std", "tokora/std", "bytes?/default"]
+
+# The two dialects, forwarded to the lexer because a parser for a dialect needs that dialect's
+# tokens. Every doc link to one is `#[cfg_attr]`-gated for the reason `smear-lexer` records.
+graphql = ["smear-lexer/graphql"]
+graphqlx = ["smear-lexer/graphqlx"]
+
+# The source backings. Nothing in `src/` outside a `#[cfg(feature = "bytes")]` test names one of
+# these types — the parser is generic over `Src` — so they exist here to forward the lexer's and,
+# for `bytes`, to give those tests the type to name.
+smallvec = ["smear-lexer/smallvec"]
+bytes = ["dep:bytes", "smear-lexer/bytes", "tokora/bytes_1"]
+bstr = ["smear-lexer/bstr"]
+hipstr = ["smear-lexer/hipstr"]
+smol-bytes = ["smear-lexer/smol-bytes"]
+
+# The lossless CST tower. `std` because the runner needs it.
+#
+# EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH, and will stay outside it until
+# `rowan` is fixed upstream — `rowan 0.17.0` executes undefined behaviour on the ordinary path,
+# under Stacked Borrows from building any green tree and under Tree Borrows from dropping any red
+# one. #77 has the evidence and `ci/miri_scope.py` fails the Miri matrix if this feature ever
+# resolves ON inside it.
+rowan = ["dep:rowan", "tokora/rowan", "std"]
+
+# Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
+# trivia-injection gate can prove its corpus reached every production instead of asserting success
+# over whichever handful of shapes it happens to exercise. Test-only: it changes no behaviour, and
+# without it the instrumentation is not compiled at all.
+lossless-coverage = ["rowan"]
+
+# Compiles the lossless suites' `test_support` scaffolding. Every item it exposes is reachable
+# only from an integration test, which is a separate crate and therefore sees `pub` and nothing
+# else — so `#[cfg(test)]` and `pub(crate)` are both out of reach and a feature is the only door.
+#
+# Deliberately does NOT imply `rowan`. All of it lives inside the `rowan`-gated lossless tower, so
+# with `rowan` off there is nothing for this feature to expose; implying it would drag the whole
+# tower into a default-feature test row, which today compiles the lossless suites to nothing on
+# purpose.
+test-support = []
+
+[dependencies]
+derive_more.workspace = true
+paste = "1"
+tokora.workspace = true
+
+smear-lexer.workspace = true
+
+bytes = { workspace = true, optional = true }
+rowan = { version = "0.17", optional = true }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
