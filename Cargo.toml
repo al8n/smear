@@ -1,18 +1,24 @@
 [workspace]
 members = [
-  "benchmarks",
   "ci/source_census",
   "smear",
-  "smear-benches",
   "smear-noatomic",
   "smear-smoke",
 ]
 
-# ── THREE OF THE SIX MEMBERS PULL `smear` PAST ITS DEFAULT FEATURE SET ───────────────────────
+# ── ONE OF THE FOUR MEMBERS PULLS `smear` PAST ITS DEFAULT FEATURE SET ───────────────────────
 #
-# `benchmarks` and `smear-smoke` both enable `smear/rowan`; `smear-smoke` also enables
-# `lossless-coverage` and `test-support`. Cargo unifies features across the SELECTED packages,
-# so a bare workspace-wide command resolves `smear` with every feature it declares turned on.
+# `smear-smoke` enables `smear/rowan`, `lossless-coverage` and `test-support`. Cargo unifies
+# features across the SELECTED packages, so a bare workspace-wide command resolves `smear` with
+# every feature it declares turned on.
+#
+# It used to be three of six. `benchmarks` (`smear-apollo-bench`) and `smear-benches` were the
+# other two, and they are gone: their six criterion targets are now `smear`'s own, under
+# `smear/benches/`, so a bare `cargo bench` reaches the whole suite and nothing crosses a member
+# boundary to read a fixture. What that costs is in `smear/Cargo.toml`'s dev-dependency header —
+# criterion and the comparison parsers are on this package's inner loop now — and it does not
+# change this arithmetic, because a package's own dev-dependencies are not another member's
+# feature request.
 #
 # TWO members this arithmetic does not reach, both deliberately and for different reasons.
 #
@@ -63,9 +69,9 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # they disagree on the major, cargo links both crates and the types stop matching. The failure is
 # not subtle and it is not a deprecation: `expected rowan::GreenNode, found rowan::GreenNode`.
 # `0.9` is therefore the floor, not a preference: published tokora 0.8.0 pins `rowan = "0.16"`,
-# and 0.9.0 is the first release carrying `rowan = "0.17"` to match the pins in `smear`,
-# `smear-smoke` and `benchmarks`. Because tokora is `0.x`, the minor IS the major — `^0.8.0`
-# cannot reach 0.9.0 — so this requirement had to be edited rather than moved by `cargo update`.
+# and 0.9.0 is the first release carrying `rowan = "0.17"` to match the pins in `smear` and
+# `smear-smoke`. Because tokora is `0.x`, the minor IS the major — `^0.8.0` cannot reach 0.9.0 —
+# so this requirement had to be edited rather than moved by `cargo update`.
 #
 # `combinators` is named explicitly and is NOT a rowan consequence. tokora 0.9.0 put each
 # combinator family behind its own feature and made the `combinators` umbrella a DEFAULT feature;

@@ -19,17 +19,22 @@
 //! To see which:
 //!
 //! ```text
-//! cargo run -p smear-apollo-bench --example treedump --release -- <corpus> > /tmp/after.dump
-//! git stash && cargo run -p smear-apollo-bench --example treedump --release -- <corpus> > /tmp/before.dump
+//! cargo run -p smear --features rowan,validator --example treedump --release -- <corpus> > /tmp/after.dump
+//! git stash && cargo run -p smear --features rowan,validator --example treedump --release -- <corpus> > /tmp/before.dump
 //! git stash pop && diff /tmp/before.dump /tmp/after.dump
 //! ```
 //!
-//! **Do not edit the constant to make this pass.** The constants live in `src/dump.rs` with a note
+//! **Do not edit the constant to make this pass.** The constants live in `support/dump.rs` with a
+//! note
 //! on what they are pinned to; re-bless one only after the diff above is understood and intended,
 //! and record what moved it in the same commit. Editing a recorded hash to match whatever the code
 //! now produces turns the only byte-identity gate in this repository into a tautology.
 
-use smear_apollo_bench::dump::{Corpus, hash};
+// The shared harness. It is a module compiled into this target rather than a library
+// linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
+mod support;
+
+use crate::support::dump::{Corpus, hash};
 
 /// The corpora [`cheap`] covers — everything that is not the 45-million-line one.
 const CHEAP: &[Corpus] = &[Corpus::Clean, Corpus::Perturbed, Corpus::Malformed];
@@ -67,7 +72,8 @@ fn check(corpora: &[Corpus]) {
     "{} of {} corpus dump(s) no longer hash to their recorded value:\n{}\n\n\
      The tree changed. Read this as a claim about structure, not text: a parse can round-trip \
      byte-exactly and still open different nodes. `diff` the before/after dumps to see where \
-     (see this file's header), and do NOT edit the constant in src/dump.rs to make this pass.",
+     (see this file's header), and do NOT edit the constant in support/dump.rs to make this \
+     pass.",
     failures.len(),
     corpora.len(),
     failures.join("\n"),
@@ -87,7 +93,7 @@ fn cheap() {
 /// runs it in release with `--include-ignored`, and [`every_corpus_is_covered`] fails if a corpus
 /// ever stops being reachable from one of the two lists above.
 ///
-/// Locally: `cargo test -p smear-apollo-bench --release -- --include-ignored`.
+/// Locally: `cargo test -p smear --features rowan,validator --release --test byte_identity -- --include-ignored`.
 #[test]
 #[ignore = "45M lines; run in release, CI covers it via --include-ignored"]
 fn prefixes() {

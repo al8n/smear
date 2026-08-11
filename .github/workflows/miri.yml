@@ -40,41 +40,62 @@ name: Miri
 # justified the split rather than a description of the file. #77 changed both:
 #
 #   * "the macOS queue is a runner-concurrency constraint this repository does not own" — still
-#     true of the account, and still true of `.github/workflows/macos.yml`'s four legs, but no
-#     longer true HERE: every cell in this file runs on `ubuntu-latest`. The next section says
-#     why that became possible. What is left of this lane's cost is wall clock alone.
+#     true of the account, still true of `.github/workflows/macos.yml`'s four legs, and true
+#     again of two cells HERE. #77 took every cell in this file to `ubuntu-latest`; the benches
+#     have since been consolidated back into `smear`, which put `criterion` back in its dev
+#     graph, and the two `aarch64-apple-darwin` cells are on `macos-latest` again. The next
+#     section says why, and why it is those two and no others. Six of the eight cells cost wall
+#     clock alone; two cost the queue as well.
 #   * "not a coverage change" — that was the split. #77 IS a coverage change, deliberately and
 #     in one direction: the scripts now pass `-p smear`, which drops the lossless CST tower.
 #     See "WHAT THIS MATRIX DOES NOT COVER" below; it is not optional and it is not a saving.
 
-# ── WHY THE APPLE CELLS NO LONGER RUN ON A macOS HOST ───────────────────────────────────────
+# ── WHY ONE TARGET PICKS A macOS HOST AND THE OTHER THREE DO NOT ────────────────────────────
 #
-# Every cell below runs on `ubuntu-latest`, the apple target included, and this repository
-# now asks this workflow for no macOS runner at all. Miri interprets a TARGET, so the host was
-# always supposed to be irrelevant; until #77 it was not, and the reason had nothing to do with
-# Miri.
+# Miri interprets a TARGET, so the host is supposed to be irrelevant, and for the three Linux
+# targets below it is. `aarch64-apple-darwin` is the exception, and the reason has nothing to do
+# with Miri: it is one C file, in one transitive dependency of the benchmark harness.
 #
-# `criterion 0.8.2` was an unconditional dev-dependency of `smear` and it depends on
-# `alloca 0.4.0`, whose build script is a `cc::Build` that compiles `alloca.c`. Cargo resolves
-# dev-dependencies per PACKAGE and not per target, so the `--tests` selection these scripts make
-# built `alloca` for whatever target was named; on a Linux host targeting `*-apple-darwin`, cc-rs
-# invokes the host `cc` with `-arch x86_64` / `-arch arm64` and `-mmacosx-version-min=...`, which
-# a Linux `cc` rejects. Four cells were therefore pinned to `macos-latest` by one C file in one
-# transitive dependency of a benchmark harness.
+# `criterion 0.8.2` depends on `alloca 0.4.0`, whose build script is a `cc::Build` that compiles
+# `alloca.c`. Cargo resolves dev-dependencies per PACKAGE and not per target, so the `--lib` TEST
+# build these scripts make compiles `alloca` for whatever target was named; on a Linux host
+# targeting `*-apple-darwin`, cc-rs invokes the host `cc` with `-arch arm64` and
+# `-mmacosx-version-min=...`, which a Linux `cc` rejects. On a macOS host the same compile is
+# native and the question never arises — which is why the pairing is written as a property of the
+# target, in `runs-on:` below, rather than as a second matrix dimension.
 #
-# The previous revision of this comment named the way out and called it "not a CI edit": get
-# criterion out of the dev-dependency graph, which — since cargo has no optional
-# dev-dependency — means the benches moving to their own workspace member. That is what
-# `smear-benches` is (see its manifest header), and it is the same move tokora made in its #216.
-# Measured on this tree afterwards: `cargo miri test -p smear --tests --lib` resolves to 32
-# packages where it previously resolved 95, and not one of the remaining build scripts compiles
-# C — `alloca`, `cc`, `criterion` and the three comparison parsers are all gone from the graph.
-# `apollo-parser` went with them, which also takes `rowan` out of `smear`'s dev graph entirely.
+# THIS FILE HAS SAID THE OPPOSITE, and what moved is where criterion lives — not what Miri does
+# and not what a host can build. Before #77, `criterion` was `smear`'s dev-dependency and four
+# apple cells were pinned to `macos-latest` by that C file. #77 moved the benches into their own
+# workspace members, criterion left `smear`'s dev graph, and every cell went to `ubuntu-latest`;
+# the measurement recorded then was `cargo miri test -p smear --tests --lib` resolving 32 packages
+# where it had resolved 95. The benches have since been consolidated back into `smear` — six
+# `[[bench]]` targets in the crate they measure, one `cargo bench`, and no fixture read across a
+# member boundary — so criterion, the three comparison parsers and `apollo-parser` are in that
+# graph again and the pin comes back with them. `smear/Cargo.toml`'s dev-dependency header
+# carries what the consolidation cost and why it was taken.
 #
-# Do not reintroduce a `criterion` — or anything else with a `cc` build script — into `smear`'s
-# `[dev-dependencies]`. It will not fail here; it will silently make the two
-# `aarch64-apple-darwin` cells unschedulable on Linux again, and the symptom will look like a
-# compiler error in C.
+# HOW MUCH BIGGER, measured on this tree as
+# `cargo tree -p smear -e normal,dev,build --target <t>`, unique packages, before and after the
+# consolidation (a resolve count, not the unit count the 32/95 figures above are — do not compare
+# the two):
+#
+#   x86_64-unknown-linux-gnu       42 -> 143
+#   i686-unknown-linux-gnu         42 -> 113   (no `apollo-compiler` subtree; see below)
+#
+# Every cell in this file pays that, because `--lib` in a TEST build links a package's whole
+# dev-dependency set whether or not a test names one.
+#
+# IT COMES BACK FOR TWO CELLS, NOT FOUR, and that is the whole of the change. `x86_64-apple-darwin`
+# was dropped for redundancy (next section), so the only apple target left is the one that is also
+# the most valuable cell in the file. Two of eight cells now sit behind the account's macOS runner
+# queue that this file's header measures; the other six do not.
+#
+# `apollo-compiler`, the differential oracle, is NOT in that graph on every target. It carries a
+# const assertion that is false under the 32-bit x86 ABI, so `smear/Cargo.toml` declares it under
+# `cfg(target_pointer_width = "64")` and the two `i686-unknown-linux-gnu` cells never resolve it.
+# That is a real `[target.'cfg(...)']` predicate — one cargo evaluates against the target spec —
+# and not a `cfg(miri)`, which appears nowhere in `rustc --print cfg` and would be always true.
 #
 # ── WHAT THE TARGET AXIS BUYS, AND WHY ONE CELL WAS DROPPED ─────────────────────────────────
 #
@@ -144,6 +165,14 @@ name: Miri
 # rather than counted on trust: `ci/miri_scope.py` derives the number of `#[ignore]`s from the
 # sources and fails the cell if a run reports a different one, or if a target ends up with every
 # test ignored — the case where the per-test form has quietly become the per-file one.
+#
+# THE NUMBER ABOVE IS PINNED, in both spellings. A derived count cannot catch a per-test ignore
+# being ADDED: the source moves to five, the log moves to five, they agree, and a coverage cut has
+# ratified itself. So `ci/miri_scope.py` also carries `MIRI_IGNORE_BUDGET` as a frozen literal,
+# fails if the total moves in either direction, and fails if this file stops stating that same
+# number — both at the count-list row above and in the sentence before it. Adding or removing a
+# per-test ignore therefore takes three edits in one commit: the attribute, the budget, and this
+# header. That is the decision being recorded, and the diff is the point.
 #
 # What is left in a cell is the lib unit tests, `tests/oracle.rs`,
 # `tests/tokora_conformance.rs` and the eight span-extent witnesses — the SIMD lexer over a
@@ -223,11 +252,11 @@ concurrency:
 # the full account of what it is for. The construct at risk in this file is the
 # `case ... esac` in both `Install cross C toolchain` steps, which PowerShell cannot parse at
 # all. Before #86 it was safe only because that step's `if: runner.os == 'Linux'` skipped it on
-# the two apple cells — a guard written for a different purpose holding up a dialect assumption
-# by accident. It is now safe twice over and for the stated reason: this block, and the fact
-# that since #77 every cell in this file runs on `ubuntu-latest`. Both stay. "Every host happens
-# to be Linux" is a property of the matrix, which can change in one line; declaring the shell is
-# a property of the file.
+# the apple cells — a guard written for a different purpose holding up a dialect assumption by
+# accident. This block is what makes it safe for the stated reason instead, and the matrix has
+# since proved the point twice: #77 made every host Linux, and the `runs-on:` expressions below
+# have made one of them macOS again. "Every host happens to be Linux" is a property of the
+# matrix, which changes in one line; declaring the shell is a property of the file.
 defaults:
   run:
     shell: bash
@@ -253,9 +282,10 @@ jobs:
       matrix:
         # ONE dimension. Until #77 there was an `os` dimension too, with five `exclude:` entries
         # pairing each target to the only host that could build it — a 2 x 5 product carved back
-        # down to 5. The two apple targets needed `macos-latest` because `criterion` put a C
-        # build script in `smear`'s dev graph; `smear-benches` took it out, so every target now
-        # builds on the same host and the product is the list.
+        # down to 5. The pairing is real again, because `criterion` is back in `smear`'s dev
+        # graph, but it is expressed in `runs-on:` below instead: the host is a CONSEQUENCE of
+        # the target, and a second dimension would state four pairs where a target list plus one
+        # rule states them once and cannot be half-edited.
         #
         # FOUR entries, not five: `x86_64-apple-darwin` was dropped because it is the one target
         # here that interprets the same program as another — same arch, width, endianness and
@@ -269,7 +299,11 @@ jobs:
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - aarch64-apple-darwin
-    runs-on: ubuntu-latest
+    # `aarch64-apple-darwin` cannot be built from a Linux host — `criterion` -> `alloca` -> a C
+    # build script; see the header. Every other target here builds on Linux and should stay
+    # there, because the account's macOS runner concurrency is the queue this workflow's header
+    # is about.
+    runs-on: ${{ matrix.target == 'aarch64-apple-darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - name: Cache cargo build and registry
@@ -286,11 +320,11 @@ jobs:
         # Named targets rather than a negation. The guard used to read
         # `runner.os == 'Linux' && matrix.target != 'x86_64-apple-darwin'`-shaped, which was
         # true for exactly the two targets the `case` below has branches for — but only by
-        # coincidence, and since #77 every host IS Linux, so the `runner.os` half is now a
-        # condition that can never be false. Naming the two keeps the guard and the `case`
-        # arms in agreement where a reader can see it, and makes adding a third target a
-        # deliberate edit in two visible places rather than a silent fall-through to a `case`
-        # with no matching branch.
+        # coincidence, and a `runner.os` test is not the question being asked: `apt-get` is
+        # wrong on the macOS cell AND on the x86_64 Linux one. Naming the two keeps the guard
+        # and the `case` arms in agreement where a reader can see it, and makes adding a third
+        # target a deliberate edit in two visible places rather than a silent fall-through to a
+        # `case` with no matching branch.
         if: matrix.target == 'i686-unknown-linux-gnu' || matrix.target == 'powerpc64-unknown-linux-gnu'
         run: |
           case "${{ matrix.target }}" in
@@ -317,9 +351,10 @@ jobs:
       matrix:
         # ONE dimension. Until #77 there was an `os` dimension too, with five `exclude:` entries
         # pairing each target to the only host that could build it — a 2 x 5 product carved back
-        # down to 5. The two apple targets needed `macos-latest` because `criterion` put a C
-        # build script in `smear`'s dev graph; `smear-benches` took it out, so every target now
-        # builds on the same host and the product is the list.
+        # down to 5. The pairing is real again, because `criterion` is back in `smear`'s dev
+        # graph, but it is expressed in `runs-on:` below instead: the host is a CONSEQUENCE of
+        # the target, and a second dimension would state four pairs where a target list plus one
+        # rule states them once and cannot be half-edited.
         #
         # FOUR entries, not five: `x86_64-apple-darwin` was dropped because it is the one target
         # here that interprets the same program as another — same arch, width, endianness and
@@ -333,7 +368,11 @@ jobs:
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - aarch64-apple-darwin
-    runs-on: ubuntu-latest
+    # `aarch64-apple-darwin` cannot be built from a Linux host — `criterion` -> `alloca` -> a C
+    # build script; see the header. Every other target here builds on Linux and should stay
+    # there, because the account's macOS runner concurrency is the queue this workflow's header
+    # is about.
+    runs-on: ${{ matrix.target == 'aarch64-apple-darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - name: Cache cargo build and registry
@@ -350,11 +389,11 @@ jobs:
         # Named targets rather than a negation. The guard used to read
         # `runner.os == 'Linux' && matrix.target != 'x86_64-apple-darwin'`-shaped, which was
         # true for exactly the two targets the `case` below has branches for — but only by
-        # coincidence, and since #77 every host IS Linux, so the `runner.os` half is now a
-        # condition that can never be false. Naming the two keeps the guard and the `case`
-        # arms in agreement where a reader can see it, and makes adding a third target a
-        # deliberate edit in two visible places rather than a silent fall-through to a `case`
-        # with no matching branch.
+        # coincidence, and a `runner.os` test is not the question being asked: `apt-get` is
+        # wrong on the macOS cell AND on the x86_64 Linux one. Naming the two keeps the guard
+        # and the `case` arms in agreement where a reader can see it, and makes adding a third
+        # target a deliberate edit in two visible places rather than a silent fall-through to a
+        # `case` with no matching branch.
         if: matrix.target == 'i686-unknown-linux-gnu' || matrix.target == 'powerpc64-unknown-linux-gnu'
         run: |
           case "${{ matrix.target }}" in

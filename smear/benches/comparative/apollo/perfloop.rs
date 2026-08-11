@@ -7,12 +7,16 @@
 //! is the estimator that compares two builds rather than two schedulings.
 //!
 //! ```text
-//! cargo run -q -p smear-apollo-bench --example perfloop --release -- alias
+//! cargo run -q -p smear --features rowan,validator --example perfloop --release -- alias
 //! ```
+
+// The shared harness. It is a module compiled into this target rather than a library
+// linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
+mod support;
 
 use std::{hint::black_box, time::Instant};
 
-use smear_apollo_bench::{CORPUS, apollo_parse, smear_parse};
+use crate::support::{CORPUS, apollo_parse, smear_parse};
 
 fn main() {
   let args: Vec<String> = std::env::args().skip(1).collect();

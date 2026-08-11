@@ -5,20 +5,24 @@
 //! question "are both parsers doing the same job on this corpus?" and get an exit code:
 //!
 //! ```text
-//! cargo run -p smear-apollo-bench --example gate --release          # table + verdict
-//! cargo run -p smear-apollo-bench --example gate --release -- kinds # + node-kind histograms
+//! cargo run -p smear --features rowan,validator --example gate --release          # table + verdict
+//! cargo run -p smear --features rowan,validator --example gate --release -- kinds # + node-kind histograms
 //! ```
 //!
-//! **An example rather than a `[[bin]]`, deliberately.** Every existing workspace member is a
-//! library, so smear's CI `cross` job — `cargo build --target <t>` over fifteen targets, with
-//! nothing installed but `rustup target add` — has never had to *link an executable*. A `[[bin]]`
-//! here would be the workspace's first, and `cargo build` builds bins by default: the job then
+//! **An example rather than a `[[bin]]`, deliberately.** `smear` declares no `[[bin]]`, so its CI
+//! `cross` job — `cargo build -p smear --target <t>` over fifteen targets, with nothing installed
+//! but `rustup target add` — has never had to *link an executable*. A `[[bin]]` here would be its
+//! first, and `cargo build` builds bins by default: the job then
 //! fails at link time on every target whose cross linker the runner lacks (verified locally:
 //! `aarch64-linux-android` and `x86_64-pc-windows-gnu` both fail with
 //! `could not compile ... (bin "gate")`). `cargo build` does **not** build examples, so as an
 //! example this file leaves the cross job building exactly what it built before.
 
-use smear_apollo_bench::{CORPUS, kind_histograms, print_gate, run_gate};
+// The shared harness. It is a module compiled into this target rather than a library
+// linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
+mod support;
+
+use crate::support::{CORPUS, kind_histograms, print_gate, run_gate};
 
 fn main() -> std::process::ExitCode {
   // `gate kinds` additionally dumps each side's node-kind histogram, which is what turns gate

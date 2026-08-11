@@ -8,21 +8,25 @@
 //! * **tier2** — parse plus `apollo-parser`'s own typed traversal, reproduced on both sides.
 //!   `tier2 - tier1` isolates the traversal.
 //!
-//! The [correctness gate](smear_apollo_bench::run_gate) runs first, in this same process, and any
+//! The [correctness gate](crate::support::run_gate) runs first, in this same process, and any
 //! corpus entry that either side mishandles is excluded from timing and named on stdout. An
 //! entry both sides handle is timed with ids paired as `tierN/<entry>/smear` and
 //! `tierN/<entry>/apollo` so criterion reports them adjacently.
 //!
-//! Run with `cargo bench -p smear-apollo-bench --bench apollo_comparison`. A `harness = false`
+//! Run with `cargo bench -p smear --features rowan,validator --bench apollo_comparison`. A `harness = false`
 //! bench invoked any other way runs its body once with no timing.
+
+// The shared harness. It is a module compiled into this target rather than a library
+// linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
+mod support;
 
 use core::hint::black_box;
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use smear_apollo_bench::{
+use crate::support::{
   CORPUS, Entry, apollo_lex, apollo_parse, apollo_parse_and_traverse, print_gate, run_gate,
   smear_lex, smear_parse, smear_parse_and_traverse,
 };
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 /// Everything that is timed, for one eligible corpus entry.
 fn bench_entry(c: &mut Criterion, entry: &Entry) {
