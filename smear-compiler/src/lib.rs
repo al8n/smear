@@ -165,3 +165,29 @@ pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErro
 pub use schema::IntrospectionError;
 pub use scratch::{Budget, Scratch};
 pub use sink::{Collect, Count, First, Ignore, Sink};
+
+/// The features this crate was compiled with, as constants the umbrella asserts against.
+///
+/// **Not public API.** `smear` re-exports this crate whole, so every `#[cfg(feature = …)]` inside
+/// it is gated by THIS crate's features — and cargo unifies a package's features across the entire
+/// graph, so a second dependency naming `smear-compiler` directly could switch a capability on behind a
+/// `smear` consumer who never asked for it. Observed, not argued: with
+/// `smear = { default-features = false, features = ["std"] }` plus a direct `smear-compiler` dependency,
+/// a path the consumer had not enabled resolved.
+///
+/// `smear` reads these constants and refuses to compile when one disagrees with its own matching
+/// feature, which is what makes "the umbrella's feature is the gate" true rather than advertised.
+/// The alternative — a facade module per gated path — cannot reach trait impls, which are not
+/// namespaced, and would have to mirror every nested `#[cfg]` besides.
+///
+/// `ci/feature_reachability.py` derives this list from `cargo metadata` and fails when a feature
+/// this crate declares has no constant here or no assertion in `smear`.
+#[doc(hidden)]
+pub mod __features {
+  /// `introspection`, as this crate resolved it.
+  pub const INTROSPECTION: bool = cfg!(feature = "introspection");
+  /// `rowan`, as this crate resolved it.
+  pub const ROWAN: bool = cfg!(feature = "rowan");
+  /// `std`, as this crate resolved it.
+  pub const STD: bool = cfg!(feature = "std");
+}

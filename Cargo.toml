@@ -59,6 +59,13 @@ members = [
 # pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted is not what
 # those scripts claim.
 
+# `ci/downstream/` is NOT a member and must never become one. It is a consumer fixture with a
+# dependency edge to `smear`, so a member entry would add its features to the workspace-wide resolve
+# and unify them into smear's own build — which is exactly the unification it exists to escape. It
+# carries its own `[workspace]` table; this says the same thing a second time, so a future `members`
+# glob cannot swallow it.
+exclude = ["ci/downstream"]
+
 resolver = "3"
 
 [workspace.package]

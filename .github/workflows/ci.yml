@@ -309,6 +309,44 @@ jobs:
     - name: feature_reachability
       run: python3 ci/feature_reachability.py --verbose
 
+  # The one property no job above can see, because every one of them builds THIS workspace.
+  #
+  # `smear` re-exports whole member crates, so a feature of `smear` gates what it advertises only
+  # where `smear/src/lib.rs` writes the `#[cfg]`. Where it forwards to a member feature, the `#[cfg]`
+  # lives inside the member — and cargo unifies a package's features across the whole graph, so a
+  # SECOND DEPENDENCY naming that member directly switches the capability on behind the consumer.
+  # This workspace has no second requester, so nothing here could reproduce it; `ci/downstream/` is
+  # a consumer outside the workspace, and its compile is the property.
+  #
+  # Measured before the repair: ten of ten forwarded pairs leaked. The repair is an equivalence
+  # `smear` asserts at compile time, and this job is what keeps it honest in both directions —
+  # a LEAK leg that compiles is the defect, and a CTL leg that compiles means the probe stopped
+  # naming the path and the positive beside it proves nothing.
+  #
+  # `--locked` against the fixture's committed lock, so the job is hermetic and a red reads "your
+  # feature is broken" rather than "upstream released something".
+  #
+  # In no `needs:` chain, so it blocks nothing.
+  downstream:
+    name: downstream
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-downstream-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-downstream-
+    - name: ci/downstream.sh
+      run: bash ci/downstream.sh
+
   # Check formatting
   rustfmt:
     name: rustfmt

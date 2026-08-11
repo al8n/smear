@@ -217,6 +217,101 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
   return findings
 
 
+# ── the third check: every member feature has an enforced equivalence ───────────────────────
+#
+# `smear` re-exports whole member crates, so a feature of `smear` gates what it advertises only
+# where `smear/src/lib.rs` writes the `#[cfg]`. Where it forwards to a member feature, the `#[cfg]`
+# is inside the member, and cargo unifies that member's features across the whole graph — so a
+# second dependency naming the member directly switches the capability on behind the consumer.
+# Measured before the repair: ten of ten forwarded pairs leaked; the four smear `#[cfg]`s itself
+# did not.
+#
+# The repair is an equivalence smear asserts at compile time: each member publishes its resolved
+# features as `__features` constants, and smear refuses to build when one disagrees with its own.
+# This check is what keeps that total — a feature added to a member with no constant, or with no
+# assertion in smear, is a hole in the gate and not a smaller gate.
+#
+# The exemption table is READ OUT OF `ci/downstream_pairs.py` rather than restated, so the two
+# gates cannot come to disagree about which pairs owe an equivalence.
+
+MEMBER_ROOTS = {
+  "smear-lexer": "smear-lexer/src/lib.rs",
+  "smear-parser": "smear-parser/src/lib.rs",
+  "smear-schema": "smear-schema/src/lib.rs",
+  "smear-compiler": "smear-compiler/src/lib.rs",
+  "graphql-proto": "graphql-proto/src/lib.rs",
+}
+
+
+def _eq_exempt() -> dict[tuple[str, str], str]:
+  """`EQ_EXEMPT` out of `ci/downstream_pairs.py`, by importing it rather than by restating it."""
+  path = REPO_ROOT / "ci" / "downstream_pairs.py"
+  previous = sys.dont_write_bytecode
+  sys.dont_write_bytecode = True
+  try:
+    spec = importlib.util.spec_from_file_location("_downstream_pairs_for_reachability", path)
+    if spec is None or spec.loader is None:
+      raise RuntimeError(f"{path} could not be loaded as a module")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+  finally:
+    sys.dont_write_bytecode = previous
+  table = getattr(module, "EQ_EXEMPT", None)
+  if table is None:
+    raise RuntimeError(f"{path} declares no EQ_EXEMPT")
+  return table
+
+
+def check_equivalence(feature_tables: dict[str, dict[str, list[str]]]) -> list[str]:
+  """Every member feature is witnessed by a constant and pinned by an assertion in the umbrella."""
+  findings: list[str] = []
+  try:
+    exempt = _eq_exempt()
+  except Exception as err:  # noqa: BLE001 — the message is the finding
+    return [f"the EQ_EXEMPT table could not be read ({err}), so this check knows nothing"]
+
+  try:
+    umbrella_src = (REPO_ROOT / "smear" / "src" / "lib.rs").read_text()
+  except OSError as err:
+    return [f"smear/src/lib.rs is unreadable ({err})"]
+
+  checked = 0
+  used_exempt: set[tuple[str, str]] = set()
+  for member, root in sorted(MEMBER_ROOTS.items()):
+    if member not in feature_tables:
+      findings.append(f"`{member}` is in MEMBER_ROOTS and not in the workspace")
+      continue
+    try:
+      member_src = (REPO_ROOT / root).read_text()
+    except OSError as err:
+      findings.append(f"{root} is unreadable ({err}), so `{member}`'s witnesses are unknown")
+      continue
+    ident = member.replace("-", "_")
+    for feature in sorted(f for f in feature_tables[member] if f != "default"):
+      if (member, feature) in exempt:
+        used_exempt.add((member, feature))
+        continue
+      checked += 1
+      const = feature.upper().replace("-", "_")
+      if f'pub const {const}: bool = cfg!(feature = "{feature}");' not in member_src:
+        findings.append(
+          f"`{member}` declares `{feature}` and publishes no `__features::{const}` constant, so "
+          f"`smear` cannot see whether the graph turned it on"
+        )
+      if f"{ident}::__features::{const}" not in umbrella_src:
+        findings.append(
+          f"`{member}/{feature}` is not asserted equal to `smear/{feature}` in smear/src/lib.rs: "
+          f"a second dependency can switch it on behind a `smear` consumer, which is the leak the "
+          f"equivalence exists to make unrepresentable"
+        )
+  for pair, why in sorted(exempt.items()):
+    if pair not in used_exempt:
+      findings.append(f"the equivalence exemption for `{pair[0]}/{pair[1]}` matches nothing ({why})")
+  if checked == 0:
+    findings.append("zero member features were checked for an equivalence")
+  return findings
+
+
 # ── the second check: selection completeness ────────────────────────────────────────────────
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -466,6 +561,20 @@ def main() -> int:
   if args.verbose:
     for key in SELECTIONS:
       print(f"  ok        {READERS[key][0]}")
+  equivalence_findings = check_equivalence(tables)
+  if equivalence_findings:
+    print("::error::feature_reachability: a member feature has no enforced equivalence")
+    for f in equivalence_findings:
+      print(f"  - {f}")
+    print(
+      "  Without it the umbrella's feature is advertising a gate it cannot hold: cargo unifies a "
+      "member's features across the whole graph, so a second dependency naming that member turns "
+      "the capability on behind the consumer. `ci/downstream.sh` is the experiment that shows it."
+    )
+    return 1
+  if args.verbose:
+    print("  ok        every member feature is asserted equal to its `smear` twin")
+
   selection_findings = check_selections(publishable)
   if selection_findings:
     print("::error::feature_reachability: a gate's selection has stopped covering every member")
@@ -486,8 +595,9 @@ def main() -> int:
     if f != "default"
   )
   print(
-    f"feature_reachability OK: {counted} member features, all reachable through `{UMBRELLA}`; "
-    f"{len(publishable)} publishable members, all inside {len(SELECTIONS)} gate selections"
+    f"feature_reachability OK: {counted} member features, all reachable through `{UMBRELLA}` and "
+    f"all asserted equal to it; {len(publishable)} publishable members, all inside "
+    f"{len(SELECTIONS)} gate selections"
   )
   return 0
 

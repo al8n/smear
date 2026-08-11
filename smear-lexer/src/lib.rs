@@ -159,3 +159,39 @@ mod handlers;
 /// SIMD lexers.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) mod simd;
+
+/// The features this crate was compiled with, as constants the umbrella asserts against.
+///
+/// **Not public API.** `smear` re-exports this crate whole, so every `#[cfg(feature = …)]` inside
+/// it is gated by THIS crate's features — and cargo unifies a package's features across the entire
+/// graph, so a second dependency naming `smear-lexer` directly could switch a capability on behind a
+/// `smear` consumer who never asked for it. Observed, not argued: with
+/// `smear = { default-features = false, features = ["std"] }` plus a direct `smear-lexer` dependency,
+/// a path the consumer had not enabled resolved.
+///
+/// `smear` reads these constants and refuses to compile when one disagrees with its own matching
+/// feature, which is what makes "the umbrella's feature is the gate" true rather than advertised.
+/// The alternative — a facade module per gated path — cannot reach trait impls, which are not
+/// namespaced, and would have to mirror every nested `#[cfg]` besides.
+///
+/// `ci/feature_reachability.py` derives this list from `cargo metadata` and fails when a feature
+/// this crate declares has no constant here or no assertion in `smear`.
+#[doc(hidden)]
+pub mod __features {
+  /// `bstr`, as this crate resolved it.
+  pub const BSTR: bool = cfg!(feature = "bstr");
+  /// `bytes`, as this crate resolved it.
+  pub const BYTES: bool = cfg!(feature = "bytes");
+  /// `graphql`, as this crate resolved it.
+  pub const GRAPHQL: bool = cfg!(feature = "graphql");
+  /// `graphqlx`, as this crate resolved it.
+  pub const GRAPHQLX: bool = cfg!(feature = "graphqlx");
+  /// `hipstr`, as this crate resolved it.
+  pub const HIPSTR: bool = cfg!(feature = "hipstr");
+  /// `smallvec`, as this crate resolved it.
+  pub const SMALLVEC: bool = cfg!(feature = "smallvec");
+  /// `smol-bytes`, as this crate resolved it.
+  pub const SMOL_BYTES: bool = cfg!(feature = "smol-bytes");
+  /// `std`, as this crate resolved it.
+  pub const STD: bool = cfg!(feature = "std");
+}
