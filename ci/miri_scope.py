@@ -63,9 +63,37 @@ import io
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
-import tomllib
+
+# ── THIS SCRIPT NEEDS PYTHON >= 3.11, AND SAYS SO RATHER THAN TRACEBACKING ──────────────────
+#
+# `tomllib` entered the standard library in 3.11. This script parses `smear/Cargo.toml` to resolve
+# which features a Miri cell compiles with, and a hand-rolled TOML reader is exactly the shape this
+# repository has already been burned by — a checker written against one exemplar that was wrong on
+# five of six valid forms. So the floor is real and stays.
+#
+# What was NOT acceptable was the floor being silent. `ci/feature_reachability.py` used to reach
+# this file's `MIRI_PACKAGES` by importing it, which inherited this line: on the macOS system
+# interpreter (`/usr/bin/python3`, 3.9.6) that gate exited 1 with `No module named 'tomllib'`
+# before reading anything, while the workflow and its own usage line both said `python3`. That
+# reader now parses the constant instead of executing this module, and this guard makes the
+# remaining floor a sentence instead of a traceback.
+#
+# `ci/miri_sb.sh` and `ci/miri_tb.sh` — the only callers — check the same floor before they spend
+# minutes on a Miri run. The other Python gates (`feature_reachability.py`, `downstream_pairs.py`)
+# are deliberately stdlib-3.9-safe and are verified on 3.9.6, because they are the ones a person is
+# told to run locally.
+try:
+  import tomllib
+except ModuleNotFoundError as err:  # pragma: no cover - depends on the interpreter, not the tree
+  raise SystemExit(
+    f"::error::miri_scope needs Python >= 3.11 for `tomllib` and this is "
+    f"{sys.version_info.major}.{sys.version_info.minor} ({err}). It parses `smear/Cargo.toml` to "
+    f"resolve a Miri cell's feature set; a hand-rolled TOML reader is not an acceptable "
+    f"substitute. On macOS, `/usr/bin/python3` is 3.9 — use a newer one."
+  ) from err
 
 # `.github/workflows/miri.yml` sets `CARGO_TERM_COLOR: always`, so cargo emits SGR escapes even
 # though nothing here is a tty: `\x1b[1m\x1b[32m     Running\x1b[0m tests/oracle.rs (...)`. Every
@@ -138,6 +166,133 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 # does not run in a Miri cell, and leaving it out would give the next coverage cut a spelling that
 # this budget does not see.
 MIRI_IGNORE_BUDGET = 4
+
+# PROPERTY: every lib unit test in a publishable member is interpreted by both Miri cells, or its
+# member is recorded here as carrying none at this feature set.
+#
+# THE PACKAGES THE MIRI CELLS RUN. Not a description of them — the source of them: `ci/miri_sb.sh`
+# and `ci/miri_tb.sh` build their `-p` list by asking `--print-packages` for this tuple.
+#
+# THAT IS THE REPAIR, and it is worth stating what it replaced. This tuple and the scripts' `-p`
+# arguments were two hand-maintained lists. The split grew this one to six members as it extracted
+# them and never touched the other, so the scripts ran two while the guard below expected six — and
+# the guard reads THIS list, so it could pass against a declaration the workflow did not execute,
+# leaving the cell to fail late, after the expensive run. Deriving deletes the second list instead
+# of adding a check that compares them, and `ci/feature_reachability.py` fails if either script
+# stops asking or starts passing a literal `-p`.
+#
+# It was one package until the crate split, and the check below was "exactly one lib unit-test
+# binary ran" — a shape that would have stayed GREEN while `smear-lexer` carried 130 lib unit
+# tests, and all four of this project's own `unsafe` sites, out of the selection. Both scripts'
+# headers claim the covered half is "where this project's own `unsafe` lives"; these names are what
+# makes that claim falsifiable rather than decorative.
+#
+# ADDING A PACKAGE IS A DECISION WITH A COST, because feature unification is over the SELECTED
+# packages and that is the mechanism #77 turned on: `smear-smoke` enabling `rowan` is how the
+# entire lossless tower entered a Miri cell that nobody widened. Checked for each of the four:
+# `smear-lexer` declares no `rowan` feature at all; `smear-parser` and `smear-compiler` do declare
+# one but it is not in their `default` and these scripts pass no `--features`, so the resolve
+# leaves it off; `graphql-proto` declares only `std`. This file's own feature-set guard prints what
+# actually resolved, so none of that is taken on trust.
+#
+# `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
+# `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
+MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-compiler", "graphql-proto")
+
+# The publishable members deliberately NOT selected, each with the measurement behind it.
+#
+# A member with no lib unit tests at this cell's feature set contributes nothing to interpret, and
+# selecting it produces an empty harness — which `check()` below fails on purpose, because "a
+# target that compiles to an empty harness passes without testing anything" is #73's mechanism.
+# So they are excluded, and excluded WITH A REASON that `ci/feature_reachability.py` requires to
+# still match a real member.
+#
+# Measured on this tree with `cargo test -p <m> --lib -- --list`, at this cell's feature set and at
+# `--all-features`:
+#
+#   smear-lexer    125 / 130      smear           0 / 0
+#   smear-parser   353 / 362      smear-schema    0 / 3
+#   smear-compiler  12 /  12
+#   graphql-proto   15 /  15
+MIRI_NOT_SELECTED = {
+    "smear": {
+        # The strongest claim in the table, so it is asserted at the strongest configuration: no
+        # feature set of this crate produces a lib unit test, because there is no code to test.
+        "features": ("--all-features",),
+        "why": "the umbrella is re-exports only — `smear/src` is one file — so its lib carries no "
+               "unit tests at ANY feature set, and selecting it would yield a harness with 0 tests",
+    },
+    "smear-schema": {
+        # A NARROWER claim, and the flags are what make it narrow: three unit tests exist behind
+        # `build`, so this is asserted at the feature set these scripts actually build and nowhere
+        # else. Writing `--all-features` here would be a claim the crate does not satisfy, and
+        # `--verify-exclusions` would say so.
+        "features": (),
+        "why": "its three lib unit tests are behind `build`, and these scripts pass no `--features` "
+               "by design; at the feature set they DO build, its harness has 0 tests",
+    },
+}
+
+
+def verify_exclusions(cargo: str = "cargo") -> int:
+    """Re-run the measurement every `MIRI_NOT_SELECTED` reason rests on.
+
+    PROPERTY: a member is excluded from the Miri selection only while it really has no lib unit
+    tests at the configuration the exclusion names.
+
+    THIS IS THE SECOND TIME THIS FILE'S FAMILY HAS NEEDED THIS. `ci/feature_reachability.py` used to
+    carry `EQ_EXEMPT`, a skip table whose one entry was excused by a measurement nobody re-ran; it
+    was replaced by `EQ_TWIN`, which has no skip path at all. One round later `MIRI_NOT_SELECTED`
+    arrived — a new exemption table whose entries were justified by a measurement nobody re-ran, and
+    guarded by nothing stronger than "the reason is non-empty". A non-empty reason is the guarantee
+    that somebody once thought about it.
+
+    So the reason is EXECUTABLE: each entry carries the cargo flags its claim is measured at, and
+    this runs exactly those. Add a `#[test]` to `smear` and this fails; move `smear-schema`'s tests
+    out from behind `build` and this fails; widen a claim to `--all-features` that only holds at the
+    default set and this fails.
+
+    Reproduced before it was written: a `#[test]` added to `smear/src/lib.rs` left
+    `feature_reachability` and `miri_scope --selftest` both green while the test would never be
+    interpreted.
+    """
+    failures = []
+    for member, entry in sorted(MIRI_NOT_SELECTED.items()):
+        flags = list(entry.get("features", ()))
+        command = [cargo, "test", "-p", member, "--lib", *flags, "--", "--list"]
+        printed = " ".join(command)
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            failures.append(
+                f"{member}: `{printed}` exited {result.returncode}, so the exclusion's claim could "
+                f"not be measured at all\n{result.stderr.strip()[:400]}"
+            )
+            continue
+        found = re.search(r"^(\d+) tests?, \d+ benchmarks?$", result.stdout, re.M)
+        if found is None:
+            failures.append(
+                f"{member}: `{printed}` printed no `N tests, M benchmarks` summary, so this check "
+                f"read nothing — cargo's --list output has changed shape"
+            )
+            continue
+        count = int(found.group(1))
+        print(f"  {member:16} {count:>4} lib unit tests at `{' '.join(flags) or 'default features'}`")
+        if count:
+            failures.append(
+                f"{member}: {count} lib unit test(s) at `{' '.join(flags) or 'default features'}`, "
+                f"and MIRI_NOT_SELECTED excludes it from the Miri selection on the claim that it "
+                f"has none. Those tests are interpreted by nothing. Either add `{member}` to "
+                f"MIRI_PACKAGES, or narrow the recorded reason to a configuration where the count "
+                f"really is zero.\n      recorded reason: {entry['why']}"
+            )
+    if failures:
+        print("::error::miri_scope: an exclusion from the Miri selection is no longer true",
+              file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+    print(f"miri_scope: {len(MIRI_NOT_SELECTED)} exclusions re-measured, all still zero")
+    return 0
 
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.
@@ -528,7 +683,9 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     # first case moves a target from 0 ignored to 1, which is the same finding.
     a_skipping = next((n for n in sorted(compiled) if declared.get(n, 0)), a_compiled)
     a_declared = declared.get(a_skipping, 0)
-    clean = ([("<lib>", 400)]
+    # One lib binary per selected package, which is what a correct run produces.
+    libs_clean = [("<lib>", 400 - 10 * i) for i in range(len(MIRI_PACKAGES))]
+    clean = (libs_clean
              + [(n, 0) for n in sorted(excluded)]
              + [(n, floor) for n in sorted(compiled)])
     cases: list[tuple[str, str, bool, int, int]] = [
@@ -542,21 +699,26 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
          log([e for e in clean if e[0] != a_compiled]), True, 0, 1),
         ("a compiled target absent from a run that ABORTED is truncation, not a finding",
          log([e for e in clean if e[0] != a_compiled]), True, 1, 0),
-        ("the lib binary reporting zero tests fails",
+        ("a lib binary reporting zero tests fails",
          log([("<lib>", 0)] + clean[1:]), True, 0, 1),
-        ("the lib binary never running fails",
+        ("a lib binary never running fails",
          log(clean[1:]), True, 0, 1),
         ("`--lib` alone does not require the integration targets to appear",
-         log([("<lib>", 400)]), False, 0, 0),
+         log(libs_clean), False, 0, 0),
         # `CARGO_TERM_COLOR: always` in the workflow means the log this guard reads is full of
         # SGR escapes. Pinned as a case rather than trusted, because the failure mode is silent
         # in the wrong direction: unstripped, `RUNNING` matches nothing, every target looks
         # absent, and on a SUCCESSFUL run the guard would fail the cell for the whole suite.
         # The shape the CI log of run 31073592771 actually has: `smear`'s lib binary and the
         # since-dissolved `smear-apollo-bench`'s, both spelled `Running unittests src/lib.rs`,
-        # distinguished only by the path. Two of them means the selection is not one package.
-        ("a second package's lib unit tests running fails (#77, from the other end)",
-         log([("<lib>", 400), ("<lib>", 0)] + clean[1:]), True, 0, 1),
+        # distinguished only by the path. More of them than `MIRI_PACKAGES` names means the
+        # selection is wider than the scripts pass.
+        ("one lib binary too many fails (#77, from the other end)",
+         log(libs_clean + [("<lib>", 7)] + clean[len(libs_clean):]), True, 0, 1),
+        # And the direction the crate split introduced: a package silently leaving the selection
+        # takes its unit tests with it and every other check here stays green.
+        ("one lib binary too few fails (a package left the selection)",
+         log(libs_clean[:-1] + clean[len(libs_clean):]), True, 0, 1),
         ("a colourised log parses the same as a plain one",
          log(clean).replace("     Running", "\x1b[1m\x1b[32m     Running\x1b[0m"), True, 0, 0),
         # The per-test half of the same property. `#[cfg_attr(miri, ignore)]` skips a test without
@@ -697,20 +859,27 @@ def check(
     failures: list[str] = []
     notes: list[str] = []
 
-    lib = libs[0][1] if libs else None
     if not libs:
         (notes if aborted else failures).append(
-            "the lib unit-test binary never ran; every cell must interpret it"
+            "no lib unit-test binary ran; every cell must interpret one per selected package"
         )
-    elif len(libs) > 1:
+    elif len(libs) != len(MIRI_PACKAGES):
+        wider = len(libs) > len(MIRI_PACKAGES)
         failures.append(
-            f"{len(libs)} lib unit-test binaries ran, and `-p smear` selects ONE package — so "
-            "the selection is wider than these scripts pass. That is #77's mechanism seen from "
-            "the other end; the extra packages were: "
-            + ", ".join(path for path, _ in libs[1:])
+            f"{len(libs)} lib unit-test binaries ran and these scripts select "
+            f"{len(MIRI_PACKAGES)} package(s) ({', '.join(MIRI_PACKAGES)}), so the selection is "
+            + ("WIDER than they pass — that is #77's mechanism seen from the other end"
+               if wider else
+               "NARROWER than they pass — a package's unit tests stopped being interpreted and "
+               "nothing else would have said so")
+            + "; the binaries were: "
+            + ", ".join(path for path, _ in libs)
         )
-    elif lib == 0:
-        failures.append("the lib unit-test binary reported `running 0 tests`")
+    elif any(count == 0 for _, count in libs):
+        failures.append(
+            "a lib unit-test binary reported `running 0 tests`: "
+            + ", ".join(path for path, count in libs if count == 0)
+        )
 
     for name in compiled:
         got = counts.get(name)
@@ -784,9 +953,12 @@ def check(
 
     covered = sorted(n for n in compiled if n in counts)
     where = "so far" if aborted else "interpreted"
-    print(f"miri_scope OK: lib ({lib if lib is not None else 'not reached'}) + {len(covered)} "
-          f"integration targets {where}; {len(excluded)} excluded for the recorded reasons and "
-          "none of them ran")
+    # Each selected package's lib count, named rather than summed: a total would hide one package
+    # shrinking while another grew, which is the shape this guard exists to refuse.
+    lib_counts = " + ".join(str(count) for _, count in libs) if libs else "not reached"
+    print(f"miri_scope OK: {len(libs)} lib unit-test binaries ({lib_counts} tests) + "
+          f"{len(covered)} integration targets {where}; {len(excluded)} excluded for the recorded "
+          "reasons and none of them ran")
     return 0
 
 
@@ -811,6 +983,24 @@ def main() -> int:
         "--no-default-features",
         action="store_true",
         help="Set when the run passed `--no-default-features`, for the same reason.",
+    )
+    ap.add_argument(
+        "--verify-exclusions",
+        action="store_true",
+        help="Re-measure every MIRI_NOT_SELECTED member with the cargo flags its reason names, and "
+        "fail if any has a non-empty harness. This is the reason being EXECUTED rather than read: "
+        "an exclusion table whose entries are checked only for being non-blank is the shape "
+        "`EQ_EXEMPT` already had once. Both Miri scripts run it before `cargo miri setup`.",
+    )
+    ap.add_argument(
+        "--print-packages",
+        action="store_true",
+        help="Print the `-p` arguments for `cargo miri test`, one token per line, and exit. This "
+        "is how ci/miri_sb.sh and ci/miri_tb.sh build their selection: MIRI_PACKAGES is then the "
+        "single source of truth for what RUNS as well as for what the guard EXPECTS. They used to "
+        "be two hard-coded lists and they did drift — the constant grew to six members while the "
+        "scripts still passed two, so the guard was reading a declaration the workflow did not "
+        "execute.",
     )
     ap.add_argument(
         "--selftest",
@@ -842,6 +1032,18 @@ def main() -> int:
     if not args.manifest.is_file():
         print(f"::error::miri_scope: no such manifest: {args.manifest}", file=sys.stderr)
         return 1
+
+    if args.verify_exclusions:
+        return verify_exclusions()
+
+    if args.print_packages:
+        if not MIRI_PACKAGES:
+            print("::error::miri_scope: MIRI_PACKAGES is empty", file=sys.stderr)
+            return 1
+        for package in MIRI_PACKAGES:
+            print("-p")
+            print(package)
+        return 0
 
     if args.selftest:
         return selftest(args.tests_dir, args.manifest)
