@@ -366,6 +366,10 @@ pub struct Limits {
   /// it out at the ceiling. So undrained entries are bounded by this value *minus one*, and a slot
   /// is free again as soon as the live work drains.
   ///
+  /// Three paths hold that bound for three different reasons, and the last of them is an ordering
+  /// rather than a release — so the bound is checked where the count is raised and not only argued
+  /// here: `propagate` asserts it, in debug, on every discard.
+  ///
   /// The worst an ignored channel can therefore do is take the driver down to one request at a
   /// time; it never takes it to none, and it can be cleared whenever the driver likes, because the
   /// channel is returning `Some`. A ceiling of zero would admit nothing at all and no call could
@@ -1983,6 +1987,32 @@ where
     }
     self.discard(cursor);
     self.abandon_under(cursor);
+    // [`Limits::max_in_flight`] promises that abandoned entries **narrow** the ceiling and never
+    // close it, and this is the only place in the executor that can move an entry into that count.
+    // So the promise is one predicate at one site, and this is the site.
+    //
+    // It is a property of *where* a field error may be raised rather than of anything here:
+    // `abandon_under` moves entries from `live` to `abandoned` and leaves the sum alone, so what
+    // the bound needs is that every path into `record` already holds a free slot.
+    // [`handle_resolved`](Self::handle_resolved) and
+    // [`handle_field_error`](Self::handle_field_error) release their own request before they can
+    // fail; a draft §6.4.1 argument error is raised past
+    // [`poll_resolve`](Self::poll_resolve)'s gate, which has already refused to pop at the ceiling;
+    // and [`expand`](Self::expand)'s budget refusals run from the root with nothing outstanding at
+    // all. Move the gate behind `coerce_arguments` and the third of those stops holding: an
+    // argument error at a full ceiling would promote every live sibling, and `poll_resolve` would
+    // go on returning `None` to a driver that had answered everything it was asked.
+    //
+    // Three paths, three different reasons, one predicate — which is why it is checked rather than
+    // argued. Debug-only: the same argument bounds the release build, and nothing here is a
+    // memory-safety condition.
+    debug_assert!(
+      self.live + self.abandoned < self.limits.max_in_flight.get(),
+      "draft §6.4.4 closed the in-flight ceiling: {} live and {} abandoned at a ceiling of {}",
+      self.live,
+      self.abandoned,
+      self.limits.max_in_flight,
+    );
   }
 
   /// Takes the subtree at `root` out of the response, releasing every driver value in it.

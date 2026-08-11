@@ -4259,6 +4259,7 @@ type Holder {
   text: String
   inner: Holder
   required: String!
+  stamped(mark: String!): Holder!
 }
 "#;
 
@@ -4614,6 +4615,11 @@ fn an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation() 
 /// do at this ceiling. The slot the argument promises is the one `two` is then offered in, with
 /// the channel never polled.
 ///
+/// This case drives the *resolver* half of that list, where the free slot comes from a release the
+/// failing request itself performed. The §6.4.1 half rests on the gate's position instead and has
+/// its own case below, in
+/// [`an_argument_error_at_the_ceiling_leaves_a_slot_for_the_next_mutation_field`].
+///
 /// # Two children under `two`, and why one was not enough
 ///
 /// The refusal this case used to rest on was polled while `two`'s subtree held nothing ready, so
@@ -4720,6 +4726,146 @@ fn an_abandonment_can_never_take_the_last_in_flight_slot() {
     executor.poll_abandoned(),
     None,
     "and the discard promoted no third"
+  );
+}
+
+/// The same bound, reached through draft §6.4.1 instead of through a resolver.
+///
+/// The case above releases the failing request itself — `handle_field_error` is past `release` —
+/// so the free slot it observes is the one that request gave back. An **argument** error has no
+/// request to give back: `poll_resolve` raises it on a candidate it never handed out, and the only
+/// thing standing between it and a full ceiling is the order of two statements. The gate refuses
+/// to pop at the ceiling *before* `coerce_arguments` runs, so the raise happens with at most
+/// `max_in_flight - 1` outstanding, and promoting every one of them still leaves the ceiling one
+/// short of closed. Coerce first and check second, and an argument error at a full ceiling
+/// promotes every live sibling instead: `abandoned` reaches the ceiling, and `poll_resolve` goes
+/// on answering `None` until the driver acts on work it has been told to stop doing — retiring an
+/// entry on the abandonment channel, which
+/// [`Limits::max_in_flight`](smear::proto::Limits::max_in_flight) documents as optional, or
+/// answering one of the cancelled requests, which `release` retires as well.
+///
+/// The field the case needs did not exist in this schema until it was written. `tagged` carries a
+/// required argument and returns a **nullable** `Holder`, so its argument error nulls itself and
+/// abandons nothing; nulling a *sibling's* subtree takes a non-null position, which is what
+/// `stamped(mark: String!): Holder!` is for.
+///
+/// # What each half of the run pins
+///
+/// The refusal at three live requests is the one that fails under the reordering, and it is
+/// asserted the only way a driver can see it: `poll_abandoned` answering `None` says the executor
+/// declined to *look at* `one.stamped`, rather than looking at it, cancelling three requests and
+/// declining for that reason instead. The offer of `two` afterwards is the bound itself — two
+/// entries promoted, the third slot free, and the next mutation field handed out in the very poll
+/// that raised the error. Nothing is retired on the abandonment channel until after the response
+/// is delivered: the single poll of it before then answers `None`, so it hands no slot back and
+/// every refusal the run asserts is the ceiling's own.
+#[test]
+fn an_argument_error_at_the_ceiling_leaves_a_slot_for_the_next_mutation_field() {
+  let query = "mutation ($m: String!) { one { a: text b: text c: text stamped(mark: $m) { text } } \
+               two { a: text b: text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  // `$m` is declared and never supplied, which is draft §6.4.1 step 5.d's field error — raised
+  // inside `poll_resolve`, on a slot that never became a request.
+  let mut space = Space::default();
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(3).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  // Three live requests is the ceiling, and `one.stamped` is what is left at the head of the ready
+  // chain behind them.
+  let (path, keeper) = offer(&mut executor, &mut space).expect("`one.a`");
+  assert_eq!(path, "one.a");
+  let (path, promoted_b) = offer(&mut executor, &mut space).expect("`one.b`");
+  assert_eq!(path, "one.b");
+  let (path, promoted_c) = offer(&mut executor, &mut space).expect("`one.c`");
+  assert_eq!(path, "one.c");
+
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`one.stamped` is ready and three live requests is the ceiling"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "and the refusal is the gate declining to pop, not draft §6.4.1 running at a full ceiling: an \
+     argument error raised here would have promoted all three live siblings and left `abandoned` \
+     equal to the ceiling, which is the one state `poll_resolve` cannot poll its way out of"
+  );
+
+  // One slot back, and now the candidate the gate was holding is popped, coerced, and refused.
+  executor.handle_resolved(&mut space, keeper, J::Str("1".to_owned()));
+
+  let (path, two) = offer(&mut executor, &mut space).expect(
+    "`stamped` is non-null, so its argument error nulls `one` and abandons the two siblings still \
+     outstanding — and the slot the gate kept free is the one `two` is offered in, in the same \
+     poll that raised the error and without a single entry having been retired",
+  );
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+
+  let (path, first) = offer(&mut executor, &mut space).expect("`two.a`");
+  assert_eq!(path, "two.a");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two.b` is ready and refused: one live request plus both promoted entries is the whole of a \
+     ceiling of three, which says the two slots are still occupied and not quietly retired"
+  );
+
+  executor.handle_resolved(&mut space, first, J::Str("2".to_owned()));
+  let (path, second) =
+    offer(&mut executor, &mut space).expect("`two.b`, in the slot answering its sibling freed");
+  assert_eq!(path, "two.b");
+  executor.handle_resolved(&mut space, second, J::Str("2".to_owned()));
+
+  let response = executor
+    .poll_response()
+    .expect("the mutation finished with both abandoned entries still in the table");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    response
+      .errors()
+      .next()
+      .expect("one error was raised")
+      .kind(),
+    Kind::ArgumentVariableMissing
+  );
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"a":"2","b":"2"}}"#
+  );
+
+  // Which entries were holding those two slots. `one.a` was answered before the discard, so it is
+  // not among them — the discard promotes what is outstanding, not what the subtree contained.
+  let mut retired = [
+    executor
+      .poll_abandoned()
+      .expect("the first entry the discard promoted"),
+    executor
+      .poll_abandoned()
+      .expect("the second, which a nullable `stamped` would not have produced at all"),
+  ];
+  retired.sort_unstable();
+  let mut promoted = [promoted_b, promoted_c];
+  promoted.sort_unstable();
+  assert_eq!(
+    retired, promoted,
+    "`one.b` and `one.c` are the entries that were occupying the ceiling, and both were still \
+     there at delivery"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "and `one.a`, answered while `one` was still alive, was retired by that answer"
   );
 }
 
