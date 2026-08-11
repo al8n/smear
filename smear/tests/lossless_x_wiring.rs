@@ -27,7 +27,7 @@ use trivia_probe::assert_trivia_survives_lexing;
 
 /// The wiring guard, stated where it is actually decided.
 ///
-/// Phase B found this missing: `smear/src/lexer/graphqlx/lossless/token.rs`'s two `tokora::Token`
+/// Phase B found this missing: `smear-lexer/src/graphqlx/lossless/token.rs`'s two `tokora::Token`
 /// impls define `Kind`, `Error`, `kind` and `is_trivia` and stop there, so the associated constant
 /// took tokora's default of `false` and a GraphQLx `Sink` would have failed to build — as an
 /// `E0080` from inside tokora, a long way from the declaration that caused it. This states the

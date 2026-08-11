@@ -1,0 +1,77 @@
+[package]
+name = "smear-lexer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Zero-copy lexers for GraphQL and GraphQLx: a syntactic token stream that skips trivia and a lossless one that keeps every byte of it."
+keywords = ["graphql", "lexer", "tokenizer", "zero-copy", "no-std"]
+categories = ["parsing", "parser-implementations", "no-std"]
+
+# A real file, not a symlink: this crate has its own README and there is nothing for it to drift
+# from. `smear/README.md` is a symlink because that one IS the workspace-root landing page.
+readme = "README.md"
+
+# The irreducible base of the stack, and the crate this split restores. #84 merged it into `smear`
+# behind a `parser` feature; the full-stack target reverses that, because a syntax highlighter, a
+# formatter front end or a token-level tool has no reason to resolve the parser tower, let alone
+# the schema and the protocol machine, to read tokens.
+#
+# There is deliberately NO `lexer` feature here and none in the umbrella: the lexer is what this
+# crate IS, and a gate that can only ever be on is not a gate.
+
+[features]
+# Element-for-element the subset of `smear`'s own default that reaches this layer: `std`, both
+# dialects, and `smallvec`. `smear` names every member feature explicitly with
+# `default-features = false`, so this list governs a DIRECT dependent and nothing else.
+default = ["std", "graphql", "graphqlx", "smallvec"]
+
+std = [
+  "tokora/std",
+  "memspan/std",
+  "thiserror/default",
+  "bytes?/default",
+  "bstr?/default",
+  "hipstr?/default",
+]
+
+# The two dialects. Each is a module only in a build that enables it, which is why every doc link
+# to one is `#[cfg_attr]`-gated: ungated they are `unresolved link` errors under
+# `RUSTDOCFLAGS="-D warnings"` in a single-dialect build.
+graphql = []
+graphqlx = []
+
+# The source-representation integrations. Each turns on the matching `tokora` backing so the
+# lexer's `Source` implementations line up with the substrate's; enabling the dependency alone
+# would compile the type in and leave the substrate half missing.
+smallvec = ["dep:smallvec"]
+bytes = ["dep:bytes", "tokora/bytes_1"]
+bstr = ["dep:bstr", "tokora/bstr_1"]
+hipstr = ["dep:hipstr", "tokora/hipstr_0_8"]
+smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
+
+[dependencies]
+derive_more.workspace = true
+paste = "1"
+thiserror.workspace = true
+tokora.workspace = true
+
+# `std` is carried by this crate's own `std` feature, not enabled here. Pinning it on the dependency
+# line put `memspan/std` in the graph of a `--no-default-features` build, so the member advertised
+# `#![no_std]` while its dependency was always compiled against std.
+memspan = { version = "0.1", default-features = false }
+
+hipstr = { version = "0.8", default-features = false, optional = true }
+bytes = { workspace = true, optional = true }
+smol-bytes = { workspace = true, optional = true }
+bstr = { workspace = true, optional = true }
+smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -1,0 +1,49 @@
+[package]
+name = "smear-compiler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Draft §5 GraphQL document validation over a built schema, with an allocation-free steady state and a caller-owned report sink."
+keywords = ["graphql", "validation", "linter", "no-std"]
+categories = ["parsing", "web-programming", "no-std"]
+readme = "README.md"
+
+# NOT named `smear-validator`, and the design says why: the crate would validate nothing under that
+# name — it also carries the §3 build's caller, the rule vocabulary and the diagnostic rendering. A
+# name that misdescribes its contents is the defect family this program keeps hitting.
+#
+# `smear-schema` is taken WITH `build`, unlike `graphql-proto`'s edge, and that is the whole
+# difference between the two consumers: this crate produces a `Schema`, the protocol machine reads
+# one.
+
+[features]
+default = ["std"]
+
+std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
+
+# The lossless door: the same draft §5 rules over a rowan CST, by projecting it to the same AST
+# rather than by being a second validator. `std` because the runner needs it.
+#
+# EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH until `rowan` is fixed upstream — #77 has
+# the evidence, and `ci/miri_scope.py` fails the Miri matrix if it ever resolves ON inside it.
+rowan = ["smear-parser/rowan", "std"]
+
+# The second construction door, forwarded rather than re-implemented: `Schema::from_introspection`
+# lives in `smear-schema` and this crate re-exports its error type.
+introspection = ["smear-schema/introspection", "std"]
+
+[dependencies]
+tokora.workspace = true
+
+smear-parser = { workspace = true, features = ["graphql"] }
+smear-schema = { workspace = true, features = ["build"] }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
