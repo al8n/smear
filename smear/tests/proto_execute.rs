@@ -28,7 +28,9 @@ use smear::{
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
-  proto::{ArgumentSource, Executor, Kind, Leaf, Limits, Node, Response, StartError, Values},
+  proto::{
+    ArgumentSource, Executor, Kind, Leaf, Limits, Node, ReqId, Response, StartError, Values,
+  },
   validator::{Budget, First, Schema, Scratch, validate_executable},
 };
 
@@ -1958,6 +1960,10 @@ type Query {
   pair(first: String, second: String!): String
   nest: Wrap
 }
+type Mutation {
+  first: Wrap
+  second: Wrap
+}
 type Wrap {
   boom: String!
   echo(text: String): String
@@ -2542,9 +2548,14 @@ fn get_operation_refuses_what_it_cannot_run() {
     StartError::UnknownOperation
   );
   assert_eq!(
-    start_error(sdl, "mutation { m }", None),
-    StartError::NotAQuery,
-    "a mutation is refused rather than run serially-by-accident"
+    start_error(sdl, "subscription { m }", None),
+    StartError::NotAQueryOrMutation,
+    "draft §6.2.3 is a stream of responses and this surface delivers one"
+  );
+  assert_eq!(
+    start_error("type Query { a: String }", "mutation { m }", None),
+    StartError::NoMutationRoot,
+    "draft §6.2.2 step 2 wants a mutation root object and this schema declares none"
   );
   assert_eq!(
     start_error(
@@ -4221,4 +4232,1038 @@ fn a_merged_key_refused_during_collection_points_at_the_first_selection() {
     (first, first + "nullable".len()),
     "the group's first selection at byte {first}, not the duplicate that happened to cross"
   );
+}
+
+// ------------------------------------------------------------------------------------------
+// draft §6.2.2 ExecuteMutation: serial, by withholding
+// ------------------------------------------------------------------------------------------
+//
+// The property is *what the executor is willing to have outstanding*, and it is invisible to the
+// obvious driver: one that answers every request before asking for the next serialises everything
+// it is handed, mutation or query, and would pass a suite written that way with the rule deleted.
+// So every case below polls **twice without answering in between**, and the second poll is the
+// assertion. `a_query_offers_every_top_level_field_at_once` is the control that makes the rest mean
+// something — without it an executor that offered nothing at all would satisfy the section.
+
+const MUTATION_SDL: &str = r#"
+type Query {
+  reading: String
+}
+type Mutation {
+  one: Holder
+  two: Holder
+  strict: Holder!
+  tagged(mark: String!): Holder
+}
+type Holder {
+  text: String
+  inner: Holder
+  required: String!
+  stamped(mark: String!): Holder!
+}
+"#;
+
+/// Polls one field request and returns its draft §7.1.2 path and its id.
+///
+/// The borrow a [`FieldRequest`](smear::proto::FieldRequest) holds is why this exists: the cases
+/// below poll again *without* answering, which cannot be written while a request is still alive.
+/// The path rather than the name, because it is the response key and so distinguishes
+/// `one` from `one.text` and an alias from the field it aliases.
+fn offer(executor: &mut Executor<'_, &str, Space>, space: &mut Space) -> Option<(String, ReqId)> {
+  let request = executor.poll_resolve(space)?;
+  Some((request.path().to_string(), request.id()))
+}
+
+fn holder(text: &str) -> J {
+  J::Obj(
+    "Holder",
+    vec![("text", J::Str(text.to_owned())), ("inner", J::Null)],
+  )
+}
+
+fn mutation(query: &str) -> (Schema, ExecutableDocument<&str>) {
+  compile(MUTATION_SDL, query)
+}
+
+/// A mutation offers its first top-level field and withholds the second.
+///
+/// Draft §6.2.2 step 4 runs the top-level selection set *serially*, and this is the whole of what
+/// that means to a driver: the second field does not exist to be resolved yet.
+#[test]
+fn a_mutation_offers_one_top_level_field_at_a_time() {
+  let query = "mutation { one { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("the first top-level field");
+  assert_eq!(path, "one");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two` is the next top-level field and must not be offered while `one` is unresolved"
+  );
+
+  executor.handle_resolved(&mut space, one, holder("1"));
+  let (path, _) = offer(&mut executor, &mut space).expect("`one`'s sub-selection");
+  assert_eq!(
+    path, "one.text",
+    "the subtree of `one` is what comes next, not `two`"
+  );
+}
+
+/// The control: a query offers every top-level field at once.
+///
+/// Without this the section proves nothing. An executor that withheld *everything* — a
+/// `poll_resolve` that returned `None` forever — would satisfy every other case here, and this is
+/// the one it fails.
+#[test]
+fn a_query_offers_every_top_level_field_at_once() {
+  let (schema, document) = compile(BUDGET_SDL, "{ a b c }");
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let offered: Vec<String> = (0..3)
+    .map(|_| {
+      offer(&mut executor, &mut space)
+        .expect("a query has no serial rule")
+        .0
+    })
+    .collect();
+  assert_eq!(
+    offered,
+    vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
+    "all three are outstanding at once, none of them answered"
+  );
+}
+
+/// The next top-level field waits for the previous one's **subtree**, not for its answer.
+///
+/// The discriminating case for the two readings of §6.2.2, and the reason `graphql-js` was measured
+/// rather than argued with: upstream's `executeFieldsSerially` awaits `executeField`, whose promise
+/// is `completeValue`'s, so `nested(a)` runs before `b`'s resolver. An executor that released on
+/// the answer alone would offer `two` at the first assertion below — and it would be running the
+/// second mutation's side effect while the first mutation's sub-selection was still resolving.
+///
+/// This is the *live* subtree, and the whole of the guarantee's positive half. Its boundary is
+/// [`an_abandoned_nested_request_does_not_withhold_the_next_mutation_field`], which measures what
+/// happens to a subtree draft §6.4.4 has already discarded — the case where "finished" and
+/// "no longer able to affect the response" come apart.
+#[test]
+fn a_mutation_withholds_for_the_subtree_and_not_just_the_answer() {
+  let query = "mutation { one { inner { text } } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(
+    &mut space,
+    one,
+    J::Obj("Holder", vec![("inner", holder("deep"))]),
+  );
+
+  let (path, inner) = offer(&mut executor, &mut space).expect("`one.inner`");
+  assert_eq!(path, "one.inner");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`one` has been answered and its subtree has not finished, so `two` is still withheld"
+  );
+
+  executor.handle_resolved(&mut space, inner, holder("deep"));
+  let (path, text) = offer(&mut executor, &mut space).expect("`one.inner.text`");
+  assert_eq!(path, "one.inner.text");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "two levels down and still outstanding"
+  );
+
+  executor.handle_resolved(&mut space, text, J::Str("deep".to_owned()));
+  let (path, _) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two", "and only now");
+}
+
+/// An **abandoned** nested request does not withhold the next top-level mutation field.
+///
+/// The boundary of the guarantee above, and the one place "the previous field's subtree has
+/// finished" and "nothing under it can still affect the response" disagree. Draft §6.4.4 nulls
+/// `one` when its non-null `required` fails; `one.text` is still outstanding at that instant and
+/// becomes *abandoned* rather than answered, so it is in the in-flight table but no longer in any
+/// position a response could read. `release_serial` does not wait for it.
+///
+/// # Measured, not chosen
+///
+/// The two candidate rules — gate the release on abandoned work too, or release over it — are a
+/// semantics question, and this module settles those against the reference implementation. Run on
+/// `graphql-js` 16.11.0 with the same shape as the document below, where `Sub.failing: Int!`
+/// resolves to null through a promise and `Sub.outstanding: Int` returns a promise the probe
+/// settles by hand from a later macrotask:
+///
+/// ```text
+/// mutation { first { outstanding failing } second { outstanding } }
+/// ```
+///
+/// ```text
+/// 1. resolver: first
+/// 2. resolver: first.outstanding   (returns a promise nobody has settled)
+/// 3. resolver: first.failing       (resolves null, which Int! rejects)
+/// 4. resolver: SECOND
+/// 5. resolver: second.outstanding
+/// 6. --- the probe settles the deferred first.outstanding ---
+/// {"data":{"first":null,"second":{"outstanding":7}},
+///  "errors":[{"message":"Cannot return null for non-nullable field Sub.failing.",
+///             "path":["first","failing"]}]}
+/// ```
+///
+/// `second`'s resolver runs at step 4, two steps before `first.outstanding` can possibly settle.
+/// The control run of the same probe with `failing` resolving to `1` instead puts `second` at step
+/// 6, *after* the deferral — which is what proves the non-wait is caused by the failure and not by
+/// a probe that never waits for anything. Upstream's mechanism is `promiseForObject`'s
+/// `Promise.all`: it rejects on the first rejection without waiting for its siblings, and a
+/// rejected promise chain in JS does not cancel them.
+///
+/// So gating the release on `abandoned` would make this executor **stricter than the reference
+/// implementation**, and it would put the next mutation field behind a call —
+/// [`poll_abandoned`](smear::proto::Executor::poll_abandoned) — that no other one can substitute
+/// for.
+///
+/// This case drains that channel and runs at the default ceiling, so it measures the release rule
+/// and says nothing about what an *undrained* entry costs.
+/// [`an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation`] is its pair and
+/// does neither.
+#[test]
+fn an_abandoned_nested_request_does_not_withhold_the_next_mutation_field() {
+  let query = "mutation { one { text required } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  // Left unanswered for the rest of the test, so that it is genuinely outstanding at the moment
+  // the sibling fails. A case that answered it first would be measuring the order of two answers
+  // and not the rule.
+  let (path, text) = offer(&mut executor, &mut space).expect("`one.text`");
+  assert_eq!(path, "one.text");
+  let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
+  assert_eq!(path, "one.required");
+
+  // `required` is `String!`, so §6.4.4 walks up to `one` — nullable, so it stops there — discards
+  // that subtree, and abandons everything still outstanding under it, which is `one.text`.
+  executor.handle_field_error(required, "no");
+
+  let (path, two) = offer(&mut executor, &mut space).expect(
+    "`one`'s subtree can no longer contribute to the response, so `two` is released over the \
+     nested request that is still outstanding under it",
+  );
+  assert_eq!(path, "two");
+  // Polled *after* `two` was offered, and deliberately: it is the proof that the request was still
+  // in the in-flight table — neither answered nor retired — at the moment the next mutation's side
+  // effect was handed out. Polling it first would have retired the entry and made the assertion
+  // above pass under either rule.
+  assert_eq!(
+    executor.poll_abandoned(),
+    Some(text),
+    "`one.text` was cancelled by the discard, not answered"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "and it was the only one under `one`"
+  );
+
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let errors: Vec<(String, String)> = response
+    .errors()
+    .map(|error| (error.path().to_string(), error.to_string()))
+    .collect();
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(
+    errors[0].0, "one.required",
+    "upstream's path is [first, failing]: {errors:?}"
+  );
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"text":"2"}}"#,
+    "upstream's data is {{\"first\":null,\"second\":{{\"outstanding\":7}}}}"
+  );
+}
+
+/// The same release at the in-flight ceiling, with the abandonment channel **never polled**.
+///
+/// The pair to the case above rather than a variation on it, and the difference is the whole
+/// point. That one drains [`poll_abandoned`](smear::proto::Executor::poll_abandoned) and runs at
+/// the default ceiling, so it measures the release rule and says nothing about what an *undrained*
+/// entry costs. This one never touches the channel, and the ceiling is two so that the one entry
+/// it leaves behind is half of it.
+///
+/// # The `None` in the middle is the load-bearing assertion
+///
+/// `two { a: text b: text }` selects two children, and only one of them can be outstanding at a
+/// time here: the abandoned `one.text` is still holding the other slot. That refusal is what
+/// proves the entry was never retired — a run in which it had quietly gone away would offer both
+/// children and look identical in every other respect, including its response.
+///
+/// # And the mutation still finishes
+///
+/// Which is the liveness claim, stated at its edge. `two` is released over the abandoned entry,
+/// both its children are answered one at a time, and the response is delivered while the entry is
+/// still in the table. Ignoring the channel costs *concurrency* — one slot of two, for as long as
+/// the driver ignores it — and not progress; see
+/// [`an_abandonment_can_never_take_the_last_in_flight_slot`] for why that is a bound and not an
+/// artefact of these numbers.
+#[test]
+fn an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation() {
+  let query = "mutation { one { text required } two { a: text b: text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  // Left unanswered for the whole test. It is the entry that never retires.
+  let (path, _text) = offer(&mut executor, &mut space).expect("`one.text`");
+  assert_eq!(path, "one.text");
+  let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
+  assert_eq!(path, "one.required");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "two live requests is the ceiling"
+  );
+
+  // §6.4.4 nulls `one` and moves `one.text` from live to abandoned, which frees no slot.
+  executor.handle_field_error(required, "no");
+
+  let (path, two) = offer(&mut executor, &mut space)
+    .expect("`two` is released over the abandoned entry, exactly as it is when the driver drains");
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+
+  let (path, first) = offer(&mut executor, &mut space).expect("`two.a`");
+  assert_eq!(path, "two.a");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two.b` is ready and the ceiling refuses it: one live request plus the abandoned `one.text`, \
+     which is still in the in-flight table because nothing has retired it"
+  );
+
+  executor.handle_resolved(&mut space, first, J::Str("2".to_owned()));
+  let (path, second) = offer(&mut executor, &mut space)
+    .expect("`two.b`, now that answering its sibling has freed the one slot the driver has");
+  assert_eq!(path, "two.b");
+  executor.handle_resolved(&mut space, second, J::Str("2".to_owned()));
+
+  let response = executor
+    .poll_response()
+    .expect("the abandoned entry does not withhold the response either");
+  let errors: Vec<(String, String)> = response
+    .errors()
+    .map(|error| (error.path().to_string(), error.to_string()))
+    .collect();
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(errors[0].0, "one.required", "{errors:?}");
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"a":"2","b":"2"}}"#,
+    "the whole mutation ran, with `one.text` outstanding from start to finish"
+  );
+}
+
+/// An abandonment can never take the **last** in-flight slot.
+///
+/// The bound under the case above, and the reason its claim needs no qualifier about how many
+/// requests were abandoned. Everything that abandons runs `propagate` from a field error, and
+/// every field error is raised at a moment when at least one slot is already free:
+/// `handle_resolved` and `handle_field_error` release their own request before they can fail, and
+/// `poll_resolve`'s draft §6.4.1 failure is past the gate that already refused to pop at the
+/// ceiling. A discard can therefore promote only the requests that were live *besides* the one
+/// that caused it, so the count of abandoned entries is bounded by `max_in_flight - 1`.
+///
+/// Driven to that bound rather than argued: a ceiling of three, all three slots outstanding under
+/// `one`, and the third fails — abandoning the other two, which is the most any single discard can
+/// do at this ceiling. The slot the argument promises is the one `two` is then offered in, with
+/// the channel never polled.
+///
+/// This case drives the *resolver* half of that list, where the free slot comes from a release the
+/// failing request itself performed. The §6.4.1 half rests on the gate's position instead and has
+/// its own case below, in
+/// [`an_argument_error_at_the_ceiling_leaves_a_slot_for_the_next_mutation_field`].
+///
+/// # Two children under `two`, and why one was not enough
+///
+/// The refusal this case used to rest on was polled while `two`'s subtree held nothing ready, so
+/// it followed from an empty queue rather than from the ceiling — a rule that abandoned one
+/// sibling and *retired* the other would have produced the same `None`, leaving the `max - 1` edge
+/// unobserved. `two` selects two children now, and the refusal between them is the assertion:
+/// `two.b` is ready, one live request plus **two** abandoned entries is the whole of a ceiling of
+/// three, and only a run in which both entries are still occupying slots withholds it.
+///
+/// That refusal says the slots are taken; it does not say by what.
+/// [`poll_abandoned`](smear::proto::Executor::poll_abandoned) after the response says that — the
+/// two ids it yields are the `one.a` and `one.b` the discard promoted, and there is no third.
+/// Either half alone reads as an accident of these numbers.
+#[test]
+fn an_abandonment_can_never_take_the_last_in_flight_slot() {
+  let query = "mutation { one { a: text b: text required } two { a: text b: text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(3).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  // Neither is ever answered. These are the two entries the discard below promotes, and they are
+  // still in the in-flight table when the response is delivered.
+  let (path, promoted_a) = offer(&mut executor, &mut space).expect("`one.a`");
+  assert_eq!(path, "one.a");
+  let (path, promoted_b) = offer(&mut executor, &mut space).expect("`one.b`");
+  assert_eq!(path, "one.b");
+  let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
+  assert_eq!(path, "one.required");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "three live requests is the ceiling"
+  );
+
+  // The failing request is released before it fails, so the discard finds two live siblings and
+  // the slot the third one occupied is already free when it promotes them.
+  executor.handle_field_error(required, "no");
+
+  let (path, two) = offer(&mut executor, &mut space).expect(
+    "two of three slots hold abandoned entries and the third is free, because the request that \
+     caused the discard had already released it",
+  );
+  assert_eq!(path, "two");
+  // One live request plus two abandoned entries is the ceiling again at this point, but nothing
+  // under `two` is ready to be withheld yet, so a poll here would answer `None` whatever the
+  // counters held. The refusal that discriminates is the one below, after answering `two` has put
+  // its two children on the chain.
+  executor.handle_resolved(&mut space, two, holder("2"));
+
+  let (path, first) = offer(&mut executor, &mut space).expect("`two.a`");
+  assert_eq!(path, "two.a");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two.b` is ready and the ceiling refuses it: one live request plus both abandoned entries is \
+     the whole of a ceiling of three, and a discard that had promoted only one of them would hand \
+     it out"
+  );
+
+  executor.handle_resolved(&mut space, first, J::Str("2".to_owned()));
+  let (path, second) =
+    offer(&mut executor, &mut space).expect("`two.b`, in the one slot answering its sibling freed");
+  assert_eq!(path, "two.b");
+  executor.handle_resolved(&mut space, second, J::Str("2".to_owned()));
+
+  let response = executor
+    .poll_response()
+    .expect("the mutation finished with both abandoned entries still in the table");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"a":"2","b":"2"}}"#
+  );
+
+  // Which entries were holding those two slots, asserted rather than read off the refusal above.
+  // Polled after the response, so that no retirement can have helped anything the run asserted.
+  let mut retired = [
+    executor
+      .poll_abandoned()
+      .expect("the first entry the discard promoted"),
+    executor
+      .poll_abandoned()
+      .expect("the second, which a rule that retired one sibling instead would not produce"),
+  ];
+  retired.sort_unstable();
+  let mut promoted = [promoted_a, promoted_b];
+  promoted.sort_unstable();
+  assert_eq!(
+    retired, promoted,
+    "`one.a` and `one.b` are the entries that were occupying the ceiling, and both were still \
+     there at delivery"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "and the discard promoted no third"
+  );
+}
+
+/// The same bound, reached through draft §6.4.1 instead of through a resolver.
+///
+/// The case above releases the failing request itself — `handle_field_error` is past `release` —
+/// so the free slot it observes is the one that request gave back. An **argument** error has no
+/// request to give back: `poll_resolve` raises it on a candidate it never handed out, and the only
+/// thing standing between it and a full ceiling is the order of two statements. The gate refuses
+/// to pop at the ceiling *before* `coerce_arguments` runs, so the raise happens with at most
+/// `max_in_flight - 1` outstanding, and promoting every one of them still leaves the ceiling one
+/// short of closed. Coerce first and check second, and an argument error at a full ceiling
+/// promotes every live sibling instead: `abandoned` reaches the ceiling, and `poll_resolve` goes
+/// on answering `None` until the driver acts on work it has been told to stop doing — retiring an
+/// entry on the abandonment channel, which
+/// [`Limits::max_in_flight`](smear::proto::Limits::max_in_flight) documents as optional, or
+/// answering one of the cancelled requests, which `release` retires as well.
+///
+/// The field the case needs did not exist in this schema until it was written. `tagged` carries a
+/// required argument and returns a **nullable** `Holder`, so its argument error nulls itself and
+/// abandons nothing; nulling a *sibling's* subtree takes a non-null position, which is what
+/// `stamped(mark: String!): Holder!` is for.
+///
+/// # What each half of the run pins
+///
+/// The refusal at three live requests is the one that fails under the reordering, and it is
+/// asserted the only way a driver can see it: `poll_abandoned` answering `None` says the executor
+/// declined to *look at* `one.stamped`, rather than looking at it, cancelling three requests and
+/// declining for that reason instead. The offer of `two` afterwards is the bound itself — two
+/// entries promoted, the third slot free, and the next mutation field handed out in the very poll
+/// that raised the error. Nothing is retired on the abandonment channel until after the response
+/// is delivered: the single poll of it before then answers `None`, so it hands no slot back and
+/// every refusal the run asserts is the ceiling's own.
+#[test]
+fn an_argument_error_at_the_ceiling_leaves_a_slot_for_the_next_mutation_field() {
+  let query = "mutation ($m: String!) { one { a: text b: text c: text stamped(mark: $m) { text } } \
+               two { a: text b: text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  // `$m` is declared and never supplied, which is draft §6.4.1 step 5.d's field error — raised
+  // inside `poll_resolve`, on a slot that never became a request.
+  let mut space = Space::default();
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(3).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  // Three live requests is the ceiling, and `one.stamped` is what is left at the head of the ready
+  // chain behind them.
+  let (path, keeper) = offer(&mut executor, &mut space).expect("`one.a`");
+  assert_eq!(path, "one.a");
+  let (path, promoted_b) = offer(&mut executor, &mut space).expect("`one.b`");
+  assert_eq!(path, "one.b");
+  let (path, promoted_c) = offer(&mut executor, &mut space).expect("`one.c`");
+  assert_eq!(path, "one.c");
+
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`one.stamped` is ready and three live requests is the ceiling"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "and the refusal is the gate declining to pop, not draft §6.4.1 running at a full ceiling: an \
+     argument error raised here would have promoted all three live siblings and left `abandoned` \
+     equal to the ceiling, which is the one state `poll_resolve` cannot poll its way out of"
+  );
+
+  // One slot back, and now the candidate the gate was holding is popped, coerced, and refused.
+  executor.handle_resolved(&mut space, keeper, J::Str("1".to_owned()));
+
+  let (path, two) = offer(&mut executor, &mut space).expect(
+    "`stamped` is non-null, so its argument error nulls `one` and abandons the two siblings still \
+     outstanding — and the slot the gate kept free is the one `two` is offered in, in the same \
+     poll that raised the error and without a single entry having been retired",
+  );
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+
+  let (path, first) = offer(&mut executor, &mut space).expect("`two.a`");
+  assert_eq!(path, "two.a");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two.b` is ready and refused: one live request plus both promoted entries is the whole of a \
+     ceiling of three, which says the two slots are still occupied and not quietly retired"
+  );
+
+  executor.handle_resolved(&mut space, first, J::Str("2".to_owned()));
+  let (path, second) =
+    offer(&mut executor, &mut space).expect("`two.b`, in the slot answering its sibling freed");
+  assert_eq!(path, "two.b");
+  executor.handle_resolved(&mut space, second, J::Str("2".to_owned()));
+
+  let response = executor
+    .poll_response()
+    .expect("the mutation finished with both abandoned entries still in the table");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    response
+      .errors()
+      .next()
+      .expect("one error was raised")
+      .kind(),
+    Kind::ArgumentVariableMissing
+  );
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"a":"2","b":"2"}}"#
+  );
+
+  // Which entries were holding those two slots. `one.a` was answered before the discard, so it is
+  // not among them — the discard promotes what is outstanding, not what the subtree contained.
+  let mut retired = [
+    executor
+      .poll_abandoned()
+      .expect("the first entry the discard promoted"),
+    executor
+      .poll_abandoned()
+      .expect("the second, which a nullable `stamped` would not have produced at all"),
+  ];
+  retired.sort_unstable();
+  let mut promoted = [promoted_b, promoted_c];
+  promoted.sort_unstable();
+  assert_eq!(
+    retired, promoted,
+    "`one.b` and `one.c` are the entries that were occupying the ceiling, and both were still \
+     there at delivery"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "and `one.a`, answered while `one` was still alive, was retired by that answer"
+  );
+}
+
+/// A ceiling of one abandons nothing at all.
+///
+/// The other end of the same bound, and the case a reader checks first: if abandoned entries are
+/// capped at `max_in_flight - 1`, then at the smallest legal ceiling they are capped at *zero*.
+///
+/// The mechanism is visible here rather than arithmetic. A driver at this ceiling cannot hold a
+/// second request open to be abandoned — the `None` below is the executor refusing to let it — so
+/// by the time anything under `one` can fail, `one`'s other requests have all been answered and
+/// the discard finds nothing outstanding to promote.
+#[test]
+fn a_ceiling_of_one_abandons_nothing() {
+  let query = "mutation { one { text required } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let limits = Limits {
+    max_in_flight: NonZeroU32::MIN,
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  let (path, text) = offer(&mut executor, &mut space).expect("`one.text`");
+  assert_eq!(path, "one.text");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`one.required` is ready and cannot be outstanding beside `one.text`, which is the whole \
+     reason nothing here can ever be abandoned"
+  );
+
+  executor.handle_resolved(&mut space, text, J::Str("1".to_owned()));
+  let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
+  assert_eq!(path, "one.required");
+  executor.handle_field_error(required, "no");
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "the discard walked a subtree whose every request had already been answered"
+  );
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (path, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  assert_eq!(path, "two.text");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"text":"2"}}"#
+  );
+}
+
+/// A mutation with a field still withheld is not a finished response.
+///
+/// The path a driver takes when it asks for the response before asking for work. `poll_response`
+/// reads the ready chain and the in-flight table, and a withheld field is in neither — so without
+/// the release on this path the executor would hand back a response missing every mutation after
+/// the first, with no error to say so.
+#[test]
+fn a_mutation_is_not_finished_while_a_field_is_still_withheld() {
+  let query = "mutation { one { text } two { text } }";
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (_, one) = offer(&mut executor, &mut space).expect("`one`");
+  executor.handle_resolved(&mut space, one, holder("1"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`one.text`");
+  executor.handle_resolved(&mut space, text, J::Str("1".to_owned()));
+
+  assert!(
+    executor.poll_response().is_none(),
+    "`two` has not run, so this response would be missing a field the document asked for"
+  );
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":{"text":"1"},"two":{"text":"2"}}"#
+  );
+}
+
+/// A `__typename` between two mutation fields is answered in place and stops nothing.
+///
+/// It never joins the ready chain, so the cut that withholds the rest never sees it — and the
+/// response still carries it in document order, because order is the slots' creation order and not
+/// the order they were offered in.
+#[test]
+fn a_typename_between_two_mutation_fields_keeps_its_place() {
+  let query = "mutation { one { text } __typename two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (data, errors) = run(
+    MUTATION_SDL,
+    query,
+    J::Obj("Mutation", vec![("one", holder("1")), ("two", holder("2"))]),
+  );
+  assert!(errors.is_empty(), "{errors:?}");
+  assert_eq!(
+    data,
+    r#"{"one":{"text":"1"},"__typename":"Mutation","two":{"text":"2"}}"#
+  );
+}
+
+/// A mutation of nothing but `__typename` asks the driver for nothing at all.
+#[test]
+fn a_mutation_of_only_typename_issues_no_field_request() {
+  let (data, errors) = run(MUTATION_SDL, "mutation { __typename }", obj(vec![]));
+  assert!(errors.is_empty(), "{errors:?}");
+  assert_eq!(data, r#"{"__typename":"Mutation"}"#);
+}
+
+/// A field error at a *nullable* top-level mutation field does not stop the ones after it.
+///
+/// Upstream's `evaluates mutations correctly in the presence of a failed mutation`, in the small:
+/// `third` is null, and `fourth` and `fifth` still run.
+#[test]
+fn a_failed_top_level_mutation_field_releases_the_next_one() {
+  let query = "mutation { one { text } two { text } }";
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_field_error(one, "no");
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(
+    path, "two",
+    "`Holder` is nullable, so the failure nulls `one` and the serial chain carries on"
+  );
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"text":"2"}}"#
+  );
+}
+
+/// A field error at a **non-null** top-level mutation field stops the rest of them.
+///
+/// Draft §6.4.4 nulls the root, so there is no response left for a later mutation to contribute to
+/// — and the executor must not run its side effect. Measured against `graphql-js` 16.11.0, whose
+/// `promiseReduce` chain rejects at that point and never calls the next `executeField`: with the
+/// same document and a non-null mutation type, upstream's resolver log is `a`, `b` and not `c`.
+#[test]
+fn a_non_null_top_level_mutation_field_that_fails_stops_the_rest() {
+  let query = "mutation { strict { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, strict) = offer(&mut executor, &mut space).expect("`strict`");
+  assert_eq!(path, "strict");
+  executor.handle_field_error(strict, "no");
+
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "the root is nulled, so `two` is not a position any answer could reach"
+  );
+  let response = executor
+    .poll_response()
+    .expect("a mutation whose root was nulled is finished, not stalled on its withheld fields");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(render(&response.data()), "null");
+}
+
+/// A draft §6.4.1 argument error at a top-level mutation field releases the next one.
+///
+/// The field leaves the ready chain without ever being offered, which is the departure path an
+/// answer-driven release would miss: the very first request this driver is handed is `two`.
+#[test]
+fn a_top_level_argument_error_releases_the_next_mutation_field() {
+  let query = "mutation ($m: String!) { tagged(mark: $m) { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  // `$m` is declared and never supplied, which is draft §6.4.1 step 5.d's field error.
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two", "`tagged` never became a request");
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    response
+      .errors()
+      .next()
+      .expect("one error was raised")
+      .kind(),
+    Kind::ArgumentVariableMissing
+  );
+  assert_eq!(
+    render(&response.data()),
+    r#"{"tagged":null,"two":{"text":"2"}}"#
+  );
+}
+
+/// Restarting a mutation as a query leaves nothing of the mutation's withholding behind.
+///
+/// The cursor is per-operation state and `reset` clears it; a cursor that survived would point at a
+/// slot the next operation has reused, and the first thing it would do is splice that slot onto the
+/// ready chain.
+#[test]
+fn a_query_after_a_mutation_offers_everything_again() {
+  let query = "mutation m { one { text } two { text } } query q { reading }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, Some("m"), obj(vec![]))
+    .expect("the operation resolves");
+  let (path, _) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+
+  executor
+    .start(
+      &mut space,
+      Some("q"),
+      obj(vec![("reading", J::Str("r".to_owned()))]),
+    )
+    .expect("the operation resolves");
+  let (path, reading) = offer(&mut executor, &mut space).expect("`reading`");
+  assert_eq!(path, "reading");
+  executor.handle_resolved(&mut space, reading, J::Str("r".to_owned()));
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(render(&response.data()), r#"{"reading":"r"}"#);
+}
+
+/// Draft §6.2.2's withholding must not disturb the root's read count.
+///
+/// The root's value is `parent_value` for *every* top-level field, and a mutation offers them one
+/// at a time — so a count that tracked "children currently on the ready chain" would reach zero at
+/// the first offer, expire the root, and lend the second field a value that has been dropped. What
+/// keeps it right is that `expand` counts what it enqueued and the cut does not touch the count;
+/// this is the assertion that says so, and it is the one the lifetime table's "an enqueue or
+/// departure path that skips the count" column names.
+#[test]
+fn every_top_level_mutation_field_reads_the_root_value() {
+  let query = "mutation { first { boom } second { boom } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  // A tagged payload: the schema decides that the root is an object, never the payload, so this
+  // asserts *which* value is lent and not merely that some value is.
+  executor
+    .start(&mut space, None, Counted::text(&held.tree, "ROOT"))
+    .expect("the operation resolves");
+
+  let first = {
+    let request = executor.poll_resolve(&mut space).expect("`first`");
+    assert!(matches!(
+      request.parent_value().payload,
+      Payload::Str("ROOT")
+    ));
+    request.id()
+  };
+  executor.handle_resolved(&mut space, first, Counted::obj(&held.tree));
+  let boom = executor
+    .poll_resolve(&mut space)
+    .expect("`first.boom`")
+    .id();
+  executor.handle_resolved(&mut space, boom, Counted::text(&held.tree, "B"));
+
+  let second = {
+    let request = executor.poll_resolve(&mut space).expect("`second`");
+    assert!(
+      matches!(request.parent_value().payload, Payload::Str("ROOT")),
+      "the root's value is still readable at the last top-level field, which is the property a \
+       cut chain has to keep true"
+    );
+    request.id()
+  };
+  executor.handle_resolved(&mut space, second, Counted::obj(&held.tree));
+  let boom = executor
+    .poll_resolve(&mut space)
+    .expect("`second.boom`")
+    .id();
+  executor.handle_resolved(&mut space, boom, Counted::text(&held.tree, "B"));
+
+  assert!(executor.poll_resolve(&mut space).is_none());
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(
+    held.tree.get(),
+    2,
+    "the two leaves, and none of the three object values — the root's outlived both offers and \
+     then went, which is the count doing exactly one job"
+  );
+}
+
+/// A budget refused at a mutation's root does not call the operation a query.
+///
+/// The root-slot branch of the budget message used to name the query, which was true when the only
+/// operation this executor ran was one. It is `slot == 0` that identifies the root, not the
+/// operation kind, so the message has to be one that is true of both.
+#[test]
+fn a_root_budget_error_on_a_mutation_names_no_operation_kind() {
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let messages = execute_bounded(
+    MUTATION_SDL,
+    "mutation { one { text } two { text } }",
+    obj(vec![]),
+    Vec::new(),
+    limits,
+    |response| {
+      response
+        .errors()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>()
+    },
+  );
+
+  assert_eq!(messages.len(), 1, "{messages:?}");
+  assert!(
+    messages[0].contains("root selection set"),
+    "the position that could not be assembled is the root: {}",
+    messages[0]
+  );
+  assert!(
+    !messages[0].contains("query"),
+    "a mutation's root selection set is not a query's: {}",
+    messages[0]
+  );
+}
+
+/// Top-level fields reached through a fragment are top-level fields.
+///
+/// Draft §6.2.2 runs `CollectFields` first and executes the *grouped field set* serially, so what
+/// is serialised is what collection produced and not what the document wrote inline. An
+/// implementation that read the operation's own selections would treat these two as one selection
+/// and serialise nothing.
+#[test]
+fn top_level_fields_reached_through_a_fragment_are_still_serial() {
+  let query = "mutation { ...Both } fragment Both on Mutation { one { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two` came from the same fragment and is withheld exactly as an inline sibling would be"
+  );
+
+  executor.handle_resolved(&mut space, one, holder("1"));
+  let (path, text) = offer(&mut executor, &mut space).expect("`one.text`");
+  assert_eq!(path, "one.text");
+  executor.handle_resolved(&mut space, text, J::Str("1".to_owned()));
+  let (path, _) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two");
 }
