@@ -234,17 +234,8 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
 # The exemption table is READ OUT OF `ci/downstream_pairs.py` rather than restated, so the two
 # gates cannot come to disagree about which pairs owe an equivalence.
 
-MEMBER_ROOTS = {
-  "smear-lexer": "smear-lexer/src/lib.rs",
-  "smear-parser": "smear-parser/src/lib.rs",
-  "smear-schema": "smear-schema/src/lib.rs",
-  "smear-compiler": "smear-compiler/src/lib.rs",
-  "graphql-proto": "graphql-proto/src/lib.rs",
-}
-
-
-def _eq_exempt() -> dict[tuple[str, str], str]:
-  """`EQ_EXEMPT` out of `ci/downstream_pairs.py`, by importing it rather than by restating it."""
+def _eq_twin() -> dict[tuple[str, str], str]:
+  """`EQ_TWIN` out of `ci/downstream_pairs.py`, by importing it rather than by restating it."""
   path = REPO_ROOT / "ci" / "downstream_pairs.py"
   previous = sys.dont_write_bytecode
   sys.dont_write_bytecode = True
@@ -256,40 +247,77 @@ def _eq_exempt() -> dict[tuple[str, str], str]:
     spec.loader.exec_module(module)
   finally:
     sys.dont_write_bytecode = previous
-  table = getattr(module, "EQ_EXEMPT", None)
+  table = getattr(module, "EQ_TWIN", None)
   if table is None:
-    raise RuntimeError(f"{path} declares no EQ_EXEMPT")
+    raise RuntimeError(f"{path} declares no EQ_TWIN")
   return table
 
 
-def check_equivalence(feature_tables: dict[str, dict[str, list[str]]]) -> list[str]:
-  """Every member feature is witnessed by a constant and pinned by an assertion in the umbrella."""
+def member_roots(meta: dict) -> dict[str, pathlib.Path]:
+  """Every workspace member with features, other than the umbrella, and its crate root.
+
+  DERIVED, and it did not used to be. A hand-written table is a second place a member can be
+  missing from, and this gate exists because a pair went missing from one.
+  """
+  ids = set(meta["workspace_members"])
+  out = {}
+  for p in meta["packages"]:
+    if p["id"] not in ids or p["name"] == UMBRELLA:
+      continue
+    if not [f for f in p["features"] if f != "default"]:
+      continue  # `smear-smoke`, `smear-noatomic`, `source-census`: nothing to forward
+    out[p["name"]] = pathlib.Path(p["manifest_path"]).parent / "src" / "lib.rs"
+  return out
+
+
+def check_equivalence(meta: dict, feature_tables: dict[str, dict[str, list[str]]]) -> list[str]:
+  """Every member feature is witnessed by a constant AND pinned by an assertion in the umbrella.
+
+  There is no skip. A pair whose umbrella twin is not its namesake declares the twin in
+  `EQ_TWIN`; a pair with neither is a finding. The previous revision had an `EQ_EXEMPT` that
+  removed a pair from the walk entirely, and the one entry in it was the pair that leaked.
+  """
   findings: list[str] = []
   try:
-    exempt = _eq_exempt()
+    twins = _eq_twin()
   except Exception as err:  # noqa: BLE001 — the message is the finding
-    return [f"the EQ_EXEMPT table could not be read ({err}), so this check knows nothing"]
+    return [f"the EQ_TWIN table could not be read ({err}), so this check knows nothing"]
 
   try:
     umbrella_src = (REPO_ROOT / "smear" / "src" / "lib.rs").read_text()
   except OSError as err:
     return [f"smear/src/lib.rs is unreadable ({err})"]
+  umbrella_features = set(feature_tables.get(UMBRELLA, {}))
+
+  roots = member_roots(meta)
+  if not roots:
+    return ["cargo metadata reported no member with features, so this check walked nothing"]
 
   checked = 0
-  used_exempt: set[tuple[str, str]] = set()
-  for member, root in sorted(MEMBER_ROOTS.items()):
-    if member not in feature_tables:
-      findings.append(f"`{member}` is in MEMBER_ROOTS and not in the workspace")
-      continue
+  used_twin: set[tuple[str, str]] = set()
+  for member, root in sorted(roots.items()):
     try:
-      member_src = (REPO_ROOT / root).read_text()
+      member_src = root.read_text()
     except OSError as err:
       findings.append(f"{root} is unreadable ({err}), so `{member}`'s witnesses are unknown")
       continue
     ident = member.replace("-", "_")
     for feature in sorted(f for f in feature_tables[member] if f != "default"):
-      if (member, feature) in exempt:
-        used_exempt.add((member, feature))
+      twin = twins.get((member, feature))
+      if twin is not None:
+        used_twin.add((member, feature))
+      elif feature in umbrella_features:
+        twin = feature
+      else:
+        findings.append(
+          f"`{member}/{feature}` has no `{UMBRELLA}/{feature}` and no EQ_TWIN entry, so nothing "
+          f"says what it should be equivalent to — and a pair this walk cannot name is a pair "
+          f"outside the fence"
+        )
+        continue
+      if twin not in umbrella_features:
+        findings.append(f"EQ_TWIN sends `{member}/{feature}` to `{UMBRELLA}/{twin}`, "
+                        f"which does not exist")
         continue
       checked += 1
       const = feature.upper().replace("-", "_")
@@ -298,15 +326,18 @@ def check_equivalence(feature_tables: dict[str, dict[str, list[str]]]) -> list[s
           f"`{member}` declares `{feature}` and publishes no `__features::{const}` constant, so "
           f"`smear` cannot see whether the graph turned it on"
         )
-      if f"{ident}::__features::{const}" not in umbrella_src:
+      # BOTH halves, and the second is the one that matters: a constant that exists and is never
+      # read is a witness nobody consults. The assertion is matched WITH its right-hand side, so a
+      # pair asserted against the wrong umbrella feature is a finding too.
+      wanted = f'{ident}::__features::{const} == cfg!(feature = "{twin}")'
+      if wanted not in umbrella_src:
         findings.append(
-          f"`{member}/{feature}` is not asserted equal to `smear/{feature}` in smear/src/lib.rs: "
-          f"a second dependency can switch it on behind a `smear` consumer, which is the leak the "
-          f"equivalence exists to make unrepresentable"
+          f"`{member}/{feature}` is not asserted equal to `{UMBRELLA}/{twin}` in smear/src/lib.rs "
+          f"(looked for `{wanted}`): a second dependency can switch it on behind a `smear` "
+          f"consumer, which is the leak the equivalence exists to make unrepresentable"
         )
-  for pair, why in sorted(exempt.items()):
-    if pair not in used_exempt:
-      findings.append(f"the equivalence exemption for `{pair[0]}/{pair[1]}` matches nothing ({why})")
+  for pair in sorted(set(twins) - used_twin):
+    findings.append(f"the EQ_TWIN entry for `{pair[0]}/{pair[1]}` matches nothing")
   if checked == 0:
     findings.append("zero member features were checked for an equivalence")
   return findings
@@ -561,7 +592,7 @@ def main() -> int:
   if args.verbose:
     for key in SELECTIONS:
       print(f"  ok        {READERS[key][0]}")
-  equivalence_findings = check_equivalence(tables)
+  equivalence_findings = check_equivalence(meta, tables)
   if equivalence_findings:
     print("::error::feature_reachability: a member feature has no enforced equivalence")
     for f in equivalence_findings:

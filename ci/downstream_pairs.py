@@ -39,6 +39,13 @@ naming its path would leave POS compiling vacuously forever, which is pql's R5.
 
 # What is deliberately NOT derived, and what checks it
 
+THE FENCE'S SCOPE IS MEMBER FEATURES, and several `smear` features also forward to third-party
+ones — `bytes` forwards `tokora/bytes_1`, and the `Source for bytes::Bytes` impl is tokora's rather
+than `smear-lexer`'s. Measured: a consumer with `smear/bytes` off and `tokora/bytes_1` on directly
+gets that impl and no assertion fires, because tokora publishes no feature witnesses. It is not a
+regression from the split — the same forward is in `origin/feat/proto`'s manifest — but it is the
+boundary of what the equivalence can hold, and it is stated rather than implied by a green run.
+
 `PROBES` below is written down: which public path a feature gates is a judgement, and `cargo
 metadata` does not carry it. What is derived is its COMPLETENESS in the direction that matters —
 C1 requires a `uses-` feature in the fixture for every probe, and C2 requires an EQ leg for every
@@ -63,14 +70,20 @@ UMBRELLA = "smear"
 # than skipping it, so a sixth layer cannot arrive unnoticed.
 MEMBERS = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto")
 
-# (member, feature) pairs with no same-named umbrella feature, and the argument for owing no
-# equivalence. An entry matching nothing is a failure, like every other table in this repository.
-EQ_EXEMPT = {
-  ("smear-schema", "build"): (
-    "there is no `smear/build`. The builder is reachable only through `smear::validator::schema`, "
-    "and `smear::validator` is gated by a `#[cfg]` smear writes itself — measured: a consumer with "
-    "`smear-schema/build` on and `smear/validator` off cannot name `SchemaBuilder`."
-  ),
+# THE ONLY ESCAPE FROM BEING ASSERTED IS TO NAME A DIFFERENT TWIN, never to be left out.
+#
+# This used to be `EQ_EXEMPT`, a table of pairs to SKIP, and it had one entry: `smear-schema/build`,
+# excused because "a consumer with `smear-schema/build` on and `smear/validator` off cannot name
+# `SchemaBuilder`". That measurement was over PATHS and it was true. `build` also gates
+# `impl Diagnose for SchemaError`, and the argument this whole fence rests on is that an impl is not
+# namespaced — so the exemption was justified with exactly the evidence the fence had already
+# declared insufficient, in the same commit. The gate then honoured it, reported "all 25 pairs", and
+# was green over the leak.
+#
+# So there is no skip. A pair whose umbrella twin is not its namesake declares the twin here; a pair
+# with neither is a FINDING. `plan()` asserts the table is total in both directions.
+EQ_TWIN = {
+  ("smear-schema", "build"): "validator",
 }
 
 # The observable half. Each entry is
@@ -84,6 +97,9 @@ PROBES = (
   ("parser-graphqlx", "smear-parser", "graphqlx", ("parser",), ()),
   ("parser-rowan", "smear-parser", "rowan", ("parser",), ()),
   ("parser-test-support", "smear-parser", "test-support", ("parser", "graphql", "rowan"), ()),
+  # The pair the hand-written exemption removed from the fence, and the reason it matters: it is
+  # impl-bearing. Its smear twin is `validator`, not a namesake — `EQ_TWIN` carries that.
+  ("schema-build", "smear-schema", "build", ("parser", "graphql"), ()),
   ("schema-introspection", "smear-schema", "introspection",
    ("parser", "graphql", "validator"), ()),
   ("compiler-rowan", "smear-compiler", "rowan", ("parser", "graphql", "validator"), ()),
@@ -139,21 +155,27 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
     die(f"workspace members with features that this gate does not know about: {unknown}. "
         f"Add them to MEMBERS, with a probe if they carry a gated public path.")
 
-  # C2 — the EQ family, total over cargo's own view of every member feature.
+  # C2 — the EQ family, total over cargo's own view of every member feature. Every pair gets a
+  # twin; none is skipped. `eq_pairs` carries the twin so a caller cannot re-derive it wrongly.
   eq_pairs = []
-  used_exempt = set()
+  used_twin = set()
   for member in MEMBERS:
     for feature in sorted(f for f in pkgs[member]["features"] if f != "default"):
-      if (member, feature) in EQ_EXEMPT:
-        used_exempt.add((member, feature))
-        continue
-      if feature not in umbrella_features:
-        die(f"`{member}/{feature}` has no `{UMBRELLA}/{feature}` and no EQ_EXEMPT entry, so this "
-            f"gate cannot say what it should be equivalent to")
-      eq_pairs.append((member, feature))
-  stale = sorted(set(EQ_EXEMPT) - used_exempt)
+      twin = EQ_TWIN.get((member, feature))
+      if twin is not None:
+        used_twin.add((member, feature))
+      elif feature in umbrella_features:
+        twin = feature
+      else:
+        die(f"`{member}/{feature}` has no `{UMBRELLA}/{feature}` and no EQ_TWIN entry, so this "
+            f"gate cannot say what it should be equivalent to. Add the twin — there is no way to "
+            f"leave a pair out.")
+      if twin not in umbrella_features:
+        die(f"EQ_TWIN sends `{member}/{feature}` to `{UMBRELLA}/{twin}`, which does not exist")
+      eq_pairs.append((member, feature, twin))
+  stale = sorted(set(EQ_TWIN) - used_twin)
   if stale:
-    die(f"EQ_EXEMPT entries that match nothing: {stale}")
+    die(f"EQ_TWIN entries that match nothing: {stale}")
 
   # C1 — every probe names a real pair, and the fixture declares its `uses-` feature.
   fixture = metadata(fixture_manifest)
@@ -180,24 +202,64 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
     die(f"the fixture's `smear` entry must be `default-features = false` with no features; it is "
         f"features={entry.get('features')} default={entry.get('uses_default_features')}")
 
+  # A member feature can forward to OTHER member features — `smear-schema/build` activates
+  # `smear-parser/graphql` — so a leg that enables it alone puts two pairs into disagreement and the
+  # build fails on whichever assertion rustc reaches first. That leg would pass a judge looking only
+  # for "an equivalence fired", while proving nothing about the pair under test. Measured: the
+  # `build` leg failed on `smear-lexer/graphql`.
+  #
+  # So every other pair the closure activates gets its umbrella twin composed into the leg's base,
+  # and exactly one disagreement is left. Derived from the members' own `[features]` tables.
+  def activated(member: str, feature: str) -> set[tuple[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    stack = [(member, feature)]
+    while stack:
+      m, f = stack.pop()
+      if (m, f) in seen or m not in pkgs:
+        continue
+      seen.add((m, f))
+      for entry in pkgs[m]["features"].get(f, []):
+        if entry.startswith("dep:"):
+          continue
+        if "/" in entry:
+          dep, _, sub = entry.partition("/")
+          stack.append((dep.removesuffix("?"), sub))
+        else:
+          stack.append((m, entry))
+    return seen
+
+  twin_of = {(m, f): tw for m, f, tw in eq_pairs}
+
   legs = []
-  for member, feature in eq_pairs:
+  for member, feature, twin in eq_pairs:
     base = ["smear/std"] + [f"smear/{f}" for f in PRESENCE[member]]
+    # Never the pair's OWN twin: composing it would satisfy the assertion under test and the leg
+    # would compile for the wrong reason. A sibling pair sharing this twin therefore disagrees
+    # alongside — which is fine, because the judge requires THIS pair to be named in the message.
+    for other in sorted(activated(member, feature) - {(member, feature)}):
+      other_twin = twin_of.get(other)
+      if other_twin and other_twin != twin and f"smear/{other_twin}" not in base:
+        base.append(f"smear/{other_twin}")
     legs.append(("EQ-POS", f"{member}/{feature}",
-                 ",".join(base + [f"smear/{feature}", f"{member}/{feature}"])))
-    # A pair whose presence features already imply it cannot be withheld, so there is no
-    # disagreeing graph to build and no leg to run. Recorded rather than skipped in silence.
-    if feature in PRESENCE[member] or feature == "std":
+                 ",".join(base + [f"smear/{twin}", f"{member}/{feature}"])))
+    # A pair whose presence features already imply its twin cannot be put into disagreement, so
+    # there is no graph to build. Recorded rather than skipped in silence.
+    if twin in PRESENCE[member] or twin == "std":
       legs.append(("EQ-LEAK-NA", f"{member}/{feature}", ",".join(base)))
     else:
       legs.append(("EQ-LEAK", f"{member}/{feature}",
                    ",".join(base + [f"{member}/{feature}"])))
 
   for label, member, feature, extra, fx_extra in PROBES:
+    twin = twin_of[(member, feature)]
     base = ["smear/std"] + [f"smear/{f}" for f in extra]
+    for other in sorted(activated(member, feature) - {(member, feature)}):
+      other_twin = twin_of.get(other)
+      if other_twin and other_twin != twin and f"smear/{other_twin}" not in base:
+        base.append(f"smear/{other_twin}")
     uses = [f"uses-{label}"] + list(fx_extra)
     legs.append(("CTL", label, ",".join(uses + base)))
-    legs.append(("POS", label, ",".join(uses + base + [f"smear/{feature}"])))
+    legs.append(("POS", label, ",".join(uses + base + [f"smear/{twin}"])))
     legs.append(("LEAK", label, ",".join(uses + base + [f"{member}/{feature}"])))
 
   # UNION — every probe at once, with every feature it needs. The only configuration worth
@@ -205,13 +267,13 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
   # workspace, so `cargo fmt --all` and `cargo clippy --workspace` at the root do not reach it, and
   # a gate this repository's own gates do not check is a gate that rots.
   union_uses = sorted({f"uses-{label}" for label, *_ in PROBES})
-  union_smear = sorted({f"smear/{f}" for _, _, f, _, _ in PROBES}
+  union_smear = sorted({f"smear/{twin_of[(m, f)]}" for _, m, f, _, _ in PROBES}
                        | {f"smear/{f}" for _, _, _, extra, _ in PROBES for f in extra}
                        | {"smear/std"})
   legs.append(("UNION", "all-probes", ",".join(union_uses + union_smear)))
 
   print(f"certified: {len(eq_pairs)} member features, {len(PROBES)} observable probes, "
-        f"{len(EQ_EXEMPT)} exemption, {len(legs)} legs", file=sys.stderr)
+        f"{len(EQ_TWIN)} non-namesake twin, {len(legs)} legs", file=sys.stderr)
   for kind, label, features in legs:
     print(f"{kind}\t{label}\t{features}")
   return 0
@@ -222,14 +284,18 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
 # fixture itself supplied.
 REASONS = {
   # The equivalence assertion is a `const _: () = { assert!(…) }` in `smear`, so a violating graph
-  # fails const evaluation. The message is required too: E0080 alone would also accept an unrelated
-  # const panic from anywhere in the graph.
-  "EQ-LEAK": ("E0080", "disagree"),
-  "LEAK": ("E0080", "disagree"),
-  # The control must fail because the PATH is absent, which is E0432 for a `use` and E0433 for a
-  # path in an expression. A CTL that failed on the equivalence would mean the leg is not testing
-  # what it claims.
-  "CTL": ("E0432|E0433|E0599|E0277", None),
+  # fails const evaluation. E0080 alone would accept an unrelated const panic from anywhere in the
+  # graph; "disagree" alone would accept ANOTHER pair's assertion firing, which is not a hypothetical
+  # — the `smear-schema/build` leg did exactly that before the legs were made to isolate one pair.
+  # So the label is required in the message, and the label IS the pair.
+  "EQ-LEAK": ("E0080", "@label"),
+  "LEAK": ("E0080", "@label"),
+  # The control must fail because the CAPABILITY is absent, and rustc spells that four ways
+  # depending on where the probe names it: E0432 for a `use`, E0433 for a path in an expression,
+  # E0425 for a name in a signature, E0277 for an unsatisfied bound when the item exists but the
+  # impl does not. NOT E0080 — a CTL that failed on the equivalence assertion would mean the leg is
+  # measuring the fence instead of the capability, which is the whole thing it is a control for.
+  "CTL": ("E0432|E0433|E0425|E0599|E0277", None),
 }
 
 
@@ -237,6 +303,16 @@ def judge(kind: str, label: str, json_log: pathlib.Path) -> int:
   if kind not in REASONS:
     die(f"no reason is recorded for a `{kind}` leg, so its failure cannot be judged")
   codes, needle = REASONS[kind]
+  # `@label` means "the message must name the pair under test". For a probe leg the label is the
+  # probe's name, so the pair is looked up rather than spelled twice.
+  if needle == "@label":
+    pair = label if "/" in label else None
+    if pair is None:
+      match = next((f"{m}/{f}" for lbl, m, f, _, _ in PROBES if lbl == label), None)
+      if match is None:
+        die(f"no pair is known for probe `{label}`, so its failure cannot be attributed")
+      pair = match
+    needle = f"`{pair}` and `smear/"
   wanted = set(codes.split("|"))
   seen_codes: set[str] = set()
   text = []

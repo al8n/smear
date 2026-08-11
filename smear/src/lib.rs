@@ -207,8 +207,21 @@ pub mod __private {
 // contract being kept, not a new restriction — but it is now a hard error where before the split
 // it was unreachable and after the split it was silent.
 //
+// WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
+// was built against. It covers MEMBER features — the 26 `cargo metadata` reports across the five
+// crates smear re-exports. Several `smear` features ALSO forward to third-party ones: `bytes`
+// forwards `tokora/bytes_1`, and `impl Source for bytes::Bytes` comes from tokora, not from
+// `smear-lexer`. Measured on this tree: a consumer with `smear/bytes` off and `tokora/bytes_1`
+// enabled directly gets that impl, and nothing here fires — tokora publishes no feature witnesses
+// and this repository cannot give it any. That is NOT a regression from the split: `smear/bytes`
+// forwarded `tokora/bytes_1` on `origin/feat/proto` too, so the same graph did the same thing
+// before any crate moved. It is a pre-existing bound of the umbrella, now written down.
+//
 // Derived, not remembered: `ci/feature_reachability.py` reads every member feature out of
-// `cargo metadata` and fails when one has no constant in its member or no assertion here.
+// `cargo metadata`, pairs each with its umbrella twin — the namesake, or an explicit entry in
+// `ci/downstream_pairs.py`'s `EQ_TWIN`, and a pair with neither is a FINDING — and fails when one
+// has no constant in its member or no assertion here. There is no way to leave a pair out; the
+// revision that had one skipped `smear-schema/build`, which is impl-bearing, and was green over it.
 
 const _: () = {
   assert!(
@@ -294,6 +307,20 @@ const _: () = {
 };
 
 const _: () = {
+  // `build` is the one pair whose twin is not its namesake: there is no `smear/build`, and
+  // `smear/validator` is what turns it on. It was EXEMPTED from this fence in `0c1a841`, on a
+  // reason measured over PATHS — "a consumer with `smear-schema/build` on and `smear/validator`
+  // off cannot name `SchemaBuilder`", which is true and is not the property. `build` also gates
+  // `impl Diagnose for SchemaError` (`smear-schema/src/error.rs:1001`), and an impl is not
+  // namespaced — which is the argument this whole fence was built on, applied to every pair
+  // except the one it was written in the same commit as. Measured on this tree before the fix: a
+  // consumer with `smear/{std,parser,graphql}` and `smear-schema/build` compiled a function
+  // demanding `smear::diagnostic::Diagnose` over `smear_schema::SchemaError`, with every const
+  // assertion passing.
+  assert!(
+    smear_schema::__features::BUILD == cfg!(feature = "validator"),
+    "`smear-schema/build` and `smear/validator` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` items gated by it — including `impl Diagnose for\n     SchemaError`, which is not namespaced and no re-export can hide — would then appear or\n     vanish behind a consumer who never asked. Enable `smear/validator` too, or stop enabling\n     `smear-schema/build`."
+  );
   assert!(
     smear_schema::__features::INTROSPECTION == cfg!(feature = "introspection"),
     "`smear-schema/introspection` and `smear/introspection` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/introspection` too, or stop enabling\n     `smear-schema/introspection`."

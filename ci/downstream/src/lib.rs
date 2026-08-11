@@ -34,6 +34,8 @@ pub mod parser_graphqlx;
 pub mod parser_rowan;
 #[cfg(feature = "uses-parser-test-support")]
 pub mod parser_test_support;
+#[cfg(feature = "uses-schema-build")]
+pub mod schema_build;
 #[cfg(feature = "uses-schema-introspection")]
 pub mod schema_introspection;
 
