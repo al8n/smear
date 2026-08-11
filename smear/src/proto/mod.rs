@@ -40,10 +40,30 @@
 //!
 //! # Scope
 //!
-//! Queries. A `mutation` or a `subscription` is refused by [`Executor::start`](crate::proto::Executor::start)
-//! with [`StartError::NotAQuery`](crate::proto::StartError::NotAQuery) rather than executed as if it were a query, because draft §6.3's
-//! serial-execution rule for mutations is a real constraint and silently ignoring it would produce
-//! a plausible-looking wrong answer.
+//! Queries and mutations. Draft §6.2.2's serial rule for a mutation's top-level fields is expressed
+//! by *withholding*: [`poll_resolve`](crate::proto::Executor::poll_resolve) offers one of them and
+//! keeps the next off the ready chain until that one's whole subtree is **complete or cancelled**,
+//! so the ordering is structural rather than a contract a driver could forget to honour. Everything
+//! below the top level is draft §6.3's ordinary collection, which is where the specification draws
+//! the line too.
+//!
+//! "Or cancelled" is the edge and it is load-bearing rather than a hedge. When draft §6.4.4 nulls a
+//! mutation field because something under it failed, the requests still outstanding beneath it are
+//! *abandoned* — [`poll_abandoned`](crate::proto::Executor::poll_abandoned) is how the driver hears
+//! so — and the next mutation field is released over them rather than behind them. `graphql-js`
+//! 16.11.0 was measured doing the same, and waiting instead would put that field behind work the
+//! driver has just been told to stop doing: retiring those entries on that channel, or answering
+//! them, which are the only two things that clear the count.
+//!
+//! Releasing over them is not free, and the price is stated exactly. An abandoned request keeps
+//! its in-flight slot until the driver retires *or answers* it, so a driver that does neither runs
+//! under a ceiling narrowed by however many it is holding — never by all of them, because
+//! [`max_in_flight`](crate::proto::Limits::max_in_flight) bounds them at one below itself. The
+//! cost is concurrency, down to a floor of one request at a time, and never progress.
+//!
+//! A `subscription` is refused by [`Executor::start`](crate::proto::Executor::start) with
+//! [`StartError::NotAQueryOrMutation`](crate::proto::StartError::NotAQueryOrMutation): draft §6.2.3
+//! delivers a *stream* of responses over a source event stream, and this surface delivers one.
 //!
 //! Draft §6.1 `CoerceVariableValues` is the driver's: values reaching [`Values::variable`](crate::proto::Values::variable) are
 //! already coerced against their declared types.

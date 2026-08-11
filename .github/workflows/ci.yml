@@ -1145,8 +1145,9 @@ jobs:
       # whether the oracle checked five hundred documents or five.
       run: cargo test -p smear --features rowan,validator --test validator_oracle -- --nocapture
 
-  # smear's draft §6.4.4 null propagation against `graphql-js`'s own `nonnull-test.ts`, case by
-  # case (`smear/tests/proto_nonnull_oracle.rs`).
+  # smear's draft §6.4.4 null propagation against `graphql-js`'s own `nonnull-test.ts`, and its
+  # draft §6.2.2 serial mutation ordering against `mutations-test.ts`, case by case
+  # (`smear/tests/proto_nonnull_oracle.rs` and `smear/tests/proto_mutation_oracle.rs`).
   #
   # WHY A SEPARATE JOB, WHEN `test` ALREADY RUNS THIS TARGET. `cargo test --all-features` runs the
   # seventeen ported cases wherever it runs, and it will keep passing with the transcription stale:
@@ -1170,9 +1171,12 @@ jobs:
         mkdir -p "$RUNNER_TEMP/graphql-js"
         curl -sSfL https://github.com/graphql/graphql-js/archive/c18e9f6aada9ae086ddf836e4d822cf1426f3868.tar.gz \
           | tar -xz -C "$RUNNER_TEMP/graphql-js" --strip-components=1
-        # Fail here, loudly, rather than let the drift gate take its unset-variable branch and
-        # report a green run over a lane that fetched nothing.
+        # Fail here, loudly, rather than let a drift gate take its unset-variable branch and
+        # report a green run over a lane that fetched nothing. One `test -f` per ported upstream
+        # file, because a tarball that no longer carries one of them is exactly the case the
+        # unset-variable branch would swallow.
         test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/nonnull-test.ts"
+        test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/mutations-test.ts"
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Cache cargo build and registry
@@ -1185,7 +1189,7 @@ jobs:
         key: ${{ runner.os }}-proto-oracle-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-proto-oracle-
-    - name: cargo test --test proto_nonnull_oracle --test proto_execute
+    - name: cargo test --test proto_nonnull_oracle --test proto_mutation_oracle --test proto_execute
       env:
         SMEAR_GRAPHQL_JS: ${{ runner.temp }}/graphql-js
       # `--nocapture` because the counts are the artifact: how many cases reached a comparison, how
@@ -1193,11 +1197,13 @@ jobs:
       # against upstream. A green tick alone would not say whether the oracle compared 29 entries
       # or none.
       #
-      # Both targets by name, not `-p smear --tests`: a cargo target *filter* warns and exits 0
-      # when it matches nothing, so a renamed file would silently empty this job.
+      # Every target by name, not `-p smear --tests`: a cargo target *filter* warns and exits 0
+      # when it matches nothing, so a renamed file would silently empty this job. Which is also why
+      # a new oracle file has to be added here in the same change that adds it — a drift gate that
+      # never runs with `SMEAR_GRAPHQL_JS` set is a gate that cannot fire.
       run: |
-        cargo test -p smear --features proto --test proto_nonnull_oracle --test proto_execute \
-          -- --nocapture
+        cargo test -p smear --features proto --test proto_nonnull_oracle \
+          --test proto_mutation_oracle --test proto_execute -- --nocapture
 
   # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
   # `macos-latest` cell, so on a run where those cells never got a runner this job was never

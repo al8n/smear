@@ -26,7 +26,7 @@ use std::string::ToString;
 
 use core::num::NonZeroU32;
 
-use super::{Executor, Limits, State};
+use super::{Executor, Limits, NONE, State, node};
 
 const SDL: &str = r#"
 type Query {
@@ -957,4 +957,214 @@ fn collected_under(
   }
   let response = executor.poll_response().expect("nothing is outstanding");
   response.errors().next().map(|error| error.to_string())
+}
+
+// ------------------------------------------------------------------------------------------
+// draft §6.2.2's serial release: the product it would have been
+// ------------------------------------------------------------------------------------------
+//
+// The spec's fourth sweep says a budget on one factor of a product bounds nothing, and names this
+// path as one of the two places the shape was expected to recur. It is here to be built: the serial
+// rule has to decide, once per offer, whether the previous top-level field is done with and which
+// field comes next. Scanning the root's children for the answer makes that `offers × M`, with
+// `offers` the driver's quantity — one document sub-selection becomes as many requests as
+// `list_len` claims elements — and `M` the document's. `max_response_slots` bounds the first,
+// itself and `max_response_metadata` bound the second, and neither reaches their product.
+//
+// The remedy here is not a fourth ceiling, because the cost is in a mechanism rather than in a
+// population: withholding removes it. The withheld fields are the ready chain's own tail, so
+// "which is next" is one link, and nothing that can still affect the response is on the chain or
+// counted `live` outside the running subtree, so "is it done with" is two counters — the question
+// being the weaker one, because draft §6.4.4 moves a discarded subtree's requests out of `live`
+// and the release steps over them. `Executor::release_serial` carries that boundary.
+//
+// Which is unobservable from a response — a scanning implementation answers every mutation exactly
+// as this one does — so the gate is the count, as it is for collection three sections up. The
+// second fixture is the one that matters: it holds the *query* factor fixed and multiplies the
+// *driver's*, which is the product's own shape.
+
+/// A mutation root with one field, so a document can name it as often as it likes, and a list of
+/// **objects**, so the driver decides how many requests the document's one sub-selection becomes.
+///
+/// Also the fixture for `a_withheld_top_level_field_is_in_the_tree_and_reads_as_null`, which needs
+/// nothing from a schema but two top-level mutation fields.
+///
+/// The element type is an object and not a leaf, and that is the fixture's whole discriminating
+/// power. A list of leaves grows *positions* with the driver's answer but not **offers** — the
+/// elements are completed inside one `handle_resolved` and never handed out — so a `[String]`
+/// version runs the same number of `poll_resolve` calls at every length, holds the wrong factor
+/// fixed, and cannot see the product at all. That version was written first, and the planted scan
+/// passed it.
+const SERIAL_SDL: &str = r#"
+type Query { a: String }
+type Mutation { m: Cell }
+type Cell { items: [Cell] text: String }
+"#;
+
+/// Runs a mutation of `fields` top-level aliases, each over a list of `elements` objects, and
+/// returns what the serial release cost and how many requests the driver was offered.
+///
+/// Two numbers rather than one, because "the cost did not change" is only evidence if the thing it
+/// was supposed to change with did.
+fn serial_run(fields: usize, elements: usize) -> (u64, usize) {
+  let mut query = std::string::String::from("mutation {");
+  for field in 0..fields {
+    query.push_str(&std::format!(" f{field}: m {{ items {{ text }} }}"));
+  }
+  query.push_str(" }");
+
+  let (schema, document) = compile_against(SERIAL_SDL, &query);
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let mut offers = 0usize;
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    offers += 1;
+    let id = request.id();
+    let answer = match request.name() {
+      "items" => Value::List(elements),
+      "text" => Value::Text,
+      _ => Value::Obj,
+    };
+    executor.handle_resolved(&mut space, id, answer);
+  }
+  assert!(
+    executor.poll_response().is_some(),
+    "the mutation runs to a response"
+  );
+  (executor.serial_steps(), offers)
+}
+
+/// The release costs one link per top-level field, and the first field costs none.
+///
+/// Exact rather than bounded: the cut leaves the head on the chain and parks the other `M - 1`, and
+/// each of them is spliced back by following exactly one link.
+///
+/// **Measured against the plant.** Replacing the cursor with a walk of the root's children on every
+/// call — the obvious implementation, and a correct one — takes this from 63 to **6,112**.
+#[test]
+fn a_serial_release_costs_one_step_per_top_level_field() {
+  const FIELDS: usize = 64;
+
+  let (steps, _) = serial_run(FIELDS, 1);
+  assert_eq!(
+    steps,
+    FIELDS as u64 - 1,
+    "{FIELDS} top-level fields, the first of which is never withheld; a larger total means the \
+     release is searching for the next field rather than being handed it"
+  );
+}
+
+/// **The constraint the spec predicted this path would trip.** The driver's answers do not multiply
+/// the serial mechanism's cost.
+///
+/// The query factor is held fixed and the driver's is multiplied, which is the product's own shape:
+/// an implementation that decided serial eligibility per offer grows with the second run and this
+/// one does not move at all.
+///
+/// **Measured against the same plant**, and this is the number that says the shape is a product
+/// rather than merely a cost. The two runs offer 192 and 4,224 requests over the same 64 top-level
+/// fields; the cursor spends 63 links on both, and the planted walk spends **6,112 and 133,120** —
+/// twenty-two times the driver's requests bought twenty-two times the serial gate's work, for a
+/// document that did not change.
+#[test]
+fn a_serial_release_does_not_grow_with_the_response() {
+  const FIELDS: usize = 64;
+  const ELEMENTS: usize = 64;
+
+  let (narrow_steps, narrow_offers) = serial_run(FIELDS, 1);
+  let (wide_steps, wide_offers) = serial_run(FIELDS, ELEMENTS);
+
+  assert!(
+    wide_offers > narrow_offers * 8,
+    "the fixture has to make the driver's factor big before it can say the cost ignores it: \
+     {narrow_offers} requests against {wide_offers}"
+  );
+  assert_eq!(
+    narrow_steps, wide_steps,
+    "{wide_offers} requests against {narrow_offers}, and the same {narrow_steps} links; a total \
+     that moved would be the serial gate charging the driver's quantity for the document's"
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// What a response would say about a field draft §6.2.2 is still withholding
+// ------------------------------------------------------------------------------------------
+
+/// A withheld top-level mutation field is **in** the response tree, and it reads as `null`.
+///
+/// The fact under [`Executor::release_serial`]'s account of what gating the release on `abandoned`
+/// would cost a release build. That symptom is not a *missing* field, and the difference matters
+/// because absence is something a driver can notice: §6.2.2's cut takes the field off the ready
+/// chain and off nothing else, so its slot is still the root's child and still carries its
+/// response key, and [`node`] renders [`State::Ready`] as [`Node::Null`]. What a gated
+/// `release_serial` would hand back is the key present with a null under it and no error — a wrong
+/// answer shaped like a legitimate one.
+///
+/// The two halves are asserted apart because either can go without the other. A later phase that
+/// built the response tree lazily, or one that unlinked a withheld field rather than only
+/// unchaining it, would drop the key; one that gave `Ready` a rendering of its own would keep the
+/// key and change the value. Only the pair makes "null, not absent" true.
+///
+/// Read from the tree rather than from a delivered response, because the executor never delivers
+/// one in this state — `poll_response` splices the cursor before it tests whether it is finished.
+/// That is the same reason `a_drained_subtree_is_not_walked_again` is in here.
+#[test]
+fn a_withheld_top_level_field_is_in_the_tree_and_reads_as_null() {
+  let (schema, document) = compile_against(
+    SERIAL_SDL,
+    "mutation { first: m { text } second: m { text } }",
+  );
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  // `first` is answered and its own sub-selection is left outstanding, which is what holds the
+  // release and keeps `second` withheld for the read below.
+  let first = executor.poll_resolve(&mut space).expect("`first`").id();
+  executor.handle_resolved(&mut space, first, Value::Obj);
+  assert!(
+    executor.poll_resolve(&mut space).is_some(),
+    "`first.text`, never answered"
+  );
+
+  let withheld = executor.serial_next;
+  assert_ne!(withheld, NONE, "`second` is parked on the withheld cursor");
+  assert!(
+    matches!(executor.slots[withheld as usize].state, State::Ready),
+    "and it is still `Ready`: withholding is a cut on `next_ready` and nothing else"
+  );
+
+  const ROOT: u32 = 0;
+  let Node::Object(mut fields) = node(
+    &executor.slots,
+    executor.interner.bytes(),
+    executor.interner.spans(),
+    ROOT,
+  ) else {
+    panic!("the root is an object")
+  };
+  let (key, value) = fields.next().expect("`first`");
+  assert_eq!(key.to_string(), "first");
+  assert!(
+    matches!(value, Node::Object(_)),
+    "the field that was released is an object, so the two keys below are distinguishable"
+  );
+  let (key, value) = fields
+    .next()
+    .expect("the withheld field is still the root's child");
+  assert_eq!(
+    key.to_string(),
+    "second",
+    "under its response key, which is what makes the symptom a null and not an absence"
+  );
+  assert!(
+    matches!(value, Node::Null),
+    "and it reads as `null`, with nothing in `errors` to account for it"
+  );
+  assert!(fields.next().is_none(), "and the root has no third child");
 }
