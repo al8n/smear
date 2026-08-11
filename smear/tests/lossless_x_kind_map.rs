@@ -4,7 +4,7 @@
 //!
 //! GraphQL's mapper is a **wildcard-free** match, so the compiler is its own completeness check:
 //! delete an arm and `smear-parser` stops building. GraphQLx's cannot be. Its
-//! `LosslessToken` is `#[non_exhaustive]` (`smear-lexer/src/graphqlx/lossless/mod.rs:90`) where
+//! `LosslessToken` is `#[non_exhaustive]` (`smear/src/lexer/graphqlx/lossless/mod.rs:90`) where
 //! GraphQL's is not, and `#[non_exhaustive]` binds across the **crate** boundary — `smear-parser`
 //! is a different crate from `smear-lexer` — so rustc *requires* a wildcard arm here no matter
 //! what the mapper's author wants. The plan asked for a wildcard-free match and for "delete an
@@ -228,8 +228,8 @@ fn the_only_fold_is_the_line_terminator() {
 /// of variants the mapper must name for its wildcard to be genuinely dead.
 #[test]
 fn the_mapper_wildcard_arm_panics_rather_than_classifying() {
-  let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    .join("../smear-parser/src/graphqlx/lossless/kind_map.rs");
+  let path =
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/parser/graphqlx/lossless/kind_map.rs");
   let text =
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
 

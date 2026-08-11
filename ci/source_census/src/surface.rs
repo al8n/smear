@@ -106,42 +106,21 @@ pub struct Surface {
 
 /// Reads the crate rooted at `lib_rs` into a [`Surface`].
 pub fn load(lib_rs: &Path, crate_name: &str) -> Result<Surface, String> {
-  load_many(&[(lib_rs.to_path_buf(), crate_name.to_string())])
-}
-
-/// Reads several crate roots into ONE [`Surface`], each mounted at the path a consumer writes.
-///
-/// The censused surface is the one a *dependent* reaches, and since the split that surface is
-/// spread over member crates the umbrella re-exports. `syn` cannot follow `pub use smear_lexer as
-/// lexer;` into another package — it sees a foreign re-export and nothing behind it — so reading
-/// only `smear/src/lib.rs` would report a crate with almost no public entries and every exemption
-/// in both tables would go stale in the same instant. That failure is the tool working: an
-/// exemption matching nothing is already a hard error, precisely so a reader that stops seeing the
-/// surface cannot be mistaken for a clean crate.
-///
-/// So each member is mounted under the name the umbrella publishes it as — `smear::lexer`,
-/// `smear::parser`, … — and the census reads the same paths it read when all of this was one
-/// crate. Both exemption tables, and D2's generated probe, keep spelling `smear::…` because
-/// `smear::…` is still what a consumer types.
-pub fn load_many(roots: &[(PathBuf, String)]) -> Result<Surface, String> {
   let mut modules = Vec::new();
   let mut macro_invocations = 0usize;
+  let children_dir = lib_rs
+    .parent()
+    .ok_or_else(|| format!("{} has no parent directory", lib_rs.display()))?
+    .to_path_buf();
 
-  for (lib_rs, crate_name) in roots {
-    let children_dir = lib_rs
-      .parent()
-      .ok_or_else(|| format!("{} has no parent directory", lib_rs.display()))?
-      .to_path_buf();
-
-    read_module(
-      lib_rs,
-      &children_dir,
-      vec![crate_name.to_string()],
-      true,
-      &mut modules,
-      &mut macro_invocations,
-    )?;
-  }
+  read_module(
+    lib_rs,
+    &children_dir,
+    vec![crate_name.to_string()],
+    true,
+    &mut modules,
+    &mut macro_invocations,
+  )?;
 
   let mut surface = Surface {
     files_read: modules

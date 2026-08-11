@@ -1378,14 +1378,9 @@ fn without_comments(src: &str) -> String {
 /// declaration a human maintains can be the sole witness for "nothing is missing", because the
 /// thing that goes missing is the declaration.
 fn source_inventory() -> Vec<SourceGetter> {
-  // `../smear-parser/src`, not `src`: the source this gate reads moved into its own crate with
-  // the split, and the corpus this file also reads did not. Pointing the scan at the sibling
-  // package keeps both reads in one test rather than splitting the gate across two packages.
-  // The scan still fails loudly on a wrong path — that is what the `unwrap_or_else` below is.
   let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    .join("..")
-    .join("smear-parser")
     .join("src")
+    .join("parser")
     .join("graphql")
     .join("lossless")
     .join("ast");

@@ -1195,7 +1195,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// `.next()`. It is the only gate in this suite that sees trailing placement without going through
 /// a `.rast` file, which is what makes it the one that survives a bless: an `UPDATE_GOLDEN=1` run
 /// rewrites every expectation a placement change touches and leaves this assertion exactly where it
-/// was. The atoms it is measuring are `smear-parser/src/lossless/trivia.rs`'s — shared with
+/// was. The atoms it is measuring are `smear/src/parser/lossless/trivia.rs`'s — shared with
 /// GraphQL — so this and its GraphQL twin are one gate over two grammars, and a change to the
 /// substrate reds both.
 ///
