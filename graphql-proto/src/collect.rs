@@ -38,13 +38,11 @@
 
 use tokora::{SimpleSpan, span::AsSpan};
 
-use crate::{
-  parser::graphql::ast::{
-    Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
-    SelectionSet,
-  },
-  validator::schema::{Schema, TypeId, bucket, hash_bytes},
+use smear_parser::graphql::ast::{
+  Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
+  SelectionSet,
 };
+use smear_schema::{Schema, TypeId, bucket, hash_bytes};
 
 use super::{
   Values,
@@ -204,7 +202,7 @@ pub(super) struct Fault<'a> {
 /// [`Groups`].
 ///
 /// **`Schema::sym`, which is examined and cleared rather than left unsaid.** `expand` and
-/// [`applies`] probe the schema's [`NameIndex`](crate::validator::NameIndex) with *document* bytes,
+/// [`applies`] probe the schema's [`NameIndex`](smear_schema::NameIndex) with *document* bytes,
 /// uncharged. The rule above is what clears it: the table is populated from the **schema**, which
 /// the operator wrote, so a client chooses the lookup key and never the run it walks. That is the
 /// same question that condemned [`Fragments`], answered the other way.
@@ -632,12 +630,10 @@ where
 mod table {
   use tokora::SimpleSpan;
 
-  use crate::{
-    parser::graphql::ast::{
-      DescribedExecutableDefinition, ExecutableDefinition, FragmentDefinition,
-    },
-    validator::schema::{bucket, hash_bytes},
+  use smear_parser::graphql::ast::{
+    DescribedExecutableDefinition, ExecutableDefinition, FragmentDefinition,
   };
+  use smear_schema::{bucket, hash_bytes};
 
   use super::{Fault, NONE, Visits};
 

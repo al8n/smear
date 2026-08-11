@@ -168,9 +168,13 @@ pub mod validator;
 ///
 /// Requires `validator`, because execution is entered with a document the draft §5 rules have
 /// already accepted.
+///
+/// The layer is the `graphql-proto` crate; this is the name it has always had inside `smear` and
+/// the path every consumer already writes.
 #[cfg(feature = "proto")]
 #[cfg_attr(docsrs, doc(cfg(feature = "proto")))]
-pub mod proto;
+#[doc(inline)]
+pub use graphql_proto as proto;
 
 #[doc(hidden)]
 pub mod __private {

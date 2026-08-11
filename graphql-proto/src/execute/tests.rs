@@ -7,20 +7,21 @@
 //! no counter and no assertion on the response can tell the two apart — only a slot the walk would
 //! have overwritten can, and reaching one means reaching into the executor.
 
-use crate::{
-  lexer::tokora::{Parse as _, Parser},
-  parser::graphql::{
+use smear_parser::{
+  graphql::{
     GraphQL,
     ast::{ExecutableDocument, TypeSystemDocument},
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
-  proto::{Leaf, Node, Values},
-  validator::Schema,
+  lexer::tokora::{Parse as _, Parser},
 };
+use smear_schema::Schema;
 
-// `proto` implies `validator` and neither implies `std`, so this module also compiles under
-// `--no-default-features --features proto`, where `crate::std` is `alloc` and `ToString` is not in
+use crate::{Leaf, Node, Values};
+
+// Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
+// compiles under `--no-default-features`, where `crate::std` is `alloc` and `ToString` is not in
 // the prelude. The crate's other in-crate test modules that render a value spell it the same way.
 use std::string::ToString;
 
@@ -751,9 +752,7 @@ fn colliding_names(prefix: &str, mask: u32) -> std::vec::Vec<std::string::String
     std::vec::from_elem(std::vec::Vec::new(), mask as usize + 1);
   for candidate in 0u64.. {
     let name = std::format!("{prefix}{candidate}");
-    let at =
-      crate::validator::schema::bucket(crate::validator::schema::hash_bytes(name.as_bytes()), mask)
-        as usize;
+    let at = smear_schema::bucket(smear_schema::hash_bytes(name.as_bytes()), mask) as usize;
     by_bucket[at].push(name);
     if by_bucket[at].len() == COLLIDING {
       return core::mem::take(&mut by_bucket[at]);

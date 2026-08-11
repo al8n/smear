@@ -72,13 +72,11 @@ use core::{fmt, num::NonZeroU32};
 
 use tokora::{SimpleSpan, span::AsSpan};
 
-use crate::{
-  parser::graphql::ast::{
-    ExecutableDefinition, ExecutableDocument, Field, InputValue, OperationDefinition,
-    OperationType, SelectionSet,
-  },
-  validator::schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin},
+use smear_parser::graphql::ast::{
+  ExecutableDefinition, ExecutableDocument, Field, InputValue, OperationDefinition, OperationType,
+  SelectionSet,
 };
+use smear_schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin};
 
 use super::{
   Argument, ArgumentSource, Error, FieldRequest, Leaf, Node, ReqId, Values,
@@ -110,7 +108,7 @@ mod tests;
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
-/// | list nesting | — | [`MAX_WRAPPERS`](crate::validator::schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
+/// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
 /// Two rows are deliberately not ceilings. **Depth was removed rather than bounded**, because a
 /// depth ceiling's right value is a function of the deployment's stack and a heap stack has no such
@@ -320,7 +318,7 @@ mod tests;
 /// ```compile_fail,E0308
 /// use core::num::NonZeroU32;
 ///
-/// use smear::proto::Limits;
+/// use graphql_proto::Limits;
 ///
 /// const EIGHT: NonZeroU32 = NonZeroU32::new(8).expect("eight is not zero");
 ///
@@ -333,7 +331,7 @@ mod tests;
 /// ```
 /// use core::num::NonZeroU32;
 ///
-/// use smear::proto::Limits;
+/// use graphql_proto::Limits;
 ///
 /// const EIGHT: NonZeroU32 = NonZeroU32::new(8).expect("eight is not zero");
 ///
@@ -739,7 +737,7 @@ struct Entry {
 
 /// Draft §6's executor, for a query or a mutation.
 ///
-/// See [`proto`](crate::proto) for the shape, why it has that shape, and a worked example.
+/// See [the crate root](crate) for the shape, why it has that shape, and a worked example.
 pub struct Executor<'a, S, V>
 where
   V: Values,
@@ -1296,7 +1294,7 @@ where
   /// Draft §6.4.3 `CompleteValue`, step for step.
   ///
   /// Recursive only through its list arm, and therefore bounded by
-  /// [`MAX_WRAPPERS`](crate::validator::schema::MAX_WRAPPERS) — an object's sub-selections do not
+  /// [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) — an object's sub-selections do not
   /// recurse, they become ready slots and come back through `poll_resolve`. That is what keeps a
   /// deeply nested query from being a deeply nested call stack, which is the property a Sans-I/O
   /// machine is supposed to have.

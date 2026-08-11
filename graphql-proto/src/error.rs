@@ -37,7 +37,7 @@ use core::fmt;
 
 use tokora::SimpleSpan;
 
-use crate::validator::schema::{PackedType, Schema, Sym, TypeId};
+use smear_schema::{PackedType, Schema, Sym, TypeId};
 
 use super::{
   collect::Unstored,

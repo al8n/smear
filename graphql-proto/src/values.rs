@@ -116,8 +116,8 @@ impl core::fmt::Display for Leaf<'_> {
 /// **A driver is never asked for `__typename`.** Draft §6.4.3's `ResolveAbstractType` settles the
 /// concrete object type before draft §6.3 collects a single field on it, and the executor answers
 /// draft §4.4's `__typename` from that same conclusion: it lands in the response as
-/// [`Node::TypeName`](crate::proto::Node::TypeName), and no
-/// [`FieldRequest`](crate::proto::FieldRequest) is issued for it. That is a guarantee and not a
+/// [`Node::TypeName`](crate::Node::TypeName), and no
+/// [`FieldRequest`](crate::FieldRequest) is issued for it. That is a guarantee and not a
 /// convenience. The executor has already spent the object type deciding which fragment type
 /// conditions apply, so a driver free to name that type could return one the surrounding selections
 /// contradict — `... on Cat` fields sitting under a `"Dog"` — and nothing downstream could tell.
@@ -135,9 +135,9 @@ impl core::fmt::Display for Leaf<'_> {
 /// no `make_list` and no builder — which is what keeps this trait from being a `Value` enum
 /// wearing a different hat. The obvious place for the first one would have been `__typename`: a
 /// hook handing the driver a `&str` to wrap. It is answered as
-/// [`Node::TypeName`](crate::proto::Node::TypeName) instead, so a driver has no way to answer it
+/// [`Node::TypeName`](crate::Node::TypeName) instead, so a driver has no way to answer it
 /// wrongly rather than merely no reason to. Argument values reach the driver as
-/// [`ArgumentSource`](crate::proto::ArgumentSource), which is a decision and not a value `proto`
+/// [`ArgumentSource`](crate::ArgumentSource), which is a decision and not a value `proto`
 /// built: it resolves draft §6.4.1's control flow, says *which* of the sources supplies each
 /// argument, and hands back either the literal the document already holds or the driver's own
 /// value for a variable — read once by §6.4.1 and moved through, never minted.
@@ -172,7 +172,7 @@ pub trait Values {
   /// # `None` is a failure, not a `false`
   ///
   /// `if` is declared `Boolean!`, so a value that is not a boolean does not satisfy the position,
-  /// and the executor raises [`Kind::DirectiveCondition`](crate::proto::Kind::DirectiveCondition)
+  /// and the executor raises [`Kind::DirectiveCondition`](crate::Kind::DirectiveCondition)
   /// at the object whose selection set was being collected rather than choosing a boolean for it.
   /// There is no boolean it could choose: `@skip` removes the selection when the condition is
   /// `true` and `@include` removes it when it is not, so `false` would keep a `@skip`ped selection
@@ -262,7 +262,7 @@ pub trait Values {
   ///
   /// The two callers — draft §6.4.1's `CoerceArgumentValues` and draft §6.3's directive conditions
   /// — each read a variable once and spend that one value. A field argument's reaches the driver
-  /// as [`ArgumentSource::Variable`](crate::proto::ArgumentSource::Variable) rather than as a name
+  /// as [`ArgumentSource::Variable`](crate::ArgumentSource::Variable) rather than as a name
   /// to look up again, so the value that passed §6.4.1's non-null check is the value the resolver
   /// receives; a condition's is read, tested and dropped inside §6.3.
   ///
@@ -275,7 +275,7 @@ pub trait Values {
   /// invalidates or recycles on read cannot put a value past a check it did not pass. It may still
   /// be called more than once for the same *name*: a variable used at two arguments is two
   /// positions, and one nested inside an
-  /// [`ArgumentSource::Literal`](crate::proto::ArgumentSource::Literal) is read by the driver
+  /// [`ArgumentSource::Literal`](crate::ArgumentSource::Literal) is read by the driver
   /// itself.
   fn variable(&mut self, name: &str) -> Option<Self::Value>;
 }

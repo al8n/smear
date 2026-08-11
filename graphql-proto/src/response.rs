@@ -49,7 +49,7 @@
 
 use core::fmt;
 
-use crate::validator::schema::{PackedType, TypeId};
+use smear_schema::{PackedType, TypeId};
 
 /// The sentinel for "no such slot".
 pub(super) const NONE: u32 = u32::MAX;

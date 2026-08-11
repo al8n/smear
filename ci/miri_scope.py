@@ -162,7 +162,7 @@ MIRI_IGNORE_BUDGET = 4
 # `ci/feature_reachability.py` reads this tuple out of this file and fails when a publishable
 # workspace member is absent from it, so the list grows with the workspace instead of being
 # remembered.
-MIRI_PACKAGES = ("smear", "smear-lexer", "smear-parser", "smear-schema")
+MIRI_PACKAGES = ("smear", "smear-lexer", "smear-parser", "smear-schema", "graphql-proto")
 
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.

@@ -51,7 +51,7 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec"]
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
+std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "graphql-proto?/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -97,7 +97,7 @@ validator = ["parser", "graphql", "smear-schema/build"]
 # It adds NO dependency and defines no value type of its own: the driver's representation reaches
 # it through the `proto::Values` trait, so the module is `core` + `alloc` for the same reason the
 # schema representation is.
-proto = ["validator"]
+proto = ["validator", "dep:graphql-proto"]
 
 # The second construction door: building a `Schema` out of a draft §4 introspection response
 # instead of out of SDL (`Schema::from_introspection`).
@@ -196,6 +196,11 @@ smear-parser = { workspace = true, optional = true }
 # representation, `builtin`, and `diagnostic`. The builder and the introspection door are behind
 # `smear-schema/build`, which `validator` above turns on.
 smear-schema.workspace = true
+
+# The protocol machine, behind `proto`. It brings `smear-schema` with DEFAULT FEATURES OFF of its
+# own accord; the unconditional edge above is what keeps `smear::diagnostic` ungated, and the two
+# requests unify the way cargo unifies any two.
+graphql-proto = { workspace = true, optional = true }
 
 # `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
 # package's own `tests/` name those types directly to build a source of each backing.

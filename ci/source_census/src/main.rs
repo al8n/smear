@@ -79,6 +79,7 @@ const DEFAULT_ROOTS: &[(&str, &str)] = &[
   ("smear-lexer/src/lib.rs", "smear::lexer"),
   ("smear-parser/src/lib.rs", "smear::parser"),
   ("smear-schema/src/lib.rs", "smear::validator::schema"),
+  ("graphql-proto/src/lib.rs", "smear::proto"),
 ];
 
 fn main() -> ExitCode {

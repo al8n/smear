@@ -1,14 +1,17 @@
 //! Draft §6 execution, as a Sans-I/O state machine.
 //!
-//! Every link in this module's docs is crate-absolute on purpose. `pub mod proto;` in `lib.rs`
-//! carries an outer doc comment as well, and rustdoc resolves the merged fragments in the
-//! **parent** module's scope — so a relative `[`Executor`]` here reports "no item named `Executor`
-//! in module `smear`" under `RUSTDOCFLAGS="-D warnings"`. `validator/mod.rs`'s header records the
-//! same trap.
+//! The links here are bare, which is the split's doing. While this was `smear::proto`, a module
+//! with an outer doc comment on its declaration, every link had to be crate-absolute: rustdoc
+//! resolves the MERGED fragments of a module's documentation in the parent's scope, so a relative
+//! `[`Executor`]` reported "no item named `Executor` in module `smear`" under
+//! `RUSTDOCFLAGS="-D warnings"`. A crate root has no parent to be merged into, and rustdoc
+//! resolves an inlined re-export's links in the crate they were written in — so `crate::Executor`
+//! became a *redundant explicit link target*, which is also denied. `smear`'s `validator/mod.rs`
+//! header records the trap this one just escaped.
 //!
 //! # What this module is
 //!
-//! [`Executor`](crate::proto::Executor) runs a validated query against a built [`Schema`](crate::validator::Schema) and
+//! [`Executor`] runs a validated query against a built [`Schema`](smear_schema::Schema) and
 //! produces a draft §7.1 response. It performs no I/O, holds no runtime, spawns nothing, and never
 //! calls a resolver: it says which field it needs next and waits to be told the answer. That is
 //! what makes it usable from a thread pool, an async runtime, a wasm host or a C caller without
@@ -29,7 +32,7 @@
 //! # The driver owns the values
 //!
 //! There is no `smear::proto::Value`. The driver keeps values in whatever representation it
-//! already has and answers structural questions about them through [`Values`](crate::proto::Values) — is this null, is
+//! already has and answers structural questions about them through [`Values`] — is this null, is
 //! it a list, which object type is it, serialise this leaf. That trait's own documentation explains why at length; the
 //! short version is that an owned enum would force an allocation per leaf to answer questions the
 //! service can already answer in place, and would make a wasm or FFI handle second-class.
@@ -41,7 +44,7 @@
 //! # Scope
 //!
 //! Queries and mutations. Draft §6.2.2's serial rule for a mutation's top-level fields is expressed
-//! by *withholding*: [`poll_resolve`](crate::proto::Executor::poll_resolve) offers one of them and
+//! by *withholding*: [`poll_resolve`](crate::Executor::poll_resolve) offers one of them and
 //! keeps the next off the ready chain until that one's whole subtree is **complete or cancelled**,
 //! so the ordering is structural rather than a contract a driver could forget to honour. Everything
 //! below the top level is draft §6.3's ordinary collection, which is where the specification draws
@@ -49,7 +52,7 @@
 //!
 //! "Or cancelled" is the edge and it is load-bearing rather than a hedge. When draft §6.4.4 nulls a
 //! mutation field because something under it failed, the requests still outstanding beneath it are
-//! *abandoned* — [`poll_abandoned`](crate::proto::Executor::poll_abandoned) is how the driver hears
+//! *abandoned* — [`poll_abandoned`](crate::Executor::poll_abandoned) is how the driver hears
 //! so — and the next mutation field is released over them rather than behind them. `graphql-js`
 //! 16.11.0 was measured doing the same, and waiting instead would put that field behind work the
 //! driver has just been told to stop doing: retiring those entries on that channel, or answering
@@ -58,18 +61,18 @@
 //! Releasing over them is not free, and the price is stated exactly. An abandoned request keeps
 //! its in-flight slot until the driver retires *or answers* it, so a driver that does neither runs
 //! under a ceiling narrowed by however many it is holding — never by all of them, because
-//! [`max_in_flight`](crate::proto::Limits::max_in_flight) bounds them at one below itself. The
+//! [`max_in_flight`](crate::Limits::max_in_flight) bounds them at one below itself. The
 //! cost is concurrency, down to a floor of one request at a time, and never progress.
 //!
-//! A `subscription` is refused by [`Executor::start`](crate::proto::Executor::start) with
-//! [`StartError::NotAQueryOrMutation`](crate::proto::StartError::NotAQueryOrMutation): draft §6.2.3
+//! A `subscription` is refused by [`Executor::start`] with
+//! [`StartError::NotAQueryOrMutation`]: draft §6.2.3
 //! delivers a *stream* of responses over a source event stream, and this surface delivers one.
 //!
-//! Draft §6.1 `CoerceVariableValues` is the driver's: values reaching [`Values::variable`](crate::proto::Values::variable) are
+//! Draft §6.1 `CoerceVariableValues` is the driver's: values reaching [`Values::variable`] are
 //! already coerced against their declared types.
 //!
 //! Of draft §4.4's three meta-fields, one is executed and two are not. `__typename` is answered by
-//! the executor from the object type it resolved and arrives as [`Node::TypeName`](crate::proto::Node::TypeName);
+//! the executor from the object type it resolved and arrives as [`Node::TypeName`];
 //! the driver is never asked, because the executor has already spent that object type deciding
 //! which fragments applied and must not let the answer disagree with them. `__schema` and `__type`
 //! are left to the driver as ordinary fields of the query root — draft §4.5 introspection is a
@@ -79,17 +82,17 @@
 //! # Worked example
 //!
 //! ```
-//! use smear::{
-//!   lexer::tokora::{Parse as _, Parser},
-//!   parser::graphql::{
+//! use graphql_proto::{Executor, Leaf, Node, Values};
+//! use smear_parser::{
+//!   graphql::{
 //!     GraphQL,
 //!     ast::{ExecutableDocument, TypeSystemDocument},
 //!     error::GraphqlErrors,
 //!     syntactic::{GraphqlLexer, executable_document, type_system_document},
 //!   },
-//!   proto::{Executor, Leaf, Node, Values},
-//!   validator::Schema,
+//!   lexer::tokora::{Parse as _, Parser},
 //! };
+//! use smear_schema::Schema;
 //!
 //! // The driver's value representation, and the space that interprets it.
 //! #[derive(Clone, Debug)]
@@ -163,6 +166,16 @@
 //! assert_eq!(key.to_string(), "greeting");
 //! assert!(matches!(value, Node::Leaf(Json::Str(text)) if text == "hello"));
 //! ```
+
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![deny(missing_docs)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
+
+#[cfg(feature = "std")]
+extern crate std;
 
 mod collect;
 mod error;
