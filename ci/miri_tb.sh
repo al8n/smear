@@ -26,6 +26,21 @@ fi
 
 python3 ci/miri_scope.py --selftest
 
+# RE-MEASURE THE EXCLUSIONS BEFORE SPENDING ANYTHING. `MIRI_NOT_SELECTED` names the publishable
+# members left out of the selection because their lib harness is empty at the feature set this cell
+# builds — and that is a MEASUREMENT, not a fact of nature. A member that gains a `#[test]` while
+# still excluded has a test nothing interprets, and every other gate stays green over it (measured:
+# a `#[test]` added to `smear/src/lib.rs` left both this file's selftest and
+# `ci/feature_reachability.py` at exit 0).
+#
+# Here rather than in `ci/feature_reachability.py` for two reasons. It needs a `cargo test --list`,
+# which is a build, and this script is already paying for one — the fast gate stays fast. And
+# `feature_reachability.py`'s selection checks are called with SYNTHETIC package sets by its own
+# selftest, so a check that reads the real world cannot live among them; that mistake was made once
+# already and reported the gate as broken on every plant. Nothing calls `verify_exclusions` with
+# planted inputs: it reads the constant and runs cargo.
+python3 ci/miri_scope.py --verify-exclusions
+
 rustup toolchain install nightly --component miri
 rustup override set nightly
 cargo miri setup

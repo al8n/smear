@@ -63,6 +63,7 @@ import io
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -214,11 +215,84 @@ MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-compiler", "graphql-proto
 #   smear-compiler  12 /  12
 #   graphql-proto   15 /  15
 MIRI_NOT_SELECTED = {
-    "smear": "the umbrella is re-exports only — `smear/src` is one file and its lib carries no "
-             "unit tests at any feature set, so selecting it yields a harness with 0 tests",
-    "smear-schema": "its three lib unit tests are behind `build`, and these scripts pass no "
-                    "`--features` by design; selecting it here yields 0 tests",
+    "smear": {
+        # The strongest claim in the table, so it is asserted at the strongest configuration: no
+        # feature set of this crate produces a lib unit test, because there is no code to test.
+        "features": ("--all-features",),
+        "why": "the umbrella is re-exports only — `smear/src` is one file — so its lib carries no "
+               "unit tests at ANY feature set, and selecting it would yield a harness with 0 tests",
+    },
+    "smear-schema": {
+        # A NARROWER claim, and the flags are what make it narrow: three unit tests exist behind
+        # `build`, so this is asserted at the feature set these scripts actually build and nowhere
+        # else. Writing `--all-features` here would be a claim the crate does not satisfy, and
+        # `--verify-exclusions` would say so.
+        "features": (),
+        "why": "its three lib unit tests are behind `build`, and these scripts pass no `--features` "
+               "by design; at the feature set they DO build, its harness has 0 tests",
+    },
 }
+
+
+def verify_exclusions(cargo: str = "cargo") -> int:
+    """Re-run the measurement every `MIRI_NOT_SELECTED` reason rests on.
+
+    PROPERTY: a member is excluded from the Miri selection only while it really has no lib unit
+    tests at the configuration the exclusion names.
+
+    THIS IS THE SECOND TIME THIS FILE'S FAMILY HAS NEEDED THIS. `ci/feature_reachability.py` used to
+    carry `EQ_EXEMPT`, a skip table whose one entry was excused by a measurement nobody re-ran; it
+    was replaced by `EQ_TWIN`, which has no skip path at all. One round later `MIRI_NOT_SELECTED`
+    arrived — a new exemption table whose entries were justified by a measurement nobody re-ran, and
+    guarded by nothing stronger than "the reason is non-empty". A non-empty reason is the guarantee
+    that somebody once thought about it.
+
+    So the reason is EXECUTABLE: each entry carries the cargo flags its claim is measured at, and
+    this runs exactly those. Add a `#[test]` to `smear` and this fails; move `smear-schema`'s tests
+    out from behind `build` and this fails; widen a claim to `--all-features` that only holds at the
+    default set and this fails.
+
+    Reproduced before it was written: a `#[test]` added to `smear/src/lib.rs` left
+    `feature_reachability` and `miri_scope --selftest` both green while the test would never be
+    interpreted.
+    """
+    failures = []
+    for member, entry in sorted(MIRI_NOT_SELECTED.items()):
+        flags = list(entry.get("features", ()))
+        command = [cargo, "test", "-p", member, "--lib", *flags, "--", "--list"]
+        printed = " ".join(command)
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            failures.append(
+                f"{member}: `{printed}` exited {result.returncode}, so the exclusion's claim could "
+                f"not be measured at all\n{result.stderr.strip()[:400]}"
+            )
+            continue
+        found = re.search(r"^(\d+) tests?, \d+ benchmarks?$", result.stdout, re.M)
+        if found is None:
+            failures.append(
+                f"{member}: `{printed}` printed no `N tests, M benchmarks` summary, so this check "
+                f"read nothing — cargo's --list output has changed shape"
+            )
+            continue
+        count = int(found.group(1))
+        print(f"  {member:16} {count:>4} lib unit tests at `{' '.join(flags) or 'default features'}`")
+        if count:
+            failures.append(
+                f"{member}: {count} lib unit test(s) at `{' '.join(flags) or 'default features'}`, "
+                f"and MIRI_NOT_SELECTED excludes it from the Miri selection on the claim that it "
+                f"has none. Those tests are interpreted by nothing. Either add `{member}` to "
+                f"MIRI_PACKAGES, or narrow the recorded reason to a configuration where the count "
+                f"really is zero.\n      recorded reason: {entry['why']}"
+            )
+    if failures:
+        print("::error::miri_scope: an exclusion from the Miri selection is no longer true",
+              file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+    print(f"miri_scope: {len(MIRI_NOT_SELECTED)} exclusions re-measured, all still zero")
+    return 0
 
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.
@@ -911,6 +985,14 @@ def main() -> int:
         help="Set when the run passed `--no-default-features`, for the same reason.",
     )
     ap.add_argument(
+        "--verify-exclusions",
+        action="store_true",
+        help="Re-measure every MIRI_NOT_SELECTED member with the cargo flags its reason names, and "
+        "fail if any has a non-empty harness. This is the reason being EXECUTED rather than read: "
+        "an exclusion table whose entries are checked only for being non-blank is the shape "
+        "`EQ_EXEMPT` already had once. Both Miri scripts run it before `cargo miri setup`.",
+    )
+    ap.add_argument(
         "--print-packages",
         action="store_true",
         help="Print the `-p` arguments for `cargo miri test`, one token per line, and exit. This "
@@ -950,6 +1032,9 @@ def main() -> int:
     if not args.manifest.is_file():
         print(f"::error::miri_scope: no such manifest: {args.manifest}", file=sys.stderr)
         return 1
+
+    if args.verify_exclusions:
+        return verify_exclusions()
 
     if args.print_packages:
         if not MIRI_PACKAGES:

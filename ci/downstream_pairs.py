@@ -92,7 +92,21 @@ EQ_TWIN = {
   ("smear-schema", "build"): "validator",
 }
 
-# The observable half. Each entry is
+# ── BOUND: THE COMPLETENESS OF THIS LIST IS NOT DERIVABLE ───────────────────────────────────
+#
+# Which public path or impl a feature gates is a JUDGEMENT, and `cargo metadata` does not carry it.
+# Nothing here can tell you that a gated path exists with no probe watching it.
+#
+# What that costs is bounded, and the bound is why the list is allowed to be a judgement at all:
+# the EQ family is TOTAL over every member feature cargo reports, so a missing probe costs an
+# observable path and never a whole pair — the equivalence for that feature is still asserted and
+# still tested. C1 additionally requires each probe to name a real pair and to have a matching
+# `uses-` feature in the fixture, so an entry cannot describe nothing.
+#
+# Stated here rather than only in a report: a bound recorded where nobody meets it is the shape
+# that produced two exemption tables whose reasons nobody re-ran.
+#
+# Each entry is
 #   (label, member, feature, extra smear features the path needs, extra fixture features)
 # and requires a `uses-<label>` feature in the fixture manifest.
 PROBES = (

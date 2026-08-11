@@ -92,6 +92,75 @@ import sys
 
 UMBRELLA = "smear"
 
+# ── EVERY TABLE IN THIS DIRECTORY, AND WHAT RE-CHECKS IT ────────────────────────────────────
+#
+# Asked because it has now happened twice. `EQ_EXEMPT` was a skip table whose one entry carried a
+# reason nobody re-ran; it was replaced by `EQ_TWIN`, which has no skip path. One round later
+# `MIRI_NOT_SELECTED` arrived — a new exemption table whose entries were justified by a measurement
+# nobody re-ran, guarded by nothing stronger than "the reason is non-empty", which is the same
+# guarantee `EQ_EXEMPT` offered: that somebody once thought about it.
+#
+# So every table that asserts something about the tree is listed here with its checker. A table
+# with no checker is either fixed or recorded as a bound — never left implicit.
+#
+#   TABLE                          CLAIMS                          RE-CHECKED BY
+#   ---------------------------------------------------------------------------------------------
+#   EXEMPT_MEMBERS                 the member has no feature to    audit_exempt_members: it must be
+#     (this file)                  forward                         a member and declare none
+#   EXEMPT (features)              this feature need not be        an entry matching nothing is a
+#     (this file)                  forwarded                       finding; empty today
+#   EXEMPT_SELECTION               this member need not be in      an entry matching nothing is a
+#     (this file)                  that selection                  finding; empty today
+#   FLOOR_BEARING                  only this file may import a     two-sided: others may not, and
+#     (this file)                  floor-bearing stdlib module     the owner must
+#   SELECTIONS / READERS           these are the selections that   a reader that cannot find its
+#     (this file)                  must cover every member         table is a finding
+#   EQ_TWIN                        this pair's umbrella twin is    two-sided: a stale entry, and a
+#     (downstream_pairs)           not its namesake                pair with no twin, both fail
+#   MEMBERS                        these are the crates the        C4: a workspace member with
+#     (downstream_pairs)           umbrella re-exports             features and no row fails
+#   PRESENCE                       features a member's edge needs  self-verifying ONE WAY: too
+#     (downstream_pairs)                                           narrow fails its POS leg; too
+#                                                                  wide still compiles and only
+#                                                                  makes the leg less isolated
+#   REASONS                        how a negative leg may fail     self-verifying ONE WAY: an
+#     (downstream_pairs)                                           unlisted reason is a finding;
+#                                                                  an over-broad entry admits a
+#                                                                  failure it should not
+#   MIRI_PACKAGES                  what the Miri cells run         it IS the source: the scripts
+#     (miri_scope)                                                 build `-p` from it, and the
+#                                                                  post-run binary count checks it
+#   MIRI_NOT_SELECTED              this member's lib harness is    --verify-exclusions re-runs the
+#     (miri_scope)                 empty at these cargo flags      measurement the reason names
+#   MIRI_IGNORE_BUDGET             how many per-test ignores       counted out of the sources, and
+#     (miri_scope)                                                 restated in miri.yml
+#   WORKFLOW_BUDGET_SITES          where miri.yml restates it      matched against miri.yml
+#   CELL_FLAGS                     value of each bare cfg in a     self-verifying: an unmodelled
+#     (miri_scope)                 Miri cell                       cfg raises rather than guesses
+#   EXEMPTIONS (40 entries)        this error type is outside      an entry matching nothing is a
+#     (source_census, Rust)        the diagnostic contract         hard error
+#
+# THE TWO ONE-WAY ROWS ABOVE ARE NOT "FINE". They are checked in the direction that has bitten and
+# unchecked in the other, and saying so is the point of this table: eleven unexplained "sound"s is
+# the shape both exemption tables had. Neither residual is silent in practice — a too-wide
+# `PRESENCE` shows up as a LEAK leg that stops isolating one pair, which the judge's
+# name-the-pair rule catches, and an over-broad `REASONS` entry would have to be written
+# deliberately — but neither is closed by construction.
+#
+# TWO BOUNDS, recorded because they cannot be closed rather than because nobody tried:
+#
+#   PROBES (downstream_pairs) — which public path a feature gates is a JUDGEMENT, and cargo does
+#   not carry it. Each probe is checked to name a real pair with a real `uses-` feature, and the EQ
+#   family is total over every member feature, so a missing probe costs an observable path and not
+#   a whole pair. Completeness of the judgement is not derivable.
+#
+#   EXECUTION_IMPORTS / EXECUTION_CALLS / SPAWN_CALLS (this file) — a denylist of spellings cannot
+#   be complete in principle. What IS derived is the set of forbidden targets: `ci/*.py` basenames
+#   and the Miri scripts, so a gate added tomorrow is covered without anyone remembering.
+#
+# Both bounds are ALSO written at the tables they describe, not only here. A bound recorded where
+# nobody meets it is the shape that produced two exemption tables whose reasons nobody re-ran.
+
 # Members with no public API of their own to forward. Each is a workspace member so the
 # repository's own gates reach it, not because a dependent ever names it.
 #
@@ -133,13 +202,29 @@ PLANTS = {
 
 
 def metadata() -> dict:
+  """`cargo metadata`, reported as a finding rather than raised as a traceback.
+
+  A gate that dies with a stack trace when the manifests do not parse tells the reader about
+  Python. Found by a plant that happened to write invalid TOML: the run ended in
+  `CalledProcessError` from `subprocess`, forty lines of it, with cargo's actual complaint nowhere
+  in sight.
+  """
   out = subprocess.run(
     ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-    check=True,
     capture_output=True,
     text=True,
   )
-  return json.loads(out.stdout)
+  if out.returncode != 0:
+    print("::error::feature_reachability: `cargo metadata` failed, so this gate read nothing",
+          file=sys.stderr)
+    print(out.stderr.strip()[:1200], file=sys.stderr)
+    raise SystemExit(1)
+  try:
+    return json.loads(out.stdout)
+  except json.JSONDecodeError as err:
+    print(f"::error::feature_reachability: `cargo metadata` printed no usable JSON ({err})",
+          file=sys.stderr)
+    raise SystemExit(1) from err
 
 
 def members(meta: dict) -> dict[str, dict]:
@@ -260,6 +345,19 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
 #
 # Matched over the syntax tree, not the text: an earlier revision grepped for its own table and
 # reported itself. A string literal is not a call, and `ast` knows the difference.
+# ── BOUND: THIS LIST CANNOT BE COMPLETE, AND HERE IS WHAT IS DERIVED INSTEAD ────────────────
+#
+# A denylist of spellings is not a closure. There is no finite set of ways to run another file in
+# Python, and anyone determined to can reach one past these names. Stated at the table rather than
+# only in a report, because a bound recorded where nobody meets it is exactly the shape that
+# produced this file's history: `EQ_EXEMPT`'s reason, `MIRI_NOT_SELECTED`'s measurement and this
+# check's first revision all said the right thing somewhere nobody read.
+#
+# What IS closed is the other half — the set of forbidden TARGETS. `siblings` below is every
+# `ci/*.py` basename and the Miri scripts are found by their content, so a gate added tomorrow is
+# covered without anyone remembering. The residual risk is a novel spelling of "run it", not a new
+# file going unwatched, and the first revision's actual defect was in the target half: it could not
+# see a plain `import miri_scope`.
 EXECUTION_IMPORTS = ("importlib", "runpy")
 EXECUTION_CALLS = ("exec", "eval", "exec_module", "spec_from_file_location")
 # Callables that hand a command line to the operating system. A `.py` of ours in one of their
@@ -277,7 +375,7 @@ SPAWN_CALLS = ("run", "call", "check_call", "check_output", "Popen", "system", "
 FLOOR_BEARING = {"tomllib": ("miri_scope.py", "parses smear/Cargo.toml; stdlib since 3.11")}
 
 
-def check_no_gate_executes_another(verbose: bool = False) -> list[str]:
+def audit_no_gate_executes_another(verbose: bool = False) -> list[str]:
   """PROPERTY: no `ci/*.py` obtains another gate's contents by running it, in any spelling."""
   findings: list[str] = []
   scripts = sorted((REPO_ROOT / "ci").glob("*.py"))
@@ -487,7 +585,7 @@ def member_roots(meta: dict) -> dict[str, pathlib.Path]:
   return out
 
 
-def check_equivalence(meta: dict, feature_tables: dict[str, dict[str, list[str]]]) -> list[str]:
+def audit_equivalence(meta: dict, feature_tables: dict[str, dict[str, list[str]]]) -> list[str]:
   """Every member feature is witnessed by a constant AND pinned by an assertion in the umbrella.
 
   There is no skip. A pair whose umbrella twin is not its namesake declares the twin in
@@ -596,15 +694,23 @@ def _read_miri_packages() -> set[str]:
     raise RuntimeError("ci/miri_scope.py declares no non-empty MIRI_PACKAGES")
   excluded = read_constant(path, "MIRI_NOT_SELECTED")
   if not isinstance(excluded, dict):
-    raise RuntimeError("ci/miri_scope.py's MIRI_NOT_SELECTED is not a dict of member -> reason")
+    raise RuntimeError("ci/miri_scope.py's MIRI_NOT_SELECTED is not a dict of member -> entry")
   overlap = sorted(set(selected) & set(excluded))
   if overlap:
     raise RuntimeError(
       f"ci/miri_scope.py both selects and excludes {overlap}; the two tables must partition"
     )
-  blank = sorted(m for m, why in excluded.items() if not str(why).strip())
-  if blank:
-    raise RuntimeError(f"ci/miri_scope.py excludes {blank} with no reason recorded")
+  # An entry has to be MEASURABLE, not merely worded. `features` is the cargo configuration its
+  # claim is asserted at and `miri_scope.py --verify-exclusions` runs exactly that; a `why` with no
+  # `features` beside it is the shape this table had when it was an unchecked exemption.
+  for member, entry in sorted(excluded.items()):
+    if not isinstance(entry, dict) or "features" not in entry or not str(
+      entry.get("why", "")
+    ).strip():
+      raise RuntimeError(
+        f"ci/miri_scope.py's exclusion of `{member}` is not `{{'features': (...), 'why': '...'}}`. "
+        f"The reason must name the configuration it is measured at, or nothing can re-run it."
+      )
   return set(selected) | set(excluded)
 
 
@@ -632,18 +738,35 @@ def _read_census_roots() -> set[str]:
 # Deriving removed the duplicate; this stops it coming back. Planted: re-hardcoding
 # `cargo miri test -p smear -p smear-lexer` in `ci/miri_sb.sh` left every other gate green, because
 # nothing else reads a shell script's argument list.
-MIRI_SCRIPTS = ("ci/miri_sb.sh", "ci/miri_tb.sh")
+def miri_scripts() -> list[pathlib.Path]:
+  """The Miri cell scripts, DERIVED from the directory rather than listed.
+
+  A hand-written pair is one more table resting on an unverified fact — "these are all of them" —
+  and a third aliasing model added as `ci/miri_xx.sh` would be unchecked. Anything under `ci/` that
+  runs `cargo miri test` is one of these, which is the property rather than the naming convention.
+  """
+  found = []
+  for script in sorted((REPO_ROOT / "ci").glob("*.sh")):
+    try:
+      if "cargo miri test" in script.read_text():
+        found.append(script)
+    except OSError:
+      continue
+  return found
 
 
-def check_miri_scripts_derive() -> list[str]:
+def audit_miri_scripts_derive() -> list[str]:
   """PROPERTY: what the Miri scripts RUN is what `MIRI_PACKAGES` says, because it is its source.
 
   Not "the two lists agree" — that would leave two lists. The scripts ask for the constant, and
   this refuses both ways of stopping: not asking, and passing a literal `-p` beside it.
   """
   findings: list[str] = []
-  for name in MIRI_SCRIPTS:
-    path = REPO_ROOT / name
+  scripts = miri_scripts()
+  if not scripts:
+    return ["no script under `ci/` runs `cargo miri test`, so this check walked nothing"]
+  for path in scripts:
+    name = f"ci/{path.name}"
     try:
       text = path.read_text()
     except OSError as err:
@@ -654,6 +777,12 @@ def check_miri_scripts_derive() -> list[str]:
         f"{name} does not build its selection from `miri_scope.py --print-packages`, so "
         f"`MIRI_PACKAGES` is a declaration again and the guard would be reading a list the "
         f"workflow does not execute"
+      )
+    if "miri_scope.py --verify-exclusions" not in text:
+      findings.append(
+        f"{name} does not run `miri_scope.py --verify-exclusions`, so `MIRI_NOT_SELECTED`'s "
+        f"reasons are back to being writable rather than executable — a member that gains a lib "
+        f"unit test while excluded has one nothing interprets, and this fast gate cannot see it"
       )
     for line in text.splitlines():
       stripped = line.strip()
@@ -725,12 +854,50 @@ def check_selections(publishable: set[str]) -> list[str]:
   return findings
 
 
-def check_miri_exclusions(publishable: set[str]) -> list[str]:
+# ── THE TWO FAMILIES, AND WHY THE LINE BETWEEN THEM IS CHECKED AND NOT JUST FOLLOWED ────────
+#
+# `check_*` is called BY THE SELFTEST with planted inputs, so it must derive every finding from its
+# arguments. `audit_*` compares a table against the real workspace and is reachable only from
+# `main()`.
+#
+# This was got wrong twice, both times by putting a world-comparing check in a selftest-reachable
+# function: it then fires on every synthetic case and reports the gate as broken. The second time
+# was four minutes after writing the rule down as a comment — which is the whole argument for
+# `audit_containment()` below. A constraint that has been restated and then violated is a
+# constraint that needed to be structural.
+
+
+def audit_exempt_members(feature_tables: dict[str, dict[str, list[str]]]) -> list[str]:
+  """PROPERTY: a member exempted as having nothing to forward really has nothing to forward.
+
+  `EXEMPT_MEMBERS` asserts a fact about the tree, so it is re-derived rather than trusted — a
+  member that has grown a feature is being skipped on a claim that stopped being true, and one
+  that is not a member at all describes nothing. Cheap: the same `cargo metadata` main() already
+  read.
+  """
+  findings: list[str] = []
+  for member, why in sorted(EXEMPT_MEMBERS.items()):
+    if member not in feature_tables:
+      findings.append(
+        f"`{member}` is exempted as having nothing to forward and is not a workspace member ({why})"
+      )
+      continue
+    declared = sorted(f for f in feature_tables[member] if f != "default")
+    if declared:
+      findings.append(
+        f"`{member}` is exempted as having nothing to forward and now declares {declared}. The "
+        f"exemption's claim is no longer true, so those features are unchecked."
+      )
+  return findings
+
+
+def audit_miri_exclusions(publishable: set[str]) -> list[str]:
   """No member is excluded from the Miri selection for a reason that describes nothing.
 
-  Kept OUT of `check_selections`, which the selftest calls with synthetic package sets — a check
-  against the real tree inside a function whose inputs are planted would fail on every plant and
-  report it as the gate's fault. That is what it did on the first attempt here.
+  `audit_`, not `check_`: it reads the real tree, so it must never be reachable from the selftest,
+  which calls the `check_*` family with synthetic package sets. A world-reading check among those
+  fails on every plant and reports it as the gate's fault — done twice now, which is why the
+  distinction is in the names.
   """
   findings: list[str] = []
   try:
@@ -768,8 +935,63 @@ def _case(name: str, tables: dict, want_findings: bool) -> str | None:
   return None
 
 
+def audit_containment() -> list[str]:
+  """PROPERTY: no `audit_*` is reachable from `selftest()`, and every `audit_*` is reachable from
+  `main()`.
+
+  The naming rule, made checkable. `audit_*` compares a table against the real workspace, and the
+  selftest replaces exactly that with planted inputs — so an `audit_` in its call graph fails on
+  every synthetic case and blames the gate. The second direction catches the opposite mistake: an
+  `audit_` nobody calls is a check that does not run.
+
+  Computed over this file's own syntax tree, transitively, so a helper that reaches an `audit_` is
+  caught as surely as a direct call.
+  """
+  findings: list[str] = []
+  try:
+    tree = ast.parse(pathlib.Path(__file__).read_text(), filename=__file__)
+  except (OSError, SyntaxError) as err:
+    return [f"this file could not be parsed to check its own call graph ({err})"]
+  funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+  def reachable(root: str) -> set[str]:
+    seen: set[str] = set()
+    stack = [root]
+    while stack:
+      name = stack.pop()
+      if name in seen or name not in funcs:
+        continue
+      seen.add(name)
+      for node in ast.walk(funcs[name]):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+          stack.append(node.func.id)
+    return seen
+
+  audits = {n for n in funcs if n.startswith("audit_")} - {"audit_containment"}
+  if not audits:
+    return ["no `audit_*` function exists, so this check compared nothing"]
+
+  from_selftest = reachable("selftest")
+  for name in sorted(audits & from_selftest):
+    findings.append(
+      f"`{name}` reads the real workspace and is reachable from `selftest()`, which calls the "
+      f"`check_*` family with PLANTED inputs — so it will fire on every synthetic case and report "
+      f"the gate as broken. Rename it `check_*` and derive its findings from its arguments, or "
+      f"move the call out of the selftest's reach."
+    )
+  from_main = reachable("main")
+  for name in sorted(audits - from_main):
+    findings.append(f"`{name}` is never reached from `main()`, so it is a check that does not run")
+  return findings
+
+
 def selftest() -> int:
   problems: list[str] = []
+
+  # Before any case: the selftest's own containment. A planted case that fails because an `audit_`
+  # is in the call graph looks exactly like the gate being wrong, and that misreading has cost two
+  # rounds.
+  problems.extend(audit_containment())
 
   problems.append(_case("the honest tree", _BASE, want_findings=False))
 
@@ -883,9 +1105,9 @@ def main() -> int:
   if args.verbose:
     for key in SELECTIONS:
       print(f"  ok        {READERS[key][0]}")
-    for name in MIRI_SCRIPTS:
-      print(f"  ok        {name} derives its selection from MIRI_PACKAGES")
-  execution_findings = check_no_gate_executes_another(args.verbose)
+    for path in miri_scripts():
+      print(f"  ok        ci/{path.name} derives its selection and re-measures its exclusions")
+  execution_findings = audit_no_gate_executes_another(args.verbose)
   if execution_findings:
     print("::error::feature_reachability: a gate executes another gate")
     for f in execution_findings:
@@ -896,7 +1118,7 @@ def main() -> int:
     )
     return 1
 
-  equivalence_findings = check_equivalence(meta, tables)
+  equivalence_findings = audit_equivalence(meta, tables)
   if equivalence_findings:
     print("::error::feature_reachability: a member feature has no enforced equivalence")
     for f in equivalence_findings:
@@ -911,8 +1133,9 @@ def main() -> int:
     print("  ok        every member feature is asserted equal to its `smear` twin")
 
   selection_findings = (check_selections(publishable)
-                        + check_miri_scripts_derive()
-                        + check_miri_exclusions(publishable))
+                        + audit_miri_scripts_derive()
+                        + audit_miri_exclusions(publishable)
+                        + audit_exempt_members(tables))
   if selection_findings:
     print("::error::feature_reachability: a gate's selection has stopped covering every member")
     for f in selection_findings:
