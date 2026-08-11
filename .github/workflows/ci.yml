@@ -342,18 +342,23 @@ jobs:
   # Fifteen targets, one question: does the crate a consumer installs build for them. That is
   # `smear` and only `smear` — it is the sole publishable member, which is a property of the
   # manifests rather than an opinion, and the step below re-reads it out of `cargo metadata` so
-  # the list cannot go stale in silence. The other five are `publish = false`: two criterion
-  # harnesses — one of which also carries the `apollo-compiler` differential oracle — two
-  # tripwires, and the `source-genericity` gate's `syn` reader, none of which any target here
-  # will ever run.
+  # the list cannot go stale in silence. The other three are `publish = false`: two tripwires and
+  # the `source-genericity` gate's `syn` reader, none of which any target here will ever run.
   #
   # This job said `cargo build --target ...` with no package selection until it was fixed, so it
-  # built every member, and one of them cannot be built for a 32-bit target at all:
-  # `smear-apollo-bench` pins `apollo-compiler =1.32.0`, whose lib carries
-  # `assert!(size_of::<Name>() == 24)`. At 32 bits that is false, it is a const assertion so it
-  # fires during compilation, and `cross (i686-linux-android)` failed on `main` with
-  # `evaluation of name::_ failed here`. Nothing a consumer of `smear` can reach was involved:
-  # the gate was red about a benchmark harness's oracle, on Android, and it blocked merges.
+  # built every member, and one of them could not be built for a 32-bit target at all: the
+  # `apollo-compiler =1.32.0` oracle, whose lib carries `assert!(size_of::<Name>() == 24)`. Under
+  # the 32-bit x86 ABI that is false, it is a const assertion so it fires during compilation, and
+  # `cross (i686-linux-android)` failed on `main` with `evaluation of name::_ failed here`.
+  # Nothing a consumer of `smear` can reach was involved: the gate was red about a benchmark
+  # harness's oracle, on Android, and it blocked merges.
+  #
+  # THAT ORACLE IS NOW A DEV-DEPENDENCY OF `smear` — the benches were consolidated into the crate
+  # they measure — and this job is unaffected for a reason worth stating rather than rediscovering:
+  # `cargo build` does not build dev-dependencies at all, only `cargo build --tests` does. The
+  # place where it WOULD have mattered is `cargo miri test --lib`, which does; see
+  # `smear/Cargo.toml`, where the entry sits under `cfg(target_pointer_width = "64")` so that the
+  # two 32-bit Miri cells never resolve it.
   #
   # `-p smear` NAMES THE PACKAGE, and that is the load-bearing half — the same rule `noatomic`
   # below, `publish-dry-run` and `byte-identity` are written around. A selection that goes quiet
@@ -542,33 +547,30 @@ jobs:
         # Measured on this tree: `cargo test`'s default target selection is lib + bins + tests +
         # examples; a `[[bench]]` target is not in it, and neither `cargo build --workspace
         # --all-features` (the `msrv` job) nor `cargo hack build --each-feature` above builds
-        # one. So while the benches lived in `smear/benches/` they were compiled by no gate at
-        # all — `#73`'s family exactly, a target that exists and that nothing ever proves builds.
+        # one. A bench is a target that exists and that nothing else here ever proves builds —
+        # `#73`'s family exactly — so this pass is the only gate over all six.
         #
-        # That was survivable when the benches sat beside the fixtures they `include_str!`. It
-        # is not now: `smear-benches` reaches across a member boundary for all 29 of them
-        # (`../../smear/tests/fixtures/...`), so a fixture rename would break four bench targets
-        # and every other job would stay green. `--benches` names a target KIND on a package
-        # that has nothing else, so there is no filter here that can match zero targets and
-        # exit 0.
+        # The first line covers the four that measure `smear`'s DEFAULT feature set. `-p smear`
+        # names the package, which is the loud spelling: a target FILTER that matches nothing
+        # warns and exits 0, a named `-p` that cannot be built fails.
         #
-        # `smear-apollo-bench` is the SAME defect one member over, and it survived the fix that
-        # this comment describes: `-p smear-benches` names one package, and `benchmarks/`'s two
-        # criterion targets — `apollo_comparison` and `validator_comparison` — live in a
-        # different one. Nothing built them. `validator_comparison` in particular carries G5's
-        # acceptance criterion (issue #85), so the target that proves the validator's headline
-        # number was itself unproven. Naming the package is what makes the gate fire: a target
-        # FILTER that matches nothing warns and exits 0, a named `-p` that cannot be built fails.
+        # THE SECOND LINE IS NOT A SECOND HELPING OF THE FIRST. `apollo_comparison` and
+        # `validator_comparison` carry `required-features = ["rowan", "validator"]`, and an unmet
+        # `required-features` makes cargo SKIP the target in silence — no output, exit code 0.
+        # Measured: `cargo bench --no-run -p smear` builds four of the six and says nothing about
+        # the other two. A workspace-wide `cargo bench` does build all six, but only because
+        # `smear-smoke` names every one of `smear`'s features and cargo unifies across the
+        # selected packages — coverage by resolution, which is what #70 and #84 both were, and
+        # which would disappear the day that member narrowed. So the two are NAMED, `--bench` by
+        # `--bench`, with their features passed: a named target that cannot be built is a hard
+        # error, and a renamed one takes this step red on the commit that renamed it.
+        # `validator_comparison` in particular carries G5's acceptance criterion (issue #85).
         #
-        # Two invocations rather than `-p a -p b`, deliberately. Cargo unifies features across
-        # the packages selected by ONE command, and these two resolve `smear` differently
-        # (`smear-benches` does not ask for `validator`; `smear-apollo-bench` does, and adds
-        # `rowan`). A single command would build each bench against the union and could pass a
-        # target that does not compile against its own package's declared feature set.
-        #
-        # Build, not run: criterion sampling is minutes per target and this is a compile gate.
-        cargo build -p smear-benches --benches
-        cargo build -p smear-apollo-bench --benches
+        # `--no-run`, not a run: criterion sampling is minutes per target and this is a compile
+        # gate.
+        cargo bench --no-run -p smear
+        cargo bench --no-run -p smear --features rowan,validator \
+          --bench apollo_comparison --bench validator_comparison
 
   test:
     name: test
@@ -839,8 +841,8 @@ jobs:
     # Derived from `cargo metadata` over every workspace member rather than a list of
     # three crate names, so a crate added later is covered the day it is added. Keyed on
     # `publish`: cargo reports `[]` for `publish = false` and null otherwise, so
-    # `smear-apollo-bench` — a bench harness docs.rs will never build — is skipped
-    # without being named.
+    # `smear-smoke`, `smear-noatomic` and `source-census` — none of which docs.rs will
+    # ever build — are skipped without being named.
     - name: every publishable crate declares [package.metadata.docs.rs]
       run: |
         set -euo pipefail
@@ -1032,9 +1034,10 @@ jobs:
 
   # ── THE BYTE-IDENTITY GATE ──────────────────────────────────────────────────────────────────
   #
-  # Recomputes the four corpus tree hashes (`benchmarks/tests/byte_identity.rs`) and fails if any
-  # has moved. Before this job the four values lived in a GitHub issue and a commit message, so a
-  # change that re-shaped every tree in the corpus went green through every gate in the repository.
+  # Recomputes the four corpus tree hashes (`smear/benches/comparative/apollo/byte_identity.rs`)
+  # and fails if any has moved. Before this job the four values lived in a GitHub issue and a
+  # commit message, so a change that re-shaped every tree in the corpus went green through every
+  # gate in the repository.
   #
   # WHY HERE, and not in `macos.yml` or `miri.yml`. Those two exist to hold legs that are
   # queue-bound or slow, so that `CI` can reach a conclusion — see their headers. This gate is
@@ -1074,14 +1077,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-byte-identity-
     - name: cargo test --release --test byte_identity -- --include-ignored
-      run: cargo test -p smear-apollo-bench --release --test byte_identity -- --include-ignored
+      run: cargo test -p smear --release --features rowan,validator --test byte_identity -- --include-ignored
 
   # ── THE VALIDATOR DIFFERENTIAL ORACLE ───────────────────────────────────────────────────────
   #
   # Runs smear's draft §5 validator against `apollo-compiler` 1.32.0 verdict by verdict
-  # (`benchmarks/tests/validator_oracle.rs`, issue #85 G2). The committed corpus runs in the
-  # ordinary `test` job too, because `cargo test --all-features` covers every workspace member —
-  # this job exists for the two things that one cannot do.
+  # (`smear/benches/comparative/apollo/validator_oracle.rs`, issue #85 G2). The committed corpus
+  # runs in the ordinary `test` job too, because `cargo test --all-features` covers every workspace
+  # member — this job exists for the two things that one cannot do.
   #
   # WHY A NAMED `--test` TARGET. Same reason as `byte-identity` above: a cargo target *filter* that
   # matches nothing warns and exits 0, so a renamed or deleted gate would leave a green tick over
@@ -1098,7 +1101,7 @@ jobs:
   #
   # WHY A PINNED SHA AND NOT `main`. A moving external corpus in a required gate is a gate that
   # eventually gets switched off. `fa2b5fe8` is the `apollo-compiler@1.32.0` tag — the same release
-  # `benchmarks/Cargo.toml` pins with `=`, so the corpus and the oracle move together or not at
+  # `smear/Cargo.toml` pins with `=`, so the corpus and the oracle move together or not at
   # all. Bumping one without the other is exactly the mistake the whitelist's re-verification test
   # exists to catch, and this pin makes it impossible to make by accident.
   #
@@ -1140,7 +1143,7 @@ jobs:
       # `--nocapture` because the report is the artifact: how many cases reached a comparison, what
       # each whitelist class and each open gap accounted for. A green tick alone would not say
       # whether the oracle checked five hundred documents or five.
-      run: cargo test -p smear-apollo-bench --test validator_oracle -- --nocapture
+      run: cargo test -p smear --features rowan,validator --test validator_oracle -- --nocapture
 
   # smear's draft §6.4.4 null propagation against `graphql-js`'s own `nonnull-test.ts`, case by
   # case (`smear/tests/proto_nonnull_oracle.rs`).

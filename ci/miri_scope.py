@@ -439,9 +439,9 @@ def ran_counts(log: pathlib.Path) -> tuple[dict[str, int], list[tuple[str, int]]
     `Running unittests src/lib.rs (<path>)` — the same text for all of them, distinguished only
     by the path in parentheses. Collapsing them onto one key silently keeps whichever ran first,
     and on a workspace-wide selection that is a coin toss between packages: the CI log of run
-    31073592771 has two, `smear`'s and `smear-apollo-bench`'s, both empty. So they are returned
-    as a LIST and the caller requires exactly one, which is both the truth under `-p smear` and
-    a direct check that the selection is still one package.
+    31073592771 has two, `smear`'s and the since-dissolved `smear-apollo-bench`'s, both empty. So
+    they are returned as a LIST and the caller requires exactly one, which is both the truth under
+    `-p smear` and a direct check that the selection is still one package.
     """
     counts: dict[str, int] = {}
     libs: list[tuple[str, int]] = []
@@ -552,9 +552,9 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
         # SGR escapes. Pinned as a case rather than trusted, because the failure mode is silent
         # in the wrong direction: unstripped, `RUNNING` matches nothing, every target looks
         # absent, and on a SUCCESSFUL run the guard would fail the cell for the whole suite.
-        # The shape the CI log of run 31073592771 actually has: `smear`'s lib binary and
-        # `smear-apollo-bench`'s, both spelled `Running unittests src/lib.rs`, distinguished only
-        # by the path. Two of them means the selection is not one package.
+        # The shape the CI log of run 31073592771 actually has: `smear`'s lib binary and the
+        # since-dissolved `smear-apollo-bench`'s, both spelled `Running unittests src/lib.rs`,
+        # distinguished only by the path. Two of them means the selection is not one package.
         ("a second package's lib unit tests running fails (#77, from the other end)",
          log([("<lib>", 400), ("<lib>", 0)] + clean[1:]), True, 0, 1),
         ("a colourised log parses the same as a plain one",

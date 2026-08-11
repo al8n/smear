@@ -1,10 +1,10 @@
 //! The tree dump, and the four byte-identity constants it is checked against.
 //!
-//! This module holds the machinery that [`examples/treedump.rs`](../examples/treedump.rs) used to
-//! own outright. It lives in the library so that **two** callers can reach it: the example, which
-//! prints a dump for a human to read or pipe into `shasum`, and
-//! [`tests/byte_identity.rs`](../tests/byte_identity.rs), which recomputes the four hashes and
-//! fails if any of them moved.
+//! This module holds the machinery that `treedump.rs` used to own outright. It lives in the
+//! shared harness so that **two** callers can reach it: the `treedump` example, which prints a
+//! dump for a human to read or pipe into `shasum`, and the `byte_identity` test, which
+//! recomputes the four hashes and fails if any of them moved. Both sit one directory up, beside
+//! `support/`, for the reason [`super`]'s header gives.
 //!
 //! That second caller is the point. Before it existed, the four hashes lived in an issue and in a
 //! commit message — which is a note, not a baseline. Nothing recomputed them, so a change that
@@ -15,9 +15,9 @@
 //! A hash here is a function of **three** inputs, and all three have to be named or the number is
 //! not reproducible:
 //!
-//! * the corpus, which is committed under `benchmarks/corpus/` and does not move;
+//! * the corpus, which is committed beside this file under `../corpus/` and does not move;
 //! * smear's own parser, which is what the gate is *for* — if this moves, the gate reds;
-//! * tokora, which this crate takes from crates.io as a published version, not from a sibling
+//! * tokora, which this workspace takes from crates.io as a published version, not from a sibling
 //!   checkout, so the constants reproduce on any machine with no path patch in play.
 //!
 //! Blessed against **published `tokora 0.9.0`**. Two of the four moved when this harness was
@@ -42,7 +42,7 @@ use core::fmt::Write as _;
 use sha2::{Digest as _, Sha256};
 use smear::parser::graphql::lossless::SyntaxNode;
 
-use crate::{CORPUS, Entry, smear_parse};
+use super::{CORPUS, Entry, smear_parse};
 
 /// One element of a CST, projected onto the four axes the dump prints.
 ///
@@ -315,8 +315,8 @@ impl Corpus {
   /// The recorded SHA-256 of this corpus's dump.
   ///
   /// See the module documentation for what these are pinned to and how to re-bless one. Editing a
-  /// value here to make [`tests/byte_identity.rs`](../tests/byte_identity.rs) pass converts the
-  /// only byte-identity gate this repository has into a tautology.
+  /// value here to make the `byte_identity` test pass converts the only byte-identity gate this
+  /// repository has into a tautology.
   pub const fn expected(self) -> &'static str {
     match self {
       Self::Clean => "00f2b8b2bce48001aff45f8049141a13ca740fc6fe8eb4d9e287d1ccd4a46fc9",

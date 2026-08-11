@@ -122,9 +122,15 @@ export MIRIFLAGS
 #
 # This line said `cargo miri test $TEST_ARGS --target $TARGET --lib` until #77 — no `-p`, so it
 # selected every workspace member, and cargo unified their features. `smear` does NOT default to
-# `rowan`, but `benchmarks` and `smear-smoke` both enable it, so the resolve turned it on and the
+# `rowan`, but `benchmarks` and `smear-smoke` both enabled it, so the resolve turned it on and the
 # whole lossless CST tower entered this cell. Nobody widened the scope; #70 and then #84 added a
 # member and the arithmetic did it. See the note in the root `Cargo.toml`.
+#
+# `benchmarks` has since been dissolved into `smear` and `smear-smoke` is the only member left
+# that enables `rowan`, which narrows the accident by one member and removes none of the reason:
+# a bare selection is still a resolve rather than a decision, and `smear`'s own `[[bench]]`
+# targets now ask for `rowan` and `validator` through `required-features` — which `-p smear`
+# leaves unsatisfied, so they are skipped here rather than interpreted.
 #
 # The widening was not survivable, and that is the finding rather than an inconvenience.
 # `rowan 0.17.0` has undefined behaviour reachable from its ordinary public API, under BOTH
