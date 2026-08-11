@@ -81,6 +81,13 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # a `--test`-level list in this script would be a second statement of the same fact, free to
 # drift from the first.
 #
+# The derived count does not stand alone, because on its own it ratifies additions: a fifth
+# `#[cfg_attr(miri, ignore)]` moves the source and the reported `ignored` together, they agree,
+# and the cell stays green over a coverage cut nobody chose. So `ci/miri_scope.py` also holds
+# `MIRI_IGNORE_BUDGET`, a frozen total that fails the cell in EITHER direction and requires
+# `.github/workflows/miri.yml` to keep stating the same number. Adding or removing one of these
+# ignores is a decision, and it is meant to show up as a diff to that literal.
+#
 # What it costs is small for the question Miri answers. Miri decides whether an execution path has
 # undefined behaviour; those four sweeps vary the INPUT — 56 and 90 corpus entries times eight
 # ignorable forms — over paths the lib tests, `tests/oracle.rs` and `tests/tokora_conformance.rs`

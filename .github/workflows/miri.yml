@@ -145,6 +145,14 @@ name: Miri
 # sources and fails the cell if a run reports a different one, or if a target ends up with every
 # test ignored — the case where the per-test form has quietly become the per-file one.
 #
+# THE NUMBER ABOVE IS PINNED, in both spellings. A derived count cannot catch a per-test ignore
+# being ADDED: the source moves to five, the log moves to five, they agree, and a coverage cut has
+# ratified itself. So `ci/miri_scope.py` also carries `MIRI_IGNORE_BUDGET` as a frozen literal,
+# fails if the total moves in either direction, and fails if this file stops stating that same
+# number — both at the count-list row above and in the sentence before it. Adding or removing a
+# per-test ignore therefore takes three edits in one commit: the attribute, the budget, and this
+# header. That is the decision being recorded, and the diff is the point.
+#
 # What is left in a cell is the lib unit tests, `tests/oracle.rs`,
 # `tests/tokora_conformance.rs` and the eight span-extent witnesses — the SIMD lexer over a
 # corpus, and tokora's own input-layer conformance kit. That is where this project's `unsafe`

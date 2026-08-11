@@ -39,6 +39,17 @@ written, which is the shape of both defects above. It is also why an unmodelled 
 `target_os`, a bare `cfg` name this file does not know — is a hard ERROR rather than a guess:
 a guard that silently assumes is worse than one that stops.
 
+EXCEPT FOR ONE NUMBER, AND THE EXCEPTION IS THE POINT. `MIRI_IGNORE_BUDGET` — how many individual
+tests inside the compiled targets are skipped — is a frozen literal. Deriving it would make it
+unfalsifiable: a per-test `#[cfg_attr(miri, ignore)]` is invisible in the partition above, because
+the target still compiles, still runs and still passes, and the derived per-target count would
+simply agree with whatever the sources now say. Adding a fifth ignore would move the source to 5,
+move the log to 5, and stay green. The whole class of defect this file is about is a coverage cut
+that nobody chose, and this one's signature is ADDITION, which a derivation from the same sources
+erases. So the budget is written down, required in BOTH directions, and required to be restated in
+`.github/workflows/miri.yml` — the derived check and the declared one are kept together, not
+traded off.
+
 Exit 0 on agreement, 1 on any disagreement. The excluded set is printed on every run, pass or
 fail, with the reason each target is on it, because "what this matrix does not cover" belongs in
 the log rather than in a reader's assumption.
@@ -99,6 +110,52 @@ MIRI_REASON = (
     "the file excludes itself from Miri with `not(miri)`, on wall clock: measured on CI run "
     "31318425279, `tests/syntactic_span_extent.rs` had not finished after 5h40m and the cell was "
     "killed there. The file's own header carries the decision and what it costs (al8n/smear#141)"
+)
+
+# Resolved from this file, not from the process's cwd. `ci/miri_sb.sh` and `ci/miri_tb.sh` run
+# from the repository root, but the budget check below reads a file that no argument to this
+# script names, and a check that silently reads nothing when it is invoked from somewhere else
+# would pass forever — which is the shape of every defect in the header above.
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
+
+# How many individual tests, in total, a Miri cell may skip across the targets it compiles.
+#
+# A FROZEN LITERAL, and deliberately not derived. `declared_ignores()` below counts the `#[ignore]`
+# attributes in the sources and `check()` requires each target's run to report the same number,
+# which catches a RUN that disagrees with the tree. What it cannot catch is the tree moving: add a
+# fifth `#[cfg_attr(miri, ignore)]` and the source and the log agree at five, every per-target
+# check passes, and a coverage cut has ratified itself. An expectation derived from the sources it
+# constrains erases precisely the case whose signature is addition.
+#
+# So the number is written down instead. Every per-test ignore is a deliberate coverage cut whose
+# cost is recorded in its file's header, and CHANGING THIS LITERAL IS THE DECISION BEING RECORDED:
+# the diff to this line is the thing a reviewer is meant to see. Move it in the same commit that
+# adds or removes the ignore, and restate it in `.github/workflows/miri.yml`, which is required
+# below so the header cannot drift away from the guard.
+#
+# A plain `#[ignore]` counts here too. It is not a Miri decision, but it is equally a test that
+# does not run in a Miri cell, and leaving it out would give the next coverage cut a spelling that
+# this budget does not see.
+MIRI_IGNORE_BUDGET = 4
+
+# The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
+# apart on what they are calling them.
+BUDGET_OVER = "no per-test `#[ignore]` was added without raising the budget"
+BUDGET_UNDER = "no per-test `#[ignore]` was removed without lowering the budget"
+BUDGET_STATED = "`.github/workflows/miri.yml` restates the budget"
+
+# Where `miri.yml`'s header states that same number. Each entry is (what the site is, a pattern
+# with `{n}` standing in for the budget).
+#
+# The count-list entry reads `#    4  individual tests`: the number is one row of a `37 / 9 / 4`
+# breakdown and carries that table's column spacing, so a pattern spelling the literal string
+# `4 individual tests` matches nothing in the file and passes forever — the exact defect this
+# check exists to close, rebuilt inside the check. The spacing is therefore matched as spacing,
+# and `--selftest` proves both patterns fire rather than trusting that they do.
+WORKFLOW_BUDGET_SITES = (
+    ("the summary sentence above the list", r"\band {n} of the tests inside the\b"),
+    ("the count-list entry", r"^#[ \t]+{n}[ \t]+individual tests\b"),
 )
 
 
@@ -286,6 +343,59 @@ def declared_ignores(tests_dir: pathlib.Path) -> dict[str, int]:
     return out
 
 
+def budget_findings(compiled: list[str], declared: dict[str, int]) -> dict[str, str]:
+    """The frozen-budget checks, as {case name: finding} for the cases that FAILED.
+
+    Keyed rather than listed because `--selftest` has to show each one failing on its own, and a
+    case that cannot be named separately cannot be proven separately. The counterpart to
+    `declared_ignores()`: that function asks whether the RUN matches the tree, and this one asks
+    whether the tree still matches the decision, which is the half nothing constrained.
+
+    Only the compiled targets count. An ignore inside a target this cell does not build changes no
+    coverage here, and a target moving out of the compiled set takes its ignores with it — which
+    is itself a coverage change, and shows up as the budget dropping.
+    """
+    out: dict[str, str] = {}
+    total = sum(declared.get(name, 0) for name in compiled)
+    if total != MIRI_IGNORE_BUDGET:
+        carrying = ", ".join(
+            f"{name} ({declared[name]})" for name in compiled if declared.get(name)
+        )
+        direction = BUDGET_OVER if total > MIRI_IGNORE_BUDGET else BUDGET_UNDER
+        moved = "added" if total > MIRI_IGNORE_BUDGET else "removed"
+        out[direction] = (
+            f"{total} of the tests in the compiled targets carry `#[ignore]` and the budget in "
+            f"`ci/miri_scope.py` is {MIRI_IGNORE_BUDGET}. Skipping a test under Miri is a coverage "
+            f"cut, so one being {moved} is a decision and not bookkeeping: if it is intended, move "
+            f"`MIRI_IGNORE_BUDGET` to {total} in the same commit, restate it in `{WORKFLOW.name}`, "
+            "and say in the target's header what the cut costs. Currently carrying: "
+            + (carrying or "none")
+        )
+
+    try:
+        header = WORKFLOW.read_text(encoding="utf-8")
+    except OSError as err:
+        out[BUDGET_STATED] = (
+            f"{WORKFLOW} could not be read ({err}), so this guard cannot tell whether the "
+            "workflow header still states the budget"
+        )
+        return out
+    absent: list[tuple[str, str]] = []
+    for site, pattern in WORKFLOW_BUDGET_SITES:
+        expected = pattern.replace("{n}", str(MIRI_IGNORE_BUDGET))
+        if not re.search(expected, header, re.M):
+            absent.append((site, expected))
+    if absent:
+        out[BUDGET_STATED] = (
+            f"`{WORKFLOW.name}` no longer states a budget of {MIRI_IGNORE_BUDGET} at "
+            + "; ".join(f"{site} (`{pattern}`)" for site, pattern in absent)
+            + ". That header is where a reader is told what the matrix does not cover, so it may "
+            "not disagree with the number the guard enforces. Update the prose, or the budget, "
+            "until they say the same thing"
+        )
+    return out
+
+
 def partition(
     tests_dir: pathlib.Path, features: set[str]
 ) -> tuple[dict[str, str], list[str]]:
@@ -463,8 +573,24 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
          True, 0, 1),
     ]
 
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="miri-scope-selftest-"))
+    # Read first, and printed first, because every case below is built out of `declared` and so
+    # agrees with the tree by construction: if the tree has drifted off the budget these will say
+    # so once, and the synthetic cases will then fail as collateral rather than as findings.
+    #
+    # These three are also the only cases here that touch the SOURCE side. `#[ignore]`s are the
+    # one input this guard both reads and is constrained by, so a case that only synthesises a log
+    # exercises the half that was never the problem.
+    budget_cases = (BUDGET_OVER, BUDGET_UNDER, BUDGET_STATED)
+    found = budget_findings(compiled, declared)
     bad = 0
+    for name in budget_cases:
+        finding = found.get(name)
+        print(f"  {'FAIL' if finding else 'ok  '} {name}")
+        if finding:
+            bad += 1
+            print(f"       {finding}")
+
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="miri-scope-selftest-"))
     try:
         for i, (name, text, sel, status, want) in enumerate(cases):
             path = tmp / f"case{i}.log"
@@ -509,12 +635,15 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
             bad += 1
             print(f"  FAIL [{got!r} vs want {want!r}] cfg `{text}`")
 
+    total_cases = len(budget_cases) + len(cases) + len(cfg_cases)
     if bad:
-        print(f"::error::miri_scope selftest: {bad} of {len(cases) + len(cfg_cases)} cases did "
+        print(f"::error::miri_scope selftest: {bad} of {total_cases} cases did "
               "not behave as written — this guard does not check what its header claims")
         return 1
-    print(f"miri_scope selftest OK: {len(cases) + len(cfg_cases)} cases, "
+    print(f"miri_scope selftest OK: {total_cases} cases, "
           f"{len(excluded)} excluded / {len(compiled)} compiled targets in {tests_dir}, "
+          f"{sum(declared.get(n, 0) for n in compiled)} individual tests skipped against a "
+          f"budget of {MIRI_IGNORE_BUDGET}, "
           f"feature set {{{', '.join(sorted(features))}}}")
     return 0
 
@@ -559,6 +688,8 @@ def check(
         skip = declared.get(name, 0)
         note = f"  ({skip} of its tests carry `#[ignore]` here)" if skip else ""
         print(f"    + {name}{note}")
+    print(f"SKIPPED INSIDE THOSE: {sum(declared.get(n, 0) for n in compiled)} individual tests, "
+          f"against a frozen budget of {MIRI_IGNORE_BUDGET}")
     print("────────────────────────────────────────────────────────────────────────────────")
     print()
 
@@ -634,6 +765,10 @@ def check(
                 "workspace member enabling a `smear` feature and unifying into the resolve is how "
                 "#70 and #84 both did it. Pin the selection rather than let it be resolved"
             )
+
+    # Everything above compares the run to the tree. This compares the tree to the decision, and
+    # is the only check here that a log cannot satisfy by agreeing with the sources.
+    failures.extend(budget_findings(compiled, declared).values())
 
     if notes:
         print(f"miri_scope: `cargo miri test` exited {miri_status}, so the run stopped early "
