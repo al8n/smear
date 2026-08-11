@@ -166,37 +166,59 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 # this budget does not see.
 MIRI_IGNORE_BUDGET = 4
 
-# The packages `ci/miri_sb.sh` and `ci/miri_tb.sh` select, written down for the same reason the
-# budget above is: what this guard has to catch is the SELECTION moving, and a selection derived
-# from the run cannot see itself shrink.
+# PROPERTY: every lib unit test in a publishable member is interpreted by both Miri cells, or its
+# member is recorded here as carrying none at this feature set.
+#
+# THE PACKAGES THE MIRI CELLS RUN. Not a description of them — the source of them: `ci/miri_sb.sh`
+# and `ci/miri_tb.sh` build their `-p` list by asking `--print-packages` for this tuple.
+#
+# THAT IS THE REPAIR, and it is worth stating what it replaced. This tuple and the scripts' `-p`
+# arguments were two hand-maintained lists. The split grew this one to six members as it extracted
+# them and never touched the other, so the scripts ran two while the guard below expected six — and
+# the guard reads THIS list, so it could pass against a declaration the workflow did not execute,
+# leaving the cell to fail late, after the expensive run. Deriving deletes the second list instead
+# of adding a check that compares them, and `ci/feature_reachability.py` fails if either script
+# stops asking or starts passing a literal `-p`.
 #
 # It was one package until the crate split, and the check below was "exactly one lib unit-test
-# binary ran" — a shape that would have stayed GREEN through the split while `smear-lexer` carried
-# 130 lib unit tests, and all four of this project's own `unsafe` sites, out of the selection. The
-# header of both scripts claims the covered half is "where this project's own `unsafe` lives"; the
-# names here are what makes that claim falsifiable rather than decorative.
+# binary ran" — a shape that would have stayed GREEN while `smear-lexer` carried 130 lib unit
+# tests, and all four of this project's own `unsafe` sites, out of the selection. Both scripts'
+# headers claim the covered half is "where this project's own `unsafe` lives"; these names are what
+# makes that claim falsifiable rather than decorative.
 #
 # ADDING A PACKAGE IS A DECISION WITH A COST, because feature unification is over the SELECTED
 # packages and that is the mechanism #77 turned on: `smear-smoke` enabling `rowan` is how the
-# entire lossless tower entered a Miri cell that nobody widened. `smear-lexer` declares no `rowan`
-# feature at all, so it cannot do that — check the same of anything added here. `smear-parser`
-# DOES declare `rowan`, and is safe for a different reason: it is not in its `default`, and the
-# scripts pass no `--features`, so the resolve over these packages leaves it off exactly as it does
-# for `smear` itself. `smear-schema` declares no `rowan` either; its heaviest feature is `build`,
-# which pulls `smear-parser` and is likewise not in its `default`.
-# `ci/miri_scope.py`'s own feature-set guard prints what resolved.
+# entire lossless tower entered a Miri cell that nobody widened. Checked for each of the four:
+# `smear-lexer` declares no `rowan` feature at all; `smear-parser` and `smear-compiler` do declare
+# one but it is not in their `default` and these scripts pass no `--features`, so the resolve
+# leaves it off; `graphql-proto` declares only `std`. This file's own feature-set guard prints what
+# actually resolved, so none of that is taken on trust.
 #
-# `ci/feature_reachability.py` reads this tuple out of this file and fails when a publishable
-# workspace member is absent from it, so the list grows with the workspace instead of being
-# remembered.
-MIRI_PACKAGES = (
-    "smear",
-    "smear-lexer",
-    "smear-parser",
-    "smear-schema",
-    "smear-compiler",
-    "graphql-proto",
-)
+# `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
+# `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
+MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-compiler", "graphql-proto")
+
+# The publishable members deliberately NOT selected, each with the measurement behind it.
+#
+# A member with no lib unit tests at this cell's feature set contributes nothing to interpret, and
+# selecting it produces an empty harness — which `check()` below fails on purpose, because "a
+# target that compiles to an empty harness passes without testing anything" is #73's mechanism.
+# So they are excluded, and excluded WITH A REASON that `ci/feature_reachability.py` requires to
+# still match a real member.
+#
+# Measured on this tree with `cargo test -p <m> --lib -- --list`, at this cell's feature set and at
+# `--all-features`:
+#
+#   smear-lexer    125 / 130      smear           0 / 0
+#   smear-parser   353 / 362      smear-schema    0 / 3
+#   smear-compiler  12 /  12
+#   graphql-proto   15 /  15
+MIRI_NOT_SELECTED = {
+    "smear": "the umbrella is re-exports only — `smear/src` is one file and its lib carries no "
+             "unit tests at any feature set, so selecting it yields a harness with 0 tests",
+    "smear-schema": "its three lib unit tests are behind `build`, and these scripts pass no "
+                    "`--features` by design; selecting it here yields 0 tests",
+}
 
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.
@@ -889,6 +911,16 @@ def main() -> int:
         help="Set when the run passed `--no-default-features`, for the same reason.",
     )
     ap.add_argument(
+        "--print-packages",
+        action="store_true",
+        help="Print the `-p` arguments for `cargo miri test`, one token per line, and exit. This "
+        "is how ci/miri_sb.sh and ci/miri_tb.sh build their selection: MIRI_PACKAGES is then the "
+        "single source of truth for what RUNS as well as for what the guard EXPECTS. They used to "
+        "be two hard-coded lists and they did drift — the constant grew to six members while the "
+        "scripts still passed two, so the guard was reading a declaration the workflow did not "
+        "execute.",
+    )
+    ap.add_argument(
         "--selftest",
         action="store_true",
         help="Prove every branch of the guard can fail, against synthesised logs, and exit. "
@@ -918,6 +950,15 @@ def main() -> int:
     if not args.manifest.is_file():
         print(f"::error::miri_scope: no such manifest: {args.manifest}", file=sys.stderr)
         return 1
+
+    if args.print_packages:
+        if not MIRI_PACKAGES:
+            print("::error::miri_scope: MIRI_PACKAGES is empty", file=sys.stderr)
+            return 1
+        for package in MIRI_PACKAGES:
+            print("-p")
+            print(package)
+        return 0
 
     if args.selftest:
         return selftest(args.tests_dir, args.manifest)

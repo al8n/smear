@@ -245,12 +245,27 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
 # but `ast`; an execution inherits every dependency the other file has now or acquires later. This
 # check is what makes that a property of the directory rather than a habit — and it is derived, so
 # a third gate added tomorrow is covered without anyone remembering.
-# The machinery that runs another file, as MODULES IMPORTED and FUNCTIONS CALLED. Matched over the
-# syntax tree and not over the text, which the first revision of this check got wrong: it grepped
-# for these names and found them in its own table, so the gate reported itself. A string literal is
-# not a call, and `ast` knows the difference.
+# THE PROPERTY, and the previous revision was written against the mechanism instead: no `ci/*.py`
+# obtains another gate's contents BY RUNNING IT, in any spelling. That revision matched
+# `importlib`/`runpy` and four call names — every one of them the mechanism this gate had just
+# stopped using — so the plainest spelling of the forbidden thing, `import miri_scope`, was the one
+# form it could not see. A check that only recognises the instance it replaced is not a check on
+# the property.
+#
+# Three spellings, and the first is derived from the directory so a gate added tomorrow is covered:
+#
+#   1. importing a sibling by name          `import miri_scope`, `from miri_scope import X`
+#   2. importing the machinery to do it     `importlib`, `runpy`
+#   3. shelling out to one                  `subprocess.run([sys.executable, "ci/miri_scope.py"])`
+#
+# Matched over the syntax tree, not the text: an earlier revision grepped for its own table and
+# reported itself. A string literal is not a call, and `ast` knows the difference.
 EXECUTION_IMPORTS = ("importlib", "runpy")
 EXECUTION_CALLS = ("exec", "eval", "exec_module", "spec_from_file_location")
+# Callables that hand a command line to the operating system. A `.py` of ours in one of their
+# arguments, or `sys.executable`, is spelling 3.
+SPAWN_CALLS = ("run", "call", "check_call", "check_output", "Popen", "system", "execv", "execvp",
+               "spawnv", "spawnvp")
 
 # Stdlib modules that carry an interpreter floor, and the one file allowed to have one.
 #
@@ -263,11 +278,14 @@ FLOOR_BEARING = {"tomllib": ("miri_scope.py", "parses smear/Cargo.toml; stdlib s
 
 
 def check_no_gate_executes_another(verbose: bool = False) -> list[str]:
-  """No `ci/*.py` executes a sibling to reach its contents."""
+  """PROPERTY: no `ci/*.py` obtains another gate's contents by running it, in any spelling."""
   findings: list[str] = []
   scripts = sorted((REPO_ROOT / "ci").glob("*.py"))
   if not scripts:
     return ["no `ci/*.py` was found, so this check walked nothing"]
+  # DERIVED from the directory, so a gate added tomorrow is a forbidden import target without
+  # anyone remembering to add it.
+  siblings = {s.stem for s in scripts}
   for script in scripts:
     try:
       tree = ast.parse(script.read_text(), filename=str(script))
@@ -276,13 +294,21 @@ def check_no_gate_executes_another(verbose: bool = False) -> list[str]:
       continue
     hits: set[str] = set()
     for node in ast.walk(tree):
+      # 1 + 2 — importing a sibling gate by name, or the machinery for loading one. Anywhere in the
+      # file, including inside a function: a deferred import is still an import.
       if isinstance(node, ast.Import):
-        hits |= {a.name.split(".")[0] for a in node.names
-                 if a.name.split(".")[0] in EXECUTION_IMPORTS}
+        for alias in node.names:
+          root = alias.name.split(".")[0]
+          if root in EXECUTION_IMPORTS:
+            hits.add(root)
+          elif root in siblings:
+            hits.add(f"import {root}")
       elif isinstance(node, ast.ImportFrom) and node.module:
         root = node.module.split(".")[0]
         if root in EXECUTION_IMPORTS:
           hits.add(root)
+        elif root in siblings:
+          hits.add(f"from {root} import …")
       elif isinstance(node, ast.Call):
         func = node.func
         name = func.id if isinstance(func, ast.Name) else (
@@ -290,9 +316,19 @@ def check_no_gate_executes_another(verbose: bool = False) -> list[str]:
         )
         if name in EXECUTION_CALLS:
           hits.add(f"{name}()")
+        # 3 — a command line that names one of our scripts, or the interpreter running us.
+        elif name in SPAWN_CALLS:
+          for inner in ast.walk(node):
+            if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+              stem = pathlib.PurePosixPath(inner.value).name
+              if stem.endswith(".py") and stem[:-3] in siblings:
+                hits.add(f"{name}() on {stem}")
+            elif (isinstance(inner, ast.Attribute) and inner.attr == "executable"
+                  and isinstance(inner.value, ast.Name) and inner.value.id == "sys"):
+              hits.add(f"{name}() with sys.executable")
     if hits:
       findings.append(
-        f"`ci/{script.name}` can run another module ({', '.join(sorted(hits))}). A gate may READ a "
+        f"`ci/{script.name}` can run another gate ({', '.join(sorted(hits))}). A gate may READ a "
         f"sibling's source — `read_constant` does, with `ast` — but running it inherits that "
         f"file's imports, which is how this gate acquired an unstated Python >=3.11 floor."
       )
@@ -340,6 +376,15 @@ def check_no_gate_executes_another(verbose: bool = False) -> list[str]:
 def read_constant(path: pathlib.Path, name: str):
   """One module-level constant out of another gate's source, by READING it rather than running it.
 
+  PROPERTY: the value returned is the value the module would hold at import time.
+
+  Every clause below is that sentence: refuse a second write, because two writes mean the literal
+  is not the final value; refuse an augmented assignment, for the same reason; refuse a `global`
+  rebind, because then import time is not decidable by reading; and refuse a non-literal, because
+  only the interpreter could evaluate it. Checking the implementation against the SENTENCE rather
+  than against the case that prompted it is what turned up the second-write hole — the first
+  revision returned the first match and stopped.
+
   THE DIFFERENCE IS THE WHOLE POINT, and it cost a review round. These readers used to
   `importlib`-execute the sibling gate, on the argument that importing beats scraping — which is
   right about *scraping* and wrong about *executing*: an import inherits the imported module's
@@ -361,20 +406,60 @@ def read_constant(path: pathlib.Path, name: str):
     raise RuntimeError(f"{path} is unreadable ({err})") from err
   except SyntaxError as err:
     raise RuntimeError(f"{path} does not parse ({err})") from err
-  for node in tree.body:
-    targets = node.targets if isinstance(node, ast.Assign) else (
-      [node.target] if isinstance(node, ast.AnnAssign) and node.value is not None else []
+
+  # EVERY write that runs at import time, not the first one. Taking the first match and stopping
+  # was this reader's own version of the defect it was written to fix: `NAME = (…)` followed by
+  # `NAME += (…)`, or a later reassignment, returns the initial literal while EXECUTING the module
+  # would use the final one — so replacing the import with a read would have created a fresh way
+  # for the two gates to disagree, silently.
+  #
+  # `If`/`Try`/`For`/`While`/`With` bodies are descended into because they run on import;
+  # `FunctionDef` and `ClassDef` bodies are not, because a name bound there is local — unless it is
+  # declared `global`, which is why that is a finding on its own.
+  writes = []
+  def scan(body):
+    for node in body:
+      if isinstance(node, ast.Assign):
+        for target in node.targets:
+          if isinstance(target, ast.Name) and target.id == name:
+            writes.append(node)
+      elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        target = node.target
+        if isinstance(target, ast.Name) and target.id == name and getattr(node, "value", None):
+          writes.append(node)
+      elif isinstance(node, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
+        for attr in ("body", "orelse", "finalbody", "handlers"):
+          inner = getattr(node, attr, None) or []
+          scan([h for h in inner] if attr != "handlers" else
+               [stmt for handler in inner for stmt in handler.body])
+      elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        for inner in ast.walk(node):
+          if isinstance(inner, ast.Global) and name in inner.names:
+            raise RuntimeError(
+              f"{path} declares `global {name}` inside `{node.name}`, so its value at import time "
+              f"is not decidable by reading. Keep the constant a single module-level literal."
+            )
+  scan(tree.body)
+
+  if not writes:
+    raise RuntimeError(f"{path} declares no module-level `{name}`")
+  if len(writes) > 1:
+    lines = ", ".join(str(w.lineno) for w in writes)
+    raise RuntimeError(
+      f"{path} writes `{name}` {len(writes)} times (lines {lines}). This reader returns what the "
+      f"module would hold at import time, and with more than one write that is not what a single "
+      f"literal says — refuse rather than pick one."
     )
-    for target in targets:
-      if isinstance(target, ast.Name) and target.id == name:
-        try:
-          return ast.literal_eval(node.value)
-        except ValueError as err:
-          raise RuntimeError(
-            f"{path}'s `{name}` is not a literal this reader can evaluate ({err}). It must stay a "
-            f"plain literal: reading it is what keeps this gate free of that file's dependencies."
-          ) from err
-  raise RuntimeError(f"{path} declares no module-level `{name}`")
+  node = writes[0]
+  if isinstance(node, ast.AugAssign):
+    raise RuntimeError(f"{path}'s `{name}` is built by augmented assignment, which has no literal")
+  try:
+    return ast.literal_eval(node.value)
+  except ValueError as err:
+    raise RuntimeError(
+      f"{path}'s `{name}` is not a literal this reader can evaluate ({err}). It must stay a "
+      f"plain literal: reading it is what keeps this gate free of that file's dependencies."
+    ) from err
 
 
 def _eq_twin() -> dict[tuple[str, str], str]:
@@ -484,7 +569,17 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # silently finds an empty table would report every member as missing — or, worse, report nothing
 # missing from a set it never read.
 def _read_miri_packages() -> set[str]:
-  """`MIRI_PACKAGES` out of `ci/miri_scope.py`.
+  """Every publishable member `ci/miri_scope.py` ACCOUNTS FOR — selected, or excluded with a reason.
+
+  Two tables, because the property is "accounted for", not "selected". `MIRI_PACKAGES` is what the
+  Miri scripts execute — they build their `-p` list from it, so it is not a declaration any more —
+  and `MIRI_NOT_SELECTED` names the publishable members with no lib unit tests to interpret at that
+  feature set, each with the measurement. Selecting one of those would produce an empty harness,
+  which `miri_scope`'s own check fails on purpose.
+
+  A member in NEITHER table is the finding this check exists for. A member in BOTH is a
+  contradiction and is also a finding, and an excluded member that no longer exists makes the
+  reason stale — so the account cannot rot in either direction.
 
   Read and not imported, and not relocated either. Moving the constant into a shared
   dependency-light module was the other option; it would separate the tuple from the twenty lines
@@ -495,10 +590,22 @@ def _read_miri_packages() -> set[str]:
   Reading also leaves no `ci/__pycache__/` behind, which importing did and which nothing in this
   repository ignores.
   """
-  packages = read_constant(REPO_ROOT / "ci" / "miri_scope.py", "MIRI_PACKAGES")
-  if not packages:
+  path = REPO_ROOT / "ci" / "miri_scope.py"
+  selected = read_constant(path, "MIRI_PACKAGES")
+  if not selected:
     raise RuntimeError("ci/miri_scope.py declares no non-empty MIRI_PACKAGES")
-  return set(packages)
+  excluded = read_constant(path, "MIRI_NOT_SELECTED")
+  if not isinstance(excluded, dict):
+    raise RuntimeError("ci/miri_scope.py's MIRI_NOT_SELECTED is not a dict of member -> reason")
+  overlap = sorted(set(selected) & set(excluded))
+  if overlap:
+    raise RuntimeError(
+      f"ci/miri_scope.py both selects and excludes {overlap}; the two tables must partition"
+    )
+  blank = sorted(m for m, why in excluded.items() if not str(why).strip())
+  if blank:
+    raise RuntimeError(f"ci/miri_scope.py excludes {blank} with no reason recorded")
+  return set(selected) | set(excluded)
 
 
 def _read_census_roots() -> set[str]:
@@ -518,6 +625,46 @@ def _read_census_roots() -> set[str]:
   if not roots:
     raise RuntimeError(f"{path}'s DEFAULT_ROOTS block held no (path, name) pairs")
   return {root.split("/", 1)[0] for root in roots}
+
+
+# The two scripts that must BUILD their selection from `MIRI_PACKAGES` rather than restate it.
+#
+# Deriving removed the duplicate; this stops it coming back. Planted: re-hardcoding
+# `cargo miri test -p smear -p smear-lexer` in `ci/miri_sb.sh` left every other gate green, because
+# nothing else reads a shell script's argument list.
+MIRI_SCRIPTS = ("ci/miri_sb.sh", "ci/miri_tb.sh")
+
+
+def check_miri_scripts_derive() -> list[str]:
+  """PROPERTY: what the Miri scripts RUN is what `MIRI_PACKAGES` says, because it is its source.
+
+  Not "the two lists agree" — that would leave two lists. The scripts ask for the constant, and
+  this refuses both ways of stopping: not asking, and passing a literal `-p` beside it.
+  """
+  findings: list[str] = []
+  for name in MIRI_SCRIPTS:
+    path = REPO_ROOT / name
+    try:
+      text = path.read_text()
+    except OSError as err:
+      findings.append(f"{name} is unreadable ({err}), so its selection is unknown")
+      continue
+    if "miri_scope.py --print-packages" not in text:
+      findings.append(
+        f"{name} does not build its selection from `miri_scope.py --print-packages`, so "
+        f"`MIRI_PACKAGES` is a declaration again and the guard would be reading a list the "
+        f"workflow does not execute"
+      )
+    for line in text.splitlines():
+      stripped = line.strip()
+      if stripped.startswith("#") or "cargo miri test" not in stripped:
+        continue
+      if " -p " in stripped:
+        findings.append(
+          f"{name} passes a literal `-p` to `cargo miri test` ({stripped[:70]}…). The selection "
+          f"must come from the constant; a second hard-coded list is what drifted last time."
+        )
+  return findings
 
 
 def _read_cross_packages() -> set[str]:
@@ -575,6 +722,26 @@ def check_selections(publishable: set[str]) -> list[str]:
       findings.append(
         f"the selection exemption for `{pair[1]}` in `{pair[0]}` matches nothing ({why})"
       )
+  return findings
+
+
+def check_miri_exclusions(publishable: set[str]) -> list[str]:
+  """No member is excluded from the Miri selection for a reason that describes nothing.
+
+  Kept OUT of `check_selections`, which the selftest calls with synthetic package sets — a check
+  against the real tree inside a function whose inputs are planted would fail on every plant and
+  report it as the gate's fault. That is what it did on the first attempt here.
+  """
+  findings: list[str] = []
+  try:
+    excluded = read_constant(REPO_ROOT / "ci" / "miri_scope.py", "MIRI_NOT_SELECTED")
+  except Exception as err:  # noqa: BLE001 — the message is the finding
+    return [f"ci/miri_scope.py's MIRI_NOT_SELECTED could not be read ({err})"]
+  for member in sorted(set(excluded) - publishable):
+    findings.append(
+      f"ci/miri_scope.py excludes `{member}` from the Miri selection, and it is not a publishable "
+      f"workspace member — the recorded reason describes nothing"
+    )
   return findings
 
 
@@ -716,6 +883,8 @@ def main() -> int:
   if args.verbose:
     for key in SELECTIONS:
       print(f"  ok        {READERS[key][0]}")
+    for name in MIRI_SCRIPTS:
+      print(f"  ok        {name} derives its selection from MIRI_PACKAGES")
   execution_findings = check_no_gate_executes_another(args.verbose)
   if execution_findings:
     print("::error::feature_reachability: a gate executes another gate")
@@ -741,7 +910,9 @@ def main() -> int:
   if args.verbose:
     print("  ok        every member feature is asserted equal to its `smear` twin")
 
-  selection_findings = check_selections(publishable)
+  selection_findings = (check_selections(publishable)
+                        + check_miri_scripts_derive()
+                        + check_miri_exclusions(publishable))
   if selection_findings:
     print("::error::feature_reachability: a gate's selection has stopped covering every member")
     for f in selection_findings:
