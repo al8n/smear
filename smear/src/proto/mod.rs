@@ -40,10 +40,15 @@
 //!
 //! # Scope
 //!
-//! Queries. A `mutation` or a `subscription` is refused by [`Executor::start`](crate::proto::Executor::start)
-//! with [`StartError::NotAQuery`](crate::proto::StartError::NotAQuery) rather than executed as if it were a query, because draft §6.3's
-//! serial-execution rule for mutations is a real constraint and silently ignoring it would produce
-//! a plausible-looking wrong answer.
+//! Queries and mutations. Draft §6.2.2's serial rule for a mutation's top-level fields is expressed
+//! by *withholding*: [`poll_resolve`](crate::proto::Executor::poll_resolve) offers one of them and
+//! keeps the next off the ready chain until that one's whole subtree has finished, so the ordering
+//! is structural rather than a contract a driver could forget to honour. Everything below the top
+//! level is draft §6.3's ordinary collection, which is where the specification draws the line too.
+//!
+//! A `subscription` is refused by [`Executor::start`](crate::proto::Executor::start) with
+//! [`StartError::NotAQueryOrMutation`](crate::proto::StartError::NotAQueryOrMutation): draft §6.2.3
+//! delivers a *stream* of responses over a source event stream, and this surface delivers one.
 //!
 //! Draft §6.1 `CoerceVariableValues` is the driver's: values reaching [`Values::variable`](crate::proto::Values::variable) are
 //! already coerced against their declared types.

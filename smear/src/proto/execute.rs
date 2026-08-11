@@ -1,4 +1,4 @@
-//! Draft §6's execution core for a query, as a Sans-I/O state machine.
+//! Draft §6's execution core for a query or a mutation, as a Sans-I/O state machine.
 //!
 //! # Three inputs, three obligations, and no `Step`
 //!
@@ -23,10 +23,23 @@
 //!
 //! There is no queue between the executor and the driver. Fields waiting to be resolved are slots
 //! in the response tree, threaded on an intrusive chain; `poll_resolve` refuses to yield past
-//! [`Limits::max_in_flight`] rather than reading ahead. Withholding is also what draft §6.3's
-//! serial-mutation rule needs — offer exactly one top-level mutation field, withhold the next
-//! until it is answered — so the constraint is structural rather than a contract a driver could
-//! forget to honour.
+//! [`Limits::max_in_flight`] rather than reading ahead.
+//!
+//! Draft §6.2.2's serial-mutation rule is that same mechanism rather than a second one. A
+//! mutation's root expands exactly as a query's does and enqueues every top-level field, and then
+//! the chain is **cut** after its head: the fields behind it keep their links and simply are not on
+//! it, and one is spliced back each time the previous field's subtree finishes. Nothing is
+//! allocated, nothing accumulates, and there is no ordering contract for a driver to honour or
+//! forget — `poll_resolve` cannot offer what is not on the chain.
+//!
+//! **"Until the previous field's subtree finishes", and not "until it is answered".** The two
+//! readings differ on a nested resolver, and the reference implementation was measured rather than
+//! argued with: `graphql-js` 16.11.0's `executeFieldsSerially` awaits `executeField`, whose promise
+//! is `completeValue`'s and therefore resolves only once every sub-field has. Run against
+//! `mutation { a: m { nested } b: m { nested } }`, upstream calls the resolvers in the order `a`,
+//! `nested(a)`, `b`, `nested(b)` — so a rule that released on the answer alone would start `b`'s
+//! side effect while `a`'s sub-selection was still running, which is what §6.2.2 exists to forbid.
+//! See [`Executor::release_serial`].
 
 use core::{fmt, num::NonZeroU32};
 
@@ -34,7 +47,8 @@ use tokora::{SimpleSpan, span::AsSpan};
 
 use crate::{
   parser::graphql::ast::{
-    ExecutableDefinition, ExecutableDocument, Field, InputValue, OperationDefinition, SelectionSet,
+    ExecutableDefinition, ExecutableDocument, Field, InputValue, OperationDefinition,
+    OperationType, SelectionSet,
   },
   validator::schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin},
 };
@@ -116,6 +130,7 @@ mod tests;
 /// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
 /// | collection scratch | `max_response_metadata`, charged before each push | `expand`, this call only | cleared at the next collection | cleared, never shrunk — capacity is reused | a staged population charged against a *different* ceiling than the one that refuses it |
+/// | withheld top-level fields (draft §6.2.2) | the root's own children, so `max_response_slots` | `release_serial`, one splice each | the last splice, or the root's discard | `reset`; a discarded root retires the cursor at the next release | a `restore` truncating over the cursor — asserted, because the argument for it is about creation order and a restore is about indices |
 ///
 /// Three rules keep the table true as phases 2–8 add members, and each is a rule the rounds paid
 /// for:
@@ -208,9 +223,23 @@ mod tests;
 /// consuming `N` of the position budget.
 ///
 /// The shape recurs wherever a *driver* quantity multiplies a *query* quantity, which is exactly
-/// what draft §6.2.3's per-event collection and draft §6.3's mutation path both do. The remedy is
+/// what draft §6.2.3's per-event collection and draft §6.2.2's mutation path both do. The remedy is
 /// not a cleverer bound on either factor; it is a ceiling on the product itself, which is what
 /// this knob is.
+///
+/// **The mutation path was one of the two predictions, and it came out the other way.** The product
+/// is there to be built: §6.2.2's serial rule has to decide, once per offer, whether the previous
+/// top-level field has finished and which field comes next, and *offers* are the driver's while
+/// *top-level fields* and the subtree's shape are the document's. Scanning the root's children, or
+/// walking the running subtree, makes that `offers × M` — with `M` bounded by this ceiling, offers
+/// bounded by the position ceiling, and their product bounded by neither, which is this section
+/// verbatim. What it does **not** call for is a fourth knob. The cost is in a mechanism rather than
+/// in a population, so withholding deletes it instead: the withheld fields are the ready chain's
+/// own tail, so "which is next" is one link, and nothing outside the running subtree is ever on the
+/// chain or in the in-flight table, so "has it finished" is two counters. `M` fields cost `M` steps
+/// over the whole operation, whatever the driver answers. See `Executor::serial_next`, and
+/// `a_serial_release_does_not_grow_with_the_response` for the gate that would fail if a scan came
+/// back.
 ///
 /// Sharing the group between the elements of one list was considered and is **not** a substitute.
 /// The collection is not identical per element: `applies` resolves a fragment's type condition
@@ -582,10 +611,20 @@ pub enum StartError {
   UnknownOperation,
   /// No name was given and the document holds more than one operation.
   AmbiguousOperation,
-  /// The operation is a `mutation` or a `subscription`. This executor runs queries.
-  NotAQuery,
+  /// The operation is a `subscription`. This executor runs queries and mutations.
+  ///
+  /// Draft §6.2.3 delivers a *stream* of responses over a source event stream, and
+  /// [`poll_response`](Executor::poll_response) yields at most once by construction — so this is a
+  /// refusal rather than a gap a relaxed check would fill.
+  NotAQueryOrMutation,
   /// The schema declares no `query` root type.
+  ///
+  /// Draft §5.2.1.1 makes an operation whose root type the schema does not declare a validation
+  /// failure, so a validated document never reaches this or [`NoMutationRoot`](Self::NoMutationRoot);
+  /// both are here because `start` is total over the schemas it is handed.
   NoQueryRoot,
+  /// The schema declares no `mutation` root type.
+  NoMutationRoot,
 }
 
 impl fmt::Display for StartError {
@@ -596,8 +635,9 @@ impl fmt::Display for StartError {
       Self::AmbiguousOperation => {
         "the document contains more than one operation and none was named"
       }
-      Self::NotAQuery => "the operation is not a query",
+      Self::NotAQueryOrMutation => "the operation is neither a query nor a mutation",
       Self::NoQueryRoot => "the schema declares no query root type",
+      Self::NoMutationRoot => "the schema declares no mutation root type",
     })
   }
 }
@@ -648,7 +688,7 @@ struct Entry {
   state: Slotted,
 }
 
-/// Draft §6's query executor.
+/// Draft §6's executor, for a query or a mutation.
 ///
 /// See [`proto`](crate::proto) for the shape, why it has that shape, and a worked example.
 pub struct Executor<'a, S, V>
@@ -709,6 +749,37 @@ where
   /// One cell is enough: an offer takes one slot out of Ready, so at most one parent can reach zero
   /// per offer.
   deferred: u32,
+
+  /// The next top-level field draft §6.2.2's serial rule is withholding, or [`NONE`].
+  ///
+  /// # It is the ready chain, cut
+  ///
+  /// A mutation's root expands exactly as a query's does and enqueues every top-level field;
+  /// [`withhold_serial`](Self::withhold_serial) then severs the chain after its head. The withheld
+  /// fields keep their `next_ready` links — they are still a list, just not one `ready_head`
+  /// reaches — and [`release_serial`](Self::release_serial) splices one back each time the previous
+  /// field's subtree finishes. That is the whole of serial execution: no queue is allocated, no
+  /// flag is consulted, and no ordering contract is handed to a driver, because `poll_resolve`
+  /// cannot offer what is not on the chain.
+  ///
+  /// # The cost, because this is where the product would have been
+  ///
+  /// A splice is one link and the cursor only moves forward, so a mutation of `M` top-level fields
+  /// spends `M` steps over the whole operation however many positions the driver's answers build.
+  /// The shape being avoided is the obvious implementation: deciding *which field is next* by
+  /// scanning the root's children, or *whether the previous subtree has finished* by walking it.
+  /// Either is paid once per offer — and offers are the **driver's** quantity while `M` and the
+  /// subtree's shape are the **document's**, which is the product [`Limits`] refuses to meet a
+  /// fourth time. There is no ceiling here because there is no product: `release_serial` reads two
+  /// counters and follows one link. `serial_steps` is what keeps that measured rather than claimed.
+  serial_next: u32,
+
+  /// Links [`release_serial`](Self::release_serial) has followed, over this executor's whole life.
+  ///
+  /// Counted for the reason `collect::Fragments::compares` is. A serial gate that costs `M` and one
+  /// that costs `M` per offer produce the same response, so no assertion on a response separates
+  /// them and a clock is not a gate.
+  serial_steps: u64,
 
   started: bool,
   delivered: bool,
@@ -781,15 +852,24 @@ where
       delivered: false,
       scratch_sets: std::vec::Vec::new(),
       deferred: NONE,
+      serial_next: NONE,
+      serial_steps: 0,
       visits: Visits::new(limits.max_selection_visits.get()),
       scratch_args: std::vec::Vec::new(),
     }
   }
 
-  /// Begins draft §6.2.1 `ExecuteQuery` on `root`, which is §6.2.1's `initialValue`.
+  /// Begins draft §6.2.1 `ExecuteQuery` or §6.2.2 `ExecuteMutation` on `root`, which is their
+  /// `initialValue`.
   ///
   /// `operation` names the operation to run, as draft §6.1's `GetOperation` takes it: `None`
   /// selects the document's only operation and fails if there is more than one.
+  ///
+  /// Which of the two it is decides one thing here and nothing afterwards: a mutation's top-level
+  /// fields leave this call withheld rather than ready, and §6.2.2's "serially" is then a property
+  /// of what [`poll_resolve`](Executor::poll_resolve) is able to offer. Everything below the top
+  /// level — including the sub-selections of a mutation field — is §6.3's ordinary parallel
+  /// collection, which is where the specification draws the line too.
   ///
   /// Collecting the root selection set happens here, so a document whose every root field is
   /// `@skip`ped produces a complete, empty response with no call to the driver at all.
@@ -821,19 +901,25 @@ where
     let Some(ExecutableDefinition::Operation(op)) = definition else {
       return Err(StartError::NoOperation);
     };
-    let set = match op {
-      OperationDefinition::Shorthand(set) => set,
-      OperationDefinition::Named(named) => {
-        if !named.operation_type().is_query() {
-          return Err(StartError::NotAQuery);
-        }
-        named.selection_set()
-      }
+    // Enumerated rather than tested with `is_query()`, so that a fourth operation keyword would be
+    // a compile error here instead of an operation silently executed as a query.
+    let (set, operation, missing) = match op {
+      OperationDefinition::Shorthand(set) => (set, RootOperation::Query, StartError::NoQueryRoot),
+      OperationDefinition::Named(named) => match named.operation_type() {
+        OperationType::Query(_) => (
+          named.selection_set(),
+          RootOperation::Query,
+          StartError::NoQueryRoot,
+        ),
+        OperationType::Mutation(_) => (
+          named.selection_set(),
+          RootOperation::Mutation,
+          StartError::NoMutationRoot,
+        ),
+        OperationType::Subscription(_) => return Err(StartError::NotAQueryOrMutation),
+      },
     };
-    let root_type = self
-      .schema
-      .root(RootOperation::Query)
-      .ok_or(StartError::NoQueryRoot)?;
+    let root_type = self.schema.root(operation).ok_or(missing)?;
 
     let root_ty = PackedType::named(self.schema.type_def(root_type).name(), root_type);
     self.slots.push(Slot::new(
@@ -860,6 +946,11 @@ where
     self.scratch_sets.clear();
     self.scratch_sets.push(set);
     self.expand(ctx, 0);
+    // Draft §6.2.2 runs the top-level selection set serially. The expansion above enqueued every
+    // top-level field, exactly as a query's does; this takes all but the first back off the chain.
+    if operation == RootOperation::Mutation {
+      self.withhold_serial();
+    }
     Ok(())
   }
 
@@ -878,6 +969,10 @@ where
       return None;
     }
     let found = loop {
+      // Draft §6.2.2's next top-level field becomes available the moment the previous one's subtree
+      // is finished, and this is where that is noticed. A no-op for a query, and for a mutation
+      // with work still outstanding.
+      self.release_serial();
       if self.live + self.abandoned >= self.limits.max_in_flight.get() {
         break None;
       }
@@ -1080,12 +1175,22 @@ where
   /// the documented soft stall for a driver that ignores that channel into a deadlock at exactly
   /// the moment its remaining work is zero. What that costs is a driver holding live-looking
   /// [`ReqId`]s across a restart, and [`ReqId`]'s epoch is what pays it.
+  ///
+  /// A mutation's **withheld** top-level fields do withhold it, and they are the one kind of
+  /// outstanding work that is in neither the ready chain nor the in-flight table — draft §6.2.2
+  /// keeps them off both on purpose. A response delivered over them would be missing a field the
+  /// document asked for, with no error to say so, so this releases the next one before it decides.
   pub fn poll_response(&mut self) -> Option<Response<'_, V::Value>> {
     self.on_entry();
     if !self.started || self.delivered {
       return None;
     }
     self.drain_ready();
+    // A mutation with fields still withheld is not finished, even though none of them is on the
+    // chain. Releasing here rather than testing the cursor keeps one decision point: the same code
+    // that consumes the cursor is the code that retires it, so a mutation whose root draft §6.4.4
+    // nulled ends instead of stalling on fields that can no longer be part of any response.
+    self.release_serial();
     if self.live > 0 || self.ready_head != NONE {
       return None;
     }
@@ -1997,6 +2102,16 @@ where
     self.interner.compares()
   }
 
+  /// Links draft §6.2.2's serial release has followed. See [`serial_next`](Self::serial_next).
+  ///
+  /// The separator for the one product a mutation could have brought back: a scan over the root's
+  /// children per offer, or a walk of the running subtree per event, answers every query and
+  /// mutation exactly as the cursor does. Only a count says which one ran.
+  #[cfg(test)]
+  fn serial_steps(&self) -> u64 {
+    self.serial_steps
+  }
+
   /// What this operation has charged against each of the four cumulative ceilings.
   ///
   /// One value rather than four accessors, so the gate compares all four in one `assert_eq!` and
@@ -2062,6 +2177,7 @@ where
     self.ready_head = NONE;
     self.ready_tail = NONE;
     self.deferred = NONE;
+    self.serial_next = NONE;
     self.started = false;
     self.delivered = false;
   }
@@ -2104,9 +2220,13 @@ where
   /// than at either caller on purpose. Draft §6.4.3's list clause completes synchronously, so the
   /// caller that most needs bounding is a loop whose trip count is the driver's own
   /// [`Values::list_len`](super::Values::list_len); a guard written into that loop would bound
-  /// that loop, and the next phase to grow a position — draft §6.3's mutation path, §6.2.3's
-  /// per-event collection — would have to remember to write it again. Returning `None` from here
-  /// makes forgetting impossible: a caller has to answer the empty case to get an index at all.
+  /// that loop, and the next phase to grow a position — draft §6.2.3's per-event collection —
+  /// would have to remember to write it again. Returning `None` from here makes forgetting
+  /// impossible: a caller has to answer the empty case to get an index at all.
+  ///
+  /// Draft §6.2.2's mutation path was on that list and is off it, which is the shape working: it
+  /// re-orders when the top-level fields are *offered* and creates not one position the root's own
+  /// expansion did not already create, so there is no third caller to bound.
   ///
   /// The `as u32` below is exact for the same reason. `self.slots.len()` is strictly less than the
   /// ceiling whenever this returns `Some`, and the ceiling is a `u32`, so the new index is at most
@@ -2179,6 +2299,16 @@ where
       self.deferred, NONE,
       "a restore ran with an object value parked for release; the parked slot may be inside the \
        region about to be truncated"
+    );
+    // A third thing could point in, and the argument that it cannot is about creation order while a
+    // restore is about indices — so it is asserted rather than left as prose. Draft §6.2.2's cursor
+    // names a top-level field, every one of which the root's own expansion created, and that is the
+    // first expansion of the operation; the cursor is still `NONE` while that expansion runs, and
+    // every later mark is taken above those slots.
+    debug_assert!(
+      self.serial_next == NONE || (self.serial_next as usize) < mark.slots,
+      "a restore would truncate over the withheld top-level field at slot {}",
+      self.serial_next
     );
     self.errors.truncate(mark.errors);
     self.slots.truncate(mark.slots);
@@ -2262,6 +2392,98 @@ where
       } else {
         self.expire(parent);
       }
+    }
+  }
+
+  /// Cuts the ready chain after its head, so draft §6.2.2's top-level fields are offered one at a
+  /// time.
+  ///
+  /// Called once, from `start`, on a mutation's root expansion and nowhere else. Everything after
+  /// the head is still a `next_ready` list — it is simply no longer one `ready_head` reaches, which
+  /// is what makes the withholding structural: `poll_resolve` has nothing to decline, because there
+  /// is nothing there to decline.
+  ///
+  /// **The root's read count is deliberately not touched.** `expand` set it to the number of
+  /// children it enqueued, and every one of them still departs Ready exactly once — later, through
+  /// [`release_serial`](Self::release_serial) — so the count that keeps the root's value readable
+  /// across all of them is already right. Counting "children currently on the chain" instead would
+  /// expire the root after the first offer and lend the second field a value that has been dropped,
+  /// which is the enqueue-path-that-skips-the-count failure [`Limits`]'s lifetime table names.
+  fn withhold_serial(&mut self) {
+    let head = self.ready_head;
+    if head == NONE {
+      return;
+    }
+    // What is cut has to *be* the root's expansion. Nothing else can be on the chain today —
+    // `reset` empties it and this runs immediately after the operation's first expansion — but that
+    // is an argument about call order, and a later phase that enqueued anything before `start`'s
+    // `expand` would cut in the wrong place and withhold something that is not a top-level field.
+    // Once per operation, in debug, over a chain the document's size bounds.
+    #[cfg(debug_assertions)]
+    {
+      let mut cursor = head;
+      while cursor != NONE {
+        debug_assert_eq!(
+          self.slots[cursor as usize].parent, 0,
+          "the ready chain held something other than the root's own children when draft §6.2.2's \
+           cut ran"
+        );
+        cursor = self.slots[cursor as usize].next_ready;
+      }
+    }
+    self.serial_next = self.slots[head as usize].next_ready;
+    self.slots[head as usize].next_ready = NONE;
+    self.ready_tail = head;
+  }
+
+  /// Splices the next withheld top-level field back onto the ready chain, if draft §6.2.2 permits
+  /// it yet.
+  ///
+  /// The permission is one question — *has the previous top-level field's whole subtree finished* —
+  /// and withholding is what makes it two counters instead of a walk: nothing outside that subtree
+  /// has ever been on the ready chain or in the in-flight table, so an empty chain with no live
+  /// request **is** the subtree being done. A queue would not have that property, because the other
+  /// fields' work would be sitting in the same structures.
+  ///
+  /// Abandoned requests are deliberately not waited for, which is the reasoning
+  /// [`poll_response`](Self::poll_response) already applies to them: draft §6.4.4 has discarded the
+  /// positions they would have filled, so no answer to one can change a byte of the response. It is
+  /// also the only choice that cannot deadlock — waiting would let a driver that ignores
+  /// [`poll_abandoned`](Self::poll_abandoned) stall a mutation for ever rather than softly. The
+  /// reference implementation settles it the same way: `promiseForObject` is `Promise.all`, which
+  /// rejects on the first rejection, so `graphql-js` starts the next mutation field while the
+  /// previous one's other nested resolvers are still running.
+  ///
+  /// # Why "finished" and not "answered"
+  ///
+  /// Measured rather than read off the prose, per this module's standing method. `graphql-js`
+  /// 16.11.0's `executeFieldsSerially` awaits `executeField`, and `executeField`'s promise is
+  /// `completeValue`'s — which for an object resolves only once every sub-field has. On
+  /// `mutation { a: m { nested } b: m { nested } }` upstream's resolver order is `a`, `nested(a)`,
+  /// `b`, `nested(b)`. Releasing on the answer alone would run `b`'s side effect while `a`'s
+  /// sub-selection was still resolving.
+  fn release_serial(&mut self) {
+    if self.serial_next == NONE {
+      return;
+    }
+    if self.live != 0 || self.ready_head != NONE {
+      return;
+    }
+    while self.serial_next != NONE {
+      self.serial_steps += 1;
+      let slot = self.serial_next;
+      self.serial_next = self.slots[slot as usize].next_ready;
+      self.slots[slot as usize].next_ready = NONE;
+      // Only reachable with the root itself discarded: a top-level field is flagged either by its
+      // own failure — impossible before it has been offered — or by a discard rooted at the root,
+      // which flags all of them at once. So the skip runs the cursor to its end in one call, which
+      // is the same `M` steps the splices would have cost, and never leaves the root's read count
+      // stranded, because a discarded root holds no count to strand.
+      if self.slots[slot as usize].discarded {
+        continue;
+      }
+      self.enqueue(slot);
+      return;
     }
   }
 

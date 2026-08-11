@@ -374,9 +374,12 @@ impl<V> fmt::Display for Error<'_, V> {
     // `slot == 0` **is** the root, by construction, because `start` pushes it before anything else.
     // A field genuinely named `Query` on `Query` still renders `Query.Query`, because its slot is
     // not zero, so there is no sentinel to collide with.
+    //
+    // "the operation's" rather than "the query's": draft §6.2.2 made the root a mutation's as well,
+    // and a message that names the wrong operation kind is the same class of lie as the one above.
     let position = |f: &mut fmt::Formatter<'_>, parent: TypeId, field: Sym| -> fmt::Result {
       if self.row.slot == 0 {
-        f.write_str("Cannot complete the query's root selection set")
+        f.write_str("Cannot complete the operation's root selection set")
       } else {
         f.write_str("Cannot complete field ")?;
         owner(f, parent, field)

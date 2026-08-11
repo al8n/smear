@@ -28,7 +28,9 @@ use smear::{
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
-  proto::{ArgumentSource, Executor, Kind, Leaf, Limits, Node, Response, StartError, Values},
+  proto::{
+    ArgumentSource, Executor, Kind, Leaf, Limits, Node, ReqId, Response, StartError, Values,
+  },
   validator::{Budget, First, Schema, Scratch, validate_executable},
 };
 
@@ -1958,6 +1960,10 @@ type Query {
   pair(first: String, second: String!): String
   nest: Wrap
 }
+type Mutation {
+  first: Wrap
+  second: Wrap
+}
 type Wrap {
   boom: String!
   echo(text: String): String
@@ -2542,9 +2548,14 @@ fn get_operation_refuses_what_it_cannot_run() {
     StartError::UnknownOperation
   );
   assert_eq!(
-    start_error(sdl, "mutation { m }", None),
-    StartError::NotAQuery,
-    "a mutation is refused rather than run serially-by-accident"
+    start_error(sdl, "subscription { m }", None),
+    StartError::NotAQueryOrMutation,
+    "draft §6.2.3 is a stream of responses and this surface delivers one"
+  );
+  assert_eq!(
+    start_error("type Query { a: String }", "mutation { m }", None),
+    StartError::NoMutationRoot,
+    "draft §6.2.2 step 2 wants a mutation root object and this schema declares none"
   );
   assert_eq!(
     start_error(
@@ -4221,4 +4232,495 @@ fn a_merged_key_refused_during_collection_points_at_the_first_selection() {
     (first, first + "nullable".len()),
     "the group's first selection at byte {first}, not the duplicate that happened to cross"
   );
+}
+
+// ------------------------------------------------------------------------------------------
+// draft §6.2.2 ExecuteMutation: serial, by withholding
+// ------------------------------------------------------------------------------------------
+//
+// The property is *what the executor is willing to have outstanding*, and it is invisible to the
+// obvious driver: one that answers every request before asking for the next serialises everything
+// it is handed, mutation or query, and would pass a suite written that way with the rule deleted.
+// So every case below polls **twice without answering in between**, and the second poll is the
+// assertion. `a_query_offers_every_top_level_field_at_once` is the control that makes the rest mean
+// something — without it an executor that offered nothing at all would satisfy the section.
+
+const MUTATION_SDL: &str = r#"
+type Query {
+  reading: String
+}
+type Mutation {
+  one: Holder
+  two: Holder
+  strict: Holder!
+  tagged(mark: String!): Holder
+}
+type Holder {
+  text: String
+  inner: Holder
+}
+"#;
+
+/// Polls one field request and returns its draft §7.1.2 path and its id.
+///
+/// The borrow a [`FieldRequest`](smear::proto::FieldRequest) holds is why this exists: the cases
+/// below poll again *without* answering, which cannot be written while a request is still alive.
+/// The path rather than the name, because it is the response key and so distinguishes
+/// `one` from `one.text` and an alias from the field it aliases.
+fn offer(executor: &mut Executor<'_, &str, Space>, space: &mut Space) -> Option<(String, ReqId)> {
+  let request = executor.poll_resolve(space)?;
+  Some((request.path().to_string(), request.id()))
+}
+
+fn holder(text: &str) -> J {
+  J::Obj(
+    "Holder",
+    vec![("text", J::Str(text.to_owned())), ("inner", J::Null)],
+  )
+}
+
+fn mutation(query: &str) -> (Schema, ExecutableDocument<&str>) {
+  compile(MUTATION_SDL, query)
+}
+
+/// A mutation offers its first top-level field and withholds the second.
+///
+/// Draft §6.2.2 step 4 runs the top-level selection set *serially*, and this is the whole of what
+/// that means to a driver: the second field does not exist to be resolved yet.
+#[test]
+fn a_mutation_offers_one_top_level_field_at_a_time() {
+  let query = "mutation { one { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("the first top-level field");
+  assert_eq!(path, "one");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two` is the next top-level field and must not be offered while `one` is unresolved"
+  );
+
+  executor.handle_resolved(&mut space, one, holder("1"));
+  let (path, _) = offer(&mut executor, &mut space).expect("`one`'s sub-selection");
+  assert_eq!(
+    path, "one.text",
+    "the subtree of `one` is what comes next, not `two`"
+  );
+}
+
+/// The control: a query offers every top-level field at once.
+///
+/// Without this the section proves nothing. An executor that withheld *everything* — a
+/// `poll_resolve` that returned `None` forever — would satisfy every other case here, and this is
+/// the one it fails.
+#[test]
+fn a_query_offers_every_top_level_field_at_once() {
+  let (schema, document) = compile(BUDGET_SDL, "{ a b c }");
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let offered: Vec<String> = (0..3)
+    .map(|_| {
+      offer(&mut executor, &mut space)
+        .expect("a query has no serial rule")
+        .0
+    })
+    .collect();
+  assert_eq!(
+    offered,
+    vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
+    "all three are outstanding at once, none of them answered"
+  );
+}
+
+/// The next top-level field waits for the previous one's **subtree**, not for its answer.
+///
+/// The discriminating case for the two readings of §6.2.2, and the reason `graphql-js` was measured
+/// rather than argued with: upstream's `executeFieldsSerially` awaits `executeField`, whose promise
+/// is `completeValue`'s, so `nested(a)` runs before `b`'s resolver. An executor that released on
+/// the answer alone would offer `two` at the first assertion below — and it would be running the
+/// second mutation's side effect while the first mutation's sub-selection was still resolving.
+#[test]
+fn a_mutation_withholds_until_the_whole_subtree_is_finished() {
+  let query = "mutation { one { inner { text } } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(
+    &mut space,
+    one,
+    J::Obj("Holder", vec![("inner", holder("deep"))]),
+  );
+
+  let (path, inner) = offer(&mut executor, &mut space).expect("`one.inner`");
+  assert_eq!(path, "one.inner");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`one` has been answered and its subtree has not finished, so `two` is still withheld"
+  );
+
+  executor.handle_resolved(&mut space, inner, holder("deep"));
+  let (path, text) = offer(&mut executor, &mut space).expect("`one.inner.text`");
+  assert_eq!(path, "one.inner.text");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "two levels down and still outstanding"
+  );
+
+  executor.handle_resolved(&mut space, text, J::Str("deep".to_owned()));
+  let (path, _) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two", "and only now");
+}
+
+/// A mutation with a field still withheld is not a finished response.
+///
+/// The path a driver takes when it asks for the response before asking for work. `poll_response`
+/// reads the ready chain and the in-flight table, and a withheld field is in neither — so without
+/// the release on this path the executor would hand back a response missing every mutation after
+/// the first, with no error to say so.
+#[test]
+fn a_mutation_is_not_finished_while_a_field_is_still_withheld() {
+  let query = "mutation { one { text } two { text } }";
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (_, one) = offer(&mut executor, &mut space).expect("`one`");
+  executor.handle_resolved(&mut space, one, holder("1"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`one.text`");
+  executor.handle_resolved(&mut space, text, J::Str("1".to_owned()));
+
+  assert!(
+    executor.poll_response().is_none(),
+    "`two` has not run, so this response would be missing a field the document asked for"
+  );
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":{"text":"1"},"two":{"text":"2"}}"#
+  );
+}
+
+/// A `__typename` between two mutation fields is answered in place and stops nothing.
+///
+/// It never joins the ready chain, so the cut that withholds the rest never sees it — and the
+/// response still carries it in document order, because order is the slots' creation order and not
+/// the order they were offered in.
+#[test]
+fn a_typename_between_two_mutation_fields_keeps_its_place() {
+  let query = "mutation { one { text } __typename two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (data, errors) = run(
+    MUTATION_SDL,
+    query,
+    J::Obj("Mutation", vec![("one", holder("1")), ("two", holder("2"))]),
+  );
+  assert!(errors.is_empty(), "{errors:?}");
+  assert_eq!(
+    data,
+    r#"{"one":{"text":"1"},"__typename":"Mutation","two":{"text":"2"}}"#
+  );
+}
+
+/// A mutation of nothing but `__typename` asks the driver for nothing at all.
+#[test]
+fn a_mutation_of_only_typename_issues_no_field_request() {
+  let (data, errors) = run(MUTATION_SDL, "mutation { __typename }", obj(vec![]));
+  assert!(errors.is_empty(), "{errors:?}");
+  assert_eq!(data, r#"{"__typename":"Mutation"}"#);
+}
+
+/// A field error at a *nullable* top-level mutation field does not stop the ones after it.
+///
+/// Upstream's `evaluates mutations correctly in the presence of a failed mutation`, in the small:
+/// `third` is null, and `fourth` and `fifth` still run.
+#[test]
+fn a_failed_top_level_mutation_field_releases_the_next_one() {
+  let query = "mutation { one { text } two { text } }";
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_field_error(one, "no");
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(
+    path, "two",
+    "`Holder` is nullable, so the failure nulls `one` and the serial chain carries on"
+  );
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"text":"2"}}"#
+  );
+}
+
+/// A field error at a **non-null** top-level mutation field stops the rest of them.
+///
+/// Draft §6.4.4 nulls the root, so there is no response left for a later mutation to contribute to
+/// — and the executor must not run its side effect. Measured against `graphql-js` 16.11.0, whose
+/// `promiseReduce` chain rejects at that point and never calls the next `executeField`: with the
+/// same document and a non-null mutation type, upstream's resolver log is `a`, `b` and not `c`.
+#[test]
+fn a_non_null_top_level_mutation_field_that_fails_stops_the_rest() {
+  let query = "mutation { strict { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, strict) = offer(&mut executor, &mut space).expect("`strict`");
+  assert_eq!(path, "strict");
+  executor.handle_field_error(strict, "no");
+
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "the root is nulled, so `two` is not a position any answer could reach"
+  );
+  let response = executor
+    .poll_response()
+    .expect("a mutation whose root was nulled is finished, not stalled on its withheld fields");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(render(&response.data()), "null");
+}
+
+/// A draft §6.4.1 argument error at a top-level mutation field releases the next one.
+///
+/// The field leaves the ready chain without ever being offered, which is the departure path an
+/// answer-driven release would miss: the very first request this driver is handed is `two`.
+#[test]
+fn a_top_level_argument_error_releases_the_next_mutation_field() {
+  let query = "mutation ($m: String!) { tagged(mark: $m) { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  // `$m` is declared and never supplied, which is draft §6.4.1 step 5.d's field error.
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two", "`tagged` never became a request");
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (_, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    response
+      .errors()
+      .next()
+      .expect("one error was raised")
+      .kind(),
+    Kind::ArgumentVariableMissing
+  );
+  assert_eq!(
+    render(&response.data()),
+    r#"{"tagged":null,"two":{"text":"2"}}"#
+  );
+}
+
+/// Restarting a mutation as a query leaves nothing of the mutation's withholding behind.
+///
+/// The cursor is per-operation state and `reset` clears it; a cursor that survived would point at a
+/// slot the next operation has reused, and the first thing it would do is splice that slot onto the
+/// ready chain.
+#[test]
+fn a_query_after_a_mutation_offers_everything_again() {
+  let query = "mutation m { one { text } two { text } } query q { reading }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, Some("m"), obj(vec![]))
+    .expect("the operation resolves");
+  let (path, _) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+
+  executor
+    .start(
+      &mut space,
+      Some("q"),
+      obj(vec![("reading", J::Str("r".to_owned()))]),
+    )
+    .expect("the operation resolves");
+  let (path, reading) = offer(&mut executor, &mut space).expect("`reading`");
+  assert_eq!(path, "reading");
+  executor.handle_resolved(&mut space, reading, J::Str("r".to_owned()));
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(render(&response.data()), r#"{"reading":"r"}"#);
+}
+
+/// Draft §6.2.2's withholding must not disturb the root's read count.
+///
+/// The root's value is `parent_value` for *every* top-level field, and a mutation offers them one
+/// at a time — so a count that tracked "children currently on the ready chain" would reach zero at
+/// the first offer, expire the root, and lend the second field a value that has been dropped. What
+/// keeps it right is that `expand` counts what it enqueued and the cut does not touch the count;
+/// this is the assertion that says so, and it is the one the lifetime table's "an enqueue or
+/// departure path that skips the count" column names.
+#[test]
+fn every_top_level_mutation_field_reads_the_root_value() {
+  let query = "mutation { first { boom } second { boom } }";
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  // A tagged payload: the schema decides that the root is an object, never the payload, so this
+  // asserts *which* value is lent and not merely that some value is.
+  executor
+    .start(&mut space, None, Counted::text(&held.tree, "ROOT"))
+    .expect("the operation resolves");
+
+  let first = {
+    let request = executor.poll_resolve(&mut space).expect("`first`");
+    assert!(matches!(
+      request.parent_value().payload,
+      Payload::Str("ROOT")
+    ));
+    request.id()
+  };
+  executor.handle_resolved(&mut space, first, Counted::obj(&held.tree));
+  let boom = executor
+    .poll_resolve(&mut space)
+    .expect("`first.boom`")
+    .id();
+  executor.handle_resolved(&mut space, boom, Counted::text(&held.tree, "B"));
+
+  let second = {
+    let request = executor.poll_resolve(&mut space).expect("`second`");
+    assert!(
+      matches!(request.parent_value().payload, Payload::Str("ROOT")),
+      "the root's value is still readable at the last top-level field, which is the property a \
+       cut chain has to keep true"
+    );
+    request.id()
+  };
+  executor.handle_resolved(&mut space, second, Counted::obj(&held.tree));
+  let boom = executor
+    .poll_resolve(&mut space)
+    .expect("`second.boom`")
+    .id();
+  executor.handle_resolved(&mut space, boom, Counted::text(&held.tree, "B"));
+
+  assert!(executor.poll_resolve(&mut space).is_none());
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 0);
+  assert_eq!(
+    held.tree.get(),
+    2,
+    "the two leaves, and none of the three object values — the root's outlived both offers and \
+     then went, which is the count doing exactly one job"
+  );
+}
+
+/// A budget refused at a mutation's root does not call the operation a query.
+///
+/// The root-slot branch of the budget message used to name the query, which was true when the only
+/// operation this executor ran was one. It is `slot == 0` that identifies the root, not the
+/// operation kind, so the message has to be one that is true of both.
+#[test]
+fn a_root_budget_error_on_a_mutation_names_no_operation_kind() {
+  let limits = Limits {
+    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let messages = execute_bounded(
+    MUTATION_SDL,
+    "mutation { one { text } two { text } }",
+    obj(vec![]),
+    Vec::new(),
+    limits,
+    |response| {
+      response
+        .errors()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>()
+    },
+  );
+
+  assert_eq!(messages.len(), 1, "{messages:?}");
+  assert!(
+    messages[0].contains("root selection set"),
+    "the position that could not be assembled is the root: {}",
+    messages[0]
+  );
+  assert!(
+    !messages[0].contains("query"),
+    "a mutation's root selection set is not a query's: {}",
+    messages[0]
+  );
+}
+
+/// Top-level fields reached through a fragment are top-level fields.
+///
+/// Draft §6.2.2 runs `CollectFields` first and executes the *grouped field set* serially, so what
+/// is serialised is what collection produced and not what the document wrote inline. An
+/// implementation that read the operation's own selections would treat these two as one selection
+/// and serialise nothing.
+#[test]
+fn top_level_fields_reached_through_a_fragment_are_still_serial() {
+  let query = "mutation { ...Both } fragment Both on Mutation { one { text } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two` came from the same fragment and is withheld exactly as an inline sibling would be"
+  );
+
+  executor.handle_resolved(&mut space, one, holder("1"));
+  let (path, text) = offer(&mut executor, &mut space).expect("`one.text`");
+  assert_eq!(path, "one.text");
+  executor.handle_resolved(&mut space, text, J::Str("1".to_owned()));
+  let (path, _) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two");
 }
