@@ -59,6 +59,26 @@
 //! ceiling that allocates first is not a ceiling. For the same reason a repeated key is resolved by
 //! looking first and replacing in place, so a duplicate costs no allocation and charges nothing.
 //!
+//! # The two ceilings bound what the map reports; a third quantity is what it holds
+//!
+//! **The round after the one above found that the pair was still a bound on the wrong thing**, and
+//! the diagnosis is one step past the one that produced them. Entries and key bytes are the two
+//! factors of the map's *reported content*, and they do bound it. The resource
+//! [`set_extensions`](crate::Executor::set_extensions) is actually protecting is *retained memory*,
+//! whose factors are not those two: the spine's **capacity** is not derived from the entries at
+//! all. It is a high-water mark, and [`remove`](Extensions::remove) — whose own doc comment used to
+//! stop at "giving its key bytes back to the ceiling" — refunds the budget and returns no slot to
+//! the allocator. So a map grown to a million entries under a lax [`Limits`] and emptied reads as
+//! `len() == 0` and `key_bytes() == 0` through both re-checks while holding a million slots, and
+//! the executor keeps that allocation until the next `start`, a `take_extensions`, or drop.
+//!
+//! `Extensions::shrink_to_ceiling` closes it by re-deriving the allocation from the entries on the
+//! way in, and carries the argument for normalizing rather than refusing. The rule worth keeping is
+//! the general one: **a ceiling bounds a retained buffer only if every growth of that buffer passed
+//! through it.** This spine was the only buffer in the crate grown under a ceiling its retainer
+//! does not own — which is exactly what "a map built under a laxer `Limits`" means, and the
+//! re-check was written for the two quantities that were easy to see.
+//!
 //! # What it costs, stated rather than waved at
 //!
 //! One `Vec` and one boxed key per entry, paid once per response. An opaque `V::Value` allocated
@@ -250,6 +270,14 @@ impl<V> Extensions<V> {
   }
 
   /// Removes an entry, returning its value and giving its key bytes back to the ceiling.
+  ///
+  /// **The budget it refunds and the memory it frees are not the same thing.** The key's bytes are
+  /// freed with its `Box<str>`, and the entry's *slot* is not: a `Vec` never returns capacity to
+  /// the allocator on its own, so a map emptied this way reports nothing and is still holding
+  /// everything it grew to. That is only a footprint the driver chose while the map is the
+  /// driver's; the moment it crosses into an executor it is a footprint that executor never
+  /// authorised, which is why `Extensions::shrink_to_ceiling` exists and why it is called by
+  /// [`Executor::set_extensions`](crate::Executor::set_extensions) on the way in.
   pub fn remove(&mut self, key: &str) -> Option<V> {
     let index = self.entries.iter().position(|(name, _)| &**name == key)?;
     let (name, value) = self.entries.remove(index);
@@ -286,6 +314,61 @@ impl<V> Extensions<V> {
   #[inline]
   pub const fn key_bytes(&self) -> u32 {
     self.key_bytes
+  }
+
+  /// How many entry slots the spine is *holding*, which is not what [`len`](Extensions::len)
+  /// reports.
+  ///
+  /// Crate-visible rather than public because it is not something a caller needs to act on: the
+  /// invariant it measures is enforced on the way into an executor rather than reported back for
+  /// the driver to fix. See [`shrink_to_ceiling`](Extensions::shrink_to_ceiling).
+  #[inline]
+  pub(crate) fn capacity(&self) -> usize {
+    self.entries.capacity()
+  }
+
+  /// Re-derives the spine from the entries it actually holds, when it is holding more slots than
+  /// `max_entries`.
+  ///
+  /// `max_entries` is the **executor's** [`max_extension_entries`](Limits::max_extension_entries)
+  /// and never this map's. The map's own ceilings are the ones the caller picked, and the point of
+  /// this call is that the caller's number stops mattering the instant the map is retained by
+  /// somebody else's budget.
+  ///
+  /// # Why the entry ceilings did not already bound this
+  ///
+  /// `len` and `key_bytes` are the map's *reported content*, and the two ceilings bound them
+  /// exactly. Capacity is not derived from either: it is a high-water mark of every entry the map
+  /// has ever held, and [`remove`](Extensions::remove) refunds the budget without returning the
+  /// slot. So a map grown to a million entries under a lax [`Limits`] and emptied back down reads
+  /// as `len() == 0` and `key_bytes() == 0` through every check
+  /// [`set_extensions`](crate::Executor::set_extensions) performs, while holding a million slots.
+  ///
+  /// The rule that generalises it: **a ceiling bounds a retained buffer only if every growth of
+  /// that buffer passed through it.** Every other buffer the executor keeps satisfies that by
+  /// construction — the interner's arena can only ever have been grown through
+  /// `Interner::intern`, which is gated by the executor's own `max_interned_bytes`, so its
+  /// never-shrunk capacity is bounded by the executor's ceiling however many operations it has
+  /// served. This spine was the one buffer grown under a ceiling the executor does not own.
+  ///
+  /// # Normalized rather than refused
+  ///
+  /// A map that was grown and emptied is a perfectly valid `extensions` map — §7.1.7 has nothing
+  /// to say about how one was built — and its capacity is invisible from the public API, so a
+  /// refusal would fail a legal program on a property its author cannot see. Nor could they act on
+  /// it if they could see it: there is no `shrink` and no `drain` out here, so the only recovery
+  /// would be to [`remove`](Extensions::remove) every entry into a freshly constructed map and
+  /// re-attach that. Re-deriving the allocation here keeps acceptance exactly as documented and
+  /// makes the ceiling mean what it says.
+  ///
+  /// Nothing is cloned. [`std::vec::Vec::shrink_to_fit`] moves the entries into the smaller
+  /// allocation, so no `V: Clone` bound appears anywhere and a driver's handle is neither
+  /// duplicated nor dropped. The cost is one reallocation, on the one path where the spine is over
+  /// the ceiling.
+  pub(crate) fn shrink_to_ceiling(&mut self, max_entries: u32) {
+    if self.capacity() as u64 > u64::from(max_entries) {
+      self.entries.shrink_to_fit();
+    }
   }
 
   /// Returns the entries in insertion order.

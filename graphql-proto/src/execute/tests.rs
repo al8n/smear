@@ -1833,3 +1833,158 @@ fn the_extensions_entry_points_settle_the_deferred_object_too() {
     );
   }
 }
+
+/// How many entries the lax map is grown to before it is emptied.
+///
+/// Chosen so the spine's capacity lands on a power of two exactly — `Vec` doubles, so 4,096
+/// pushes leave 4,096 slots — and so the overshoot against the strict ceiling below is a number
+/// rather than an argument. `insert` scans for a duplicate on every call, so growing a map is
+/// quadratic in its own ceiling; that cost is why this is 4,096 and not a million, and it is a
+/// cost the *map's* ceilings bound and the executor's do not.
+const GROWN_ENTRIES: usize = 4096;
+
+/// A map grown under a lax `Limits` and emptied does not carry its allocation into a strict
+/// executor.
+///
+/// The two ceilings `set_extensions` re-checks bound what the map *reports* — `len` and
+/// `key_bytes` — and the resource being bounded is what it *holds*. `remove` gives the key bytes
+/// back to the ceiling and gives no slots back to the allocator, so an empty map can arrive
+/// carrying a spine no `Limits` this executor was built with ever authorised.
+///
+/// Read off the executor's own field rather than through
+/// [`take_extensions`](Executor::take_extensions), because the claim is about what is *retained*:
+/// taking the map back is one of the three things that ends the retention.
+#[test]
+fn an_accepted_map_retains_no_capacity_the_executor_never_authorised() {
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(GROWN_ENTRIES as u32).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
+    ..Limits::default()
+  };
+  // The key-byte ceiling is deliberately *above* the capacity being planted, and not a small
+  // number chosen to look strict. There are two ceilings a repair could read here and only one of
+  // them bounds entry slots; with the other one set low, a repair reading it would shrink anyway
+  // and this case would pass a bound it never checked.
+  let strict = Limits {
+    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(GROWN_ENTRIES as u32 * 2).expect("not zero"),
+    ..Limits::default()
+  };
+
+  let mut map: Extensions<Value> = Extensions::new(&lax);
+  for index in 0..GROWN_ENTRIES {
+    map
+      .insert(&std::format!("k{index}"), Value::Text)
+      .expect("the lax map has room");
+  }
+  let grown = map.capacity();
+  assert!(
+    grown >= GROWN_ENTRIES,
+    "the map did not actually grow: {grown} slots"
+  );
+  for index in 0..GROWN_ENTRIES {
+    map
+      .remove(&std::format!("k{index}"))
+      .expect("every key was inserted");
+  }
+  assert_eq!(map.len(), 0, "empty by every ceiling the executor reads");
+  assert_eq!(map.key_bytes(), 0, "and by the other one");
+  assert_eq!(
+    map.capacity(),
+    grown,
+    "and still holding every slot: `remove` refunds the budget and never the allocation, which is \
+     the whole gap this case is about"
+  );
+
+  let (schema, document) = compile("{ nest { boom } }");
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, strict);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  executor
+    .set_extensions(map)
+    .expect("nothing it reports is over a ceiling");
+
+  let retained = executor
+    .extensions
+    .as_ref()
+    .expect("the map was accepted")
+    .capacity();
+  let slot = core::mem::size_of::<(std::boxed::Box<str>, Value)>();
+  assert!(
+    retained as u64 <= u64::from(strict.max_extension_entries.get()),
+    "the executor is holding {retained} entry slots ({} bytes) under a ceiling of {}, grown to \
+     {grown} under a `Limits` it never agreed to",
+    retained * slot,
+    strict.max_extension_entries.get()
+  );
+}
+
+/// The map [`take_extensions`](Executor::take_extensions) hands back re-enters through the same
+/// gate.
+///
+/// A returned map still carries the ceilings it was *created* under — the lax ones, because
+/// nothing rewrites them on acceptance — so a driver can grow it again well past anything this
+/// executor authorised and attach it a second time. What closes that is not a second check: it is
+/// that `set_extensions` is the only site in this file that writes `self.extensions`, so the round
+/// trip has exactly one way back in and it is the normalizing one.
+#[test]
+fn a_map_taken_back_and_regrown_re_enters_through_the_same_gate() {
+  /// Smaller than the first case's, because this half is about the path and not the size.
+  const REGROWN: usize = 256;
+
+  // One over, because the map keeps the entry it was first attached with while it regrows.
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(REGROWN as u32 + 1).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
+    ..Limits::default()
+  };
+  // Above the regrown capacity, for the reason the case above states.
+  let strict = Limits {
+    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(REGROWN as u32 * 8).expect("not zero"),
+    ..Limits::default()
+  };
+
+  let (schema, document) = compile("{ nest { boom } }");
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, strict);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  let mut map: Extensions<Value> = Extensions::new(&lax);
+  map.insert("first", Value::Text).expect("room");
+  executor.set_extensions(map).expect("one entry, under four");
+
+  let mut back = executor.take_extensions().expect("the map comes back");
+  for index in 0..REGROWN {
+    back
+      .insert(&std::format!("k{index}"), Value::Text)
+      .expect("the ceilings that came back with it are still the lax ones");
+  }
+  assert!(
+    back.capacity() > strict.max_extension_entries.get() as usize,
+    "the second growth has to actually exceed the executor's ceiling, or this case proves nothing"
+  );
+  for index in 0..REGROWN {
+    back
+      .remove(&std::format!("k{index}"))
+      .expect("every key was inserted");
+  }
+
+  executor
+    .set_extensions(back)
+    .expect("one entry again, under four");
+  let retained = executor
+    .extensions
+    .as_ref()
+    .expect("the map was accepted")
+    .capacity();
+  assert!(
+    retained as u64 <= u64::from(strict.max_extension_entries.get()),
+    "a second pass through the gate retained {retained} slots under a ceiling of {}",
+    strict.max_extension_entries.get()
+  );
+}

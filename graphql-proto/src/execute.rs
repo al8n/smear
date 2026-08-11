@@ -107,7 +107,7 @@ mod tests;
 /// | collection work | selections **examined**, name-table entries **compared**, and the fragment index's pass, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; and leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
-/// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key |
+/// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and `set_extensions`, which re-derives an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
 /// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
@@ -153,14 +153,15 @@ mod tests;
 /// | `TypeName` ids | interner ceiling | `Response` readers | next `start`/drop | `reset` | nothing: no `V`, no handle |
 /// | slots, metadata, interned text | their ceilings | tree walks, `Response` | next `start`/drop | `reset`; suffix-`restore` only | a creator that bypasses the sole creator |
 /// | error rows | one per position | `Response::errors` | next `start`/drop | `reset` | a position able to fail twice |
-/// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them |
+/// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size, and **not** the entries alone, which bound what the map reports and not the spine it holds | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them; and a map retained with the capacity a *different* `Limits` let it grow to |
 /// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
 /// | collection scratch | `max_response_metadata`, charged before each push | `expand`, this call only | cleared at the next collection | cleared, never shrunk — capacity is reused | a staged population charged against a *different* ceiling than the one that refuses it |
 /// | withheld top-level fields (draft §6.2.2) | the root's own children, so `max_response_slots` | `release_serial`, one splice each | the last splice, or the root's discard | `reset`; a discarded root retires the cursor at the next release | a `restore` truncating over the cursor — asserted, because the argument for it is about creation order and a restore is about indices |
 ///
-/// Three rules keep the table true as phases 2–8 add members, and each is a rule the rounds paid
-/// for:
+/// Five rules keep the table true as phases 2–8 add members, and each is a rule the rounds paid
+/// for. (This said "three" over four of them, uncaught since the extraction — the smallest possible
+/// instance of the thing the section it introduces is about.)
 ///
 /// 1. **Release is a state transition on the owner, never a call at a site.** Any state holding a
 ///    `V` must name its transitions out, and every one of them drops the value. For
@@ -191,6 +192,21 @@ mod tests;
 ///    `complete`, and an object whose selection is only `__typename` enqueues nothing at all — so a
 ///    release hung off "the completion path" misses the first and a release hung off "the last
 ///    offer" misses the second. Hanging it off the state catches both by construction.
+/// 5. **A ceiling bounds a retained buffer only if every growth of that buffer passed through it.**
+///    The `bound` column above names a ceiling, and a ceiling on a *reported* quantity is not
+///    automatically a bound on the allocation behind it — a container that refunds its budget on
+///    removal returns no capacity to the allocator, so the two diverge and only the reported half
+///    is checked. Whether that gap is reachable is decided by one question, and it is the
+///    falsifier: **for each retained buffer, name the site that grows it and the ceiling that
+///    charges that site; if it is not this executor's own ceiling, the buffer is unbounded here.**
+///    Run over this table it answers cleanly. Slots, metadata, interned text and the error rows are
+///    grown only by sites this executor charges, so `reset`'s deliberate never-shrink keeps a
+///    capacity that is still bounded by the ceilings — which is what makes a steady-state response
+///    allocate nothing. Draft §7.1.7's map was the one member grown somewhere else: `Extensions`
+///    carries the ceilings a *caller* chose, `Extensions::insert` charges those, and the executor
+///    then retained the result under its own. `set_extensions` re-derives the spine on acceptance,
+///    and that is the whole difference — every other row's growth site and its retainer read the
+///    same number.
 ///
 /// # Every event that reaches a death point
 ///
@@ -510,6 +526,12 @@ pub struct Limits {
   /// under a laxer `Limits` is refused rather than trusted, because a ceiling a caller can pick is
   /// advice.
   ///
+  /// It bounds the map's **entry slots** and not only its entries. `Extensions::remove` refunds
+  /// this budget without returning the slot to the allocator, so `set_extensions` re-derives an
+  /// accepted map's spine from its entries whenever it is holding more than this — otherwise a map
+  /// grown under the laxer `Limits` and emptied back down would pass every check here and be
+  /// retained at its high-water mark. The entries themselves are untouched; see that method.
+  ///
   /// One of a **pair**, and neither half bounds anything alone: see
   /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes).
   pub max_extension_entries: NonZeroU32,
@@ -525,9 +547,16 @@ pub struct Limits {
   /// that arena is a response budget shared with field names and driver error messages, so
   /// spending it on protocol metadata would let an extensions map refuse an error message.
   ///
-  /// Values are **not** bounded here, by either ceiling. `proto` bounds what `proto` allocates, and
-  /// an entry's value is the driver's own `V` — the same way a `String` leaf of any length reaches
-  /// the response without a byte ceiling looking at it.
+  /// Values are **not** bounded here, by either ceiling, and that is a **non-goal rather than the
+  /// third hole in this pair**. `proto` bounds what `proto` allocates, and an entry's value is the
+  /// driver's own `V` — the same way a `String` leaf of any length reaches the response without a
+  /// byte ceiling looking at it, and the same way `start`'s `root` and every
+  /// [`handle_resolved`](Executor::handle_resolved) answer do. There is no ceiling that could
+  /// apply: [`Values`](crate::Values) asks seven questions, each discharging a numbered draft §6
+  /// step, and none of them is "how big is this" — measuring one would mean a `V` the executor is
+  /// allowed to interpret, which is the boundary this crate is built not to cross. `max_in_flight`
+  /// and [`max_response_slots`](Limits::max_response_slots) bound how *many* driver values are
+  /// held; nothing bounds one of them, here or anywhere else.
   pub max_extension_key_bytes: NonZeroU32,
 }
 
@@ -1467,6 +1496,31 @@ where
   /// method is meaningful only while an operation is running, and a setter that accepts a value it
   /// can never show anyone is a silent loss whichever side of the operation it happens on.
   ///
+  /// # On acceptance the allocation is re-derived, and that is not a refusal
+  ///
+  /// **The ceilings above bound what the map reports; this bounds what it holds.** `len` and
+  /// `key_bytes` are the map's content, and an [`Extensions`]'s spine capacity is derived from
+  /// neither — it is the high-water mark of every entry the map has ever held, and
+  /// [`Extensions::remove`] refunds the key bytes without returning the slot. A map grown to a
+  /// million entries under a lax [`Limits`] and emptied passes both checks above while holding a
+  /// million entry slots, and this executor would then keep that allocation until the next
+  /// [`start`](Executor::start), a [`take_extensions`](Executor::take_extensions), or drop.
+  ///
+  /// So an accepted map's spine is re-derived from the entries it actually carries whenever it is
+  /// over [`max_extension_entries`](Limits::max_extension_entries). The entries, their order, their
+  /// keys and their values are untouched — nothing is cloned, nothing is dropped, and this is
+  /// invisible to every observable the type has. It is deliberately **not** a fourth
+  /// [`SetExtensionsError`]: a grown-and-emptied map is a valid `extensions` map, its capacity is
+  /// not visible through this crate's public API, and a caller handed one back could not shrink it
+  /// even if it were. Refusing it would fail a legal program on a property its author cannot see.
+  ///
+  /// The general rule, which is the half worth carrying to the next resource: **a ceiling bounds a
+  /// retained buffer only if every growth of that buffer passed through it.** Everything else this
+  /// executor retains satisfies that by construction, because the executor's own ceiling gates the
+  /// only site that grows it. A map arrives grown under a [`Limits`] that is not this one's, which
+  /// is the same premise the [`TooLarge`](SetExtensionsError::TooLarge) re-check is built on — it
+  /// was simply applied to the two quantities that were easy to see.
+  ///
   /// # It is an entry point
   ///
   /// Like every other public call in, it settles the lends the driver's previous call left open
@@ -1480,7 +1534,7 @@ where
   /// it does with `std`.
   pub fn set_extensions(
     &mut self,
-    extensions: Extensions<V::Value>,
+    mut extensions: Extensions<V::Value>,
   ) -> Result<Option<Extensions<V::Value>>, SetExtensionsError<V::Value>> {
     self.on_entry();
     if !self.started {
@@ -1494,6 +1548,9 @@ where
     {
       return Err(SetExtensionsError::TooLarge(extensions));
     }
+    // After the refusals, so a map this call is not going to keep is not reallocated on its way
+    // back out to the driver.
+    extensions.shrink_to_ceiling(self.limits.max_extension_entries.get());
     Ok(self.extensions.replace(extensions))
   }
 

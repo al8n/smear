@@ -5615,6 +5615,66 @@ fn a_map_built_under_laxer_limits_is_refused() {
   );
 }
 
+/// A map grown under a laxer `Limits` and emptied back down is *accepted*, and normalizing its
+/// allocation changes nothing a response can see.
+///
+/// The other side of the repair for the retained-capacity hole, and the side no assertion about
+/// capacity can make. `set_extensions` re-derives an accepted map's spine from its entries, and the
+/// two ways to get that wrong are both invisible to a capacity check: bounding the *content*
+/// instead of the allocation — a `truncate` where a `shrink_to_fit` belongs — passes every capacity
+/// assertion while silently dropping the driver's entries and the values under them, and a rebuild
+/// that reordered them would serialise a different map. So this case reads the entries out of the
+/// finished response, in order, with the driver's own values under the keys.
+///
+/// It is also the acceptance half of the reject-versus-normalize decision: a grown-and-emptied map
+/// is a legal §7.1.7 map, and this is the case that fails if a later round decides to refuse one.
+#[test]
+fn a_map_grown_and_emptied_is_accepted_and_reaches_the_response_unchanged() {
+  /// Well past the executor's default ceiling of 64, so the spine the map arrives holding is one
+  /// no `Limits` the executor was built with would have authorised.
+  const GROWN: usize = 512;
+
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(GROWN as u32).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
+    ..Limits::default()
+  };
+
+  let seen = ext_run(
+    |executor| {
+      let mut map: Extensions<J> = Extensions::new(&lax);
+      for index in 0..GROWN {
+        map
+          .insert(&format!("k{index}"), J::Int(index as i64))
+          .expect("the lax map accepts it");
+      }
+      for index in 0..GROWN - 3 {
+        map
+          .remove(&format!("k{index}"))
+          .expect("every key was inserted");
+      }
+      assert_eq!(
+        map.len(),
+        3,
+        "three left, well under the executor's ceiling"
+      );
+      executor
+        .set_extensions(map)
+        .expect("what it reports is under both ceilings, and how it was built is not a refusal");
+    },
+    ext_of,
+  );
+  assert_eq!(
+    seen,
+    Some(vec![
+      ("k509".to_owned(), J::Int(509)),
+      ("k510".to_owned(), J::Int(510)),
+      ("k511".to_owned(), J::Int(511)),
+    ]),
+    "every surviving entry, in insertion order, with the driver's own value still under its key"
+  );
+}
+
 // ── the lifecycle ────────────────────────────────────────────────────────────────────────────
 
 /// Attaching before `start` is refused rather than accepted and then dropped.
