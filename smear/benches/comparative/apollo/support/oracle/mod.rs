@@ -44,7 +44,7 @@
 //! exception nothing exercises is either dead or evidence that the corpus is too thin, and both
 //! need saying out loud.
 //!
-//! It also refuses to be a test that cannot fail. `tests/validator_oracle.rs` runs the whole corpus
+//! It also refuses to be a test that cannot fail. The `validator_oracle` test runs the whole corpus
 //! once per rule with that rule switched off and requires a red each time, so "the oracle agrees"
 //! is never true merely because the oracle cannot tell.
 
@@ -293,6 +293,14 @@ pub fn apollo_syntax(source: &str) -> Result<(), String> {
 // ------------------------------------------------------------------------------------------
 
 /// A comparison that failed.
+//
+// `clippy::enum_variant_names` fires on `ParseDivergence`, and only started firing when this
+// harness stopped being a library: the lint honours `avoid_breaking_exported_api`, so a `pub`
+// enum in a lib is exempt and the same enum inside a bench target's module tree is not. Nothing
+// about the type changed. The suffix is load-bearing — see the variant's own documentation, which
+// exists because a parse divergence read as a validator finding is the one misreading this report
+// must not permit — so the lint is answered here rather than by renaming the variant.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub enum Divergence {
   /// **smear accepted a document apollo rejected.**
@@ -658,7 +666,7 @@ impl Oracle {
   ///
   /// This is how the harness proves it discriminates. Dropping a rule makes smear genuinely laxer
   /// on every document that rule was the only thing catching, and a harness worth having must
-  /// then red. `tests/validator_oracle.rs` runs the whole corpus once per rule this way and
+  /// then red. The `validator_oracle` test runs the whole corpus once per rule this way and
   /// asserts the red, so the discrimination property is gated on every run rather than
   /// demonstrated once by hand.
   pub fn without(rule: Rule) -> Self {

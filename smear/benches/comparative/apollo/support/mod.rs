@@ -44,7 +44,35 @@
 //! * the correctness gate itself — error-free parse, byte-exact round-trip, non-trivial node
 //!   counts — which decides which entries are eligible to be timed at all.
 //!
-//! Nothing here is timed. `benches/apollo_comparison.rs` does the timing and calls into this.
+//! Nothing here is timed. `apollo_comparison.rs`, beside this directory, does the timing and
+//! calls into this.
+//!
+//! ── WHY A MODULE TREE UNDER `benches/`, AND NOT A LIBRARY ───────────────────────────────────
+//!
+//! Seven targets share this code: the two criterion benches, the two gates (`byte_identity`,
+//! `validator_oracle`) and the three tools (`gate`, `perfloop`, `treedump`). Until the benches
+//! were consolidated into `smear` it was the `src/` of a separate `smear-apollo-bench` package
+//! and the seven were its targets, which is what let them `use` it.
+//!
+//! A package has exactly one library, and `smear`'s is the published crate — `apollo-compiler`
+//! and `apollo-parser` cannot go in it. So the only remaining way for several targets to share
+//! one copy of this source is ordinary module resolution, and `mod support;` resolves against
+//! the directory holding the file that writes it. That is the whole reason the two `[[test]]`
+//! targets and the three `[[example]]` targets are declared with a `path` into `benches/`
+//! rather than living in `tests/` and `examples/`: a target in another directory could only
+//! reach this tree through `#[path]`, or through a second copy, and both of those are a seam
+//! that drifts. Everything that shares the harness sits with it.
+//!
+//! It is compiled once per target, which is the price. Nothing here is on a timed path — the
+//! work functions are `#[inline]` and the criterion loop calls them directly — so the cost is
+//! compile time in `cargo bench`, not a change to any number.
+
+// Seven targets compile this tree and each one uses a subset of it: `byte_identity` needs
+// `dump`, `validator_oracle` needs `oracle`, `perfloop` needs two functions. As a library those
+// were `pub` and reachable; as a module inside a target's crate root, everything the *current*
+// target does not call is dead code. Allowing it here is what keeps the shared source single —
+// the alternative is per-target `#[cfg]`s that make each target compile a different harness.
+#![allow(dead_code)]
 
 use core::hint::black_box;
 

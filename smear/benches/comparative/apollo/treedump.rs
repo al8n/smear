@@ -10,17 +10,18 @@
 //! root, and the two round-trip to the same bytes. Everything in that gap is this file's to catch.
 //!
 //! ```text
-//! cargo run -p smear-apollo-bench --example treedump --release | shasum -a 256
-//! cargo run -p smear-apollo-bench --example treedump --release -- perturbed | shasum -a 256
-//! cargo run -p smear-apollo-bench --example treedump --release -- selfcheck
-//! cargo run -p smear-apollo-bench --example treedump --release -- malformed | shasum -a 256
+//! cargo run -p smear --features rowan,validator --example treedump --release | shasum -a 256
+//! cargo run -p smear --features rowan,validator --example treedump --release -- perturbed | shasum -a 256
+//! cargo run -p smear --features rowan,validator --example treedump --release -- selfcheck
+//! cargo run -p smear --features rowan,validator --example treedump --release -- malformed | shasum -a 256
 //! ```
 //!
 //! # This file is the human-facing half of the harness
 //!
 //! The machinery — the row projection, the escape, the renderer, the four corpora and the recorded
-//! hashes — lives in [`smear_apollo_bench::dump`], not here. That is so the *other* caller can
-//! reach it: `tests/byte_identity.rs` recomputes all four hashes and fails if any has moved. This
+//! hashes — lives in [`crate::support::dump`], not here. That is so the *other* caller can
+//! reach it: `byte_identity.rs`, beside this file, recomputes all four hashes and fails if any
+//! has moved. This
 //! example and that gate therefore dump the same bytes by construction rather than by two
 //! implementations agreeing, which is the only arrangement in which `treedump | shasum` and the
 //! gate can never disagree.
@@ -47,11 +48,11 @@
 //!   `malformed` run. Redirect it to a file rather than a terminal.
 //!
 //!   ```text
-//!   cargo run -p smear-apollo-bench --example treedump --release -- prefixes > /tmp/prefixes.dump
+//!   cargo run -p smear --features rowan,validator --example treedump --release -- prefixes > /tmp/prefixes.dump
 //!   shasum -a 256 /tmp/prefixes.dump
 //!   ```
 //!
-//!   Note that `tests/byte_identity.rs` hashes this same corpus in **bounded memory** without
+//!   Note that the `byte_identity` test hashes this same corpus in **bounded memory** without
 //!   writing 1.4 GB anywhere, so checking it does not require the redirect above.
 //!
 //! # Comparing two tokora checkouts
@@ -65,7 +66,7 @@
 //! for t in /path/to/tokora-a /path/to/tokora-b; do
 //!   CARGO_TARGET_DIR=/tmp/td-$(basename $t) \
 //!   cargo --config "patch.crates-io.tokora.path=\"$t\"" \
-//!     run -p smear-apollo-bench --example treedump --release | shasum -a 256
+//!     run -p smear --features rowan,validator --example treedump --release | shasum -a 256
 //! done
 //! ```
 //!
@@ -104,12 +105,16 @@
 //! fifteen-target `cross` job ever had to link, and it would fail on every target whose linker the
 //! runner lacks.
 
+// The shared harness. It is a module compiled into this target rather than a library
+// linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
+mod support;
+
 use std::{
   io::{BufWriter, Write as _},
   process::ExitCode,
 };
 
-use smear_apollo_bench::{
+use crate::support::{
   dump::{Corpus, for_each_chunk, render, rows},
   smear_parse,
 };

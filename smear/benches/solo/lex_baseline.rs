@@ -37,34 +37,34 @@ use std::hint::black_box;
 //   * gitlab schema — an extreme stress test (~2.3 MB)
 //
 // Every path below is relative to THIS FILE, which is how `include_str!` resolves; the corpora
-// live in `smear`'s test tree and are reached across the member boundary. If a fixture moves,
-// these calls fail at compile time, which is the right failure mode — and
-// `.github/workflows/ci.yml`'s `build` job compiles this member's bench targets so that failure
-// is reachable from CI, which it was not while the benches lived inside `smear` (no gate builds
-// a `[[bench]]` target: `cargo test`'s default selection omits them).
+// are this package's own, two directories up in `smear/tests/fixtures/`. If a fixture moves,
+// these calls fail at compile time, which is the right failure mode — but only for whoever
+// compiles this target, and NOTHING in an ordinary run does: `cargo test`'s default selection is
+// lib + bins + tests + examples, and a `[[bench]]` is in none of it. The gate is
+// `.github/workflows/ci.yml`'s `build` job, which runs `cargo bench --no-run` for exactly that
+// reason; read its Pass 3 comment before assuming a bench is covered by anything else.
 
 const FIXTURES_EXEC: &str = "smear/tests/fixtures/executables";
 const FIXTURES_SCHEMA: &str = "smear/tests/fixtures/schemas";
 
 // Executable queries.
-const Q_TINY: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_01_tiny_simple.graphql");
+const Q_TINY: &str = include_str!("../../tests/fixtures/executables/bench_01_tiny_simple.graphql");
 const Q_SMALL: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_03_small_variables.graphql");
+  include_str!("../../tests/fixtures/executables/bench_03_small_variables.graphql");
 const Q_MED_FRAG: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_05_medium_fragments.graphql");
+  include_str!("../../tests/fixtures/executables/bench_05_medium_fragments.graphql");
 const Q_LARGE_COMPLEX: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_06_large_complex.graphql");
+  include_str!("../../tests/fixtures/executables/bench_06_large_complex.graphql");
 const Q_HUGE: &str =
-  include_str!("../../smear/tests/fixtures/executables/bench_10_huge_comprehensive.graphql");
+  include_str!("../../tests/fixtures/executables/bench_10_huge_comprehensive.graphql");
 const Q_KITCHEN_SINK: &str =
-  include_str!("../../smear/tests/fixtures/executables/kitchen-sink_canonical.graphql");
+  include_str!("../../tests/fixtures/executables/kitchen-sink_canonical.graphql");
 
 // Schemas — ascending in size.
-const S_MINIMAL: &str = include_str!("../../smear/tests/fixtures/schemas/minimal.graphql");
-const S_GMX: &str = include_str!("../../smear/tests/fixtures/schemas/gmx_schema.graphql");
-const S_GITHUB: &str = include_str!("../../smear/tests/fixtures/schemas/github_schema.graphql");
-const S_GITLAB: &str = include_str!("../../smear/tests/fixtures/schemas/gitlab_schema.graphql");
+const S_MINIMAL: &str = include_str!("../../tests/fixtures/schemas/minimal.graphql");
+const S_GMX: &str = include_str!("../../tests/fixtures/schemas/gmx_schema.graphql");
+const S_GITHUB: &str = include_str!("../../tests/fixtures/schemas/github_schema.graphql");
+const S_GITLAB: &str = include_str!("../../tests/fixtures/schemas/gitlab_schema.graphql");
 
 /// All inputs, paired with a short label for the bench id.
 const INPUTS: &[(&str, &str)] = &[

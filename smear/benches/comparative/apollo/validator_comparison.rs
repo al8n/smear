@@ -75,8 +75,13 @@
 //! [project]: smear::parser::graphql::lossless::project_executable_document_recovered
 //! [complete]: smear::validator::Recovery::is_complete
 
+// The shared harness. It is a module compiled into this target rather than a library
+// linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
+mod support;
+
 use core::hint::black_box;
 
+use crate::support::oracle::{Schemas, build_schemas, build_smear_schema, corpus};
 use apollo_compiler::{
   ExecutableDocument as ApolloExecutable, Schema as ApolloSchema, ast as apollo_ast,
 };
@@ -95,7 +100,6 @@ use smear::{
     validate_schema_lossless,
   },
 };
-use smear_apollo_bench::oracle::{Schemas, build_schemas, build_smear_schema, corpus};
 
 /// One (schema, query) pair to time.
 struct Workload {

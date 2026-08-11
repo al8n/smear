@@ -200,8 +200,19 @@ impl Scan {
   }
 }
 
+// These ran as `smear-apollo-bench`'s lib unit tests until the harness became a module. They now
+// run inside the two `[[test]]` targets that share it — `byte_identity` and `validator_oracle` —
+// which cargo builds with `--test`, so `#[cfg(test)]` still selects them and they are executed
+// twice rather than once.
+//
+// A `harness = false` BENCH target is the awkward case, and it is why the import carries an
+// `allow`: `cargo bench` compiles it with `cfg(test)` on but without `--test`, so this module is
+// compiled while every `#[test]` in it is stripped, and the glob is left importing nothing anyone
+// uses. Narrowing the glob to the names below would not help — those imports would be unused for
+// exactly the same reason.
 #[cfg(test)]
 mod tests {
+  #[allow(unused_imports)]
   use super::*;
 
   #[test]

@@ -20,13 +20,17 @@
 
 #![allow(missing_docs)]
 
+// The shared harness. It is a module compiled into this target rather than a library
+// linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
+mod support;
+
 use std::collections::BTreeMap;
 
-use smear::validator::Rule;
-use smear_apollo_bench::oracle::{
+use crate::support::oracle::{
   Class, Divergence, Oracle, Report, SchemaOutcome, apollo_schema_error_names, build_schemas,
   corpus, gaps, whitelist::Expectation,
 };
+use smear::validator::Rule;
 
 fn run() -> Report {
   Oracle::new().run(&corpus::all())
@@ -113,7 +117,7 @@ fn every_whitelist_class_is_exercised() {
 
 /// The other direction's exception list, held to the same two conditions.
 ///
-/// A [`Gap`](smear_apollo_bench::oracle::Gap) says smear is laxer than the oracle on a named draft
+/// A [`Gap`](crate::support::oracle::Gap) says smear is laxer than the oracle on a named draft
 /// section because that rule is openly unimplemented. Both halves have to keep being true:
 ///
 /// * **still open** — no `Rule` may claim the section. Phase 3 landing draft 5.3.2 flips this and
@@ -341,7 +345,7 @@ fn the_whitelist_still_describes_apollo() {
     violated.is_empty(),
     "the whitelist no longer describes apollo-compiler {}. Re-run the feasibility measurement \
      before touching the pin in Cargo.toml.\n{violated:#?}\n\nexpectations:\n{}",
-    smear_apollo_bench::oracle::APOLLO_VERSION,
+    crate::support::oracle::APOLLO_VERSION,
     Class::ALL
       .iter()
       .map(|class| format!("  {class:?} requires {:?}: {class}\n", class.expectation()))

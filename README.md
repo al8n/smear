@@ -310,19 +310,28 @@ build, not as a tested runtime.
 
 ## Benchmarks
 
-Two packages carry the benchmark suites. Every target sets `harness = false` and runs under criterion,
-so a run must name its target:
+All six live in `smear/benches`, as `smear`'s own `[[bench]]` targets, so `cargo bench` is the whole
+suite. They are grouped by how many implementations are inside the timed region:
+
+* `benches/solo/` — `lex_baseline` and `graphqlx`, where both sides are smear. The number is
+  comparable only to an earlier run on the same machine.
+* `benches/comparative/` — `executables` and `type_system` against four other Rust GraphQL parsers,
+  and `benches/comparative/apollo/`'s `apollo_comparison` and `validator_comparison` against
+  `apollo-parser` and `apollo-compiler`. The number is a ratio.
+
+Every target sets `harness = false` and runs under criterion, so a run must name its target. The two
+apollo ones additionally need the features they measure:
 
 ```sh
-cargo bench --package smear-benches      --bench executables          -- --quick
-cargo bench --package smear-benches      --bench type_system          -- --quick
-cargo bench --package smear-apollo-bench --bench validator_comparison -- --quick
-cargo bench --package smear-apollo-bench --bench apollo_comparison    -- --quick
+cargo bench -p smear --bench executables -- --quick
+cargo bench -p smear --bench type_system -- --quick
+cargo bench -p smear --features rowan,validator --bench apollo_comparison    -- --quick
+cargo bench -p smear --features rowan,validator --bench validator_comparison -- --quick
 ```
 
-`smear-benches` measures parsing against four other Rust GraphQL parsers, and `smear-apollo-bench`
-measures the lossless CST tower and draft §5 validation against `apollo-parser` and
-`apollo-compiler`.
+Those two carry `required-features`, and an unmet `required-features` makes cargo *skip* a target in
+silence. `cargo bench -p smear` therefore builds four of the six and exits 0; the CI step that closes
+that names both targets explicitly.
 
 **No tables here.** The ones this file used to carry were measured on an unrecorded commit, date and
 machine, and had drifted far enough to understate the crate — so they were removed rather than
