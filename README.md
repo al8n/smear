@@ -248,25 +248,16 @@ assert_eq!(diagnostic.subject_source(), Some(&"title"));
 
 ## Architecture
 
-Five layers, one crate each, and `smear` is an umbrella that re-exports all of them. The lower two
-are generic over the source type and the dialect; the upper three are standard GraphQL only.
+Five layers. The lower two are generic over the source type and the dialect; the upper three are
+standard GraphQL only.
 
-| Layer | Crate | Reached as | What it is |
-|---|---|---|---|
-| Lexer | `smear-lexer` | `smear::lexer` | Source text to zero-copy tokens, in a syntactic or a lossless stream. The irreducible base — it has no feature of its own because everything above it is built on its token streams |
-| Parser | `smear-parser` | `smear::parser` | Combinators that build an AST from the syntactic stream, and the rowan CST tower from the lossless one, plus the generic node definitions a new dialect reuses |
-| Schema | `smear-schema` | `smear::validator::schema` | The built-once `Schema` and, behind its `build` feature, draft §3 inside the builder. A consumer that only *reads* a schema takes it with `default-features = false` and gets no front end |
-| Validator | `smear-compiler` | `smear::validator` | The draft §5 rules over a parsed request, the rule vocabulary and the diagnostic rendering |
-| Execution | `graphql-proto` | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Queries today, behind the non-default `proto` feature |
-| Diagnostic | (in `smear-schema`) | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. It ships with the schema because that is the lowest crate whose errors implement it |
-
-**Depend on `smear` and enable features, or depend on a member directly** — the two are the same
-code and the same paths. `smear::lexer::X` and `smear_lexer::X` are one item. A member is worth
-naming directly when you want exactly one layer: a syntax highlighter wants `smear-lexer` and never
-resolves the parser tower; a driver that reads a schema at execution time wants `smear-schema` with
-`default-features = false` and never resolves the front end. Every feature a member declares is
-forwarded by `smear` under the same name, which `ci/feature_reachability.py` checks by enumerating
-the members rather than by reading the umbrella's own table.
+| Layer | Module | What it is |
+|---|---|---|
+| Lexer | `smear::lexer` | Source text to zero-copy tokens, in a syntactic or a lossless stream. The irreducible base — it has no feature of its own because the parser cannot exist without it |
+| Parser | `smear::parser` | Combinators that build an AST from the syntactic stream, and the rowan CST tower from the lossless one, plus the generic node definitions a new dialect reuses |
+| Validator | `smear::validator` | The built-once `Schema`, draft §3 inside its build, and the draft §5 rules over a parsed request |
+| Execution | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Queries today, behind the non-default `proto` feature |
+| Diagnostic | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice |
 
 ## Feature Flags
 
@@ -278,10 +269,10 @@ without it, and a gate that can only ever be on is not a gate.
 | `std` | Standard library support; off is `no_std`, and `alloc` is required either way | ✓ |
 | `graphql` | Standard GraphQL, in every layer | ✓ |
 | `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
-| `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
+| `parser` | `smear::parser` — the combinators and the ASTs. Off, the crate is the lexer alone | ✓ |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
-| `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
-| `proto` | `smear::proto` — draft §6 query execution as a Sans-I/O state machine. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
+| `validator` | `smear::validator` — the built-once `Schema`, draft §3 inside its build, and the draft §5 rules. Implies `parser` and `graphql`. Adds no dependency | |
+| `proto` | `smear::proto` — draft §6 query execution as a Sans-I/O state machine. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no dependency and defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator` and `std`, and is the one validator feature that costs a dependency (`serde`, `serde_json`) | |
 | `rowan` | The lossless CST tower, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
 | `bytes` | Support the `bytes::Bytes` source type | |
@@ -292,13 +283,11 @@ without it, and a gate that can only ever be on is not a gate.
 | `test-support` | The lossless suites' `test_support` scaffolding | |
 
 A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns the
-parser off, or names the member and skips the umbrella entirely. The two resolve the same code:
+parser off:
 
 ```toml
 [dependencies]
 smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
-# or
-smear-lexer = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
 ```
 
 ### `no_std`
@@ -306,8 +295,8 @@ smear-lexer = { version = "0.0.0", default-features = false, features = ["std", 
 With `std` off the crate is `no_std` and requires `alloc`. CI cross-compiles `smear` with
 `--all-features` for fourteen targets including five WebAssembly ones, and builds the validator's
 schema representation for `thumbv6m-none-eabi` — a core with no compare-and-swap — through the
-`smear-noatomic` member, which `#[path]`-includes `smear-schema`'s own files so the proof cannot
-drift from the source.
+`smear-noatomic` member, which `#[path]`-includes smear's own files so the proof cannot drift from
+the source.
 
 Two limits on that claim, because they are the difference between "compiles" and "works". `smear`
 itself does **not** build for `thumbv6m-none-eabi`: its AST offers an `Arc`-backed list spelling that
@@ -363,12 +352,10 @@ load average is not a usable signal for that — it reads around 3.3 at 80% idle
 Smear is **not** a GraphQL server *yet*: there is no execution engine and no response serialisation.
 Today it is the front end one would be built on; the [roadmap](#roadmap) is the rest.
 
-Migration note: `smear-lexer` and `smear-parser` were merged into this crate in [#83] and are
-separate crates again, joined by `smear-schema`, `smear-compiler` and `graphql-proto`. **Nothing a
-consumer writes changed in either direction**: `smear` re-exports every member under the module
-name it had, so `smear::lexer::X`, `smear::parser::X`, `smear::validator::X`, `smear::proto::X` and
-`smear::diagnostic::X` all still resolve, and every feature is forwarded under the same name. What
-the split adds is the option of depending on one layer directly — see [Architecture](#architecture).
+Migration note: `smear-lexer` and `smear-parser` were merged into this crate in [#83]. Neither had
+ever been published, so nothing on crates.io moved; path and git dependents rename `smear_lexer::X`
+to `smear::lexer::X` and `smear_parser::X` to `smear::parser::X`, and select features per the table
+above.
 
 ## Roadmap
 

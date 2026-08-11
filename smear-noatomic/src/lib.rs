@@ -2,7 +2,7 @@
 //!
 //! # What this member is for
 //!
-//! `smear-schema` claims three things about [`repr::Schema`] that a reader
+//! `smear::validator::schema` claims three things about [`repr::Schema`] that a reader
 //! has to take on trust unless something checks them:
 //!
 //! 1. it depends on nothing but `core` and `alloc`;
@@ -18,21 +18,13 @@
 //!
 //! # It compiles the originals, not a copy
 //!
-//! The module below is `#[path]`-included straight out of `smear-schema/src/repr/`.
+//! The module below is `#[path]`-included straight out of `smear/src/validator/schema/repr/`.
 //! Nothing is duplicated, so nothing can drift: this is the same source text `smear` ships, read
 //! through a second crate root that supplies a different `std`.
 //!
-//! # The claim is about `repr/`, not about `smear-schema` as a whole
-//!
-//! `smear-schema`'s own `[dependencies]` table is not empty — the diagnostic vocabulary moved down
-//! with it and needs `tokora`, and its `build` feature pulls `smear-parser`. None of that reaches
-//! the directory below, which is the only thing this crate compiles and the only thing the claim
-//! was ever about: `repr/` still has exactly one outbound path, the alloc-as-std alias, and a
-//! `use` anywhere in it reaching past `core` and `alloc` fails this build.
-//!
 //! # Why `smear` itself is not built for the target
 //!
-//! It cannot be. `smear-parser`'s `graphql::ast` offers an `Arc`-backed spelling of recursive list
+//! It cannot be. `smear::parser::graphql::ast` offers an `Arc`-backed spelling of recursive list
 //! types (`ArcType`), which needs `alloc::sync` and therefore native atomics, and the crate's
 //! `memspan` dependency is pulled in with `std`. The claim under test was never that the parser
 //! reaches an embedded core — it is that the *schema* does, because a build-once, read-many value
@@ -48,7 +40,7 @@
 extern crate alloc as std;
 
 /// The schema representation, compiled from `smear`'s own files.
-#[path = "../../smear-schema/src/repr/mod.rs"]
+#[path = "../../smear/src/validator/schema/repr/mod.rs"]
 pub mod repr;
 
 use repr::{

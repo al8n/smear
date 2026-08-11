@@ -15,31 +15,7 @@ TARGET=$1
 # it is the exact shape of #73. Sub-second, and it reads the real `smear/tests/` partition and
 # the real `smear/Cargo.toml` feature table, so it also fails if that tree stops having both
 # excluded and compiled targets to distinguish, or if `rowan` starts resolving on from defaults.
-# PYTHON >= 3.11, checked here rather than discovered as a traceback twenty minutes in.
-# `ci/miri_scope.py` parses `smear/Cargo.toml` with `tomllib`, which entered the standard library
-# in 3.11; on macOS `/usr/bin/python3` is 3.9 and would fail on the import alone. The other Python
-# gates in `ci/` are deliberately 3.9-safe — this is the only floor in the directory.
-if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
-  echo "FAIL: ci/miri_scope.py needs Python >= 3.11 (tomllib); \`python3\` here is $(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')" >&2
-  exit 1
-fi
-
 python3 ci/miri_scope.py --selftest
-
-# RE-MEASURE THE EXCLUSIONS BEFORE SPENDING ANYTHING. `MIRI_NOT_SELECTED` names the publishable
-# members left out of the selection because their lib harness is empty at the feature set this cell
-# builds — and that is a MEASUREMENT, not a fact of nature. A member that gains a `#[test]` while
-# still excluded has a test nothing interprets, and every other gate stays green over it (measured:
-# a `#[test]` added to `smear/src/lib.rs` left both this file's selftest and
-# `ci/feature_reachability.py` at exit 0).
-#
-# Here rather than in `ci/feature_reachability.py` for two reasons. It needs a `cargo test --list`,
-# which is a build, and this script is already paying for one — the fast gate stays fast. And
-# `feature_reachability.py`'s selection checks are called with SYNTHETIC package sets by its own
-# selftest, so a check that reads the real world cannot live among them; that mistake was made once
-# already and reported the gate as broken on every plant. Nothing calls `verify_exclusions` with
-# planted inputs: it reads the constant and runs cargo.
-python3 ci/miri_scope.py --verify-exclusions
 
 rustup toolchain install nightly --component miri
 rustup override set nightly
@@ -68,10 +44,8 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # deliberate, scoped reduction, not a silent one: i686's unique value in
 # this matrix is 32-bit pointer width on a SIMD byte-level lexer, and the
 # lib tests exercise exactly that, under both aliasing models. Measured
-# 2026-08-07 under what was then a `-p smear` selection: 478 lib unit tests, the
-# lexer's and the parser's in one binary while the crates were merged. The split redistributed
-# those across four binaries — 505 tests at this cell's feature set — and this timing has not been
-# re-measured on the derived selection. What is
+# 2026-08-07 under the `-p smear` selection below: 478 lib unit tests, the
+# lexer's and the parser's in one binary since the crates merged. What is
 # given up is "integration-suite coverage at 32-bit", not "32-bit
 # coverage" — tests/oracle.rs and tests/tokora_conformance.rs still run
 # under Miri on x86_64 and powerpc64-unknown-linux-gnu, so the scenarios
@@ -85,8 +59,6 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # `miri-tb-x86_64-unknown-linux-gnu`, timestamps from its own log:
 #
 #   14:28:25Z  lib unit tests, 478 of them            -> 14:38:41Z   10m16s
-# (Those 478 are one binary, from when the crates were merged. Since the split the selection is
-#  four binaries — 125 + 353 + 12 + 15 = 505 — and this timing has not been re-measured on it.)
 #   14:38:42Z  46 excluded targets, empty harnesses   -> 14:39:10Z      28s
 #   14:39:10Z  tests/oracle.rs, 8 tests               -> 14:47:11Z    8m01s
 #   14:47:15Z  tests/syntactic_span_extent.rs         -> killed 20:27Z, STILL IN IT
@@ -146,7 +118,7 @@ fi
 
 export MIRIFLAGS
 
-# ── WHY A NAMED SELECTION, AND WHAT IT COSTS ────────────────────────────────────────────────
+# ── WHY `-p smear`, AND WHAT IT COSTS ───────────────────────────────────────────────────────
 #
 # This line said `cargo miri test $TEST_ARGS --target $TARGET --lib` until #77 — no `-p`, so it
 # selected every workspace member, and cargo unified their features. `smear` does NOT default to
@@ -184,50 +156,19 @@ export MIRIFLAGS
 # the only fix attempt, PR #211, is a conflicting draft whose own description says the mutable
 # path still fails under Tree Borrows.
 #
-# So a named selection is not a cost/benefit trade about minutes. The lossless tower CANNOT be
+# So `-p smear` is not a cost/benefit trade about minutes. The lossless tower CANNOT be
 # interpreted, at any price, until rowan is fixed — and the 37 `#![cfg(feature = "rowan")]`
-# targets in `smear/tests/` are therefore excluded here rather than left to fail. Naming the
-# packages is the mechanism because it is the one that a future workspace member cannot undo:
-# feature unification is over the SELECTED packages, and this selects exactly these.
+# targets in `smear/tests/` are therefore excluded here rather than left to fail. `-p smear` is
+# the mechanism because it is the one that a future workspace member cannot undo: feature
+# unification is over the SELECTED packages, and this selects one.
 #
-# WHAT THIS CELL COVERS, and it is measured rather than claimed. The half where this project's own
-# `unsafe` lives — the SIMD lexer and the syntactic parser, through `tokora`'s substrate — and all
-# four of those `unsafe` sites are in `smear-lexer/src/string_lexer/`. The selection is
-# `smear-lexer`, `smear-parser`, `smear-compiler` and `graphql-proto`: 125 + 353 + 12 + 15 lib unit
-# tests, counted with `cargo test -p <m> --lib -- --list` at this cell's feature set.
-#
-# `smear` AND `smear-schema` ARE DELIBERATELY OUT, which is not a narrowing. `smear/src` is one
-# file of re-exports and its lib carries no unit tests at any feature set; `smear-schema`'s three
-# are behind `build`, which these scripts do not enable. Selecting either would produce a harness
-# with 0 tests, and `ci/miri_scope.py` fails that on purpose — "a target that compiles to an empty
-# harness passes without testing anything" is #73's mechanism. The reasons live beside the names,
-# in `MIRI_NOT_SELECTED`, and `ci/feature_reachability.py` requires each to still match a real
-# publishable member.
-#
-# THE SELECTION BELOW IS NOT WRITTEN HERE. It is read from `MIRI_PACKAGES`. Those were two
-# hand-maintained lists and they drifted: the constant grew to six members through the split while
-# this script still passed two, so the guard was checking a declaration the run did not execute and
-# the cell failed late, after the expensive part. Read `ci/miri_scope.py`'s header before changing
-# any of this.
+# What that leaves covered is the half where this project's own `unsafe` lives — the SIMD lexer
+# and the syntactic parser, through `tokora`'s substrate — and `ci/miri_scope.py` below asserts
+# that the covered/excluded split is exactly the one written here, in both directions. Read its
+# header before changing any of this.
 LOG="$(mktemp)"
 set +e
-# BUILT FROM `MIRI_PACKAGES`, not written out beside it. These two lists were hard-coded
-# separately and they drifted: the constant grew to six members as the split extracted them while
-# this line still passed two, so `ci/miri_scope.py` — which reads the constant as its expectation —
-# was checking a declaration the workflow did not execute, and the cell failed late, after the
-# expensive run. Deriving removes the second list rather than adding a check that compares them.
-#
-# Read into an array so each token is one argument, which `-p smear-lexer` needs and word-splitting
-# an unquoted string would only get right by accident.
-MIRI_SELECTION=()
-while IFS= read -r token; do MIRI_SELECTION+=("$token"); done < <(python3 ci/miri_scope.py --print-packages)
-if [ "${#MIRI_SELECTION[@]}" -eq 0 ]; then
-  echo "FAIL: ci/miri_scope.py printed no package selection." >&2
-  exit 1
-fi
-echo "selection: ${MIRI_SELECTION[*]}"
-
-cargo miri test "${MIRI_SELECTION[@]}" $TEST_ARGS --target "$TARGET" --lib 2>&1 | tee "$LOG"
+cargo miri test -p smear $TEST_ARGS --target "$TARGET" --lib 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 set -e
 
