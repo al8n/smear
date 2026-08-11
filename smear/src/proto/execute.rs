@@ -53,14 +53,15 @@
 //! `mutation { first { outstanding failing } second { outstanding } }` with `first.outstanding`
 //! held unsettled by hand — `second`'s resolver runs before it settles, because `promiseForObject`
 //! is `Promise.all` and a rejected promise chain in JS does not cancel its siblings. Waiting
-//! instead would be stricter than the reference implementation *and* would make the next mutation
-//! field reachable through the abandonment channel and nothing else — a wait no other call could
-//! end, at every ceiling and for every driver.
+//! instead would be stricter than the reference implementation *and* would put the next mutation
+//! field behind work the driver has just been told to stop doing: retiring the abandoned entries
+//! or answering them are the only two things that clear the count, at every ceiling and for every
+//! driver.
 //!
 //! Not waiting is not free either, and the cost is exactly one thing: an abandoned request holds
-//! its in-flight slot until the driver retires it, so a driver that ignores the channel runs under
-//! a ceiling narrowed by however many it has left there. That ceiling never reaches zero — see
-//! [`Limits::max_in_flight`] for the bound — so the cost is concurrency and not progress.
+//! its in-flight slot until the driver retires *or answers* it, so a driver that does neither runs
+//! under a ceiling narrowed by however many it has left there. That ceiling never reaches zero —
+//! see [`Limits::max_in_flight`] for the bound — so the cost is concurrency and not progress.
 //!
 //! See [`Executor::release_serial`], and, for the measurements as tests,
 //! `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field`,
@@ -1229,12 +1230,14 @@ where
   /// Requests [`poll_abandoned`](Executor::poll_abandoned) has not yet retired do **not** withhold
   /// it. Draft §6.4.4 discarded the positions they would have filled, so by construction no answer
   /// to one can alter a single byte of what is returned here — and withholding on them would be
-  /// the one wait a driver that ignores that channel could not clear from anywhere else. Every
-  /// other cost of ignoring it is a narrowed [`max_in_flight`](Limits::max_in_flight) that
-  /// answering the live work reopens; this one arrives at exactly the moment there is no live work
-  /// left to answer, so the response would be reachable through that channel and nothing else.
-  /// What the non-withholding costs is a driver holding live-looking [`ReqId`]s across a restart,
-  /// and [`ReqId`]'s epoch is what pays it.
+  /// the one wait a driver could clear only by acting on work it has just been told to abandon.
+  /// Every other cost of leaving an entry in the table is a narrowed
+  /// [`max_in_flight`](Limits::max_in_flight) that answering the *live* work reopens; this one
+  /// arrives at exactly the moment there is no live work left to answer, so the response would be
+  /// reachable two ways and no third — retiring those entries through that channel, or answering
+  /// them, since `release` retires an abandoned entry on a late answer as well. What the
+  /// non-withholding costs is a driver holding live-looking [`ReqId`]s across a restart, and
+  /// [`ReqId`]'s epoch is what pays it.
   ///
   /// A mutation's **withheld** top-level fields do withhold it, and they are the one kind of
   /// outstanding work that is in neither the ready chain nor the in-flight table — draft §6.2.2
@@ -2521,13 +2524,20 @@ where
   /// - [`poll_response`](Self::poll_response) already applies the same reasoning — §6.4.4 has
   ///   discarded the positions those requests would have filled, so no answer to one can change a
   ///   byte of the response.
-  /// - **It adds no wait that only [`poll_abandoned`](Self::poll_abandoned) can end, and waiting
-  ///   would.** Under a gate on `abandoned` the next top-level field becomes reachable through
-  ///   that one channel and through nothing else — not by answering the outstanding work, and not
-  ///   at a larger ceiling, the gate being on the count and not on the room. Without it there is a
-  ///   cost but no wait: an undrained entry holds an in-flight slot, so the driver's effective
-  ///   ceiling is [`max_in_flight`](Limits::max_in_flight) less the entries it has not retired.
-  ///   That subtraction never reaches zero — a discard can only promote requests that were live
+  /// - **It adds no wait on work the driver has been told to stop doing, and waiting would.**
+  ///   Under a gate on `abandoned` the next top-level field is reachable exactly two ways, and
+  ///   both of them are that work: retiring the entries through
+  ///   [`poll_abandoned`](Self::poll_abandoned), or *answering* them, since
+  ///   [`release`](Self::release)'s `Slotted::Abandoned` arm decrements the count for a late
+  ///   [`handle_resolved`](Self::handle_resolved) or
+  ///   [`handle_field_error`](Self::handle_field_error) —
+  ///   `answering_an_abandoned_request_frees_its_in_flight_entry` is that second path as a test.
+  ///   There is no third: a larger ceiling does not open the gate, which is on the count and not
+  ///   on the room. So a driver that neither polls the channel nor completes the cancelled work is
+  ///   held there for good. Without the gate there is a cost but no wait: an undrained entry holds
+  ///   an in-flight slot, so the driver's effective ceiling is
+  ///   [`max_in_flight`](Limits::max_in_flight) less the entries it has not retired. That
+  ///   subtraction never reaches zero — a discard can only promote requests that were live
   ///   *besides* the one that caused it, and that one is always released first — so the ceiling
   ///   bottoms out at one request at a time and the mutation still runs to a response.
   ///   `an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation` measures both
@@ -2537,11 +2547,21 @@ where
   ///   The gate's failure is a wrong answer before it is a wait, which is worth knowing because a
   ///   gate is not what a reader expects that from. [`poll_response`](Self::poll_response) has no
   ///   other view of a withheld field than the splice below, so a `release_serial` that declined
-  ///   would let it deliver a response missing every top-level field after the first, with no
-  ///   error to say so. Adding `|| self.abandoned != 0` to the condition below is the whole of
-  ///   that change: it trips the held-object `debug_assert` in `poll_response` and fails the two
-  ///   tests named above, plus
-  ///   `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field`.
+  ///   would let it deliver — and what it delivers is a **null, not an absence**. §6.2.2's cut
+  ///   takes a top-level field off the ready chain and off nothing else, so its slot is still the
+  ///   root's child under its own response key, and `node` renders `State::Ready` as
+  ///   `Node::Null`. On `mutation { one { text required } two { text } }` with `one.required`
+  ///   failing, a release build under the gate returns `{"one":null,"two":null}` and one error, at
+  ///   `one.required` — nothing anywhere in the response says `two` was never run, and every
+  ///   top-level field after the first goes the same way.
+  ///   `a_withheld_top_level_field_is_in_the_tree_and_reads_as_null` pins the two facts behind it:
+  ///   the key is there, and it reads as null. Adding `|| self.abandoned != 0` to the condition
+  ///   below is the whole of that
+  ///   change: in a debug build it trips the held-object `debug_assert` in `poll_response`,
+  ///   because the root still holds the value those withheld fields would have read, and it fails
+  ///   the two tests named above plus
+  ///   `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field` — and nothing else
+  ///   in the suite.
   /// - **The reference implementation does not wait, and this was measured rather than inferred
   ///   from `Promise.all`'s documented behaviour.** On
   ///   `mutation { first { outstanding failing } second { outstanding } }` against `graphql-js`

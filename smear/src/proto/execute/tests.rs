@@ -26,7 +26,7 @@ use std::string::ToString;
 
 use core::num::NonZeroU32;
 
-use super::{Executor, Limits, State};
+use super::{Executor, Limits, NONE, State, node};
 
 const SDL: &str = r#"
 type Query {
@@ -986,6 +986,9 @@ fn collected_under(
 /// A mutation root with one field, so a document can name it as often as it likes, and a list of
 /// **objects**, so the driver decides how many requests the document's one sub-selection becomes.
 ///
+/// Also the fixture for `a_withheld_top_level_field_is_in_the_tree_and_reads_as_null`, which needs
+/// nothing from a schema but two top-level mutation fields.
+///
 /// The element type is an object and not a leaf, and that is the fixture's whole discriminating
 /// power. A list of leaves grows *positions* with the driver's answer but not **offers** — the
 /// elements are completed inside one `handle_resolved` and never handed out — so a `[String]`
@@ -1084,4 +1087,84 @@ fn a_serial_release_does_not_grow_with_the_response() {
     "{wide_offers} requests against {narrow_offers}, and the same {narrow_steps} links; a total \
      that moved would be the serial gate charging the driver's quantity for the document's"
   );
+}
+
+// ------------------------------------------------------------------------------------------
+// What a response would say about a field draft §6.2.2 is still withholding
+// ------------------------------------------------------------------------------------------
+
+/// A withheld top-level mutation field is **in** the response tree, and it reads as `null`.
+///
+/// The fact under [`Executor::release_serial`]'s account of what gating the release on `abandoned`
+/// would cost a release build. That symptom is not a *missing* field, and the difference matters
+/// because absence is something a driver can notice: §6.2.2's cut takes the field off the ready
+/// chain and off nothing else, so its slot is still the root's child and still carries its
+/// response key, and [`node`] renders [`State::Ready`] as [`Node::Null`]. What a gated
+/// `release_serial` would hand back is the key present with a null under it and no error — a wrong
+/// answer shaped like a legitimate one.
+///
+/// The two halves are asserted apart because either can go without the other. A later phase that
+/// built the response tree lazily, or one that unlinked a withheld field rather than only
+/// unchaining it, would drop the key; one that gave `Ready` a rendering of its own would keep the
+/// key and change the value. Only the pair makes "null, not absent" true.
+///
+/// Read from the tree rather than from a delivered response, because the executor never delivers
+/// one in this state — `poll_response` splices the cursor before it tests whether it is finished.
+/// That is the same reason `a_drained_subtree_is_not_walked_again` is in here.
+#[test]
+fn a_withheld_top_level_field_is_in_the_tree_and_reads_as_null() {
+  let (schema, document) = compile_against(
+    SERIAL_SDL,
+    "mutation { first: m { text } second: m { text } }",
+  );
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  // `first` is answered and its own sub-selection is left outstanding, which is what holds the
+  // release and keeps `second` withheld for the read below.
+  let first = executor.poll_resolve(&mut space).expect("`first`").id();
+  executor.handle_resolved(&mut space, first, Value::Obj);
+  assert!(
+    executor.poll_resolve(&mut space).is_some(),
+    "`first.text`, never answered"
+  );
+
+  let withheld = executor.serial_next;
+  assert_ne!(withheld, NONE, "`second` is parked on the withheld cursor");
+  assert!(
+    matches!(executor.slots[withheld as usize].state, State::Ready),
+    "and it is still `Ready`: withholding is a cut on `next_ready` and nothing else"
+  );
+
+  const ROOT: u32 = 0;
+  let Node::Object(mut fields) = node(
+    &executor.slots,
+    executor.interner.bytes(),
+    executor.interner.spans(),
+    ROOT,
+  ) else {
+    panic!("the root is an object")
+  };
+  let (key, value) = fields.next().expect("`first`");
+  assert_eq!(key.to_string(), "first");
+  assert!(
+    matches!(value, Node::Object(_)),
+    "the field that was released is an object, so the two keys below are distinguishable"
+  );
+  let (key, value) = fields
+    .next()
+    .expect("the withheld field is still the root's child");
+  assert_eq!(
+    key.to_string(),
+    "second",
+    "under its response key, which is what makes the symptom a null and not an absence"
+  );
+  assert!(
+    matches!(value, Node::Null),
+    "and it reads as `null`, with nothing in `errors` to account for it"
+  );
+  assert!(fields.next().is_none(), "and the root has no third child");
 }

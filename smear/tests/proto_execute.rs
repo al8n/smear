@@ -4613,9 +4613,23 @@ fn an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation() 
 /// `one`, and the third fails — abandoning the other two, which is the most any single discard can
 /// do at this ceiling. The slot the argument promises is the one `two` is then offered in, with
 /// the channel never polled.
+///
+/// # Two children under `two`, and why one was not enough
+///
+/// The refusal this case used to rest on was polled while `two`'s subtree held nothing ready, so
+/// it followed from an empty queue rather than from the ceiling — a rule that abandoned one
+/// sibling and *retired* the other would have produced the same `None`, leaving the `max - 1` edge
+/// unobserved. `two` selects two children now, and the refusal between them is the assertion:
+/// `two.b` is ready, one live request plus **two** abandoned entries is the whole of a ceiling of
+/// three, and only a run in which both entries are still occupying slots withholds it.
+///
+/// That refusal says the slots are taken; it does not say by what.
+/// [`poll_abandoned`](smear::proto::Executor::poll_abandoned) after the response says that — the
+/// two ids it yields are the `one.a` and `one.b` the discard promoted, and there is no third.
+/// Either half alone reads as an accident of these numbers.
 #[test]
 fn an_abandonment_can_never_take_the_last_in_flight_slot() {
-  let query = "mutation { one { a: text b: text required } two { text } }";
+  let query = "mutation { one { a: text b: text required } two { a: text b: text } }";
   assert_valid(MUTATION_SDL, query);
   let (schema, document) = mutation(query);
   let limits = Limits {
@@ -4632,9 +4646,11 @@ fn an_abandonment_can_never_take_the_last_in_flight_slot() {
   assert_eq!(path, "one");
   executor.handle_resolved(&mut space, one, holder("1"));
 
-  let (path, _first) = offer(&mut executor, &mut space).expect("`one.a`");
+  // Neither is ever answered. These are the two entries the discard below promotes, and they are
+  // still in the in-flight table when the response is delivered.
+  let (path, promoted_a) = offer(&mut executor, &mut space).expect("`one.a`");
   assert_eq!(path, "one.a");
-  let (path, _second) = offer(&mut executor, &mut space).expect("`one.b`");
+  let (path, promoted_b) = offer(&mut executor, &mut space).expect("`one.b`");
   assert_eq!(path, "one.b");
   let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
   assert_eq!(path, "one.required");
@@ -4652,15 +4668,26 @@ fn an_abandonment_can_never_take_the_last_in_flight_slot() {
      caused the discard had already released it",
   );
   assert_eq!(path, "two");
+  // One live request plus two abandoned entries is the ceiling again at this point, but nothing
+  // under `two` is ready to be withheld yet, so a poll here would answer `None` whatever the
+  // counters held. The refusal that discriminates is the one below, after answering `two` has put
+  // its two children on the chain.
+  executor.handle_resolved(&mut space, two, holder("2"));
+
+  let (path, first) = offer(&mut executor, &mut space).expect("`two.a`");
+  assert_eq!(path, "two.a");
   assert!(
     offer(&mut executor, &mut space).is_none(),
-    "and that free slot is the only one: one live plus two abandoned is the ceiling again"
+    "`two.b` is ready and the ceiling refuses it: one live request plus both abandoned entries is \
+     the whole of a ceiling of three, and a discard that had promoted only one of them would hand \
+     it out"
   );
 
-  executor.handle_resolved(&mut space, two, holder("2"));
-  let (path, text) = offer(&mut executor, &mut space).expect("`two.text`");
-  assert_eq!(path, "two.text");
-  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+  executor.handle_resolved(&mut space, first, J::Str("2".to_owned()));
+  let (path, second) =
+    offer(&mut executor, &mut space).expect("`two.b`, in the one slot answering its sibling freed");
+  assert_eq!(path, "two.b");
+  executor.handle_resolved(&mut space, second, J::Str("2".to_owned()));
 
   let response = executor
     .poll_response()
@@ -4668,7 +4695,31 @@ fn an_abandonment_can_never_take_the_last_in_flight_slot() {
   assert_eq!(response.error_count(), 1);
   assert_eq!(
     render(&response.data()),
-    r#"{"one":null,"two":{"text":"2"}}"#
+    r#"{"one":null,"two":{"a":"2","b":"2"}}"#
+  );
+
+  // Which entries were holding those two slots, asserted rather than read off the refusal above.
+  // Polled after the response, so that no retirement can have helped anything the run asserted.
+  let mut retired = [
+    executor
+      .poll_abandoned()
+      .expect("the first entry the discard promoted"),
+    executor
+      .poll_abandoned()
+      .expect("the second, which a rule that retired one sibling instead would not produce"),
+  ];
+  retired.sort_unstable();
+  let mut promoted = [promoted_a, promoted_b];
+  promoted.sort_unstable();
+  assert_eq!(
+    retired, promoted,
+    "`one.a` and `one.b` are the entries that were occupying the ceiling, and both were still \
+     there at delivery"
+  );
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "and the discard promoted no third"
   );
 }
 
