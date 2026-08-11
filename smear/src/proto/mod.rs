@@ -51,8 +51,14 @@
 //! mutation field because something under it failed, the requests still outstanding beneath it are
 //! *abandoned* — [`poll_abandoned`](crate::proto::Executor::poll_abandoned) is how the driver hears
 //! so — and the next mutation field is released over them rather than behind them. `graphql-js`
-//! 16.11.0 was measured doing the same, and waiting instead would let a driver that never polls
-//! that channel stall a mutation permanently.
+//! 16.11.0 was measured doing the same, and waiting instead would make that field reachable
+//! through that channel and nothing else: a wait no other call could end.
+//!
+//! Releasing over them is not free, and the price is stated exactly. An abandoned request keeps
+//! its in-flight slot until the driver retires it, so a driver that never polls the channel runs
+//! under a ceiling narrowed by however many it is holding — never by all of them, because
+//! [`max_in_flight`](crate::proto::Limits::max_in_flight) bounds them at one below itself. The
+//! cost is concurrency, down to a floor of one request at a time, and never progress.
 //!
 //! A `subscription` is refused by [`Executor::start`](crate::proto::Executor::start) with
 //! [`StartError::NotAQueryOrMutation`](crate::proto::StartError::NotAQueryOrMutation): draft §6.2.3

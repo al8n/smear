@@ -4433,8 +4433,14 @@ fn a_mutation_withholds_for_the_subtree_and_not_just_the_answer() {
 /// rejected promise chain in JS does not cancel them.
 ///
 /// So gating the release on `abandoned` would make this executor **stricter than the reference
-/// implementation**, and it is the one gate that a driver ignoring
-/// [`poll_abandoned`](smear::proto::Executor::poll_abandoned) could turn into a permanent stall.
+/// implementation**, and it would put the next mutation field behind a call —
+/// [`poll_abandoned`](smear::proto::Executor::poll_abandoned) — that no other one can substitute
+/// for.
+///
+/// This case drains that channel and runs at the default ceiling, so it measures the release rule
+/// and says nothing about what an *undrained* entry costs.
+/// [`an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation`] is its pair and
+/// does neither.
 #[test]
 fn an_abandoned_nested_request_does_not_withhold_the_next_mutation_field() {
   let query = "mutation { one { text required } two { text } }";
@@ -4500,6 +4506,230 @@ fn an_abandoned_nested_request_does_not_withhold_the_next_mutation_field() {
     render(&response.data()),
     r#"{"one":null,"two":{"text":"2"}}"#,
     "upstream's data is {{\"first\":null,\"second\":{{\"outstanding\":7}}}}"
+  );
+}
+
+/// The same release at the in-flight ceiling, with the abandonment channel **never polled**.
+///
+/// The pair to the case above rather than a variation on it, and the difference is the whole
+/// point. That one drains [`poll_abandoned`](smear::proto::Executor::poll_abandoned) and runs at
+/// the default ceiling, so it measures the release rule and says nothing about what an *undrained*
+/// entry costs. This one never touches the channel, and the ceiling is two so that the one entry
+/// it leaves behind is half of it.
+///
+/// # The `None` in the middle is the load-bearing assertion
+///
+/// `two { a: text b: text }` selects two children, and only one of them can be outstanding at a
+/// time here: the abandoned `one.text` is still holding the other slot. That refusal is what
+/// proves the entry was never retired — a run in which it had quietly gone away would offer both
+/// children and look identical in every other respect, including its response.
+///
+/// # And the mutation still finishes
+///
+/// Which is the liveness claim, stated at its edge. `two` is released over the abandoned entry,
+/// both its children are answered one at a time, and the response is delivered while the entry is
+/// still in the table. Ignoring the channel costs *concurrency* — one slot of two, for as long as
+/// the driver ignores it — and not progress; see
+/// [`an_abandonment_can_never_take_the_last_in_flight_slot`] for why that is a bound and not an
+/// artefact of these numbers.
+#[test]
+fn an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation() {
+  let query = "mutation { one { text required } two { a: text b: text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  // Left unanswered for the whole test. It is the entry that never retires.
+  let (path, _text) = offer(&mut executor, &mut space).expect("`one.text`");
+  assert_eq!(path, "one.text");
+  let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
+  assert_eq!(path, "one.required");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "two live requests is the ceiling"
+  );
+
+  // §6.4.4 nulls `one` and moves `one.text` from live to abandoned, which frees no slot.
+  executor.handle_field_error(required, "no");
+
+  let (path, two) = offer(&mut executor, &mut space)
+    .expect("`two` is released over the abandoned entry, exactly as it is when the driver drains");
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+
+  let (path, first) = offer(&mut executor, &mut space).expect("`two.a`");
+  assert_eq!(path, "two.a");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`two.b` is ready and the ceiling refuses it: one live request plus the abandoned `one.text`, \
+     which is still in the in-flight table because nothing has retired it"
+  );
+
+  executor.handle_resolved(&mut space, first, J::Str("2".to_owned()));
+  let (path, second) = offer(&mut executor, &mut space)
+    .expect("`two.b`, now that answering its sibling has freed the one slot the driver has");
+  assert_eq!(path, "two.b");
+  executor.handle_resolved(&mut space, second, J::Str("2".to_owned()));
+
+  let response = executor
+    .poll_response()
+    .expect("the abandoned entry does not withhold the response either");
+  let errors: Vec<(String, String)> = response
+    .errors()
+    .map(|error| (error.path().to_string(), error.to_string()))
+    .collect();
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(errors[0].0, "one.required", "{errors:?}");
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"a":"2","b":"2"}}"#,
+    "the whole mutation ran, with `one.text` outstanding from start to finish"
+  );
+}
+
+/// An abandonment can never take the **last** in-flight slot.
+///
+/// The bound under the case above, and the reason its claim needs no qualifier about how many
+/// requests were abandoned. Everything that abandons runs `propagate` from a field error, and
+/// every field error is raised at a moment when at least one slot is already free:
+/// `handle_resolved` and `handle_field_error` release their own request before they can fail, and
+/// `poll_resolve`'s draft §6.4.1 failure is past the gate that already refused to pop at the
+/// ceiling. A discard can therefore promote only the requests that were live *besides* the one
+/// that caused it, so the count of abandoned entries is bounded by `max_in_flight - 1`.
+///
+/// Driven to that bound rather than argued: a ceiling of three, all three slots outstanding under
+/// `one`, and the third fails — abandoning the other two, which is the most any single discard can
+/// do at this ceiling. The slot the argument promises is the one `two` is then offered in, with
+/// the channel never polled.
+#[test]
+fn an_abandonment_can_never_take_the_last_in_flight_slot() {
+  let query = "mutation { one { a: text b: text required } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(3).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  let (path, _first) = offer(&mut executor, &mut space).expect("`one.a`");
+  assert_eq!(path, "one.a");
+  let (path, _second) = offer(&mut executor, &mut space).expect("`one.b`");
+  assert_eq!(path, "one.b");
+  let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
+  assert_eq!(path, "one.required");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "three live requests is the ceiling"
+  );
+
+  // The failing request is released before it fails, so the discard finds two live siblings and
+  // the slot the third one occupied is already free when it promotes them.
+  executor.handle_field_error(required, "no");
+
+  let (path, two) = offer(&mut executor, &mut space).expect(
+    "two of three slots hold abandoned entries and the third is free, because the request that \
+     caused the discard had already released it",
+  );
+  assert_eq!(path, "two");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "and that free slot is the only one: one live plus two abandoned is the ceiling again"
+  );
+
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (path, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  assert_eq!(path, "two.text");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor
+    .poll_response()
+    .expect("the mutation finished with both abandoned entries still in the table");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"text":"2"}}"#
+  );
+}
+
+/// A ceiling of one abandons nothing at all.
+///
+/// The other end of the same bound, and the case a reader checks first: if abandoned entries are
+/// capped at `max_in_flight - 1`, then at the smallest legal ceiling they are capped at *zero*.
+///
+/// The mechanism is visible here rather than arithmetic. A driver at this ceiling cannot hold a
+/// second request open to be abandoned — the `None` below is the executor refusing to let it — so
+/// by the time anything under `one` can fail, `one`'s other requests have all been answered and
+/// the discard finds nothing outstanding to promote.
+#[test]
+fn a_ceiling_of_one_abandons_nothing() {
+  let query = "mutation { one { text required } two { text } }";
+  assert_valid(MUTATION_SDL, query);
+  let (schema, document) = mutation(query);
+  let limits = Limits {
+    max_in_flight: NonZeroU32::MIN,
+    ..Limits::default()
+  };
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let (path, one) = offer(&mut executor, &mut space).expect("`one`");
+  assert_eq!(path, "one");
+  executor.handle_resolved(&mut space, one, holder("1"));
+
+  let (path, text) = offer(&mut executor, &mut space).expect("`one.text`");
+  assert_eq!(path, "one.text");
+  assert!(
+    offer(&mut executor, &mut space).is_none(),
+    "`one.required` is ready and cannot be outstanding beside `one.text`, which is the whole \
+     reason nothing here can ever be abandoned"
+  );
+
+  executor.handle_resolved(&mut space, text, J::Str("1".to_owned()));
+  let (path, required) = offer(&mut executor, &mut space).expect("`one.required`");
+  assert_eq!(path, "one.required");
+  executor.handle_field_error(required, "no");
+  assert_eq!(
+    executor.poll_abandoned(),
+    None,
+    "the discard walked a subtree whose every request had already been answered"
+  );
+
+  let (path, two) = offer(&mut executor, &mut space).expect("`two`");
+  assert_eq!(path, "two");
+  executor.handle_resolved(&mut space, two, holder("2"));
+  let (path, text) = offer(&mut executor, &mut space).expect("`two.text`");
+  assert_eq!(path, "two.text");
+  executor.handle_resolved(&mut space, text, J::Str("2".to_owned()));
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(response.error_count(), 1);
+  assert_eq!(
+    render(&response.data()),
+    r#"{"one":null,"two":{"text":"2"}}"#
   );
 }
 

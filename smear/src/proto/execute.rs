@@ -16,8 +16,8 @@
 //! underneath it can no longer affect the response, and a driver holding a database round-trip for
 //! one of them should stop. In a single `Step` enum that is one arm among many, easy to leave
 //! unhandled and invisible when it is. As a channel it is a function the driver either calls or
-//! does not, and one that does not call it stalls at the in-flight ceiling — loudly, rather than
-//! silently doing needless work.
+//! does not, and one that does not call it narrows its own in-flight ceiling — visibly, rather
+//! than silently doing needless work.
 //!
 //! # Withholding is the only flow control
 //!
@@ -53,12 +53,19 @@
 //! `mutation { first { outstanding failing } second { outstanding } }` with `first.outstanding`
 //! held unsettled by hand — `second`'s resolver runs before it settles, because `promiseForObject`
 //! is `Promise.all` and a rejected promise chain in JS does not cancel its siblings. Waiting
-//! instead would be stricter than the reference implementation *and* would let a driver that never
-//! polls the abandonment channel stall a mutation permanently rather than softly.
+//! instead would be stricter than the reference implementation *and* would make the next mutation
+//! field reachable through the abandonment channel and nothing else — a wait no other call could
+//! end, at every ceiling and for every driver.
 //!
-//! See [`Executor::release_serial`], and
-//! `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field` for the measurement as a
-//! test.
+//! Not waiting is not free either, and the cost is exactly one thing: an abandoned request holds
+//! its in-flight slot until the driver retires it, so a driver that ignores the channel runs under
+//! a ceiling narrowed by however many it has left there. That ceiling never reaches zero — see
+//! [`Limits::max_in_flight`] for the bound — so the cost is concurrency and not progress.
+//!
+//! See [`Executor::release_serial`], and, for the measurements as tests,
+//! `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field`,
+//! `an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation` and
+//! `an_abandonment_can_never_take_the_last_in_flight_slot`.
 
 use core::{fmt, num::NonZeroU32};
 
@@ -349,9 +356,19 @@ pub struct Limits {
   /// a hundred thousand live handles.
   ///
   /// Requests [`poll_abandoned`](Executor::poll_abandoned) has not yet retired count against it,
-  /// so a driver that ignores that channel stops making progress rather than accumulating work
-  /// nobody wants. That is a stall the driver can always clear — the channel is returning `Some`
-  /// — which is what separates it from a ceiling of zero, and why the ceiling cannot be zero.
+  /// so a driver that ignores that channel narrows its own ceiling rather than accumulating work
+  /// nobody wants. **It cannot close it.** A discard promotes to abandoned only the requests that
+  /// were live *besides* the one that caused it, and that one has always been released by the time
+  /// it can fail — through [`handle_resolved`](Executor::handle_resolved), through
+  /// [`handle_field_error`](Executor::handle_field_error), or, for a draft §6.4.1 argument error,
+  /// through the gate in [`poll_resolve`](Executor::poll_resolve) that had already refused to hand
+  /// it out at the ceiling. So undrained entries are bounded by this value *minus one*, and a slot
+  /// is free again as soon as the live work drains.
+  ///
+  /// The worst an ignored channel can therefore do is take the driver down to one request at a
+  /// time; it never takes it to none, and it can be cleared whenever the driver likes, because the
+  /// channel is returning `Some`. A ceiling of zero would admit nothing at all and no call could
+  /// clear it, which is the difference, and why this one cannot be zero.
   pub max_in_flight: NonZeroU32,
 
   /// How many positions the response tree may hold, counting the root.
@@ -1166,10 +1183,18 @@ where
   /// about it, and cancelling the work is the driver's to do — `proto` performs no I/O and has
   /// nothing to cancel.
   ///
-  /// Nothing waits for these. A mutation's next top-level field is released over an abandoned
-  /// request rather than behind it — `release_serial` records the `graphql-js` measurement that
-  /// settled it — and [`poll_response`](Self::poll_response) will deliver over one. What ignoring
-  /// this channel costs is the in-flight ceiling, not correctness.
+  /// Nothing waits for these, and that is meant literally: no release, no offer and no response is
+  /// conditioned on one being retired or answered. A mutation's next top-level field is released
+  /// over an abandoned request rather than behind it — `release_serial` records the `graphql-js`
+  /// measurement that settled it — and [`poll_response`](Self::poll_response) will deliver over
+  /// one.
+  ///
+  /// What an undrained entry does instead is *occupy*. It holds its in-flight slot, so
+  /// [`poll_resolve`](Self::poll_resolve)'s effective ceiling is
+  /// [`max_in_flight`](Limits::max_in_flight) less however many the driver has left in the table —
+  /// and never less than one of them, for the reason that knob's own documentation gives. So what
+  /// ignoring this channel costs is concurrency, with a floor of one request at a time; it is not
+  /// correctness, and it is not progress.
   ///
   /// Answering a retired request afterwards is harmless: the id is stale and ignored.
   pub fn poll_abandoned(&mut self) -> Option<ReqId> {
@@ -1203,10 +1228,13 @@ where
   ///
   /// Requests [`poll_abandoned`](Executor::poll_abandoned) has not yet retired do **not** withhold
   /// it. Draft §6.4.4 discarded the positions they would have filled, so by construction no answer
-  /// to one can alter a single byte of what is returned here, and withholding on them would turn
-  /// the documented soft stall for a driver that ignores that channel into a deadlock at exactly
-  /// the moment its remaining work is zero. What that costs is a driver holding live-looking
-  /// [`ReqId`]s across a restart, and [`ReqId`]'s epoch is what pays it.
+  /// to one can alter a single byte of what is returned here — and withholding on them would be
+  /// the one wait a driver that ignores that channel could not clear from anywhere else. Every
+  /// other cost of ignoring it is a narrowed [`max_in_flight`](Limits::max_in_flight) that
+  /// answering the live work reopens; this one arrives at exactly the moment there is no live work
+  /// left to answer, so the response would be reachable through that channel and nothing else.
+  /// What the non-withholding costs is a driver holding live-looking [`ReqId`]s across a restart,
+  /// and [`ReqId`]'s epoch is what pays it.
   ///
   /// A mutation's **withheld** top-level fields do withhold it, and they are the one kind of
   /// outstanding work that is in neither the ready chain nor the in-flight table — draft §6.2.2
@@ -2493,8 +2521,27 @@ where
   /// - [`poll_response`](Self::poll_response) already applies the same reasoning — §6.4.4 has
   ///   discarded the positions those requests would have filled, so no answer to one can change a
   ///   byte of the response.
-  /// - It is the only choice that cannot deadlock. Waiting would let a driver that ignores
-  ///   [`poll_abandoned`](Self::poll_abandoned) stall a mutation for ever rather than softly.
+  /// - **It adds no wait that only [`poll_abandoned`](Self::poll_abandoned) can end, and waiting
+  ///   would.** Under a gate on `abandoned` the next top-level field becomes reachable through
+  ///   that one channel and through nothing else — not by answering the outstanding work, and not
+  ///   at a larger ceiling, the gate being on the count and not on the room. Without it there is a
+  ///   cost but no wait: an undrained entry holds an in-flight slot, so the driver's effective
+  ///   ceiling is [`max_in_flight`](Limits::max_in_flight) less the entries it has not retired.
+  ///   That subtraction never reaches zero — a discard can only promote requests that were live
+  ///   *besides* the one that caused it, and that one is always released first — so the ceiling
+  ///   bottoms out at one request at a time and the mutation still runs to a response.
+  ///   `an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation` measures both
+  ///   halves at a ceiling of two, and `an_abandonment_can_never_take_the_last_in_flight_slot`
+  ///   drives the bound to its edge.
+  ///
+  ///   The gate's failure is a wrong answer before it is a wait, which is worth knowing because a
+  ///   gate is not what a reader expects that from. [`poll_response`](Self::poll_response) has no
+  ///   other view of a withheld field than the splice below, so a `release_serial` that declined
+  ///   would let it deliver a response missing every top-level field after the first, with no
+  ///   error to say so. Adding `|| self.abandoned != 0` to the condition below is the whole of
+  ///   that change: it trips the held-object `debug_assert` in `poll_response` and fails the two
+  ///   tests named above, plus
+  ///   `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field`.
   /// - **The reference implementation does not wait, and this was measured rather than inferred
   ///   from `Promise.all`'s documented behaviour.** On
   ///   `mutation { first { outstanding failing } second { outstanding } }` against `graphql-js`
@@ -2634,7 +2681,8 @@ where
         // What the old behaviour cost: `poll_resolve` gates on `live + abandoned`, so a request the
         // driver had already completed went on consuming the in-flight ceiling until the driver
         // polled an abandonment for work that was finished. A driver that never polls that channel
-        // is documented as stalling; it should not stall on requests it has answered.
+        // is documented as running under a narrowed ceiling; it should not pay that for requests it
+        // has answered.
         self.abandoned -= 1;
         self.release_entry(id.index);
         None
