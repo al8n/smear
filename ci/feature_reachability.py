@@ -27,6 +27,19 @@ the exemption table, and no count is written down anywhere: a census whose expec
 literal goes stale the first time a PR merges in between, and this repository has already shipped
 that exact failure.
 
+# Interpreter
+
+Stdlib only, and deliberately runs on Python 3.9 — verified on `/usr/bin/python3` 3.9.6, the macOS
+system interpreter. That is not incidental: this is a gate a person is TOLD to run locally, and a
+local gate that needs an interpreter the machine does not have is a local gate nobody runs.
+
+It used to need 3.11 and did not say so. Two readers reached a sibling gate's constant by
+`importlib`-executing it, and `ci/miri_scope.py` has a top-level `import tomllib` — so this file
+inherited that floor and exited 1 on 3.9 with `No module named 'tomllib'` before reading the tree.
+An import inherits the imported module's dependencies; a read does not. `read_constant` parses the
+assignment with `ast` and evaluates the literal, which is exact and drags in nothing, and the
+fourth check below makes "read, never run" a property of `ci/` rather than a habit.
+
 Run from the repository root:
 
     python3 ci/feature_reachability.py              # exit 1 on an unforwarded member feature
@@ -70,7 +83,7 @@ located is exactly how this gate would become the thing it exists to catch.
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import ast
 import json
 import pathlib
 import re
@@ -217,6 +230,96 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
   return findings
 
 
+# ── the fourth check: no gate executes another gate ─────────────────────────────────────────
+#
+# The defect this exists for was in this file. Two readers reached a sibling gate's constant by
+# `importlib`-executing it, and one of those siblings has a top-level `import tomllib` — so this
+# gate silently required Python >=3.11 while the workflow and the local instructions both said
+# `python3`. On the macOS system interpreter (3.9.6) it exited 1 before reading the tree.
+#
+# It failed CLOSED, which is the one thing that went right: the reader-failure branch reported
+# "coverage is unknown, not empty". But it blamed the SELECTION, so the message sent the reader
+# looking at `MIRI_PACKAGES` for a fault that was in the interpreter.
+#
+# The rule is one line: a gate may READ another gate's source, never RUN it. A read costs nothing
+# but `ast`; an execution inherits every dependency the other file has now or acquires later. This
+# check is what makes that a property of the directory rather than a habit — and it is derived, so
+# a third gate added tomorrow is covered without anyone remembering.
+# The machinery that runs another file, as MODULES IMPORTED and FUNCTIONS CALLED. Matched over the
+# syntax tree and not over the text, which the first revision of this check got wrong: it grepped
+# for these names and found them in its own table, so the gate reported itself. A string literal is
+# not a call, and `ast` knows the difference.
+EXECUTION_IMPORTS = ("importlib", "runpy")
+EXECUTION_CALLS = ("exec", "eval", "exec_module", "spec_from_file_location")
+
+# Stdlib modules that carry an interpreter floor, and the one file allowed to have one.
+#
+# The floor's SCOPE is checked rather than stated. `tomllib` is 3.11+, `ci/miri_scope.py` genuinely
+# needs it to parse `smear/Cargo.toml`, and every other gate here is 3.9-safe — verified by running
+# them on `/usr/bin/python3` 3.9.6, the macOS system interpreter the defect was reported from. The
+# entry is two-sided: a second file importing `tomllib` is a finding, and `miri_scope.py` NOT
+# importing it is a finding too, so the exception cannot go stale after the need disappears.
+FLOOR_BEARING = {"tomllib": ("miri_scope.py", "parses smear/Cargo.toml; stdlib since 3.11")}
+
+
+def check_no_gate_executes_another(verbose: bool = False) -> list[str]:
+  """No `ci/*.py` executes a sibling to reach its contents."""
+  findings: list[str] = []
+  scripts = sorted((REPO_ROOT / "ci").glob("*.py"))
+  if not scripts:
+    return ["no `ci/*.py` was found, so this check walked nothing"]
+  for script in scripts:
+    try:
+      tree = ast.parse(script.read_text(), filename=str(script))
+    except (OSError, SyntaxError) as err:
+      findings.append(f"ci/{script.name} could not be parsed ({err}), so it is unchecked")
+      continue
+    hits: set[str] = set()
+    for node in ast.walk(tree):
+      if isinstance(node, ast.Import):
+        hits |= {a.name.split(".")[0] for a in node.names
+                 if a.name.split(".")[0] in EXECUTION_IMPORTS}
+      elif isinstance(node, ast.ImportFrom) and node.module:
+        root = node.module.split(".")[0]
+        if root in EXECUTION_IMPORTS:
+          hits.add(root)
+      elif isinstance(node, ast.Call):
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else (
+          func.attr if isinstance(func, ast.Attribute) else None
+        )
+        if name in EXECUTION_CALLS:
+          hits.add(f"{name}()")
+    if hits:
+      findings.append(
+        f"`ci/{script.name}` can run another module ({', '.join(sorted(hits))}). A gate may READ a "
+        f"sibling's source — `read_constant` does, with `ast` — but running it inherits that "
+        f"file's imports, which is how this gate acquired an unstated Python >=3.11 floor."
+      )
+    elif verbose:
+      print(f"  ok        ci/{script.name} reads, does not execute")
+
+    imported = set()
+    for node in ast.walk(tree):
+      if isinstance(node, ast.Import):
+        imported |= {a.name.split(".")[0] for a in node.names}
+      elif isinstance(node, ast.ImportFrom) and node.module:
+        imported.add(node.module.split(".")[0])
+    for module, (owner, why) in FLOOR_BEARING.items():
+      if module in imported and script.name != owner:
+        findings.append(
+          f"`ci/{script.name}` imports `{module}`, which carries an interpreter floor. Only "
+          f"`ci/{owner}` is allowed one ({why}); every other gate here is run locally and is "
+          f"verified 3.9-safe."
+        )
+      if module not in imported and script.name == owner:
+        findings.append(
+          f"`ci/{owner}` no longer imports `{module}`, so the recorded floor is stale — either "
+          f"delete the FLOOR_BEARING entry and the guards that cite it, or restore the import."
+        )
+  return findings
+
+
 # ── the third check: every member feature has an enforced equivalence ───────────────────────
 #
 # `smear` re-exports whole member crates, so a feature of `smear` gates what it advertises only
@@ -234,22 +337,51 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
 # The exemption table is READ OUT OF `ci/downstream_pairs.py` rather than restated, so the two
 # gates cannot come to disagree about which pairs owe an equivalence.
 
-def _eq_twin() -> dict[tuple[str, str], str]:
-  """`EQ_TWIN` out of `ci/downstream_pairs.py`, by importing it rather than by restating it."""
-  path = REPO_ROOT / "ci" / "downstream_pairs.py"
-  previous = sys.dont_write_bytecode
-  sys.dont_write_bytecode = True
+def read_constant(path: pathlib.Path, name: str):
+  """One module-level constant out of another gate's source, by READING it rather than running it.
+
+  THE DIFFERENCE IS THE WHOLE POINT, and it cost a review round. These readers used to
+  `importlib`-execute the sibling gate, on the argument that importing beats scraping — which is
+  right about *scraping* and wrong about *executing*: an import inherits the imported module's
+  dependencies, and a read does not. `ci/miri_scope.py` has a top-level `import tomllib`, so
+  importing it put a silent Python >=3.11 floor on this gate. Reproduced on `/usr/bin/python3`
+  3.9.6, the macOS system interpreter: `feature_reachability.py --selftest` exited 1 with
+  `No module named 'tomllib'` before it read a line of the tree.
+
+  This is not the scraping the earlier repair rejected. `ast.literal_eval` over the assignment node
+  is exact — it accepts the value the interpreter would build and rejects anything that is not a
+  literal — so there is still one source of truth and still no second copy to drift. What it drops
+  is the execution, and with it every dependency the other file happens to have.
+
+  `ast` has been in the standard library since Python 2.6.
+  """
   try:
-    spec = importlib.util.spec_from_file_location("_downstream_pairs_for_reachability", path)
-    if spec is None or spec.loader is None:
-      raise RuntimeError(f"{path} could not be loaded as a module")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-  finally:
-    sys.dont_write_bytecode = previous
-  table = getattr(module, "EQ_TWIN", None)
-  if table is None:
-    raise RuntimeError(f"{path} declares no EQ_TWIN")
+    tree = ast.parse(path.read_text(), filename=str(path))
+  except OSError as err:
+    raise RuntimeError(f"{path} is unreadable ({err})") from err
+  except SyntaxError as err:
+    raise RuntimeError(f"{path} does not parse ({err})") from err
+  for node in tree.body:
+    targets = node.targets if isinstance(node, ast.Assign) else (
+      [node.target] if isinstance(node, ast.AnnAssign) and node.value is not None else []
+    )
+    for target in targets:
+      if isinstance(target, ast.Name) and target.id == name:
+        try:
+          return ast.literal_eval(node.value)
+        except ValueError as err:
+          raise RuntimeError(
+            f"{path}'s `{name}` is not a literal this reader can evaluate ({err}). It must stay a "
+            f"plain literal: reading it is what keeps this gate free of that file's dependencies."
+          ) from err
+  raise RuntimeError(f"{path} declares no module-level `{name}`")
+
+
+def _eq_twin() -> dict[tuple[str, str], str]:
+  """`EQ_TWIN` out of `ci/downstream_pairs.py`."""
+  table = read_constant(REPO_ROOT / "ci" / "downstream_pairs.py", "EQ_TWIN")
+  if not isinstance(table, dict):
+    raise RuntimeError("EQ_TWIN is not a dict")
   return table
 
 
@@ -352,28 +484,20 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # silently finds an empty table would report every member as missing — or, worse, report nothing
 # missing from a set it never read.
 def _read_miri_packages() -> set[str]:
-  """`MIRI_PACKAGES` out of `ci/miri_scope.py`, by importing it rather than by scraping."""
-  path = REPO_ROOT / "ci" / "miri_scope.py"
-  # Importing a file writes a `ci/__pycache__/` beside it, which nothing in this repository
-  # ignores; running that same file as a script does not. Suppressed rather than gitignored, so a
-  # gate leaves no trace in the tree it is reading.
-  previous = sys.dont_write_bytecode
-  sys.dont_write_bytecode = True
-  try:
-    spec = importlib.util.spec_from_file_location("_miri_scope_for_reachability", path)
-    return _load_miri_packages(spec, path)
-  finally:
-    sys.dont_write_bytecode = previous
+  """`MIRI_PACKAGES` out of `ci/miri_scope.py`.
 
+  Read and not imported, and not relocated either. Moving the constant into a shared
+  dependency-light module was the other option; it would separate the tuple from the twenty lines
+  above it that argue why that package list is what it is and what adding to it costs, and that
+  argument is the thing which stops the list being edited carelessly. A read keeps the constant
+  where its reasoning is, and `ci/miri_scope.py` keeps its `tomllib` — which it genuinely needs.
 
-def _load_miri_packages(spec, path: pathlib.Path) -> set[str]:
-  if spec is None or spec.loader is None:
-    raise RuntimeError(f"{path} could not be loaded as a module")
-  module = importlib.util.module_from_spec(spec)
-  spec.loader.exec_module(module)
-  packages = getattr(module, "MIRI_PACKAGES", None)
+  Reading also leaves no `ci/__pycache__/` behind, which importing did and which nothing in this
+  repository ignores.
+  """
+  packages = read_constant(REPO_ROOT / "ci" / "miri_scope.py", "MIRI_PACKAGES")
   if not packages:
-    raise RuntimeError(f"{path} declares no non-empty MIRI_PACKAGES")
+    raise RuntimeError("ci/miri_scope.py declares no non-empty MIRI_PACKAGES")
   return set(packages)
 
 
@@ -592,6 +716,17 @@ def main() -> int:
   if args.verbose:
     for key in SELECTIONS:
       print(f"  ok        {READERS[key][0]}")
+  execution_findings = check_no_gate_executes_another(args.verbose)
+  if execution_findings:
+    print("::error::feature_reachability: a gate executes another gate")
+    for f in execution_findings:
+      print(f"  - {f}")
+    print(
+      "  Read the constant instead — `read_constant` parses it with `ast` and evaluates the "
+      "literal, which is exact and drags in nothing."
+    )
+    return 1
+
   equivalence_findings = check_equivalence(meta, tables)
   if equivalence_findings:
     print("::error::feature_reachability: a member feature has no enforced equivalence")

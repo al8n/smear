@@ -15,6 +15,15 @@ TARGET=$1
 # it is the exact shape of #73. Sub-second, and it reads the real `smear/tests/` partition and
 # the real `smear/Cargo.toml` feature table, so it also fails if that tree stops having both
 # excluded and compiled targets to distinguish, or if `rowan` starts resolving on from defaults.
+# PYTHON >= 3.11, checked here rather than discovered as a traceback twenty minutes in.
+# `ci/miri_scope.py` parses `smear/Cargo.toml` with `tomllib`, which entered the standard library
+# in 3.11; on macOS `/usr/bin/python3` is 3.9 and would fail on the import alone. The other Python
+# gates in `ci/` are deliberately 3.9-safe — this is the only floor in the directory.
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+  echo "FAIL: ci/miri_scope.py needs Python >= 3.11 (tomllib); \`python3\` here is $(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')" >&2
+  exit 1
+fi
+
 python3 ci/miri_scope.py --selftest
 
 rustup toolchain install nightly --component miri

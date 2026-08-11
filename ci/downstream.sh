@@ -51,6 +51,9 @@ if [ ! -f "$MANIFEST" ]; then
   echo "FAIL: no consumer fixture at $MANIFEST" >&2
   exit 1
 fi
+# Any `python3` will do, and that is checked rather than hoped: `ci/downstream_pairs.py` is stdlib
+# only and 3.9-safe, verified on `/usr/bin/python3` 3.9.6. The one gate in `ci/` with an interpreter
+# floor is `miri_scope.py`, which needs 3.11 for `tomllib` and says so itself.
 if ! command -v python3 >/dev/null 2>&1; then
   echo "FAIL: python3 is required to read cargo's JSON." >&2
   exit 1

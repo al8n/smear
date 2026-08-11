@@ -51,6 +51,12 @@ metadata` does not carry it. What is derived is its COMPLETENESS in the directio
 C1 requires a `uses-` feature in the fixture for every probe, and C2 requires an EQ leg for every
 (member, feature) pair cargo reports. A probe naming a pair that no longer exists is C4.
 
+# Interpreter
+
+Stdlib only, and 3.9-safe — verified on `/usr/bin/python3` 3.9.6. `ci/feature_reachability.py`
+checks that: it fails if any gate here imports a floor-bearing stdlib module, `ci/miri_scope.py`
+and its `tomllib` being the single recorded exception.
+
 Usage:
   ci/downstream_pairs.py plan <workspace-manifest> <fixture-manifest>   certify, print the legs
   ci/downstream_pairs.py judge <kind> <label> <cargo-json>              judge one failed leg

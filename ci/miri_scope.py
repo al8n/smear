@@ -65,7 +65,34 @@ import re
 import shutil
 import sys
 import tempfile
-import tomllib
+
+# ── THIS SCRIPT NEEDS PYTHON >= 3.11, AND SAYS SO RATHER THAN TRACEBACKING ──────────────────
+#
+# `tomllib` entered the standard library in 3.11. This script parses `smear/Cargo.toml` to resolve
+# which features a Miri cell compiles with, and a hand-rolled TOML reader is exactly the shape this
+# repository has already been burned by — a checker written against one exemplar that was wrong on
+# five of six valid forms. So the floor is real and stays.
+#
+# What was NOT acceptable was the floor being silent. `ci/feature_reachability.py` used to reach
+# this file's `MIRI_PACKAGES` by importing it, which inherited this line: on the macOS system
+# interpreter (`/usr/bin/python3`, 3.9.6) that gate exited 1 with `No module named 'tomllib'`
+# before reading anything, while the workflow and its own usage line both said `python3`. That
+# reader now parses the constant instead of executing this module, and this guard makes the
+# remaining floor a sentence instead of a traceback.
+#
+# `ci/miri_sb.sh` and `ci/miri_tb.sh` — the only callers — check the same floor before they spend
+# minutes on a Miri run. The other Python gates (`feature_reachability.py`, `downstream_pairs.py`)
+# are deliberately stdlib-3.9-safe and are verified on 3.9.6, because they are the ones a person is
+# told to run locally.
+try:
+  import tomllib
+except ModuleNotFoundError as err:  # pragma: no cover - depends on the interpreter, not the tree
+  raise SystemExit(
+    f"::error::miri_scope needs Python >= 3.11 for `tomllib` and this is "
+    f"{sys.version_info.major}.{sys.version_info.minor} ({err}). It parses `smear/Cargo.toml` to "
+    f"resolve a Miri cell's feature set; a hand-rolled TOML reader is not an acceptable "
+    f"substitute. On macOS, `/usr/bin/python3` is 3.9 — use a newer one."
+  ) from err
 
 # `.github/workflows/miri.yml` sets `CARGO_TERM_COLOR: always`, so cargo emits SGR escapes even
 # though nothing here is a tty: `\x1b[1m\x1b[32m     Running\x1b[0m tests/oracle.rs (...)`. Every

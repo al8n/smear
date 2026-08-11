@@ -49,6 +49,13 @@ name: Miri
 #   * "not a coverage change" — that was the split. #77 IS a coverage change, deliberately and
 #     in one direction: the scripts now name their packages (`-p smear -p smear-lexer` since the
 #     crate split), which drops the lossless CST tower.
+#
+# PYTHON >= 3.11 IS A REQUIREMENT OF THIS WORKFLOW, stated because an unstated interpreter floor is
+# an unstated environment dependency. `ci/miri_scope.py` parses `smear/Cargo.toml` with `tomllib`,
+# stdlib since 3.11. GitHub's `ubuntu-latest` and `macos-latest` images both ship newer, so no
+# setup step is needed — but a local run on macOS's `/usr/bin/python3` (3.9) fails, and
+# `ci/miri_sb.sh` and `ci/miri_tb.sh` now say so before starting rather than tracebacking. Every
+# other Python gate in `ci/` is 3.9-safe and verified on 3.9.6.
 #     See "WHAT THIS MATRIX DOES NOT COVER" below; it is not optional and it is not a saving.
 
 # ── WHY ONE TARGET PICKS A macOS HOST AND THE OTHER THREE DO NOT ────────────────────────────
