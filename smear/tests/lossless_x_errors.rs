@@ -12,7 +12,7 @@
 //!
 //! The `unclosed` list is a **macro argument**, so each dialect states its own pairs. GraphQLx
 //! states a fourth — `<>` — because its lexer depth-counts `<` and `>` alongside the other three
-//! (`smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`). That fourth entry is the single line in
+//! (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`). That fourth entry is the single line in
 //! this task that a reviewer cannot check by symmetry with GraphQL, and it is the line that
 //! decides whether an unterminated generic list reports `Unclosed::Angle` or the catch-all's
 //! `Other("unclosed delimiter")`.

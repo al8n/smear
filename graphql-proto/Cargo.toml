@@ -1,0 +1,49 @@
+[package]
+name = "graphql-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "The GraphQL protocol machine, Sans-I/O: draft §6 execution as a state machine that owns no I/O, no clock and no randomness source."
+keywords = ["graphql", "sans-io", "execution", "no-std"]
+categories = ["network-programming", "web-programming", "no-std"]
+readme = "README.md"
+
+# NOT "the execution engine", and the name is the design's. It is the GraphQL protocol machine for
+# both roles, in the sense viewstamp's README states for this family: a single Sans-I/O "super
+# state machine" modelled on `quinn-proto` — events in through `handle_*`, actions out through
+# `poll_*`. Today it holds the server's draft §6 executor; the request and subscription lifecycles,
+# id multiplexing and the entire client half are new code that arrives after the split, not with
+# it.
+#
+# `smear-schema` is taken with DEFAULT FEATURES OFF, which is the whole reason that crate has a
+# `build` feature instead of a sibling crate: a machine that READS a schema at execution time does
+# not get the parser underneath it through that edge. The parser is here anyway, directly, because
+# `Executor::new` takes an `&ExecutableDocument<S>` — that is not new and it is not the schema
+# edge's doing.
+
+[features]
+default = ["std"]
+
+std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
+
+[dependencies]
+tokora.workspace = true
+
+smear-parser = { workspace = true, features = ["graphql"] }
+smear-schema = { workspace = true }
+
+[dev-dependencies]
+# The unit tests build a `Schema` from SDL, which is `smear-schema/build`. A dev-dependency rather
+# than a feature: it must not reach a consumer's graph, and cargo unifies it only into targets that
+# need dev-dependencies, so `cargo tree -p graphql-proto` is unaffected.
+smear-schema = { workspace = true, features = ["build"] }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
