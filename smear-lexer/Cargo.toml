@@ -28,7 +28,14 @@ readme = "README.md"
 # `default-features = false`, so this list governs a DIRECT dependent and nothing else.
 default = ["std", "graphql", "graphqlx", "smallvec"]
 
-std = ["tokora/std", "thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
+std = [
+  "tokora/std",
+  "memspan/std",
+  "thiserror/default",
+  "bytes?/default",
+  "bstr?/default",
+  "hipstr?/default",
+]
 
 # The two dialects. Each is a module only in a build that enables it, which is why every doc link
 # to one is `#[cfg_attr]`-gated: ungated they are `unresolved link` errors under
@@ -51,7 +58,10 @@ paste = "1"
 thiserror.workspace = true
 tokora.workspace = true
 
-memspan = { version = "0.1", default-features = false, features = ["std"] }
+# `std` is carried by this crate's own `std` feature, not enabled here. Pinning it on the dependency
+# line put `memspan/std` in the graph of a `--no-default-features` build, so the member advertised
+# `#![no_std]` while its dependency was always compiled against std.
+memspan = { version = "0.1", default-features = false }
 
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
