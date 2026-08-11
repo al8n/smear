@@ -6,53 +6,56 @@
 //!
 //! # What is here
 //!
-//! - [`schema`](crate::validator::schema) — the built-once
-//!   [`Schema`](crate::validator::schema::Schema) every rule reads, and the draft §3 "Type
+//! - [`schema`] — the built-once
+//!   [`Schema`] every rule reads, and the draft §3 "Type
 //!   Validation" pass that runs while building it. A server rejects a malformed SDL exactly once,
 //!   at startup, and never rediscovers it per request.
 #![cfg_attr(
   feature = "introspection",
-  doc = "- [`schema::introspection`](crate::validator::schema::introspection) — the second \
+  doc = "- [`schema::introspection`] — the second \
          construction door, building that same schema out of a server's draft §4 introspection \
          response. It renders the response as SDL and hands it to the same builder, so draft §3 \
          runs there too and the two doors cannot drift apart."
 )]
-//! - [`validate_executable`](crate::validator::validate_executable) — the draft §5 rules over a
+//! - [`validate_executable`] — the draft §5 rules over a
 //!   parsed executable document, reported into the caller's
-//!   [`Sink`](crate::validator::Sink) and worked out in the caller's
-//!   [`Scratch`](crate::validator::Scratch).
+//!   [`Sink`] and worked out in the caller's
+//!   [`Scratch`].
 #![cfg_attr(
   feature = "rowan",
-  doc = "- [`validate_executable_lossless`](crate::validator::validate_executable_lossless) — the \
+  doc = "- [`validate_executable_lossless`] — the \
          same rules over a lossless rowan CST, by projecting it to that same AST rather than by \
          being a second validator. The IDE door: it recovers per definition, so a document \
          somebody is still typing is validated as far as it is well-formed, and the \
-         [`Recovery`](crate::validator::Recovery) it returns says how far that was.\n\
-         - [`validate_schema_lossless`](crate::validator::validate_schema_lossless) — the same \
+         [`Recovery`] it returns says how far that was.\n\
+         - [`validate_schema_lossless`] — the same \
          again for SDL, and the reason an editor validating a schema through the CST gets the \
          draft §3 refusals rather than nothing. It projects and calls \
-         [`Schema::build`](crate::validator::Schema::build), so §3 has one implementation reached \
+         [`Schema::build`], so §3 has one implementation reached \
          three ways, and it recovers and reports a \
-         [`Recovery`](crate::validator::Recovery) for the same reason its executable twin does."
+         [`Recovery`] for the same reason its executable twin does."
 )]
 //!
-//! Every link in this module's docs is crate-absolute on purpose. `pub mod validator;` in
-//! `lib.rs` carries an outer doc comment as well, and rustdoc resolves the merged fragments in
-//! the **parent** module's scope — so a `schema`-relative link here reports "no item named
-//! `schema` in module `smear`" under `RUSTDOCFLAGS="-D warnings"`.
+//! The links here are bare, and they were crate-absolute until the split. While this was
+//! `smear::validator`, a module whose declaration carried an outer doc comment, they had to be:
+//! rustdoc resolves the MERGED fragments of a module's documentation in the parent's scope, so a
+//! `schema`-relative link reported "no item named `schema` in module `smear`" under
+//! `RUSTDOCFLAGS="-D warnings"`. A crate root has no parent to be merged into, and the absolute
+//! spelling then became a *redundant explicit link target*, which the same flag denies just as
+//! firmly. `graphql-proto`'s header records the identical reversal.
 //!
 //! # Validating a request
 //!
 //! ```
-//! use smear::{
-//!   lexer::tokora::{Parse as _, Parser},
-//!   parser::graphql::{
+//! use smear_compiler::{Budget, First, Rule, Schema, Scratch, validate_executable};
+//! use smear_parser::{
+//!   graphql::{
 //!     GraphQL,
 //!     ast::{ExecutableDocument, TypeSystemDocument},
 //!     error::GraphqlErrors,
 //!     syntactic::{GraphqlLexer, executable_document, type_system_document},
 //!   },
-//!   validator::{Budget, First, Rule, Schema, Scratch, validate_executable},
+//!   lexer::tokora::{Parse as _, Parser},
 //! };
 //!
 //! let schema = Schema::build(
@@ -88,18 +91,18 @@
 //!
 //! - **The schema** is built once and read as `&Schema` by an unbounded number of concurrent
 //!   validations.
-//! - **The report** is one seam: [`Sink::diagnostic`](crate::validator::Sink::diagnostic) takes a
-//!   value and returns whether to keep going. [`First`](crate::validator::First),
-//!   [`Collect`](crate::validator::Collect), [`Count`](crate::validator::Count) and
-//!   [`Ignore`](crate::validator::Ignore) mirror `tokora`'s emitter-bundle semantics.
-//! - **The working set** is the caller's [`Scratch`](crate::validator::Scratch), reused across
-//!   requests, and what may be *done* is the caller's [`Budget`](crate::validator::Budget). The
+//! - **The report** is one seam: [`Sink::diagnostic`] takes a
+//!   value and returns whether to keep going. [`First`],
+//!   [`Collect`], [`Count`] and
+//!   [`Ignore`] mirror `tokora`'s emitter-bundle semantics.
+//! - **The working set** is the caller's [`Scratch`], reused across
+//!   requests, and what may be *done* is the caller's [`Budget`]. The
 //!   steady state allocates nothing at all, which `tests/validator_allocation.rs` measures with a
 //!   counting allocator rather than asserting.
 //!
 //! # The shape, and why
 //!
-//! Three properties of [`Schema`](crate::validator::schema::Schema) decide everything
+//! Three properties of [`Schema`] decide everything
 //! downstream:
 //!
 //! - **It is not generic over the document's source type.** The builder consumes a
@@ -117,12 +120,23 @@
 //!   `u32` mask, and an interface's implementors are a bitset — so draft 5.5.2.3, all four of its
 //!   subsections, is one word-`AND`.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![deny(missing_docs)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
+
+#[cfg(feature = "std")]
+extern crate std;
+
 /// The built-once schema, and the draft §3 "Type Validation" pass that runs while building it.
 ///
 /// The layer is the `smear-schema` crate; this is the name it has always had inside `smear` and
 /// the path every consumer already writes. Its `build` feature — which is what carries
-/// [`Schema::build`](crate::validator::schema::Schema::build) — is turned on by this crate's
-/// `validator` feature, so a `smear` that has a validator has a builder.
+/// [`Schema::build`](smear_schema::Schema::build) — is a hard dependency of this crate rather
+/// than a feature of it: a validator with no builder could not produce the `Schema` its rules
+/// read.
 #[doc(inline)]
 pub use smear_schema as schema;
 

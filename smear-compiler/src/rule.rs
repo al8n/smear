@@ -9,7 +9,7 @@
 //! a subset — a linter checking only the fragment rules, say — hands one to
 //! [`validate_executable_with`](super::validate_executable_with).
 
-use crate::diagnostic::{Code, Severity};
+use smear_schema::diagnostic::{Code, Severity};
 
 /// One draft §5 validation rule.
 ///

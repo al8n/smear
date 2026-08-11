@@ -51,7 +51,7 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec"]
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "graphql-proto?/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
+std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-compiler?/std", "graphql-proto?/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -85,7 +85,7 @@ parser = ["dep:smear-parser"]
 # It adds NO dependency. The schema representation is `core` + `alloc` and nothing else, which the
 # `smear-noatomic` workspace member holds to by compiling those very files for
 # `thumbv6m-none-eabi` with an empty `[dependencies]` table.
-validator = ["parser", "graphql", "smear-schema/build"]
+validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build"]
 
 # Draft §6 execution (`smear::proto`): the Sans-I/O query executor.
 #
@@ -115,7 +115,7 @@ proto = ["validator", "dep:graphql-proto"]
 # `std` is not decoration. `serde_json`'s `alloc`-only mode exists, but the door parses a
 # `&str` from a network response and reports through `std::error::Error`, and the whole point of
 # the no-atomic tier is the *representation*, which this feature does not touch.
-introspection = ["validator", "std", "smear-schema/introspection", "dep:serde", "dep:serde_json"]
+introspection = ["validator", "std", "smear-compiler/introspection", "smear-schema/introspection"]
 
 # The five source backings. Each forwards to `smear-lexer`, which is where the `Source`
 # implementations live; the `dep:` half survives only for the three this package's own test
@@ -143,7 +143,7 @@ smol-bytes = ["smear-lexer/smol-bytes", "smear-parser?/smol-bytes", "tokora/smol
 #
 # This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
-rowan = ["dep:rowan", "smear-parser/rowan", "tokora/rowan", "std", "parser"]
+rowan = ["smear-parser/rowan", "smear-compiler?/rowan", "tokora/rowan", "std", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting
@@ -173,9 +173,15 @@ lossless-coverage = ["rowan", "smear-parser/lossless-coverage"]
 # `required-features` entry; see that block for why.
 test-support = ["smear-parser?/test-support"]
 
+# ── AN UMBRELLA'S DEPENDENCY TABLE ──────────────────────────────────────────────────────────
+#
+# `smear/src` is one file now — `lib.rs`, and nothing in it but re-exports — so nothing here is for
+# this package's own code. `tokora` stays because `__private` re-exports it and because the dev
+# targets name it; the three source backings stay because `tests/` constructs a source of each
+# type. `derive_more`, `paste`, `rowan`, `serde` and `serde_json` left with the modules that used
+# them: the first two are `smear-parser`'s and `smear-lexer`'s, `rowan` is `smear-parser`'s and is
+# separately a dev-dependency here, and the serde pair is `smear-schema`'s `introspection`.
 [dependencies]
-derive_more.workspace = true
-paste = "1"
 tokora.workspace = true
 
 # The lexer, unconditional and with no feature of its own to gate it: it is the base of the stack
@@ -202,20 +208,16 @@ smear-schema.workspace = true
 # requests unify the way cargo unifies any two.
 graphql-proto = { workspace = true, optional = true }
 
+# Draft §5 validation, behind `validator`. It takes `smear-schema` WITH `build`, which is the whole
+# difference between it and the protocol machine above: this crate produces a `Schema`, that one
+# reads one.
+smear-compiler = { workspace = true, optional = true }
+
 # `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
 # package's own `tests/` name those types directly to build a source of each backing.
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
-rowan = { version = "0.17", optional = true }
-
-# The `introspection` feature's two, and the only two dependencies in this manifest that are not
-# either a source backing or part of the parser tower. `derive` because the draft §4 shape is a
-# dozen plain records and hand-written visitors would be a dozen ways to get "missing field"
-# wrong; `default-features = false` plus `std` on both because that is what the feature declares
-# and an implicit default is how a no_std claim rots.
-serde = { version = "1", default-features = false, features = ["std", "derive"], optional = true }
-serde_json = { version = "1", default-features = false, features = ["std"], optional = true }
 
 # ── THE BENCHMARK HARNESS, AND WHAT IT COSTS THE INNER LOOP ─────────────────────────────────
 #

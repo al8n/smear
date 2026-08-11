@@ -80,15 +80,15 @@
 //! document is what this door exists to replace. So it reports, the [`Recovery`] rides along in
 //! both arms, and `tests/validator_lossless_schema.rs` pins both artifacts.
 //!
-//! [`project_executable_document`]: crate::parser::graphql::lossless::project_executable_document
-//! [`project_executable_document_recovered`]: crate::parser::graphql::lossless::project_executable_document_recovered
+//! [`project_executable_document`]: smear_parser::graphql::lossless::project_executable_document
+//! [`project_executable_document_recovered`]: smear_parser::graphql::lossless::project_executable_document_recovered
 //! [`Schema::build`]: super::Schema::build
 
-use crate::parser::graphql::lossless::{
+use smear_parser::graphql::lossless::{
   Parse, project_executable_document_recovered, project_type_system_document_recovered,
 };
 
-pub use crate::parser::lossless::project::Recovery;
+pub use smear_parser::lossless::project::Recovery;
 
 use super::{
   Budget, Invalid, RuleSet, Schema, SchemaErrors, Scratch, Sink, validate_executable_with,
@@ -145,7 +145,7 @@ impl core::error::Error for LosslessInvalid {}
 /// Validates a lossless executable parse against a schema, checking every draft §5 rule.
 ///
 /// [`validate_executable`](super::validate_executable)'s twin for the CST. `parse` is what
-/// [`parse_executable_document`](crate::parser::graphql::lossless::parse_executable_document)
+/// [`parse_executable_document`](smear_parser::graphql::lossless::parse_executable_document)
 /// returned and `source` is the text it was parsed from — the pair is **verified, not trusted**,
 /// so a mismatched one is refused by the projection rather than validated against unrelated
 /// bytes. `scratch`, `budget` and `sink` are the syntactic door's, unchanged and reusable across
@@ -189,17 +189,17 @@ impl core::error::Error for LosslessInvalid {}
 /// # Example
 ///
 /// ```
-/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
-/// use smear::{
-///   lexer::tokora::{Parse as _, Parser},
-///   parser::graphql::{
+/// # #[cfg(feature = "rowan")] {
+/// use smear_compiler::{Budget, First, Rule, Schema, Scratch, validate_executable_lossless};
+/// use smear_parser::{
+///   graphql::{
 ///     GraphQL,
 ///     ast::TypeSystemDocument,
 ///     error::GraphqlErrors,
 ///     lossless::parse_executable_document,
 ///     syntactic::{GraphqlLexer, type_system_document},
 ///   },
-///   validator::{Budget, First, Rule, Schema, Scratch, validate_executable_lossless},
+///   lexer::tokora::{Parse as _, Parser},
 /// };
 ///
 /// let schema = Schema::build(
@@ -340,7 +340,7 @@ impl core::error::Error for LosslessSchemaErrors {}
 ///
 /// [`validate_executable_lossless`]'s twin one section of the specification over, and
 /// [`Schema::build`](super::Schema::build)'s twin for the CST. `parse` is what
-/// [`parse_type_system_document`](crate::parser::graphql::lossless::parse_type_system_document)
+/// [`parse_type_system_document`](smear_parser::graphql::lossless::parse_type_system_document)
 /// returned and `source` is the text it was parsed from — the pair is **verified, not trusted**,
 /// so a mismatched one is refused by the projection rather than built against unrelated bytes.
 ///
@@ -383,18 +383,16 @@ impl core::error::Error for LosslessSchemaErrors {}
 ///
 /// [`SchemaBuilder`](super::SchemaBuilder) is still the door for a schema that spans more than one
 /// file, and it is reachable from here:
-/// [`project_type_system_document_recovered`](crate::parser::graphql::lossless::project_type_system_document_recovered)
+/// [`project_type_system_document_recovered`](smear_parser::graphql::lossless::project_type_system_document_recovered)
 /// is public and answers the `(document, recovery)` pair this function feeds the one-document
 /// case with.
 ///
 /// # Example
 ///
 /// ```
-/// # #[cfg(all(feature = "validator", feature = "rowan"))] {
-/// use smear::{
-///   parser::graphql::lossless::parse_type_system_document,
-///   validator::{SchemaErrorKind, validate_schema_lossless},
-/// };
+/// # #[cfg(feature = "rowan")] {
+/// use smear_compiler::{SchemaErrorKind, validate_schema_lossless};
+/// use smear_parser::graphql::lossless::parse_type_system_document;
 ///
 /// // An SDL an editor is in the middle of: the interface is finished and wrong, the field after
 /// // it has no type yet. The finished half is still checked.

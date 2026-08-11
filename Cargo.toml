@@ -6,6 +6,7 @@ members = [
   "smear-lexer",
   "smear-noatomic",
   "smear-parser",
+  "smear-compiler",
   "smear-schema",
   "smear-smoke",
 ]
@@ -92,6 +93,7 @@ graphql-proto = { path = "graphql-proto", version = "0.0.0", default-features = 
 smear = { path = "smear", version = "0.0.0", default-features = false }
 smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
 smear-parser = { path = "smear-parser", version = "0.0.0", default-features = false }
+smear-compiler = { path = "smear-compiler", version = "0.0.0", default-features = false }
 smear-schema = { path = "smear-schema", version = "0.0.0", default-features = false }
 
 [workspace.lints.rust]

@@ -17,7 +17,7 @@
 
 use tokora::{SimpleSpan, span::AsSpan};
 
-use crate::parser::graphql::ast::{
+use smear_parser::graphql::ast::{
   Argument, BooleanValue, ConstArgument, ConstDirective, ConstInputValue, ConstObjectField,
   Directive, EnumValue, ExecutableDefinition, ExecutableDocument, FloatValue, FragmentDefinition,
   InputValue, IntValue, Name, ObjectField, OperationDefinition, Selection, SelectionSet,
@@ -447,7 +447,7 @@ where
 
 /// Returns a field's response name — the alias when it has one, otherwise the field name.
 #[inline]
-pub(crate) fn response_name<S>(field: &crate::parser::graphql::ast::Field<S>) -> &Name<S> {
+pub(crate) fn response_name<S>(field: &smear_parser::graphql::ast::Field<S>) -> &Name<S> {
   match field.alias() {
     Some(alias) => alias.name(),
     None => field.name(),

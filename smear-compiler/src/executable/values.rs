@@ -9,13 +9,13 @@ use core::ops::ControlFlow;
 
 use tokora::{SimpleSpan, span::AsSpan};
 
-use crate::parser::graphql::ast::VariableValue;
+use smear_parser::graphql::ast::VariableValue;
 
 use super::{
   Diagnostic, Rule, TypeId, Validator,
   nodes::{ArgumentLike, DirectiveLike, ObjectFieldLike, ValueLike, name_bytes},
 };
-use crate::validator::{
+use crate::{
   diagnostic::Context,
   schema::{DirectiveLocation, PackedType, Range32, Sym, TypeKind},
   scratch::{NONE, ValueFrame, ValueLevel, set_bit},
@@ -839,7 +839,7 @@ fn is_finite(spelling: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
   use super::{are_types_compatible, fits_i32, is_finite};
-  use crate::validator::schema::{PackedType, Sym, TypeId};
+  use smear_schema::{PackedType, Sym, TypeId};
 
   fn named(id: u32) -> PackedType {
     PackedType::named(Sym::new(id), TypeId::new(id))

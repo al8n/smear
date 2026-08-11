@@ -13,7 +13,7 @@ use core::ops::ControlFlow;
 
 use tokora::span::AsSpan;
 
-use crate::parser::graphql::ast::{
+use smear_parser::graphql::ast::{
   ExecutableDocument, Field, FragmentSpread, InlineFragment, Selection, SelectionSet,
 };
 
@@ -21,7 +21,7 @@ use super::{
   Rule, TypeId, Validator,
   nodes::{child_selection_set, fragment, name_bytes, root_selection_set},
 };
-use crate::validator::{
+use crate::{
   diagnostic::Context,
   schema::{DirectiveLocation, Schema},
   scratch::{Frame, NONE, get_bit, set_bit},
@@ -262,7 +262,7 @@ where
   /// Draft 5.5.2.3, all four subsections, as one bitset intersection.
   fn check_spread_possible(
     &mut self,
-    name: &crate::parser::graphql::ast::Name<S>,
+    name: &smear_parser::graphql::ast::Name<S>,
     target: TypeId,
     frame: Frame,
   ) -> ControlFlow<()> {
@@ -284,7 +284,7 @@ where
   /// because two operations reached it.
   pub(super) fn composite_of(
     &self,
-    condition: &crate::parser::graphql::ast::Name<S>,
+    condition: &smear_parser::graphql::ast::Name<S>,
   ) -> Option<TypeId> {
     let id = self.type_of(condition)?;
     self.schema.type_def(id).kind().is_composite().then_some(id)

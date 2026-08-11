@@ -489,7 +489,7 @@ pub(crate) fn hash_u32(state: u64, value: u32) -> u64 {
 /// allocate nothing.
 ///
 /// ```
-/// # use smear::validator::Scratch;
+/// # use smear_compiler::Scratch;
 /// let mut scratch = Scratch::new();
 /// // … validate_executable(&schema, &document, &mut scratch, &budget, &mut sink) …
 /// scratch.reset(); // clears, keeps capacity

@@ -6,7 +6,7 @@
 //! *pair* of selections that a response name collects, at every level of the response shape, after
 //! fragments have been expanded — and the expansion of a nested, reused fragment graph is where
 //! both graphql-js and apollo-compiler have had denial-of-service incidents. So it gets a working
-//! set, a memo, and a [`Budget`](crate::validator::Budget), from the first line rather than after
+//! set, a memo, and a [`Budget`](crate::Budget), from the first line rather than after
 //! the first incident.
 //!
 //! # The algorithm
@@ -31,7 +31,7 @@
 //!
 //! One pass over the document builds a table of every selection set, every field occurrence, and
 //! every spread, all reduced to integers — response names and field names interned into the
-//! caller's [`Scratch`](crate::validator::Scratch), return types already resolved to
+//! caller's [`Scratch`](crate::Scratch), return types already resolved to
 //! the schema's own packed form. After that the engine sorts, groups and compares `u32`s, and goes back to the
 //! syntax tree only to compare argument literals and to quote a name in a diagnostic.
 //!
@@ -56,7 +56,7 @@
 
 use core::ops::ControlFlow;
 
-use crate::parser::graphql::ast::{Argument, Field, InputValue, Selection, SelectionSet};
+use smear_parser::graphql::ast::{Argument, Field, InputValue, Selection, SelectionSet};
 
 use super::{
   Diagnostic, Rule, Validator,
@@ -64,7 +64,7 @@ use super::{
     ValueLike, child_selection_set, fragment, name_bytes, response_name, root_selection_set,
   },
 };
-use crate::validator::{
+use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{MergeField, MergeFrame, MergeKid, MergeMemo, MergeSet, NONE, get_bit, hash_u32},

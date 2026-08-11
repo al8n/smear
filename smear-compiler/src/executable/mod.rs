@@ -42,7 +42,7 @@ use core::ops::ControlFlow;
 
 use tokora::{SimpleSpan, span::AsSpan};
 
-use crate::parser::graphql::ast::{
+use smear_parser::graphql::ast::{
   DescribedVariableDefinition, ExecutableDefinition, ExecutableDocument, Name, OperationDefinition,
   OperationType, Selection, Type,
 };
@@ -138,15 +138,15 @@ impl core::error::Error for Invalid {}
 /// # Example
 ///
 /// ```
-/// use smear::{
-///   lexer::tokora::{Parse as _, Parser},
-///   parser::graphql::{
+/// use smear_compiler::{Budget, First, Schema, Scratch, validate_executable};
+/// use smear_parser::{
+///   graphql::{
 ///     GraphQL,
 ///     ast::{ExecutableDocument, TypeSystemDocument},
 ///     error::GraphqlErrors,
 ///     syntactic::{GraphqlLexer, executable_document, type_system_document},
 ///   },
-///   validator::{Budget, First, Schema, Scratch, validate_executable},
+///   lexer::tokora::{Parse as _, Parser},
 /// };
 ///
 /// let schema = Schema::build(

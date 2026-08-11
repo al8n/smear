@@ -3,23 +3,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
-// The alias the crate's own modules are written against: they spell their allocations
-// `std::boxed::Box`, which resolves to `alloc` in a `no_std` build and to the real `std`
-// otherwise.
-//
-// `#[allow(unused_extern_crates)]` because THIS CRATE IS BECOMING AN UMBRELLA. With
-// `--no-default-features` the only module left compiled here is `diagnostic`, which names nothing
-// under `std::` — so `cargo hack clippy --each-feature` reaches a configuration in which the alias
-// is genuinely unused, while every configuration that turns on `validator` or `proto` needs it.
-// The lint has no `cfg` to key on that is not just a restatement of the module list, and it goes
-// away by deletion when the last module leaves for its own crate, not by a narrower predicate.
-#[cfg(not(feature = "std"))]
-#[allow(unused_extern_crates)]
-extern crate alloc as std;
-
-#[cfg(feature = "std")]
-#[allow(unused_extern_crates)]
-extern crate std;
+// The `extern crate alloc as std;` alias that used to sit here is GONE, and its deletion is the
+// last commit's `#[allow(unused_extern_crates)]` coming good: the alias existed so this crate's
+// own modules could spell their allocations `std::boxed::Box`, and this crate has no modules left.
+// Each member carries its own. `#![no_std]` above still means what it says — an umbrella that
+// forwards a `no_std` stack must not itself link `std`.
 
 // Deliberately no outer doc comment, unlike the modules below. Rustdoc resolves the MERGED
 // fragments of a module's documentation in the scope of whichever attribute came from outside, so
@@ -151,9 +139,13 @@ pub use smear_parser::ast_node;
   doc = "the GraphQLx dialect has no validator, deliberately: its extensions have no \
          specification semantics to validate against."
 )]
+///
+/// The layer is the `smear-compiler` crate; `validator` is the name it has always had inside
+/// `smear` and the path every consumer already writes.
 #[cfg(feature = "validator")]
 #[cfg_attr(docsrs, doc(cfg(feature = "validator")))]
-pub mod validator;
+#[doc(inline)]
+pub use smear_compiler as validator;
 
 /// Draft §6 execution, as a Sans-I/O state machine.
 ///
