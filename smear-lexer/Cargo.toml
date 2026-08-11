@@ -10,6 +10,10 @@ description = "Zero-copy lexers for GraphQL and GraphQLx: a syntactic token stre
 keywords = ["graphql", "lexer", "tokenizer", "zero-copy", "no-std"]
 categories = ["parsing", "parser-implementations", "no-std"]
 
+# A real file, not a symlink: this crate has its own README and there is nothing for it to drift
+# from. `smear/README.md` is a symlink because that one IS the workspace-root landing page.
+readme = "README.md"
+
 # The irreducible base of the stack, and the crate this split restores. #84 merged it into `smear`
 # behind a `parser` feature; the full-stack target reverses that, because a syntax highlighter, a
 # formatter front end or a token-level tool has no reason to resolve the parser tower, let alone

@@ -43,7 +43,7 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # deliberate, scoped reduction, not a silent one: i686's unique value in
 # this matrix is 32-bit pointer width on a SIMD byte-level lexer, and the
 # lib tests exercise exactly that, under both aliasing models. Measured
-# 2026-08-07 under the `-p smear` selection below: 478 lib unit tests, the
+# 2026-08-07 under what was then a `-p smear` selection: 478 lib unit tests, the
 # lexer's and the parser's in one binary since the crates merged. What is
 # given up is "integration-suite coverage at 32-bit", not "32-bit
 # coverage" — tests/oracle.rs and tests/tokora_conformance.rs still run
@@ -58,6 +58,8 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # `miri-tb-x86_64-unknown-linux-gnu`, timestamps from its own log:
 #
 #   14:28:25Z  lib unit tests, 478 of them            -> 14:38:41Z   10m16s
+# (Those 478 are one binary. The same tests are 392 + 130 across two binaries since the split;
+#  the work is the same and this timing has not been re-measured on the two-package selection.)
 #   14:38:42Z  46 excluded targets, empty harnesses   -> 14:39:10Z      28s
 #   14:39:10Z  tests/oracle.rs, 8 tests               -> 14:47:11Z    8m01s
 #   14:47:15Z  tests/syntactic_span_extent.rs         -> killed 20:27Z, STILL IN IT
@@ -117,7 +119,7 @@ fi
 
 export MIRIFLAGS
 
-# ── WHY `-p smear`, AND WHAT IT COSTS ───────────────────────────────────────────────────────
+# ── WHY `-p smear -p smear-lexer`, AND WHAT IT COSTS ────────────────────────────────────────
 #
 # This line said `cargo miri test $TEST_ARGS --target $TARGET --lib` until #77 — no `-p`, so it
 # selected every workspace member, and cargo unified their features. `smear` does NOT default to
@@ -152,19 +154,28 @@ export MIRIFLAGS
 # the only fix attempt, PR #211, is a conflicting draft whose own description says the immutable
 # path still fails under Stacked Borrows.
 #
-# So `-p smear` is not a cost/benefit trade about minutes. The lossless tower CANNOT be
+# So a named selection is not a cost/benefit trade about minutes. The lossless tower CANNOT be
 # interpreted, at any price, until rowan is fixed — and the 37 `#![cfg(feature = "rowan")]`
-# targets in `smear/tests/` are therefore excluded here rather than left to fail. `-p smear` is
-# the mechanism because it is the one that a future workspace member cannot undo: feature
-# unification is over the SELECTED packages, and this selects one.
+# targets in `smear/tests/` are therefore excluded here rather than left to fail. Naming the
+# packages is the mechanism because it is the one that a future workspace member cannot undo:
+# feature unification is over the SELECTED packages, and this selects exactly these.
 #
-# What that leaves covered is the half where this project's own `unsafe` lives — the SIMD lexer
-# and the syntactic parser, through `tokora`'s substrate — and `ci/miri_scope.py` below asserts
-# that the covered/excluded split is exactly the one written here, in both directions. Read its
-# header before changing any of this.
+# `-p smear-lexer` IS THE CRATE SPLIT'S HALF OF THAT SENTENCE, and it is the direction the guard
+# did not used to have. What this cell leaves covered is the half where this project's own
+# `unsafe` lives — the SIMD lexer and the syntactic parser, through `tokora`'s substrate — and all
+# four of those `unsafe` sites are in `smear-lexer/src/string_lexer/`. When the lexer became its
+# own crate it took 130 lib unit tests with it, and a `-p smear` alone would have gone on passing
+# over the 392 that remained: the claim above would have quietly become false with no cell to say
+# so. `smear-lexer` declares no `rowan` feature at all, so adding it cannot pull the lossless
+# tower back in, which is the property this selection exists to hold.
+#
+# `ci/miri_scope.py` below asserts that the covered/excluded split is exactly the one written
+# here, in both directions, and holds the package list as `MIRI_PACKAGES` so a package leaving
+# the selection is a hard error rather than a smaller number nobody reads. Read its header before
+# changing any of this.
 LOG="$(mktemp)"
 set +e
-cargo miri test -p smear $TEST_ARGS --target "$TARGET" --lib 2>&1 | tee "$LOG"
+cargo miri test -p smear -p smear-lexer $TEST_ARGS --target "$TARGET" --lib 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 set -e
 

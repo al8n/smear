@@ -47,7 +47,8 @@ name: Miri
 #     section says why, and why it is those two and no others. Six of the eight cells cost wall
 #     clock alone; two cost the queue as well.
 #   * "not a coverage change" — that was the split. #77 IS a coverage change, deliberately and
-#     in one direction: the scripts now pass `-p smear`, which drops the lossless CST tower.
+#     in one direction: the scripts now name their packages (`-p smear -p smear-lexer` since the
+#     crate split), which drops the lossless CST tower.
 #     See "WHAT THIS MATRIX DOES NOT COVER" below; it is not optional and it is not a saving.
 
 # ── WHY ONE TARGET PICKS A macOS HOST AND THE OTHER THREE DO NOT ────────────────────────────

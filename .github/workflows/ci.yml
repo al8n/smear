@@ -276,6 +276,33 @@ jobs:
     - name: source-census
       run: cargo run -p source-census -- --verbose
 
+  # al8n/smear#84's defect, as a gate: a member crate declaring a feature the crate named `smear`
+  # cannot reach. #84 found four of them, `rowan` — the gate on the entire lossless CST tower —
+  # among them, and the forwarding layer had dropped them in silence. The full-stack split rebuilds
+  # that layer over more manifests than it had then, so the gate lands with the first member out.
+  #
+  # THE SELFTEST FIRST, and for the reason `source-genericity` above states: the walk runs FROM the
+  # members, which are the superset, precisely because the defect's signature is absence and a
+  # check derived from the umbrella's own table is blind to it. `--selftest` plants three shapes of
+  # the defect and requires the verdict to fire on each; one plant proves the plant.
+  #
+  # Reads both sides out of `cargo metadata` and hardcodes no count. It needs no Rust toolchain
+  # beyond `cargo metadata`, so it is a separate job from the census above rather than a step in it
+  # — a gate that waits on a two-minute probe build is a gate people stop running locally.
+  #
+  # In no `needs:` chain, so it blocks nothing.
+  feature-reachability:
+    name: feature-reachability
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: feature_reachability --selftest
+      run: python3 ci/feature_reachability.py --selftest
+    - name: feature_reachability
+      run: python3 ci/feature_reachability.py --verbose
+
   # Check formatting
   rustfmt:
     name: rustfmt
@@ -323,6 +350,11 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
+        # `smear-lexer` needs no pass of its own, and that is measured rather than assumed: not one
+        # of its features implies another — every entry in its `[features]` table is either empty
+        # or a forward to a dependency — so pass 1 already builds each of them in the only
+        # combination the old single-crate run gave them.
+        #
         # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
         # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
         # `--no-default-features` and `--all-features` are excluded because those three runs would
@@ -339,11 +371,12 @@ jobs:
 
   # ── WHAT CROSS-COMPILES, AND FOR WHOM ───────────────────────────────────────────────────────
   #
-  # Fifteen targets, one question: does the crate a consumer installs build for them. That is
-  # `smear` and only `smear` — it is the sole publishable member, which is a property of the
-  # manifests rather than an opinion, and the step below re-reads it out of `cargo metadata` so
-  # the list cannot go stale in silence. The other three are `publish = false`: two tripwires and
-  # the `source-genericity` gate's `syn` reader, none of which any target here will ever run.
+  # Fifteen targets, one question: does the crate a consumer installs build for them. Since the
+  # crate split that is `smear` AND `smear-lexer` — the publishable members, which is a property
+  # of the manifests rather than an opinion, and the step below re-reads it out of `cargo
+  # metadata` so the list cannot go stale in silence. The other three are `publish = false`: two
+  # tripwires and the `source-genericity` gate's `syn` reader, none of which any target here will
+  # ever run.
   #
   # This job said `cargo build --target ...` with no package selection until it was fixed, so it
   # built every member, and one of them could not be built for a 32-bit target at all: the
@@ -425,20 +458,29 @@ jobs:
       # is exactly the kind that goes stale without a symptom: a second publishable member would
       # simply never be cross-compiled, under fifteen green ticks. Keyed on the same `publish`
       # field the `docs` job reads — cargo reports `[]` for `publish = false` and null otherwise.
-      - name: smear is still the only publishable member
+      # A FROZEN LITERAL on the left of the comparison and the SAME NAMES on the `-p` list below,
+      # deliberately: derived from metadata, the guard would silently start covering whatever the
+      # workspace happens to contain, and a member added and not cross-compiled is exactly the
+      # green-over-nothing this step exists to refuse. Updating both halves in one diff is the
+      # decision being recorded.
+      - name: the publishable members are the ones this matrix builds
         run: |
           PUBLISHABLE="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(",".join(sorted(p["name"] for p in json.load(sys.stdin)["packages"] if p.get("publish") != [])))')"
           echo "publishable members: $PUBLISHABLE"
-          if [ "$PUBLISHABLE" != "smear" ]; then
-            echo "::error::this matrix cross-compiles '-p smear', but the publishable members are now: $PUBLISHABLE"
+          if [ "$PUBLISHABLE" != "smear,smear-lexer" ]; then
+            echo "::error::this matrix cross-compiles '-p smear -p smear-lexer', but the publishable members are now: $PUBLISHABLE"
             echo "::error::add the new one to the build below, or mark it publish = false if it does not ship"
             exit 1
           fi
-      - name: cargo build -p smear --all-features --target ${{ matrix.target }}
+      # `-p smear-lexer` is named even though `-p smear --all-features` already builds it through
+      # the dependency edge: what a published crate has to survive is being built ON ITS OWN, and
+      # a member reached only as a dependency is built with whatever the umbrella's features
+      # resolve to rather than with its own.
+      - name: cargo build -p smear -p smear-lexer --all-features --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build -p smear --all-features --target ${{ matrix.target }}
+          cargo build -p smear -p smear-lexer --all-features --target ${{ matrix.target }}
 
   # The validator's schema representation, on a core with no compare-and-swap.
   #
@@ -528,6 +570,11 @@ jobs:
         # build always contained the parser; a single-crate `--each-feature` never builds `parser`
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
+        #
+        # `smear-lexer` needs no pass of its own, and that is measured rather than assumed: not one
+        # of its features implies another — every entry in its `[features]` table is either empty
+        # or a forward to a dependency — so pass 1 already builds each of them in the only
+        # combination the old single-crate run gave them.
         #
         # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
         # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
@@ -964,8 +1011,17 @@ jobs:
         key: ${{ runner.os }}-publish-dry-run-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-publish-dry-run-
-    - name: cargo publish --dry-run -p smear
-      run: cargo publish --dry-run -p smear
+    # `--workspace`, NOT `-p smear`, and the difference is a hard failure rather than a
+    # preference. `smear` depends on `smear-lexer` by path plus version, and nothing named
+    # `smear-lexer` is on the registry yet, so `cargo publish --dry-run -p smear` exits 1 with
+    # `no matching package named smear-lexer found`. Measured on this tree. `--workspace`
+    # packages the members in dependency order and verifies each against the ones already
+    # packaged, which is also the order a real release has to go out in.
+    #
+    # `publish = false` members are skipped by cargo itself, so `smear-smoke`, `smear-noatomic`
+    # and `source-census` are not named here and do not need to be.
+    - name: cargo publish --dry-run --workspace
+      run: cargo publish --dry-run --workspace
     # The dry run passing is necessary and NOT sufficient, and the gap is specific.
     # `smear/README.md` is a symlink to the workspace-root `README.md`, which cargo resolves by
     # copying the TARGET into the package. A checkout that did not create the symlink — Windows

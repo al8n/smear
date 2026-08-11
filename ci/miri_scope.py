@@ -139,6 +139,22 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 # this budget does not see.
 MIRI_IGNORE_BUDGET = 4
 
+# The packages `ci/miri_sb.sh` and `ci/miri_tb.sh` select, written down for the same reason the
+# budget above is: what this guard has to catch is the SELECTION moving, and a selection derived
+# from the run cannot see itself shrink.
+#
+# It was one package until the crate split, and the check below was "exactly one lib unit-test
+# binary ran" — a shape that would have stayed GREEN through the split while `smear-lexer` carried
+# 130 lib unit tests, and all four of this project's own `unsafe` sites, out of the selection. The
+# header of both scripts claims the covered half is "where this project's own `unsafe` lives"; the
+# names here are what makes that claim falsifiable rather than decorative.
+#
+# ADDING A PACKAGE IS A DECISION WITH A COST, because feature unification is over the SELECTED
+# packages and that is the mechanism #77 turned on: `smear-smoke` enabling `rowan` is how the
+# entire lossless tower entered a Miri cell that nobody widened. `smear-lexer` declares no `rowan`
+# feature at all, so it cannot do that — check the same of anything added here.
+MIRI_PACKAGES = ("smear", "smear-lexer")
+
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.
 BUDGET_OVER = "no per-test `#[ignore]` was added without raising the budget"
@@ -528,7 +544,9 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     # first case moves a target from 0 ignored to 1, which is the same finding.
     a_skipping = next((n for n in sorted(compiled) if declared.get(n, 0)), a_compiled)
     a_declared = declared.get(a_skipping, 0)
-    clean = ([("<lib>", 400)]
+    # One lib binary per selected package, which is what a correct run produces.
+    libs_clean = [("<lib>", 400 - 10 * i) for i in range(len(MIRI_PACKAGES))]
+    clean = (libs_clean
              + [(n, 0) for n in sorted(excluded)]
              + [(n, floor) for n in sorted(compiled)])
     cases: list[tuple[str, str, bool, int, int]] = [
@@ -542,21 +560,26 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
          log([e for e in clean if e[0] != a_compiled]), True, 0, 1),
         ("a compiled target absent from a run that ABORTED is truncation, not a finding",
          log([e for e in clean if e[0] != a_compiled]), True, 1, 0),
-        ("the lib binary reporting zero tests fails",
+        ("a lib binary reporting zero tests fails",
          log([("<lib>", 0)] + clean[1:]), True, 0, 1),
-        ("the lib binary never running fails",
+        ("a lib binary never running fails",
          log(clean[1:]), True, 0, 1),
         ("`--lib` alone does not require the integration targets to appear",
-         log([("<lib>", 400)]), False, 0, 0),
+         log(libs_clean), False, 0, 0),
         # `CARGO_TERM_COLOR: always` in the workflow means the log this guard reads is full of
         # SGR escapes. Pinned as a case rather than trusted, because the failure mode is silent
         # in the wrong direction: unstripped, `RUNNING` matches nothing, every target looks
         # absent, and on a SUCCESSFUL run the guard would fail the cell for the whole suite.
         # The shape the CI log of run 31073592771 actually has: `smear`'s lib binary and the
         # since-dissolved `smear-apollo-bench`'s, both spelled `Running unittests src/lib.rs`,
-        # distinguished only by the path. Two of them means the selection is not one package.
-        ("a second package's lib unit tests running fails (#77, from the other end)",
-         log([("<lib>", 400), ("<lib>", 0)] + clean[1:]), True, 0, 1),
+        # distinguished only by the path. More of them than `MIRI_PACKAGES` names means the
+        # selection is wider than the scripts pass.
+        ("one lib binary too many fails (#77, from the other end)",
+         log(libs_clean + [("<lib>", 7)] + clean[len(libs_clean):]), True, 0, 1),
+        # And the direction the crate split introduced: a package silently leaving the selection
+        # takes its unit tests with it and every other check here stays green.
+        ("one lib binary too few fails (a package left the selection)",
+         log(libs_clean[:-1] + clean[len(libs_clean):]), True, 0, 1),
         ("a colourised log parses the same as a plain one",
          log(clean).replace("     Running", "\x1b[1m\x1b[32m     Running\x1b[0m"), True, 0, 0),
         # The per-test half of the same property. `#[cfg_attr(miri, ignore)]` skips a test without
@@ -697,20 +720,27 @@ def check(
     failures: list[str] = []
     notes: list[str] = []
 
-    lib = libs[0][1] if libs else None
     if not libs:
         (notes if aborted else failures).append(
-            "the lib unit-test binary never ran; every cell must interpret it"
+            "no lib unit-test binary ran; every cell must interpret one per selected package"
         )
-    elif len(libs) > 1:
+    elif len(libs) != len(MIRI_PACKAGES):
+        wider = len(libs) > len(MIRI_PACKAGES)
         failures.append(
-            f"{len(libs)} lib unit-test binaries ran, and `-p smear` selects ONE package — so "
-            "the selection is wider than these scripts pass. That is #77's mechanism seen from "
-            "the other end; the extra packages were: "
-            + ", ".join(path for path, _ in libs[1:])
+            f"{len(libs)} lib unit-test binaries ran and these scripts select "
+            f"{len(MIRI_PACKAGES)} package(s) ({', '.join(MIRI_PACKAGES)}), so the selection is "
+            + ("WIDER than they pass — that is #77's mechanism seen from the other end"
+               if wider else
+               "NARROWER than they pass — a package's unit tests stopped being interpreted and "
+               "nothing else would have said so")
+            + "; the binaries were: "
+            + ", ".join(path for path, _ in libs)
         )
-    elif lib == 0:
-        failures.append("the lib unit-test binary reported `running 0 tests`")
+    elif any(count == 0 for _, count in libs):
+        failures.append(
+            "a lib unit-test binary reported `running 0 tests`: "
+            + ", ".join(path for path, count in libs if count == 0)
+        )
 
     for name in compiled:
         got = counts.get(name)
@@ -784,9 +814,12 @@ def check(
 
     covered = sorted(n for n in compiled if n in counts)
     where = "so far" if aborted else "interpreted"
-    print(f"miri_scope OK: lib ({lib if lib is not None else 'not reached'}) + {len(covered)} "
-          f"integration targets {where}; {len(excluded)} excluded for the recorded reasons and "
-          "none of them ran")
+    # Each selected package's lib count, named rather than summed: a total would hide one package
+    # shrinking while another grew, which is the shape this guard exists to refuse.
+    lib_counts = " + ".join(str(count) for _, count in libs) if libs else "not reached"
+    print(f"miri_scope OK: {len(libs)} lib unit-test binaries ({lib_counts} tests) + "
+          f"{len(covered)} integration targets {where}; {len(excluded)} excluded for the recorded "
+          "reasons and none of them ran")
     return 0
 
 
