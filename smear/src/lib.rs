@@ -50,10 +50,18 @@ pub mod diagnostic;
 ///
 #[cfg_attr(feature = "graphql", doc = "- [`graphql`](lexer::graphql)")]
 #[cfg_attr(feature = "graphqlx", doc = "- [`graphqlx`](lexer::graphqlx)")]
-// Scoped here rather than crate-wide: it was `#![allow(clippy::result_large_err)]` on the
-// `smear-lexer` crate root, and the merge is the moment it stops covering the parser too.
-#[allow(clippy::result_large_err)]
-pub mod lexer;
+///
+/// The layer is the `smear-lexer` crate; this is the name it has always had inside `smear` and
+/// the path every consumer already writes.
+#[doc(inline)]
+pub use smear_lexer as lexer;
+
+/// Declares a keyword token type for a dialect.
+///
+/// Re-exported so `smear::keyword!` keeps naming the macro it named before the lexer became its
+/// own crate. `#[macro_export]` puts a macro at its defining crate's root, so the split would
+/// otherwise have moved this one out from under every caller.
+pub use smear_lexer::keyword;
 
 /// Parsers for GraphQL and GraphQL-like DSLs.
 ///

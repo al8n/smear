@@ -2,6 +2,7 @@
 members = [
   "ci/source_census",
   "smear",
+  "smear-lexer",
   "smear-noatomic",
   "smear-smoke",
 ]
@@ -85,6 +86,7 @@ paste = "1"
 thiserror = { version = "2", default-features = false }
 
 smear = { path = "smear", version = "0.0.0", default-features = false }
+smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
 
 [workspace.lints.rust]
 rust_2018_idioms = "warn"

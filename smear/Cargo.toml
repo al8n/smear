@@ -46,9 +46,14 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec"]
 # dialects, and the parser, which a `smear` dependency compiled unconditionally. A default build
 # compiles the same code before and after the merge.
 
-std = ["tokora/std", "thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
+# `thiserror/default` is gone from this list and is NOT a lost forward. The only
+# `#[derive(thiserror::Error)]` in the tree is `smear-lexer`'s `LengthError`, so the crate that
+# derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
+# on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
+# edge, so a dropped forward is a compile error in a member rather than a silent tier change.
+std = ["smear-lexer/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
-graphql = []
+graphql = ["smear-lexer/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
 # stabilises. This comment is the successor to the deleted `unstable` marker feature, which gated
 # no code anywhere in the workspace and was auto-enabled by this one — cargo features are
@@ -56,7 +61,7 @@ graphql = []
 # GraphQLx. `alloc` went the same way and for the same reason: nothing read
 # `cfg(feature = "alloc")`, both layers unconditionally `extern crate alloc as std` when `std` is
 # off, and there is no core-only tier for it to select.
-graphqlx = []
+graphqlx = ["smear-lexer/graphqlx"]
 
 # The parser tower (`smear::parser`). Off, this crate is the lexer alone — the configuration that
 # used to be the `smear-lexer` crate, for the consumers it existed to serve: syntax highlighters,
@@ -112,11 +117,17 @@ proto = ["validator"]
 # the no-atomic tier is the *representation*, which this feature does not touch.
 introspection = ["validator", "std", "dep:serde", "dep:serde_json"]
 
-smallvec = ["dep:smallvec"]
-bytes = ["dep:bytes", "tokora/bytes_1"]
-bstr = ["dep:bstr", "tokora/bstr_1"]
-hipstr = ["dep:hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
+# The five source backings. Each forwards to `smear-lexer`, which is where the `Source`
+# implementations live; the `dep:` half survives only for the three this package's own test
+# targets still name by type, and the `tokora/<backing>` half is kept beside it rather than left
+# to `smear-lexer` to supply, because `smear-smoke`'s header records that losing that half is
+# silent — cargo falls back to the implicit feature an optional dependency creates and resolution
+# still succeeds.
+smallvec = ["smear-lexer/smallvec"]
+bytes = ["dep:bytes", "smear-lexer/bytes", "tokora/bytes_1"]
+bstr = ["dep:bstr", "smear-lexer/bstr", "tokora/bstr_1"]
+hipstr = ["dep:hipstr", "smear-lexer/hipstr", "tokora/hipstr_0_8"]
+smol-bytes = ["smear-lexer/smol-bytes", "tokora/smol_bytes_0_1"]
 
 # The lossless CST tower. Reachable through the crate named `smear` for the first time here (#81).
 # `parser` because the tower lives in that module; `std` because the runner needs it.
@@ -165,16 +176,19 @@ test-support = []
 [dependencies]
 derive_more.workspace = true
 paste = "1"
-thiserror.workspace = true
 tokora.workspace = true
 
-memspan = { version = "0.1", default-features = false, features = ["std"] }
+# The lexer, unconditional and with no feature of its own to gate it: it is the base of the stack
+# and a `smear` with it switched off would be an empty crate. `smear-lexer` also carries the four
+# dependencies this manifest used to hold for it and no longer does — `thiserror`, `memspan`,
+# `smallvec` and `smol-bytes` — each removed because nothing outside `smear-lexer/src` names it.
+smear-lexer.workspace = true
 
+# `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
+# package's own `tests/` name those types directly to build a source of each backing.
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
-smol-bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
-smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 rowan = { version = "0.17", optional = true }
 
 # The `introspection` feature's two, and the only two dependencies in this manifest that are not
