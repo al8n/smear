@@ -42,9 +42,17 @@
 //!
 //! Queries and mutations. Draft §6.2.2's serial rule for a mutation's top-level fields is expressed
 //! by *withholding*: [`poll_resolve`](crate::proto::Executor::poll_resolve) offers one of them and
-//! keeps the next off the ready chain until that one's whole subtree has finished, so the ordering
-//! is structural rather than a contract a driver could forget to honour. Everything below the top
-//! level is draft §6.3's ordinary collection, which is where the specification draws the line too.
+//! keeps the next off the ready chain until that one's whole subtree is **complete or cancelled**,
+//! so the ordering is structural rather than a contract a driver could forget to honour. Everything
+//! below the top level is draft §6.3's ordinary collection, which is where the specification draws
+//! the line too.
+//!
+//! "Or cancelled" is the edge and it is load-bearing rather than a hedge. When draft §6.4.4 nulls a
+//! mutation field because something under it failed, the requests still outstanding beneath it are
+//! *abandoned* — [`poll_abandoned`](crate::proto::Executor::poll_abandoned) is how the driver hears
+//! so — and the next mutation field is released over them rather than behind them. `graphql-js`
+//! 16.11.0 was measured doing the same, and waiting instead would let a driver that never polls
+//! that channel stall a mutation permanently.
 //!
 //! A `subscription` is refused by [`Executor::start`](crate::proto::Executor::start) with
 //! [`StartError::NotAQueryOrMutation`](crate::proto::StartError::NotAQueryOrMutation): draft §6.2.3

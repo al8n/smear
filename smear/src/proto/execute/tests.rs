@@ -965,7 +965,7 @@ fn collected_under(
 //
 // The spec's fourth sweep says a budget on one factor of a product bounds nothing, and names this
 // path as one of the two places the shape was expected to recur. It is here to be built: the serial
-// rule has to decide, once per offer, whether the previous top-level field has finished and which
+// rule has to decide, once per offer, whether the previous top-level field is done with and which
 // field comes next. Scanning the root's children for the answer makes that `offers × M`, with
 // `offers` the driver's quantity — one document sub-selection becomes as many requests as
 // `list_len` claims elements — and `M` the document's. `max_response_slots` bounds the first,
@@ -973,8 +973,10 @@ fn collected_under(
 //
 // The remedy here is not a fourth ceiling, because the cost is in a mechanism rather than in a
 // population: withholding removes it. The withheld fields are the ready chain's own tail, so
-// "which is next" is one link, and nothing outside the running subtree is ever on the chain or in
-// the in-flight table, so "has it finished" is two counters.
+// "which is next" is one link, and nothing that can still affect the response is on the chain or
+// counted `live` outside the running subtree, so "is it done with" is two counters — the question
+// being the weaker one, because draft §6.4.4 moves a discarded subtree's requests out of `live`
+// and the release steps over them. `Executor::release_serial` carries that boundary.
 //
 // Which is unobservable from a response — a scanning implementation answers every mutation exactly
 // as this one does — so the gate is the count, as it is for collection three sections up. The

@@ -28,18 +28,37 @@
 //! Draft §6.2.2's serial-mutation rule is that same mechanism rather than a second one. A
 //! mutation's root expands exactly as a query's does and enqueues every top-level field, and then
 //! the chain is **cut** after its head: the fields behind it keep their links and simply are not on
-//! it, and one is spliced back each time the previous field's subtree finishes. Nothing is
-//! allocated, nothing accumulates, and there is no ordering contract for a driver to honour or
-//! forget — `poll_resolve` cannot offer what is not on the chain.
+//! it, and one is spliced back each time the previous field's subtree can no longer affect the
+//! response. Nothing is allocated, nothing accumulates, and there is no ordering contract for a
+//! driver to honour or forget — `poll_resolve` cannot offer what is not on the chain.
 //!
-//! **"Until the previous field's subtree finishes", and not "until it is answered".** The two
-//! readings differ on a nested resolver, and the reference implementation was measured rather than
-//! argued with: `graphql-js` 16.11.0's `executeFieldsSerially` awaits `executeField`, whose promise
-//! is `completeValue`'s and therefore resolves only once every sub-field has. Run against
+//! # What the release actually waits for, stated to its edge
+//!
+//! Two readings had to be settled and both were settled the same way, by measuring `graphql-js`
+//! 16.11.0 rather than arguing from its prose.
+//!
+//! **It waits for the previous field's subtree, not for its answer.** The readings differ on a
+//! nested resolver: upstream's `executeFieldsSerially` awaits `executeField`, whose promise is
+//! `completeValue`'s and therefore resolves only once every sub-field has. Run against
 //! `mutation { a: m { nested } b: m { nested } }`, upstream calls the resolvers in the order `a`,
 //! `nested(a)`, `b`, `nested(b)` — so a rule that released on the answer alone would start `b`'s
 //! side effect while `a`'s sub-selection was still running, which is what §6.2.2 exists to forbid.
-//! See [`Executor::release_serial`].
+//!
+//! **It does not wait for work draft §6.4.4 has already discarded.** When a nested non-null under
+//! `a` fails, §6.4.4 nulls `a` and every request still outstanding beneath it is *abandoned* — see
+//! [`poll_abandoned`](Executor::poll_abandoned) — and the release steps over those rather than
+//! waiting for them. So the guarantee is **"the previous field's subtree is complete or
+//! cancelled"**, and not "complete": an abandoned request under `a` may still be in the in-flight
+//! table when `b`'s resolver is offered. Upstream does the same and was measured doing it, on
+//! `mutation { first { outstanding failing } second { outstanding } }` with `first.outstanding`
+//! held unsettled by hand — `second`'s resolver runs before it settles, because `promiseForObject`
+//! is `Promise.all` and a rejected promise chain in JS does not cancel its siblings. Waiting
+//! instead would be stricter than the reference implementation *and* would let a driver that never
+//! polls the abandonment channel stall a mutation permanently rather than softly.
+//!
+//! See [`Executor::release_serial`], and
+//! `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field` for the measurement as a
+//! test.
 
 use core::{fmt, num::NonZeroU32};
 
@@ -229,17 +248,25 @@ mod tests;
 ///
 /// **The mutation path was one of the two predictions, and it came out the other way.** The product
 /// is there to be built: §6.2.2's serial rule has to decide, once per offer, whether the previous
-/// top-level field has finished and which field comes next, and *offers* are the driver's while
+/// top-level field is done with and which field comes next, and *offers* are the driver's while
 /// *top-level fields* and the subtree's shape are the document's. Scanning the root's children, or
 /// walking the running subtree, makes that `offers × M` — with `M` bounded by this ceiling, offers
 /// bounded by the position ceiling, and their product bounded by neither, which is this section
 /// verbatim. What it does **not** call for is a fourth knob. The cost is in a mechanism rather than
 /// in a population, so withholding deletes it instead: the withheld fields are the ready chain's
-/// own tail, so "which is next" is one link, and nothing outside the running subtree is ever on the
-/// chain or in the in-flight table, so "has it finished" is two counters. `M` fields cost `M` steps
-/// over the whole operation, whatever the driver answers. See `Executor::serial_next`, and
-/// `a_serial_release_does_not_grow_with_the_response` for the gate that would fail if a scan came
-/// back.
+/// own tail, so "which is next" is one link, and nothing that can still affect the response is on
+/// the chain or counted `live` outside the running subtree, so "is it done with" is two counters.
+/// `M` fields cost `M` steps over the whole operation, whatever the driver answers. See
+/// `Executor::serial_next`, and `a_serial_release_does_not_grow_with_the_response` for the gate
+/// that would fail if a scan came back.
+///
+/// The second clause is about what can still *affect the response* and not about what is
+/// outstanding, and the two come apart on the error path: draft §6.4.4 moves a discarded subtree's
+/// requests from `live` to `abandoned` rather than ending them, so after a release the in-flight
+/// table can hold entries belonging to an earlier top-level field. The stronger sentence does not
+/// hold there and must not be restored. Excluding those entries from the release's question is
+/// deliberate — see `Executor::release_serial` — and it is what keeps the answer two counters
+/// instead of a walk.
 ///
 /// Sharing the group between the elements of one list was considered and is **not** a substitute.
 /// The collection is not identical per element: `applies` resolves a fragment's type condition
@@ -758,16 +785,16 @@ where
   /// [`withhold_serial`](Self::withhold_serial) then severs the chain after its head. The withheld
   /// fields keep their `next_ready` links — they are still a list, just not one `ready_head`
   /// reaches — and [`release_serial`](Self::release_serial) splices one back each time the previous
-  /// field's subtree finishes. That is the whole of serial execution: no queue is allocated, no
-  /// flag is consulted, and no ordering contract is handed to a driver, because `poll_resolve`
-  /// cannot offer what is not on the chain.
+  /// field's subtree is complete or cancelled. That is the whole of serial execution: no queue is
+  /// allocated, no flag is consulted, and no ordering contract is handed to a driver, because
+  /// `poll_resolve` cannot offer what is not on the chain.
   ///
   /// # The cost, because this is where the product would have been
   ///
   /// A splice is one link and the cursor only moves forward, so a mutation of `M` top-level fields
   /// spends `M` steps over the whole operation however many positions the driver's answers build.
   /// The shape being avoided is the obvious implementation: deciding *which field is next* by
-  /// scanning the root's children, or *whether the previous subtree has finished* by walking it.
+  /// scanning the root's children, or *whether the previous subtree is done with* by walking it.
   /// Either is paid once per offer — and offers are the **driver's** quantity while `M` and the
   /// subtree's shape are the **document's**, which is the product [`Limits`] refuses to meet a
   /// fourth time. There is no ceiling here because there is no product: `release_serial` reads two
@@ -970,8 +997,8 @@ where
     }
     let found = loop {
       // Draft §6.2.2's next top-level field becomes available the moment the previous one's subtree
-      // is finished, and this is where that is noticed. A no-op for a query, and for a mutation
-      // with work still outstanding.
+      // is complete or cancelled, and this is where that is noticed. A no-op for a query, and for a
+      // mutation with work still outstanding that could reach the response.
       self.release_serial();
       if self.live + self.abandoned >= self.limits.max_in_flight.get() {
         break None;
@@ -1138,6 +1165,11 @@ where
   /// under that ancestor becomes irrelevant the instant it does. This is how the driver hears
   /// about it, and cancelling the work is the driver's to do — `proto` performs no I/O and has
   /// nothing to cancel.
+  ///
+  /// Nothing waits for these. A mutation's next top-level field is released over an abandoned
+  /// request rather than behind it — `release_serial` records the `graphql-js` measurement that
+  /// settled it — and [`poll_response`](Self::poll_response) will deliver over one. What ignoring
+  /// this channel costs is the in-flight ceiling, not correctness.
   ///
   /// Answering a retired request afterwards is harmless: the id is stale and ignored.
   pub fn poll_abandoned(&mut self) -> Option<ReqId> {
@@ -2439,26 +2471,49 @@ where
   /// Splices the next withheld top-level field back onto the ready chain, if draft §6.2.2 permits
   /// it yet.
   ///
-  /// The permission is one question — *has the previous top-level field's whole subtree finished* —
-  /// and withholding is what makes it two counters instead of a walk: nothing outside that subtree
-  /// has ever been on the ready chain or in the in-flight table, so an empty chain with no live
-  /// request **is** the subtree being done. A queue would not have that property, because the other
-  /// fields' work would be sitting in the same structures.
+  /// The permission is one question — *can anything still under the previous top-level field
+  /// affect the response* — and withholding is what makes it two counters instead of a walk:
+  /// nothing outside that subtree has ever been on the ready chain or counted `live`, so an empty
+  /// chain with no live request **is** that question answered. A queue would not have the property,
+  /// because the other fields' work would be sitting in the same structures.
   ///
-  /// Abandoned requests are deliberately not waited for, which is the reasoning
-  /// [`poll_response`](Self::poll_response) already applies to them: draft §6.4.4 has discarded the
-  /// positions they would have filled, so no answer to one can change a byte of the response. It is
-  /// also the only choice that cannot deadlock — waiting would let a driver that ignores
-  /// [`poll_abandoned`](Self::poll_abandoned) stall a mutation for ever rather than softly. The
-  /// reference implementation settles it the same way: `promiseForObject` is `Promise.all`, which
-  /// rejects on the first rejection, so `graphql-js` starts the next mutation field while the
-  /// previous one's other nested resolvers are still running.
+  /// # The guarantee is "complete or cancelled", and the difference is not cosmetic
+  ///
+  /// `live` is the counter, and draft §6.4.4 takes requests *out* of it: when a nested non-null
+  /// fails, [`abandon_under`](Self::abandon_under) moves everything still outstanding beneath the
+  /// nulled position from `live` to `abandoned`. So this can, and does, splice the next top-level
+  /// field while the previous one still has entries in the in-flight table. Two counters therefore
+  /// answer "nothing left that can reach the response", which is strictly weaker than "the subtree
+  /// has finished", and the weaker sentence is the one every other statement of this rule makes —
+  /// the `Limits` product argument included, since it is that weaker question the counters are
+  /// cheap for.
+  ///
+  /// Waiting for `abandoned` too was the alternative and it was rejected on evidence, not taste:
+  ///
+  /// - [`poll_response`](Self::poll_response) already applies the same reasoning — §6.4.4 has
+  ///   discarded the positions those requests would have filled, so no answer to one can change a
+  ///   byte of the response.
+  /// - It is the only choice that cannot deadlock. Waiting would let a driver that ignores
+  ///   [`poll_abandoned`](Self::poll_abandoned) stall a mutation for ever rather than softly.
+  /// - **The reference implementation does not wait, and this was measured rather than inferred
+  ///   from `Promise.all`'s documented behaviour.** On
+  ///   `mutation { first { outstanding failing } second { outstanding } }` against `graphql-js`
+  ///   16.11.0, with `failing: Int!` resolving null through a promise and `first.outstanding`
+  ///   returning a promise the probe settles by hand from a later macrotask, upstream's resolver
+  ///   order is `first`, `first.outstanding`, `first.failing`, **`second`** — and only then does
+  ///   `first.outstanding` settle. The control run, identical but with `failing` succeeding, puts
+  ///   `second` *after* the deferral, which is what rules out a probe that never waits for
+  ///   anything. Gating on `abandoned` would make this executor stricter than upstream.
+  ///
+  /// `an_abandoned_nested_request_does_not_withhold_the_next_mutation_field` is that measurement as
+  /// a test. Upstream's own `mutations-test.ts` cannot decide it — the ported corpus stays green
+  /// under either rule — which is why the case is hand-built rather than another oracle entry.
   ///
   /// # Why "finished" and not "answered"
   ///
-  /// Measured rather than read off the prose, per this module's standing method. `graphql-js`
-  /// 16.11.0's `executeFieldsSerially` awaits `executeField`, and `executeField`'s promise is
-  /// `completeValue`'s — which for an object resolves only once every sub-field has. On
+  /// The other half of the same question, measured the same way, per this module's standing method.
+  /// `graphql-js` 16.11.0's `executeFieldsSerially` awaits `executeField`, and `executeField`'s
+  /// promise is `completeValue`'s — which for an object resolves only once every sub-field has. On
   /// `mutation { a: m { nested } b: m { nested } }` upstream's resolver order is `a`, `nested(a)`,
   /// `b`, `nested(b)`. Releasing on the answer alone would run `b`'s side effect while `a`'s
   /// sub-selection was still resolving.
