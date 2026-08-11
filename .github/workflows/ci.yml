@@ -385,33 +385,13 @@ jobs:
       run: rustup update stable --no-self-update && rustup default stable
     - name: Install cargo-hack
       run: cargo install cargo-hack
-    - name: Apply clippy lints
-      run: |
-        cargo hack clippy --each-feature
-        # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
-        # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
-        # build always contained the parser; a single-crate `--each-feature` never builds `parser`
-        # together with exactly one other feature. This restores those pairs deliberately, and the
-        # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
-        #
-        # `smear-lexer` needs no pass of its own, and that is measured rather than assumed: not one
-        # of its features implies another — every entry in its `[features]` table is either empty
-        # or a forward to a dependency — so pass 1 already builds each of them in the only
-        # combination the old single-crate run gave them.
-        #
-        # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
-        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
-        # `--no-default-features` and `--all-features` are excluded because those three runs would
-        # duplicate pass-1 exactly.
-        #
-        # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
-        # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
-        # and it does not need to be there — it already skips the `parser,parser` cell on its own.
-        # Nine cells, one per remaining feature, and a feature added to the manifest later joins
-        # them without anyone editing this file.
-        cargo hack clippy -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
-          --exclude-no-default-features --exclude-all-features
+    # ONE STRING, SHARED WITH A LOCAL RUN. The invocation used to live here, and a local
+    # `cargo hack clippy --each-feature` typed by hand is a different question: this file sets
+    # `RUSTFLAGS: -Dwarnings` for every job, so a rustc lint is an error here and a warning there.
+    # That gap cleared this branch twice on the same construct, and the second time a stacked
+    # branch found it. `ci/hack.sh` carries the flags, both passes and the reasoning.
+    - name: ci/hack.sh
+      run: bash ci/hack.sh
 
   # ── WHAT CROSS-COMPILES, AND FOR WHOM ───────────────────────────────────────────────────────
   #

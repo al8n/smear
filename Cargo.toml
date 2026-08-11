@@ -110,8 +110,25 @@ smear-compiler = { path = "smear-compiler", version = "0.0.0", default-features 
 smear-schema = { path = "smear-schema", version = "0.0.0", default-features = false }
 
 [workspace.lints.rust]
-rust_2018_idioms = "warn"
+# `priority = -1` because `unused_extern_crates` below is a MEMBER of this group, and cargo
+# refuses a group and one of its lints at the same priority — the group has to be resolved first
+# for the specific level to win.
+rust_2018_idioms = { level = "warn", priority = -1 }
 single_use_lifetimes = "warn"
+# ALREADY ON, AND THAT IS THE POINT. `unused_extern_crates` is part of `rust_2018_idioms` above, so
+# this repository had opted into the lint from the start — at `warn`. What decided whether it
+# stopped a build was the ENVIRONMENT: `.github/workflows/ci.yml` sets `RUSTFLAGS: -Dwarnings` for
+# every job, so it is an error in CI and a warning in any local run that does not export the same
+# variable. `cargo hack clippy --each-feature` run without it cleared a tree CI then reddened,
+# twice, on the same construct — the alloc-as-std alias, once in `smear` and once in
+# `smear-parser`.
+#
+# Denying it here is the repair for that gap: a lint level in the manifest travels with the code
+# and holds for `cargo clippy`, `cargo check` and `cargo hack` alike, with or without the
+# environment. `ci/hack.sh` closes the other half by making CI and a local run the same string.
+#
+# The alloc-as-std alias in each member carries an explicit `#[allow]` and states why.
+unused_extern_crates = "deny"
 unexpected_cfgs = { level = "warn", check-cfg = [
   # Testing / coverage helpers. These are set via `RUSTFLAGS='--cfg ...'`
   # in CI to force the dispatcher down a specific path so lower‑tier

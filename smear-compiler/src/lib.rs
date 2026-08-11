@@ -124,10 +124,32 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
+// The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
+// resolves to `alloc` in a `no_std` build and to the real `std` otherwise.
+//
+// `#[allow(unused_extern_crates)]`, ON EVERY MEMBER AND NOT ONLY THE ONE THAT TRIPS TODAY. The
+// alias is a crate-wide compatibility shim whose USERS are feature-gated, and
+// `unused_extern_crates` is a lint about the item: it fires in any configuration that happens to
+// compile none of them. On this tree that is `smear-parser --no-default-features`, where every
+// `std::` use is inside a dialect or `rowan` module — but the construct is identical in all five
+// members and which one trips is an accident of where the uses sit. Measured: `smear-lexer` 41,
+// `smear-parser` 70, `smear-schema` 15, `smear-compiler` 8, `graphql-proto` 82.
+//
+// Not a narrower `#[cfg]`: the honest predicate would be "any feature whose module names `std::`",
+// which is a restatement of the module list and drifts the first time one is added. And not
+// deletion, because the gated modules need it.
+//
+// `unused_extern_crates` is DENIED in `[workspace.lints.rust]` so that this allow is the recorded
+// exception rather than the lint being off — a stray `extern crate` anywhere else is a hard error
+// locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
+// this construct reddened CI twice, and both times the local run that cleared it was narrower
+// than CI's.
 #[cfg(not(feature = "std"))]
+#[allow(unused_extern_crates)]
 extern crate alloc as std;
 
 #[cfg(feature = "std")]
+#[allow(unused_extern_crates)]
 extern crate std;
 
 /// The built-once schema, and the draft §3 "Type Validation" pass that runs while building it.
