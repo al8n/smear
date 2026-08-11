@@ -79,7 +79,7 @@ use smear_parser::graphql::ast::{
 use smear_schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin};
 
 use super::{
-  Argument, ArgumentSource, Error, FieldRequest, Leaf, Node, ReqId, Values,
+  Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, Values,
   collect::{Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields},
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
@@ -107,6 +107,7 @@ mod tests;
 /// | collection work | selections **examined**, name-table entries **compared**, and the fragment index's pass, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; and leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
+/// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
 /// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
@@ -152,6 +153,7 @@ mod tests;
 /// | `TypeName` ids | interner ceiling | `Response` readers | next `start`/drop | `reset` | nothing: no `V`, no handle |
 /// | slots, metadata, interned text | their ceilings | tree walks, `Response` | next `start`/drop | `reset`; suffix-`restore` only | a creator that bypasses the sole creator |
 /// | error rows | one per position | `Response::errors` | next `start`/drop | `reset` | a position able to fail twice |
+/// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them |
 /// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
 /// | collection scratch | `max_response_metadata`, charged before each push | `expand`, this call only | cleared at the next collection | cleared, never shrunk — capacity is reused | a staged population charged against a *different* ceiling than the one that refuses it |
@@ -500,6 +502,33 @@ pub struct Limits {
   /// shape this module refuses; it is stated because a caller choosing this number is choosing
   /// twenty-five times it.
   pub max_interned_bytes: NonZeroU32,
+
+  /// How many entries a draft §7.1.7 [`Extensions`] map may hold.
+  ///
+  /// Charged by `Extensions::insert`, and re-checked by
+  /// [`set_extensions`](Executor::set_extensions) against *this* executor's value — a map built
+  /// under a laxer `Limits` is refused rather than trusted, because a ceiling a caller can pick is
+  /// advice.
+  ///
+  /// One of a **pair**, and neither half bounds anything alone: see
+  /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes).
+  pub max_extension_entries: NonZeroU32,
+
+  /// How many bytes of *key* a draft §7.1.7 [`Extensions`] map may hold, summed over its entries.
+  ///
+  /// The other half of the pair. Entries alone would leave one key free to be a gigabyte; key bytes
+  /// alone would leave an unbounded number of entries under empty keys, since a zero-length key is
+  /// a legal key. Together they also bound the map's linear scan, whose whole-life worst case is
+  /// `max_extension_entries × max_extension_key_bytes` byte comparisons.
+  ///
+  /// **Not** [`max_interned_bytes`](Limits::max_interned_bytes), and the separation is deliberate:
+  /// that arena is a response budget shared with field names and driver error messages, so
+  /// spending it on protocol metadata would let an extensions map refuse an error message.
+  ///
+  /// Values are **not** bounded here, by either ceiling. `proto` bounds what `proto` allocates, and
+  /// an entry's value is the driver's own `V` — the same way a `String` leaf of any length reaches
+  /// the response without a byte ceiling looking at it.
+  pub max_extension_key_bytes: NonZeroU32,
 }
 
 /// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
@@ -531,6 +560,18 @@ const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^
 /// working.
 const DEFAULT_INTERNED_BYTES: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
 
+/// Entries in one draft §7.1.7 `extensions` map.
+///
+/// Small on purpose, and it is not the shape of the other ceilings here. Those bound populations
+/// the *document* or the *response* grows into, and are sized so that no realistic request meets
+/// them. This bounds protocol metadata a service writes about itself — tracing, cost, cache hints,
+/// a deprecation notice — which is a handful of keys chosen by the implementer at design time, not
+/// a quantity that scales with anything. A service that genuinely needs more says so.
+const DEFAULT_EXTENSION_ENTRIES: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+
+/// Key bytes across one draft §7.1.7 `extensions` map, which with the entry count bounds the scan.
+const DEFAULT_EXTENSION_KEY_BYTES: NonZeroU32 = NonZeroU32::new(4096).expect("4096 is not zero");
+
 impl Default for Limits {
   #[inline]
   fn default() -> Self {
@@ -540,6 +581,8 @@ impl Default for Limits {
       max_response_metadata: DEFAULT_RESPONSE_METADATA,
       max_selection_visits: DEFAULT_SELECTION_VISITS,
       max_interned_bytes: DEFAULT_INTERNED_BYTES,
+      max_extension_entries: DEFAULT_EXTENSION_ENTRIES,
+      max_extension_key_bytes: DEFAULT_EXTENSION_KEY_BYTES,
     }
   }
 }
@@ -649,6 +692,26 @@ enum Exhausted {
 ///
 /// Every variant is a draft §6.1 `GetOperation` failure — a *request* error, raised before
 /// execution begins, which is why it is returned rather than collected into the response.
+///
+/// # A valid document reaches this, and there is no response shape for it
+///
+/// Worth stating plainly, because the opposite was written here first. These are **not** the
+/// residue of documents draft §5 would have rejected. [`AmbiguousOperation`](Self::AmbiguousOperation)
+/// is what a perfectly valid two-operation document produces when `start` is given no operation
+/// name, and [`UnknownOperation`](Self::UnknownOperation) is what a valid document produces when
+/// the driver names an operation it does not define. §6.1 selects *which* operation to run, which
+/// is a property of the request rather than of the document, so validation cannot pre-empt it.
+///
+/// Draft §7.1.3 gives those a response shape — a *request error result*: a map with **no** `data`
+/// entry, a non-empty `errors` list, and optionally its own §7.1.7 `extensions`. **This crate does
+/// not build one.** `start` returns this type and stops, so there is no [`Response`] to attach
+/// either entry to, and a driver that needs the §7.1.3 shape assembles it itself from the variant
+/// it was handed.
+///
+/// Closing that gap is not a matter of adding a field. A request error result's `errors` entries
+/// need §7.1.6's error result format — `message` at least — and per-error `extensions` is where a
+/// diagnostic code would go, which al8n/smear#126 reserves. So the second §7.1.7 site is recorded
+/// here rather than implemented, and it stays recorded until that contract exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StartError {
@@ -691,6 +754,56 @@ impl fmt::Display for StartError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for StartError {}
+
+/// Why [`Executor::set_extensions`] refused, carrying the map back.
+///
+/// The map is returned in every variant rather than dropped, for the reason a refused
+/// [`Extensions::insert`] returns its value: an entry may be a wasm or FFI handle, and a refusal
+/// that closes one has done more than refuse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SetExtensionsError<V> {
+  /// No operation is running: [`Executor::start`] has not been called, or the last one refused.
+  NoOperation(Extensions<V>),
+  /// The response has already been delivered, so no map attached now could ever appear in one.
+  AlreadyDelivered(Extensions<V>),
+  /// The map is larger than this executor's extension ceilings allow.
+  TooLarge(Extensions<V>),
+}
+
+impl<V> SetExtensionsError<V> {
+  /// Returns the map that was refused, giving up ownership.
+  #[inline]
+  pub fn into_extensions(self) -> Extensions<V> {
+    match self {
+      Self::NoOperation(extensions)
+      | Self::AlreadyDelivered(extensions)
+      | Self::TooLarge(extensions) => extensions,
+    }
+  }
+}
+
+impl<V> fmt::Display for SetExtensionsError<V> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(match self {
+      Self::NoOperation(_) => {
+        "no operation is running, so a `extensions` map attached now would be released by the next \
+         `start`"
+      }
+      Self::AlreadyDelivered(_) => {
+        "the response has already been delivered, so no `extensions` map attached now could appear \
+         in one"
+      }
+      Self::TooLarge(_) => {
+        "the `extensions` map exceeds this executor's `max_extension_entries` or \
+         `max_extension_key_bytes`"
+      }
+    })
+  }
+}
+
+#[cfg(feature = "std")]
+impl<V: fmt::Debug> std::error::Error for SetExtensionsError<V> {}
 
 /// What a slot needs from the document, kept out of [`Slot`] so the response types stay free of
 /// the source type `S`.
@@ -738,6 +851,58 @@ struct Entry {
 /// Draft §6's executor, for a query or a mutation.
 ///
 /// See [the crate root](crate) for the shape, why it has that shape, and a worked example.
+///
+/// # What every public `&mut self` method owes, on two axes
+///
+/// ## Axis 1 — the release
+///
+/// A driver's call in is the first moment the executor learns that the *previous* call's borrows
+/// have ended: the [`FieldRequest`] it handed out is gone, so the arguments it carried can be
+/// retired, and the object value the last offer parked can be settled. Neither release can happen
+/// when the lend ends, because at that instant the driver still holds the borrow. **So every public
+/// method taking `&mut self` must call `on_entry` before it does anything else** — or discharge the
+/// same obligation another way and say which.
+///
+/// ## Axis 2 — the phase
+///
+/// An operation is in one of three phases: **Idle** (`!started`), **Running**
+/// (`started && !delivered`), **Delivered** (`started && delivered`). A method is not owed a call
+/// in every one of them, and accepting a call from a phase where it cannot mean anything is not
+/// harmless — it is a success return for work that will never happen. A phase a method excludes has
+/// to be kept out by a flag test, or be impossible for a stated structural reason.
+///
+/// | method | discharge | meaningful in | how the rest are kept out |
+/// |---|---|---|---|
+/// | [`start`](Executor::start) | `reset`, which retires the arguments and drops the whole slot vector, parked object included | all three | — it *is* the transition into Running |
+/// | [`poll_resolve`](Executor::poll_resolve) | `on_entry` | Running | tests `started`; Delivered needs none, since delivery implies an empty ready chain and no live requests |
+/// | [`handle_resolved`](Executor::handle_resolved) | `on_entry` | Running | the [`ReqId`]'s epoch and generation — an id from another phase is stale and ignored |
+/// | [`handle_field_error`](Executor::handle_field_error) | `on_entry` | Running | the same id validation |
+/// | [`poll_abandoned`](Executor::poll_abandoned) | `on_entry` | Running **and Delivered** | the abandoned count, which `reset` zeroes. Delivered is deliberate: `poll_response` does not withhold on abandoned entries, so this is how they are retired afterwards |
+/// | [`set_extensions`](Executor::set_extensions) | `on_entry` | Running | tests both flags and **refuses**, because a map accepted outside Running is one no response will ever carry |
+/// | [`take_extensions`](Executor::take_extensions) | `on_entry` | all three | — outside Running there is no map, and `None` is the truthful answer |
+/// | [`poll_response`](Executor::poll_response) | `on_entry` | Running | tests both flags |
+///
+/// ## What holds the table to the code
+///
+/// Two tests, and neither is sufficient alone — a table can be complete and wrong, and a release
+/// can be real and unlisted.
+/// `execute::tests::every_public_entry_point_declares_its_discharge_and_its_phases` derives the set
+/// of public `&mut self` methods from this file's own source and fails on one the table does not
+/// name, one whose body does not *open* with the discharge it claims, one whose declared flag tests
+/// are not the flag tests the body performs, or an excluded phase with neither a guard nor a
+/// structural reason.
+/// `execute::tests::every_public_entry_point_settles_the_previous_call` drives each of them with
+/// both lends open and fails on one that does not close them.
+///
+/// **Both axes are here because review found a defect on each, and they were one mistake.**
+/// `set_extensions` and `take_extensions` shipped without `on_entry`, so a driver could drop a
+/// `FieldRequest`, call one of them, and leave a handle open with nothing in the response to show
+/// for it. `set_extensions` then also accepted a map before `start` — which the next `start`
+/// dropped — and after delivery, where no response could carry it. The first table was complete
+/// along the release axis and blind along the phase one. The obligation had been written down for
+/// years, on `on_entry` itself, in a comment that even predicted which later phases would inherit
+/// it. Prose one level away from the decision is not a mechanism, and **a table is only as wide as
+/// its columns**: when a ninth entry point arrives, the failure to expect is not a missing row.
 pub struct Executor<'a, S, V>
 where
   V: Values,
@@ -774,6 +939,29 @@ where
   locations: std::vec::Vec<SimpleSpan>,
   interner: Interner,
   errors: std::vec::Vec<Row>,
+  /// The draft §7.1.7 *Extensions* entry for this operation, or `None` when the response has none.
+  ///
+  /// # `proto` owns the top level, the driver owns every value under it
+  ///
+  /// §7.1.7 makes one structural demand — "if set, must have a map as its value" — and then stops:
+  /// "there are no additional restrictions on its contents". Those two clauses draw the seam. The
+  /// top level is where the specification requires a shape, so `Extensions` owns it and the illegal
+  /// shapes cannot be written; everything below is representation, so each value is one `V::Value`
+  /// the driver hands over and nothing here reads.
+  ///
+  /// This was an opaque `V::Value` for the whole entry first, and review corrected it. That version
+  /// let safe driver code reach a `Response` carrying `"extensions": null` with no error anywhere,
+  /// and `proto` could not detect it: `Values` has no `is_map`, and must not grow one, because each
+  /// of its methods discharges a numbered draft §6 step. `extensions.rs` carries the full argument
+  /// and prices the container.
+  ///
+  /// # It is released like an argument, not like a slot
+  ///
+  /// The response *tree* releases its values by being cleared, and this one is not in the tree, so
+  /// `reset` drops it by name. A value in it may be a wasm or FFI handle — `scratch_args` carries
+  /// that argument at length — and one kept past the operation it belongs to holds open whatever it
+  /// names.
+  extensions: Option<Extensions<V::Value>>,
 
   inflight: std::vec::Vec<Entry>,
   epoch: u64,
@@ -838,11 +1026,14 @@ where
   visits: Visits,
   /// Draft §6.4.1's surviving arguments, for the one request `poll_resolve` is offering.
   ///
-  /// The only driver values the executor owns that are not part of the response, and so the only
-  /// ones whose release is not the response tree's. An [`ArgumentSource::Variable`] carries the
-  /// very value §6.4.1 checked rather than the name to look it up by — see that variant for why it
-  /// must — which makes this vector the owner of a `V::Value` that may be a wasm or FFI handle,
-  /// and a handle held past the position it was checked for holds open whatever it names.
+  /// The only driver values the executor owns that are not part of the response at all, and so not
+  /// released by the response tree — nor is `extensions`, which *is* part of the response and still
+  /// outside the tree. Those two are the executor's only values that have to be dropped by name.
+  ///
+  /// An [`ArgumentSource::Variable`] carries the very value §6.4.1 checked rather than the name to
+  /// look it up by — see that variant for why it must — which makes this vector the owner of a
+  /// `V::Value` that may be a wasm or FFI handle, and a handle held past the position it was
+  /// checked for holds open whatever it names.
   ///
   /// It has exactly one reader, and [`retire_arguments`](Self::retire_arguments) is what that
   /// buys.
@@ -887,6 +1078,7 @@ where
       locations: std::vec::Vec::new(),
       interner: Interner::new(limits.max_interned_bytes.get()),
       errors: std::vec::Vec::new(),
+      extensions: None,
       inflight: std::vec::Vec::new(),
       epoch: 0,
       free: NONE,
@@ -928,8 +1120,9 @@ where
   /// operation for them to belong to.
   ///
   /// Every driver value that operation left behind is released here as well — its response tree,
-  /// and the arguments of the last request it was offered. That happens before draft §6.1's lookup
-  /// and therefore on the refusals too, so a `start` that returns a [`StartError`] leaves the
+  /// the arguments of the last request it was offered, and any draft §7.1.7 *Extensions* map
+  /// [`set_extensions`](Executor::set_extensions) was given. That happens before draft §6.1's
+  /// lookup and therefore on the refusals too, so a `start` that returns a [`StartError`] leaves the
   /// executor holding nothing: not the operation it ended, and not the `root` it was handed, which
   /// is never stored on a path that refuses.
   pub fn start(
@@ -1223,6 +1416,106 @@ where
     None
   }
 
+  /// Returns the ceilings this executor was built with.
+  ///
+  /// Chiefly so an [`Extensions`] map can be created under the same budget it will be checked
+  /// against: `Extensions::new(executor.limits())`.
+  #[inline]
+  pub const fn limits(&self) -> &Limits {
+    &self.limits
+  }
+
+  /// Attaches the draft §7.1.7 *Extensions* map to the response this operation will produce, and
+  /// returns whatever entry it replaced.
+  ///
+  /// §7.1.7, in full: "The `extensions` entry in an *execution result* or *request error result*,
+  /// if set, must have a map as its value. This entry is reserved for implementers to extend the
+  /// protocol however they see fit, and hence there are no additional restrictions on its
+  /// contents."
+  ///
+  /// # Three states, and no two of them are one
+  ///
+  /// | in the response | here | what §7 says |
+  /// |---|---|---|
+  /// | no `extensions` key at all | `None`: never set, or [`take_extensions`](Executor::take_extensions) | §7.1.1 *Execution Result*: it "**may** also contain an entry with key `extensions`" |
+  /// | `"extensions": { … }`, the empty map included | `Some(`[`Extensions`]`)` | §7.1.7 puts no restriction on the contents, and an empty map is a map |
+  /// | `"extensions": null`, or a scalar, or a list | **unrepresentable** | §7.1.7: "if set, **must have a map** as its value" |
+  ///
+  /// Present-and-empty is a different response from absent, and the `Option` is the only thing that
+  /// separates them: [`Extensions::is_empty`] is still a *present* entry.
+  ///
+  /// # Refusal
+  ///
+  /// Three ways, all handing the map back — see [`SetExtensionsError`]. Two are the operation
+  /// lifecycle and one is the budget:
+  ///
+  /// - **[`NoOperation`](SetExtensionsError::NoOperation).** Before [`start`](Executor::start), or
+  ///   after one that refused. `start` releases the previous operation's values, so a map accepted
+  ///   here would be dropped by the very next call — a silent loss dressed as a success.
+  /// - **[`AlreadyDelivered`](SetExtensionsError::AlreadyDelivered).**
+  ///   [`poll_response`](Executor::poll_response) yields at most once, so a map accepted after it
+  ///   has yielded could never appear in any response, and its values would be held by an executor
+  ///   with no way to surface them.
+  /// - **[`TooLarge`](SetExtensionsError::TooLarge).** The map exceeds *this* executor's
+  ///   [`max_extension_entries`](Limits::max_extension_entries) or
+  ///   [`max_extension_key_bytes`](Limits::max_extension_key_bytes). `Extensions` carries the
+  ///   ceilings it was created under, so the re-check is what stops a map built under a laxer
+  ///   `Limits` from being attached here — a ceiling a caller can pick is advice, and a signature
+  ///   is what prevents it.
+  ///
+  /// The first two are the same defect the third row of `Executor`'s phase table exists for: this
+  /// method is meaningful only while an operation is running, and a setter that accepts a value it
+  /// can never show anyone is a silent loss whichever side of the operation it happens on.
+  ///
+  /// # It is an entry point
+  ///
+  /// Like every other public call in, it settles the lends the driver's previous call left open
+  /// before anything else — including on the refusal paths, which is why `on_entry` runs before the
+  /// checks rather than after them. See [`Executor`]'s header for the obligation and the table.
+  ///
+  /// # No tier withholds it
+  ///
+  /// It is available wherever this crate is, and no feature gates it: `alloc` is unconditional in
+  /// this crate, so [`Extensions`] compiles and behaves the same under `--no-default-features` as
+  /// it does with `std`.
+  pub fn set_extensions(
+    &mut self,
+    extensions: Extensions<V::Value>,
+  ) -> Result<Option<Extensions<V::Value>>, SetExtensionsError<V::Value>> {
+    self.on_entry();
+    if !self.started {
+      return Err(SetExtensionsError::NoOperation(extensions));
+    }
+    if self.delivered {
+      return Err(SetExtensionsError::AlreadyDelivered(extensions));
+    }
+    if extensions.len() as u64 > u64::from(self.limits.max_extension_entries.get())
+      || u64::from(extensions.key_bytes()) > u64::from(self.limits.max_extension_key_bytes.get())
+    {
+      return Err(SetExtensionsError::TooLarge(extensions));
+    }
+    Ok(self.extensions.replace(extensions))
+  }
+
+  /// Removes the draft §7.1.7 *Extensions* map, returning it, so that the response carries no such
+  /// entry.
+  ///
+  /// The third transition, so that "absent" is not a one-way door. A driver that attached a map and
+  /// then concluded the response should not carry one gets its values back — which matters when one
+  /// is a handle — instead of having to end the operation to release them.
+  ///
+  /// **Legal in every phase, unlike its counterpart**, and infallible with it. Before an operation
+  /// and after delivery there is simply no map, so this answers `None` truthfully rather than
+  /// accepting something it cannot honour; and after delivery it is the one way a driver reclaims
+  /// the values the response was carrying without dropping the executor.
+  ///
+  /// An entry point, on the same terms as [`set_extensions`](Executor::set_extensions).
+  #[inline]
+  pub fn take_extensions(&mut self) -> Option<Extensions<V::Value>> {
+    self.on_entry();
+    self.extensions.take()
+  }
+
   /// Returns the finished response, once nothing that could still change it is outstanding.
   ///
   /// Yields at most once. A second call returns `None`, which is what makes it usable as the
@@ -1284,6 +1577,7 @@ where
       name_spans: self.interner.spans(),
       locations: &self.locations,
       errors: &self.errors,
+      extensions: self.extensions.as_ref(),
     })
   }
 
@@ -2254,6 +2548,12 @@ where
     self.interner.clear();
     self.interner.set_cap(self.limits.max_interned_bytes.get());
     self.errors.clear();
+    // Draft §7.1.7's entry belongs to the response one operation produced, so it is per-operation
+    // by this function's own rule: a function of neither the document nor the schema. Dropping it
+    // here is also the release — it is a driver value the response tree does not hold, so nothing
+    // else would ever let go of it — and it is why `set_extensions` says to call it *after*
+    // `start`.
+    self.extensions = None;
     self.inflight.clear();
     self.retire_arguments();
     // Emptying the slab makes every id the last operation issued reusable by index and generation,
@@ -2441,6 +2741,11 @@ where
   /// two calls because a later phase's entry point — phase 2's mutation withholding, phase 5's
   /// `handle_source_event` — should inherit the whole discipline by calling one thing, not
   /// remember a list.
+  ///
+  /// That prediction came true and this comment did not stop it: §7.1.7's two setters were added
+  /// without the call. [`Executor`]'s own header now carries the protocol and the table of what
+  /// discharges it, and `tests::every_public_entry_point_declares_its_discharge` derives the method
+  /// set from this file's source so a new one cannot join silently.
   fn on_entry(&mut self) {
     self.settle_deferred();
     self.retire_arguments();
@@ -2769,6 +3074,12 @@ where
 }
 
 /// A finished draft §7.1 response.
+///
+/// Draft §7.1.8 *Additional Entries* closes the map — an execution result "must not contain any
+/// entries other than those described above" — so this type's three accessors are the whole of the
+/// response rather than a part of it. [`data`](Response::data) is always an entry,
+/// [`errors`](Response::errors) is one when it is non-empty, and
+/// [`extensions`](Response::extensions) is one when the driver attached a map.
 pub struct Response<'r, V> {
   schema: &'r Schema,
   slots: &'r [Slot<V>],
@@ -2776,14 +3087,28 @@ pub struct Response<'r, V> {
   name_spans: &'r [(u32, u32)],
   locations: &'r [SimpleSpan],
   errors: &'r [Row],
+  extensions: Option<&'r Extensions<V>>,
 }
 
 impl<'r, V> Response<'r, V> {
   /// Returns the response's `data` entry.
   ///
   /// [`Node::Null`] is `"data": null`, which is what draft §6.4.4 produces when a non-null root
-  /// field errors — not an absent `data`, which §7.1.1 reserves for a *request* error and which
-  /// this executor cannot produce because it is only entered with a validated document.
+  /// field errors. It is never an *absent* `data`: the draft reserves that for a §7.1.3 *request
+  /// error result*, and a `Response` is only ever built by
+  /// [`poll_response`](Executor::poll_response), which runs after an execution began.
+  ///
+  /// **The reason is the construction and not the document, which is a correction.** This said "the
+  /// executor cannot produce one because it is only entered with a validated document", and that is
+  /// false — validity is not what stops it. A *valid* document with two named operations, started
+  /// without an operation name, is draft §6.1 `GetOperation`'s ambiguity and returns
+  /// [`StartError::AmbiguousOperation`]; so does a valid document plus a name it does not define.
+  /// Those are request errors, they are reachable, and what makes them absent from this type is
+  /// that [`start`](Executor::start) refuses *before* any response exists — the refusal is a
+  /// `StartError` returned to the driver, not a response with no `data`.
+  ///
+  /// So the §7.1.3 result shape is real and this crate has no path to it; see
+  /// [`StartError`]'s own header for what building one would take.
   #[inline]
   pub fn data(&self) -> Node<'r, V> {
     node(self.slots, self.names, self.name_spans, 0)
@@ -2813,6 +3138,19 @@ impl<'r, V> Response<'r, V> {
   pub fn is_ok(&self) -> bool {
     self.errors.is_empty()
   }
+
+  /// Returns the response's draft §7.1.7 *Extensions* entry, or `None` when it has none.
+  ///
+  /// `None` is an absent key and never an empty map: §7.1.1 *Execution Result* makes the entry
+  /// optional, and `Some(`[`Extensions`]`)` with [`is_empty`](Extensions::is_empty) true is the
+  /// *present* empty map, which is a different response. A `Some` is what
+  /// [`Executor::set_extensions`](Executor::set_extensions) was given, entry for entry and in the
+  /// same order; §7.1.7 reserves the values for the implementer, so there is nothing here for
+  /// `proto` to have interpreted.
+  #[inline]
+  pub fn extensions(&self) -> Option<&'r Extensions<V>> {
+    self.extensions
+  }
 }
 
 impl<V> fmt::Debug for Response<'_, V> {
@@ -2820,6 +3158,9 @@ impl<V> fmt::Debug for Response<'_, V> {
     f.debug_struct("Response")
       .field("data", &self.data())
       .field("errors", &self.error_count())
+      // `Extensions`'s own `Debug` renders keys without requiring `V: Debug`, for the reason
+      // `Node::Leaf` renders as `<leaf>`.
+      .field("extensions", &self.extensions)
       .finish()
   }
 }
