@@ -1,12 +1,17 @@
 [workspace]
 members = [
   "ci/source_census",
+  "graphql-proto",
   "smear",
+  "smear-lexer",
   "smear-noatomic",
+  "smear-parser",
+  "smear-compiler",
+  "smear-schema",
   "smear-smoke",
 ]
 
-# ── ONE OF THE FOUR MEMBERS PULLS `smear` PAST ITS DEFAULT FEATURE SET ───────────────────────
+# ── ONE MEMBER PULLS `smear` PAST ITS DEFAULT FEATURE SET ────────────────────────────────────
 #
 # `smear-smoke` enables `smear/rowan`, `lossless-coverage` and `test-support`. Cargo unifies
 # features across the SELECTED packages, so a bare workspace-wide command resolves `smear` with
@@ -19,6 +24,12 @@ members = [
 # criterion and the comparison parsers are on this package's inner loop now — and it does not
 # change this arithmetic, because a package's own dev-dependencies are not another member's
 # feature request.
+#
+# THE SPLIT DID NOT CHANGE THIS ARITHMETIC, and it is worth saying why not: the five member crates
+# below `smear` are reached only THROUGH it, so `smear-smoke`'s request travels down the same edges
+# a dependent's does. What the split does change is that a bare workspace command now also selects
+# those five directly, each at its own default — which is a wider build, not a wider resolve of
+# `smear`.
 #
 # TWO members this arithmetic does not reach, both deliberately and for different reasons.
 #
@@ -47,6 +58,13 @@ members = [
 # later. The selection is pinned where it is READ instead: `ci/miri_sb.sh` and `ci/miri_tb.sh`
 # pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted is not what
 # those scripts claim.
+
+# `ci/downstream/` is NOT a member and must never become one. It is a consumer fixture with a
+# dependency edge to `smear`, so a member entry would add its features to the workspace-wide resolve
+# and unify them into smear's own build — which is exactly the unification it exists to escape. It
+# carries its own `[workspace]` table; this says the same thing a second time, so a future `members`
+# glob cannot swallow it.
+exclude = ["ci/downstream"]
 
 resolver = "3"
 
@@ -84,11 +102,33 @@ tokora = { version = "0.9", default-features = false, features = ["logos", "allo
 paste = "1"
 thiserror = { version = "2", default-features = false }
 
+graphql-proto = { path = "graphql-proto", version = "0.0.0", default-features = false }
 smear = { path = "smear", version = "0.0.0", default-features = false }
+smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
+smear-parser = { path = "smear-parser", version = "0.0.0", default-features = false }
+smear-compiler = { path = "smear-compiler", version = "0.0.0", default-features = false }
+smear-schema = { path = "smear-schema", version = "0.0.0", default-features = false }
 
 [workspace.lints.rust]
-rust_2018_idioms = "warn"
+# `priority = -1` because `unused_extern_crates` below is a MEMBER of this group, and cargo
+# refuses a group and one of its lints at the same priority — the group has to be resolved first
+# for the specific level to win.
+rust_2018_idioms = { level = "warn", priority = -1 }
 single_use_lifetimes = "warn"
+# ALREADY ON, AND THAT IS THE POINT. `unused_extern_crates` is part of `rust_2018_idioms` above, so
+# this repository had opted into the lint from the start — at `warn`. What decided whether it
+# stopped a build was the ENVIRONMENT: `.github/workflows/ci.yml` sets `RUSTFLAGS: -Dwarnings` for
+# every job, so it is an error in CI and a warning in any local run that does not export the same
+# variable. `cargo hack clippy --each-feature` run without it cleared a tree CI then reddened,
+# twice, on the same construct — the alloc-as-std alias, once in `smear` and once in
+# `smear-parser`.
+#
+# Denying it here is the repair for that gap: a lint level in the manifest travels with the code
+# and holds for `cargo clippy`, `cargo check` and `cargo hack` alike, with or without the
+# environment. `ci/hack.sh` closes the other half by making CI and a local run the same string.
+#
+# The alloc-as-std alias in each member carries an explicit `#[allow]` and states why.
+unused_extern_crates = "deny"
 unexpected_cfgs = { level = "warn", check-cfg = [
   # Testing / coverage helpers. These are set via `RUSTFLAGS='--cfg ...'`
   # in CI to force the dispatcher down a specific path so lower‑tier

@@ -15,7 +15,7 @@ publish = false
 #
 # It does that by compiling `smear`'s own files — `#[path]`-included, not copied. A copy would
 # pass forever after the original drifted; this member fails to build the moment a `use` in
-# `smear/src/validator/schema/repr/` reaches outside `core` and `alloc`.
+# `smear-schema/src/repr/` reaches outside `core` and `alloc`.
 #
 # The gate is `cargo build -p smear-noatomic --target thumbv6m-none-eabi`. `smear` itself cannot
 # build for that target and is not expected to: its syntactic AST offers an `Arc`-backed list-type
