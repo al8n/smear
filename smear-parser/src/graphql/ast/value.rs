@@ -121,7 +121,12 @@ impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
 }
 
 /// GraphQL constant input value (schema context).
-#[derive(Debug, Clone, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+///
+/// The `From` conversions are how the shared value productions build this tree: a production
+/// names the leaf it just read and converts, so one body serves both this tree and its
+/// materialised twin. [`InputValue`] has derived them since it was written, and this enum gaining
+/// them is the **only** change the materialisation axis makes to this file. It is additive.
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {

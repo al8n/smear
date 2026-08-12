@@ -44,6 +44,7 @@ smear = { path = "../smear", default-features = false, features = [
   "rowan",
   "lossless-coverage",
   "test-support",
+  "materialized-numbers",
 ] }
 
 # The source-backing crates, named directly so each probe can construct a source of that type.

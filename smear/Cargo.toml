@@ -132,6 +132,18 @@ bstr = ["dep:bstr", "smear-lexer/bstr", "smear-parser?/bstr", "tokora/bstr_1"]
 hipstr = ["dep:hipstr", "smear-lexer/hipstr", "smear-parser?/hipstr", "tokora/hipstr_0_8"]
 smol-bytes = ["smear-lexer/smol-bytes", "smear-parser?/smol-bytes", "tokora/smol_bytes_0_1"]
 
+# The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
+# productions carrying `i64` and `f64` where the slice parser carries a source slice.
+#
+# It names the member STRONGLY and pulls `parser` and `graphql` in, where the five backings above
+# forward weakly. The difference is that those features mean something to `smear-lexer` with no
+# parser in the graph, and this one means nothing at all: every item it compiles is inside
+# `smear-parser`'s `graphql` modules. A weak forward would let `smear/materialized-numbers`
+# resolve with `smear-parser` absent and enable nothing anywhere, and — because the member
+# feature implies `graphql` — would trip the feature fence below the moment the parser DID
+# arrive through some other edge.
+materialized-numbers = ["parser", "graphql", "smear-parser/materialized-numbers"]
+
 # The lossless CST tower. Reachable through the crate named `smear` for the first time here (#81).
 # `parser` because the tower lives in that module; `std` because the runner needs it.
 #
