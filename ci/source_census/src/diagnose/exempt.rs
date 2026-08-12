@@ -162,6 +162,21 @@ pub const EXEMPTIONS: &[Exemption] = &[
              that refused, which is the machine-readable part a code would otherwise have carried.",
   },
   Exemption {
+    path: "smear::proto::TooLarge",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Which of the two §7.1.7 extension ceilings refused a whole map on its way into a \
+             draft §7.1.3 request error result, and the map handed back so a refusal cannot close \
+             a handle the driver still owns. Same argument as `Full`, one level up: `Full` is an \
+             insert refused and this is an attach refused, and neither has a document behind it to \
+             have a span in — the map is the *service's* own, built after execution was declined. \
+             The value it is refused by happens to be a §7 response, and that changes nothing: \
+             this refusal never reaches one, because the whole point is that the map does not. \
+             `Ceiling::field` names the `Limits` field that refused, which is the machine-readable \
+             part a code would otherwise have carried.",
+  },
+  Exemption {
     path: "smear::validator::LosslessInvalid",
     kind: Kind::Verdict,
     element: None,

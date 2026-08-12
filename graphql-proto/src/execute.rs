@@ -107,7 +107,7 @@ mod tests;
 /// | collection work | selections **examined**, name-table entries **compared**, and the fragment index's pass, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; and leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
-/// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and `set_extensions`, which re-derives an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to |
+/// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the two retainers** — [`set_extensions`](Executor::set_extensions) and [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions), both of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
 /// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
@@ -534,6 +534,13 @@ pub struct Limits {
   ///
   /// One of a **pair**, and neither half bounds anything alone: see
   /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes).
+  ///
+  /// **Two retainers read it, because §7.1.7 has two sites.**
+  /// [`RequestErrorResult`](super::RequestErrorResult) carries the entry for a draft §7.1.3
+  /// *request error result* and performs the identical re-check and re-derivation against the
+  /// ceilings it was created with. Passing [`limits`](Executor::limits) is what makes those this
+  /// executor's; the type's header says why nothing forces it and what that does and does not
+  /// bound.
   pub max_extension_entries: NonZeroU32,
 
   /// How many bytes of *key* a draft §7.1.7 [`Extensions`] map may hold, summed over its entries.
@@ -722,7 +729,7 @@ enum Exhausted {
 /// Every variant is a draft §6.1 `GetOperation` failure — a *request* error, raised before
 /// execution begins, which is why it is returned rather than collected into the response.
 ///
-/// # A valid document reaches this, and there is no response shape for it
+/// # A valid document reaches this, and there is a response shape for it
 ///
 /// Worth stating plainly, because the opposite was written here first. These are **not** the
 /// residue of documents draft §5 would have rejected. [`AmbiguousOperation`](Self::AmbiguousOperation)
@@ -732,15 +739,20 @@ enum Exhausted {
 /// is a property of the request rather than of the document, so validation cannot pre-empt it.
 ///
 /// Draft §7.1.3 gives those a response shape — a *request error result*: a map with **no** `data`
-/// entry, a non-empty `errors` list, and optionally its own §7.1.7 `extensions`. **This crate does
-/// not build one.** `start` returns this type and stops, so there is no [`Response`] to attach
-/// either entry to, and a driver that needs the §7.1.3 shape assembles it itself from the variant
-/// it was handed.
+/// entry, a non-empty `errors` list, and optionally its own §7.1.7 `extensions`.
+/// [`RequestErrorResult::new`](super::RequestErrorResult::new) builds one from this type and the
+/// refusing executor's [`limits`](Executor::limits). `start`'s own signature is unchanged: it
+/// returns this value and builds no response, because a result the driver may never need is not
+/// the refusal's to allocate.
 ///
-/// Closing that gap is not a matter of adding a field. A request error result's `errors` entries
-/// need §7.1.6's error result format — `message` at least — and per-error `extensions` is where a
-/// diagnostic code would go, which al8n/smear#126 reserves. So the second §7.1.7 site is recorded
-/// here rather than implemented, and it stays recorded until that contract exists.
+/// **This header used to say the shape was gated on al8n/smear#126, and the gate was drawn one
+/// step too wide.** §7.1.6's error result format has exactly one `must` — `message` — and this
+/// type's `Display` is it, rendered rather than stored the way `error.rs`'s are; per-error
+/// `extensions` is a `may`, which the execution result's own [`Error`](super::Error) does not
+/// carry either. What #126 does gate is a *driver-supplied* entry in that list — a message this
+/// crate did not raise, with a diagnostic code beside it — which is why the list here holds
+/// exactly the one error `start` raised. [`RequestErrorResult`](super::RequestErrorResult)'s
+/// header has the boundary and the three request-error sources that fall outside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StartError {
@@ -3164,8 +3176,11 @@ impl<'r, V> Response<'r, V> {
   /// that [`start`](Executor::start) refuses *before* any response exists — the refusal is a
   /// `StartError` returned to the driver, not a response with no `data`.
   ///
-  /// So the §7.1.3 result shape is real and this crate has no path to it; see
-  /// [`StartError`]'s own header for what building one would take.
+  /// So the §7.1.3 result shape is real, and it is a **different type**:
+  /// [`RequestErrorResult`](super::RequestErrorResult), which has no `data` accessor at all. The
+  /// two result kinds are two maps in §7.1 and they are two types here, which is what stops a
+  /// driver from reaching for this one — whose `data` is infallible — to answer a request that
+  /// never ran.
   #[inline]
   pub fn data(&self) -> Node<'r, V> {
     node(self.slots, self.names, self.name_spans, 0)
