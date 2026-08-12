@@ -40,6 +40,15 @@
 //! ended; and cancel that stream when [`response_stream`](crate::Executor::response_stream) reads
 //! [`Cancelled`](ResponseStream::Cancelled).
 //!
+//! **That last one is the only obligation this crate cannot discharge, so it is the only one it
+//! refuses to let a driver walk past.** [`start`](crate::Executor::start) over an executor whose
+//! response stream is still open answers
+//! [`ResponseStreamOpen`](crate::StartError::ResponseStreamOpen) and changes nothing: a `reset`
+//! there would replace the phase — and the phase *is* the channel `Cancelled` travels on — so a
+//! reused executor would leak one source stream per restart with nothing left in the machine to say
+//! so. Ending the stream through [`unsubscribe`](crate::Executor::unsubscribe) is what publishes the
+//! obligation, and after that `start` proceeds.
+//!
 //! # Why the intake is serial, measured rather than assumed
 //!
 //! `graphql-js` 16.11.0's `subscribe()` is `createSourceEventStream` followed by
@@ -69,9 +78,22 @@
 //! Every source event begins with the same `reset` a second
 //! [`start`](crate::Executor::start) performs: the response tree, the interner, the error rows, the
 //! draft §7.1.7 map, the in-flight slab and the whole visit budget go back to where they were, and
-//! every driver value the previous event held is dropped. The containers keep their capacity, which
-//! the ceilings already bound, so a steady-state event allocates nothing and no ceiling accumulates
-//! across a stream.
+//! every driver value the previous event held is dropped. So no *entry* survives an event, and no
+//! ceiling accumulates across a stream.
+//!
+//! **The containers keep their capacity, and this used to say the ceilings bound it. They bound
+//! most of it.** `reset` clears and deliberately never shrinks — that is what makes a steady-state
+//! event allocate nothing — so the honest statement is about twelve buffers rather than one
+//! sentence, and one of the twelve is grown by a site no ceiling charges at all: draft §6.4.1's
+//! coerced arguments, which are bounded by the schema's widest declared argument list instead.
+//! [`Limits`](crate::Limits) carries the census, row by row, with each buffer's growth site and
+//! what bounds it; `no_buffer_a_subscription_retains_grows_with_the_stream` is the gate.
+//!
+//! The gap is worth naming because of *how* it survived. "Nothing is retained per event" is true of
+//! entries and was read as true of bytes, and every gate here reads entries: a charge model puts
+//! each spend back to zero at the reset, so a buffer creeping upward event after event leaves all
+//! four cumulative quantities identical. A capacity census is the only thing that asks the
+//! question, and it is the question a stream that never ends makes load-bearing.
 //!
 //! That last clause is a correctness property and not an optimisation. [`Limits`](crate::Limits)'s
 //! cumulative ceilings — positions, metadata, interned bytes and above all
@@ -115,6 +137,27 @@
 //!   complete"), and §6.2.3.2 enumerates exactly which endings there are. They are the last three
 //!   variants, and enumerating them once is deliberate: a phase enum that learns a termination per
 //!   discovery is one that was written before the algorithm was read.
+//!
+//! # An ending is sequenced after the events, and that is a state rather than a rule
+//!
+//! §6.2.3.2's two source-stream endings are the last thing in a mapping over the events that came
+//! before them, so a source that emits its final value and completes back to back leaves this
+//! machine with an accepted event, an undelivered execution result, and a completion to honour. The
+//! shipped draft ended the stream on the spot, which reset over that event and dropped the result —
+//! the specification's one-result-per-source-event mapping, violated by the ordinary behaviour of a
+//! push source, with a comment next to it saying the driver had to drain first. It does not: the
+//! `Response` borrow a driver never takes constrains nothing.
+//!
+//! So the executor holds a private stage that [`ResponseStream`] has no value for — the source
+//! ended, one result still owed — and the terminator's own `match` cannot reach the reset from it.
+//! The ending is recorded, [`poll_response`](crate::Executor::poll_response) emits the result and
+//! *then* performs it, and until it does the stream reads
+//! [`Streaming`](ResponseStream::Streaming), which is the truthful answer to the only question
+//! [`ResponseStream::is_open`] asks.
+//!
+//! §6.2.3.3 is the exception and is the one ending that discards, because a client that has
+//! cancelled is not owed a payload. The three endings are not symmetric here and should not be
+//! made so.
 //!
 //! # The one arm of §6.2.3.2 that is unreachable here
 //!
@@ -267,6 +310,13 @@ pub enum ResponseStream {
   Creating,
   /// Open: each source event the machine accepts produces exactly one draft §7.1.1 execution
   /// result.
+  ///
+  /// It also covers the state in which the source stream has already ended and the last accepted
+  /// event's result has not been taken. That is deliberate rather than a conflation — §6.2.3.2
+  /// sequences an ending *after* the events it mapped, so the response stream has not completed
+  /// while it still owes one, and this variant is the answer to "can it still emit an execution
+  /// result". Take the result and the state becomes the ending that was recorded. The module
+  /// header has the whole argument.
   Streaming,
   /// Draft §6.2.3.2: "When {sourceStream} completes normally: Complete {responseStream} normally."
   Completed,
@@ -330,18 +380,26 @@ impl fmt::Display for ResponseStream {
 /// Both variants are repairable from what the caller already holds, which is the other half of the
 /// obligation. [`Outstanding`](SourceEventError::Outstanding) says *drain this event's response
 /// first* — the driver has the poll loop that does it and can push the same value again.
-/// [`NotStreaming`](SourceEventError::NotStreaming) says *there is no open response stream* —
-/// [`response_stream`](crate::Executor::response_stream) says which of the four non-streaming
-/// states it is in, so the driver can tell "§6.2.3.1 is not finished" from "the stream has ended"
-/// without guessing.
+/// [`NotStreaming`](SourceEventError::NotStreaming) says *no further event will be accepted* —
+/// [`response_stream`](crate::Executor::response_stream) says where the stream is, so the driver
+/// can tell "§6.2.3.1 is not finished" from "the stream has ended" without guessing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SourceEventError<V> {
-  /// No response stream is open to emit an execution result on.
+  /// No further source event will be accepted.
   ///
   /// Either the executor is not running a subscription at all, or draft §6.2.3.1 has not finished
   /// — [`handle_source_stream`](crate::Executor::handle_source_stream) has not been called — or the
   /// stream has already completed, failed or been cancelled.
+  ///
+  /// **One case answers this while [`response_stream`](crate::Executor::response_stream) still
+  /// reads [`Streaming`](ResponseStream::Streaming)**, and the two are not in disagreement. A
+  /// source stream that ended while an event was running has its §6.2.3.2 ending *recorded*: the
+  /// response stream is open because it still owes that event's execution result, and no event will
+  /// ever be taken again because the source has already ended. This variant is the second half, and
+  /// it is the actionable one — the driver's remedy is to take the last result, not to retry the
+  /// event, which is why it is not
+  /// [`Outstanding`](SourceEventError::Outstanding).
   NotStreaming(V),
   /// The previous event's draft §7.1.1 execution result has not been taken yet.
   ///
@@ -366,7 +424,7 @@ impl<V> fmt::Display for SourceEventError<V> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.write_str(match self {
       Self::NotStreaming(_) => {
-        "no draft §7.1.2 response stream is open, so a source event accepted now could not be \
+        "no draft §7.1.2 response stream is taking source events, so one accepted now could not be \
          mapped to an execution result"
       }
       Self::Outstanding(_) => {

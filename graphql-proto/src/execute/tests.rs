@@ -1178,20 +1178,24 @@ fn a_withheld_top_level_field_is_in_the_tree_and_reads_as_null() {
 /// *omitted*: the only way out of `on_entry` is to name the alternative that does the same work.
 /// `refactor/crate-split` learned the same lesson one level up, where an exemption table of pairs
 /// to skip hid a real finding and became a table of twins to declare instead.
+///
+/// **It had a second variant, `Reset`, and losing it is a finding rather than a tidy.** `start`
+/// opened with `self.reset()`, which discharges strictly more than `on_entry` — and that was
+/// exactly the defect: the reset destroyed the draft §6.2.3.3 obligation an open response stream
+/// was publishing, before `start` could refuse on it. The refusal has to read the phase first, so
+/// `start`'s opening statement is now `on_entry` like every other entry point's, and every path
+/// that goes on to begin an operation still resets. One variant, therefore — and a method that ever
+/// needs a different discharge adds its own rather than being omitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Discharge {
-  /// Calls `on_entry` first, which is the ordinary case.
+  /// Calls `on_entry` first, which is every entry point.
   OnEntry,
-  /// Calls `reset` first, which retires the arguments and drops the whole slot vector — the parked
-  /// object among them — so it discharges strictly more than `on_entry` does.
-  Reset,
 }
 
 impl Discharge {
   const fn statement(self) -> &'static str {
     match self {
       Self::OnEntry => "self.on_entry();",
-      Self::Reset => "self.reset();",
     }
   }
 }
@@ -1281,8 +1285,15 @@ struct EntryPoint {
   /// **The third column, added with draft §6.2.3's five entry points rather than after them.**
   /// Empty means the method performs no operation-kind test at all: its legality is decided by the
   /// two execution flags, and it means the same thing under a query, a mutation and a
-  /// subscription. Non-empty means it reads [`Guard::Stream`], and these are the states it lets
-  /// through.
+  /// subscription. Non-empty means it reads [`Guard::Stream`], and these are the states its test
+  /// acts in.
+  ///
+  /// "Acts in" and not "admits", because two rows read the slot without gating on it. `start`
+  /// **refuses** the states it does not name, so for it the column is the admitted set; and
+  /// `poll_response` performs a *transition* in the state it names — a recorded §6.2.3.2 ending is
+  /// discharged by the very call that takes the result it was queued behind. Both are the same
+  /// claim the column exists to make: this method does not mean the same thing under every
+  /// operation kind, and here is where it differs.
   ///
   /// The two claims are checked against each other, in both directions, for the reason the guard
   /// column is checked against the source: a column nothing compares to the code is a caption. What
@@ -1309,12 +1320,22 @@ const MIN_REASON: usize = 40;
 /// if the reader ever stops finding the surface, this table goes stale in the same instant rather
 /// than reporting a clean file.
 const ENTRY_PROTOCOL: &[EntryPoint] = &[
+  // `on_entry` and not `reset`, and the difference is one refusal. Draft §6.2.3.3's obligation
+  // travels on the phase, so the open-stream refusal has to be read *before* the reset that would
+  // erase it — and a refusal that mutates nothing is not "doing something else" ahead of the
+  // discharge. Every path that actually begins an operation still resets, which is strictly more.
   EntryPoint {
     name: "start",
-    discharge: Discharge::Reset,
+    discharge: Discharge::OnEntry,
     meaningful: &ALL_PHASES,
-    stream: &[],
-    guards: &[],
+    // The three endings, and no open one: a source stream the driver has not been told to cancel
+    // is the one thing `start` cannot silently replace.
+    stream: &[
+      ResponseStream::Completed,
+      ResponseStream::Failed,
+      ResponseStream::Cancelled,
+    ],
+    guards: &[Guard::Stream],
     structural: "",
   },
   EntryPoint {
@@ -1377,12 +1398,17 @@ const ENTRY_PROTOCOL: &[EntryPoint] = &[
     guards: &[],
     structural: "",
   },
+  // The one row whose `self.phase` read is a *transition* rather than a legality test, and the
+  // column is right to demand it: under a subscription whose source stream has already ended, this
+  // call is what completes the response stream, so it no longer means the same thing under all
+  // three operation kinds. The state named is the published one it acts in — a recorded ending is
+  // still `Streaming` until the result it is queued behind is taken here.
   EntryPoint {
     name: "poll_response",
     discharge: Discharge::OnEntry,
     meaningful: &[Phase::Running],
-    stream: &[],
-    guards: &[Guard::Started, Guard::Delivered],
+    stream: &[ResponseStream::Streaming],
+    guards: &[Guard::Started, Guard::Delivered, Guard::Stream],
     structural: "",
   },
   // ── draft §6.2.3, the five that read the operation-kind slot ─────────────────────────────────
@@ -1416,6 +1442,10 @@ const ENTRY_PROTOCOL: &[EntryPoint] = &[
                  execution result the specification requires to be emitted. It is reported as \
                  `SourceEventError::Outstanding`, with the event handed back.",
   },
+  // The two endings that read *both* execution flags, and that pair is the whole of the repair.
+  // Running is not excluded — a source stream ends when it ends, mid-event included — it is the
+  // phase in which the ending is recorded rather than performed, so the accepted event's execution
+  // result survives to be emitted.
   EntryPoint {
     name: "handle_source_complete",
     discharge: Discharge::OnEntry,
@@ -1423,7 +1453,7 @@ const ENTRY_PROTOCOL: &[EntryPoint] = &[
     // with requests outstanding, and after a result has been taken are all reachable.
     meaningful: &ALL_PHASES,
     stream: &[ResponseStream::Streaming],
-    guards: &[Guard::Stream],
+    guards: &[Guard::Started, Guard::Delivered, Guard::Stream],
     structural: "",
   },
   EntryPoint {
@@ -1431,7 +1461,7 @@ const ENTRY_PROTOCOL: &[EntryPoint] = &[
     discharge: Discharge::OnEntry,
     meaningful: &ALL_PHASES,
     stream: &[ResponseStream::Streaming],
-    guards: &[Guard::Stream],
+    guards: &[Guard::Started, Guard::Delivered, Guard::Stream],
     structural: "",
   },
   EntryPoint {
@@ -2191,6 +2221,75 @@ type Message {
 /// The chat subscription draft §6.2.3 itself uses as its example, with a literal argument.
 const SUB_QUERY: &str = r#"subscription NewMessages { newMessage(roomId: "123") { sender text } }"#;
 
+/// A subscription whose event can be made as large as the ceilings admit, for the retained-buffer
+/// census.
+///
+/// A list under the source field is what lets a *driver* quantity drive the response size, which is
+/// the only way to reach the position and metadata ceilings from an event; `feed`'s two arguments
+/// are the schema's widest list and therefore the bound on `scratch_args`.
+const CENSUS_SDL: &str = r#"
+type Query {
+  a: String
+}
+type Subscription {
+  feed(topic: ID!, since: String): Cell
+}
+type Cell {
+  rows: [Row]
+}
+type Row {
+  text: String
+  other: String
+}
+"#;
+
+/// Two fragments, so draft §6.3's `visitedFragments` and the fragment index are populated rather
+/// than left at zero — a census row that is always empty checks nothing.
+const CENSUS_QUERY: &str = r#"
+subscription Feed { feed(topic: "t") { rows { ...Body } } }
+fragment Body on Row { text ...Tail }
+fragment Tail on Row { other }
+"#;
+
+/// One field with arguments, aliased enough times that a buffer accumulating across candidates
+/// leaves the schema's widest argument list behind.
+///
+/// Twelve rather than three, because a `Vec`'s first allocation is four elements: a bound of two
+/// and an accumulation of three are the same capacity, so a smaller fixture would go green under
+/// the very fault this is for.
+const ARGUMENTS_SDL: &str = r#"
+type Query {
+  a: String
+}
+type Subscription {
+  feed(topic: ID!, since: String): Cell
+}
+type Cell {
+  bad(pad: String, must: String!): String
+}
+"#;
+
+/// Every alias supplies `must` from a variable [`Space`] does not answer, so draft §6.4.1 step 5.f
+/// raises **after** `pad` has been pushed — which is the one shape that leaves anything behind.
+const ARGUMENTS_QUERY: &str = r#"
+subscription Feed($missing: String!) {
+  feed(topic: "t", since: "s") {
+    f1: bad(pad: "p", must: $missing)
+    f2: bad(pad: "p", must: $missing)
+    f3: bad(pad: "p", must: $missing)
+    f4: bad(pad: "p", must: $missing)
+    f5: bad(pad: "p", must: $missing)
+    f6: bad(pad: "p", must: $missing)
+    f7: bad(pad: "p", must: $missing)
+    f8: bad(pad: "p", must: $missing)
+    f9: bad(pad: "p", must: $missing)
+    f10: bad(pad: "p", must: $missing)
+    f11: bad(pad: "p", must: $missing)
+    f12: bad(pad: "p", must: $missing)
+  }
+}
+"#;
+
 /// Runs one draft §6.2.3.2 event to its execution result, answering every field, and returns what
 /// the event charged against the four cumulative ceilings.
 fn drive_event(executor: &mut Executor<'_, &str, Space>, space: &mut Space) -> super::Charges {
@@ -2604,6 +2703,331 @@ fn reporting_the_source_stream_releases_the_initial_value() {
     0,
     "and released the instant the source stream exists"
   );
+}
+
+/// A source stream that ends while an event's result is undelivered still emits that result.
+/// An ending reported mid-event is a state the terminator cannot skip past.
+///
+/// **The fault: draft §6.2.3.2's one-result-per-event mapping, broken by the ordinary behaviour of
+/// a push source.** A source that emits its final value and completes back to back reaches the
+/// terminator with an event accepted and its execution result untaken, and the shipped draft
+/// `reset` over it — data, errors, the §7.1.7 map and both execution flags — so `poll_response`
+/// could never emit the result the specification requires. The ordering was a sentence in a
+/// comment claiming the compiler enforced it; the borrow it appealed to never exists for a driver
+/// that simply does not call `poll_response`.
+///
+/// So this drives the states the repair adds rather than only the result: the ending refuses to
+/// happen twice, the intake still refuses, the event is still *running* enough to accept a §7.1.7
+/// map, and the recorded ending arrives exactly when the result is taken. Both §6.2.3.2 arms,
+/// because they are two bodies and a repair to one is not a repair to the other.
+#[test]
+fn an_ending_reported_mid_event_still_emits_that_events_result() {
+  for end in [ResponseStream::Completed, ResponseStream::Failed] {
+    let (schema, document) = compile_against(SUB_SDL, SUB_QUERY);
+    let mut space = Space;
+    let mut executor = Executor::new(&schema, &document);
+    executor
+      .start(&mut space, None, Value::Obj)
+      .expect("the subscription resolves");
+    assert!(executor.handle_source_stream());
+
+    executor
+      .handle_source_event(&mut space, Value::Obj)
+      .expect("the stream is open");
+    while let Some(request) = executor.poll_resolve(&mut space) {
+      let id = request.id();
+      executor.handle_resolved(&mut space, id, Value::Text);
+    }
+
+    let ended = match end {
+      ResponseStream::Completed => executor.handle_source_complete(),
+      _ => executor.handle_source_error(),
+    };
+    assert!(ended, "{end:?} ends an open stream");
+    assert_eq!(
+      executor.response_stream(),
+      Some(ResponseStream::Streaming),
+      "a stream that still owes an execution result has not completed"
+    );
+    assert!(
+      !executor.handle_source_complete() && !executor.handle_source_error(),
+      "and the ending does not happen twice"
+    );
+    // `NotStreaming` and not `Outstanding`, and the difference is the driver's remedy: the source
+    // has ended, so no retry of this event can ever succeed and the thing to do is take the last
+    // result. It is the one case where the refusal says "not streaming" while the stream reads
+    // `Streaming`, and `SourceEventError::NotStreaming` records why the two agree.
+    assert!(matches!(
+      executor.handle_source_event(&mut space, Value::Obj),
+      Err(SourceEventError::NotStreaming(_))
+    ));
+
+    // The event is still Running, which is what makes it able to owe a result at all — so draft
+    // §7.1.7's setter still accepts, and the map reaches the response the ending was queued behind.
+    let mut extensions = Extensions::new(executor.limits());
+    extensions
+      .insert("seq", Value::Text)
+      .expect("well under the ceiling");
+    executor
+      .set_extensions(extensions)
+      .expect("the event is running and its result is not delivered");
+
+    {
+      let response = executor
+        .poll_response()
+        .expect("the accepted event owes an execution result");
+      assert!(matches!(response.data(), Node::Object(_)));
+      assert!(response.extensions().is_some());
+    }
+    assert_eq!(
+      executor.response_stream(),
+      Some(end),
+      "and taking it is the transition into the ending that was recorded"
+    );
+    assert!(matches!(
+      executor.handle_source_event(&mut space, Value::Obj),
+      Err(SourceEventError::NotStreaming(_))
+    ));
+  }
+}
+
+/// `start` over an open response stream refuses rather than orphaning the driver's source stream.
+///
+/// **The fault: one leaked pub-sub subscription, cursor or task per restart, with no observable.**
+/// `start` reset before it looked at the phase, so an open `Streaming` was replaced without ever
+/// passing through `Cancelled` — and `Cancelled` read off `response_stream()` is the only channel
+/// draft §6.2.3.3's driver-side obligation travels on. The refusal is inert on purpose: the phase,
+/// the event and the obligation are all exactly where they were, and `unsubscribe` is the way
+/// through.
+#[test]
+fn a_start_refuses_while_a_response_stream_is_open() {
+  let query = "query Plain { a } subscription NewMessages { newMessage(roomId: \"1\") { sender } }";
+  let (schema, document) = compile_against(SUB_SDL, query);
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, Some("NewMessages"), Value::Obj)
+    .expect("the subscription resolves");
+  assert!(executor.handle_source_stream());
+  executor
+    .handle_source_event(&mut space, Value::Obj)
+    .expect("the stream is open");
+
+  let refused = executor
+    .start(&mut space, Some("Plain"), Value::Obj)
+    .expect_err("a live source stream would be orphaned");
+  assert_eq!(refused, StartError::ResponseStreamOpen);
+  assert_eq!(
+    executor.response_stream(),
+    Some(ResponseStream::Streaming),
+    "the refusal changes nothing"
+  );
+  assert!(executor.unsubscribe());
+  assert_eq!(executor.response_stream(), Some(ResponseStream::Cancelled));
+  executor
+    .start(&mut space, Some("Plain"), Value::Obj)
+    .expect("the obligation was published and the query starts");
+
+  // `Creating` is open too, and it is the leg a narrower repair would miss: the driver may already
+  // have called its resolver and be holding the stream it has not reported yet, which is exactly
+  // the window in which nothing else knows the stream exists.
+  executor
+    .start(&mut space, Some("NewMessages"), Value::Obj)
+    .expect("the subscription resolves");
+  assert_eq!(executor.response_stream(), Some(ResponseStream::Creating));
+  assert_eq!(
+    executor.start(&mut space, Some("Plain"), Value::Obj),
+    Err(StartError::ResponseStreamOpen)
+  );
+  assert!(
+    executor.source_field().is_some(),
+    "and draft §6.2.3.1 is exactly where it was, arguments included"
+  );
+}
+
+/// Draft §6.4.1's coerced arguments never hold more than one field's declared arguments.
+///
+/// **The bound the census names for `scratch_args`, at the mechanism that produces it.** No
+/// [`Limits`] ceiling charges `coerce_arguments`; what bounds the buffer is that the function
+/// *clears* and then pushes at most one entry per argument the schema declares on the one field it
+/// is coercing, so the peak is the schema's widest argument list and nothing a request sends moves
+/// it.
+///
+/// One `poll_resolve` call is where that could go wrong, and it is the only place: the loop walks
+/// past every candidate draft §6.4.1 refuses, so without the clear each refusal's already-checked
+/// arguments would stay and the buffer would grow with the *document's* field count instead. The
+/// census gate cannot see it — its document has one field with arguments, which is one push either
+/// way — and a bound with no gate at its own mechanism is a sentence.
+#[test]
+fn coerced_arguments_never_outgrow_one_fields_declared_arguments() {
+  /// `feed` and `bad` both declare two, which is the whole schema's widest.
+  const WIDEST: usize = 2;
+
+  let (schema, document) = compile_against(ARGUMENTS_SDL, ARGUMENTS_QUERY);
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the subscription resolves");
+  assert!(executor.handle_source_stream());
+  executor
+    .handle_source_event(&mut space, Value::Obj)
+    .expect("the stream is open");
+
+  let feed = executor.poll_resolve(&mut space).expect("feed").id();
+  executor.handle_resolved(&mut space, feed, Value::Obj);
+  assert!(
+    executor.poll_resolve(&mut space).is_none(),
+    "every alias refuses coercion, so one call walks all twelve"
+  );
+  let response = executor.poll_response().expect("nothing is outstanding");
+  assert_eq!(
+    response.error_count(),
+    12,
+    "one draft §6.4.1 refusal per alias, which is what put the twelve candidates in one call"
+  );
+
+  let held = executor.scratch_args.capacity();
+  assert!(
+    held <= 2 * WIDEST.max(4),
+    "`scratch_args` is holding {held} after twelve refused coercions, against a schema whose \
+     widest argument list is {WIDEST} — so it is accumulating across candidates rather than \
+     clearing at each one, and its only bound is gone"
+  );
+}
+
+/// A subscription that never ends retains no buffer that grows with it.
+///
+/// **The fault this names is one a charge model structurally cannot see.**
+/// `each_source_event_charges_what_the_first_did` reads what an event *spent* — and `reset` puts
+/// every spend back to zero while deliberately shrinking nothing, so a buffer that kept growing
+/// would leave those four quantities identical event after event. A subscription is unbounded in
+/// time, so "what is still allocated" is the question that decides whether this phase is safe, and
+/// `Retained` is the only thing that asks it.
+///
+/// Two halves, and neither is sufficient. **Bounded**: every buffer is inside a quantity the client
+/// cannot move — a [`Limits`] ceiling for all but three, and for those three the document's or the
+/// schema's own size, which is the row `scratch_args` needed and did not have. **Not growing**: the
+/// whole census is identical at event 2 and event 20, over events that deliberately vary, so a
+/// buffer creeping upward by a constant per event fails here even though every ceiling still admits
+/// it.
+///
+/// The `2 *` in the bounds is a `Vec`'s doubling and nothing else: a push past capacity reserves
+/// twice what is there, so a length bound bounds the capacity within a constant factor. A constant
+/// factor is what "bounded" means here; a *client* factor is what it must not be.
+#[test]
+fn no_buffer_a_subscription_retains_grows_with_the_stream() {
+  const SLOTS: u32 = 48;
+  const METADATA: u32 = 64;
+  const IN_FLIGHT: u32 = 8;
+  const INTERNED: u32 = 512;
+  const VISITS: u32 = 4_096;
+  /// Fragment definitions in `CENSUS_QUERY`, which is what `visited` and the index are sized by.
+  const FRAGMENTS: usize = 2;
+  /// The widest argument list the schema declares on any one field, which is what bounds
+  /// `scratch_args` — no ceiling does.
+  const SCHEMA_ARGUMENTS: usize = 2;
+
+  let limits = Limits {
+    max_in_flight: NonZeroU32::new(IN_FLIGHT).expect("not zero"),
+    max_response_slots: NonZeroU32::new(SLOTS).expect("not zero"),
+    max_response_metadata: NonZeroU32::new(METADATA).expect("not zero"),
+    max_interned_bytes: NonZeroU32::new(INTERNED).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(VISITS).expect("not zero"),
+    ..Limits::default()
+  };
+  let (schema, document) = compile_against(CENSUS_SDL, CENSUS_QUERY);
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the subscription resolves");
+  assert!(executor.handle_source_stream());
+
+  // Event 1 is the one that reaches every peak: its list is long enough to be refused by the
+  // position ceiling, which is the largest response this executor can be made to build.
+  let mut settled = None;
+  for event in 0..20u32 {
+    let rows = if event == 0 { usize::from(u8::MAX) } else { 1 };
+    executor
+      .handle_source_event(&mut space, Value::Obj)
+      .expect("the stream is open and the last result was taken");
+    while let Some(request) = executor.poll_resolve(&mut space) {
+      let id = request.id();
+      let value = match request.name() {
+        "rows" => Value::List(rows),
+        "feed" => Value::Obj,
+        _ => Value::Text,
+      };
+      executor.handle_resolved(&mut space, id, value);
+    }
+    while executor.poll_abandoned().is_some() {}
+    assert!(executor.poll_response().is_some(), "event {event} resolved");
+    if event == 1 {
+      settled = Some(executor.retained());
+    }
+  }
+  let settled = settled.expect("event 1 ran");
+  assert_eq!(
+    settled,
+    executor.retained(),
+    "eighteen more events, and not one buffer moved"
+  );
+
+  // And every one of them is inside something the client cannot choose. The comment on each row is
+  // the bound's source, which is the half a number alone does not carry.
+  let held = executor.retained();
+  let ceiling = |bound: u64| -> u64 { 2 * bound.max(4) };
+  for (what, capacity, bound) in [
+    // `push_child`, the sole creator of a position, charged against the position ceiling.
+    ("slots", held.slots, u64::from(SLOTS)),
+    // One per position, pushed on the same line.
+    ("meta", held.meta, u64::from(SLOTS)),
+    // `expand`'s commit, charged against the metadata ceiling.
+    ("merged", held.merged, u64::from(METADATA)),
+    // `expand` and `fail_at`, both charged against the metadata ceiling.
+    ("locations", held.locations, u64::from(METADATA)),
+    // `Interner::insert`, refused past the arena ceiling. A name is at least one byte, so entries
+    // cannot outrun bytes.
+    ("interner entries", held.interner.0, u64::from(INTERNED)),
+    ("interner bytes", held.interner.1, u64::from(INTERNED)),
+    // `fail`/`fail_at`, derived: at most one row per position.
+    ("errors", held.errors, u64::from(SLOTS)),
+    // `poll_resolve`, which withholds at the in-flight ceiling.
+    ("inflight", held.inflight, u64::from(IN_FLIGHT)),
+    // The walk's staging buffer, charged against the metadata ceiling before each push.
+    ("scratch.fields", held.scratch.fields, u64::from(METADATA)),
+    // One per distinct response key, so at most one per staged field.
+    ("scratch.groups", held.scratch.groups, u64::from(METADATA)),
+    // Sparse over interner ids, and an id is only minted by an insertion the arena admitted.
+    ("scratch.keys", held.scratch.keys, u64::from(INTERNED)),
+    // Draft §6.3's `visitedFragments`: a bitset word per 64 fragment ordinals, and the ordinals
+    // set. **The document's size, not a ceiling** — every ordinal comes from the fragment index.
+    ("scratch.visited words", held.scratch.visited.0, 1),
+    (
+      "scratch.visited seen",
+      held.scratch.visited.1,
+      FRAGMENTS as u64,
+    ),
+    // One frame per fragment spread or inline fragment, each charged a visit before it is taken.
+    ("scratch.stack", held.scratch.stack, u64::from(VISITS)),
+    // The sub-selection sets of one merged group, which is a slice of `merged`.
+    ("scratch_sets", held.scratch_sets, u64::from(METADATA)),
+    // **The one buffer no ceiling bounds.** `coerce_arguments` clears and then pushes at most one
+    // entry per argument the *schema* declares on the one field being coerced, so the peak is the
+    // schema's widest argument list — a deployment constant, like `MAX_WRAPPERS`.
+    ("scratch_args", held.scratch_args, SCHEMA_ARGUMENTS as u64),
+    // The fragment index, kept across every reset on purpose. **The document's size**, and its
+    // pass is charged: `defs` and `chain` are one entry per fragment and `heads` is a power-of-two
+    // bucket table at a load factor of a half.
+    ("fragments", held.fragments, 4 * FRAGMENTS as u64),
+  ] {
+    assert!(
+      capacity as u64 <= ceiling(bound),
+      "`{what}` is holding {capacity} against a bound of {bound}, which nothing a client sends can \
+       move — so either the bound is wrong or the buffer has escaped it"
+    );
+  }
 }
 
 /// Draft §6.2.3.3 releases the event's values too, which is what §6.2.3.3 calls the point of it.

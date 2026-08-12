@@ -122,9 +122,13 @@
 //! [`poll_response`](Executor::poll_response) like any other. §6.2.3.2's ordering — one execution
 //! result per event, in source order — is owned by the machine rather than published as a rule: the
 //! intake refuses the next event while the previous result is undelivered, which is draft §6.2.2's
-//! withholding applied one level up. `subscribe.rs`'s header has the division of labour, the
-//! `graphql-js` measurement behind the serial intake, and what a subscription retains between
-//! events, which is nothing that holds a driver value.
+//! withholding applied one level up, and a source stream that ends mid-event has its ending
+//! *recorded* so that event's result is still emitted. The two obligations that stay the driver's
+//! are made unskippable the same way: [`Executor::start`] refuses while a response stream is still
+//! open, because ending it through [`Executor::unsubscribe`] is what publishes §6.2.3.3's
+//! cancellation. `subscribe.rs`'s header has the division of labour, the `graphql-js` measurement
+//! behind the serial intake, and what a subscription retains between events, which is nothing that
+//! holds a driver value.
 //!
 //! Draft §6.1 `CoerceVariableValues` is the driver's: values reaching [`Values::variable`] are
 //! already coerced against their declared types.

@@ -5986,7 +5986,7 @@ fn request_error_result(
 /// than against a transcribed string: the wording is prose that may be improved, and what has to
 /// hold is that the entry is this error's and not a neighbour's.
 ///
-/// **Eight of `StartError`'s nine variants, and the ninth is unreachable from here rather than
+/// **Nine of `StartError`'s ten variants, and the tenth is unreachable from here rather than
 /// omitted.** `NoQueryRoot` needs a schema with no query root, and `Schema::build` refuses one —
 /// `MissingQueryRootOperationType`, observed — so there is no built `Schema` that can produce it
 /// and no `Executor` to raise it. That is what `StartError`'s own header means by `start` being
@@ -5998,6 +5998,13 @@ fn request_error_result(
 /// also have refused — reachable here only because `start` is total over what it is handed. The
 /// fourth, `SourceFieldArguments`, is reachable with a validated document: which variables a
 /// request supplies is not a property §5 can see.
+///
+/// `ResponseStreamOpen` is the ninth and it is built separately, because it is the one refusal that
+/// is not a property of the document, the schema or the request at all: it needs an executor with a
+/// live §6.2.3 subscription, which the fixture below deliberately cannot produce. Its §7.1.3 result
+/// is the same shape as every other refusal's, and that is what this case is for — the driver that
+/// meets it is mid-restart and still owes its source stream a cancellation, which is exactly when a
+/// request error result is the thing it has to render.
 #[test]
 fn the_errors_entry_is_the_one_refusal_start_raised() {
   let both = "type Query { a: String } type Mutation { m: String }";
@@ -6068,27 +6075,49 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
   ] {
     let (raised, result) = request_error_result(sdl, query, operation, limits);
     assert_eq!(raised, expected);
-    assert_eq!(result.error(), expected);
-
-    let mut errors = result.errors();
-    assert_eq!(
-      errors.len(),
-      1,
-      "§7.1.3 requires a non-empty list, and this crate raises exactly one request error"
-    );
-    let entry = errors.next().expect("non-empty by construction");
-    assert_eq!(entry, expected);
-    assert_eq!(
-      entry.to_string(),
-      expected.to_string(),
-      "§7.1.6's one `must` is `message`, and it has to be this refusal's"
-    );
-    assert!(errors.next().is_none(), "and there is no second entry");
-    assert!(
-      result.extensions().is_none(),
-      "a freshly built result has no §7.1.7 entry, which is a different response from an empty map"
-    );
+    one_request_error(&result, expected);
   }
+
+  // The ninth, which needs a subscription already running rather than a document.
+  let (schema, document) = compile(chat, "subscription { newMessage(roomId: \"1\") }");
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the subscription resolves");
+  assert!(executor.handle_source_stream());
+  let raised = executor
+    .start(&mut space, None, obj(vec![]))
+    .expect_err("the response stream is still open");
+  assert_eq!(raised, StartError::ResponseStreamOpen);
+  one_request_error(
+    &RequestErrorResult::new(executor.limits(), raised),
+    StartError::ResponseStreamOpen,
+  );
+}
+
+/// The §7.1.3 shape every refusal has to produce: one entry, this refusal's, and no §7.1.7 map.
+fn one_request_error(result: &RequestErrorResult<J>, expected: StartError) {
+  assert_eq!(result.error(), expected);
+
+  let mut errors = result.errors();
+  assert_eq!(
+    errors.len(),
+    1,
+    "§7.1.3 requires a non-empty list, and this crate raises exactly one request error"
+  );
+  let entry = errors.next().expect("non-empty by construction");
+  assert_eq!(entry, expected);
+  assert_eq!(
+    entry.to_string(),
+    expected.to_string(),
+    "§7.1.6's one `must` is `message`, and it has to be this refusal's"
+  );
+  assert!(errors.next().is_none(), "and there is no second entry");
+  assert!(
+    result.extensions().is_none(),
+    "a freshly built result has no §7.1.7 entry, which is a different response from an empty map"
+  );
 }
 
 /// The second §7.1.7 site carries the driver's map entry for entry, unread, and gives it back.
@@ -6558,43 +6587,216 @@ fn the_three_completions_are_three_different_answers() {
   }
 }
 
-/// One executor runs a subscription and then a query, and neither leaves anything of itself in the
-/// other.
+/// A `start` over an open response stream refuses, and draft §6.2.3.3 is the way through it.
 ///
-/// `start` is the transition into an operation whatever the previous one was, so a stream that has
-/// completed — or one still streaming — is ended by it, and the phase reports the new operation
-/// rather than the old stream.
+/// **The fault: a source stream orphaned in silence.** Reusing an executor used to reset straight
+/// over an open subscription — the phase became the new operation's, `response_stream()` answered
+/// `None`, and the driver's own pub-sub subscription, cursor or task stayed alive with nothing left
+/// in the machine referring to it. §6.2.3.3 makes cancelling that stream the *driver's* half of
+/// `Unsubscribe`, and the only channel the obligation travels on is `Cancelled` read off the state,
+/// so the reset deleted the message before it could be read. One leaked stream per restart, and no
+/// observable anywhere.
+///
+/// The refusal is inert, which is the half that makes it usable: it happens before anything is
+/// released, so the driver can still take the obligation, cancel, and then start. Everything the
+/// old test asserted about the *second* operation is asserted below, one `unsubscribe` later.
 #[test]
-fn a_start_ends_whatever_the_executor_was_doing() {
+fn a_start_over_an_open_response_stream_refuses_and_orphans_nothing() {
   let query = "query Plain { a } subscription NewMessages { newMessage(roomId: 1) { sender } }";
   let (schema, document) = compile(CHAT_SDL, query);
-  let mut space = Space::default();
+  let live = Rc::new(Cell::new(0usize));
+  let mut space = Handles {
+    mint: Rc::clone(&live),
+    variables: Vec::new(),
+  };
   let mut executor = Executor::new(&schema, &document);
 
   executor
-    .start(&mut space, Some("NewMessages"), obj(vec![]))
+    .start(&mut space, Some("NewMessages"), Counted::obj(&live))
     .expect("the subscription resolves");
   assert!(executor.handle_source_stream());
   executor
-    .handle_source_event(&mut space, obj(vec![]))
+    .handle_source_event(&mut space, Counted::obj(&live))
     .expect("the stream is open");
   let message = executor.poll_resolve(&mut space).expect("newMessage").id();
+  executor.handle_resolved(&mut space, message, Counted::obj(&live));
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Counted::text(&live, "x"));
+  }
+  let held = live.get();
+  assert!(held > 0, "the event is holding its own answered values");
 
-  // Mid-event, with a request outstanding.
+  // Mid-event, with the result built and untaken: the moment a reset destroys the most.
+  let refused = executor
+    .start(&mut space, Some("Plain"), Counted::obj(&live))
+    .expect_err("an open response stream is not silently replaced");
+  assert_eq!(refused, StartError::ResponseStreamOpen);
+  assert_eq!(
+    executor.response_stream(),
+    Some(ResponseStream::Streaming),
+    "the refusal changes nothing, so the obligation is still reachable"
+  );
+  assert_eq!(
+    live.get(),
+    held,
+    "and it releases nothing — including the `root` it refused, which it never stored"
+  );
+  assert!(
+    matches!(
+      executor.handle_source_event(&mut space, Counted::obj(&live)),
+      Err(SourceEventError::Outstanding(_))
+    ),
+    "the event is exactly where it was, result included"
+  );
+
+  // Draft §6.2.3.3 by name, which is what publishes the cancellation the driver owes.
+  assert!(executor.unsubscribe());
+  assert_eq!(executor.response_stream(), Some(ResponseStream::Cancelled));
+  assert_eq!(live.get(), 0, "and releases the subscription's values");
+
   executor
-    .start(&mut space, Some("Plain"), obj(vec![]))
-    .expect("the query resolves");
+    .start(&mut space, Some("Plain"), Counted::obj(&live))
+    .expect("a stream that has ended is no obstacle");
   assert_eq!(
     executor.response_stream(),
     None,
     "the executor is running a query now"
   );
   // The subscription's outstanding id is void, exactly as it is across any other restart.
-  executor.handle_resolved(&mut space, message, J::Str("stale".to_owned()));
+  executor.handle_resolved(&mut space, message, Counted::text(&live, "stale"));
 
   let a = executor.poll_resolve(&mut space).expect("a").id();
-  executor.handle_resolved(&mut space, a, J::Str("hello".to_owned()));
+  executor.handle_resolved(&mut space, a, Counted::text(&live, "hello"));
   let response = executor.poll_response().expect("nothing is outstanding");
-  assert_eq!(render(&response.data()), r#"{"a":"hello"}"#);
+  let Node::Object(mut fields) = response.data() else {
+    panic!("the root is an object")
+  };
+  let (key, value) = fields.next().expect("`a` was selected");
+  assert_eq!(key.to_string(), "a");
+  assert!(matches!(
+    value,
+    Node::Leaf(Counted {
+      payload: Payload::Str("hello"),
+      ..
+    })
+  ));
+  assert!(fields.next().is_none());
   assert_eq!(response.error_count(), 0);
+}
+
+/// A source stream that ends mid-event still emits that event's draft §7.1.1 execution result.
+///
+/// **The fault: the last payload of every subscription, dropped.** A push source emits its final
+/// value and its completion back to back, so a terminator that ended the stream on the spot reset
+/// over an accepted event — data, errors, `extensions` and both execution flags — and
+/// `poll_response` could never emit the result §6.2.3.2 requires. The ordering was written down as
+/// a sentence saying the driver must drain first; the compiler enforced nothing of the kind.
+///
+/// Driven from outside because that is where the loss is visible as a *stream*: what a consumer
+/// serialises is the sequence of results, and the missing one is the last.
+#[test]
+fn a_source_stream_that_ends_mid_event_still_emits_that_events_result() {
+  for (end, expected) in [
+    (ResponseStream::Completed, ResponseStream::Completed),
+    (ResponseStream::Failed, ResponseStream::Failed),
+  ] {
+    let (schema, document) = compile(CHAT_SDL, CHAT_QUERY);
+    let mut space = Space::default();
+    let mut executor = Executor::new(&schema, &document);
+    executor
+      .start(&mut space, None, obj(vec![]))
+      .expect("the subscription resolves");
+    assert!(executor.handle_source_stream());
+
+    // The last event, answered in full and not yet taken.
+    executor
+      .handle_source_event(&mut space, obj(vec![]))
+      .expect("the stream is open");
+    while let Some(request) = executor.poll_resolve(&mut space) {
+      let id = request.id();
+      let value = match request.name() {
+        "newMessage" => obj(vec![]),
+        _ => J::Str("Ginny".to_owned()),
+      };
+      executor.handle_resolved(&mut space, id, value);
+    }
+
+    // …and the source ends in the same breath.
+    let ended = match end {
+      ResponseStream::Failed => executor.handle_source_error(),
+      _ => executor.handle_source_complete(),
+    };
+    assert!(ended, "{end:?} ends an open stream");
+    assert_eq!(
+      executor.response_stream(),
+      Some(ResponseStream::Streaming),
+      "the response stream still owes one execution result, so it has not completed"
+    );
+    assert!(
+      !executor.handle_source_complete() && !executor.handle_source_error(),
+      "and it does not end twice"
+    );
+
+    {
+      let last = executor
+        .poll_response()
+        .expect("draft §6.2.3.2 maps the accepted event to an execution result");
+      assert_eq!(
+        render(&last.data()),
+        r#"{"newMessage":{"sender":"Ginny","text":"Ginny"}}"#
+      );
+      assert_eq!(last.error_count(), 0);
+    }
+
+    // Taking it is the transition: the queued ending happens now, and it is the right one.
+    assert_eq!(executor.response_stream(), Some(expected));
+    assert!(
+      matches!(
+        executor.handle_source_event(&mut space, obj(vec![])),
+        Err(SourceEventError::NotStreaming(_))
+      ),
+      "and no event is accepted after it"
+    );
+  }
+}
+
+/// Draft §6.2.3.3 is the one ending that discards an undelivered result, because that is what
+/// cancellation means.
+///
+/// The counterpart to the case above, and the reason the asymmetry is deliberate rather than an
+/// oversight: §6.2.3.2's two arms are the source stream ending on its own, sequenced after the
+/// events it emitted, while §6.2.3.3 is the client saying stop. Holding a response nobody is
+/// listening for would be the opposite of "a good opportunity to clean up any other resources used
+/// by the subscription".
+#[test]
+fn cancelling_mid_event_discards_the_result_rather_than_deferring_to_it() {
+  let (schema, document) = compile(CHAT_SDL, CHAT_QUERY);
+  let live = Rc::new(Cell::new(0usize));
+  let mut space = Handles {
+    mint: Rc::clone(&live),
+    variables: Vec::new(),
+  };
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Counted::obj(&live))
+    .expect("the subscription resolves");
+  assert!(executor.handle_source_stream());
+  executor
+    .handle_source_event(&mut space, Counted::obj(&live))
+    .expect("the stream is open");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    let value = match request.name() {
+      "newMessage" => Counted::obj(&live),
+      _ => Counted::text(&live, "x"),
+    };
+    executor.handle_resolved(&mut space, id, value);
+  }
+  assert!(live.get() > 0, "the event's result is built and untaken");
+
+  assert!(executor.unsubscribe());
+  assert_eq!(executor.response_stream(), Some(ResponseStream::Cancelled));
+  assert_eq!(live.get(), 0, "and the result is released rather than owed");
+  assert!(executor.poll_response().is_none());
 }
