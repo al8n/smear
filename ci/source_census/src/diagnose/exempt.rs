@@ -162,6 +162,23 @@ pub const EXEMPTIONS: &[Exemption] = &[
              that refused, which is the machine-readable part a code would otherwise have carried.",
   },
   Exemption {
+    path: "smear::proto::SourceEventError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `Executor::handle_source_event` refused a draft §6.2.3.2 source event, and the \
+             event itself, returned through `into_value` so a refusal cannot close a handle the \
+             driver still owns. The same argument as `SetExtensionsError`, whose two lifecycle \
+             variants these two are the subscription's: no response stream is open, or the \
+             previous event's execution result has not been taken. Both are properties of the \
+             *call* — of where the machine is, not of anything in the document — so there is no \
+             source position to point at and no response path to carry, and neither ever reaches a \
+             §7 response, because the point of the refusal is that the event does not. \
+             `Executor::response_stream` names the state that refused, which is the \
+             machine-readable part a code would otherwise have carried, and the remedy: drain the \
+             result, or stop pushing.",
+  },
+  Exemption {
     path: "smear::proto::TooLarge",
     kind: Kind::Verdict,
     element: None,
@@ -239,8 +256,10 @@ pub const EXEMPTIONS: &[Exemption] = &[
     element: None,
     issue: Some(126),
     reason: "How `Executor::start` refuses: draft §6.1's `GetOperation` failures — no operation, \
-             no operation of that name, more than one and none named — plus this phase's \
-             query-only scope and a schema with no query root. Phase D of al8n/smear#126 owns it \
+             no operation of that name, more than one and none named — plus a schema missing one \
+             of the three root types, and draft §6.2.3.1 `CreateSourceEventStream`'s three request \
+             errors, which are request errors in the specification's own words because they are \
+             raised before any execution exists. Phase D of al8n/smear#126 owns it \
              with `proto::Error`, and it carries a question of its own that phase has to answer \
              first: unlike every other row here it is a *request* error, refused before execution \
              begins, so it has no response path, and it is refused on a property of the whole \

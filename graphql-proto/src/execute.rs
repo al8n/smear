@@ -1,4 +1,4 @@
-//! Draft §6's execution core for a query or a mutation, as a Sans-I/O state machine.
+//! Draft §6's execution core for all three of §6.2's operations, as one Sans-I/O state machine.
 //!
 //! # Three inputs, three obligations, and no `Step`
 //!
@@ -79,7 +79,8 @@ use smear_parser::graphql::ast::{
 use smear_schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin};
 
 use super::{
-  Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, Values,
+  Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
+  SourceEventError, SourceField, Values,
   collect::{Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields},
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
@@ -158,6 +159,75 @@ mod tests;
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
 /// | collection scratch | `max_response_metadata`, charged before each push | `expand`, this call only | cleared at the next collection | cleared, never shrunk — capacity is reused | a staged population charged against a *different* ceiling than the one that refuses it |
 /// | withheld top-level fields (draft §6.2.2) | the root's own children, so `max_response_slots` | `release_serial`, one splice each | the last splice, or the root's discard | `reset`; a discarded root retires the cursor at the next release | a `restore` truncating over the cursor — asserted, because the argument for it is about creation order and a restore is about indices |
+/// | **draft §6.2.3.1's `initialValue`** | one, the root position | [`source_field`](Executor::source_field)'s `parent_value`, any number of times while the stream is `Creating` | the transition out of `Creating` | `reset`, in [`handle_source_stream`](Executor::handle_source_stream), [`unsubscribe`](Executor::unsubscribe) or the next `start` | a `Creating` state with a transition out that does not reset — a subscription is unbounded in time, so a value held from there is held for the client's whole connection |
+/// | **the source field's coerced arguments** | one field's arguments | `source_field`'s `arguments`, the same way | the same transition | the same `reset` | `on_entry` retiring them at a *no-op* call in, which would silently hand the driver a source field with no arguments. That is why `on_entry` does not, while `Creating` |
+/// | **a subscription's operation** — its root selection set and root type | two `Copy` items: a borrow into the document, and a `TypeId` | [`handle_source_event`](Executor::handle_source_event), once per event | the next `start`, or a drop | overwritten by the phase | nothing: it holds no `V`, allocates nothing, and is the only thing draft §6.2.3 keeps across an event |
+///
+/// **Draft §6.2.3's per-event populations get no row, and their absence is the answer.** A source
+/// event is one whole execution, so every row above is its row — and
+/// [`handle_source_event`](Executor::handle_source_event) begins with the same `reset` a second
+/// [`start`](Executor::start) performs, which is each row's own release. So a subscription
+/// retains, between events, exactly the three rows above and nothing else, and every cumulative
+/// ceiling is re-armed. The bound this needs and a query does not is that **no ceiling accumulates
+/// across an unbounded stream**, and it is discharged by there being no per-event retention at all
+/// rather than by a fourth knob. `each_source_event_charges_what_the_first_did` is the gate, and it
+/// is `a_second_operation_charges_what_the_first_did` over a stream, reading the same four
+/// quantities.
+///
+/// One event is the exception, and it is the same exception a query already is. When §6.2.3.2's
+/// source stream ends while an event is running, the ending is *recorded* rather than performed —
+/// see `Stage` — so that event's populations survive the terminator and die where a query's do, at
+/// the next `start` or drop, with `poll_response` reading them in between. Nothing new is retained:
+/// the recorded ending is one `Copy` discriminant, and the populations are the ones the row above
+/// already covers, kept for the one reader they exist for.
+///
+/// # Every buffer that survives a `reset`, and what bounds each one
+///
+/// **The paragraph above is true of *entries* and was published as if it were true of bytes.** It
+/// said the containers keep capacities "which the ceilings already bound" — and one of them is not
+/// bounded by a ceiling at all. `reset` clears without shrinking on purpose, so the two halves come
+/// apart exactly where rule 5 says they do: `each_source_event_charges_what_the_first_did` reads
+/// four *spends*, all of which return to zero, and a buffer growing without end would leave every
+/// one of them identical. A subscription is unbounded in time, so a census of the *capacities* is
+/// the artifact this needed and did not have.
+///
+/// So here it is, over every buffer an executor carries across a `reset`. The third column is the
+/// falsifier — rule 5 asks it of each row, and a row whose growth site is charged by something that
+/// is neither a ceiling nor a fixed input is unbounded here.
+///
+/// | buffer | grown at | bounded by |
+/// |---|---|---|
+/// | `slots`, `meta` | `push_child`, the sole creator of a position | [`max_response_slots`](Limits::max_response_slots) |
+/// | `merged`, `locations` | `expand`'s commit, and `fail_at` for a lone span | [`max_response_metadata`](Limits::max_response_metadata) |
+/// | `interner` — arena, spans, chain, buckets | `Interner::insert` | [`max_interned_bytes`](Limits::max_interned_bytes): a GraphQL name is at least one byte, so entries cannot outrun the arena, and the bucket table is a power of two at a load factor of a half |
+/// | `errors` | `fail`, `fail_at` | derived: at most one row per position, so `max_response_slots` |
+/// | `inflight` | `poll_resolve`, which withholds at the ceiling and reuses freed entries | [`max_in_flight`](Limits::max_in_flight) |
+/// | `scratch.fields`, `scratch.groups` | `walk`, charged **before** each push against the ceiling the staging is *for* — rule 3 | `max_response_metadata` |
+/// | `scratch.keys` | `walk`, grown one entry at a time to reach an interner id | `max_interned_bytes`, since only an admitted insertion mints an id |
+/// | `scratch.visited` | `walk`, one bit per fragment ordinal | **the document's** fragment count; every spread that reaches it is charged a visit |
+/// | `scratch.stack` | `walk`, one frame per spread or inline fragment | `max_selection_visits`, charged before the frame is taken |
+/// | `scratch_sets` | `complete`'s object arm, one entry per merged selection carrying a sub-selection | `max_response_metadata`, being a slice of `merged` |
+/// | `fragments` — the index | `Fragments::build`, once, kept across resets on purpose | **the document's** definition count, and the pass is charged against `max_selection_visits` before the storage exists |
+/// | **`scratch_args`** | `coerce_arguments`, which **charges nothing** | **the schema's** widest declared argument list: the function clears and then pushes at most one entry per argument the schema declares on the *one* field being coerced |
+///
+/// **`scratch_args` is the row this section exists for, and it is the third kind of bound rather
+/// than a missing one.** Two rows above are bounded by the document and one by the schema, and a
+/// schema-derived bound is already in the spend table — list nesting is `MAX_WRAPPERS`, "by the
+/// schema". What separates a bound from an absence is not which artifact it comes from, it is
+/// **whether the quantity is one an adversary can move**: positions and list lengths are the
+/// driver's, selections and fragments are the document's and therefore the client's, and a field's
+/// declared argument list is the *deployment's*. No request and no event changes it, and no number
+/// of events accumulates it, because `coerce_arguments` opens with `retire_arguments`.
+///
+/// It is worth stating what a ceiling would and would not buy, because the answer is "less than it
+/// looks". `max_field_arguments` would bound `scratch_args` at a number the operator picked instead
+/// of at a number the operator's own SDL already fixes, and it would have to refuse a *valid* field
+/// mid-coercion to do it. It is a real option and a breaking one — [`Limits`] is not
+/// `#[non_exhaustive]`, and `7b9b293` took that attribute off four types deliberately — so it is
+/// recorded here as the owner's call and not taken.
+///
+/// `no_buffer_a_subscription_retains_grows_with_the_stream` is the gate, and it is this table
+/// mechanised: every row bounded, and the whole census identical at event 2 and event 20.
 ///
 /// Five rules keep the table true as phases 2–8 add members, and each is a rule the rounds paid
 /// for. (This said "three" over four of them, uncaught since the extraction — the smallest possible
@@ -197,16 +267,27 @@ mod tests;
 ///    automatically a bound on the allocation behind it — a container that refunds its budget on
 ///    removal returns no capacity to the allocator, so the two diverge and only the reported half
 ///    is checked. Whether that gap is reachable is decided by one question, and it is the
-///    falsifier: **for each retained buffer, name the site that grows it and the ceiling that
-///    charges that site; if it is not this executor's own ceiling, the buffer is unbounded here.**
-///    Run over this table it answers cleanly. Slots, metadata, interned text and the error rows are
-///    grown only by sites this executor charges, so `reset`'s deliberate never-shrink keeps a
-///    capacity that is still bounded by the ceilings — which is what makes a steady-state response
-///    allocate nothing. Draft §7.1.7's map was the one member grown somewhere else: `Extensions`
-///    carries the ceilings a *caller* chose, `Extensions::insert` charges those, and the executor
-///    then retained the result under its own. `set_extensions` re-derives the spine on acceptance,
-///    and that is the whole difference — every other row's growth site and its retainer read the
-///    same number.
+///    falsifier: **for each retained buffer, name the site that grows it and what bounds that site
+///    — and if the answer is neither one of this executor's ceilings nor a fixed input, the buffer
+///    is unbounded here.** Slots, metadata, interned text and the error rows are grown only by
+///    sites this executor charges, so `reset`'s deliberate never-shrink keeps a capacity that is
+///    still bounded by the ceilings — which is what makes a steady-state response allocate nothing.
+///    Draft §7.1.7's map was the one member grown somewhere else: `Extensions` carries the ceilings
+///    a *caller* chose, `Extensions::insert` charges those, and the executor then retained the
+///    result under its own. `set_extensions` re-derives the spine on acceptance, and that is the
+///    whole difference.
+///
+///    **The clause "or a fixed input" is a repair, and it was paid for the same way the rest of
+///    this table was.** The rule shipped saying a growth site not charged by this executor's own
+///    ceiling makes the buffer unbounded, ran cleanly over the members that existed, and gave the
+///    wrong verdict on the very next one: `coerce_arguments` charges nothing and `scratch_args` is
+///    nonetheless bounded, by the schema, which no request can move. Three of the twelve rows in
+///    the census above are like that. The question the rule is *for* is whether an adversary can
+///    make the buffer grow, and "which ceiling charges it" is only a proxy for that — a good proxy,
+///    which is why it stands first, and a proxy that has to name its other answer or it starts
+///    rejecting sound rows and, worse, teaches the next reader to add a knob instead of a bound.
+///    **A rule that has met one counterexample has probably met the class**: run it over every
+///    member, not over the one that prompted it.
 ///
 /// # Every event that reaches a death point
 ///
@@ -283,6 +364,23 @@ mod tests;
 /// `M` fields cost `M` steps over the whole operation, whatever the driver answers. See
 /// `Executor::serial_next`, and `a_serial_release_does_not_grow_with_the_response` for the gate
 /// that would fail if a scan came back.
+///
+/// **The subscription path was the other prediction, and it came out the same way for a different
+/// reason.** Draft §6.2.3.2 runs draft §6.3's collection once per source event, so the product is
+/// `events × collection` with *events* the driver's and *collection* the document's — and events
+/// are bounded by nothing at all, a stream being unbounded in time. That is worse than the shape
+/// this section names, and it needs no knob either, because the second factor is not *retained*:
+/// [`handle_source_event`](Executor::handle_source_event) resets before it collects, so an event's
+/// collection is charged against a budget re-armed for that event and released with it. The
+/// product is over time rather than over memory, and a ceiling on cumulative work across a
+/// subscription would be a bound a client clears by reconnecting.
+///
+/// Hoisting the collection out of the loop — the plan is loop-invariant, the document and schema
+/// being fixed for the subscription's life — is the optimisation this deliberately does not take.
+/// It trades work per event for memory held across an unbounded number of them, which is a
+/// *different* resource, and an unmeasured saving does not buy a new retention. See
+/// `subscribe.rs`'s header, and `each_source_event_charges_what_the_first_did` for the gate on the
+/// half that is claimed.
 ///
 /// The second clause is about what can still *affect the response* and not about what is
 /// outstanding, and the two come apart on the error path: draft §6.4.4 moves a discarded subtree's
@@ -490,6 +588,14 @@ pub struct Limits {
   /// document re-pays the fragment index pass it built the first time, even though the table is
   /// still there — so the verdict on a request is a function of the request and this number, and
   /// never of what the executor happened to be asked before it.
+  ///
+  /// **And per draft §6.2.3.2 *event*, which is the same sentence and had to be checked rather
+  /// than assumed.** §6.2.3.2 makes each source event one whole `ExecuteRootSelectionSet`, so an
+  /// event is an operation by this ceiling's own unit — and it must be, because a subscription is
+  /// unbounded in time and a budget spent cumulatively across one would refuse event *N* for work
+  /// event 1 did. [`handle_source_event`](Executor::handle_source_event) re-arms it through the
+  /// same `reset` a second `start` performs, and `each_source_event_charges_what_the_first_did` is
+  /// the gate.
   pub max_selection_visits: NonZeroU32,
 
   /// How many bytes of interned text the response may hold.
@@ -705,6 +811,57 @@ struct Charges {
   interned: usize,
 }
 
+/// The **capacity** every buffer an [`Executor`] carries across a [`reset`](Executor::reset) is
+/// holding, buffer by buffer.
+///
+/// # Why this is not [`Charges`] with different arithmetic
+///
+/// [`Charges`] reads what an operation *spent*, which is what each ceiling's own check compares
+/// against. This reads what the allocator is still holding afterwards, and the two come apart
+/// exactly where review has twice found a defect: a container's reported size and its capacity are
+/// different numbers, `reset` deliberately clears without shrinking, and a **subscription is
+/// unbounded in time** — so "each event charges what the first did" says nothing at all about what
+/// the executor is holding at event a million.
+///
+/// The gate this exists for is therefore two assertions rather than one: every field is bounded by
+/// the ceiling — or the fixed input — its row in [`Limits`]'s census names, and no field moves
+/// between one event and the next. One struct rather than eleven accessors, for the reason
+/// [`Charges`] is one value: a gate comparing a subset would pass while the buffer it omitted grew.
+///
+/// **A buffer added to [`Executor`] and not to this is invisible here**, which is the residual and
+/// the reason the census in [`Limits`] is prose a reader checks against the struct definition. The
+/// mechanical half cannot derive the field list from the type without a proc macro this crate does
+/// not have.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Retained {
+  /// Positions. Bounded by [`Limits::max_response_slots`].
+  slots: usize,
+  /// One per position, parallel to `slots`.
+  meta: usize,
+  /// Merged selections. Bounded by [`Limits::max_response_metadata`].
+  merged: usize,
+  /// Location spans. Bounded by [`Limits::max_response_metadata`].
+  locations: usize,
+  /// The interner's arena, table and chain, in entries and bytes. Bounded by
+  /// [`Limits::max_interned_bytes`].
+  interner: (usize, usize),
+  /// Error rows. Derived: at most one per position.
+  errors: usize,
+  /// In-flight slab entries. Bounded by [`Limits::max_in_flight`].
+  inflight: usize,
+  /// Draft §6.3's five staging buffers, each with its own bound. See `collect::ScratchCapacity`.
+  scratch: crate::collect::ScratchCapacity,
+  /// The sub-selection sets one `MergeSelectionSets` concatenates. Bounded by
+  /// [`Limits::max_response_metadata`].
+  scratch_sets: usize,
+  /// Draft §6.4.1's coerced arguments. **The one buffer no ceiling bounds** — see [`Limits`]'s
+  /// census for the schema-derived bound that does.
+  scratch_args: usize,
+  /// The fragment index. Bounded by the document, and its pass is charged.
+  fragments: usize,
+}
+
 /// Which of [`Limits`]'s ceilings `expand` ran into.
 ///
 /// Carried out of the loop rather than reported inside it, because recording a failure borrows the
@@ -762,12 +919,6 @@ pub enum StartError {
   UnknownOperation,
   /// No name was given and the document holds more than one operation.
   AmbiguousOperation,
-  /// The operation is a `subscription`. This executor runs queries and mutations.
-  ///
-  /// Draft §6.2.3 delivers a *stream* of responses over a source event stream, and
-  /// [`poll_response`](Executor::poll_response) yields at most once by construction — so this is a
-  /// refusal rather than a gap a relaxed check would fill.
-  NotAQueryOrMutation,
   /// The schema declares no `query` root type.
   ///
   /// Draft §5.2.1.1 makes an operation whose root type the schema does not declare a validation
@@ -776,6 +927,89 @@ pub enum StartError {
   NoQueryRoot,
   /// The schema declares no `mutation` root type.
   NoMutationRoot,
+  /// The schema declares no `subscription` root type.
+  ///
+  /// Draft §6.2.3.1 step 1 asks for it and step 2 asserts it is an Object type; §5.2.1.1 makes an
+  /// operation whose root type the schema does not declare a validation failure, so this is here
+  /// on the same terms as the two above — `start` is total over the schemas it is handed.
+  NoSubscriptionRoot,
+  /// Draft §6.2.3.1 step 5: the subscription's root selection set does not name exactly one field
+  /// with an event stream.
+  ///
+  /// Step 5 is a *request error* in the specification's own words — "If {collectedFieldsMap} does
+  /// not have exactly one entry, raise a *request error*" — which is why it is a [`StartError`] and
+  /// not one of the field errors §6.4 raises. There is no response for a field error to live in:
+  /// `CreateSourceEventStream` runs before any execution does.
+  ///
+  /// Four shapes reach it, and the sentence above is true of each. The root selection set collects
+  /// **nothing**; it collects **more than one** entry; the one entry names a field the schema does
+  /// not define, so there is no resolver to ask for a stream; or the one entry is draft §4.4's
+  /// `__typename`, which the executor answers itself from the object type it already resolved and
+  /// which has no event stream to resolve — §5.2.3.1 spells that last one out, requiring the single
+  /// entry to be one "which must not be an introspection field".
+  ///
+  /// Draft §5.2.3.1 *Single Root Field* catches all four statically, and forbids `@skip` and
+  /// `@include` in the root selection set precisely so that it can decide this without runtime
+  /// variables. So a validated document does not reach this either; it is here because `start` is
+  /// total over the documents it is handed.
+  NoSourceField,
+  /// Collecting the subscription's root selection set raised an error, so draft §6.2.3.1 had no
+  /// `collectedFieldsMap` to count.
+  ///
+  /// Separate from [`NoSourceField`](Self::NoSourceField) because the caller's remedy is a
+  /// different one: this is a ceiling of *this executor's*
+  /// ([`max_selection_visits`](Limits::max_selection_visits),
+  /// [`max_response_slots`](Limits::max_response_slots),
+  /// [`max_response_metadata`](Limits::max_response_metadata),
+  /// [`max_interned_bytes`](Limits::max_interned_bytes)) or a `@skip`/`@include` condition whose
+  /// variable [`Values::variable`](super::Values::variable) did not supply — raise the budget or
+  /// supply the variable, rather than rewrite the document's root selection set.
+  ///
+  /// The specific fault is **not** carried, and that is a boundary rather than an oversight. It is
+  /// available as a draft §7.1.2 field error inside the executor, and [`StartError`] is a `Copy`,
+  /// data-free enum whose whole `errors` entry in a §7.1.3
+  /// [`RequestErrorResult`](super::RequestErrorResult) is one rendered [`Display`](fmt::Display).
+  /// Carrying more means a driver-supplied error *entry*, which is al8n/smear#126's — the same line
+  /// `request_error.rs` draws around the three request-error sources that arise outside this crate,
+  /// and the same one that leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
+  SourceSelectionRefused,
+  /// Draft §6.2.3.1 step 8: `CoerceArgumentValues` rejected an argument of the source field.
+  ///
+  /// **This is the one place where §6.4.1's failure changes shape, and the change is the
+  /// specification's.** Everywhere else `CoerceArgumentValues` raises a *field error*, which
+  /// §6.4.4 turns into a null and an entry in the response's `errors`. §6.2.3.1 calls it inside
+  /// `CreateSourceEventStream`, before a response stream exists at all, so there is no execution
+  /// result to null a field in and the only shape left is a request error. `graphql-js` 16.11.0
+  /// does the same and was read rather than assumed: `executeSubscription` lets
+  /// `getArgumentValues`'s throw escape to `createSourceEventStream`, which returns
+  /// `{ errors: [error] }` — a map with no `data` key, which is §7.1.3's request error result.
+  ///
+  /// Reachable with a **validated** document, unlike the three refusals above: §6.4.1 step 5.f's
+  /// `hasValue` is false for a variable [`Values::variable`](super::Values::variable) does not
+  /// supply, and which variables a request supplies is not a property draft §5 can see.
+  ///
+  /// Which argument, and which of §6.4.1's three failures, is not carried — see
+  /// [`SourceSelectionRefused`](Self::SourceSelectionRefused) for why, and note that upstream does
+  /// carry it. This is an unmet "should" of §7.1.6's `locations`, recorded as one.
+  SourceFieldArguments,
+  /// A draft §7.1.2 response stream is still open, so beginning another operation would orphan the
+  /// source stream behind it.
+  ///
+  /// **The one refusal that is not about the document, the schema or the request** — and the one
+  /// after which the executor is deliberately *not* empty. Draft §6.2.3.3 splits `Unsubscribe` in
+  /// two: this crate ends the response stream, and cancelling the source stream is the driver's,
+  /// because the source stream is the driver's. The driver learns it owes that cancellation by
+  /// reading [`Cancelled`](super::ResponseStream::Cancelled) off
+  /// [`response_stream`](Executor::response_stream) — so a `start` that replaced the phase would
+  /// delete the obligation's only channel and leave a pub-sub subscription, a cursor or a task
+  /// alive with nothing referring to it.
+  ///
+  /// The remedy is [`unsubscribe`](Executor::unsubscribe): §6.2.3.3, called by name, which
+  /// publishes the obligation and leaves a stream that is no longer open. Then `start` proceeds.
+  /// Raised from [`Creating`](super::ResponseStream::Creating) as well as
+  /// [`Streaming`](super::ResponseStream::Streaming), because `is_open` is one question and a
+  /// driver that has already called its resolver is in the first of them.
+  ResponseStreamOpen,
 }
 
 impl fmt::Display for StartError {
@@ -786,9 +1020,22 @@ impl fmt::Display for StartError {
       Self::AmbiguousOperation => {
         "the document contains more than one operation and none was named"
       }
-      Self::NotAQueryOrMutation => "the operation is neither a query nor a mutation",
       Self::NoQueryRoot => "the schema declares no query root type",
       Self::NoMutationRoot => "the schema declares no mutation root type",
+      Self::NoSubscriptionRoot => "the schema declares no subscription root type",
+      Self::NoSourceField => {
+        "the subscription's root selection set does not name exactly one field with an event stream"
+      }
+      Self::SourceSelectionRefused => {
+        "collecting the subscription's root selection set raised an error"
+      }
+      Self::SourceFieldArguments => {
+        "the subscription's source field has an argument the request does not satisfy"
+      }
+      Self::ResponseStreamOpen => {
+        "a response stream is still open, and its source stream must be cancelled through \
+         `unsubscribe` before another operation begins"
+      }
     })
   }
 }
@@ -871,6 +1118,179 @@ struct Meta<'a, S> {
   field_sym: Sym,
 }
 
+/// Draft §6.2.3.2's two source-stream endings that an already-accepted event's execution result is
+/// queued in front of.
+///
+/// Cancellation is deliberately not one of them. §6.2.3.3 *discards*: "Cancel {sourceStream}.
+/// Complete {responseStream} normally" ends the stream on the client's instruction, and a result
+/// the client has stopped listening for is not owed to anyone. The two here are the arms where the
+/// source ended **on its own**, which §6.2.3.2 sequences *after* the events it already emitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ending {
+  /// "When {sourceStream} completes normally: Complete {responseStream} normally."
+  Completed,
+  /// "When {sourceStream} completes with {error}: Complete {responseStream} with {error}."
+  Failed,
+}
+
+impl Ending {
+  /// The stage this becomes once the result it was queued behind has been taken.
+  #[inline]
+  const fn ended(self) -> Stage {
+    match self {
+      Self::Completed => Stage::Completed,
+      Self::Failed => Stage::Failed,
+    }
+  }
+}
+
+/// Where draft §6.2.3 has got to, which is [`ResponseStream`] plus the one state §7.1.2 does not
+/// name.
+///
+/// # Why the phase does not simply hold the public type
+///
+/// It did, and that is the shape a review found a lost execution result in. §6.2.3.2 maps each
+/// source event to one execution result, and a push source may emit its last value and its
+/// completion back to back — so "the source has ended **and** an accepted event still owes its
+/// result" is a state the machine can be in, and [`ResponseStream`] has no value for it. Holding
+/// the public type meant the terminator had two choices, both wrong: end the stream now, which
+/// resets over the undelivered result and drops it; or refuse, which makes the driver responsible
+/// for re-reporting a completion it has already observed.
+///
+/// [`Owed`](Stage::Owed) is the third. The ending is *recorded* rather than performed, the event's
+/// execution is untouched, and [`poll_response`](Executor::poll_response) — the one call that can
+/// end that event — is the only transition out of it. What was a sentence in a comment saying the
+/// driver must drain before completing is now a state the terminator cannot skip, because the
+/// terminator's `match` does not reach `reset` from it.
+///
+/// # `Owed` reads as `Streaming`, and that is the truthful answer
+///
+/// [`ResponseStream::is_open`] asks exactly one question — "can this still emit an execution
+/// result" — and while a result is owed the answer is yes. Reporting the ending early would tell a
+/// serialiser the stream had completed and then hand it one more result; reporting `Streaming`
+/// tells it there is still one to take, which is precisely the obligation the driver has.
+///
+/// So `Owed` is unreachable from outside, and the invariant that keeps it honest is narrow enough
+/// to state: **`Owed` implies `started && !delivered`**. It is entered only under that condition,
+/// `handle_source_event` cannot re-enter `Streaming` from it, and `poll_response` leaves it in the
+/// same statement that sets `delivered`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+  /// Draft §6.2.3.1 `CreateSourceEventStream` is running.
+  Creating,
+  /// Open, with no ending reported.
+  Streaming,
+  /// The source stream ended, and the last accepted event's execution result has not been taken.
+  Owed(Ending),
+  /// Draft §6.2.3.2's normal completion.
+  Completed,
+  /// Draft §6.2.3.2's completion with an error.
+  Failed,
+  /// Draft §6.2.3.3 `Unsubscribe`.
+  Cancelled,
+}
+
+impl Stage {
+  /// Draft §7.1.2's state as a driver reads it.
+  #[inline]
+  const fn published(self) -> ResponseStream {
+    match self {
+      Self::Creating => ResponseStream::Creating,
+      Self::Streaming | Self::Owed(_) => ResponseStream::Streaming,
+      Self::Completed => ResponseStream::Completed,
+      Self::Failed => ResponseStream::Failed,
+      Self::Cancelled => ResponseStream::Cancelled,
+    }
+  }
+}
+
+/// Which of draft §6.2's three operations is running, and where a subscription is inside §6.2.3.
+///
+/// # The at-most-one slot, which is what makes this one machine
+///
+/// This is the `Role`-shaped centre of a "super state machine" in the sense this program's other
+/// Sans-I/O crates use the phrase — the whole protocol in *one* machine taking events through
+/// `handle_*` and emitting obligations through `poll_*`, rather than a coordinator over
+/// sub-machines. Its two siblings are shaped the same way: a Raft endpoint's `Role`
+/// (`sailing-proto`) and a VSR replica's `Status` (`viewstamp-proto`) are single-valued slots at
+/// the heart of a machine that also owns incidental concurrent fan-out. "Only one is live at a
+/// time" is not an argument against the pattern; it *is* the pattern's central slot, and the fan-out
+/// here is one layer down and already built — a single §6.2.3.2 event is a whole execution, with
+/// its own in-flight table, ready chain, ceilings and §6.4.4 propagation.
+///
+/// The posture was already here and implicit before this type existed. `start` matched on
+/// [`RootOperation`] to decide whether [`withhold_serial`](Executor::withhold_serial) ran and then
+/// threw the answer away, so "which operation kind is this" was a fact the machine knew for one
+/// statement. Making it a field is what let subscription be its third value instead of its
+/// refusal.
+///
+/// # Why the subscription arm carries data and the other two do not
+///
+/// A query and a mutation are started once and produce one response, so nothing about the operation
+/// has to outlive `start`. A subscription runs draft §6.2.3.2's `ExecuteSubscriptionEvent` once per
+/// event, and that algorithm is `ExecuteRootSelectionSet` over **the same operation** — so the root
+/// selection set and the root type have to survive every `reset`, and they live here rather than in
+/// fields beside a discriminant that could disagree with them. Both are `Copy`: a borrow into the
+/// document, which outlives the executor, and a [`TypeId`]. Nothing is allocated and no `V` is held.
+enum Phase<'a, S> {
+  /// No operation: before the first [`start`](Executor::start), or after one that refused.
+  Idle,
+  /// Draft §6.2.1 `ExecuteQuery`.
+  Query,
+  /// Draft §6.2.2 `ExecuteMutation`, whose top-level fields are withheld.
+  Mutation,
+  /// Draft §6.2.3 `Subscribe`.
+  Subscription {
+    /// Draft §7.1.2's response stream, as a state — see [`Stage`], which is the public
+    /// [`ResponseStream`] plus the one state §7.1.2 does not name.
+    stage: Stage,
+    /// The operation's root selection set, re-collected once per event by §6.2.3.2.
+    set: &'a SelectionSet<S>,
+    /// The root Subscription type.
+    root: TypeId,
+    /// The source field's position while §6.2.3.1 is still running, and [`NONE`] afterwards.
+    ///
+    /// It indexes a response tree that only exists during
+    /// [`Creating`](ResponseStream::Creating) — the tree `start` built to collect the root
+    /// selection set, which the transition into [`Streaming`](ResponseStream::Streaming) resets
+    /// away. Holding [`NONE`] outside that state is what makes a stale index unrepresentable
+    /// rather than merely unlikely.
+    source: u32,
+  },
+}
+
+impl<S> Clone for Phase<'_, S> {
+  #[inline]
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
+/// `Copy` written out rather than derived, because a derive would bound `S: Copy`.
+///
+/// The only `S` this holds is behind a `&'a`, which is `Copy` whatever `S` is — the same
+/// over-bound [`Extensions`]'s hand-written `Debug` avoids so that [`Response`] can keep its own.
+impl<S> Copy for Phase<'_, S> {}
+
+impl<S> fmt::Debug for Phase<'_, S> {
+  /// Renders the discriminant and the response stream's state, and no borrow of the document.
+  ///
+  /// Unbounded in `S` for the reason [`Copy`] above is, and the selection set would be noise: it is
+  /// the operation's whole body.
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Self::Idle => f.write_str("Idle"),
+      Self::Query => f.write_str("Query"),
+      Self::Mutation => f.write_str("Mutation"),
+      Self::Subscription { stage, source, .. } => f
+        .debug_struct("Subscription")
+        .field("stage", stage)
+        .field("source", source)
+        .finish_non_exhaustive(),
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Slotted {
   Free {
@@ -889,7 +1309,7 @@ struct Entry {
   state: Slotted,
 }
 
-/// Draft §6's executor, for a query or a mutation.
+/// Draft §6's executor, for a query, a mutation or a subscription.
 ///
 /// See [the crate root](crate) for the shape, why it has that shape, and a worked example.
 ///
@@ -904,24 +1324,48 @@ struct Entry {
 /// method taking `&mut self` must call `on_entry` before it does anything else** — or discharge the
 /// same obligation another way and say which.
 ///
-/// ## Axis 2 — the phase
+/// ## Axis 2 — the phase, which is now two axes
 ///
-/// An operation is in one of three phases: **Idle** (`!started`), **Running**
+/// One *execution* is in one of three phases: **Idle** (`!started`), **Running**
 /// (`started && !delivered`), **Delivered** (`started && delivered`). A method is not owed a call
 /// in every one of them, and accepting a call from a phase where it cannot mean anything is not
 /// harmless — it is a success return for work that will never happen. A phase a method excludes has
 /// to be kept out by a flag test, or be impossible for a stated structural reason.
 ///
-/// | method | discharge | meaningful in | how the rest are kept out |
-/// |---|---|---|---|
-/// | [`start`](Executor::start) | `reset`, which retires the arguments and drops the whole slot vector, parked object included | all three | — it *is* the transition into Running |
-/// | [`poll_resolve`](Executor::poll_resolve) | `on_entry` | Running | tests `started`; Delivered needs none, since delivery implies an empty ready chain and no live requests |
-/// | [`handle_resolved`](Executor::handle_resolved) | `on_entry` | Running | the [`ReqId`]'s epoch and generation — an id from another phase is stale and ignored |
-/// | [`handle_field_error`](Executor::handle_field_error) | `on_entry` | Running | the same id validation |
-/// | [`poll_abandoned`](Executor::poll_abandoned) | `on_entry` | Running **and Delivered** | the abandoned count, which `reset` zeroes. Delivered is deliberate: `poll_response` does not withhold on abandoned entries, so this is how they are retired afterwards |
-/// | [`set_extensions`](Executor::set_extensions) | `on_entry` | Running | tests both flags and **refuses**, because a map accepted outside Running is one no response will ever carry |
-/// | [`take_extensions`](Executor::take_extensions) | `on_entry` | all three | — outside Running there is no map, and `None` is the truthful answer |
-/// | [`poll_response`](Executor::poll_response) | `on_entry` | Running | tests both flags |
+/// The **operation kind** is the second axis and it is outer: the private `Phase` slot — named
+/// rather than linked, being private, the way `request_error.rs` names its own module header —
+/// says whether the executor
+/// is running a query, a mutation or a subscription, and for a subscription which
+/// [`ResponseStream`] state it is in. Draft §6.2.3's five entry points read it and the other eight
+/// do not, which is the column the last two rows of the table below add. The two axes are not the
+/// same question — a subscription's `Idle` is "between events", where a query's is "before the
+/// operation" — and collapsing them is how a machine ends up delivering an event's response into a
+/// stream that has already completed.
+///
+/// | method | discharge | execution phases | stream states | how the rest are kept out |
+/// |---|---|---|---|---|
+/// | [`start`](Executor::start) | `on_entry`, and then `reset` on every path that begins an operation — which retires the arguments and drops the whole slot vector, parked object included | all three | the three **endings** | tests the stream state and **refuses** an open one, because a `reset` would delete the §6.2.3.3 obligation before the driver could read it |
+/// | [`poll_resolve`](Executor::poll_resolve) | `on_entry` | Running | — | tests `started`; Delivered needs none, since delivery implies an empty ready chain and no live requests |
+/// | [`handle_resolved`](Executor::handle_resolved) | `on_entry` | Running | — | the [`ReqId`]'s epoch and generation — an id from another phase is stale and ignored |
+/// | [`handle_field_error`](Executor::handle_field_error) | `on_entry` | Running | — | the same id validation |
+/// | [`poll_abandoned`](Executor::poll_abandoned) | `on_entry` | Running **and Delivered** | — | the abandoned count, which `reset` zeroes. Delivered is deliberate: `poll_response` does not withhold on abandoned entries, so this is how they are retired afterwards |
+/// | [`set_extensions`](Executor::set_extensions) | `on_entry` | Running | — | tests both flags and **refuses**, because a map accepted outside Running is one no response will ever carry |
+/// | [`take_extensions`](Executor::take_extensions) | `on_entry` | all three | — | — outside Running there is no map, and `None` is the truthful answer |
+/// | [`poll_response`](Executor::poll_response) | `on_entry` | Running | Streaming | tests both flags; the stream test is a **transition** rather than a guard — taking the result is what discharges a §6.2.3.2 ending recorded while the event was running |
+/// | [`handle_source_stream`](Executor::handle_source_stream) | `on_entry` | Idle | Creating | tests the stream state; Creating implies `!started`, since §6.2.3.1 begins no execution |
+/// | [`handle_source_event`](Executor::handle_source_event) | `on_entry` | Idle **and Delivered** | Streaming | tests the stream state, and Running is kept out by the conjunction of both flags — that pair *is* draft §6.2.3.2's ordering |
+/// | [`handle_source_complete`](Executor::handle_source_complete) | `on_entry` | all three | Streaming | tests the stream state; every execution phase is reachable when a source stream ends, including mid-event — and in Running the two flags decide whether the ending is *performed* or *recorded* |
+/// | [`handle_source_error`](Executor::handle_source_error) | `on_entry` | all three | Streaming | the same |
+/// | [`unsubscribe`](Executor::unsubscribe) | `on_entry` | all three | Creating **and** Streaming | tests the stream state; §6.2.3.3 may arrive at any moment, which is what cancellation is |
+///
+/// A row with no stream state performs no `Phase` test, and means the same thing under every
+/// operation kind. That is a claim about the code and it is checked as one, in both directions.
+///
+/// **Two rows read the slot without gating on it, and both arrived in the same review round.**
+/// `start` refuses the states it does not name, and `poll_response` performs a transition in the
+/// one it does. Neither is the column drifting: both are the claim it exists to make — that the
+/// method does not mean the same thing under every operation kind — and a row that read `Phase`
+/// while naming no state would fail the check either way.
 ///
 /// ## What holds the table to the code
 ///
@@ -930,8 +1374,9 @@ struct Entry {
 /// `execute::tests::every_public_entry_point_declares_its_discharge_and_its_phases` derives the set
 /// of public `&mut self` methods from this file's own source and fails on one the table does not
 /// name, one whose body does not *open* with the discharge it claims, one whose declared flag tests
-/// are not the flag tests the body performs, or an excluded phase with neither a guard nor a
-/// structural reason.
+/// are not the flag tests the body performs, an excluded phase with neither a guard nor a
+/// structural reason, or a row whose stream-state column disagrees with whether the body reads
+/// `Phase` at all.
 /// `execute::tests::every_public_entry_point_settles_the_previous_call` drives each of them with
 /// both lends open and fails on one that does not close them.
 ///
@@ -944,6 +1389,13 @@ struct Entry {
 /// years, on `on_entry` itself, in a comment that even predicted which later phases would inherit
 /// it. Prose one level away from the decision is not a mechanism, and **a table is only as wide as
 /// its columns**: when a ninth entry point arrives, the failure to expect is not a missing row.
+///
+/// Five arrived, and the prediction held exactly. Draft §6.2.3's entry points are legal or illegal
+/// on a dimension the two flags cannot express — a subscription that has completed still has
+/// `started` and `delivered` saying whatever the last event left them saying — so the stream-state
+/// column is the third one, added with the rows rather than after them. It carries its own
+/// two-way check for the reason the other two do: a column whose entries nothing compares against
+/// the code is a list, and a list is what this table exists instead of.
 pub struct Executor<'a, S, V>
 where
   V: Values,
@@ -1057,7 +1509,26 @@ where
   /// them and a clock is not a gate.
   serial_steps: u64,
 
+  /// Which of draft §6.2's three operations is running. See [`Phase`].
+  ///
+  /// The at-most-one operation-kind slot, and the *outer* of the executor's two phase axes: this
+  /// says which operation, and `started`/`delivered` say where one execution of it has got to. For
+  /// a query or a mutation the two collapse — there is exactly one execution — and for a
+  /// subscription they do not, which is the whole of draft §6.2.3.2 inside this machine.
+  phase: Phase<'a, S>,
+
+  /// Whether an execution is running: one query, one mutation, or **one draft §6.2.3.2 event**.
+  ///
+  /// It is per *execution* and not per operation, which is what lets a subscription reuse every
+  /// other field here unchanged. A subscription's `start` leaves this `false` — §6.2.3.1 begins no
+  /// execution, so there is nothing for `poll_resolve` to offer and nothing for `poll_response` to
+  /// deliver — and each `handle_source_event` sets it, exactly as `start` does for the other two.
   started: bool,
+  /// Whether the running execution's response has been taken.
+  ///
+  /// For a query or a mutation this is terminal. For a subscription it is the intake gate: it is
+  /// what makes `handle_source_event` refuse while the previous event's draft §7.1.1 execution
+  /// result is still undelivered, and the next accepted event clears it by resetting.
   delivered: bool,
 
   /// Everything one draft §6.3 collection reuses from the last. See `collect::Scratch`.
@@ -1128,6 +1599,7 @@ where
       abandon_cursor: 0,
       ready_head: NONE,
       ready_tail: NONE,
+      phase: Phase::Idle,
       started: false,
       delivered: false,
       scratch_sets: std::vec::Vec::new(),
@@ -1139,17 +1611,32 @@ where
     }
   }
 
-  /// Begins draft §6.2.1 `ExecuteQuery` or §6.2.2 `ExecuteMutation` on `root`, which is their
-  /// `initialValue`.
+  /// Begins draft §6.2.1 `ExecuteQuery`, §6.2.2 `ExecuteMutation` or §6.2.3 `Subscribe` on `root`,
+  /// which is their `initialValue`.
   ///
   /// `operation` names the operation to run, as draft §6.1's `GetOperation` takes it: `None`
   /// selects the document's only operation and fails if there is more than one.
   ///
-  /// Which of the two it is decides one thing here and nothing afterwards: a mutation's top-level
-  /// fields leave this call withheld rather than ready, and §6.2.2's "serially" is then a property
-  /// of what [`poll_resolve`](Executor::poll_resolve) is able to offer. Everything below the top
-  /// level — including the sub-selections of a mutation field — is §6.3's ordinary parallel
-  /// collection, which is where the specification draws the line too.
+  /// Which of the three it is decides what this call leaves behind, and nothing else about the
+  /// surface changes:
+  ///
+  /// - A **query** leaves every root field ready.
+  /// - A **mutation** leaves all but the first withheld, and §6.2.2's "serially" is then a property
+  ///   of what [`poll_resolve`](Executor::poll_resolve) is able to offer. Everything below the top
+  ///   level — including the sub-selections of a mutation field — is §6.3's ordinary parallel
+  ///   collection, which is where the specification draws the line too.
+  /// - A **subscription** runs draft §6.2.3.1 `CreateSourceEventStream` and begins **no execution
+  ///   at all**. It collects the root selection set to find the single source field and coerces its
+  ///   arguments, and then waits: [`source_field`](Executor::source_field) is what the driver calls
+  ///   `ResolveFieldEventStream` with, and until it reports back through
+  ///   [`handle_source_stream`](Executor::handle_source_stream) there is nothing to resolve and no
+  ///   response to deliver. `subscribe.rs`'s header has the whole division of labour.
+  ///
+  /// **Every refusal §6.2.3.1 can raise is a [`StartError`] and none of them is a field error**,
+  /// which is the specification's own shape: `CreateSourceEventStream` runs before any execution,
+  /// so there is no response for a field error to live in. That includes step 8's
+  /// `CoerceArgumentValues`, whose failures are field errors everywhere else in draft §6 — see
+  /// [`SourceFieldArguments`](StartError::SourceFieldArguments).
   ///
   /// Collecting the root selection set happens here, so a document whose every root field is
   /// `@skip`ped produces a complete, empty response with no call to the driver at all.
@@ -1166,12 +1653,51 @@ where
   /// lookup and therefore on the refusals too, so a `start` that returns a [`StartError`] leaves the
   /// executor holding nothing: not the operation it ended, and not the `root` it was handed, which
   /// is never stored on a path that refuses.
+  ///
+  /// # One refusal comes *before* that, and it is the exception the sentence above needs
+  ///
+  /// [`ResponseStreamOpen`](StartError::ResponseStreamOpen). An open draft §7.1.2 response stream
+  /// is the one thing this executor holds that **is not this executor's to release**: the source
+  /// stream behind it is the driver's — a pub-sub subscription, a cursor, a task — and draft
+  /// §6.2.3.3 makes cancelling it the driver's half of `Unsubscribe`. The only channel that
+  /// obligation travels on is [`response_stream`](Executor::response_stream) reading
+  /// [`Cancelled`](ResponseStream::Cancelled), and a `start` that reset would delete the channel
+  /// before the driver could read it — so a reused executor would leak one source stream per
+  /// restart, silently and with nothing in the state left to say so.
+  ///
+  /// So this refusal is taken **first, and changes nothing at all**: the phase, the response
+  /// stream's state, and everything §6.2.3 was holding are exactly as they were, and the way
+  /// forward is [`unsubscribe`](Executor::unsubscribe) — §6.2.3.3 by name, which publishes
+  /// `Cancelled` and then lets the next `start` through. It is the one [`StartError`] after which
+  /// the executor is not empty, and that is the point of it rather than an omission.
+  ///
+  /// **The alternative was to cancel on the driver's behalf and hand the obligation back**, either
+  /// as a `Cancelled` state a successful `start` leaves behind — which the very next line
+  /// overwrites — or as a value in the `Ok`. Both are worse for the same reason: `start(..)?`
+  /// discards an `Ok` payload without a diagnostic, and a state the next statement overwrites is
+  /// not a channel. A refusal cannot be discarded, because the operation does not begin; and it
+  /// makes the driver write `unsubscribe`, which is the point where a human decides what happens
+  /// to the source stream. Performing §6.2.3.3 inside an unrelated `start` would also be this
+  /// crate running a specification algorithm nobody asked for.
+  ///
+  /// A stream that has already **ended** — [`Completed`](ResponseStream::Completed),
+  /// [`Failed`](ResponseStream::Failed) or [`Cancelled`](ResponseStream::Cancelled) — is not open
+  /// and is no obstacle: the source stream is gone or the driver has already been told to end it.
   pub fn start(
     &mut self,
     ctx: &mut V,
     operation: Option<&str>,
     root: V::Value,
   ) -> Result<(), StartError> {
+    self.on_entry();
+    // Before the reset, because the reset is what would destroy the evidence. `on_entry` above is
+    // the discharge every entry point owes; this refusal performs no state change of its own, so
+    // "settle the previous call before doing anything else" still holds over it.
+    if let Phase::Subscription { stage, .. } = self.phase
+      && stage.published().is_open()
+    {
+      return Err(StartError::ResponseStreamOpen);
+    }
     self.reset();
     let index = self.operation_index(operation)?;
     let definition = self
@@ -1197,18 +1723,148 @@ where
           RootOperation::Mutation,
           StartError::NoMutationRoot,
         ),
-        OperationType::Subscription(_) => return Err(StartError::NotAQueryOrMutation),
+        OperationType::Subscription(_) => (
+          named.selection_set(),
+          RootOperation::Subscription,
+          StartError::NoSubscriptionRoot,
+        ),
       },
     };
     let root_type = self.schema.root(operation).ok_or(missing)?;
 
+    // Draft §6.2.3.1 begins no execution: `CreateSourceEventStream` collects and coerces, and the
+    // first thing that could be resolved belongs to the first *event*. Leaving the flag false is
+    // what makes `poll_resolve` and `poll_response` answer `None` while the stream is being
+    // created, without either of them learning about subscriptions.
+    self.started = operation != RootOperation::Subscription;
+    let collected = self.root_selection_set(ctx, root_type, set, root);
+    match operation {
+      RootOperation::Query => self.phase = Phase::Query,
+      RootOperation::Mutation => {
+        // Draft §6.2.2 runs the top-level selection set serially. The expansion above enqueued
+        // every top-level field, exactly as a query's does; this takes all but the first back off
+        // the chain.
+        self.withhold_serial();
+        self.phase = Phase::Mutation;
+      }
+      RootOperation::Subscription => {
+        self.create_source_event_stream(ctx, set, root_type, collected)?
+      }
+    }
+    Ok(())
+  }
+
+  /// Draft §6.2.3.1 `CreateSourceEventStream` steps 5 to 8, over the root expansion `start` has
+  /// just run.
+  ///
+  /// Steps 1 to 4 are the caller's — the root type, the top level selection set, and `CollectFields`
+  /// — because they are the same four things a query's `start` does and are done by the same code.
+  /// Step 9 `ResolveFieldEventStream` is the **driver's**: it is a resolver call, and this crate
+  /// never makes one.
+  ///
+  /// # Step 5 counts collected entries, and so does this
+  ///
+  /// "If {collectedFieldsMap} does not have exactly one entry, raise a *request error*." The entry
+  /// count is `collected`, taken from the collection itself, and it is deliberately not
+  /// "how many child positions did the expansion create": `expand` skips a group whose field the
+  /// schema does not define — omitting the key being the only response that cannot invent one — so
+  /// `{ undefinedField newMessage }` creates one position out of **two** collected entries, and a
+  /// count of positions would accept a document step 5 refuses.
+  ///
+  /// # Every refusal resets first
+  ///
+  /// [`start`](Executor::start) promises that a refusal leaves the executor holding nothing, and
+  /// these refusals happen *after* the root value has been stored and the root selection set
+  /// expanded. So each of them resets before returning, which releases the `initialValue`, the
+  /// throwaway tree, and any argument coercion had already pushed. Without it a refused
+  /// subscription would leave a driver handle alive with no operation to release it.
+  fn create_source_event_stream(
+    &mut self,
+    ctx: &mut V,
+    set: &'a SelectionSet<S>,
+    root: TypeId,
+    collected: usize,
+  ) -> Result<(), StartError> {
+    let source = match self.one_source_field(collected) {
+      Ok(source) => source,
+      Err(refusal) => {
+        self.reset();
+        return Err(refusal);
+      }
+    };
+    // Step 8. Its failure is a *request* error here and a field error everywhere else in draft §6,
+    // for the reason `SourceFieldArguments` gives: there is no response yet to null a field in.
+    if !self.coerce_arguments(ctx, source) {
+      self.reset();
+      return Err(StartError::SourceFieldArguments);
+    }
+    // The root still holds the `initialValue` and `scratch_args` holds step 8's answer, and both
+    // are lent by `source_field` for as long as this state lasts. `on_entry` is what would
+    // otherwise retire the second of them, and it does not while the stream is `Creating`.
+    //
+    // **There is deliberately no assertion here, and it is a repair rather than an omission.** One
+    // was written — that the root is still `State::Object` — and it duplicated `source_field`'s
+    // own `unreachable!`, which covers the identical condition unconditionally and at the reader.
+    // A duplicate check one step earlier on the same path is not free: measured, it *moved* where
+    // two planted faults fired. Accepting `__typename` as a source field leaves the root expired,
+    // and accepting two collected entries leaves it holding two children — both tripped the new
+    // line rather than the checks that own them, so the step 5 count's own gate went green under a
+    // fault it exists to catch. Put the guard where the value is read, once.
+    self.phase = Phase::Subscription {
+      stage: Stage::Creating,
+      set,
+      root,
+      source,
+    };
+    Ok(())
+  }
+
+  /// Draft §6.2.3.1 steps 5 to 7: the position of the one source field, or why there is not one.
+  fn one_source_field(&self, collected: usize) -> Result<u32, StartError> {
+    // A refused collection has no `collectedFieldsMap` to count at all, so it is answered before
+    // the count rather than through it. `expand` records its refusal as a field error at the root
+    // and §6.4.4 discards it, which is the flag read here.
+    if self.slots[0].discarded {
+      return Err(StartError::SourceSelectionRefused);
+    }
+    if collected != 1 {
+      return Err(StartError::NoSourceField);
+    }
+    let source = self.slots[0].first_child;
+    // Two shapes reach this with one collected entry and no field to resolve: the schema does not
+    // define the field, so `expand` created no position for it; and draft §4.4's `__typename`,
+    // which the executor answers itself and never enqueues. §5.2.3.1 rules the second one out by
+    // name — the single entry "must not be an introspection field".
+    if source == NONE || !matches!(self.slots[source as usize].state, State::Ready) {
+      return Err(StartError::NoSourceField);
+    }
+    Ok(source)
+  }
+
+  /// Pushes the root position over `value` and runs draft §6.3 on `set`, returning how many entries
+  /// the collection produced.
+  ///
+  /// Everything `start` does once for a query or a mutation, and once **per source event** for a
+  /// subscription: draft §6.2.3.2's `ExecuteSubscriptionEvent` is `ExecuteRootSelectionSet` over
+  /// the same operation with the event as `initialValue`, so an event's execution is this
+  /// executor's ordinary one and §6.2.3 adds no execution code at all.
+  ///
+  /// The caller has already `reset`, which is what makes each event pay the same ceilings as the
+  /// first. See [`handle_source_event`](Executor::handle_source_event).
+  fn root_selection_set(
+    &mut self,
+    ctx: &mut V,
+    root_type: TypeId,
+    set: &'a SelectionSet<S>,
+    value: V::Value,
+  ) -> usize {
     let root_ty = PackedType::named(self.schema.type_def(root_type).name(), root_type);
     self.slots.push(Slot::new(
       NONE,
       Key::Root,
       root_ty,
       State::Object {
-        value: root,
+        value,
         ty: root_type,
         // `expand` writes the real count on its way out, and does so for the root through the very
         // same path it uses for every other object — which is why the root needed no special case.
@@ -1222,17 +1878,10 @@ where
       parent_type: root_type,
       field_sym: self.schema.type_def(root_type).name(),
     });
-    self.started = true;
 
     self.scratch_sets.clear();
     self.scratch_sets.push(set);
-    self.expand(ctx, 0);
-    // Draft §6.2.2 runs the top-level selection set serially. The expansion above enqueued every
-    // top-level field, exactly as a query's does; this takes all but the first back off the chain.
-    if operation == RootOperation::Mutation {
-      self.withhold_serial();
-    }
-    Ok(())
+    self.expand(ctx, 0)
   }
 
   /// Returns the next field the driver must resolve, or `None`.
@@ -1494,9 +2143,12 @@ where
   ///   after one that refused. `start` releases the previous operation's values, so a map accepted
   ///   here would be dropped by the very next call — a silent loss dressed as a success.
   /// - **[`AlreadyDelivered`](SetExtensionsError::AlreadyDelivered).**
-  ///   [`poll_response`](Executor::poll_response) yields at most once, so a map accepted after it
-  ///   has yielded could never appear in any response, and its values would be held by an executor
-  ///   with no way to surface them.
+  ///   [`poll_response`](Executor::poll_response) yields at most once per execution, so a map
+  ///   accepted after it has yielded could never appear in any response, and its values would be
+  ///   held by an executor with no way to surface them. Under a draft §6.2.3 subscription the
+  ///   refusal is per *event* and so is the acceptance: each event's §7.1.7 map is attached while
+  ///   that event is running and released with it, so a service that annotates every payload
+  ///   attaches one per event rather than one per subscription.
   /// - **[`TooLarge`](SetExtensionsError::TooLarge).** The map exceeds *this* executor's
   ///   [`max_extension_entries`](Limits::max_extension_entries) or
   ///   [`max_extension_key_bytes`](Limits::max_extension_key_bytes). `Extensions` carries the
@@ -1587,9 +2239,17 @@ where
 
   /// Returns the finished response, once nothing that could still change it is outstanding.
   ///
-  /// Yields at most once. A second call returns `None`, which is what makes it usable as the
-  /// driver's loop condition rather than something that has to be guarded by a flag the driver
-  /// keeps.
+  /// Yields at most once **per execution**. A second call returns `None`, which is what makes it
+  /// usable as the driver's loop condition rather than something that has to be guarded by a flag
+  /// the driver keeps.
+  ///
+  /// For a query or a mutation there is one execution, so that is once and then never. For a
+  /// subscription each draft §6.2.3.2 source event is one execution and yields one draft §7.1.1
+  /// execution result — and this method is not what re-opens it. The next
+  /// [`handle_source_event`](Executor::handle_source_event) is, which is why the intake refuses
+  /// while a result is undelivered: "delivered" is exactly the condition that lets the next event
+  /// in, so the successive yields of this method **are** §7.1.2's response stream, in source order,
+  /// with no second surface and no change to this one.
   ///
   /// Requests [`poll_abandoned`](Executor::poll_abandoned) has not yet retired do **not** withhold
   /// it. Draft §6.4.4 discarded the positions they would have filled, so by construction no answer
@@ -1638,6 +2298,27 @@ where
       "a response was delivered with an object value still held: some enqueue or departure path \
        is not accounted"
     );
+    // Draft §6.2.3.2's source stream may have ended while this event was running, in which case the
+    // ending is recorded on the phase and this result is the one it was queued behind. Taking the
+    // result is the transition, so it happens in the statement that marks it taken: `Owed` is
+    // entered only while `started && !delivered`, and this is the one line that ends that.
+    //
+    // The `Response` below borrows the slots, so nothing here may `reset` — and nothing needs to.
+    // An event's populations die at the next `start` or drop exactly as a query's do.
+    if let Phase::Subscription {
+      stage: Stage::Owed(ending),
+      set,
+      root,
+      ..
+    } = self.phase
+    {
+      self.phase = Phase::Subscription {
+        stage: ending.ended(),
+        set,
+        root,
+        source: NONE,
+      };
+    }
     self.delivered = true;
     Some(Response {
       schema: self.schema,
@@ -1648,6 +2329,410 @@ where
       errors: &self.errors,
       extensions: self.extensions.as_ref(),
     })
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // draft §6.2.3 Subscription, and draft §7.1.2 Response Stream
+  // ---------------------------------------------------------------------------------------
+
+  /// Returns draft §7.1.2's *response stream* state, or `None` when this is not a subscription.
+  ///
+  /// `None` is §7.1.2's own condition, made structural: a response stream is what a request returns
+  /// "when the GraphQL operation is a subscription", so a query or a mutation — or an executor that
+  /// has not been started — has none, and cannot be asked to serialise one.
+  ///
+  /// It survives the stream ending, which is the point. The three completions are terminal states
+  /// rather than a return to `None`, so a driver reads *how* the stream ended off the machine after
+  /// the fact — including [`Cancelled`](ResponseStream::Cancelled), which is the driver's
+  /// instruction to cancel its own source stream.
+  ///
+  /// Takes `&self`, so it is not one of the entry points [`Executor`]'s protocol table governs: it
+  /// settles nothing, because it lends nothing.
+  #[inline]
+  pub const fn response_stream(&self) -> Option<ResponseStream> {
+    match self.phase {
+      Phase::Idle | Phase::Query | Phase::Mutation => None,
+      Phase::Subscription { stage, .. } => Some(stage.published()),
+    }
+  }
+
+  /// Returns the one root field draft §6.2.3.1 step 9 `ResolveFieldEventStream` is to be called
+  /// with, or `None`.
+  ///
+  /// `Some` exactly while the response stream is [`Creating`](ResponseStream::Creating) — steps 1
+  /// to 8 have run and the driver has not yet reported a stream. The driver calls its own
+  /// subscription resolver with [`name`](SourceField::name),
+  /// [`parent_value`](SourceField::parent_value) and [`arguments`](SourceField::arguments), and then
+  /// [`handle_source_stream`](Executor::handle_source_stream).
+  ///
+  /// # It takes `&self`, and that is a decision rather than an accident
+  ///
+  /// Every other output on this surface is a `poll_*` that takes `&mut self`, because every other
+  /// one *drains* something: a request leaves the ready chain, an abandonment leaves the table, a
+  /// response is delivered once. This drains nothing. §6.2.3.1's answer is a property of the state
+  /// rather than an item on a channel, it does not change while the state lasts, and reading it
+  /// twice is not a driver error.
+  ///
+  /// The shared borrow is also what keeps the lend honest. The arguments this lends are the ones
+  /// [`start`](Executor::start) coerced — §6.2.3.1 puts `CoerceArgumentValues` inside
+  /// `CreateSourceEventStream`, and [`Values::variable`](super::Values::variable) takes `&mut V`
+  /// and may legitimately answer differently per call, so coercing a second time here could deliver
+  /// a value step 8 never checked. Being `&self`, this cannot re-coerce and does not have to: the
+  /// values are still where step 8 left them, and `on_entry` does not retire them while the stream
+  /// is `Creating` for exactly that reason.
+  #[inline]
+  pub fn source_field(&self) -> Option<SourceField<'_, 'a, S, V::Value>> {
+    let Phase::Subscription {
+      stage: Stage::Creating,
+      source,
+      ..
+    } = self.phase
+    else {
+      return None;
+    };
+    let meta = &self.meta[source as usize];
+    let (start, len) = meta.merged;
+    let field = meta
+      .field
+      .expect("draft §6.2.3.1's source field is a collected field and has a node");
+    let State::Object { value, .. } = &self.slots[0].state else {
+      // Enumerated by its opposite for the reason the offer path enumerates every variant: the root
+      // holds the `initialValue` for as long as `Creating` lasts, because `expand` enqueued exactly
+      // one child and nothing has departed. `create_source_event_stream` asserts it on the way in.
+      unreachable!("draft §6.2.3.1's root holds its `initialValue` while the stream is created")
+    };
+    Some(SourceField {
+      schema: self.schema,
+      field,
+      merged: &self.merged[start as usize..(start + len) as usize],
+      field_sym: meta.field_sym,
+      parent_type: meta.parent_type,
+      parent_value: value,
+      field_type: self.slots[source as usize].ty,
+      arguments: &self.scratch_args,
+    })
+  }
+
+  /// Reports that draft §6.2.3.1 step 9 `ResolveFieldEventStream` returned a source stream, opening
+  /// draft §7.1.2's response stream.
+  ///
+  /// Returns whether it made the transition: `true` from
+  /// [`Creating`](ResponseStream::Creating), and `false` from anywhere else, where there is no
+  /// §6.2.3.1 in progress for a stream to belong to.
+  ///
+  /// # It is the release point for everything §6.2.3.1 held
+  ///
+  /// The `initialValue` [`start`](Executor::start) was given, the throwaway tree that collection
+  /// built, and step 8's coerced arguments are all dead the instant the source stream exists —
+  /// nothing reads them again, and each event brings its own root value. So this resets, and a
+  /// subscription in [`Streaming`](ResponseStream::Streaming) with no event in flight holds no
+  /// driver value at all.
+  ///
+  /// That is a bound rather than tidiness. A subscription is unbounded in time: a value held from
+  /// here would be held for as long as the client stays connected, and `V::Value` is the driver's
+  /// own type — a wasm or FFI handle, a pooled buffer, a database cursor. Waiting for the first
+  /// event to reset would hold it for a stream that may legitimately never produce one.
+  ///
+  /// A driver whose resolver *failed* calls nothing here. §6.2.3.1's failure is a request error
+  /// that this crate did not raise, so the driver builds its own §7.1.3 response and drops or
+  /// restarts the executor; [`unsubscribe`](Executor::unsubscribe) is available if it wants the
+  /// state to say so.
+  pub fn handle_source_stream(&mut self) -> bool {
+    self.on_entry();
+    let Phase::Subscription {
+      stage: Stage::Creating,
+      set,
+      root,
+      ..
+    } = self.phase
+    else {
+      return false;
+    };
+    self.reset();
+    self.phase = Phase::Subscription {
+      stage: Stage::Streaming,
+      set,
+      root,
+      source: NONE,
+    };
+    true
+  }
+
+  /// Supplies one event from the source stream, beginning draft §6.2.3.2's
+  /// `ExecuteSubscriptionEvent` on it.
+  ///
+  /// `event` is the event's value, which §6.2.3.2 makes the execution's `initialValue`. From here
+  /// the driver's loop is a query's, unchanged: [`poll_resolve`](Executor::poll_resolve) until it
+  /// withholds, answer through [`handle_resolved`](Executor::handle_resolved) and
+  /// [`handle_field_error`](Executor::handle_field_error), and take the event's draft §7.1.1
+  /// execution result from [`poll_response`](Executor::poll_response). Then offer the next event.
+  ///
+  /// # The intake is the ordering, and the ordering is the reason this phase exists
+  ///
+  /// §6.2.3.2 maps each source event to one execution result on the response stream, in source
+  /// order. This refuses with [`Outstanding`](SourceEventError::Outstanding) while the previous
+  /// event's result has not been taken, which is that requirement made structural — a driver cannot
+  /// lose a result by pushing early, and cannot emit two out of order, because the machine will not
+  /// take the second event.
+  ///
+  /// **It is deliberately stricter than the reference implementation, and no conformance test can
+  /// see the difference.** `graphql-js` 16.11.0's `mapAsyncIterator` has no queue and no
+  /// re-entrancy guard, so a consumer that does not `for await` gets concurrent executions resolved
+  /// in completion order; upstream's ordering is its consumer's, not its library's. A Sans-I/O
+  /// machine has no `for await` to borrow that from, so the choice is to own the invariant or to
+  /// publish it as a rule the driver must remember. `subscribe.rs`'s header has the measurement and
+  /// prices the alternative, which is a reordering buffer whose size is a driver quantity times a
+  /// response — the product shape [`Limits`] refuses.
+  ///
+  /// # Each event pays exactly what the first one did
+  ///
+  /// This resets before it collects, so every cumulative ceiling — positions, metadata, interned
+  /// bytes and [`max_selection_visits`](Limits::max_selection_visits) — is re-armed per event, and
+  /// every driver value the previous event held is released here. A stream that charged
+  /// cumulatively would fail event *N* for work event 1 did, which is a bound a client clears by
+  /// reconnecting rather than a bound. What survives is what survives a second
+  /// [`start`](Executor::start): the fragment index, which is a function of the document, and the
+  /// containers' capacities, which the ceilings bound.
+  ///
+  /// Draft §6.3's collection is re-run per event rather than hoisted out of the loop, which is what
+  /// upstream does. See `subscribe.rs`'s header for why the hoist is not taken.
+  ///
+  /// # Refusal
+  ///
+  /// Two ways, both handing the event back — see [`SourceEventError`]. A source event is the
+  /// driver's own value and may be a handle, so a refusal that dropped it would have done more than
+  /// refuse.
+  pub fn handle_source_event(
+    &mut self,
+    ctx: &mut V,
+    event: V::Value,
+  ) -> Result<(), SourceEventError<V::Value>> {
+    self.on_entry();
+    let Phase::Subscription {
+      stage: Stage::Streaming,
+      set,
+      root,
+      ..
+    } = self.phase
+    else {
+      return Err(SourceEventError::NotStreaming(event));
+    };
+    // Draft §6.2.3.2's one-result-per-event, as the two flags rather than as a rule. An execution
+    // that has begun and not been delivered is the previous event's, and taking this one would
+    // discard it.
+    if self.started && !self.delivered {
+      return Err(SourceEventError::Outstanding(event));
+    }
+    self.reset();
+    self.phase = Phase::Subscription {
+      stage: Stage::Streaming,
+      set,
+      root,
+      source: NONE,
+    };
+    self.started = true;
+    // `ExecuteSubscriptionEvent` is `ExecuteRootSelectionSet` over the same operation, so this is
+    // the very call `start` makes — one execution, indistinguishable from a query's from here on.
+    let _ = self.root_selection_set(ctx, root, set, event);
+    Ok(())
+  }
+
+  /// Reports that the source stream completed normally, completing draft §7.1.2's response stream
+  /// normally.
+  ///
+  /// Draft §6.2.3.2: "When {sourceStream} completes normally: Complete {responseStream} normally."
+  /// Returns whether it made the transition, which is `true` only from
+  /// [`Streaming`](ResponseStream::Streaming) — a stream that was never opened cannot complete, and
+  /// one that has already ended does not end twice.
+  ///
+  /// Terminal. No further event is accepted, and every driver value the last event left behind is
+  /// released here rather than waiting for the executor to be dropped or restarted — **unless that
+  /// event still owes its execution result**, in which case its populations are the response's and
+  /// die where a query's do, at the next [`start`](Executor::start) or drop. See below.
+  ///
+  /// # It never ends a stream that still owes an execution result
+  ///
+  /// A push source can emit its last value and its completion back to back, so this call is
+  /// reachable with an event accepted and its draft §7.1.1 execution result not yet taken. Ending
+  /// the stream there would `reset` over that event — its `data`, its `errors`, its §7.1.7 map and
+  /// its execution flags — and [`poll_response`](Executor::poll_response) could then never emit the
+  /// result §6.2.3.2 requires. So the ending is **recorded and not performed**: the execution is
+  /// left exactly as it was, and the completion happens inside the `poll_response` that takes the
+  /// result it was queued behind.
+  ///
+  /// While that is pending, [`response_stream`](Executor::response_stream) still reads
+  /// [`Streaming`](ResponseStream::Streaming) — the honest answer to the one question
+  /// [`is_open`](ResponseStream::is_open) asks, since a result is still to come — and no further
+  /// source event is accepted, this call included: it returns `false` a second time, the stream
+  /// having already ended once.
+  ///
+  /// **This used to be a sentence saying the driver had to drain first**, on the argument that a
+  /// `Response` borrows the executor so the compiler requires it. The compiler requires no such
+  /// thing: the borrow ends when the driver drops the `Response`, and it never begins for a driver
+  /// that simply did not call `poll_response`. That is the whole lesson — an ordering a comment
+  /// states is not an ordering — and the repair is that the state machine has a value for
+  /// "accepted and undelivered" which the terminator's `match` cannot reach `reset` from. See
+  /// `Stage`.
+  ///
+  /// # The three completions are written out and not folded into one helper
+  ///
+  /// This body, [`handle_source_error`](Executor::handle_source_error)'s and
+  /// [`unsubscribe`](Executor::unsubscribe)'s differ in a few tokens each, and factoring them into
+  /// `complete_stream(end)` is the obvious tidy. It is refused for a mechanical reason:
+  /// `execute::tests::every_public_entry_point_declares_its_discharge_and_its_phases` derives each
+  /// entry point's guards from **its own body**, so a phase test moved into a shared callee is a
+  /// guard the table can no longer see. Three near-identical bodies that a gate reads are worth
+  /// more than one body it does not — and they are not identical anyway: `unsubscribe` admits a
+  /// second stream state and discards rather than defers, cancellation being the one ending that
+  /// owes no result.
+  pub fn handle_source_complete(&mut self) -> bool {
+    self.on_entry();
+    let Phase::Subscription {
+      stage: Stage::Streaming,
+      set,
+      root,
+      ..
+    } = self.phase
+    else {
+      return false;
+    };
+    // Draft §6.2.3.2 maps the accepted event to an execution result, and this completion is queued
+    // behind it. The two branches are the whole of the repair: one ends the stream, and the other
+    // records that it is ending and leaves the execution alone for `poll_response`.
+    let stage = if self.started && !self.delivered {
+      Stage::Owed(Ending::Completed)
+    } else {
+      self.reset();
+      Stage::Completed
+    };
+    self.phase = Phase::Subscription {
+      stage,
+      set,
+      root,
+      source: NONE,
+    };
+    true
+  }
+
+  /// Reports that the source stream completed with an error, completing draft §7.1.2's response
+  /// stream with it.
+  ///
+  /// Draft §6.2.3.2: "When {sourceStream} completes with {error}: Complete {responseStream} with
+  /// {error}." Returns whether it made the transition, on the same terms as
+  /// [`handle_source_complete`](Executor::handle_source_complete), and is terminal in the same way.
+  ///
+  /// # The error is not carried, and that is the boundary rather than a gap
+  ///
+  /// It takes no message. The error is the **driver's**: it belongs to a stream this crate does not
+  /// own, raised by code this crate did not run, and there is no type here for a driver-supplied
+  /// error entry — that is al8n/smear#126's, and it is the same line
+  /// [`RequestErrorResult`](super::RequestErrorResult) draws around the three request-error sources
+  /// that arise outside this crate. A driver reporting one already holds it.
+  ///
+  /// What the call buys is that the *ending* is recorded in one place. §6.2.3.2 makes completing
+  /// with an error a different completion from completing normally, and a serialiser reads which
+  /// one happened off [`response_stream`](Executor::response_stream) rather than off its own
+  /// bookkeeping — and the machine refuses further events either way.
+  ///
+  /// # An accepted event's result survives this too
+  ///
+  /// Identically to [`handle_source_complete`](Executor::handle_source_complete), and it has to be
+  /// identical: §6.2.3.2's two source-stream endings are sequenced after the events the stream
+  /// already emitted, and an event this machine accepted is one of those. A source that fails
+  /// immediately after pushing its last value is the ordinary shape of that, not an exotic one. So
+  /// the ending is recorded, `poll_response` still emits the event's execution result, and the
+  /// response stream reads [`Failed`](ResponseStream::Failed) once it has.
+  pub fn handle_source_error(&mut self) -> bool {
+    self.on_entry();
+    let Phase::Subscription {
+      stage: Stage::Streaming,
+      set,
+      root,
+      ..
+    } = self.phase
+    else {
+      return false;
+    };
+    let stage = if self.started && !self.delivered {
+      Stage::Owed(Ending::Failed)
+    } else {
+      self.reset();
+      Stage::Failed
+    };
+    self.phase = Phase::Subscription {
+      stage,
+      set,
+      root,
+      source: NONE,
+    };
+    true
+  }
+
+  /// Draft §6.2.3.3 `Unsubscribe`: cancels draft §7.1.2's response stream.
+  ///
+  /// Returns whether it cancelled an open stream — `true` from
+  /// [`Creating`](ResponseStream::Creating) and [`Streaming`](ResponseStream::Streaming), and
+  /// `false` from a stream that has already ended or from a query or mutation, neither of which has
+  /// a response stream to cancel.
+  ///
+  /// # Half of §6.2.3.2's cancellation arm, and the other half is the driver's
+  ///
+  /// "When {responseStream} is cancelled: Cancel {sourceStream}. Complete {responseStream}
+  /// normally." The second step is this call. The first cannot be: the source stream is the
+  /// driver's, and this crate performs no I/O and has nothing to cancel. So the obligation is
+  /// *published as state* instead — [`response_stream`](Executor::response_stream) reads
+  /// [`Cancelled`](ResponseStream::Cancelled), which is a different value from
+  /// [`Completed`](ResponseStream::Completed) precisely so that a driver cannot mistake "the stream
+  /// ended on its own" for "you still owe your source stream a cancellation".
+  ///
+  /// §6.2.3.3 calls that cancellation "a good opportunity to clean up any other resources used by
+  /// the subscription", and this call does its own half of that too: it releases the last event's
+  /// response tree, the draft §7.1.7 map, and — from `Creating` — the `initialValue` and the source
+  /// field's coerced arguments.
+  ///
+  /// # Legal at any moment, which is what cancellation means
+  ///
+  /// It is accepted mid-event, before the first event, and while §6.2.3.1 has not finished. A
+  /// client disconnects when it disconnects, and a cancellation that could only be taken at a
+  /// quiescent point would be one a driver had to queue — which is the driver owning a protocol
+  /// obligation again. Every [`ReqId`] outstanding at that moment is void from here, exactly as it
+  /// is across a [`start`](Executor::start), and for the same reason.
+  ///
+  /// # Cancellation is the ending that discards, and the only one
+  ///
+  /// [`handle_source_complete`](Executor::handle_source_complete) defers to an accepted event's
+  /// undelivered execution result; this does not, and the asymmetry is §6.2.3's rather than an
+  /// inconsistency. Those two arms are the source stream ending *on its own*, which §6.2.3.2
+  /// sequences after the events it already emitted. §6.2.3.3 is the **client** saying stop, and a
+  /// result nobody is listening for is owed to nobody — "a good opportunity to clean up any other
+  /// resources used by the subscription" is the specification's own framing, and holding an
+  /// undelivered response would be the opposite of it.
+  ///
+  /// It is therefore also legal from a stream whose ending is already recorded and whose last
+  /// result has not been taken: the published state is still
+  /// [`Streaming`](ResponseStream::Streaming), the stream is open, and this discards the result and
+  /// cancels. The answer is [`Cancelled`](ResponseStream::Cancelled) even though that source stream
+  /// has already ended, which costs a driver one no-op cancellation and keeps one rule instead of
+  /// two.
+  pub fn unsubscribe(&mut self) -> bool {
+    self.on_entry();
+    let Phase::Subscription {
+      stage, set, root, ..
+    } = self.phase
+    else {
+      return false;
+    };
+    if !stage.published().is_open() {
+      return false;
+    }
+    self.reset();
+    self.phase = Phase::Subscription {
+      stage: Stage::Cancelled,
+      set,
+      root,
+      source: NONE,
+    };
+    true
   }
 
   // ---------------------------------------------------------------------------------------
@@ -1849,17 +2934,33 @@ where
         self.scratch_sets.push(set);
       }
     }
-    self.expand(ctx, slot);
+    // Draft §6.2.3.1 step 5's entry count is the only reader of this, and only for the *root*
+    // expansion of a subscription. Below the root nothing counts entries.
+    let _ = self.expand(ctx, slot);
   }
 
-  /// Draft §6.3 over `self.scratch_sets`, creating one ready slot per response key.
+  /// Draft §6.3 over `self.scratch_sets`, creating one ready slot per response key, and returning
+  /// how many entries the collection produced.
   ///
   /// A `@skip`/`@include` condition that could not be read is a field error *here*, at the object
   /// whose selection set was being collected — which for the root selection set is the root, whose
   /// path is empty and whose null is the whole of `data`. That is the position the condition
   /// belongs to: the guarded field has no slot yet, and one selection's unreadable guard says
   /// nothing about its siblings' values, only that this object cannot be assembled.
-  fn expand(&mut self, ctx: &mut V, slot: u32) {
+  ///
+  /// # The return value is `collectedFieldsMap`'s size, and only one caller has a use for it
+  ///
+  /// Draft §6.2.3.1 step 5 counts *entries*, and entries and positions are different numbers: a
+  /// group whose field the schema does not define is skipped without a position being created, and
+  /// draft §4.4's `__typename` becomes a position that is never enqueued. Every other caller
+  /// discards this, which is deliberate — a `#[must_use]` here would be asserting that the count
+  /// matters to §6.4.3's completion path, and it does not.
+  ///
+  /// It is the count *before* any refusal, because that is what step 5 asks about: the map
+  /// `CollectFields` produced, not the part of it this expansion managed to commit. A refused
+  /// expansion is answered by the root's discard flag instead, which is a different question with
+  /// a different remedy.
+  fn expand(&mut self, ctx: &mut V, slot: u32) -> usize {
     let object_type = match &self.slots[slot as usize].state {
       State::Object { ty, .. } => *ty,
       // Enumerated for the reason the offer path is. `Expanded` cannot appear because a slot
@@ -1870,14 +2971,14 @@ where
       | State::Null
       | State::Leaf(_)
       | State::TypeName(_)
-      | State::List => return,
+      | State::List => return 0,
     };
     if self.scratch_sets.is_empty() {
       // An exit that leaves the slot live, so it settles the count like every other. Nothing was
       // enqueued, so the value's reader set is empty the moment this returns and the object expires
       // here rather than at the next `start`.
       self.settle_pending(slot, 0);
-      return;
+      return 0;
     }
     // Taken before the collection, because the collection interns too: a response key belonging to
     // a field that never becomes a position must not be left spending a later sibling's arena.
@@ -1945,8 +3046,15 @@ where
         (raw, _) => raw,
       };
       self.fail_at(slot, raw, fault.location);
-      return;
+      // Zero, because a refused collection produced no `collectedFieldsMap` at all. Draft §6.2.3.1
+      // does not read this number on that path — the root's discard flag answers first, and with a
+      // different refusal — so this is the truthful value rather than a load-bearing one.
+      return 0;
     }
+
+    // Draft §6.2.3.1 step 5's `collectedFieldsMap` size, read before the commit loop can refuse
+    // any of it.
+    let entries = scratch.groups().len();
 
     // Counted, not inferred from the group list: a `__typename` child is never enqueued and a
     // group whose field the schema does not define is skipped, so "groups collected" and "reads
@@ -2101,6 +3209,7 @@ where
       // §6.4.1's argument errors already draw.
       self.fail_at(slot, raw, location);
     }
+    entries
   }
 
   // ---------------------------------------------------------------------------------------
@@ -2582,6 +3691,29 @@ where
     }
   }
 
+  /// What every buffer this executor carries across a [`reset`](Self::reset) is holding.
+  ///
+  /// The lifetime census's mechanical half. [`Charges`] reads what an operation spent, this reads
+  /// what is still allocated afterwards, and only the second can see a stream that grows without
+  /// end — `reset` clears without shrinking on purpose, so the reported quantities go back to zero
+  /// while the capacities do not.
+  #[cfg(test)]
+  fn retained(&self) -> Retained {
+    Retained {
+      slots: self.slots.capacity(),
+      meta: self.meta.capacity(),
+      merged: self.merged.capacity(),
+      locations: self.locations.capacity(),
+      interner: self.interner.capacity(),
+      errors: self.errors.capacity(),
+      inflight: self.inflight.capacity(),
+      scratch: self.scratch.capacities(),
+      scratch_sets: self.scratch_sets.capacity(),
+      scratch_args: self.scratch_args.capacity(),
+      fragments: self.fragments.reserved(),
+    }
+  }
+
   /// Entries the fragment index has reserved room for, which no ceiling bounds and
   /// [`reset`](Self::reset) does not clear.
   ///
@@ -2638,6 +3770,12 @@ where
     self.ready_tail = NONE;
     self.deferred = NONE;
     self.serial_next = NONE;
+    // The operation kind goes with the operation, and every caller that is *not* ending one writes
+    // it back on the next line. That is deliberate rather than awkward: `Idle` and `!started` mean
+    // the same thing, so leaving the phase alone here would let a `start` that refuses at draft
+    // §6.1 report a subscription that is no longer running — and it is what makes `on_entry`'s
+    // `Creating` test unable to survive the reset that retires the very arguments it protects.
+    self.phase = Phase::Idle;
     self.started = false;
     self.delivered = false;
   }
@@ -2680,13 +3818,18 @@ where
   /// than at either caller on purpose. Draft §6.4.3's list clause completes synchronously, so the
   /// caller that most needs bounding is a loop whose trip count is the driver's own
   /// [`Values::list_len`](super::Values::list_len); a guard written into that loop would bound
-  /// that loop, and the next phase to grow a position — draft §6.2.3's per-event collection —
-  /// would have to remember to write it again. Returning `None` from here makes forgetting
-  /// impossible: a caller has to answer the empty case to get an index at all.
+  /// that loop, and the next phase to grow a position would have to remember to write it again.
+  /// Returning `None` from here makes forgetting impossible: a caller has to answer the empty case
+  /// to get an index at all.
   ///
-  /// Draft §6.2.2's mutation path was on that list and is off it, which is the shape working: it
-  /// re-orders when the top-level fields are *offered* and creates not one position the root's own
-  /// expansion did not already create, so there is no third caller to bound.
+  /// **Both phases that were predicted to add a caller have landed and neither did.** Draft
+  /// §6.2.2's mutation path re-orders when the top-level fields are *offered* and creates not one
+  /// position the root's own expansion did not already create. Draft §6.2.3's per-event collection
+  /// creates positions through the very same `expand` a query's root does, because
+  /// [`handle_source_event`](Executor::handle_source_event) resets and re-enters
+  /// `root_selection_set` — so an event is bounded because it *is* an execution, not because a
+  /// second site remembered the ceiling. That is the property this design was for, and it is worth
+  /// recording that it held twice rather than leaving the prediction standing.
   ///
   /// The `as u32` below is exact for the same reason. `self.slots.len()` is strictly less than the
   /// ceiling whenever this returns `Some`, and the ceiling is a `u32`, so the new index is at most
@@ -2815,9 +3958,35 @@ where
   /// without the call. [`Executor`]'s own header now carries the protocol and the table of what
   /// discharges it, and `tests::every_public_entry_point_declares_its_discharge` derives the method
   /// set from this file's source so a new one cannot join silently.
+  ///
+  /// # The one state where the arguments are not a previous call's
+  ///
+  /// `retire_arguments` releases *a lend that has ended*, and while draft §7.1.2's response stream
+  /// is [`Creating`](ResponseStream::Creating) it has not. Those arguments are §6.2.3.1 step 8's,
+  /// coerced by [`start`](Self::start) and lent by [`source_field`](Self::source_field) for as long
+  /// as the state lasts — so their owner is the state, not an offer, and every transition out of it
+  /// resets, which retires them. That keeps [`Limits`]'s rule 1 intact: the release is a transition
+  /// on the owner rather than a call at a site.
+  ///
+  /// Without the test this is a **silent wrong answer** rather than a leak, which is why it is a
+  /// condition here and not a note somewhere. Six entry points are no-ops while the stream is being
+  /// created — `poll_resolve`, `poll_response`, `poll_abandoned`, `set_extensions`,
+  /// `take_extensions`, and either `handle_*` with a stale id — and every one of them would empty
+  /// `scratch_args` on its way through. `source_field` would then hand the driver a source field
+  /// with **no arguments** and no way to tell that from a field that has none, and the driver would
+  /// resolve the wrong event stream. `a_call_in_while_creating_keeps_the_source_field_arguments`
+  /// is the gate.
   fn on_entry(&mut self) {
     self.settle_deferred();
-    self.retire_arguments();
+    if !matches!(
+      self.phase,
+      Phase::Subscription {
+        stage: Stage::Creating,
+        ..
+      }
+    ) {
+      self.retire_arguments();
+    }
   }
 
   /// Drops the object value parked by the previous `poll_resolve`, now that its lend has ended.

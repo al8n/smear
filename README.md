@@ -63,8 +63,8 @@ absent, it is absent — not partial.
 | §3 Type System | Validated inside `Schema::build`: 67 distinct refusals, each with a schema in the test suite that makes it fire |
 | §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. There is no introspection **execution** |
 | §5 Validation | All 30 executable-document rules |
-| §6 Execution | **Queries only, behind the non-default `proto` feature.** `smear::proto`'s Sans-I/O executor does collect, coerce arguments, complete, resolve abstract types and propagate nulls. A `mutation` or a `subscription` is refused rather than run, and the connection state machine, backpressure and timers a long-lived operation needs are absent |
-| §7 Response | **The tree, not the document.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. The response map's third entry is there too — the driver attaches a §7.1.7 *Extensions* map, a container that cannot hold a non-map, cannot grow past `max_extension_entries` or `max_extension_key_bytes`, and cannot be attached outside the one phase a response could carry it in; the executor hands the values back unread. Two `extensions` sites are deliberately absent: the per-*error* one of §7.1.6's error result format, because it would decide part of the diagnostic contract, and §7.1.3's *request error result*, which `start` refuses before any response object exists — a **valid** document reaches that path, so it is a real gap rather than an unreachable one. Nothing writes `data`, `errors` and `extensions` out, because serialising a driver's leaf is the driver's |
+| §6 Execution | **All three operations, behind the non-default `proto` feature.** `smear::proto`'s Sans-I/O executor does collect, coerce arguments, complete, resolve abstract types and propagate nulls. §6.2.2's serial mutation is structural rather than a contract — the top-level fields are withheld from `poll_resolve` rather than queued — and §6.2.3's subscription is a third value of the same at-most-one operation-kind phase, not a second type: `start` runs §6.2.3.1 and hands the driver the one source field to resolve into an event stream, each event it pushes back is one whole execution, and §6.2.3.2's one-result-per-event ordering is owned by the intake. What is still absent is the transport: the crate owns no stream, no clock and no timers, so the connection state machine and backpressure a long-lived operation needs live in a driver |
+| §7 Response | **The tree, not the document.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. All three of §7.1's result kinds are modelled — §7.1.1's execution result, §7.1.3's request error result as a distinct type with no `data` accessor at all, and §7.1.2's response stream as the state of a running subscription rather than a container, because a crate that owns no stream cannot hold one. The response map's third entry is there too — the driver attaches a §7.1.7 *Extensions* map, a container that cannot hold a non-map, cannot grow past `max_extension_entries` or `max_extension_key_bytes`, and cannot be attached outside the one phase a response could carry it in; the executor hands the values back unread, at both of §7.1.7's sites. One `extensions` site is deliberately absent: the per-*error* one of §7.1.6's error result format, because it would decide part of the diagnostic contract. Nothing writes `data`, `errors` and `extensions` out, because serialising a driver's leaf is the driver's |
 
 Both counts are enumerable rather than asserted. `Rule::ALL` holds 31 entries — the 29 §5 rules that
 need a runtime check, plus two non-specification resource budgets; §5.1.1 needs no entry because the
@@ -377,15 +377,16 @@ The first two carry an inline exception, because execution's first phase has lan
 stayed silent about it would be the reading this sentence exists to forbid. The list is what stands
 between the current front end and a complete implementation.
 
-- [ ] **§6 Execution** — the Sans-I/O engine described in the Overview. Query execution has landed
-  behind the non-default `proto` feature; mutations, subscription execution, the connection state
-  machine, backpressure and the timers a long-lived operation needs have not, and that is why the
-  box is unchecked.
+- [ ] **§6 Execution** — the Sans-I/O engine described in the Overview. All three of §6.2's
+  operations execute behind the non-default `proto` feature — query, serial mutation, and
+  subscription as a phase of the same machine. What has not landed is everything a *transport*
+  needs: the connection state machine, backpressure, and the timers a long-lived operation wants.
+  That is why the box is unchecked.
 - [ ] **§7 Response** — assembling and serialising the result. Execution hands back a response tree,
   and its field errors carry §7.1.2's `path` and `locations` the same way `smear::diagnostic` does;
-  the execution result's §7.1.7 *Extensions* entry is modelled and carried, the per-error one and
-  §7.1.3's request-error-result one are not, and nothing writes `data`, `errors` and `extensions`
-  out as a document.
+  all three of §7.1's result kinds are modelled, and both of §7.1.7's *Extensions* sites are
+  carried. The per-*error* `extensions` of §7.1.6 is not, and nothing writes `data`, `errors` and
+  `extensions` out as a document.
 - [ ] **Introspection execution** — a schema can be *built* from an introspection response, and an
   introspection query is *validated* like any other document, because the meta-schema is injected
   into every schema. Nothing here **answers** `__schema` or `__type`.
@@ -393,7 +394,9 @@ between the current front end and a complete implementation.
   one, or a wasm host. Thin is the point: each one is a driver, and the core stays runtime-free.
 - [ ] **Macro layer** — deriving schema types and resolver wiring from Rust types, so the ergonomic
   surface sits *above* the core instead of being the only way in.
-- [ ] **`graphql-transport-ws`** — the subscription transport, once execution can produce a stream.
+- [ ] **`graphql-transport-ws`** — the subscription transport. Execution now produces the stream
+  §7.1.2 describes, one execution result per source event, so what is left is the wire protocol and
+  the connection lifecycle around it.
 - [ ] **Diagnostic rendering** — smear ships the contract and deliberately no renderer, so nothing
   here turns an error into a rendered snippet. A companion crate for that is being built
   separately.
