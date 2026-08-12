@@ -8,6 +8,11 @@
 // own modules could spell their allocations `std::boxed::Box`, and this crate has no modules left.
 // Each member carries its own. `#![no_std]` above still means what it says — an umbrella that
 // forwards a `no_std` stack must not itself link `std`.
+//
+// `json` below is a module and does NOT bring the alias back, which is a property of that module
+// rather than an oversight here: it writes into a caller's `core::fmt::Write` and allocates
+// nothing at all, so it has no `Box`, no `String` and no `Vec` to spell. If a later module in this
+// crate does allocate, the alias comes back with it and this comment is the record of why it left.
 
 // Deliberately no outer doc comment, unlike the modules below. Rustdoc resolves the MERGED
 // fragments of a module's documentation in the scope of whichever attribute came from outside, so
@@ -167,6 +172,26 @@ pub use smear_compiler as validator;
 #[cfg_attr(docsrs, doc(cfg(feature = "proto")))]
 #[doc(inline)]
 pub use graphql_proto as proto;
+
+// THE ONE MODULE THIS CRATE OWNS, and it is here rather than one layer down for a stated reason.
+//
+// `graphql-proto` refuses to write a response out because writing one means writing the driver's
+// `V`, and `Values` asks seven structural questions of which none is "write this". The
+// materialised value layer is what closed that: with a concrete value tree there is something to
+// write, and the writer belongs ABOVE both — over `proto` for the response and over `parser` for
+// the values — which is this crate and no other. Neither layer grows a question it should not
+// have.
+//
+// Gated on `proto` alone. The materialised implementations inside it need
+// `materialized-numbers` too and carry their own `#[cfg]`, so the module and the number formatters
+// are in a `proto` build whether or not the value trees are, and `cargo hack --each-feature`
+// compiles it in the `proto` cell rather than only under `--all-features`. NO NEW FEATURE: a
+// `json` feature would be a fourteenth cell in each of `ci/hack.sh`'s two passes and a pair
+// `ci/feature_reachability.py` would have to be told about, to gate a module that is already
+// exactly as reachable as the crate it writes.
+#[cfg(feature = "proto")]
+#[cfg_attr(docsrs, doc(cfg(feature = "proto")))]
+pub mod json;
 
 #[doc(hidden)]
 pub mod __private {
