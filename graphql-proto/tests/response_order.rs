@@ -39,6 +39,34 @@
 //! map's children are offered together, the document gives them exactly one order, and requiring
 //! the arrival order to differ from it is a statement about permutation and nothing else.
 //!
+//! # Where "the document's order" comes from, and why it cannot be written down
+//!
+//! From the document. [`drive_backwards`] derives it — per response map, that map's response keys
+//! in the order draft §6.3 `CollectFields` produces them — out of the very [`ExecutableDocument`]
+//! value it then hands [`Executor::new`], and both the premise and the expected response read that
+//! one derivation. A sequence written by hand beside the query cannot be an *anchor*, because the
+//! two drift, and a drifted constant does not make this file go quiet. It makes it go **wrong**.
+//! Leave `a, b, c` written down beside a query that says `c, b, a` and every premise check passes
+//! against the constant — including the inequality, which then reads "the arrivals differ from
+//! `a, b, c`" and is satisfied by a driver that permuted nothing at all — and the response is then
+//! required to be `a, b, c`, so an executor that assembles its maps in some order of its own is
+//! *blessed* by the assertion written to catch it. Only the driver's intended **supply** order is
+//! still written by hand, because that is an input to the run rather than a fact about the
+//! document.
+//!
+//! Deriving it is not a walk over the selections. Draft §6.3 groups by **response key**: a key that
+//! appears twice is one entry, at the position of its *first* selection, and draft §6.4's
+//! `MergeSelectionSets` concatenates that group's sub-selection sets into the one map underneath
+//! it. So `a { p q } b a { r p }` declares `a, b` with `a` holding `p, q, r` — not `a, b, a`, and
+//! not two `a` maps, and not `p, q, r, p`. Neither fixture below repeats a response key, so the
+//! grouping is stated against documents that do: [`document_maps`] has its own cases at the end of
+//! this file, and they are the ones a walk over selections fails.
+//!
+//! What the derivation will not do is guess. A fragment's selections belong to a map only if
+//! `DoesFragmentTypeApply` says so, which reads the schema and the position's runtime type, and
+//! `@skip`/`@include` read variable values; none of the three is a fact about the document, so
+//! [`group_by_response_key`] refuses those selections instead of answering for them.
+//!
 //! # Aliases, and depth
 //!
 //! The response key is the *alias* when a field has one, and the alias is what a consumer compares
@@ -65,7 +93,7 @@
 //!
 //! | suite | result |
 //! |---|---|
-//! | this file | 2 of 2 red, each naming the key sequence it got |
+//! | this file's two execution cases | 2 of 2 red, each naming the key sequence it got |
 //! | `smear/tests/proto_execute.rs` | 145 of 146 green |
 //! | `proto_mutation_oracle.rs` | 3 of 5 green |
 //! | `proto_nonnull_oracle.rs` | 5 of 5 green |
@@ -74,7 +102,7 @@
 //!
 //! | suite | result |
 //! |---|---|
-//! | this file | the nested case red, the root case green |
+//! | this file's two execution cases | the nested case red, the root case green |
 //! | `smear/tests/proto_execute.rs` | **146 of 146 green** |
 //! | `proto_mutation_oracle.rs`, `proto_nonnull_oracle.rs` | all green |
 //!
@@ -95,7 +123,9 @@ use graphql_proto::{Executor, Leaf, Node, ReqId, Values};
 use smear_parser::{
   graphql::{
     GraphQL,
-    ast::{ExecutableDocument, TypeSystemDocument},
+    ast::{
+      ExecutableDefinition, ExecutableDocument, OperationDefinition, Selection, TypeSystemDocument,
+    },
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
@@ -172,7 +202,7 @@ impl Values for Space {
   }
 }
 
-/// What one run of a fixture answered, read three ways.
+/// What one run of a fixture answered, read three ways, and what its document said it should be.
 struct Run {
   /// Every response key, as a dotted draft §7.1.2 path, in the order the finished response yields
   /// them. This is the serialized key sequence the property is about.
@@ -187,6 +217,73 @@ struct Run {
   /// unit a premise can be phrased in: see the module header on why one flat sequence for the whole
   /// run says nothing.
   supplied: Vec<(String, Vec<String>)>,
+  /// The same table as the document declares it, derived by [`document_maps`] from the very
+  /// [`ExecutableDocument`] this run's [`Executor`] was built from.
+  ///
+  /// Not a parameter, and not a constant. It travels with the run because the run is the only thing
+  /// that knows which document it executed, and a second copy anywhere else is a copy that can
+  /// disagree with the first.
+  declared: Vec<(String, Vec<String>)>,
+}
+
+impl Run {
+  /// The dotted response paths [`Self::declared`] yields when it is walked depth-first — what
+  /// [`Self::keys`] has to be.
+  ///
+  /// The walk turns a table of *selection sets* into a sequence of *response paths*, which is exact
+  /// only where every object position holds exactly one map. `SDL` declares no list type and
+  /// [`Space`] nulls nothing, so it is exact here; a fixture that grew a list would produce
+  /// `a.0.p` where this produces `a.p` and the comparison would fail, which is the direction a
+  /// wrong assumption has to fail in.
+  fn document_keys(&self) -> Vec<String> {
+    fn walk(maps: &[(String, Vec<String>)], path: &str, out: &mut Vec<String>) {
+      let Some((_, keys)) = maps.iter().find(|(name, _)| name == path) else {
+        return;
+      };
+      for key in keys {
+        let child = join(path, key);
+        out.push(child.clone());
+        walk(maps, &child, out);
+      }
+    }
+
+    let mut keys = Vec::new();
+    walk(&self.declared, "", &mut keys);
+    keys
+  }
+
+  /// The `data` [`Self::declared`] implies under [`drive_backwards`]'s answering convention — what
+  /// [`Self::data`] has to be.
+  ///
+  /// The convention is the whole of the extra input: the driver answers every leaf with the
+  /// response path the executor asked it at, so the value under a key is that key's own path and
+  /// nothing here has to know what the driver did. A permutation that crossed keys and values puts
+  /// some other path under a key and this is what notices.
+  fn document_data(&self) -> String {
+    fn walk(maps: &[(String, Vec<String>)], path: &str) -> String {
+      let (_, keys) = maps
+        .iter()
+        .find(|(name, _)| name == path)
+        .expect("the walk descends only into paths the table names");
+      let mut out = String::from("{");
+      for (index, key) in keys.iter().enumerate() {
+        if index > 0 {
+          out.push(',');
+        }
+        let child = join(path, key);
+        let value = if maps.iter().any(|(name, _)| *name == child) {
+          walk(maps, &child)
+        } else {
+          format!("\"{child}\"")
+        };
+        out.push_str(&format!("\"{key}\":{value}"));
+      }
+      out.push('}');
+      out
+    }
+
+    walk(&self.declared, "")
+  }
 }
 
 /// Runs `query` to completion against [`SDL`], answering each batch of offers in reverse.
@@ -197,6 +294,9 @@ struct Run {
 /// ever complete in the order the executor offered.
 fn drive_backwards(query: &str) -> Run {
   let (schema, document) = compile(SDL, query);
+  // Before the executor exists, and from the same value it is about to be handed. This is the one
+  // place the document's order is read, and there is nowhere for a second reading to drift from it.
+  let declared = document_maps(&document);
   let mut space = Space;
   let mut executor = Executor::new(&schema, &document);
   executor
@@ -244,6 +344,7 @@ fn drive_backwards(query: &str) -> Run {
     keys,
     data: render(&data),
     supplied,
+    declared,
   }
 }
 
@@ -254,11 +355,7 @@ fn collect_keys(node: &Node<'_, Value>, prefix: &str, out: &mut Vec<String>) {
     Node::Null | Node::Leaf(_) | Node::TypeName(_) => return,
   };
   for (key, child) in children {
-    let path = if prefix.is_empty() {
-      key.to_string()
-    } else {
-      format!("{prefix}.{key}")
-    };
+    let path = join(prefix, &key.to_string());
     out.push(path.clone());
     collect_keys(&child, &path, out);
   }
@@ -297,6 +394,16 @@ fn render(node: &Node<'_, Value>) -> String {
   }
 }
 
+/// A child's dotted path: `key` under the response map at `parent`, whose own path is empty at the
+/// root.
+fn join(parent: &str, key: &str) -> String {
+  if parent.is_empty() {
+    key.to_owned()
+  } else {
+    format!("{parent}.{key}")
+  }
+}
+
 /// The response map a path sits in, and its response key within that map: `a.p` is `p` under `a`,
 /// and `a` is `a` under the root, whose path is empty.
 fn parent_and_key(path: &str) -> (&str, &str) {
@@ -309,6 +416,118 @@ fn record(maps: &mut Vec<(String, Vec<String>)>, parent: &str, key: &str) {
     Some(index) => maps[index].1.push(key.to_owned()),
     None => maps.push((parent.to_owned(), vec![key.to_owned()])),
   }
+}
+
+/// Draft §6.3 `CollectFields`, as much of it as a document alone can decide: one entry per response
+/// key, in the order of each key's *first* selection, carrying the concatenation of every
+/// sub-selection set the selections under that key declared.
+///
+/// # This is not the order of the selections, and that is the whole of it
+///
+/// A response key is a field's alias or, failing that, its name, and draft §6.3 collects the
+/// selections that share one into a single group at the position the first of them took. Draft
+/// §6.4's `MergeSelectionSets` then runs the group's sub-selection sets together as the one
+/// selection set of the one position underneath. Two consequences a walk over selections gets
+/// wrong: a repeated key must not appear twice, and it must not move to where its last selection
+/// sits; and the map under it holds the *concatenation* of the group's sub-selections, re-grouped
+/// by the same rule one level down.
+///
+/// # What it refuses, and why refusing is the honest answer
+///
+/// Whether a fragment's selections belong to this group depends on `DoesFragmentTypeApply`, which
+/// reads the schema and the position's runtime type, and whether a selection is collected at all
+/// depends on `@skip`/`@include`, which read variable values. Neither is a fact about the document,
+/// and this derivation has only the document. A guess would be an oracle that is right about the
+/// fixtures it was written for and quietly wrong past them, which is the shape of defect it exists
+/// to remove — so it panics instead, and a fixture that grows either construct gets a red test with
+/// the reason in it rather than an answer.
+fn group_by_response_key<'a>(
+  selections: &[&'a Selection<&'a str>],
+) -> Vec<(&'a str, Vec<&'a Selection<&'a str>>)> {
+  let mut groups: Vec<(&str, Vec<&Selection<&str>>)> = Vec::new();
+  for selection in selections {
+    let field = match selection {
+      Selection::Field(field) => field,
+      Selection::FragmentSpread(_) | Selection::InlineFragment(_) => panic!(
+        "a fragment's selections join a map only if `DoesFragmentTypeApply` says so, which the \
+         document does not: derive this order some other way, or teach the schema to this helper"
+      ),
+    };
+    assert!(
+      field.directives().is_none(),
+      "`@skip`/`@include` decide membership from variable values, which the document does not carry"
+    );
+    let key: &'a str = field
+      .alias()
+      .map_or_else(|| field.name().source(), |alias| alias.name().source());
+    let sub = match field.selection_set() {
+      Some(set) => set.selections(),
+      None => &[],
+    };
+    match groups.iter().position(|(name, _)| *name == key) {
+      Some(index) => groups[index].1.extend(sub.iter()),
+      None => groups.push((key, sub.iter().collect())),
+    }
+  }
+  groups
+}
+
+/// Every response map `selections` declares at `path` and below, and the response keys each holds
+/// in document order.
+fn document_maps_under<'a>(
+  selections: &[&'a Selection<&'a str>],
+  path: &str,
+  out: &mut Vec<(String, Vec<String>)>,
+) {
+  let groups = group_by_response_key(selections);
+  out.push((
+    path.to_owned(),
+    groups.iter().map(|(key, _)| (*key).to_owned()).collect(),
+  ));
+  for (key, merged) in groups {
+    // A key with no sub-selection is a leaf position, and a leaf holds no map. The recursion runs
+    // on the *merged* list, so a key repeated inside one of these groups regroups by the same rule.
+    if !merged.is_empty() {
+      document_maps_under(&merged, &join(path, key), out);
+    }
+  }
+}
+
+/// The document's own answer to "which response keys does each response map hold, and in what
+/// order", for the operation draft §6.1 `GetOperation` selects when it is given no operation name.
+///
+/// No operation name because that is the `None` every fixture here hands [`Executor::start`], and
+/// the two have to be reading the same operation for any of this to mean anything. `GetOperation`
+/// requires the document to hold exactly one operation in that case, so a fixture that grew a
+/// second one is a fixture whose `start` would have failed too, and it panics here rather than
+/// silently describing the first.
+///
+/// The schema is not a parameter, and it is not an oversight: which keys a response map holds and
+/// what order they come in is settled by draft §6.3 out of the document alone.
+fn document_maps(document: &ExecutableDocument<&str>) -> Vec<(String, Vec<String>)> {
+  let operations: Vec<_> = document
+    .definitions()
+    .iter()
+    .filter_map(|described| match described.node() {
+      ExecutableDefinition::Operation(operation) => Some(operation),
+      ExecutableDefinition::Fragment(_) => None,
+    })
+    .collect();
+  assert_eq!(
+    operations.len(),
+    1,
+    "draft §6.1 `GetOperation` selects an operation without a name only when the document defines \
+     exactly one"
+  );
+  let selection_set = match operations[0] {
+    OperationDefinition::Named(named) => named.selection_set(),
+    OperationDefinition::Shorthand(shorthand) => shorthand,
+  };
+
+  let selections: Vec<&Selection<&str>> = selection_set.selections().iter().collect();
+  let mut maps = Vec::new();
+  document_maps_under(&selections, "", &mut maps);
+  maps
 }
 
 /// Asserts the run's premise against the **document's** order, one response map at a time, before
@@ -329,20 +548,12 @@ fn record(maps: &mut Vec<(String, Vec<String>)>, parent: &str, key: &str) {
 ///
 /// The loop is what stops `supply_order` from being repaired into a lie. A hand-written table is a
 /// non-vacuity premise only because a reader knows what the document said, so the same sentence is
-/// asked of the machine: per map, the keys that arrived must be exactly that map's children — which
-/// is where a dropped or duplicated position is caught — and must not be in the document's order.
-/// A later round that meets a red premise by copying the run's new order into the table therefore
-/// cannot make it green if that new order is the document's, which is the one outcome the table
-/// exists to exclude.
-fn assert_permuted(run: &Run, document_order: &[&str], supply_order: &[(&str, &[&str])]) {
-  // The document's own reading of each map, derived from the sequence the case already declares
-  // rather than written out a second time and left to drift from it.
-  let mut declared: Vec<(String, Vec<String>)> = Vec::new();
-  for path in document_order {
-    let (parent, key) = parent_and_key(path);
-    record(&mut declared, parent, key);
-  }
-
+/// asked of the machine — against [`Run::declared`], which *is* what the document said: per map,
+/// the keys that arrived must be exactly that map's children — which is where a dropped or
+/// duplicated position is caught — and must not be in the document's order. A later round that
+/// meets a red premise by copying the run's new order into the table therefore cannot make it green
+/// if that new order is the document's, which is the one outcome the table exists to exclude.
+fn assert_permuted(run: &Run, supply_order: &[(&str, &[&str])]) {
   let mut supplied = run.supplied.clone();
   let mut expected: Vec<(String, Vec<String>)> = supply_order
     .iter()
@@ -362,10 +573,10 @@ fn assert_permuted(run: &Run, document_order: &[&str], supply_order: &[(&str, &[
 
   assert_eq!(
     expected.len(),
-    declared.len(),
+    run.declared.len(),
     "the case names a supply order for every map the document has, and for no map it does not"
   );
-  for (parent, children) in &declared {
+  for (parent, children) in &run.declared {
     let Some((_, arrival)) = expected.iter().find(|(name, _)| name == parent) else {
       panic!("the case names no supply order for the `{parent}` map");
     };
@@ -384,6 +595,20 @@ fn assert_permuted(run: &Run, document_order: &[&str], supply_order: &[(&str, &[
   }
 }
 
+/// Parses an executable document, which is all [`document_maps`] needs and the second of the two
+/// borrows an [`Executor`] is built from.
+fn parse_query(query: &str) -> ExecutableDocument<&str> {
+  Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(query)
+  .expect("the query parses")
+}
+
 /// Parses an SDL and a query into the two borrows an [`Executor`] is built from.
 fn compile<'q>(sdl: &str, query: &'q str) -> (Schema, ExecutableDocument<&'q str>) {
   let schema_document = Parser::with_parser::<
@@ -396,16 +621,16 @@ fn compile<'q>(sdl: &str, query: &'q str) -> (Schema, ExecutableDocument<&'q str
   .parse_str(sdl)
   .expect("the SDL parses");
   let schema = Schema::build(&schema_document).expect("the SDL is a schema");
-  let document = Parser::with_parser::<
-    GraphqlLexer<'_, str>,
-    ExecutableDocument<&str>,
-    GraphqlErrors<&str>,
-    _,
-    GraphQL,
-  >(executable_document)
-  .parse_str(query)
-  .expect("the query parses");
-  (schema, document)
+  (schema, parse_query(query))
+}
+
+/// A map table as `&str`s, so a case can be written and a failure read without a wall of
+/// `to_owned`.
+fn borrowed(maps: &[(String, Vec<String>)]) -> Vec<(&str, Vec<&str>)> {
+  maps
+    .iter()
+    .map(|(name, keys)| (name.as_str(), keys.iter().map(String::as_str).collect()))
+    .collect()
 }
 
 /// Three root fields answered backwards still serialise in the document's order.
@@ -414,7 +639,6 @@ fn compile<'q>(sdl: &str, query: &'q str) -> (Schema, ExecutableDocument<&'q str
 /// between this run and a correct one is *when* each value arrived.
 #[test]
 fn root_response_keys_are_the_document_s_order_and_not_the_driver_s() {
-  const DOCUMENT_ORDER: [&str; 3] = ["a", "b", "c"];
   // The one map this fixture has, and the driver hands it back to front.
   const SUPPLY_ORDER: [(&str, &[&str]); 1] = [("", &["c", "b", "a"])];
 
@@ -426,12 +650,13 @@ fn root_response_keys_are_the_document_s_order_and_not_the_driver_s() {
     }",
   );
 
-  assert_permuted(&run, &DOCUMENT_ORDER, &SUPPLY_ORDER);
+  assert_permuted(&run, &SUPPLY_ORDER);
   assert_eq!(
-    run.keys, DOCUMENT_ORDER,
+    run.keys,
+    run.document_keys(),
     "the response key sequence is the document's"
   );
-  assert_eq!(run.data, r#"{"a":"a","b":"b","c":"c"}"#);
+  assert_eq!(run.data, run.document_data());
 }
 
 /// The same property one level down, inside an outer field that is itself out of order.
@@ -442,9 +667,6 @@ fn root_response_keys_are_the_document_s_order_and_not_the_driver_s() {
 /// permutation already applied above it. This is the case that separates the two.
 #[test]
 fn nested_response_keys_are_the_document_s_order_at_every_depth() {
-  const DOCUMENT_ORDER: [&str; 12] = [
-    "a", "a.p", "a.q", "a.r", "b", "b.p", "b.q", "b.r", "c", "c.p", "c.q", "c.r",
-  ];
   // Four maps, every one of them handed back to front — which is the whole of what this case needs
   // to be true before its own assertions mean anything, and which no single sequence can say.
   const SUPPLY_ORDER: [(&str, &[&str]); 4] = [
@@ -462,17 +684,90 @@ fn nested_response_keys_are_the_document_s_order_at_every_depth() {
     }",
   );
 
-  assert_permuted(&run, &DOCUMENT_ORDER, &SUPPLY_ORDER);
+  assert_permuted(&run, &SUPPLY_ORDER);
   assert_eq!(
-    run.keys, DOCUMENT_ORDER,
+    run.keys,
+    run.document_keys(),
     "the response key sequence is the document's, outer and inner alike"
   );
-  assert_eq!(
-    run.data,
-    concat!(
-      r#"{"a":{"p":"a.p","q":"a.q","r":"a.r"},"#,
-      r#""b":{"p":"b.p","q":"b.q","r":"b.r"},"#,
-      r#""c":{"p":"c.p","q":"c.q","r":"c.r"}}"#,
-    )
+  assert_eq!(run.data, run.document_data());
+}
+
+/// A repeated response key is one entry, where the *first* of its selections put it.
+///
+/// Neither execution fixture repeats a key, so this is where the derivation's grouping is stated
+/// against a document that needs it, and it is a document draft §5.3.2 allows: both `a` selections
+/// name the same field with the same argument, so they merge rather than conflict.
+///
+/// Three answers a walk over selections gets wrong, all in this one case. `a` stays ahead of `b`
+/// rather than moving to where its second selection sits; it appears once rather than twice; and
+/// the map under it is the two sub-selection sets run together *and re-grouped*, so the `p` that
+/// both of them name is one key at its first position and the map reads `p, q, r` rather than
+/// `p, q, r, p`.
+#[test]
+fn a_repeated_response_key_is_one_entry_at_its_first_position() {
+  let document = parse_query(
+    r"{
+      a: item(id: 1) { p q }
+      b: label(id: 2)
+      a: item(id: 1) { r p }
+    }",
   );
+
+  assert_eq!(
+    borrowed(&document_maps(&document)),
+    [("", vec!["a", "b"]), ("a", vec!["p", "q", "r"])]
+  );
+}
+
+/// Grouping is by response key, so one field name under two aliases is two maps and one alias over
+/// two selections is one.
+///
+/// The complement of the case above, and the reason the derivation reads `alias()` before `name()`:
+/// `item` and `x: item` are the same field and must not merge, while the two `x`s are the same
+/// response key and must. Getting the key from the field's name instead would collapse all four
+/// selections into one map of `p, q, r`, in a file whose fixtures alias every field they use.
+#[test]
+fn a_response_key_is_the_alias_and_grouping_follows_it() {
+  let document = parse_query(
+    r"{
+      item(id: 1) { p }
+      x: item(id: 2) { q }
+      item(id: 1) { r }
+      x: item(id: 2) { p }
+    }",
+  );
+
+  assert_eq!(
+    borrowed(&document_maps(&document)),
+    [
+      ("", vec!["item", "x"]),
+      ("item", vec!["p", "r"]),
+      ("x", vec!["q", "p"]),
+    ]
+  );
+}
+
+/// A construct the document cannot settle is refused, not guessed at.
+///
+/// The boundary is worth a test of its own because the failure it prevents is the silent one. Draft
+/// §6.3 expands this spread in place, so the root map is `a, b`; a derivation that walked past a
+/// spread it could not resolve would answer `a`, and a response missing `b` entirely would then be
+/// the response it required. Refusing is the only answer that cannot be quietly wrong, and it is
+/// only an answer while nothing weakens it into a skip.
+#[test]
+#[should_panic(expected = "`DoesFragmentTypeApply`")]
+fn a_fragment_is_refused_rather_than_guessed_at() {
+  let document = parse_query(
+    r"{
+      a: label(id: 1)
+      ...Rest
+    }
+
+    fragment Rest on Query {
+      b: label(id: 2)
+    }",
+  );
+
+  let _ = document_maps(&document);
 }
