@@ -474,6 +474,48 @@ impl<S> IntOverflow<S> {
 /// configuration — 22 variants, always — and builds a sample through a public constructor for
 /// each one whose producer that configuration compiled: 22 samples with the feature, 20 without.
 /// A variant producible in no configuration is caught by the all-features run.
+///
+/// # Source-breaking change: `IntOverflow`'s payload
+///
+/// `IntOverflow(S)` is now [`IntOverflow(IntOverflow<S>)`](IntOverflow). This is a **breaking
+/// change to a name that predates the branch**, stated here rather than in a changelog because
+/// the workspace has never published a version to break — every crate in it is `0.0.0`, so there
+/// is no released `smear-parser` for a semver bump to describe. The obligation the bump would
+/// discharge is discharged here and in the PR instead, and the moment a version exists this
+/// paragraph is what a changelog entry is written from.
+///
+/// **What stops compiling**, in every configuration including one with `materialized-numbers`
+/// off, because the variant is unconditional:
+///
+/// - a match arm that binds the payload and uses it as `S` — `ErrorData::IntOverflow(v) => v`;
+/// - the derive-generated `unwrap_int_overflow` / `try_unwrap_int_overflow`, whose return type
+///   was `S`.
+///
+/// **The migration is one accessor per site**: `v` becomes `v.value()`, and
+/// `unwrap_int_overflow()` gains `.into_value()`. `ErrorData` stays at 22 variants and no other
+/// variant changes shape.
+///
+/// **Why this rather than the two alternatives**, both of which were considered and are worse:
+///
+/// - *A twenty-third variant, `IntOverflow32`.* This enum is deliberately not
+///   `#[non_exhaustive]`, and `smear-smoke`'s `error_data_is_exhaustively_matchable` pins that
+///   from outside the crate. A new variant is therefore `E0004` in every downstream exhaustive
+///   match — a break too, and a wider one, since it reaches consumers who never touch integer
+///   overflow at all.
+/// - *A private `Option<IntWidth>` beside `data` on [`Error`], read through additive accessors.*
+///   It breaks nothing in the type system, and it is the wrong shape for two reasons that are
+///   about what a consumer does rather than about taste. First, `Error::into_data` and
+///   `Error::data` hand out an [`ErrorData`] with no width in it, so the natural renderer — `fn
+///   render(data: &ErrorData<…>) -> String` — cannot reach the field that exists for it, and
+///   forwarding the data silently drops the width. Second, and worse: `None` would have to mean
+///   *not recorded*, never *probably 64-bit*, because an overflow whose width was never observed
+///   is not a 64-bit overflow and a default that supplies an unmeasured fact is a silent wrong
+///   answer where a compile error is a loud one. Keeping `None` honest means `Error::new(span,
+///   ErrorData::IntOverflow(v))` and the existing `int_overflow` constructor both build an
+///   overflow with **no** width, so every consumer must branch on a state this crate would never
+///   produce, forever. The payload makes that state unrepresentable instead: there is no way to
+///   construct an `IntOverflow` without naming the width, so no path can report a width it did
+///   not attempt, and no path can decline to report one either.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
