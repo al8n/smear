@@ -22,12 +22,16 @@
 //! in the response, so permuting the calls to it is precisely permuting completion — with none of a
 //! race's flakiness, and covering the interleaving a timer would only reach by luck.
 //!
-//! [`drive_backwards`] therefore answers **each batch of outstanding offers in reverse**. Reversal
-//! is chosen over a hand-written permutation because it is the maximum displacement available and
-//! because it needs no maintenance when a fixture grows a field; [`assert_permuted`] then checks,
+//! Two drivers do the permuting, and the difference between them is the subject of the
+//! history-derived section below. [`drive_backwards`] answers **every response map in the reverse
+//! of its document order**, and the two named cases are written against it because a reader can
+//! hold "backwards" in their head and check it against the query; [`assert_permuted`] then checks,
 //! against the document's order rather than the response's, that the driver really did answer out
-//! of order, so this file cannot decay into supplying in document order and passing for the wrong
-//! reason.
+//! of order, so a named case cannot decay into supplying in document order and passing for the
+//! wrong reason. [`sweep`] answers each document under **every** supply order there is — each map's
+//! orderings crossed with every other map's, 864 runs per document — because one permutation,
+//! however displaced, leaves exactly one defect of this shape standing, and the round of this file
+//! before this one was standing on it.
 //!
 //! That premise is read **one response map at a time**, and a global timeline cannot stand in for
 //! it. A whole-run supply sequence differs from the document's serialized key sequence whatever the
@@ -41,18 +45,18 @@
 //!
 //! # Where "the document's order" comes from, and why it cannot be written down
 //!
-//! From the document. [`drive_backwards`] derives it — per response map, that map's response keys
-//! in the order draft §6.3 `CollectFields` produces them — out of the very [`ExecutableDocument`]
-//! value it then hands [`Executor::new`], and both the premise and the expected response read that
-//! one derivation. A sequence written by hand beside the query cannot be an *anchor*, because the
-//! two drift, and a drifted constant does not make this file go quiet. It makes it go **wrong**.
-//! Leave `a, b, c` written down beside a query that says `c, b, a` and every premise check passes
-//! against the constant — including the inequality, which then reads "the arrivals differ from
-//! `a, b, c`" and is satisfied by a driver that permuted nothing at all — and the response is then
-//! required to be `a, b, c`, so an executor that assembles its maps in some order of its own is
-//! *blessed* by the assertion written to catch it. Only the driver's intended **supply** order is
-//! still written by hand, because that is an input to the run rather than a fact about the
-//! document.
+//! From the document. [`drive`] derives it — per response map, that map's response keys in the
+//! order draft §6.3 `CollectFields` produces them — out of the very [`ExecutableDocument`] value it
+//! then hands [`Executor::new`], and both the premise and the expected response read that one
+//! derivation. A sequence written by hand beside the query cannot be an *anchor*, because the two
+//! drift, and a drifted constant does not make this file go quiet. It makes it go **wrong**. Leave
+//! `a, b, c` written down beside a query that says `c, b, a` and every premise check passes against
+//! the constant — including the inequality, which then reads "the arrivals differ from `a, b, c`"
+//! and is satisfied by a driver that permuted nothing at all — and the response is then required to
+//! be `a, b, c`, so an executor that assembles its maps in some order of its own is *blessed* by
+//! the assertion written to catch it. Only a **named** case's intended supply order is still
+//! written by hand, because that is an input to the run rather than a fact about the document — and
+//! [`sweep`]'s are not written down at all, being every ordering of the derived list.
 //!
 //! Deriving it is not a walk over the selections. Draft §6.3 groups by **response key**: a key that
 //! appears twice is one entry, at the position of its *first* selection, and draft §6.4's
@@ -105,9 +109,13 @@
 //! in these maps at all moves one of the two fixtures out of its document order.
 //!
 //! What the pair says nothing about is an order derived from the *run* rather than from the keys —
-//! completion order, arrival index, insertion order. Those are a different family and they die to a
-//! different mechanism: the driver answers every map backwards, so any of them reproduces the
-//! reversal in the response. The plants at the end of this file measure both halves.
+//! completion order, arrival index, insertion order. Those are a different family, and the sentence
+//! that stood here said they die to the backwards driver, "so **any** of them reproduces the
+//! reversal in the response". That is **false**, it was measured false, and the section on that
+//! family below is what it cost: reversal is an involution, so an assembly emitting each map in
+//! *reverse* completion order composes with the backwards driver straight back into document order.
+//! What kills the family is the enumeration [`sweep`] runs, not any one supply order. The plants at
+//! the end of this file measure both halves.
 //!
 //! ## The belt: what the shared key set has to look like
 //!
@@ -170,9 +178,13 @@
 //!
 //! | plant | this file | `proto_execute.rs` | `proto_mutation_oracle.rs` | `proto_nonnull_oracle.rs` |
 //! |---|---|---|---|---|
-//! | `push_child` sorts the chain lexically by response key | 2 of 2 red | 140 of 146 | 2 of 5 | 2 of 5 |
-//! | `push_child` stable-sorts the chain by response-key **length** | 2 of 2 red | 136 of 146 | 2 of 5 | 5 of 5 |
-//! | `expand` stable-partitions the finished map, **aliases first** | 2 of 2 red | 144 of 146 | 5 of 5 | 3 of 5 |
+//! | `push_child` sorts the chain lexically by response key | 4 of 8 red | 140 of 146 | 2 of 5 | 2 of 5 |
+//! | `push_child` stable-sorts the chain by response-key **length** | 4 of 8 red | 136 of 146 | 2 of 5 | 5 of 5 |
+//! | `expand` stable-partitions the finished map, **aliases first** | 4 of 8 red | 144 of 146 | 5 of 5 | 3 of 5 |
+//!
+//! Four of eight and not two of eight: each of the three reddens the two named cases and both
+//! sweeps, so the enumeration below does not cost the pair its detections and does not stand in for
+//! them either — the neighbouring columns are green counts, as before.
 //!
 //! Each of the three fails at the *property*, not at the premise: reordering the sibling chain
 //! moves the response without touching the `next_ready` queue the offers come off, so the driver
@@ -200,21 +212,30 @@
 //! The same shape of defect can live in the **oracle**: a derivation that sorted its own groups
 //! would agree with a sorting executor about every document there is, and the two would be right
 //! about each other and wrong together. So `group_by_response_key` was planted with a lexical sort
-//! of its own, and it turns five of this file's six cases red — both grouping cases, both execution
-//! cases, and [`the_pair_is_one_key_set_in_two_orders`], which notices first and most directly,
-//! because a derivation that sorts reports the *same* order for two documents that differ only in
-//! order.
+//! of its own, and it turns seven of this file's eight cases red — both grouping cases, both
+//! execution cases, both sweeps, and [`the_pair_is_one_key_set_in_two_orders`], which notices first
+//! and most directly, because a derivation that sorts reports the *same* order for two documents
+//! that differ only in order. The one survivor is the `#[should_panic]` refusal, which never
+//! reaches a group.
 //!
-//! ## The history-derived family
+//! The sweeps go red under it for a reason worth stating, because it is what stops the enumeration
+//! from being self-fulfilling: a sorted derivation feeds the sweep *the same set of keys* per map,
+//! so every supply plan is still a genuine ordering of that map's children and the per-run premise
+//! stays green. What moves is the expectation — [`Run::document_keys`] and [`Run::document_data`]
+//! now describe the sorted order — and the correct executor answers in the document's. The sweep
+//! fails at the property, on all 864 plans.
 //!
-//! The plant is `handle_resolved` moving the position to the end of its parent's child chain before
-//! completing it, which is async-graphql's insert-on-completion expressed against this tree; when
-//! every child of a position completes through that path exactly once, the resulting sibling order
-//! *is* the completion order. Measured against it, with the plant applied at **every** depth:
+//! ## The history-derived family, and why naming its members did not close it
+//!
+//! The plant this family is written against is `handle_resolved` moving the position to the end of
+//! its parent's child chain before completing it, which is async-graphql's insert-on-completion
+//! expressed against this tree; when every child of a position completes through that path exactly
+//! once, the resulting sibling order *is* the completion order. Measured against it, with the plant
+//! applied at **every** depth:
 //!
 //! | suite | result |
 //! |---|---|
-//! | this file's two execution cases | 2 of 2 red, each naming the key sequence it got |
+//! | this file | 4 of 8 red — both execution cases and both sweeps, each naming the key sequence it got |
 //! | `smear/tests/proto_execute.rs` | 145 of 146 green |
 //! | `proto_mutation_oracle.rs` | 3 of 5 green |
 //! | `proto_nonnull_oracle.rs` | 5 of 5 green |
@@ -223,9 +244,48 @@
 //!
 //! | suite | result |
 //! |---|---|
-//! | this file's two execution cases | 2 of 2 red, each naming an inner map's reversal |
+//! | this file | 4 of 8 red, each naming an inner map's reversal |
 //! | `smear/tests/proto_execute.rs` | **146 of 146 green** |
 //! | `proto_mutation_oracle.rs`, `proto_nonnull_oracle.rs` | all green |
+//!
+//! ### One supply order leaves exactly one such defect standing, and it chooses which
+//!
+//! An assembly whose order comes from the run applies some permutation σ to each map's completion
+//! order. A driver that supplies one fixed permutation π hands back σ(π), so it is blind to exactly
+//! one σ — the one with σ ∘ π = identity — and *which* one is decided by π, which the fixture
+//! picked, and not by anything the fixture can observe. Three members of the family were named in
+//! an earlier round and it was called closed. It was closed against three points of it.
+//!
+//! [`sweep`] makes the census possible: run all 864 plans against a plant and count the survivors.
+//! Each of these plants survives **exactly one plan, per document**, and it is the plan the
+//! arithmetic names:
+//!
+//! | plant, in `handle_resolved` | the assembly it produces | its one surviving supply plan | this file |
+//! |---|---|---|---|
+//! | relink the position to the **end** of its parent's chain | the completion order | the **identity** — every map answered in document order | 4 of 8 red |
+//! | relink it to the **front** | the **reverse** of the completion order | every map answered **backwards** | 2 of 8 red |
+//! | relink to the end, then move the head to the end once the map is finished | a **rotation** of the completion order | every map answered rotated right by one | 4 of 8 red |
+//!
+//! The middle row is what this round is for. Its one survivor out of 864 is precisely what
+//! [`drive_backwards`] supplies, so the file as it stood before this round — the two named cases
+//! and no sweep — was **6 of 6 green** on an assembly that reverses every response map at every
+//! depth. Reversal composed with reversal is the identity; the premise checks, the key assertions,
+//! the mirrored-key-set guard and both `data` comparisons all passed on the cancellation. Against
+//! the file as it now ships that plant is 2 of 8 red, and the two it reddens are the two sweeps.
+//!
+//! The bottom row is why naming a second permutation would not have fixed it. A rotation is not an
+//! involution, so its blind spot is somewhere else entirely — `label, bee, item, a` at [`QUERY`]'s
+//! root, which nobody would write down and which the sweep supplies because it supplies everything.
+//! It is 4 of 8 red here, the named cases included: a rotation is *easy* to catch and that is the
+//! point, because the difficulty of catching one has nothing to do with how likely the defect is.
+//! The top row is the same lesson from the other side — the completion-order plant survives only
+//! the identity, and the identity is the one supply order a backwards driver can never reach.
+//!
+//! What survives this argument is a defect that is not a fixed permutation of the completion order
+//! — one that reads the *values*, say, or the wall clock. The sweep does not close that, and
+//! nothing here claims it does.
+//!
+//! ### What the neighbouring suites see, and why it is not the key order
 //!
 //! Not one of the incumbent detections is about response key order. Every one of them is a mutation
 //! or `__typename` fixture, and it fires for the same incidental reason in each: a position that
@@ -237,6 +297,14 @@
 //! one, and `a_drained_subtree_is_not_walked_again` reads `next_sibling` directly to find a slot,
 //! so it trips on the relink rather than on the order and goes red under both.
 //!
+//! The two plants added this round are not nearly as quiet elsewhere, and reading the end-relink's
+//! near-invisibility as a property of the family would be wrong. The front-relink leaves
+//! `proto_execute.rs` at 116 of 146 green and the rotation at 116 as well, against the end-relink's
+//! 145, because both of them displace the positions that *never* complete — which is precisely the
+//! set the end-relink leaves alone, since it only ever appends the ones that do. That makes them
+//! louder neighbours and no easier to see here: the front-relink is the one this file could not see
+//! at all, and it is the loudest of the three next door.
+//!
 //! Which is the same latency that hid the defect upstream, one level down: a driver that answers
 //! each offer as it takes it completes in offer order, offer order is document order, and a
 //! completion-ordered assembly then reproduces document order exactly. Every incumbent fixture
@@ -246,7 +314,9 @@
 //! Both relink plants redden both execution cases, so which depth broke is not read off the test
 //! name. It is read off the failure, which prints the whole dotted key sequence: under the relink
 //! below the root the root's keys are still the document's and only the inner maps have turned
-//! round, and under the relink at every depth the whole sequence is the supply order.
+//! round, and under the relink at every depth the whole sequence is the supply order. A sweep's
+//! failure prints the supply plan beside it, which is the fact the named cases carry in their name
+//! and an enumerated run cannot.
 
 use graphql_proto::{Executor, Leaf, Node, ReqId, Values};
 use smear_parser::{
@@ -296,10 +366,11 @@ const QUERY: &str = r"{
 /// The second of the pair: [`QUERY`]'s selections, and every inner selection set, written in the
 /// opposite order.
 ///
-/// Reversal rather than some other permutation for the reason [`drive_backwards`] reverses: it is
-/// the maximum displacement available, it needs no maintenance when a fixture grows a field, and it
-/// is what makes the stable-sort half of the header's argument go through — a stable sort leaves
-/// both a sequence and its reverse alone only if it ties every key in the map.
+/// Reversal rather than some other permutation because it is what makes the stable-sort half of the
+/// header's argument go through: a stable sort leaves both a sequence and its reverse alone only if
+/// it ties every key in the map. That is a property of the *document* pair and it survives; the
+/// same word appears in [`drive_backwards`], where it is a choice of one **supply** order, and
+/// there the header records what choosing one cost.
 const MIRROR: &str = r"{
   label(id: 4)
   a: item(id: 3) { rho: r q zed: p }
@@ -441,19 +512,43 @@ impl Run {
   }
 }
 
-/// Runs `query` to completion against [`SDL`], answering each batch of offers in reverse.
+/// Runs `query` to completion against [`SDL`], answering every response map's offers in the reverse
+/// of that map's document order.
+///
+/// The named cases below drive through this one, because a reader can hold "backwards" in their
+/// head and check it against the query; [`sweep`] runs the same documents through every supply plan
+/// there is, this one included.
+fn drive_backwards(query: &str) -> Run {
+  let (schema, document) = compile(SDL, query);
+  let plan: Vec<(String, Vec<String>)> = document_maps(&document)
+    .into_iter()
+    .map(|(path, keys)| (path, keys.into_iter().rev().collect()))
+    .collect();
+  drive(&schema, &document, &plan)
+}
+
+/// Runs `document` to completion against `schema`, answering each response map's offers in the
+/// order `plan` names for that map.
 ///
 /// A *batch* is everything [`Executor::poll_resolve`] will hand out before it withholds — for these
 /// fixtures, every position at one depth. Taking the whole batch before answering any of it is what
 /// makes the permutation possible at all: a driver that answers each offer as it takes it can only
 /// ever complete in the order the executor offered.
-fn drive_backwards(query: &str) -> Run {
-  let (schema, document) = compile(SDL, query);
-  // Before the executor exists, and from the same value it is about to be handed. This is the one
-  // place the document's order is read, and there is nowhere for a second reading to drift from it.
-  let declared = document_maps(&document);
+///
+/// What the plan settles is the order *within* each response map, and deliberately not the
+/// interleaving between two maps whose children share a batch — for the reason [`assert_permuted`]
+/// does not pin it either. The parents keep the order the executor offered them, so that stays a
+/// fact about depth scheduling rather than something a caller has to name.
+fn drive(
+  schema: &Schema,
+  document: &ExecutableDocument<&str>,
+  plan: &[(String, Vec<String>)],
+) -> Run {
+  // From the same value the executor is about to be handed. This is the one place the document's
+  // order is read, and there is nowhere for a second reading to drift from it.
+  let declared = document_maps(document);
   let mut space = Space;
-  let mut executor = Executor::new(&schema, &document);
+  let mut executor = Executor::new(schema, document);
   executor
     .start(&mut space, None, Value::Object)
     .expect("the operation resolves");
@@ -473,7 +568,7 @@ fn drive_backwards(query: &str) -> Run {
     if batch.is_empty() {
       break;
     }
-    batch.reverse();
+    order_batch(&mut batch, plan);
     for (id, path, object) in batch {
       let value = if object {
         Value::Object
@@ -501,6 +596,83 @@ fn drive_backwards(query: &str) -> Run {
     supplied,
     declared,
   }
+}
+
+/// Puts one batch of offers into the order `plan` asks for: each response map's children in that
+/// map's named order, the maps themselves in the order the executor offered them.
+///
+/// It refuses rather than falls back. A position whose map the plan does not name, or whose key
+/// that map's order does not hold, is a run the plan does not describe — and leaving it in offer
+/// order would be a driver that answered in document order while a caller believed it had asked for
+/// something else, which is the one failure mode a supply order exists to exclude.
+fn order_batch(batch: &mut [(ReqId, String, bool)], plan: &[(String, Vec<String>)]) {
+  let mut parents: Vec<String> = Vec::new();
+  for (_, path, _) in batch.iter() {
+    let (parent, _) = parent_and_key(path);
+    if !parents.iter().any(|name| name == parent) {
+      parents.push(parent.to_owned());
+    }
+  }
+  batch.sort_by_key(|(_, path, _)| {
+    let (parent, key) = parent_and_key(path);
+    let offered = parents
+      .iter()
+      .position(|name| name == parent)
+      .expect("every parent in the batch was collected from the batch");
+    let Some((_, order)) = plan.iter().find(|(name, _)| name == parent) else {
+      panic!("the supply plan names no order for the `{parent}` map");
+    };
+    let Some(supplied) = order.iter().position(|named| named == key) else {
+      panic!("the supply plan for the `{parent}` map does not name `{key}`");
+    };
+    (offered, supplied)
+  });
+}
+
+/// Every ordering of `items`, the identity first.
+///
+/// Written out rather than pulled in, and recursive rather than clever, because the one property
+/// this file needs from it is *completeness* — [`sweep`] asserts that against the document's own
+/// key lists rather than trusting the generator.
+fn permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+  if items.is_empty() {
+    return vec![Vec::new()];
+  }
+  let mut out = Vec::new();
+  for index in 0..items.len() {
+    let mut rest = items.to_vec();
+    let head = rest.remove(index);
+    for mut tail in permutations(&rest) {
+      tail.insert(0, head.clone());
+      out.push(tail);
+    }
+  }
+  out
+}
+
+/// Every supply plan the document admits: one ordering of each response map's children, taken
+/// across all of them.
+///
+/// The cross product rather than one map at a time. A per-map sweep that left the other maps at
+/// some fixed order would close each map against a defect confined to that map, and say nothing
+/// about one whose response order is a function of the whole run — arrival index across the
+/// operation, say, which the maps' orders jointly determine. The product is 4! · 3! · 3! per
+/// document, so there is no reason to take the weaker reading.
+fn supply_plans(declared: &[(String, Vec<String>)]) -> Vec<Vec<(String, Vec<String>)>> {
+  let mut plans: Vec<Vec<(String, Vec<String>)>> = vec![Vec::new()];
+  for (path, keys) in declared {
+    let orders = permutations(keys);
+    let mut extended = Vec::with_capacity(plans.len() * orders.len());
+    for plan in &plans {
+      for order in &orders {
+        let mut next = plan.clone();
+        next.push((path.clone(), order.clone()));
+        extended.push(next);
+      }
+    }
+    plans = extended;
+  }
+  plans
 }
 
 /// Every response key under `node`, depth-first, each as a dotted path.
@@ -790,6 +962,130 @@ fn assert_permuted(run: &Run, supply_order: &[(&str, &[&str])]) {
   }
 }
 
+fn factorial(count: usize) -> usize {
+  (1..=count).product()
+}
+
+/// Runs `query` under **every** supply plan [`supply_plans`] admits and requires the document's own
+/// order out of each one.
+///
+/// # Why an enumeration and not a third named case
+///
+/// The named cases supply one permutation: each map backwards. Reversal is *involutive*, and that
+/// is a property of the fixture rather than of the executor — an assembly that emitted each map in
+/// **reverse completion order** would compose with it to the identity and hand back document order
+/// at every depth, so the named cases are green on it. Naming a second permutation moves the blind
+/// spot rather than removing it, because the defect chooses where to hide *after* the fixture has
+/// chosen where to look. The root maps hold four keys and the inner ones three, so the whole space
+/// is 4! · 3! · 3! = 864 runs per document and there is no longer a choice to make.
+///
+/// # This has no permutation premise, and that is not [`assert_permuted`] weakened
+///
+/// [`assert_permuted`]'s third condition — the arrivals must differ from the document's order —
+/// exists because a *hand-written* supply order can be repaired into a lie: a later round meeting a
+/// red premise can copy the run's new order into the table, and if that new order is the document's
+/// then the case has quietly stopped asserting anything. That condition still guards the named
+/// cases, and nothing here relaxes it.
+///
+/// A sweep cannot carry it, because the identity permutation is one of the 864 and is the very run
+/// that catches a reverse-emitting assembly. What replaces it is the enumeration itself, and a
+/// sweep with no premise at all is exactly what a *vacuous* sweep looks like — so the enumeration
+/// is asserted rather than assumed, in two halves that a vacuous sweep fails at one or the other:
+///
+/// - **The plans are complete, against the document.** Three of the checks make that a proof rather
+///   than a hope: each plan's order for a map is a permutation of that map's *document* keys, which
+///   puts every plan inside a space of exactly `∏ |keys|!` = 864 members; there are 864 of them;
+///   and they are pairwise distinct. 864 distinct members of an 864-member space are all of it. The
+///   other two — that each map is seen in exactly `|keys|!` distinct orders, and that the
+///   document's own order is one of them — follow from those, and are asserted anyway because they
+///   are the two a reader checks by eye. A generator that emitted one plan 864 times, or 864 copies
+///   of the same two, or orders over some other key set, fails here.
+/// - **Each run really arrived that way.** Every run's per-map arrival table must equal the plan
+///   it was given, which is [`assert_permuted`]'s first two conditions — the same maps, holding
+///   exactly the same children, in the named order — read out of the run. A driver that ignored
+///   the plan and answered each offer as it took it fails here on all but one of the 864.
+///
+/// Together those say every completion order was tried, which is the statement a per-run inequality
+/// was standing in for. The named cases keep the inequality because they have no enumeration to
+/// stand on; the sweep drops it because it does.
+fn sweep(query: &str) {
+  let (schema, document) = compile(SDL, query);
+  let declared = document_maps(&document);
+  let plans = supply_plans(&declared);
+
+  assert_eq!(
+    plans.len(),
+    declared
+      .iter()
+      .map(|(_, keys)| factorial(keys.len()))
+      .product::<usize>(),
+    "the sweep is every map's orderings crossed with every other map's"
+  );
+  let mut distinct = plans.clone();
+  distinct.sort();
+  distinct.dedup();
+  assert_eq!(
+    distinct.len(),
+    plans.len(),
+    "a repeated plan is a run that measures nothing and a count that overstates the sweep"
+  );
+  for (path, keys) in &declared {
+    let mut orders: Vec<Vec<String>> = plans
+      .iter()
+      .map(|plan| {
+        let Some((_, order)) = plan.iter().find(|(name, _)| name == path) else {
+          panic!("a supply plan names no order for the `{path}` map");
+        };
+        order.clone()
+      })
+      .collect();
+    for order in &orders {
+      let mut arrived = order.clone();
+      let mut declared = keys.clone();
+      arrived.sort_unstable();
+      declared.sort_unstable();
+      assert_eq!(
+        arrived, declared,
+        "the `{path}` map's supply orders must be orderings of the keys the document gives it"
+      );
+    }
+    orders.sort();
+    orders.dedup();
+    assert_eq!(
+      orders.len(),
+      factorial(keys.len()),
+      "the `{path}` map is swept through every one of its orderings"
+    );
+    assert!(
+      orders.contains(keys),
+      "the `{path}` map must be supplied in the document's own order by one of the plans — that is \
+       the run an assembly emitting in reverse completion order cannot survive"
+    );
+  }
+
+  for plan in &plans {
+    let run = drive(&schema, &document, plan);
+    let mut arrived = run.supplied.clone();
+    let mut asked = plan.clone();
+    arrived.sort_by(|left, right| left.0.cmp(&right.0));
+    asked.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+      arrived, asked,
+      "each response map's children arrived in the order this plan named"
+    );
+    assert_eq!(
+      run.keys,
+      run.document_keys(),
+      "the response key sequence is the document's under the supply plan {plan:?}"
+    );
+    assert_eq!(
+      run.data,
+      run.document_data(),
+      "the response is the document's under the supply plan {plan:?}"
+    );
+  }
+}
+
 /// Asserts that `values` is neither non-decreasing nor non-increasing.
 ///
 /// A stable sort by some comparator is the identity on a sequence exactly when that sequence is
@@ -900,6 +1196,28 @@ fn the_mirror_document_s_opposite_order_is_served_by_the_same_executor() {
     "the response key sequence is the document's, outer and inner alike"
   );
   assert_eq!(run.data, run.document_data());
+}
+
+/// [`QUERY`] serialises in [`QUERY`]'s order out of **every** order its results could have arrived
+/// in. The case above is one of the 864 runs here — the one that supplies each map backwards — and
+/// it is kept for what it is readable as, not for what it covers. What this adds is the other 863,
+/// and in particular the identity: the run that answers every offer in document order, which is the
+/// one an assembly emitting in *reverse* completion order cannot survive and the one a backwards
+/// driver can never reach. See [`sweep`] for why it carries no permutation premise and what stands
+/// in its place.
+#[test]
+fn every_supply_order_of_the_query_serialises_in_the_query_s_order() {
+  sweep(QUERY);
+}
+
+/// [`MIRROR`] serialises in [`MIRROR`]'s order out of every order its results could have arrived
+/// in. The sweep is run on both documents rather than on one, for the reason the named cases are a
+/// pair: exhausting the *supply* orders closes the history-derived family, and says nothing about
+/// an assembly that reads the keys. One document swept exhaustively is still one document, and a
+/// key-only comparator answers it correctly whenever the document happens to agree with it.
+#[test]
+fn every_supply_order_of_the_mirror_serialises_in_the_mirror_s_order() {
+  sweep(MIRROR);
 }
 
 /// The two execution documents declare one key set in two orders, and each order is varied along
