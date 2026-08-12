@@ -60,6 +60,60 @@ use super::error::{ResponseError, ResponseErrorKind};
 /// The result of every primitive in this file.
 pub(super) type Scanned<T = ()> = Result<T, ResponseError>;
 
+// ---------------------------------------------------------------------------------------------
+// what the reader looks at
+// ---------------------------------------------------------------------------------------------
+
+// How many response bytes the reader has looked at, counted only when this crate's own tests are
+// built.
+//
+// ── WHY BYTES, AND NOT ALLOCATIONS OR A CLOCK ─────────────────────────────────────────────────
+//
+// Two of the reader's cost properties are about *scanning* and about nothing else: deriving a line
+// and column walks the whole prefix before the cursor, and recovering from a refused member walks
+// that member's value a second time. NEITHER ALLOCATES A BYTE. An allocation gate — which is what
+// pins the owner property one staged field over — is therefore structurally incapable of observing
+// either, and a clock observes them along with the machine it ran on.
+//
+// Bytes visited is the quantity the two properties are stated in, so it is the quantity the gate
+// counts. A byte looked at twice counts twice, because that is precisely the defect.
+#[cfg(test)]
+thread_local! {
+  /// Response bytes the reader has looked at on this thread.
+  static VISITED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// Records that the reader looked at `count` bytes of the response.
+///
+/// Compiles to nothing outside this crate's own tests.
+#[inline]
+fn visit(count: usize) {
+  #[cfg(test)]
+  VISITED.with(|visited| visited.set(visited.get() + count as u64));
+  #[cfg(not(test))]
+  let _ = count;
+}
+
+/// Returns how many response bytes the reader has looked at on this thread.
+#[cfg(test)]
+pub(super) fn visited() -> u64 {
+  VISITED.with(core::cell::Cell::get)
+}
+
+/// Every byte of the response before `at`, and the record that the reader looked at them.
+///
+/// **The one way anything outside a [`Scanner`] reaches the response, and it counts.** A refusal's
+/// position is derived from a prefix; so would a snippet be, or a caret, or whatever the next field
+/// somebody wants on an error message turns out to be. Routing all of them through here is what
+/// makes [`visited`] a measurement of the reader rather than a measurement of who remembered to
+/// call [`visit`] — a derivation that walks the response some other way is not counted, and the
+/// gate `a_discarded_refusal_costs_a_constant_number_of_bytes` would not see it.
+fn prefix(response: &str, at: usize) -> &[u8] {
+  let upto = &response.as_bytes()[..at.min(response.len())];
+  visit(upto.len());
+  upto
+}
+
 /// How deeply containers may nest before the reader refuses.
 ///
 /// This is `serde_json`'s own limit, kept rather than chosen: the previous reader enforced it
@@ -141,7 +195,7 @@ pub(super) struct Seq {
 /// [`Scanner::enter_array`] raise it and only the matching close lowers it again: a reading that
 /// stopped three containers deep left three of them open, and restoring the offset alone would
 /// leak them into the nesting bound for the rest of the document.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Mark {
   pos: usize,
   depth: u32,
@@ -152,6 +206,18 @@ impl Mark {
   #[inline]
   pub(super) const fn position(&self) -> usize {
     self.pos
+  }
+
+  /// Whether a reader that began a value at `from` may carry on from this mark.
+  ///
+  /// Two conditions, and the second is the one that does the work: the mark stands at or after
+  /// `from`, and **every container open at `from` is still open, with none left open on top** —
+  /// which is what says the mark is the end of *that* value rather than of something inside it. An
+  /// element of an array is refused with the array still open, so a mark taken there is one
+  /// container deeper than the member that owns the array and is refused here.
+  #[inline]
+  pub(super) const fn resumes(&self, from: &Self) -> bool {
+    self.depth == from.depth && self.pos >= from.pos
   }
 }
 
@@ -211,7 +277,14 @@ impl<'a> Scanner<'a> {
 
   #[inline]
   fn peek(&self) -> Option<u8> {
-    self.response.as_bytes().get(self.pos).copied()
+    self.byte_at(self.pos)
+  }
+
+  /// The one place a byte of the response is looked at, so that [`visit`] counts all of them.
+  #[inline]
+  fn byte_at(&self, at: usize) -> Option<u8> {
+    visit(1);
+    self.response.as_bytes().get(at).copied()
   }
 
   /// Positions the cursor on the next value and reports whether it is an object.
@@ -226,8 +299,7 @@ impl<'a> Scanner<'a> {
 
   /// Advances past whitespace. JSON's four characters, and no others.
   pub(super) fn skip_ws(&mut self) {
-    let bytes = self.response.as_bytes();
-    while let Some(&byte) = bytes.get(self.pos) {
+    while let Some(byte) = self.peek() {
       match byte {
         b' ' | b'\t' | b'\n' | b'\r' => self.pos += 1,
         _ => break,
@@ -278,23 +350,20 @@ impl<'a> Scanner<'a> {
     }
   }
 
-  /// Attaches the position every refusal carries.
+  /// Attaches the position every refusal carries — **staged, and not yet counted**.
   ///
   /// A line and column rather than a byte offset: the response is machine-generated, but a human
   /// is the one reading the message, and every JSON tool they have counts the same way.
+  ///
+  /// Counting them *here* would be counting them for a refusal that may never be reported. The
+  /// count walks every byte before the cursor, and the reader builds a refusal wherever a member
+  /// could not be read — including for the occurrences a later duplicate takes away — so k such
+  /// occurrences would walk k increasingly long prefixes of a response that is then accepted. The
+  /// offset rides along instead, and [`read`](super::decode::read) counts the line and column of
+  /// the one refusal it returns. `Pending`, in [`error`](super::error), is the invariant this is
+  /// one half of.
   fn refuse(&self, kind: ResponseErrorKind, what: &str) -> ResponseError {
-    let (line, column) = self.line_column();
-    ResponseError::new(kind, format!("{what} at line {line} column {column}"))
-  }
-
-  fn line_column(&self) -> (usize, usize) {
-    let upto = &self.response.as_bytes()[..self.pos.min(self.response.len())];
-    let line = 1 + upto.iter().filter(|&&byte| byte == b'\n').count();
-    let column = match upto.iter().rposition(|&byte| byte == b'\n') {
-      Some(newline) => upto.len() - newline,
-      None => upto.len() + 1,
-    };
-    (line, column)
+    ResponseError::new(kind, what).raised_at(self.pos)
   }
 
   // -------------------------------------------------------------------------------------------
@@ -495,7 +564,7 @@ impl<'a> Scanner<'a> {
         if !(0xD800..0xDC00).contains(&leading) {
           return Ok(());
         }
-        if self.peek() != Some(b'\\') || self.response.as_bytes().get(self.pos + 1) != Some(&b'u') {
+        if self.peek() != Some(b'\\') || self.byte_at(self.pos + 1) != Some(b'u') {
           return Err(self.syntax("lone leading surrogate in a `\\u` escape"));
         }
         self.pos += 2;
@@ -510,10 +579,9 @@ impl<'a> Scanner<'a> {
   }
 
   fn hex4(&mut self) -> Scanned<u32> {
-    let bytes = self.response.as_bytes();
     let mut value = 0u32;
     for _ in 0..4 {
-      let Some(&digit) = bytes.get(self.pos) else {
+      let Some(digit) = self.peek() else {
         return Err(self.syntax("unexpected end of input"));
       };
       let nibble = match digit {
@@ -559,6 +627,7 @@ impl<'a> Scanner<'a> {
   }
 
   fn keyword(&mut self, word: &str) -> Scanned {
+    visit(word.len());
     if self.response.as_bytes()[self.pos..].starts_with(word.as_bytes()) {
       self.pos += word.len();
       return Ok(());
@@ -652,6 +721,21 @@ impl<'a> Scanner<'a> {
       Some(_) => Err(self.syntax("trailing characters")),
     }
   }
+}
+
+/// Counts the line and column of a byte offset — the walk [`Scanner::refuse`] stages rather than
+/// runs.
+///
+/// A free function and not a `Scanner` method because the offset outlives the scan: it is staged in
+/// the refusal and counted by the door, against the same response, once.
+pub(super) fn line_column(response: &str, at: usize) -> (usize, usize) {
+  let upto = prefix(response, at);
+  let line = 1 + upto.iter().filter(|&&byte| byte == b'\n').count();
+  let column = match upto.iter().rposition(|&byte| byte == b'\n') {
+    Some(newline) => upto.len() - newline,
+    None => upto.len() + 1,
+  };
+  (line, column)
 }
 
 /// Expands a literal [`Scanner::string`] has already validated.

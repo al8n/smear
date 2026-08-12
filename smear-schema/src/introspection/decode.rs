@@ -30,19 +30,42 @@
 //! owner alike; only the arbitration between two defects in one object moved, and it moved from an
 //! order nobody chose to the one the reader actually walks.
 //!
-//! # The owner is an offset until something goes wrong
+//! # A refusal derives nothing, because a refusal is not necessarily reported
 //!
-//! A refusal names what it refused and what owns it — `User.pet` for a field, `User.pet.first` for
-//! its argument — and an owner is a *path*, so building one eagerly would allocate a `String` per
-//! field of a document that is about to be accepted. Worse, a member's owner is its parent's
-//! `name`, which JSON does not promise to have written first. [`Owner`] carries byte offsets
-//! instead, and [`read`] — the door, and nowhere else — reads the names back out of the response.
+//! A member written twice takes a failure away again, as [`Slot`] describes, so the reader **builds
+//! refusals and discards them**. Whatever building one costs is therefore paid once per failing
+//! *occurrence*, and a response repeating one bad member k times pays k times over for an answer it
+//! throws k−1 copies of away. When that cost is proportional to the response, the product is
+//! quadratic in what a network peer chose to send — which is a denial of service and not a slow
+//! path.
 //!
-//! **The resolution belongs at the door and not at the refusal**, because a refusal is not
-//! necessarily reported: a member written twice takes a failure away again, as [`Slot`] describes,
-//! so refusals are built and discarded. Resolving each one would walk the owning object once per
-//! failing occurrence, and a response repeating one bad member inside a large object would cost
-//! the product of the two. Resolving the survivor costs one walk per response.
+//! Two derivations cost exactly that much, and both are staged rather than performed:
+//!
+//! - **The owner.** A refusal names what it refused and what owns it — `User.pet` for a field,
+//!   `User.pet.first` for its argument — and an owner is a *path*, read back out of the owning
+//!   object. Worse, a member's owner is its parent's `name`, which JSON does not promise to have
+//!   written first, so it cannot simply be remembered on the way past. [`Owner`] carries byte
+//!   offsets instead.
+//! - **The position.** Every refusal the scanner raises ends `at line L column C`, and the two are
+//!   counted by walking every byte before the cursor. That one is [`json`](super::json)'s to stage.
+//!
+//! [`read`] — the door, and nowhere else — pays for both, on the one refusal it returns. `Pending`
+//! in [`error`](super::error) is where the two meet, so that a third expensive derivation added
+//! later inherits the rule instead of re-learning it, and
+//! `a_discarded_refusal_costs_a_constant_number_of_bytes` is what says the rule still holds.
+//!
+//! # A deferred failure says where the reader may carry on
+//!
+//! Deferring costs something on the other side of the same mechanism. A member's failure waits for
+//! its object's closing brace, so by the time anything knows the member failed the reader has
+//! already walked that object to its end — and the enclosing member, which has to go on reading in
+//! case a later occurrence replaces the failure, would rewind and walk the whole of it again.
+//! Nested, that is once per ancestor, and an `ofType` chain can put 128 of them between a defect
+//! and the document.
+//!
+//! So a refusal [`Refusals::check`] produces carries the mark the reader stands at, and [`member`]
+//! resumes from it. Which of the two paths a response takes is chosen by whoever sent it, so the
+//! path the cheap reading belongs on is the one an attacker selects.
 //!
 //! [`UnknownTypeKind`]: ResponseErrorKind::UnknownTypeKind
 //! [`UnknownDirectiveLocation`]: ResponseErrorKind::UnknownDirectiveLocation
@@ -66,12 +89,13 @@ use super::{
 /// off (`{"__schema":…}`), and the `__Schema` object alone, which is what a fixture file usually
 /// holds.
 ///
-/// **This is also where an owner stops being an offset**, and it is the only place: a refusal
-/// carries [`Owner`] until it is the refusal the door returns, so the walk that reads an owner's
-/// name back out of the response runs exactly once per response however many refusals were built
-/// and discarded on the way. See [`Slot`] for why any are discarded.
+/// **This is also where a refusal stops being staged**, and it is the only place: a refusal carries
+/// its [`Owner`] and the offset of its line and column until it is the refusal the door returns, so
+/// each of the two walks over the response runs exactly once per response however many refusals
+/// were built and discarded on the way. See [`Slot`] for why any are discarded, and `Pending` in
+/// [`error`](super::error) for the invariant that makes it one mechanism rather than two.
 pub(super) fn read(response: &str) -> Scanned<IntrospectedSchema<'_>> {
-  locate_and_read(response).map_err(|refusal| refusal.resolve_owner(response))
+  locate_and_read(response).map_err(|refusal| refusal.resolve(response))
 }
 
 fn locate_and_read(response: &str) -> Scanned<IntrospectedSchema<'_>> {
@@ -197,6 +221,9 @@ fn locate_under_data(scanner: &mut Scanner<'_>) -> Scanned<Option<usize>> {
 /// enough that a response repeating a bad member ten thousand times costs ten thousand cheap
 /// refusals rather than ten thousand walks of the object that owns them. [`read`] resolves the one
 /// that survives.
+///
+/// One of two things a refusal stages rather than derives; `Pending` in [`error`](super::error)
+/// holds both and states the invariant they share.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum Owner {
   /// The artifact stands alone: a member of `__Schema.types`, or a `__Directive`.
@@ -304,15 +331,29 @@ fn member<'a, T>(
   match read(scanner) {
     Ok(value) => *slot = Some((at.position(), Ok(value))),
     Err(refusal) => {
-      // The cursor stopped wherever the refusal happened, which may be several containers deep, so
-      // put it back and walk the value as an uninterpreted one instead: the object's remaining
-      // members still have to be read, because one of them may be this member written again.
+      // Whatever the refusal did to the cursor, it has to end up at the end of this member's value:
+      // the object's remaining members still have to be read, because one of them may be this
+      // member written again.
+      //
+      // A refusal [`Refusals::check`] held until its object closed already names a value walked to
+      // its end, and says where that end is. Taking the mark is the difference between walking a
+      // refused subtree once and walking it once per enclosing member — which along an `ofType`
+      // chain is up to the 128 the nesting bound allows, so a large skipped string in the deepest
+      // object would otherwise be scanned 128 times for a response that is refused either way.
+      //
+      // Otherwise the cursor stopped wherever the refusal happened, which may be several containers
+      // deep, so put it back and walk the value as an uninterpreted one instead.
       //
       // The walk cannot fail for a reason of its own. `locate` proved the whole document is JSON
       // before any of this ran, and it walked these bytes at a nesting depth at least as great as
       // this pass sees, so neither the grammar nor the bound can refuse them a second time.
-      scanner.rewind(at);
-      scanner.skip_value()?;
+      match refusal.resume() {
+        Some(mark) if mark.resumes(&at) => scanner.rewind(mark),
+        _ => {
+          scanner.rewind(at);
+          scanner.skip_value()?;
+        }
+      }
       *slot = Some((at.position(), Err(refusal)));
     }
   }
@@ -345,9 +386,15 @@ impl Refusals {
   }
 
   /// Reports that refusal, if the object had one.
-  fn check(self) -> Scanned {
+  ///
+  /// Stamped with where the reader stands, which is immediately past the object's closing brace: a
+  /// refusal held this long is by construction a refusal about a value the reader already walked
+  /// whole, so [`member`] resumes from the stamp rather than walking the value again. Stamped on
+  /// every call rather than only the first, because each enclosing object closes later than the one
+  /// inside it and the mark has to name the value *its own* caller is stepping over.
+  fn check(self, scanner: &Scanner<'_>) -> Scanned {
     match self.first {
-      Some((_, refusal)) => Err(refusal),
+      Some((_, refusal)) => Err(refusal.resume_at(scanner.mark())),
       None => Ok(()),
     }
   }
@@ -461,7 +508,7 @@ fn schema<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedSchema<'a>> {
   let mutation_type = refusals.take(mutation_type);
   let subscription_type = refusals.take(subscription_type);
   let directives = refusals.take(directives);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(IntrospectedSchema {
     types: types.ok_or_else(|| scanner.missing("types"))?,
@@ -489,7 +536,7 @@ fn root_slot<'a>(scanner: &mut Scanner<'a>) -> Scanned<NamedTypeRef<'a>> {
 
   let mut refusals = Refusals::default();
   let name = refusals.take(name);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(NamedTypeRef {
     name: name.flatten(),
@@ -562,7 +609,7 @@ fn ty<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedType<'a>> {
   let enum_values = refusals.take(enum_values);
   let possible_types = refusals.take(possible_types);
   let is_one_of = refusals.take(is_one_of);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(IntrospectedType {
     kind: kind.ok_or_else(|| scanner.missing("kind"))?,
@@ -610,7 +657,7 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
   let name = refusals.take(name);
   let args = refusals.take(args);
   let ty = refusals.take(ty);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(IntrospectedField {
     name: name.ok_or_else(|| scanner.missing("name"))?,
@@ -643,7 +690,7 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
   let name = refusals.take(name);
   let ty = refusals.take(ty);
   let default_value = refusals.take(default_value);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(IntrospectedInputValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
@@ -666,7 +713,7 @@ fn enum_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspect
 
   let mut refusals = Refusals::default();
   let name = refusals.take(name);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(IntrospectedEnumValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
@@ -710,7 +757,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
   let locations = refusals.take(locations);
   let args = refusals.take(args);
   let is_repeatable = refusals.take(is_repeatable);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(IntrospectedDirective {
     name: name.ok_or_else(|| scanner.missing("name"))?,
@@ -747,7 +794,7 @@ fn type_ref<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<TypeRef<'a>>
   let kind = refusals.take(kind);
   let name = refusals.take(name);
   let of_type = refusals.take(of_type);
-  refusals.check()?;
+  refusals.check(scanner)?;
 
   Ok(TypeRef {
     kind: kind.ok_or_else(|| scanner.missing("kind"))?,

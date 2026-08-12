@@ -7,7 +7,7 @@ use std::{
 use super::read;
 use crate::introspection::{
   ResponseErrorKind,
-  json::Text,
+  json::{Text, visited},
   model::{IntrospectedSchema, IntrospectedType, Name, TypeRef},
 };
 
@@ -523,6 +523,43 @@ fn a_refusal_from_the_reader_names_the_same_owner_the_renderer_named() {
   }
 }
 
+/// A refusal the scanner raised says where in the response it stopped, and staging it does not
+/// move where that is.
+///
+/// **This is a test the previous shape did not need.** The line and column used to be formatted
+/// into the subject at the refusal, in one expression, so there was no way to lose them that was
+/// not also a way to change the message. They are counted at the door now — once, on the refusal
+/// that escapes, because counting them per refusal is quadratic in a duplicated bad member — and a
+/// door that forgot to count them would produce a message missing its position and nothing else in
+/// the suite would notice.
+///
+/// Two lines and one defect, counted by hand: line 1 ends after `"queryType":{"name":"Query"},`,
+/// and on line 2 the `5` that should have been a list is the 27th byte after the newline.
+#[test]
+fn a_scanner_refusal_carries_the_line_and_column_it_stopped_at() {
+  let json =
+    "{\"__schema\":{\"queryType\":{\"name\":\"Query\"},\n \"directives\":[], \"types\":5}}";
+  assert_eq!(
+    subject_of(json),
+    "invalid type: a number, expected a sequence for `__Schema.types` at line 2 column 27"
+  );
+
+  // The same defect one line further down: the line moves and the column does not, so the
+  // assertion above is about a count and not about a constant that happens to match.
+  let lower = json.replacen('\n', "\n\n", 1);
+  assert_eq!(
+    subject_of(&lower),
+    "invalid type: a number, expected a sequence for `__Schema.types` at line 3 column 27"
+  );
+
+  // And with no newline at all, where the column is the offset: every real response is one line.
+  let flat = json.replacen('\n', "", 1);
+  assert_eq!(
+    subject_of(&flat),
+    "invalid type: a number, expected a sequence for `__Schema.types` at line 1 column 69"
+  );
+}
+
 /// An owner is found whatever order the response wrote its members in.
 ///
 /// This is the whole reason an [`Owner`] is an offset rather than a name. JSON does not promise
@@ -1029,4 +1066,176 @@ fn every_envelope_reads_the_same_document() {
   assert_eq!(names(&bare), names(&unwrapped));
   assert_eq!(names(&bare), names(&full));
   assert_eq!(names(&bare), ["Query"]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// what a refusal costs, counted in the bytes the reader looks at
+// ---------------------------------------------------------------------------------------------
+//
+// ── WHY THIS IS COUNTED AND NOT TIMED, AND NOT MEASURED AS ALLOCATION EITHER ──────────────────
+//
+// `introspection_allocation.rs` pins that a discarded refusal does not resolve its owner, and it
+// pins it in bytes allocated because a threshold on a clock is a hope. That instrument is
+// structurally blind to the two properties below: deriving a line and column walks a prefix, and
+// recovering from a refused member walks a subtree, AND NEITHER ALLOCATES ANYTHING. A pin chosen
+// for good reasons was incapable of observing the sibling of the defect it was written for.
+//
+// Bytes visited is the quantity both properties are stated in. `json::visited` counts them, and
+// what follows is a bound on the *marginal* cost — how much more scanning one more occurrence of a
+// bad member, or one more `ofType` level, is allowed to cost. A bound on the total would pass a
+// reader that scanned the response a fixed forty times; a bound on the margin says the cost of what
+// was added is proportional to what was added.
+
+/// How many times the reader may look at a byte, for each byte *added* to a response.
+///
+/// A ratio, and that is the point: it says the cost of one more occurrence of a bad member, or one
+/// more `ofType` level, is proportional to the bytes that occurrence or that level is written in and
+/// not to the response those bytes were added to. A derivation that walks the response once per
+/// refusal fails it by an order of magnitude however the constant is tuned, and nothing that does
+/// not walk the response comes near it.
+///
+/// Measured on the tree that introduced this gate: 4.7 for an added occurrence, 8.5 for an added
+/// `ofType` level. Measured for the two defects it was written against: 1 300 and 470.
+const LOOKS_PER_ADDED_BYTE: u64 = 32;
+
+/// Bytes of the response the reader looked at while reading it.
+fn visits(response: &str) -> u64 {
+  let before = visited();
+  drop(read(response));
+  visited() - before
+}
+
+/// `k` occurrences of a `__Field.name` that is not a string, and then one that is.
+///
+/// **Accepted.** Every one of the `k` builds a refusal that the final occurrence takes away, which
+/// is what makes it the shape a hostile response would use: the door returns a schema, so nothing
+/// about the outcome says how much work the response cost.
+fn discarded_refusals(k: usize) -> String {
+  let discarded = r#""name":0,"#.repeat(k);
+  format!(
+    r#"{{"__schema":{{"queryType":{{"name":"Query"}},"directives":[],"types":[
+      {{"kind":"OBJECT","name":"Query","fields":[
+        {{{discarded}"name":"ok","args":[],"type":{{"kind":"SCALAR","name":"Int"}}}}
+      ]}}
+    ]}}}}"#
+  )
+}
+
+/// An `ofType` chain `depth` wrappers deep, bottoming out in a kind nobody defines beside a
+/// `description` the door does not read.
+///
+/// **Refused**, and refused by the innermost object — so the failure is deferred out through every
+/// enclosing `ofType` member, each of which has the whole subtree in front of it.
+fn deep_refusal(depth: usize, prose: usize) -> String {
+  let description = "p".repeat(prose);
+  let mut reference = format!(r#"{{"kind":"WIDGET","name":"W","description":"{description}"}}"#);
+  for _ in 0..depth {
+    reference = format!(r#"{{"kind":"LIST","name":null,"ofType":{reference}}}"#);
+  }
+  format!(
+    r#"{{"__schema":{{"queryType":{{"name":"Query"}},"directives":[],"types":[
+      {{"kind":"OBJECT","name":"Query","fields":[
+        {{"name":"ok","args":[],"type":{reference}}}
+      ]}}
+    ]}}}}"#
+  )
+}
+
+/// Reports the marginal cost of the bytes one fixture has and a smaller one does not.
+fn per_added_byte(small: &str, large: &str) -> u64 {
+  let added = (large.len() - small.len()) as u64;
+  assert!(added > 0, "the two fixtures are the same size");
+  (visits(large) - visits(small)) / added
+}
+
+/// A refusal the reader builds and throws away costs the bytes it names, and not a piece of the
+/// response.
+///
+/// The response is **accepted**: `k` occurrences of `"name":0` inside one `__Field`, and then a
+/// `name` that reads. Each of the `k` builds a refusal that the last one replaces, so a derivation
+/// performed at construction is performed `k` times for an answer thrown away `k` times — and if it
+/// walks the response, that is Θ(k²) byte visits for a schema the door goes on to return. A network
+/// peer chooses `k`.
+#[test]
+fn a_discarded_refusal_costs_a_constant_number_of_bytes() {
+  // The control that makes the measurement mean what it says: this is the accepted path, so the
+  // cost below is paid by a response nothing else about the door would flag.
+  assert!(
+    read(&discarded_refusals(4)).is_ok(),
+    "the fixture is refused, so it is not the shape this gate is about"
+  );
+
+  // Four points two orders of magnitude apart. A quadratic term shows up as a marginal cost that
+  // grows from one interval to the next, and the assertion is on each interval rather than on the
+  // total so that a large constant cannot hide one.
+  let mut previous = discarded_refusals(8);
+  for k in [32usize, 128, 512, 2048] {
+    let next = discarded_refusals(k);
+    let looks = per_added_byte(&previous, &next);
+    assert!(
+      looks <= LOOKS_PER_ADDED_BYTE,
+      "up to k={k}, each byte of a discarded refusal cost {looks} byte visits; a refusal is \
+       deriving something by walking the response"
+    );
+    previous = next;
+  }
+}
+
+/// A refusal deferred to an object's closing brace is stepped over once, not once per ancestor.
+///
+/// Reading holds a member's failure until its object closes, so the object has been walked to its
+/// end by the time anything knows it failed — and the enclosing member would then rewind and walk
+/// the whole of it again, once for every level of `ofType` between the defect and the document.
+/// Within the 128-container bound that is up to 128 walks of one subtree, and the subtree here is a
+/// string the door does not even read.
+#[test]
+fn a_deferred_refusal_is_not_re_walked_by_every_enclosing_member() {
+  const PROSE: usize = 16 * 1024;
+
+  assert_eq!(
+    refused(&deep_refusal(8, PROSE)).0,
+    ResponseErrorKind::UnknownTypeKind,
+    "the fixture is not refused where this gate assumes it is"
+  );
+  // Without this the bound below could be met by a subtree too small to be worth re-walking.
+  assert!(deep_refusal(8, PROSE).len() > PROSE);
+
+  let mut previous = deep_refusal(1, PROSE);
+  for depth in [8usize, 32, 120] {
+    let next = deep_refusal(depth, PROSE);
+    let looks = per_added_byte(&previous, &next);
+    assert!(
+      looks <= LOOKS_PER_ADDED_BYTE,
+      "up to depth={depth}, each byte of an added `ofType` level cost {looks} byte visits; the \
+       enclosing members are walking the refused subtree again"
+    );
+    previous = next;
+  }
+}
+
+/// The counter is wired to the reader, and it moves by what the reader reads.
+///
+/// Without this, both gates above could pass because nothing was being counted.
+#[test]
+fn the_byte_gate_counts() {
+  // Every byte of the document is proved to be JSON, so reading one cannot visit fewer bytes than
+  // it has.
+  let response = discarded_refusals(64);
+  let visited = visits(&response);
+  assert!(
+    visited >= response.len() as u64,
+    "reading {} bytes registered as {visited} byte visits",
+    response.len()
+  );
+
+  // And it moves for the thing the gates measure: a response with more in it costs more to read,
+  // so a flat marginal cost above is a fact about the reader and not about the instrument.
+  assert!(
+    visits(&discarded_refusals(2048)) > visits(&discarded_refusals(8)),
+    "a longer response did not cost more, so the counter is not tracking the reader"
+  );
+  assert!(
+    visits(&deep_refusal(120, 1024)) > visits(&deep_refusal(1, 1024)),
+    "a deeper response did not cost more, so the counter is not tracking the reader"
+  );
 }
