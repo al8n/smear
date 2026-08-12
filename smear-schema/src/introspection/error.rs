@@ -23,7 +23,7 @@
 
 use std::{boxed::Box, string::String};
 
-use super::super::error::SchemaErrors;
+use super::{super::error::SchemaErrors, decode::Owner};
 use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
 /// Which rule of the draft §4 shape a [`ResponseError`] reports.
@@ -170,11 +170,33 @@ impl core::fmt::Display for ResponseErrorKind {
 /// no human wrote. The owner path is the locator.
 ///
 /// [`SchemaError`]: crate::SchemaError
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ResponseError {
   kind: ResponseErrorKind,
   subject: Box<str>,
   owner: Option<Box<str>>,
+  /// The owner whose name has not been read back out of the response yet.
+  ///
+  /// Always [`Owner::Unowned`] on any error that has left the door, because
+  /// [`read`](super::decode::read) resolves it into `owner` on the way out. It exists because the
+  /// reader builds refusals it may then discard — a member written twice replaces the first
+  /// occurrence's failure along with its value — and resolving an owner walks the object that owns
+  /// it, which is work no discarded refusal should pay.
+  pending: Owner,
+}
+
+/// The three fields a `ResponseError` reports, and not the offsets it staged one of them from.
+///
+/// `pending` is an implementation detail of the reader's error path and is `Unowned` on every
+/// error a caller can hold, so printing it would be printing a constant.
+impl core::fmt::Debug for ResponseError {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("ResponseError")
+      .field("kind", &self.kind)
+      .field("subject", &self.subject)
+      .field("owner", &self.owner)
+      .finish()
+  }
 }
 
 impl ResponseError {
@@ -184,6 +206,7 @@ impl ResponseError {
       kind,
       subject: subject.into().into_boxed_str(),
       owner: None,
+      pending: Owner::Unowned,
     }
   }
 
@@ -191,6 +214,23 @@ impl ResponseError {
   pub(super) fn owned_by(mut self, owner: impl Into<String>) -> Self {
     self.owner = Some(owner.into().into_boxed_str());
     self
+  }
+
+  /// Records the artifact that owns the subject, as the offsets its name will be read back from.
+  pub(super) fn owned_at(mut self, owner: Owner) -> Self {
+    self.pending = owner;
+    self
+  }
+
+  /// Reads a recorded owner's name out of the response, which is the last thing the door does.
+  pub(super) fn resolve_owner(mut self, response: &str) -> Self {
+    match core::mem::take(&mut self.pending) {
+      Owner::Unowned => self,
+      pending => {
+        self.owner = pending.resolve(response).map(String::into_boxed_str);
+        self
+      }
+    }
   }
 
   /// Returns which rule refused.

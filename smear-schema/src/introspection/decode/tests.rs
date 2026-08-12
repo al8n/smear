@@ -571,43 +571,77 @@ fn an_owner_is_found_when_the_response_wrote_its_name_last() {
   }
 }
 
-/// The closed vocabularies are matched against the literal's own bytes, so an escape in one is a
-/// refusal rather than a copy.
-///
-/// This is the price of the borrow being unconditional, and it is a price nothing real pays: a
-/// GraphQL name, a `__TypeKind` and a `__DirectiveLocation` are ASCII identifiers, and no server
-/// has a reason to escape one.
-#[test]
-fn a_closed_vocabulary_spelled_with_an_escape_is_refused() {
-  // A JSON `\uXXXX` escape, assembled rather than written, so nothing between this source and the
-  // fixture can normalise it into the character it stands for.
-  let hex = |code: &str, rest: &str| format!("\\u{code}{rest}");
-  let query = hex("0051", "uery");
-  let object = hex("004F", "BJECT");
-  let field = hex("0046", "IELD");
+/// A JSON `\uXXXX` escape, assembled rather than written, so nothing between this source and the
+/// fixture can normalise it into the character it stands for.
+fn escaped(code: &str, rest: &str) -> String {
+  let spelling = format!("\\u{code}{rest}");
+  assert!(spelling.contains('\\'), "the fixture lost its escape");
+  spelling
+}
 
-  // The literal decodes to `Query`, and is refused anyway — the check ran on the literal, and the
-  // subject is the literal so whoever reads the message can see why.
+/// An escape is decoded in four of [the five kinds of string](crate::introspection::json), and
+/// refused in the fifth.
+///
+/// The taxonomy is what this pins, one row per kind, because "names borrow, prose may not" is a
+/// statement about two of the five and the reader meets all five. A **dispatch key** and a
+/// **closed vocabulary** are read in order to be matched, so the escape names the member or the
+/// enum value it spells; **prose** is decoded and kept; a string in a **skipped** member is
+/// validated and never read. Only a **`Name`** is matched raw, and that is the borrow's price,
+/// charged where the borrow is.
+#[test]
+fn an_escape_is_decoded_everywhere_but_a_name() {
+  // A dispatch key, at the two places one selects a whole reading.
+  let bare_under_escaped_data = format!(
+    r#"{{"{}":{{"__schema":{{{BARE_BODY}}}}}}}"#,
+    escaped("0064", "ata")
+  );
+  assert!(
+    read(&bare_under_escaped_data).is_ok(),
+    "an escaped `data` was not recognised as `data`"
+  );
+  let escaped_schema_key = format!(r#"{{"{}":{{{BARE_BODY}}}}}"#, escaped("005F", "_schema"));
+  assert!(read(&escaped_schema_key).is_ok());
+
+  // A dispatch key on an ordinary member, and the member is read rather than skipped.
+  let escaped_name_key = response(&format!(
+    r#"{{"kind":"OBJECT","{}":"Query","fields":[]}}"#,
+    escaped("006E", "ame")
+  ));
+  let schema = read(&escaped_name_key).expect("a schema");
+  assert_eq!(
+    schema.types[0].name.expect("a name").as_str(),
+    "Query",
+    "an escaped `name` key was skipped as an unknown member"
+  );
+
+  // The two closed vocabularies.
+  let escaped_kind = response(&format!(
+    r#"{{"kind":"{}","name":"Query","fields":[]}}"#,
+    escaped("004F", "BJECT")
+  ));
+  assert!(
+    read(&escaped_kind).is_ok(),
+    "an escaped `OBJECT` was not `OBJECT`"
+  );
+  let escaped_location = with_directives(&format!(
+    r#"{{"name":"weird","locations":["{}"],"args":[]}}"#,
+    escaped("0046", "IELD")
+  ));
+  assert!(
+    read(&escaped_location).is_ok(),
+    "an escaped `FIELD` was not `FIELD`"
+  );
+
+  // A `Name` is the one kind read raw. The literal decodes to `Query` and is refused anyway, with
+  // the literal as the subject so whoever reads the message can see why.
+  let query = escaped("0051", "uery");
   let escaped_name = response(&format!(
     r#"{{"kind":"OBJECT","name":"{query}","fields":[]}}"#
   ));
   assert_eq!(refused(&escaped_name).0, ResponseErrorKind::InvalidName);
   assert_eq!(subject_of(&escaped_name), query);
 
-  let escaped_kind = response(&format!(r#"{{"kind":"{object}","name":"Query"}}"#));
-  assert_eq!(refused(&escaped_kind).0, ResponseErrorKind::UnknownTypeKind);
-  assert_eq!(subject_of(&escaped_kind), object);
-
-  let escaped_location = with_directives(&format!(
-    r#"{{"name":"weird","locations":["{field}"],"args":[]}}"#
-  ));
-  assert_eq!(
-    refused(&escaped_location).0,
-    ResponseErrorKind::UnknownDirectiveLocation
-  );
-  assert_eq!(subject_of(&escaped_location), field);
-
-  // A default value is the one place an escape is honoured, and it still is.
+  // Prose is decoded and kept, which it always was.
   let benign = response(
     r#"{"kind":"OBJECT","name":"Query","fields":[
       {"name":"ok","args":[
@@ -623,6 +657,47 @@ fn a_closed_vocabulary_spelled_with_an_escape_is_refused() {
       .expect("a default")
       .as_str(),
     "\"x\""
+  );
+
+  // A skipped member's key is neither decoded nor dispatched on, and an escape in one changes
+  // nothing about the response it sits in.
+  let escaped_unread = response(&format!(
+    r#"{{"kind":"OBJECT","name":"Query","{}":"prose","fields":[]}}"#,
+    escaped("0064", "escription")
+  ));
+  assert!(read(&escaped_unread).is_ok());
+}
+
+/// An escaped `data` still shadows every other reading, malformed or not.
+///
+/// This is the load-bearing property of [`locate`](super::locate) said against the spelling rather
+/// than against the order: the root carries a **complete and valid bare `__Schema`** beside a
+/// `data` whose `__schema` cannot be read, so a reader that failed to recognise the key would fall
+/// through to it and return a schema. `a_malformed_schema_under_data_is_not_re_read_as_a_bare_one`
+/// pins the same discrimination for the plain spelling; both spellings name the same key, so both
+/// have to reach the same refusal.
+#[test]
+fn an_escaped_data_is_still_the_only_place_looked() {
+  for spelling in ["data", &escaped("0064", "ata")] {
+    let fallible = format!(r#"{{"{spelling}":{{"__schema":5}},{BARE_BODY}}}"#);
+    assert_eq!(
+      refused(&fallible).0,
+      ResponseErrorKind::MalformedResponse,
+      "`{spelling}` did not shadow the bare reading beside it"
+    );
+
+    // A `data` carrying no `__schema` at all shadows a root-level one just the same.
+    let shadowed = format!(
+      r#"{{"{spelling}":{{"nope":1}},
+         "__schema":{{"queryType":{{"name":"Q"}},"directives":[],"types":[]}}}}"#
+    );
+    assert_eq!(refused(&shadowed).0, ResponseErrorKind::MissingSchema);
+  }
+
+  // And the control that makes both of the above evidence: the fall-through reading succeeds.
+  assert!(
+    read(&format!("{{{BARE_BODY}}}")).is_ok(),
+    "the fall-through reading does not succeed, so the assertions above prove nothing"
   );
 }
 
@@ -699,6 +774,201 @@ fn a_member_written_twice_takes_the_last() {
     schema.types[0].name.expect("a name").as_str(),
     "B",
     "the reader took a member other than the last"
+  );
+}
+
+/// Last-wins covers **whether the member could be read**, and not only which value the slot ends
+/// up with.
+///
+/// The test above pins the slot half, and the slot half alone is what a reader gets for free by
+/// assigning in document order — its first occurrence is still the one that decides, because a
+/// refusal on it never reaches the second. So `{"name":"bad-name","name":"ok"}` came back as
+/// `InvalidName` while the tree the previous reader built had kept `ok` and accepted it. Every row
+/// here is a response the old door accepted, one per shape of failure a first occurrence can have:
+/// an invalid name, a value of the wrong JSON type, an unknown member of a closed vocabulary, and
+/// a defect nested inside the member's value.
+#[test]
+fn a_member_written_twice_takes_the_last_even_when_the_first_cannot_be_read() {
+  let cases: &[(&str, String)] = &[
+    (
+      "a `__Type.name` the grammar cannot spell",
+      response(r#"{"kind":"OBJECT","name":"bad-name","name":"Ok","fields":[]}"#),
+    ),
+    (
+      "a `__Type.name` that is not a string",
+      response(r#"{"kind":"OBJECT","name":5,"name":"Ok","fields":[]}"#),
+    ),
+    (
+      "a `__Type.kind` nobody defines",
+      response(r#"{"kind":"WIDGET","kind":"OBJECT","name":"Ok","fields":[]}"#),
+    ),
+    (
+      "a `__Type.fields` that is not a list",
+      response(r#"{"kind":"OBJECT","name":"Ok","fields":5,"fields":[]}"#),
+    ),
+    (
+      "a `__Schema.types` that is not a list",
+      format!(
+        r#"{{"__schema":{{"queryType":{{"name":"Query"}},"directives":[],
+           "types":5,"types":[{OK_QUERY}]}}}}"#
+      ),
+    ),
+    (
+      "a `__Schema.queryType` naming something unspellable",
+      r#"{"__schema":{"queryType":{"name":"Not A Name"},"queryType":{"name":"Query"},
+         "directives":[],"types":[]}}"#
+        .to_string(),
+    ),
+    (
+      "a `__Field.name` the grammar cannot spell",
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"not ok","name":"ok","args":[],"type":{"kind":"SCALAR","name":"Int"}}
+        ]}"#,
+      ),
+    ),
+    (
+      "a `__Field.type` whose kind nobody defines",
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[],"type":{"kind":"WIDGET","name":"W"},
+           "type":{"kind":"SCALAR","name":"Int"}}
+        ]}"#,
+      ),
+    ),
+    (
+      "an `__InputValue.name` the grammar cannot spell",
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[
+            {"name":"not arg","name":"arg","type":{"kind":"SCALAR","name":"Int"}}
+          ],"type":{"kind":"SCALAR","name":"Int"}}
+        ]}"#,
+      ),
+    ),
+    (
+      "an `__EnumValue.name` the grammar cannot spell",
+      response(&format!(
+        r#"{OK_QUERY},{{"kind":"ENUM","name":"Verdict","enumValues":[
+          {{"name":"not ok","name":"YES"}}
+        ]}}"#
+      )),
+    ),
+    (
+      "a `__Directive.name` the grammar cannot spell",
+      with_directives(r#"{"name":"not ok","name":"weird","locations":["FIELD"],"args":[]}"#),
+    ),
+    (
+      "a `__Directive.locations` entry nobody defines",
+      with_directives(
+        r#"{"name":"weird","locations":["NOWHERE"],"locations":["FIELD"],"args":[]}"#,
+      ),
+    ),
+    (
+      "an `ofType` whose kind nobody defines",
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[],"type":{"kind":"LIST","name":null,
+            "ofType":{"kind":"WIDGET","name":"W"},"ofType":{"kind":"SCALAR","name":"Int"}}}
+        ]}"#,
+      ),
+    ),
+  ];
+
+  for (what, json) in cases {
+    assert!(
+      read(json).is_ok(),
+      "the first occurrence decided: {what}\n---\n{json}"
+    );
+  }
+}
+
+/// A member written twice and unreadable **both** times still refuses, and names the last.
+///
+/// The complement of the test above, and what keeps it from being a hole: deferring a refusal
+/// until the object closes must lose the *superseded* one and nothing else.
+#[test]
+fn a_member_unreadable_twice_reports_the_last_occurrence() {
+  let json = response(r#"{"kind":"OBJECT","name":"bad-name","name":"worse name","fields":[]}"#);
+  assert_eq!(refused(&json).0, ResponseErrorKind::InvalidName);
+  assert_eq!(subject_of(&json), "worse name");
+}
+
+/// Two defective members in one object report whichever the *response* wrote first, and a
+/// duplicate does not change which one that is.
+///
+/// Holding a member's refusal until the object closes is what makes last-wins reach validation,
+/// and the risk it carries is that the refusal a response gets stops being the first one in it.
+/// It does not: the surviving refusals are compared by where their member's value began, and
+/// members are read left to right.
+#[test]
+fn the_refusal_is_the_one_the_response_wrote_first() {
+  // Neither member duplicated: whichever comes first is the answer, both ways round.
+  let kind_first = response(r#"{"kind":"WIDGET","name":"Not A Name"}"#);
+  assert_eq!(subject_of(&kind_first), "WIDGET");
+  let name_first = response(r#"{"name":"Not A Name","kind":"WIDGET"}"#);
+  assert_eq!(subject_of(&name_first), "Not A Name");
+
+  // The first of the two repaired by a duplicate: the second one is what is left.
+  let kind_repaired = response(r#"{"kind":"WIDGET","kind":"OBJECT","name":"Not A Name"}"#);
+  assert_eq!(subject_of(&kind_repaired), "Not A Name");
+  let name_repaired = response(r#"{"name":"Not A Name","name":"Ok","kind":"WIDGET"}"#);
+  assert_eq!(subject_of(&name_repaired), "WIDGET");
+}
+
+/// A member that could not be read is walked to its end, so the members after it are still found.
+///
+/// The mechanism last-wins rests on: a refusal leaves the cursor wherever it happened, and the
+/// reader puts it back and steps over the value as an uninterpreted one. A reader that did not
+/// would lose its place and refuse the object for a reason that is not in it — and the deeper the
+/// defect, the further from the truth the second refusal would be.
+#[test]
+fn a_refused_member_is_stepped_over_and_the_object_read_on() {
+  // The defect is four containers deep inside the first `fields`, and the members after it — the
+  // duplicate `fields`, the `name` — are still read.
+  let json = response(
+    r#"{"kind":"OBJECT",
+       "fields":[{"name":"ok","args":[
+         {"name":"arg","type":{"kind":"LIST","name":null,"ofType":{"kind":"WIDGET","name":"W"}}}
+       ],"type":{"kind":"SCALAR","name":"Int"}}],
+       "fields":[{"name":"ok","args":[],"type":{"kind":"SCALAR","name":"Int"}}],
+       "name":"Query"}"#,
+  );
+  let schema = read(&json).expect("a schema");
+  assert_eq!(schema.types[0].name.expect("a name").as_str(), "Query");
+  assert_eq!(
+    schema.types[0].fields.as_ref().expect("fields")[0]
+      .args
+      .len(),
+    0,
+    "the surviving `fields` is not the last one written"
+  );
+}
+
+/// Stepping over a refused member gives back the containers it left open, not only the offset.
+///
+/// A refusal stops the cursor *inside* whatever it was reading, so the reader is several
+/// containers deep when it decides to walk the value instead. Restoring the offset alone would
+/// leave those containers counted against the 128-deep nesting bound for the rest of the
+/// document — a leak of a few per refusal, invisible until enough of them accumulate and then
+/// reported as `recursion limit exceeded`, which is a statement about a response that does not
+/// nest at all.
+///
+/// Two hundred refused occurrences is well past the 128 the bound allows and nowhere near it,
+/// which is the whole point: the response below nests five deep and has to be read.
+#[test]
+fn stepping_over_a_refused_member_gives_back_its_containers() {
+  let refused = r#""fields":[{"name":"ok","args":[],"type":{"kind":"WIDGET","name":"W"}}],"#;
+  let json = response(&format!(
+    r#"{{"kind":"OBJECT","name":"Query",{}
+       "fields":[{{"name":"ok","args":[],"type":{{"kind":"SCALAR","name":"Int"}}}}]}}"#,
+    refused.repeat(200)
+  ));
+  let schema = read(&json).expect("a schema");
+  assert_eq!(
+    schema.types[0].fields.as_ref().expect("fields").len(),
+    1,
+    "the surviving `fields` is not the last one written"
   );
 }
 

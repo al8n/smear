@@ -196,6 +196,96 @@ fn a_member_the_door_never_reads_costs_nothing() {
   );
 }
 
+/// An escaped key inside a member the door does not read costs nothing.
+///
+/// A key is a *dispatch* key and comes back decoded, which is what makes `"data"` the key
+/// `data` — but the walk over a member nobody reads dispatches on nothing, so it must not pay
+/// for the decoding. Two responses whose unread subtree spells the same 200 keys, one plainly and
+/// one entirely in `\u` escapes, describe the same schema and have to cost the same.
+#[test]
+fn an_escaped_key_in_an_unread_member_costs_nothing() {
+  // Assembled rather than written, so nothing between this source and the fixture can normalise
+  // an escape into the character it stands for.
+  let escape = format!("\\u{}", "0061");
+  assert!(escape.contains('\\'), "the fixture lost its escape");
+
+  let buried = |key: &str| -> String {
+    let members: Vec<String> = (0..200)
+      .map(|index| format!(r#""{key}{index}":{index}"#))
+      .collect();
+    response(0, 0).replace(
+      r#""description":"""#,
+      &format!(r#""description":{{{}}}"#, members.join(",")),
+    )
+  };
+  let plain = buried("a");
+  let escaped = buried(&escape);
+  assert!(
+    escaped.len() > plain.len() + 1000,
+    "the two corpora do not differ enough for the reading to mean anything"
+  );
+  assert_eq!(
+    sdl(&plain),
+    sdl(&escaped),
+    "an escaped key changed the schema, so the two are not comparable"
+  );
+
+  let _ = sdl(&plain);
+  let _ = sdl(&escaped);
+  assert_eq!(
+    allocated(|| drop(sdl(&plain))),
+    allocated(|| drop(sdl(&escaped))),
+    "the door expanded the keys of a member it never reads"
+  );
+}
+
+/// A member written twice and refused twice costs one owner, not one owner per occurrence.
+///
+/// Last-wins reaches validation by holding a member's refusal until its object closes, because a
+/// later occurrence replaces the failure along with the value. So refusals are **built and
+/// discarded**, and the expensive part of building one is reading the owning object's `name` back
+/// out of the response — a walk of that whole object. Paying it per occurrence makes a response
+/// that repeats one bad member inside one large object cost the product of the two, which is a
+/// denial of service and not a slow path.
+///
+/// The owner here is 64 KiB long and the response repeats an unspellable `__Field.name` a thousand
+/// times, so resolving it once is a few tens of kilobytes and resolving it per occurrence is tens
+/// of megabytes. Measured as allocation rather than as time because a threshold on bytes is a
+/// fact and a threshold on a clock is a hope.
+#[test]
+fn a_refusal_a_duplicate_takes_away_costs_no_owner() {
+  const OWNER: usize = 64 * 1024;
+
+  let repeated = |duplicates: usize| -> String {
+    let names = r#""name":"a b","#.repeat(duplicates);
+    format!(
+      r#"{{"__schema":{{"queryType":{{"name":"Query"}},"directives":[],"types":[
+        {{"kind":"OBJECT","name":"{}","fields":[
+          {{{names}"args":[],"type":{{"kind":"SCALAR","name":"Int"}}}}
+        ]}}
+      ]}}}}"#,
+      "z".repeat(OWNER)
+    )
+  };
+
+  // Every occurrence fails, so every one of them builds a refusal, and all but the last are
+  // thrown away. The response is refused, and the refusal names the 64 KiB owner.
+  let response = repeated(1000);
+  let error = match to_sdl(&response) {
+    Err(smear_schema::introspection::IntrospectionError::Response(error)) => error,
+    other => panic!("expected a refusal, got {other:?}"),
+  };
+  assert_eq!(error.owner().map(str::len), Some(OWNER));
+
+  let _ = to_sdl(&response);
+  let bytes = allocated(|| drop(to_sdl(&response)));
+  assert!(
+    bytes < 4 * OWNER as u64,
+    "reading 1000 refused occurrences allocated {bytes} bytes; the owner was resolved for the \
+     occurrences that were discarded"
+  );
+}
+
 /// Reading a response costs a fraction of the response, not a multiple of it.
 #[test]
 fn the_whole_door_allocates_less_than_the_response_it_read() {

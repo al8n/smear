@@ -3,6 +3,32 @@ use std::{string::String, vec::Vec};
 use super::{MAX_DEPTH, Scanner, Text};
 use crate::introspection::ResponseErrorKind;
 
+/// A key comes back decoded, and borrowed when the decoding did not have to change anything.
+///
+/// The two halves are one property: [`Scanner::next_key`] answers *which member is this*, so the
+/// escaped spelling and the plain one have to be the same answer — and the plain one, which is
+/// every key a real response writes, has to still be the response's own bytes.
+#[test]
+fn a_key_is_decoded_and_still_borrowed_when_it_can_be() {
+  // Assembled rather than written, so nothing between this source and the fixture can normalise
+  // the escape into the character it stands for.
+  let escaped = std::format!("\\u{}ata", "0064");
+  let document = std::format!(r#"{{"{escaped}":1,"plain":2}}"#);
+  assert!(document.contains("\\u0064"), "the fixture lost its escape");
+
+  let mut scanner = Scanner::new(&document);
+  let mut members = scanner.enter_object("a fixture").expect("an object");
+  let mut keys = Vec::new();
+  while let Some(key) = scanner.next_key(&mut members).expect("a key") {
+    keys.push((String::from(key.as_str()), key.is_borrowed()));
+    scanner.skip_value().expect("a value");
+  }
+  assert_eq!(
+    keys,
+    [(String::from("data"), false), (String::from("plain"), true)]
+  );
+}
+
 /// Reads one string literal out of a document that is nothing else.
 fn text(document: &str) -> Result<Text<'_>, ResponseErrorKind> {
   let mut scanner = Scanner::new(document);
@@ -231,7 +257,7 @@ fn an_unread_member_is_skipped_and_not_ignored() {
   let mut members = scanner.enter_object("a fixture").expect("an object");
   let mut keys = Vec::new();
   while let Some(key) = scanner.next_key(&mut members).expect("a key") {
-    keys.push(key);
+    keys.push(String::from(key.as_str()));
     scanner.skip_value().expect("a value");
   }
   assert_eq!(keys, ["errors", "data"]);

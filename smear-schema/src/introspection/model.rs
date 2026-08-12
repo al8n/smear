@@ -12,12 +12,19 @@
 //! owning variant, so "names are not copied" is a fact about the type rather than a claim about
 //! the code that fills it. [`IntrospectedKind`] and `DirectiveLocation` are resolved to their
 //! enums while the bytes are in hand, so a `__TypeKind` nobody defines is refused where it is read
-//! rather than compared to a string one layer down.
+//! rather than compared to a string one layer down — and, being enums, they carry nothing away
+//! from the response at all.
 //!
 //! The exception is [`IntrospectedInputValue::default_value`], which is a literal a *server
 //! printed* and may perfectly well contain a `"` or a `\`. It is a [`Text`], and a [`Text`]
-//! allocates only when the literal actually holds a backslash. Two string paths, said at the
-//! type: **names borrow, printed values may not.**
+//! allocates only when the literal actually holds a backslash.
+//!
+//! **Two paths at this type — names borrow, printed values may not — and that is a statement
+//! about the model, not about the reader.** The reader meets [five kinds of string](super::json)
+//! and decodes four of them; three of the four leave nothing behind, because a dispatch key and a
+//! closed vocabulary are read in order to be *matched* and neither is a field of anything here.
+//! `Name` is the one kind read raw, and the reason is exactly the sentence above it: the borrow is
+//! unconditional because the type admits no alternative.
 //!
 //! # Required means non-null in the meta-schema
 //!
@@ -63,6 +70,11 @@ use super::{
 /// a `\u` escape decodes to a name no server has a reason to escape, and honouring it would mean
 /// an owning variant on this type and a copy on every name to pay for it.
 ///
+/// **This is the only kind of string the reader matches raw, and the exemption stops here.** A
+/// dispatch key and a closed vocabulary are decoded before they are compared, because neither is
+/// kept and so neither has a borrow to protect; the price above buys this type's borrow and
+/// nothing else's. [The five kinds](super::json) are tabulated where they are read.
+///
 /// The check itself is not overhead. It is [`is_name`], the interner's own admission rule, run
 /// once at the earliest point the bytes exist instead of once per use downstream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +100,8 @@ impl<'a> Name<'a> {
 /// the distinction every use makes: a member of `__Schema.types` and the base of a reference must
 /// be [`Named`](Self::Named), and only a reference may be a wrapper.
 ///
-/// The match runs on the literal's own bytes, for the same reason [`Name`]'s does.
+/// The match runs on the literal's **decoded** value, unlike [`Name`]'s: this enum keeps no borrow,
+/// so there is nothing here for a raw match to protect and `"OBJECT"` is the kind `OBJECT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum IntrospectedKind {
   /// One of the six kinds that name a type.
@@ -100,7 +113,7 @@ pub(super) enum IntrospectedKind {
 }
 
 impl IntrospectedKind {
-  /// Resolves a `__TypeKind` from its spelling.
+  /// Resolves a `__TypeKind` from its decoded spelling.
   pub(super) fn from_name(literal: &str) -> Option<Self> {
     Some(match literal.as_bytes() {
       b"SCALAR" => Self::Named(TypeKind::Scalar),
@@ -178,8 +191,9 @@ pub(super) struct IntrospectedInputValue<'a> {
   /// The server's printed spelling of the default, or null for no default.
   ///
   /// **The one prose slot in the model**, and therefore the one place a [`Text`] can be
-  /// `Unescaped`: a printed value may contain a `"` or a `\`, unlike every name and every closed
-  /// vocabulary around it.
+  /// `Unescaped` *here*: a printed value may contain a `"` or a `\` and is kept. A dispatch key
+  /// and a closed vocabulary may hold an escape too and are decoded for it, but neither is a field
+  /// of anything in this file, so neither can leave an allocation behind.
   ///
   /// `Schema` keeps only [`DefaultKind`](crate::DefaultKind) — presence and
   /// null-ness — so the spelling matters exactly twice: it must parse, and it must be

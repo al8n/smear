@@ -13,9 +13,14 @@
 //! # The closed vocabularies are resolved here, not compared later
 //!
 //! `kind` and `locations` are typed `String` in a response and are `__TypeKind` and
-//! `__DirectiveLocation` — closed sets. They are matched as bytes and produce their enums, so
+//! `__DirectiveLocation` — closed sets. They are resolved to their enums at the literal, so
 //! [`UnknownTypeKind`] and [`UnknownDirectiveLocation`] are refusals *at the literal that spells
 //! them*. `InvalidName` moved with them, because [`Name`] is validated at construction.
+//!
+//! **A member key and a closed vocabulary are both dispatches, and both read the literal's decoded
+//! value; a `Name` is the one string read raw.** Which of the [five kinds of string](super::json)
+//! an escape may change is tabulated there, because the distinction belongs where the literals are
+//! read rather than where they are used.
 //!
 //! One consequence is worth stating rather than discovering. The renderer used to check a `__Type`
 //! in a fixed order — name present, name well spelled, then kind — so a type with two defects
@@ -31,8 +36,13 @@
 //! its argument — and an owner is a *path*, so building one eagerly would allocate a `String` per
 //! field of a document that is about to be accepted. Worse, a member's owner is its parent's
 //! `name`, which JSON does not promise to have written first. [`Owner`] carries byte offsets
-//! instead, and reads the names back out of the response only when a refusal actually needs them.
-//! Reading is fail-fast, so that path is walked at most once.
+//! instead, and [`read`] — the door, and nowhere else — reads the names back out of the response.
+//!
+//! **The resolution belongs at the door and not at the refusal**, because a refusal is not
+//! necessarily reported: a member written twice takes a failure away again, as [`Slot`] describes,
+//! so refusals are built and discarded. Resolving each one would walk the owning object once per
+//! failing occurrence, and a response repeating one bad member inside a large object would cost
+//! the product of the two. Resolving the survivor costs one walk per response.
 //!
 //! [`UnknownTypeKind`]: ResponseErrorKind::UnknownTypeKind
 //! [`UnknownDirectiveLocation`]: ResponseErrorKind::UnknownDirectiveLocation
@@ -55,7 +65,16 @@ use super::{
 /// response a server returns (`{"data":{"__schema":…}}`), the same with the transport layer peeled
 /// off (`{"__schema":…}`), and the `__Schema` object alone, which is what a fixture file usually
 /// holds.
+///
+/// **This is also where an owner stops being an offset**, and it is the only place: a refusal
+/// carries [`Owner`] until it is the refusal the door returns, so the walk that reads an owner's
+/// name back out of the response runs exactly once per response however many refusals were built
+/// and discarded on the way. See [`Slot`] for why any are discarded.
 pub(super) fn read(response: &str) -> Scanned<IntrospectedSchema<'_>> {
+  locate_and_read(response).map_err(|refusal| refusal.resolve_owner(response))
+}
+
+fn locate_and_read(response: &str) -> Scanned<IntrospectedSchema<'_>> {
   let Some(at) = locate(response)? else {
     return Err(ResponseError::new(
       ResponseErrorKind::MissingSchema,
@@ -80,6 +99,13 @@ pub(super) fn read(response: &str) -> Scanned<IntrospectedSchema<'_>> {
 /// envelope until one parses would turn every malformed response into a search for an
 /// interpretation that happens to work, which is precisely the failure this ordering exists to
 /// prevent.
+///
+/// **By the key, and not by its spelling.** `data`, `__schema` and `types` are
+/// [dispatch keys](super::json): [`Scanner::next_key`] hands them back decoded, so `"data"`
+/// selects this arm exactly as `"data"` does. Matching the raw literal instead would leave an
+/// escaped `data` unrecognised, and the reading would then fall through to whatever else the root
+/// happened to admit — the very outcome the paragraph above rules out, reached by the spelling
+/// rather than by the order.
 ///
 /// # The walk is also what proves the response is JSON
 ///
@@ -109,17 +135,17 @@ fn locate(response: &str) -> Scanned<Option<usize>> {
 
   let mut members = scanner.enter_object("the response")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"data" => {
+    match key.as_str() {
+      "data" => {
         has_data = true;
         under_data = locate_under_data(&mut scanner)?;
       }
-      b"__schema" => {
+      "__schema" => {
         scanner.skip_ws();
         at_root = Some(scanner.position());
         scanner.skip_value()?;
       }
-      b"types" => {
+      "types" => {
         has_types = true;
         scanner.skip_value()?;
       }
@@ -150,7 +176,7 @@ fn locate_under_data(scanner: &mut Scanner<'_>) -> Scanned<Option<usize>> {
   let mut found = None;
   let mut members = scanner.enter_object("`data`")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    if key.as_bytes() == b"__schema" {
+    if key.as_str() == "__schema" {
       scanner.skip_ws();
       found = Some(scanner.position());
     }
@@ -163,10 +189,18 @@ fn locate_under_data(scanner: &mut Scanner<'_>) -> Scanned<Option<usize>> {
 // who owns a refusal
 // ---------------------------------------------------------------------------------------------
 
-/// The artifact a refusal names as the owner of its subject, held as offsets until one happens.
-#[derive(Debug, Clone, Copy)]
-enum Owner {
+/// The artifact a refusal names as the owner of its subject, held as offsets until the door
+/// returns the refusal.
+///
+/// Not "until one happens": a refusal is *built* wherever a member could not be read, and a
+/// member written twice can take one away again — see [`Slot`] — so building one has to be cheap
+/// enough that a response repeating a bad member ten thousand times costs ten thousand cheap
+/// refusals rather than ten thousand walks of the object that owns them. [`read`] resolves the one
+/// that survives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum Owner {
   /// The artifact stands alone: a member of `__Schema.types`, or a `__Directive`.
+  #[default]
   Unowned,
   /// The `schema` block, which owns the three root operation slots.
   Schema,
@@ -182,7 +216,7 @@ impl Owner {
   /// `None` when there is nothing to name, including the case where the owning object's own `name`
   /// is absent, null or unreadable — a refusal with no owner is the same refusal, and inventing a
   /// path would be worse than omitting one.
-  fn resolve(self, response: &str) -> Option<String> {
+  pub(super) fn resolve(self, response: &str) -> Option<String> {
     match self {
       Self::Unowned => None,
       Self::Schema => Some(String::from("schema")),
@@ -212,7 +246,7 @@ fn peek_name(response: &str, at: usize) -> Option<&str> {
     // Skipped on the shared cursor whatever it turns out to be, so the walk stays on the rails for
     // a `name` that is null or of the wrong type, and read again from the offset just recorded.
     scanner.skip_value().ok()?;
-    if key.as_bytes() == b"name" {
+    if key.as_str() == "name" {
       name = Scanner::at(response, value)
         .string("an owner")
         .ok()
@@ -222,12 +256,9 @@ fn peek_name(response: &str, at: usize) -> Option<&str> {
   name
 }
 
-fn refuse(kind: ResponseErrorKind, subject: &str, owner: Owner, response: &str) -> ResponseError {
-  let error = ResponseError::new(kind, subject);
-  match owner.resolve(response) {
-    Some(owner) => error.owned_by(owner),
-    None => error,
-  }
+/// Builds a refusal, naming its owner by the offsets it will be read back from.
+fn refuse(kind: ResponseErrorKind, subject: &str, owner: Owner) -> ResponseError {
+  ResponseError::new(kind, subject).owned_at(owner)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -243,6 +274,84 @@ fn refuse(kind: ResponseErrorKind, subject: &str, owner: Owner, response: &str) 
 // A member written **twice** overwrites, so the last one wins. That is not a choice this file
 // makes so much as one it keeps: the previous reader built a JSON value tree first, and a tree's
 // object is a map, so the second `"name"` replaced the first long before the shape was consulted.
+
+/// One recognised member, as its **last** occurrence left it: where the value began, and what
+/// reading it produced.
+///
+/// # Why a member's failure waits for the closing brace
+///
+/// Last-wins has to cover *whether the member could be read at all*, and not only which value ends
+/// up in the slot. A tree-building reader collapsed `{"name":"bad-name","name":"ok"}` into one
+/// member before the shape was ever consulted, so a first occurrence nobody kept could not refuse
+/// the response. A reader that validates each occurrence where it meets it would let exactly that
+/// first spelling decide, and last-wins would hold for the value and not for the verdict.
+///
+/// So a refusal is held in the slot the occurrence wrote, and a later occurrence replaces it like
+/// any other value. Reading is still fail-fast at the *document* — [`Refusals::check`] reports
+/// before the object is built, nothing accumulates across objects — it is fail-fast at the member
+/// that survived rather than at the first one written.
+type Slot<T> = Option<(usize, Scanned<T>)>;
+
+/// Reads one occurrence of a recognised member into its slot, replacing whatever an earlier
+/// occurrence left there.
+fn member<'a, T>(
+  scanner: &mut Scanner<'a>,
+  slot: &mut Slot<T>,
+  read: impl FnOnce(&mut Scanner<'a>) -> Scanned<T>,
+) -> Scanned {
+  scanner.skip_ws();
+  let at = scanner.mark();
+  match read(scanner) {
+    Ok(value) => *slot = Some((at.position(), Ok(value))),
+    Err(refusal) => {
+      // The cursor stopped wherever the refusal happened, which may be several containers deep, so
+      // put it back and walk the value as an uninterpreted one instead: the object's remaining
+      // members still have to be read, because one of them may be this member written again.
+      //
+      // The walk cannot fail for a reason of its own. `locate` proved the whole document is JSON
+      // before any of this ran, and it walked these bytes at a nesting depth at least as great as
+      // this pass sees, so neither the grammar nor the bound can refuse them a second time.
+      scanner.rewind(at);
+      scanner.skip_value()?;
+      *slot = Some((at.position(), Err(refusal)));
+    }
+  }
+  Ok(())
+}
+
+/// The refusal an object's surviving members produce, once the object has closed.
+#[derive(Debug, Default)]
+struct Refusals {
+  first: Option<(usize, ResponseError)>,
+}
+
+impl Refusals {
+  /// Takes a slot's value, keeping its refusal if it has one.
+  fn take<T>(&mut self, slot: Slot<T>) -> Option<T> {
+    match slot {
+      None => None,
+      Some((_, Ok(value))) => Some(value),
+      Some((at, Err(refusal))) => {
+        // Document order, which is offset order: members are read left to right, so the smallest
+        // offset among the surviving failures is the defect the response wrote first — the same
+        // one a reader that stopped at the first failure would have named, whenever no duplicate
+        // took that failure away.
+        if !matches!(&self.first, Some((first, _)) if *first <= at) {
+          self.first = Some((at, refusal));
+        }
+        None
+      }
+    }
+  }
+
+  /// Reports that refusal, if the object had one.
+  fn check(self) -> Scanned {
+    match self.first {
+      Some((_, refusal)) => Err(refusal),
+      None => Ok(()),
+    }
+  }
+}
 
 /// Reads a member draft §4 declares nullable.
 fn nullable<'a, T>(
@@ -280,38 +389,37 @@ fn nullable_list<'a, T>(
 // the closed vocabularies
 // ---------------------------------------------------------------------------------------------
 
+/// A `Name`, matched against the literal's **raw** bytes.
+///
+/// The one kind of string the door reads raw, and it is a decision priced at [`Name`] rather than
+/// a shortcut taken here: the type has no owning variant, so an escaped spelling is refused as
+/// [`InvalidName`](ResponseErrorKind::InvalidName) with the literal as the subject. See
+/// [the five kinds of string](super::json) for the other four, all of which decode.
 fn graphql_name<'a>(scanner: &mut Scanner<'a>, what: &str, owner: Owner) -> Scanned<Name<'a>> {
   let (literal, _) = scanner.string(what)?;
-  Name::new(literal).ok_or_else(|| {
-    refuse(
-      ResponseErrorKind::InvalidName,
-      literal,
-      owner,
-      scanner.response(),
-    )
-  })
+  Name::new(literal).ok_or_else(|| refuse(ResponseErrorKind::InvalidName, literal, owner))
 }
 
+/// A `__TypeKind`, resolved from the literal's **decoded** value.
+///
+/// A closed vocabulary is a dispatch: the literal names one of eight values, and `"OBJECT"`
+/// names `OBJECT`. Decoding costs nothing on the path a real response takes — a spelling with no
+/// backslash in it is [`Text::Borrowed`](super::json::Text::Borrowed), the response's own bytes —
+/// and the text is dropped as soon as the enum is out of it.
 fn type_kind(scanner: &mut Scanner<'_>, what: &str, owner: Owner) -> Scanned<IntrospectedKind> {
-  let (literal, _) = scanner.string(what)?;
-  IntrospectedKind::from_name(literal).ok_or_else(|| {
-    refuse(
-      ResponseErrorKind::UnknownTypeKind,
-      literal,
-      owner,
-      scanner.response(),
-    )
-  })
+  let literal = scanner.text(what)?;
+  IntrospectedKind::from_name(literal.as_str())
+    .ok_or_else(|| refuse(ResponseErrorKind::UnknownTypeKind, literal.as_str(), owner))
 }
 
+/// A `__DirectiveLocation`, resolved from the literal's **decoded** value, as [`type_kind`] is.
 fn location(scanner: &mut Scanner<'_>, owner: Owner) -> Scanned<DirectiveLocation> {
-  let (literal, _) = scanner.string("__Directive.locations")?;
-  DirectiveLocation::from_name(literal).ok_or_else(|| {
+  let literal = scanner.text("__Directive.locations")?;
+  DirectiveLocation::from_name(literal.as_str()).ok_or_else(|| {
     refuse(
       ResponseErrorKind::UnknownDirectiveLocation,
-      literal,
+      literal.as_str(),
       owner,
-      scanner.response(),
     )
   })
 }
@@ -329,15 +437,31 @@ fn schema<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedSchema<'a>> {
 
   let mut members = scanner.enter_object("__Schema")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"types" => types = Some(list(scanner, "__Schema.types", ty)?),
-      b"queryType" => query_type = Some(root_slot(scanner)?),
-      b"mutationType" => mutation_type = Some(nullable(scanner, root_slot)?),
-      b"subscriptionType" => subscription_type = Some(nullable(scanner, root_slot)?),
-      b"directives" => directives = Some(list(scanner, "__Schema.directives", directive)?),
+    match key.as_str() {
+      "types" => member(scanner, &mut types, |scanner| {
+        list(scanner, "__Schema.types", ty)
+      })?,
+      "queryType" => member(scanner, &mut query_type, root_slot)?,
+      "mutationType" => member(scanner, &mut mutation_type, |scanner| {
+        nullable(scanner, root_slot)
+      })?,
+      "subscriptionType" => member(scanner, &mut subscription_type, |scanner| {
+        nullable(scanner, root_slot)
+      })?,
+      "directives" => member(scanner, &mut directives, |scanner| {
+        list(scanner, "__Schema.directives", directive)
+      })?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let types = refusals.take(types);
+  let query_type = refusals.take(query_type);
+  let mutation_type = refusals.take(mutation_type);
+  let subscription_type = refusals.take(subscription_type);
+  let directives = refusals.take(directives);
+  refusals.check()?;
 
   Ok(IntrospectedSchema {
     types: types.ok_or_else(|| scanner.missing("types"))?,
@@ -353,15 +477,20 @@ fn root_slot<'a>(scanner: &mut Scanner<'a>) -> Scanned<NamedTypeRef<'a>> {
   let mut name = None;
   let mut members = scanner.enter_object("__Type")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"name" => {
-        name = Some(nullable(scanner, |scanner| {
+    match key.as_str() {
+      "name" => member(scanner, &mut name, |scanner| {
+        nullable(scanner, |scanner| {
           graphql_name(scanner, "__Type.name", Owner::Schema)
-        })?)
-      }
+        })
+      })?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let name = refusals.take(name);
+  refusals.check()?;
+
   Ok(NamedTypeRef {
     name: name.flatten(),
   })
@@ -383,48 +512,57 @@ fn ty<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedType<'a>> {
 
   let mut members = scanner.enter_object("__Type")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
+    match key.as_str() {
       // A member of `__Schema.types` stands alone, so its own kind and its own name are refused
       // with no owner — exactly as the renderer refused them.
-      b"kind" => kind = Some(type_kind(scanner, "__Type.kind", Owner::Unowned)?),
-      b"name" => {
-        name = Some(nullable(scanner, |scanner| {
+      "kind" => member(scanner, &mut kind, |scanner| {
+        type_kind(scanner, "__Type.kind", Owner::Unowned)
+      })?,
+      "name" => member(scanner, &mut name, |scanner| {
+        nullable(scanner, |scanner| {
           graphql_name(scanner, "__Type.name", Owner::Unowned)
-        })?)
-      }
-      b"fields" => {
-        fields = Some(nullable_list(scanner, "__Type.fields", |scanner| {
-          field(scanner, at)
-        })?)
-      }
-      b"inputFields" => {
-        input_fields = Some(nullable_list(scanner, "__Type.inputFields", |scanner| {
+        })
+      })?,
+      "fields" => member(scanner, &mut fields, |scanner| {
+        nullable_list(scanner, "__Type.fields", |scanner| field(scanner, at))
+      })?,
+      "inputFields" => member(scanner, &mut input_fields, |scanner| {
+        nullable_list(scanner, "__Type.inputFields", |scanner| {
           input_value(scanner, owner)
-        })?)
-      }
-      b"interfaces" => {
-        interfaces = Some(nullable_list(scanner, "__Type.interfaces", |scanner| {
+        })
+      })?,
+      "interfaces" => member(scanner, &mut interfaces, |scanner| {
+        nullable_list(scanner, "__Type.interfaces", |scanner| {
           type_ref(scanner, owner)
-        })?)
-      }
-      b"enumValues" => {
-        enum_values = Some(nullable_list(scanner, "__Type.enumValues", |scanner| {
+        })
+      })?,
+      "enumValues" => member(scanner, &mut enum_values, |scanner| {
+        nullable_list(scanner, "__Type.enumValues", |scanner| {
           enum_value(scanner, owner)
-        })?)
-      }
-      b"possibleTypes" => {
-        possible_types = Some(nullable_list(scanner, "__Type.possibleTypes", |scanner| {
+        })
+      })?,
+      "possibleTypes" => member(scanner, &mut possible_types, |scanner| {
+        nullable_list(scanner, "__Type.possibleTypes", |scanner| {
           type_ref(scanner, owner)
-        })?)
-      }
-      b"isOneOf" => {
-        is_one_of = Some(nullable(scanner, |scanner| {
-          scanner.boolean("__Type.isOneOf")
-        })?)
-      }
+        })
+      })?,
+      "isOneOf" => member(scanner, &mut is_one_of, |scanner| {
+        nullable(scanner, |scanner| scanner.boolean("__Type.isOneOf"))
+      })?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let kind = refusals.take(kind);
+  let name = refusals.take(name);
+  let fields = refusals.take(fields);
+  let input_fields = refusals.take(input_fields);
+  let interfaces = refusals.take(interfaces);
+  let enum_values = refusals.take(enum_values);
+  let possible_types = refusals.take(possible_types);
+  let is_one_of = refusals.take(is_one_of);
+  refusals.check()?;
 
   Ok(IntrospectedType {
     kind: kind.ok_or_else(|| scanner.missing("kind"))?,
@@ -454,17 +592,25 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
 
   let mut members = scanner.enter_object("__Field")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"name" => name = Some(graphql_name(scanner, "__Field.name", owner)?),
-      b"args" => {
-        args = Some(list(scanner, "__Field.args", |scanner| {
+    match key.as_str() {
+      "name" => member(scanner, &mut name, |scanner| {
+        graphql_name(scanner, "__Field.name", owner)
+      })?,
+      "args" => member(scanner, &mut args, |scanner| {
+        list(scanner, "__Field.args", |scanner| {
           input_value(scanner, Owner::Member(owner_at, at))
-        })?)
-      }
-      b"type" => ty = Some(type_ref(scanner, owner)?),
+        })
+      })?,
+      "type" => member(scanner, &mut ty, |scanner| type_ref(scanner, owner))?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let name = refusals.take(name);
+  let args = refusals.take(args);
+  let ty = refusals.take(ty);
+  refusals.check()?;
 
   Ok(IntrospectedField {
     name: name.ok_or_else(|| scanner.missing("name"))?,
@@ -480,18 +626,24 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
 
   let mut members = scanner.enter_object("__InputValue")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"name" => name = Some(graphql_name(scanner, "__InputValue.name", owner)?),
-      b"type" => ty = Some(type_ref(scanner, owner)?),
-      // The one prose member in a draft §4 response, and so the one that can allocate.
-      b"defaultValue" => {
-        default_value = Some(nullable(scanner, |scanner| {
-          scanner.text("__InputValue.defaultValue")
-        })?)
-      }
+    match key.as_str() {
+      "name" => member(scanner, &mut name, |scanner| {
+        graphql_name(scanner, "__InputValue.name", owner)
+      })?,
+      "type" => member(scanner, &mut ty, |scanner| type_ref(scanner, owner))?,
+      // The one prose member in a draft §4 response, and so the one whose text is kept.
+      "defaultValue" => member(scanner, &mut default_value, |scanner| {
+        nullable(scanner, |scanner| scanner.text("__InputValue.defaultValue"))
+      })?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let name = refusals.take(name);
+  let ty = refusals.take(ty);
+  let default_value = refusals.take(default_value);
+  refusals.check()?;
 
   Ok(IntrospectedInputValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
@@ -504,11 +656,18 @@ fn enum_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspect
   let mut name = None;
   let mut members = scanner.enter_object("__EnumValue")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"name" => name = Some(graphql_name(scanner, "__EnumValue.name", owner)?),
+    match key.as_str() {
+      "name" => member(scanner, &mut name, |scanner| {
+        graphql_name(scanner, "__EnumValue.name", owner)
+      })?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let name = refusals.take(name);
+  refusals.check()?;
+
   Ok(IntrospectedEnumValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
   })
@@ -525,22 +684,33 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
 
   let mut members = scanner.enter_object("__Directive")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"name" => name = Some(graphql_name(scanner, "__Directive.name", Owner::Unowned)?),
-      b"locations" => {
-        locations = Some(list(scanner, "__Directive.locations", |scanner| {
+    match key.as_str() {
+      "name" => member(scanner, &mut name, |scanner| {
+        graphql_name(scanner, "__Directive.name", Owner::Unowned)
+      })?,
+      "locations" => member(scanner, &mut locations, |scanner| {
+        list(scanner, "__Directive.locations", |scanner| {
           location(scanner, owner)
-        })?)
-      }
-      b"args" => {
-        args = Some(list(scanner, "__Directive.args", |scanner| {
+        })
+      })?,
+      "args" => member(scanner, &mut args, |scanner| {
+        list(scanner, "__Directive.args", |scanner| {
           input_value(scanner, owner)
-        })?)
-      }
-      b"isRepeatable" => is_repeatable = Some(scanner.boolean("__Directive.isRepeatable")?),
+        })
+      })?,
+      "isRepeatable" => member(scanner, &mut is_repeatable, |scanner| {
+        scanner.boolean("__Directive.isRepeatable")
+      })?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let name = refusals.take(name);
+  let locations = refusals.take(locations);
+  let args = refusals.take(args);
+  let is_repeatable = refusals.take(is_repeatable);
+  refusals.check()?;
 
   Ok(IntrospectedDirective {
     name: name.ok_or_else(|| scanner.missing("name"))?,
@@ -557,21 +727,27 @@ fn type_ref<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<TypeRef<'a>>
 
   let mut members = scanner.enter_object("__Type")?;
   while let Some(key) = scanner.next_key(&mut members)? {
-    match key.as_bytes() {
-      b"kind" => kind = Some(type_kind(scanner, "__Type.kind", owner)?),
-      b"name" => {
-        name = Some(nullable(scanner, |scanner| {
+    match key.as_str() {
+      "kind" => member(scanner, &mut kind, |scanner| {
+        type_kind(scanner, "__Type.kind", owner)
+      })?,
+      "name" => member(scanner, &mut name, |scanner| {
+        nullable(scanner, |scanner| {
           graphql_name(scanner, "__Type.name", owner)
-        })?)
-      }
-      b"ofType" => {
-        of_type = Some(nullable(scanner, |scanner| {
-          type_ref(scanner, owner).map(Box::new)
-        })?)
-      }
+        })
+      })?,
+      "ofType" => member(scanner, &mut of_type, |scanner| {
+        nullable(scanner, |scanner| type_ref(scanner, owner).map(Box::new))
+      })?,
       _ => scanner.skip_value()?,
     }
   }
+
+  let mut refusals = Refusals::default();
+  let kind = refusals.take(kind);
+  let name = refusals.take(name);
+  let of_type = refusals.take(of_type);
+  refusals.check()?;
 
   Ok(TypeRef {
     kind: kind.ok_or_else(|| scanner.missing("kind"))?,

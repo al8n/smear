@@ -8,15 +8,39 @@
 //! it expects — so this file provides the *tokens* of JSON and nothing above them, and
 //! [`decode`](super::decode) supplies the shape.
 //!
-//! # Two string paths, and the difference is a promise about allocation
+//! # Five kinds of string, and which of them a JSON escape is allowed to change
 //!
-//! [`Scanner::string`] hands back the literal's own bytes **borrowed from the response**, together
-//! with whether a backslash occurred inside it. Everything the door reads except one field is a
-//! GraphQL `Name`, a `__TypeKind` or a `__DirectiveLocation` — closed vocabularies of ASCII
-//! identifiers that never need an escape — so those are matched against the borrowed bytes and
-//! never copied. The one exception is `__InputValue.defaultValue`, which is a *value* a server
-//! printed and may legitimately contain a `"` or a `\`; [`Text`] is what carries it, and it
-//! allocates **only when a backslash is actually present**.
+//! A JSON literal has a raw spelling and a decoded value, and they differ only when a backslash
+//! occurs. Which of the two a reader is entitled to use is not one decision: it is one per kind of
+//! string the door reads, and the kinds are these.
+//!
+//! | Kind | Read as | Escape | Survives into the model |
+//! |---|---|---|---|
+//! | **Dispatch keys** — every object member key | decoded | selects the member it spells | no |
+//! | **Closed vocabularies** — `__Type.kind`, `__Directive.locations` | decoded | resolves to the enum it spells | no, the enum does |
+//! | **`Name`s** — every `name` member | **raw** | refused as [`InvalidName`] | yes, borrowed |
+//! | **Prose** — `__InputValue.defaultValue` | decoded | expanded | yes, [`Text`] |
+//! | **Everything skipped** — a member the door does not read | neither | validated only | no |
+//!
+//! The first two are decoded because a *dispatch* is a question about which member or which enum
+//! value the literal names, and `"data"` names `data`: matching those on the raw bytes would
+//! make an escaped `data` an unknown member, and a malformed `data.__schema` would then fall
+//! through to whatever other reading the response admitted. They cost nothing on the path every
+//! real response takes — [`Scanner::next_key`] and [`Scanner::text`] hand back the literal's own
+//! bytes when it holds no backslash — and a `String` that lives until the branch returns when it
+//! does.
+//!
+//! [`Name`] is the one kind read raw, and that is a decision priced at the type rather than a
+//! shortcut taken here: a `Name` borrows the response unconditionally and has no owning variant, so
+//! an escaped spelling is refused instead of accommodated. Nothing needs one — a `Name` is
+//! `/[_A-Za-z][_0-9A-Za-z]*/`, all ASCII.
+//!
+//! Prose is the one kind that both decodes and survives: `__InputValue.defaultValue` is a value a
+//! server *printed*, so `"\"world\""` is an ordinary thing for it to contain. [`Text`] carries it,
+//! and it allocates **only when a backslash is actually present**.
+//!
+//! [`InvalidName`]: ResponseErrorKind::InvalidName
+//! [`Name`]: super::model::Name
 //!
 //! # Two failures, kept apart
 //!
@@ -50,12 +74,23 @@ const MAX_DEPTH: u32 = 128;
 ///
 /// # The name is the contract
 ///
-/// `Borrowed` is the response's own bytes. `Unescaped` is a copy, and it exists for exactly one
-/// field: `__InputValue.defaultValue` is a literal a server *printed*, so `"\"world\""` is a
-/// perfectly ordinary thing for it to contain. Nothing else the door reads can hold an escape
-/// without being refused for a different reason — a `Name`, a `__TypeKind` and a
-/// `__DirectiveLocation` are all matched against the literal's own bytes — so this type appears
-/// once in the model and the borrow appears everywhere else.
+/// `Borrowed` is the response's own bytes. `Unescaped` is a copy, and a copy is made only when the
+/// literal actually holds a backslash — so on every response no server has a reason not to send,
+/// this type is the borrow and nothing else.
+///
+/// # Three of the [five kinds of string](self) reach this type, and only one of them keeps it
+///
+/// - A **dispatch key** is a `Text` for as long as the `match` that reads it, and is dropped when
+///   the branch returns. An escaped key is therefore one temporary `String` and no lasting cost.
+/// - A **closed vocabulary** — `__Type.kind`, `__Directive.locations` — is a `Text` only until
+///   [`IntrospectedKind`](super::model::IntrospectedKind) or
+///   [`DirectiveLocation`](crate::DirectiveLocation) is resolved out of it.
+/// - **Prose** — `__InputValue.defaultValue` — is the one that is *kept*, and so the one place an
+///   `Unescaped` can appear in the model.
+///
+/// The two kinds that never reach it are a [`Name`](super::model::Name), which is matched against
+/// the literal's raw bytes and refuses an escape outright, and a string inside a member the door
+/// skips, which is validated and never read.
 ///
 /// Calling the decoder "zero-copy" without saying that would be a name that misdescribes its
 /// contents.
@@ -79,10 +114,10 @@ impl Text<'_> {
 
   /// Returns whether the text is the response's own bytes rather than a copy of them.
   ///
-  /// Read only by the allocation gate — a corpus whose default values carry no escape must answer
-  /// `true` for every one of them — because nothing in the door's own work depends on which side
-  /// of the enum it is holding. That is the property, stated as a method rather than as a
-  /// sentence.
+  /// Read only by the tests — a corpus whose default values carry no escape must answer `true` for
+  /// every one of them, and so must every key a response spells plainly — because nothing in the
+  /// door's own work depends on which side of the enum it is holding. That is the property, stated
+  /// as a method rather than as a sentence.
   #[cfg(test)]
   #[inline]
   pub(super) fn is_borrowed(&self) -> bool {
@@ -98,6 +133,26 @@ impl Text<'_> {
 #[derive(Debug)]
 pub(super) struct Seq {
   first: bool,
+}
+
+/// Where the cursor stood, so a reading that refused can be undone and the value walked instead.
+///
+/// The depth travels with the offset because [`Scanner::enter_object`] and
+/// [`Scanner::enter_array`] raise it and only the matching close lowers it again: a reading that
+/// stopped three containers deep left three of them open, and restoring the offset alone would
+/// leak them into the nesting bound for the rest of the document.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Mark {
+  pos: usize,
+  depth: u32,
+}
+
+impl Mark {
+  /// The offset the mark was taken at, which is where the value begins.
+  #[inline]
+  pub(super) const fn position(&self) -> usize {
+    self.pos
+  }
 }
 
 /// A cursor over a response, and the JSON grammar it can recognise at that cursor.
@@ -132,16 +187,26 @@ impl<'a> Scanner<'a> {
     }
   }
 
-  /// Returns the whole response, for the error path that reads an owner's name back out of it.
-  #[inline]
-  pub(super) const fn response(&self) -> &'a str {
-    self.response
-  }
-
   /// Returns the offset of the next byte, which is the start of a value after [`Self::skip_ws`].
   #[inline]
   pub(super) const fn position(&self) -> usize {
     self.pos
+  }
+
+  /// Records the cursor, so that [`Self::rewind`] can put a refused reading back.
+  #[inline]
+  pub(super) const fn mark(&self) -> Mark {
+    Mark {
+      pos: self.pos,
+      depth: self.depth,
+    }
+  }
+
+  /// Puts the cursor back where a [`Mark`] was taken, containers and all.
+  #[inline]
+  pub(super) const fn rewind(&mut self, mark: Mark) {
+    self.pos = mark.pos;
+    self.depth = mark.depth;
   }
 
   #[inline]
@@ -249,19 +314,48 @@ impl<'a> Scanner<'a> {
     Ok(Seq { first: true })
   }
 
-  /// Reads the next member's key, or closes the object and returns `None`.
+  /// Reads the next member's key **decoded**, or closes the object and returns `None`.
   ///
-  /// The key comes back as the literal's own bytes. A key spelled with a JSON escape therefore
-  /// matches no member the door knows and is skipped as an unknown one — which is what a response
-  /// carrying `"name"` deserves, since draft §4 has no such member and every real key is an
-  /// ASCII identifier.
-  pub(super) fn next_key(&mut self, seq: &mut Seq) -> Scanned<Option<&'a str>> {
+  /// A key is a [dispatch key](self): it is read in order to be *compared* against the member
+  /// names draft §4 defines, and `"data"` is the key `data` however the response chose to
+  /// spell it. Matching the raw literal instead would make an escaped `data` an unknown member
+  /// and let a malformed `data.__schema` fall through to a different envelope, which is the one
+  /// thing the envelope rule exists to prevent.
+  ///
+  /// The decoding is free on the path every real response takes: a key with no backslash in it
+  /// comes back as [`Text::Borrowed`], the response's own bytes. Only an escaped spelling costs a
+  /// `String`, and only until the branch it selected returns.
+  pub(super) fn next_key(&mut self, seq: &mut Seq) -> Scanned<Option<Text<'a>>> {
+    if !self.next_member(seq)? {
+      return Ok(None);
+    }
+    let key = self.text("an object key")?;
+    self.colon()?;
+    Ok(Some(key))
+  }
+
+  /// Steps over the next member's key without decoding it, or closes the object.
+  ///
+  /// The walk over a member the door does not read has no use for the key it is walking past, and
+  /// an escaped one there is not a dispatch — so it is validated like every other string and never
+  /// expanded.
+  fn skip_key(&mut self, seq: &mut Seq) -> Scanned<bool> {
+    if !self.next_member(seq)? {
+      return Ok(false);
+    }
+    self.string("an object key")?;
+    self.colon()?;
+    Ok(true)
+  }
+
+  /// Positions the cursor on the next member's key, or closes the object and returns `false`.
+  fn next_member(&mut self, seq: &mut Seq) -> Scanned<bool> {
     self.skip_ws();
     match self.peek() {
       Some(b'}') => {
         self.pos += 1;
         self.depth -= 1;
-        return Ok(None);
+        return Ok(false);
       }
       Some(b',') if !seq.first => {
         self.pos += 1;
@@ -275,13 +369,17 @@ impl<'a> Scanner<'a> {
     if self.peek() != Some(b'"') {
       return Err(self.syntax("key must be a string"));
     }
-    let (key, _) = self.string("an object key")?;
+    Ok(true)
+  }
+
+  /// Consumes the `:` between a member's key and its value.
+  fn colon(&mut self) -> Scanned {
     self.skip_ws();
     if self.peek() != Some(b':') {
       return Err(self.syntax("expected `:`"));
     }
     self.pos += 1;
-    Ok(Some(key))
+    Ok(())
   }
 
   /// Enters an array, or refuses whatever is there instead.
@@ -483,7 +581,7 @@ impl<'a> Scanner<'a> {
     match self.peek() {
       Some(b'{') => {
         let mut members = self.enter_object("a value")?;
-        while self.next_key(&mut members)?.is_some() {
+        while self.skip_key(&mut members)? {
           self.skip_value()?;
         }
         Ok(())
