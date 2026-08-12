@@ -441,8 +441,7 @@ pub const EXEMPTIONS: &[Exemption] = &[
 ];
 
 /// The writer's output-side `&str`s: not a caller's document in either direction.
-const JSON_OUTPUT: &str =
-  "Bytes on the way OUT, not a document on the way in. This parameter is content the writer quotes \
+const JSON_OUTPUT: &str = "Bytes on the way OUT, not a document on the way in. This parameter is content the writer quotes \
    and escapes into a JSON string, and RFC 8259 §8.1 makes a JSON document exchanged between \
    systems UTF-8 — so the narrow type is the format's and not this crate's. The sink is a \
    `core::fmt::Write`, which accepts `&str` and nothing else, so a byte-slice door would have to \
@@ -451,8 +450,7 @@ const JSON_OUTPUT: &str =
    source type, which is right: there is no document here for it to have carried.";
 
 /// Why the two response doors take the executed document as `&str`.
-const WRITER_DOCUMENT: &str =
-  "The source text the operation was parsed from, read for exactly one thing: turning the byte \
+const WRITER_DOCUMENT: &str = "The source text the operation was parsed from, read for exactly one thing: turning the byte \
    span `graphql-proto` records on a field error into draft §7.1.2's `line` and `column`. It is \
    genuinely a document and the rule is right to convict it. Widening it belongs to #122 and is \
    not free the way the schema doors are: the column is counted in CHARACTERS, so an \
