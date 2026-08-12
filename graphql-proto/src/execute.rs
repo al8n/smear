@@ -242,6 +242,16 @@ mod tests;
 /// 2. **The reader column is the falsifier.** A member whose reader set is empty *while it is held*
 ///    is a defect by inspection. That one sentence is R6, and it is the sweep a later phase runs:
 ///    enumerate the states holding a `V` or an id, and for each, name the reader or name the defect.
+///
+///    **A reader is an accessor or a lend, and never an interpreter** — every entry in that column
+///    is one, and the row for draft §7.1.7's map says `Response::extensions` precisely because
+///    nothing in this crate reads a single value in it. Taking "reader" to mean "something here
+///    reads it" would condemn that map, which is shipped and correct. The rule therefore decides
+///    whether a member that exists is *released* on time; it does not decide whether the member
+///    should exist, and a proposal answered with "nothing reads it" has not yet met this rule. The
+///    question that does decide it is whether the specification names a **destination** the crate
+///    owns — §7.1.7's map has one and the §6 preamble's request `extensions` has none, which is
+///    the crate root's `Scope` section and the one case where the two questions came apart.
 /// 3. **A staging buffer belongs to the population it is staging for.** The collection scratch is
 ///    response metadata in waiting — every selection it holds becomes two metadata entries on
 ///    commit — so it charges the metadata ceiling, at the push, and not the visit budget it happens
@@ -2122,6 +2132,14 @@ where
   /// if set, must have a map as its value. This entry is reserved for implementers to extend the
   /// protocol however they see fit, and hence there are no additional restrictions on its
   /// contents."
+  ///
+  /// **This is the response's map and there is no request-side counterpart**, deliberately: the §6
+  /// preamble's request `extensions` is the one member of a *request* that `ExecuteRequest` is not
+  /// handed, so it has no reader here and no path into a response — §7.1.8 *Additional Entries*
+  /// admits no execution-result entry beyond `data`, `errors` and this one. A driver echoing one
+  /// into a response does it through this call, with the entries it chooses. The [crate root](crate)'s `Scope` section has the derivation, why an
+  /// accessor here would satisfy the lifetime table's rule 2 and still not be a reader, and a
+  /// worked example of where the request's map goes instead.
   ///
   /// # Three states, and no two of them are one
   ///
