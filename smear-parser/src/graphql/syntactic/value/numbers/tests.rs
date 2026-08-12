@@ -1,6 +1,6 @@
 use smear_lexer::graphql::{
   error::{DecimalError, LexerErrorData},
-  syntactic::SyntacticLexer,
+  syntactic::{SyntacticLexer, SyntacticToken},
 };
 use tokora::Lexer;
 
@@ -452,6 +452,92 @@ fn an_in_range_leading_zeroed_literal_is_refused_for_shape_and_not_for_range() {
     assert_eq!(verdict(literal, width), NotALiteral);
     assert_eq!(IntOverflow::checked(literal, width), Err(literal));
   }
+}
+
+/// [`is_int_literal`] with its first-byte gate removed: the lexer's answer and nothing else.
+///
+/// The oracle for the gate, and the reason a *necessary* condition is safe to add where a second
+/// grammar was not. The gate is allowed to be redundant and is not allowed to disagree, so the
+/// property is one-sided in form and total in fact: over the corpus below the two answers are
+/// **equal**, which is what a necessary condition promises — it refuses early only what the
+/// lexer refuses anyway.
+fn lexer_alone_calls_it_an_int_literal(bytes: &[u8]) -> bool {
+  let mut lexer = SyntacticLexer::<'_, [u8]>::new(bytes);
+  match lexer.lex() {
+    Some(Ok(SyntacticToken::LitInt(literal))) => literal.len() == bytes.len(),
+    _ => false,
+  }
+}
+
+/// **The gate refuses nothing the lexer admits** — asked over every first byte there is, rather
+/// than over the ones worth guessing.
+///
+/// A wrong necessary condition can only refuse something valid, and this is the test that catches
+/// it "at once": all 256 possible first bytes against a set of tails chosen so the corpus
+/// contains genuine literals, near-misses, and the shapes the gate is there to cut off. The
+/// oracle is [`lexer_alone_calls_it_an_int_literal`] — the same function without the gate — so a
+/// gate that ever excluded a byte draft §2.9.1 admits fails here on the first run.
+///
+/// The 41-row table is folded in as well, so the boundary rows are checked against the gate-free
+/// reading and not only against their tabulated verdict.
+#[test]
+fn the_gate_refuses_nothing_the_lexer_admits() {
+  const TAILS: &[&[u8]] = &[
+    b"",
+    b"7",
+    b"0",
+    b"0007",
+    b"2147483648",
+    b"-7",
+    b"z",
+    b".5",
+    b"e9",
+    b"\\q",
+    b" ",
+    b"\"",
+    b"+7",
+  ];
+
+  let mut admitted = 0usize;
+  let mut buffer = [0u8; 32];
+  for first in u8::MIN..=u8::MAX {
+    for tail in TAILS {
+      buffer[0] = first;
+      buffer[1..=tail.len()].copy_from_slice(tail);
+      let input = &buffer[..=tail.len()];
+      let expected = lexer_alone_calls_it_an_int_literal(input);
+      assert_eq!(
+        is_int_literal(input),
+        expected,
+        "first byte {first:#04x} with tail {tail:?}: the gate disagrees with the lexer alone",
+      );
+      admitted += usize::from(expected);
+    }
+  }
+
+  for row in TABLE {
+    assert_eq!(
+      is_int_literal(row.literal.as_bytes()),
+      lexer_alone_calls_it_an_int_literal(row.literal.as_bytes()),
+      "{:?}: the gate disagrees with the lexer alone",
+      row.literal,
+    );
+  }
+
+  // Non-vacuity: a corpus the lexer admitted nothing from would make every equality above hold
+  // over a gate that refused everything.
+  assert!(
+    admitted >= 20,
+    "only {admitted} of the generated inputs are `IntValue`s; the agreement is near-vacuous",
+  );
+
+  // And the two halves of the condition, named rather than left inside the loop: a digit or `-`
+  // is the only first byte that survives it, and `0` survives it — so the leading-zero refusal is
+  // still the lexer's to make.
+  assert!(!is_int_literal(b"\"7\""));
+  assert!(!is_int_literal(b"+7"));
+  assert!(is_int_literal(b"-7") && is_int_literal(b"0"));
+  assert!(!is_int_literal(b"007") && lexer_refuses_for_leading_zeros("007"));
 }
 
 /// What the conjunction needs from its second reader, now that the first one is the lexer:

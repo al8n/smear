@@ -406,8 +406,48 @@ pub(crate) fn overflows(bytes: &[u8], width: IntWidth) -> bool {
 /// This runs a token scan where a byte loop would do, on a path reached only by a caller of the
 /// checked constructor — never by a production, which has the lexer's verdict already. That is
 /// the price of there being one answer.
+///
+/// # The first-byte gate is a *necessary* condition, and that is why it is not the grammar that
+/// was deleted
+///
+/// The deleted `-?[0-9]+` was a **sufficient** condition — "these bytes *are* a literal" — which
+/// is a grammar, and a second grammar can disagree with the first about what a literal is. It
+/// did: it admitted `007`. What is below is a **necessary** condition — "these bytes cannot
+/// *possibly* be one" — and a necessary condition has no opinion about what a literal is. The
+/// worst a wrong one can do is refuse something the lexer would have admitted; it can never admit
+/// something the lexer refuses, because it decides nothing about admission at all. That single
+/// failure mode is held by `the_gate_refuses_nothing_the_lexer_admits`, which runs this function
+/// against itself-without-the-gate over every first byte there is. **Do not delete this as the
+/// duplicate that R3 removed. It is not the same kind of thing.**
+///
+/// The condition itself is read straight off draft §2.9.1: an `IntValue`'s `IntegerPart` is
+/// `NegativeSign? 0` or `NegativeSign? NonZeroDigit Digit*`, so its first character is `-` or a
+/// digit, with no third case. A whole-slice token starts at byte 0 — that is what the length
+/// check in the body establishes — so the input's first byte *is* the literal's first byte, and
+/// any other value of it rules out the only verdict this function answers `true` to.
+///
+/// **It does not decide leading zeros, and must not.** `0` passes the gate, so `007` and
+/// `02147483648` still reach the lexer and are still refused by it as `LeadingZeros` — the
+/// refusal R3 bought. A gate that also read the second byte would be taking that decision back.
+///
+/// # What it buys, which is the reason it is here at all
+///
+/// `IntOverflow::checked` accepts arbitrary `AsRef<[u8]>`, so a caller validating an untrusted
+/// payload can hand this function anything. Asking the *general* lexer means the first byte
+/// chooses a sub-lexer, and the inline-string sub-lexer appends one diagnostic per malformed
+/// escape to a `SmallVec` before this function drops every one of them: refusing `"\q\q\q…"`
+/// cost heap proportional to the input, ~184 MB for a 1 MiB slice that was never going to be an
+/// integer. The gate makes a refusal O(1) in heap for every byte that cannot start an `IntValue`,
+/// and `a_refusal_costs_the_same_heap_at_a_kilobyte_and_at_a_megabyte` measures the constant
+/// rather than asserting it. The bytes that *do* pass reach the number arm, whose diagnostics are
+/// per-token and not per-byte; `no_first_byte_reaches_a_refusal_whose_cost_grows` is that claim
+/// derived over all 256 first bytes instead of the few worth guessing.
 #[cfg(feature = "materialized-numbers")]
 fn is_int_literal(bytes: &[u8]) -> bool {
+  if !matches!(bytes.first(), Some(b'-' | b'0'..=b'9')) {
+    return false;
+  }
+
   let mut lexer = SyntacticLexer::<'_, [u8]>::new(bytes);
   match lexer.lex() {
     Some(Ok(SyntacticToken::LitInt(literal))) => literal.len() == bytes.len(),
