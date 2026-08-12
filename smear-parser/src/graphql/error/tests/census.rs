@@ -16,7 +16,7 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 /// Census: every [`ErrorData`] variant must be producible without naming the variant, in every
 /// configuration whose build contains its producer.
 ///
-/// Three things make it non-vacuous, and they are different things.
+/// Two things make it non-vacuous, and they are different things.
 ///
 /// * **One variant list drives both the exhaustive `match` and the assertions.** A variant added
 ///   without an entry is an `E0004` in the generated `tag`, and an entry cannot be written
@@ -25,8 +25,6 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 ///   property; a version of this test with a hand-written match and a separate sample list let a
 ///   variant slip through with a match arm and no sample, and a hard-coded variant count did not
 ///   notice.
-/// * **`ErrorData` is `#[non_exhaustive]`**, which binds other crates and not this one, so the
-///   exhaustiveness check still runs here.
 /// * **Every sample is built through a public constructor or a `From` conversion**, never by
 ///   writing `ErrorData::Variant(…)`. That is the rule with teeth: `IntOverflow` and
 ///   `FloatOverflow` sat in this enum with no constructor and no construction site anywhere in

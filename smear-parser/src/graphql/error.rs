@@ -398,22 +398,9 @@ pub enum Unclosed {
 /// configuration — 22 variants, always — and builds a sample through a public constructor for
 /// each one whose producer that configuration compiled: 22 samples with the feature, 20 without.
 /// A variant producible in no configuration is caught by the all-features run.
-///
-/// # Why `#[non_exhaustive]`
-///
-/// Because this is an **error** enum, which is the canonical case for it: its vocabulary is
-/// *ours* and it grows — every parser refinement is a candidate variant — so a consumer must not
-/// be able to write a match that a new diagnostic breaks.
-///
-/// That is the opposite of the four enums `7b9b293` took the attribute *off* during the crate
-/// split. Those transcribe the GraphQL specification, whose vocabulary the document fixes rather
-/// than this library; there, an exhaustive match is a feature, because a variant appearing is a
-/// specification change the consumer should be made to look at. The distinction is who owns the
-/// list, not whether the enum is public.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),

@@ -102,6 +102,47 @@ pub fn graphql_parser(
   .parse_str(src)
 }
 
+/// `ErrorData`'s 22 variants, matched exhaustively with no wildcard, from outside the crate.
+///
+/// This is the probe row 7 of [`value_parameters_are_source_compatible`]'s table exists for, aimed
+/// at the type that actually broke it: `feat/parser-materialised-values` added
+/// `#[non_exhaustive]` to `smear::parser::graphql::error::ErrorData` with no review, and nothing
+/// in `smear-parser`'s own test suite could have caught it — `#[non_exhaustive]` binds every
+/// crate except the one that declares the enum, so an in-crate wildcard-free match (this crate's
+/// own `error_data_variant_census`) stays green whether or not the attribute is there. This
+/// crate is the one it binds. With `#[non_exhaustive]` present, this function is `E0004`.
+#[allow(clippy::type_complexity)]
+fn error_data_is_exhaustively_matchable(
+  error: &smear::parser::graphql::error::GraphqlError<&str>,
+) -> &'static str {
+  use smear::parser::graphql::error::ErrorData;
+
+  match error.data() {
+    ErrorData::Lexer(_) => "Lexer",
+    ErrorData::IntOverflow(_) => "IntOverflow",
+    ErrorData::FloatOverflow(_) => "FloatOverflow",
+    ErrorData::InvalidEnumValue(_) => "InvalidEnumValue",
+    ErrorData::InvalidBooleanValue(_) => "InvalidBooleanValue",
+    ErrorData::InvalidNullValue(_) => "InvalidNullValue",
+    ErrorData::InvalidFragmentName(_) => "InvalidFragmentName",
+    ErrorData::Unclosed(_) => "Unclosed",
+    ErrorData::UnexpectedToken(_) => "UnexpectedToken",
+    ErrorData::UnexpectedKeyword(_) => "UnexpectedKeyword",
+    ErrorData::UnexpectedEndOfVariableValue(_) => "UnexpectedEndOfVariableValue",
+    ErrorData::UnexpectedEndOfObjectFieldValue(_) => "UnexpectedEndOfObjectFieldValue",
+    ErrorData::UnknownDirectiveLocation(_) => "UnknownDirectiveLocation",
+    ErrorData::UnknownOperationType(_) => "UnknownOperationType",
+    ErrorData::UnexpectedEndOfObjectExtension(_) => "UnexpectedEndOfObjectExtension",
+    ErrorData::UnexpectedEndOfInterfaceExtension(_) => "UnexpectedEndOfInterfaceExtension",
+    ErrorData::UnexpectedEndOfEnumExtension(_) => "UnexpectedEndOfEnumExtension",
+    ErrorData::UnexpectedEndOfInputObjectExtension(_) => "UnexpectedEndOfInputObjectExtension",
+    ErrorData::UnexpectedEndOfUnionExtension(_) => "UnexpectedEndOfUnionExtension",
+    ErrorData::UnexpectedEndOfSchemaExtension(_) => "UnexpectedEndOfSchemaExtension",
+    ErrorData::EndOfInput => "EndOfInput",
+    ErrorData::Other(_) => "Other",
+  }
+}
+
 /// `graphqlx` + `parser` — the GraphQLx dialect in the parser, which is where the dialect's
 /// imports, generics and namespaced paths actually live.
 #[allow(clippy::type_complexity)]
@@ -903,6 +944,18 @@ mod tests {
     let _: fn(_) -> smear::parser::graphql::ast::materialized::InputValue<&'static str> =
       super::value_variant_namespace::materialized::Int;
     let _ = <smear::parser::graphql::ast::InputValue<&str> as super::ValueDepth>::depth;
+  }
+
+  /// `ErrorData`, matched exhaustively from outside the crate — the check that would have caught
+  /// `#[non_exhaustive]` landing on it unreviewed. Driven by a real parse failure rather than a
+  /// constructor, so the property proven is "this variant, from this crate, right now" and not
+  /// merely "this type-checks".
+  #[test]
+  fn the_error_data_variants_are_exhaustively_matchable_from_outside_the_crate() {
+    let errors = super::graphql_parser("{ f(").expect_err("a truncated document is a parse error");
+    let error = errors.into_iter().next().expect("at least one error");
+    let tag = super::error_data_is_exhaustively_matchable(&error);
+    assert!(!tag.is_empty(), "the match arm returned no tag");
   }
 
   /// The introspection door, driven end to end across the dependency edge.
