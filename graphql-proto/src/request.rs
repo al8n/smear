@@ -64,10 +64,18 @@ use super::response::{Path, Slot};
 /// retired, is recognised and ignored. A driver that answers a cancelled request late is a normal
 /// occurrence, not a bug, and it must not be able to write into whatever request took its slot.
 ///
-/// The **epoch** distinguishes the operation itself. [`Executor::start`](super::Executor::start)
-/// empties the slab, so without it the next operation would re-issue index 0 generation 0 and a
-/// late answer from the operation before could match a live slot by index and generation and land
-/// on someone else's field. Abandoned requests make that reachable without any driver misbehaviour
+/// The **epoch** distinguishes one execution from the next. [`Executor::start`](super::Executor::start)
+/// empties the slab, so without it the next execution would re-issue index 0 generation 0 and a
+/// late answer from the one before could match a live slot by index and generation and land
+/// on someone else's field.
+///
+/// One *execution* and not one operation, which draft §6.2.3 made a distinction: every
+/// [`handle_source_event`](super::Executor::handle_source_event) empties the slab too, so an id
+/// from the previous event is void the moment the next one is taken, and so is one still
+/// outstanding when [`unsubscribe`](super::Executor::unsubscribe) or either source-stream
+/// completion ends the subscription. A driver that answers a request belonging to an event that has
+/// already produced its execution result is ignored, exactly as one answering a previous operation
+/// is — which matters more here than there, because a stream gives it many more chances. Abandoned requests make that reachable without any driver misbehaviour
 /// at all: [`poll_response`](super::Executor::poll_response) delivers while they are still
 /// outstanding — deliberately, since they cannot affect the response — so a driver can be holding
 /// them across the restart. The epoch is what makes every id from a previous operation
@@ -316,6 +324,131 @@ impl<S, V> core::fmt::Debug for FieldRequest<'_, '_, S, V> {
       .field("id", &self.id)
       .field("parent_type", &self.parent_type())
       .field("path", &self.path())
+      .finish()
+  }
+}
+
+/// The one root field draft §6.2.3.1 `ResolveFieldEventStream` is to be called with.
+///
+/// Handed out by [`Executor::source_field`](super::Executor::source_field) while the response
+/// stream is [`Creating`](super::ResponseStream::Creating), and answered by calling the driver's
+/// own subscription resolver and then
+/// [`handle_source_stream`](super::Executor::handle_source_stream). Borrowed from the executor, so
+/// it must be consumed before the next call in.
+///
+/// # Why this is not a [`FieldRequest`]
+///
+/// Because its answer is not a value. `ResolveFieldEventStream(subscriptionType, rootValue,
+/// fieldName, argumentValues)` returns an *event stream*, and every way of answering a
+/// [`FieldRequest`] — [`handle_resolved`](super::Executor::handle_resolved) and
+/// [`handle_field_error`](super::Executor::handle_field_error) — would run draft §6.4.3
+/// `CompleteValue` on it. Sharing the type would mean a driver could answer this obligation with
+/// the wrong call and get a plausible, silently wrong response rather than a compile error, which
+/// is the reason this crate has one channel per obligation instead of one `Step` enum.
+///
+/// Two members of [`FieldRequest`] are therefore deliberately absent. There is no
+/// [`ReqId`], because nothing is outstanding: §6.2.3.1 runs no execution, spends no
+/// [`max_in_flight`](super::Limits::max_in_flight) slot, and has no request to retire. And there is
+/// no `path`, because there is no response to have a position in — the first response a
+/// subscription produces belongs to its first *event*, and this field's value never appears in one
+/// at all.
+///
+/// # The name is the schema's, which §6.2.3.1 says twice
+///
+/// Step 7 is "Let {fieldName} be the name of the first entry in {fields}", with the note "This
+/// value is unaffected if an alias is used" — so [`name`](SourceField::name) is the field's
+/// declared name and an alias is nowhere in this type. That matches [`FieldRequest::name`], and for
+/// the same reason: the alias is a response key, and a resolver is not being asked about a
+/// response.
+pub struct SourceField<'r, 'a, S, V> {
+  pub(super) schema: &'r Schema,
+  pub(super) field: &'a Field<S>,
+  pub(super) merged: &'r [&'a Field<S>],
+  pub(super) field_sym: Sym,
+  pub(super) parent_type: TypeId,
+  pub(super) parent_value: &'r V,
+  pub(super) field_type: PackedType,
+  pub(super) arguments: &'r [Argument<'a, S, V>],
+}
+
+impl<'r, 'a, S, V> SourceField<'r, 'a, S, V> {
+  /// Returns draft §6.2.3.1's `fieldName`: the field's name as the schema declares it, unaffected
+  /// by an alias.
+  #[inline]
+  pub fn name(&self) -> &'r str {
+    self.schema.name(self.field_sym)
+  }
+
+  /// Returns the root Subscription type the field was selected on.
+  #[inline]
+  pub fn parent_type(&self) -> &'r str {
+    self
+      .schema
+      .name(self.schema.type_def(self.parent_type).name())
+  }
+
+  /// Returns the field's declared type.
+  ///
+  /// It is the type each *event*'s value will be completed against by draft §6.4.3, not the type of
+  /// the stream: the schema has no way to spell an event stream, which is why §6.2.3.1 has a
+  /// separate resolver algorithm at all.
+  #[inline]
+  pub const fn field_type(&self) -> PackedType {
+    self.field_type
+  }
+
+  /// Returns draft §6.2.3.1's `initialValue` — the `root` given to
+  /// [`start`](super::Executor::start), which `ResolveFieldEventStream` takes as its `rootValue`.
+  ///
+  /// Held only while the response stream is [`Creating`](super::ResponseStream::Creating):
+  /// [`handle_source_stream`](super::Executor::handle_source_stream) releases it, because once the
+  /// source stream exists the initial value can no longer be read by anything and a subscription
+  /// lasts for as long as its client does.
+  #[inline]
+  pub const fn parent_value(&self) -> &'r V {
+    self.parent_value
+  }
+
+  /// Returns draft §6.2.3.1 step 8's `argumentValues`: the arguments that survived §6.4.1.
+  ///
+  /// The guarantee is [`FieldRequest::arguments`]', with one difference in what a failure means.
+  /// Every argument §6.4.1 rejects as a whole has already refused the **subscription** — §6.2.3.1
+  /// runs `CoerceArgumentValues` inside `CreateSourceEventStream`, where there is no execution
+  /// result for a field error to live in, so the refusal is
+  /// [`StartError::SourceFieldArguments`](super::StartError::SourceFieldArguments) and this value
+  /// does not exist.
+  #[inline]
+  pub const fn arguments(&self) -> &'r [Argument<'a, S, V>] {
+    self.arguments
+  }
+
+  /// Returns the span of the field draft §6.2.3.1 takes the name and arguments from.
+  ///
+  /// The first of possibly several, exactly as [`FieldRequest::location`] is: draft §6.3 merges
+  /// every selection sharing the response key, and [`merged`](SourceField::merged) has the rest.
+  #[inline]
+  pub fn location(&self) -> SimpleSpan {
+    *self.field.span()
+  }
+
+  /// Returns every field that merged into the source field's response key, in document order.
+  ///
+  /// Usually one. More than one when the root selection set wrote the same response key twice —
+  /// `subscription { newMessage { a } newMessage { b } }` — which draft §6.2.3.1 step 5 counts as
+  /// **one** entry, since §6.3 collects them into one field. That is the case a check counting
+  /// *selections* rather than collected entries would refuse, and the specification does not.
+  #[inline]
+  pub const fn merged(&self) -> &'r [&'a Field<S>] {
+    self.merged
+  }
+}
+
+impl<S, V> core::fmt::Debug for SourceField<'_, '_, S, V> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("SourceField")
+      .field("name", &self.name())
+      .field("parent_type", &self.parent_type())
+      .field("arguments", &self.arguments.len())
       .finish()
   }
 }

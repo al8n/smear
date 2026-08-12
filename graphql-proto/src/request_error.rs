@@ -68,20 +68,22 @@
 //! | `locations` | should, **if** associable to "a particular point in the requested GraphQL document" | not carried — see below |
 //! | `extensions` | may | not carried; this is #126's, and the execution result's [`Error`](crate::Error) does not carry one either |
 //!
-//! `locations` is the only judgement call, and the honest answer is "for five of the six, and not
-//! for the sixth". §7.1.6 conditions it on the error being associable to "a particular point in the
-//! requested GraphQL document", and a §6.1 `GetOperation` failure is a property of the **request**
-//! rather than of a point in the text: which operation to run is chosen by the request's
+//! `locations` is the only judgement call, and the honest answer is "for all but one of them, and
+//! not for that one". §7.1.6 conditions it on the error being associable to "a particular point in
+//! the requested GraphQL document", and a §6.1 `GetOperation` failure is a property of the
+//! **request** rather than of a point in the text: which operation to run is chosen by the request's
 //! `operationName`, so [`AmbiguousOperation`](StartError::AmbiguousOperation) is about a name that
 //! was *not* given, [`UnknownOperation`](StartError::UnknownOperation) about one that names
 //! nothing, and [`NoOperation`](StartError::NoOperation) about a document with none — no syntax
-//! element to point at in any of the three. [`NotAQueryOrMutation`](StartError::NotAQueryOrMutation)
-//! is not a §7.1.3 error the specification describes at all; it is this phase's scope.
+//! element to point at in any of the three.
+//! [`ResponseStreamOpen`](StartError::ResponseStreamOpen) is a property of the *executor* and not of
+//! any document at all: it says a previous subscription's response stream has not been ended, so
+//! there is no point in the requested text to associate it with either.
 //! [`NoQueryRoot`](StartError::NoQueryRoot) is unreachable: `Schema::build` refuses a schema with
 //! no query root (`MissingQueryRootOperationType`, observed) and it is the sole door —
 //! `Schema::from_introspection` renders SDL and calls it — so no `Schema` an executor can be handed
-//! raises it. `the_errors_entry_is_the_one_refusal_start_raised` records that as the reason its
-//! table has five rows and not six.
+//! raises it. `the_errors_entry_is_the_one_refusal_start_raised` records that as the one variant its
+//! table cannot reach.
 //!
 //! **[`NoMutationRoot`](StartError::NoMutationRoot) is the sixth, it *is* associable, and this does
 //! not carry its span.** The fault is the schema's, but the operation definition that asked for a

@@ -1175,6 +1175,17 @@ impl Interner {
     self.compares
   }
 
+  /// What this is holding, as `(entries, arena bytes)`.
+  ///
+  /// Entries covers `spans`, `chain` and `heads` at once: the first two are parallel to it by
+  /// construction, and `heads` is a power of two that [`rehash`](Interner::rehash) keeps at or above
+  /// it and never more than double. `clear` empties all four and shrinks none, so both numbers
+  /// survive every operation this executor runs.
+  #[cfg(test)]
+  pub(super) fn capacity(&self) -> (usize, usize) {
+    (self.spans.capacity(), self.bytes.capacity())
+  }
+
   /// Appends `bytes` and links it, or `None` when the arena has no room.
   ///
   /// Unbudgeted, and it does not need to be: it runs at most once per selection, which the caller
@@ -1318,6 +1329,27 @@ pub(super) struct Scratch<'a, S> {
   stack: std::vec::Vec<(&'a SelectionSet<S>, usize)>,
 }
 
+/// What each of [`Scratch`]'s five buffers is holding.
+///
+/// Named rather than a tuple, because the census that reads it is a list whose whole value is that
+/// a reader can check it against the struct definition — and a five-tuple is a list a reader cannot
+/// check anything against.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ScratchCapacity {
+  /// Surviving `(group, selection)` pairs. Charged against `max_response_metadata` at the push.
+  pub(super) fields: usize,
+  /// One per distinct response key, so at most one per `fields` entry.
+  pub(super) groups: usize,
+  /// Sparse over interner ids, so bounded by the arena rather than by the response.
+  pub(super) keys: usize,
+  /// Draft §6.3's `visitedFragments`, as `(bitset words, ordinals set)`. Bounded by the document's
+  /// fragment count, and every spread that reaches it is charged a visit.
+  pub(super) visited: (usize, usize),
+  /// The descent. One frame per fragment spread or inline fragment, each of them charged a visit.
+  pub(super) stack: usize,
+}
+
 /// What [`walk`] is handed, with the group list restricted to the two things a walk does with it.
 ///
 /// One struct rather than five more parameters, and the restriction is the point: [`walk`] never
@@ -1343,6 +1375,24 @@ impl<'a, S> Scratch<'a, S> {
   #[inline]
   pub(super) fn groups_capacity(&self) -> usize {
     self.groups.capacity()
+  }
+
+  /// What every member is holding, for the census the executor keeps of its retained buffers.
+  ///
+  /// All five, because this scratch is *cleared and never shrunk* and the executor carries it
+  /// across every `reset` — so each member is a buffer that survives an unbounded stream, and a
+  /// census reading four of them is a census with a hole. See `Limits`'s own list for the ceiling
+  /// each is bounded by.
+  #[cfg(test)]
+  #[inline]
+  pub(super) fn capacities(&self) -> ScratchCapacity {
+    ScratchCapacity {
+      fields: self.fields.capacity(),
+      groups: self.groups.capacity(),
+      keys: self.keys.capacity(),
+      visited: (self.visited.bits.capacity(), self.visited.seen.capacity()),
+      stack: self.stack.capacity(),
+    }
   }
 
   /// The walk's view of the scratch.
