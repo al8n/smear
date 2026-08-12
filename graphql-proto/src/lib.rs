@@ -41,6 +41,39 @@
 //! owns representation.** Which fields are collected, in what order they complete, where a null
 //! propagates to and which path an error carries are all `proto`'s. What an `Int` is, is not.
 //!
+//! # The response is a map with three entries, and this crate holds all three
+//!
+//! Draft §7.1.8 *Additional Entries* closes it: an execution result "must not contain any entries
+//! other than those described above", so [`Response`] is the whole shape rather than a part of it.
+//!
+//! - **`data`** (§7.1.5 *Data*) — [`Response::data`], the tree the executor built.
+//! - **`errors`** (§7.1.6 *Errors*) — [`Response::errors`], present when it is non-empty, which
+//!   [`Response::is_ok`] answers.
+//! - **`extensions`** (§7.1.7 *Extensions*) — [`Response::extensions`], present when the driver
+//!   attached an [`Extensions`] map with [`Executor::set_extensions`].
+//!
+//! The third is split at the one place §7.1.7 draws a line. It requires the entry's value to "be a
+//! map" if set and then stops — "there are no additional restrictions on its contents" — so
+//! [`Extensions`] owns the map and each value in it is one `V::Value` the driver hands over and
+//! nothing here reads. That makes `"extensions": null`, a scalar or a list a type error rather than
+//! a rule a driver is asked to keep.
+//!
+//! There is a **second** response-level site this crate does not reach. §7.1.3's *request error
+//! result* also admits `extensions`, and [`Executor::start`] can refuse a **valid** document —
+//! ambiguity between two named operations is a §6.1 `GetOperation` failure, not a validation one.
+//! `start` returns [`StartError`] with no response object, so that shape is the driver's to build.
+//! [`StartError`]'s header says what closing the gap would take and why it is not closed here.
+//!
+//! **The numbers moved, so the titles are given with them.** The draft renumbered §7.1 when it
+//! separated the result kinds and added *Response Position*: `Data` and `Errors` were §7.1.1 and
+//! §7.1.2 as recently as the October 2021 specification and are §7.1.5 and §7.1.6 now, and
+//! `Extensions` — which October 2021 stated inside §7.1 *Response Format* without a subsection of
+//! its own — is §7.1.7. Citations in the rest of this crate still read against October 2021, so a
+//! `§7.1.2` met in `error.rs` is today's §7.1.6.
+//!
+//! What this crate does **not** do is write any of the three out. §7.2's serialization format is
+//! the driver's, for the reason a leaf is.
+//!
 //! # Scope
 //!
 //! Queries and mutations. Draft §6.2.2's serial rule for a mutation's top-level fields is expressed
@@ -82,7 +115,7 @@
 //! # Worked example
 //!
 //! ```
-//! use graphql_proto::{Executor, Leaf, Node, Values};
+//! use graphql_proto::{Executor, Extensions, Leaf, Node, Values};
 //! use smear_parser::{
 //!   graphql::{
 //!     GraphQL,
@@ -157,8 +190,22 @@
 //!   executor.handle_resolved(&mut space, id, Json::Str("hello".to_owned()));
 //! }
 //!
+//! // Draft §7.1.7's entry: the service fills it in, and `proto` reads none of the values. The map
+//! // is created under the executor's own ceilings, so `set_extensions` cannot refuse it as too
+//! // large — and both `insert` and the attach hand the value back rather than dropping it.
+//! let mut extensions = Extensions::new(executor.limits());
+//! extensions
+//!   .insert("tookMs", Json::Str("3".to_owned()))
+//!   .expect("well under `max_extension_entries`");
+//! executor
+//!   .set_extensions(extensions)
+//!   .expect("an operation is running and the response is not delivered");
+//!
 //! let response = executor.poll_response().expect("nothing is outstanding");
 //! assert_eq!(response.error_count(), 0);
+//! let carried = response.extensions().expect("the service attached a map");
+//! assert_eq!(carried.len(), 1);
+//! assert!(matches!(carried.get("tookMs"), Some(Json::Str(text)) if text == "3"));
 //! let Node::Object(mut fields) = response.data() else {
 //!   panic!("the root is an object")
 //! };
@@ -202,12 +249,14 @@ extern crate std;
 mod collect;
 mod error;
 mod execute;
+mod extensions;
 mod request;
 mod response;
 mod values;
 
 pub use error::{Error, Kind};
-pub use execute::{Executor, Limits, Response, StartError};
+pub use execute::{Executor, Limits, Response, SetExtensionsError, StartError};
+pub use extensions::{Ceiling, Extensions, Full};
 pub use request::{Argument, ArgumentSource, FieldRequest, ReqId};
 pub use response::{Children, Node, Path, PathIter, Segment};
 pub use values::{Leaf, Values};
