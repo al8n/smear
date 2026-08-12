@@ -1,14 +1,17 @@
 //! The GraphQL value productions with `Int` and `Float` materialised as [`i64`] and [`f64`].
 //!
-//! This is **not a second dialect and not a second AST**. Every node it builds is a node
-//! [`super`] builds, at a different instantiation of the same generic carriers — see
-//! [`ast::materialized`](crate::graphql::ast::materialized), which is a set of type aliases and
-//! declares no type of its own. Every composite production here is
-//! [`super`]'s production monomorphised against a different
-//! `Numbers` marker, so the two parsers commit at the same tokens, recover the same way and
-//! raise the same errors everywhere except where a number is converted. Each of the five leaves
-//! that materialisation does not touch — strings, booleans, `null`, enums and variables —
-//! delegates straight to [`super`]'s, so there is one implementation of each and not two.
+//! This is **not a second dialect and not a second parser**. Every composite production here is
+//! [`super`]'s production monomorphised against a different `Numbers` marker, so the two commit
+//! at the same tokens, recover the same way and raise the same errors everywhere except where a
+//! number is converted. Each of the five leaves that materialisation does not touch — strings,
+//! booleans, `null`, enums and variables — delegates straight to [`super`]'s, so there is one
+//! implementation of each and not two.
+//!
+//! It *is* a second value tree: [`ast::materialized`](crate::graphql::ast::materialized) declares
+//! two enums whose variants match their slice twins one for one, and whose leaves are the same
+//! types but for `Int` and `Float`. The marker chooses which tree a body assembles, the same way
+//! it already chose what a numeric leaf carries. That module's header has the argument for two
+//! enums over one at two instantiations.
 //!
 //! # What is converted
 //!
@@ -34,11 +37,13 @@
 //!
 //! # Why free functions and no `graphql` method
 //!
-//! [`super`] hangs its public entry points off the AST types as `Node::graphql`. This module
-//! cannot: its nodes are the *same* types at `i64`/`f64`, so a second inherent `graphql` on
-//! `IntValue<i64>` would collide with the blanket `impl<S> IntValue<S>` that already carries one.
-//! The module path is what distinguishes the two instantiations, which is the same thing the type
-//! aliases say.
+//! [`super`] hangs its public entry points off the AST types as `Node::graphql`. **The leaves
+//! here cannot have one**: `IntValue<i64>` is the very type the blanket `impl<S> IntValue<S>`
+//! already carries a `graphql` for, so a second would collide. The composites *could* — they are
+//! this module's own enums — and they deliberately do not, because an entry point that exists on
+//! nine of eleven productions is worse than one that exists on none: the module path then means
+//! two different things depending on which node you reached for. One door per production, all of
+//! them here.
 //!
 //! # The bound set
 //!

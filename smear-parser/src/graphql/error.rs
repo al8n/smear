@@ -377,20 +377,39 @@ pub enum Unclosed {
 
 /// The data of a parser error.
 ///
-/// # Two variants exist only under `materialized-numbers`
+/// # Two variants have a feature-gated producer, and are themselves unconditional
 ///
 /// [`IntOverflow`](ErrorData::IntOverflow) and [`FloatOverflow`](ErrorData::FloatOverflow) are
-/// produced by the materialising value productions and by nothing else, so they are declared
-/// only in a build that has them. That is a deliberate repair, not a precaution: both variants
-/// existed here unconditionally and **unproducibly**: no constructor, no construction site. It is
-/// the same shape filed twice already against this project — tokora's
-/// `FinishError::InvalidDialectKind`, and `smear-lexer`'s `LosslessTokenKind::Boolean` with 28
-/// declared and 27 producible. `error_data_variant_census` in this module's tests is the guard,
-/// and it is exhaustive per configuration rather than over the union of them.
+/// raised by the materialising value productions and by nothing else, so
+/// [`Error::int_overflow`] and [`Error::float_overflow`] — the paths that *produce* them — carry
+/// `#[cfg(feature = "materialized-numbers")]`. **The variants do not.**
 ///
-/// The enum is `#[non_exhaustive]` because its variant set is now feature-dependent: a consumer
-/// who matched it exhaustively in a materialising build would otherwise break on the same source
-/// compiled without the feature, which is a semver hazard the attribute removes.
+/// The defect being repaired was real and is worth naming precisely, because the gate that
+/// repairs it is easy to put one level too high. Both variants existed here with **no
+/// constructor and no construction site in any configuration**: declared and unproducible, the
+/// same shape filed twice already against this project — tokora's
+/// `FinishError::InvalidDialectKind`, and `smear-lexer`'s `LosslessTokenKind::Boolean` with 28
+/// declared and 27 producible. What fixes that is a producer, not a `#[cfg]` on the declaration;
+/// gating the variant as well would additionally *remove* two names from the default surface,
+/// which is a second change wearing the first one's justification.
+///
+/// So the two claims the census makes are different claims, and it makes both:
+/// `error_data_variant_census` matches this enum exhaustively and wildcard-free in **every**
+/// configuration — 22 variants, always — and builds a sample through a public constructor for
+/// each one whose producer that configuration compiled: 22 samples with the feature, 20 without.
+/// A variant producible in no configuration is caught by the all-features run.
+///
+/// # Why `#[non_exhaustive]`
+///
+/// Because this is an **error** enum, which is the canonical case for it: its vocabulary is
+/// *ours* and it grows — every parser refinement is a candidate variant — so a consumer must not
+/// be able to write a match that a new diagnostic breaks.
+///
+/// That is the opposite of the four enums `7b9b293` took the attribute *off* during the crate
+/// split. Those transcribe the GraphQL specification, whose vocabulary the document fixes rather
+/// than this library; there, an exhaustive match is a feature, because a variant appearing is a
+/// specification change the consumer should be made to look at. The distinction is who owns the
+/// list, not whether the enum is public.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -399,13 +418,13 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
   /// An integer literal is syntactically valid GraphQL but does not fit in [`i64`].
-  #[cfg(feature = "materialized-numbers")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+  ///
+  /// Raised only by the `materialized-numbers` productions; see [`Error::int_overflow`].
   #[from(skip)]
   IntOverflow(S),
   /// A float literal is syntactically valid GraphQL but does not convert to a finite [`f64`].
-  #[cfg(feature = "materialized-numbers")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+  ///
+  /// Raised only by the `materialized-numbers` productions; see [`Error::float_overflow`].
   #[from(skip)]
   FloatOverflow(S),
   /// An enum value is invalid.
@@ -676,7 +695,8 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
 
   /// Creates an integer-out-of-range error, carrying the literal's source spelling.
   ///
-  /// See [`ErrorData::IntOverflow`] for why this exists only under `materialized-numbers`, and
+  /// **This is the producer, and it is what the feature gates** — the variant it builds is
+  /// unconditional. See [`ErrorData`] for why the gate belongs here and not one level up, and
   /// [`graphql::syntactic::materialized`](crate::graphql::syntactic::value::materialized) for the
   /// documented bound that makes a specification-valid literal a *parse* error in that view.
   #[cfg(feature = "materialized-numbers")]
@@ -688,7 +708,7 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
 
   /// Creates a float-out-of-range error, carrying the literal's source spelling.
   ///
-  /// See [`ErrorData::FloatOverflow`] for why this exists only under `materialized-numbers`.
+  /// The producer, gated where [`Error::int_overflow`] is and for the same reason.
   #[cfg(feature = "materialized-numbers")]
   #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
   #[inline]

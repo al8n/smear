@@ -14,9 +14,11 @@
 //! [`SliceNumbers::Error`](Numbers::Error) is [`Infallible`]. The failure arm of every
 //! conversion is therefore an **uninhabited** match in the slice parser — `match error {}`, no
 //! runtime branch, nothing to report — and the compiler is what certifies it, rather than a
-//! comment. That is also what lets the two out-of-range error variants exist only under
-//! `materialized-numbers`: the generic code never names them, so a build without the feature has
-//! no path to them and no declaration of them either.
+//! comment. It is also why the two out-of-range error *constructors* can be gated on
+//! `materialized-numbers` while their variants stay unconditional: the generic code never names
+//! either variant — it reaches them only through [`Numbers::report`] — so a build without the
+//! feature compiles no path to them and needs none, without those two names leaving the default
+//! error surface.
 //!
 //! # Why the failure carries the slice back
 //!
@@ -30,11 +32,28 @@ use core::convert::Infallible;
 
 use tokora::SimpleSpan;
 
-use crate::graphql::error::GraphqlError as DialectGraphqlError;
+#[cfg(feature = "materialized-numbers")]
+use crate::graphql::ast::materialized::{
+  ConstInputValue as MaterializedConstInputValue, InputValue as MaterializedInputValue,
+};
+use crate::graphql::{
+  ast::{ConstInputValue, DefaultVec, InputValue, Name},
+  error::GraphqlError as DialectGraphqlError,
+};
 
-/// What an `Int` and a `Float` leaf carry, and how a literal's slice becomes one.
+/// What an `Int` and a `Float` leaf carry, how a literal's slice becomes one, and which value
+/// tree the composite productions assemble.
 ///
 /// `S` is the source slice the lexer produced for the literal.
+///
+/// # Why the tree is an associated type and not a third parameter
+///
+/// The two trees are two `enum`s rather than one enum at two instantiations, because a type alias
+/// cannot be used as a module and `use ast::InputValue::{Int, String}` has to keep compiling —
+/// [`ast::materialized`](crate::graphql::ast::materialized) records the whole argument. "Which
+/// tree" is therefore a property of the marker, exactly as "which payload" already was, and
+/// belongs in the same place. The shared bodies name [`Numbers::Value`] and convert a leaf into
+/// it, so neither tree is spelled in a body that serves both.
 pub(crate) trait Numbers<S> {
   /// The payload of an `IntValue` node.
   type Int;
@@ -42,6 +61,10 @@ pub(crate) trait Numbers<S> {
   type Float;
   /// How a conversion can fail, carrying whatever the report needs.
   type Error;
+  /// The input-value tree this marker assembles.
+  type Value;
+  /// The constant input-value tree this marker assembles.
+  type ConstValue;
 
   /// Builds the `Int` payload.
   fn int(slice: S) -> Result<Self::Int, Self::Error>;
@@ -53,6 +76,44 @@ pub(crate) trait Numbers<S> {
   fn report(error: Self::Error, span: SimpleSpan) -> DialectGraphqlError<S>;
 }
 
+/// The list node a marker's value tree holds.
+pub(crate) type ValueList<S, N> =
+  crate::value::List<<N as Numbers<S>>::Value, SimpleSpan, DefaultVec<<N as Numbers<S>>::Value>>;
+
+/// One object field of a marker's value tree.
+pub(crate) type ValueObjectField<S, N> =
+  crate::value::ObjectField<Name<S>, <N as Numbers<S>>::Value>;
+
+/// The object node a marker's value tree holds.
+pub(crate) type ValueObject<S, N> = crate::value::Object<
+  Name<S>,
+  <N as Numbers<S>>::Value,
+  SimpleSpan,
+  DefaultVec<ValueObjectField<S, N>>,
+>;
+
+/// The list node a marker's constant value tree holds.
+pub(crate) type ConstValueList<S, N> = crate::value::List<
+  <N as Numbers<S>>::ConstValue,
+  SimpleSpan,
+  DefaultVec<<N as Numbers<S>>::ConstValue>,
+>;
+
+/// One object field of a marker's constant value tree.
+pub(crate) type ConstValueObjectField<S, N> =
+  crate::value::ObjectField<Name<S>, <N as Numbers<S>>::ConstValue>;
+
+/// The object node a marker's constant value tree holds.
+pub(crate) type ConstValueObject<S, N> = crate::value::Object<
+  Name<S>,
+  <N as Numbers<S>>::ConstValue,
+  SimpleSpan,
+  DefaultVec<ConstValueObjectField<S, N>>,
+>;
+
+/// The default-value node a marker's constant value tree holds.
+pub(crate) type ValueDefault<S, N> = crate::value::DefaultInputValue<<N as Numbers<S>>::ConstValue>;
+
 /// The payload the parser has always produced: the literal's source slice, unconverted.
 ///
 /// Both conversions are the identity and neither can fail, so a production monomorphised against
@@ -63,6 +124,8 @@ impl<S> Numbers<S> for SliceNumbers {
   type Int = S;
   type Float = S;
   type Error = Infallible;
+  type Value = InputValue<S>;
+  type ConstValue = ConstInputValue<S>;
 
   #[inline(always)]
   fn int(slice: S) -> Result<S, Infallible> {
@@ -108,6 +171,8 @@ where
   type Int = i64;
   type Float = f64;
   type Error = OutOfRange<S>;
+  type Value = MaterializedInputValue<S>;
+  type ConstValue = MaterializedConstInputValue<S>;
 
   #[inline]
   fn int(slice: S) -> Result<i64, OutOfRange<S>> {

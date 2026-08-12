@@ -36,18 +36,23 @@ use crate::{
   graphql::{
     GraphQL,
     ast::{
-      BooleanValue, ConstInputValue, ConstInputValueOf, ConstList as AstConstList,
-      ConstListOf as AstConstListOf, ConstObject as AstConstObject, ConstObjectField,
-      ConstObjectFieldOf, ConstObjectOf as AstConstObjectOf, DefaultInputValue,
-      DefaultInputValueOf, EnumValue, FloatValue, InputValue, InputValueOf, IntValue,
-      List as AstList, ListOf as AstListOf, NullValue, Object as AstObject, ObjectField,
-      ObjectFieldOf, ObjectOf as AstObjectOf, StringValue, VariableValue,
+      BooleanValue, ConstInputValue, ConstList as AstConstList, ConstObject as AstConstObject,
+      ConstObjectField, DefaultInputValue, EnumValue, FloatValue, InputValue, IntValue,
+      List as AstList, NullValue, Object as AstObject, ObjectField, StringValue, VariableValue,
     },
     error::{Expectation, GraphqlError as DialectGraphqlError, ObjectFieldValueHint},
   },
 };
 
-use numbers::{Numbers, SliceNumbers};
+use numbers::{
+  ConstValueList, ConstValueObject, ConstValueObjectField, Numbers, SliceNumbers, ValueDefault,
+  ValueList, ValueObject, ValueObjectField,
+};
+
+use crate::value::{
+  DefaultInputValue as DefaultInputValueNode, List as ListNode, Object as ObjectNode,
+  ObjectField as ObjectFieldNode,
+};
 
 /// The composite value productions, once, generic over what their numeric leaves carry.
 ///
@@ -88,6 +93,26 @@ macro_rules! numeric_value_parser {
       GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
       GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
       N: Numbers<GraphqlSlice<'inp, Src>>,
+      // One conversion per leaf the shared bodies read, which is how a body that serves two
+      // trees names neither. `derive_more::From` on both enums is what satisfies these, so a
+      // variant renamed on one side and not the other stops compiling here.
+      N::Value: From<VariableValue<GraphqlSlice<'inp, Src>>>
+        + From<BooleanValue<GraphqlSlice<'inp, Src>>>
+        + From<StringValue<GraphqlSlice<'inp, Src>>>
+        + From<FloatValue<N::Float>>
+        + From<IntValue<N::Int>>
+        + From<EnumValue<GraphqlSlice<'inp, Src>>>
+        + From<NullValue<GraphqlSlice<'inp, Src>>>
+        + From<ValueList<GraphqlSlice<'inp, Src>, N>>
+        + From<ValueObject<GraphqlSlice<'inp, Src>, N>>,
+      N::ConstValue: From<BooleanValue<GraphqlSlice<'inp, Src>>>
+        + From<StringValue<GraphqlSlice<'inp, Src>>>
+        + From<FloatValue<N::Float>>
+        + From<IntValue<N::Int>>
+        + From<EnumValue<GraphqlSlice<'inp, Src>>>
+        + From<NullValue<GraphqlSlice<'inp, Src>>>
+        + From<ConstValueList<GraphqlSlice<'inp, Src>, N>>
+        + From<ConstValueObject<GraphqlSlice<'inp, Src>, N>>,
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
     $body
   };
@@ -702,7 +727,7 @@ where
 numeric_value_parser!(
   list_value_with,
   inp,
-  AstListOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  ValueList<GraphqlSlice<'inp, Src>, N>,
   [contextual, delimited],
   {
     value_with::<Src, Ctx, N>
@@ -711,14 +736,14 @@ numeric_value_parser!(
       .collect_with(Vec::new())
       .token_spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: values }| AstListOf::new(span, values))
+      .map(|Spanned { span, data: values }| ListNode::new(span, values))
   }
 );
 
 numeric_value_parser!(
   const_list_value_with,
   inp,
-  AstConstListOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  ConstValueList<GraphqlSlice<'inp, Src>, N>,
   [contextual, delimited],
   {
     const_value_with::<Src, Ctx, N>
@@ -727,14 +752,14 @@ numeric_value_parser!(
       .collect_with(Vec::new())
       .token_spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: values }| AstConstListOf::new(span, values))
+      .map(|Spanned { span, data: values }| ListNode::new(span, values))
   }
 );
 
 numeric_value_parser!(
   object_field_with,
   inp,
-  ObjectFieldOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  ValueObjectField<GraphqlSlice<'inp, Src>, N>,
   [contextual, delimited],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
@@ -769,7 +794,7 @@ numeric_value_parser!(
       |Spanned {
          span,
          data: (name, value),
-       }| ObjectFieldOf::new(span, name, value),
+       }| ObjectFieldNode::new(span, name, value),
     )
     .parse_input(inp)
   }
@@ -778,7 +803,7 @@ numeric_value_parser!(
 numeric_value_parser!(
   const_object_field_with,
   inp,
-  ConstObjectFieldOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  ConstValueObjectField<GraphqlSlice<'inp, Src>, N>,
   [contextual, delimited],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
@@ -813,7 +838,7 @@ numeric_value_parser!(
       |Spanned {
          span,
          data: (name, value),
-       }| ConstObjectFieldOf::new(span, name, value),
+       }| ObjectFieldNode::new(span, name, value),
     )
     .parse_input(inp)
   }
@@ -822,7 +847,7 @@ numeric_value_parser!(
 numeric_value_parser!(
   object_value_with,
   inp,
-  AstObjectOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  ValueObject<GraphqlSlice<'inp, Src>, N>,
   [contextual, delimited],
   {
     object_field_with::<Src, Ctx, N>
@@ -831,14 +856,14 @@ numeric_value_parser!(
       .collect_with(Vec::new())
       .token_spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: fields }| AstObjectOf::new(span, fields))
+      .map(|Spanned { span, data: fields }| ObjectNode::new(span, fields))
   }
 );
 
 numeric_value_parser!(
   const_object_value_with,
   inp,
-  AstConstObjectOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  ConstValueObject<GraphqlSlice<'inp, Src>, N>,
   [contextual, delimited],
   {
     const_object_field_with::<Src, Ctx, N>
@@ -847,7 +872,7 @@ numeric_value_parser!(
       .collect_with(Vec::new())
       .token_spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: fields }| AstConstObjectOf::new(span, fields))
+      .map(|Spanned { span, data: fields }| ObjectNode::new(span, fields))
   }
 );
 
@@ -899,130 +924,122 @@ value_parser!(
   { const_object_value_with::<Src, Ctx, SliceNumbers>(inp) }
 );
 
-numeric_value_parser!(
-  value_with,
-  inp,
-  InputValueOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
-  [contextual, delimited],
+numeric_value_parser!(value_with, inp, N::Value, [contextual, delimited], {
+  let int_head_arm =
+    |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+     _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+      GraphqlToken::<'inp, Src>::LitInt(value) => match N::int(value) {
+        Ok(payload) => Ok(IntValue::new(span, payload).into()),
+        Err(err) => Err(N::report(err, span).into()),
+      },
+      _ => unreachable!("fused input-value arm received a non-int token"),
+    };
+  let float_head_arm =
+    |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+     _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+      GraphqlToken::<'inp, Src>::LitFloat(value) => match N::float(value) {
+        Ok(payload) => Ok(FloatValue::new(span, payload).into()),
+        Err(err) => Err(N::report(err, span).into()),
+      },
+      _ => unreachable!("fused input-value arm received a non-float token"),
+    };
+  let inline_string_head_arm =
+    |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+     _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+      GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
+        Ok(StringValue::new(span, value.into()).into())
+      }
+      _ => unreachable!("fused input-value arm received a non-inline-string token"),
+    };
+  let block_string_head_arm =
+    |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+     _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+      GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
+        Ok(StringValue::new(span, value.into()).into())
+      }
+      _ => unreachable!("fused input-value arm received a non-block-string token"),
+    };
+  let identifier_head_arm =
+    |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+     _: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      let keyword = token.downcast_ref();
+      match token {
+        GraphqlToken::<'inp, Src>::Identifier(value) => Ok(match keyword {
+          Some(ContextualKeyword::True) => BooleanValue::new(span, true).into(),
+          Some(ContextualKeyword::False) => BooleanValue::new(span, false).into(),
+          Some(ContextualKeyword::Null) => NullValue::new(span, value).into(),
+          _ => EnumValue::new(span, value).into(),
+        }),
+        _ => unreachable!("fused input-value arm received a non-identifier token"),
+      }
+    };
+  let dollar_head_arm =
+    |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+     inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+      GraphqlToken::<'inp, Src>::Dollar => variable_after_dollar(span.start(), inp).map(Into::into),
+      _ => unreachable!("fused input-value arm received a non-dollar token"),
+    };
+
+  match (
+    int_head_arm,
+    float_head_arm,
+    inline_string_head_arm,
+    block_string_head_arm,
+    identifier_head_arm,
+    dollar_head_arm,
+  )
+    .fused_dispatch_on_kind(&[
+      SyntacticTokenKind::Int,
+      SyntacticTokenKind::Float,
+      SyntacticTokenKind::InlineString,
+      SyntacticTokenKind::BlockString,
+      SyntacticTokenKind::Identifier,
+      SyntacticTokenKind::Dollar,
+    ])
+    .try_parse_input(inp)?
   {
-    let int_head_arm =
-      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
-       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitInt(value) => match N::int(value) {
-          Ok(payload) => Ok(InputValueOf::Int(IntValue::new(span, payload))),
-          Err(err) => Err(N::report(err, span).into()),
-        },
-        _ => unreachable!("fused input-value arm received a non-int token"),
-      };
-    let float_head_arm =
-      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
-       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitFloat(value) => match N::float(value) {
-          Ok(payload) => Ok(InputValueOf::Float(FloatValue::new(span, payload))),
-          Err(err) => Err(N::report(err, span).into()),
-        },
-        _ => unreachable!("fused input-value arm received a non-float token"),
-      };
-    let inline_string_head_arm =
-      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
-       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
-          Ok(InputValueOf::String(StringValue::new(span, value.into())))
-        }
-        _ => unreachable!("fused input-value arm received a non-inline-string token"),
-      };
-    let block_string_head_arm =
-      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
-       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
-          Ok(InputValueOf::String(StringValue::new(span, value.into())))
-        }
-        _ => unreachable!("fused input-value arm received a non-block-string token"),
-      };
-    let identifier_head_arm =
-      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
-       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let keyword = token.downcast_ref();
-        match token {
-          GraphqlToken::<'inp, Src>::Identifier(value) => Ok(match keyword {
-            Some(ContextualKeyword::True) => InputValueOf::Boolean(BooleanValue::new(span, true)),
-            Some(ContextualKeyword::False) => InputValueOf::Boolean(BooleanValue::new(span, false)),
-            Some(ContextualKeyword::Null) => InputValueOf::Null(NullValue::new(span, value)),
-            _ => InputValueOf::Enum(EnumValue::new(span, value)),
-          }),
-          _ => unreachable!("fused input-value arm received a non-identifier token"),
-        }
-      };
-    let dollar_head_arm =
-      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
-       inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::Dollar => {
-          variable_after_dollar(span.start(), inp).map(InputValueOf::Variable)
-        }
-        _ => unreachable!("fused input-value arm received a non-dollar token"),
-      };
-
-    match (
-      int_head_arm,
-      float_head_arm,
-      inline_string_head_arm,
-      block_string_head_arm,
-      identifier_head_arm,
-      dollar_head_arm,
-    )
-      .fused_dispatch_on_kind(&[
-        SyntacticTokenKind::Int,
-        SyntacticTokenKind::Float,
-        SyntacticTokenKind::InlineString,
-        SyntacticTokenKind::BlockString,
-        SyntacticTokenKind::Identifier,
-        SyntacticTokenKind::Dollar,
-      ])
-      .try_parse_input(inp)?
-    {
-      ParseAttempt::Accept(value) => Ok(value),
-      ParseAttempt::Decline => {
-        let off = *inp.offset();
-        let list = {
-          let mut peeked = inp.peek::<U1>()?;
-          match peeked.pop_front() {
-            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBracket) => true,
-            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBrace) => false,
-            Some(head) => {
-              return Err(
-                DialectGraphqlError::unexpected_token(
-                  head.token().kind(),
-                  Expectation::InputValue,
-                  *head.span(),
-                )
-                .into(),
-              );
-            }
-            None => return Err(UnexpectedEot::eot_of(off).into()),
+    ParseAttempt::Accept(value) => Ok(value),
+    ParseAttempt::Decline => {
+      let off = *inp.offset();
+      let list = {
+        let mut peeked = inp.peek::<U1>()?;
+        match peeked.pop_front() {
+          Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBracket) => true,
+          Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBrace) => false,
+          Some(head) => {
+            return Err(
+              DialectGraphqlError::unexpected_token(
+                head.token().kind(),
+                Expectation::InputValue,
+                *head.span(),
+              )
+              .into(),
+            );
           }
-        };
-
-        if list {
-          list_value_with::<Src, Ctx, N>(inp).map(InputValueOf::List)
-        } else {
-          object_value_with::<Src, Ctx, N>(inp).map(InputValueOf::Object)
+          None => return Err(UnexpectedEot::eot_of(off).into()),
         }
+      };
+
+      if list {
+        list_value_with::<Src, Ctx, N>(inp).map(Into::into)
+      } else {
+        object_value_with::<Src, Ctx, N>(inp).map(Into::into)
       }
     }
   }
-);
+});
 
 numeric_value_parser!(
   const_value_with,
   inp,
-  ConstInputValueOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  N::ConstValue,
   [contextual, delimited],
   {
     let int_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
         GraphqlToken::<'inp, Src>::LitInt(value) => match N::int(value) {
-          Ok(payload) => Ok(ConstInputValueOf::Int(IntValue::new(span, payload))),
+          Ok(payload) => Ok(IntValue::new(span, payload).into()),
           Err(err) => Err(N::report(err, span).into()),
         },
         _ => unreachable!("fused const-input-value arm received a non-int token"),
@@ -1031,7 +1048,7 @@ numeric_value_parser!(
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
         GraphqlToken::<'inp, Src>::LitFloat(value) => match N::float(value) {
-          Ok(payload) => Ok(ConstInputValueOf::Float(FloatValue::new(span, payload))),
+          Ok(payload) => Ok(FloatValue::new(span, payload).into()),
           Err(err) => Err(N::report(err, span).into()),
         },
         _ => unreachable!("fused const-input-value arm received a non-float token"),
@@ -1039,17 +1056,17 @@ numeric_value_parser!(
     let inline_string_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitInlineStr(value) => Ok(ConstInputValueOf::String(
-          StringValue::new(span, value.into()),
-        )),
+        GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
+          Ok(Into::into(StringValue::new(span, value.into())))
+        }
         _ => unreachable!("fused const-input-value arm received a non-inline-string token"),
       };
     let block_string_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitBlockStr(value) => Ok(ConstInputValueOf::String(
-          StringValue::new(span, value.into()),
-        )),
+        GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
+          Ok(Into::into(StringValue::new(span, value.into())))
+        }
         _ => unreachable!("fused const-input-value arm received a non-block-string token"),
       };
     let identifier_head_arm =
@@ -1058,14 +1075,10 @@ numeric_value_parser!(
         let keyword = token.downcast_ref();
         match token {
           GraphqlToken::<'inp, Src>::Identifier(value) => Ok(match keyword {
-            Some(ContextualKeyword::True) => {
-              ConstInputValueOf::Boolean(BooleanValue::new(span, true))
-            }
-            Some(ContextualKeyword::False) => {
-              ConstInputValueOf::Boolean(BooleanValue::new(span, false))
-            }
-            Some(ContextualKeyword::Null) => ConstInputValueOf::Null(NullValue::new(span, value)),
-            _ => ConstInputValueOf::Enum(EnumValue::new(span, value)),
+            Some(ContextualKeyword::True) => BooleanValue::new(span, true).into(),
+            Some(ContextualKeyword::False) => BooleanValue::new(span, false).into(),
+            Some(ContextualKeyword::Null) => NullValue::new(span, value).into(),
+            _ => EnumValue::new(span, value).into(),
           }),
           _ => unreachable!("fused const-input-value arm received a non-identifier token"),
         }
@@ -1110,9 +1123,9 @@ numeric_value_parser!(
         };
 
         if list {
-          const_list_value_with::<Src, Ctx, N>(inp).map(ConstInputValueOf::List)
+          const_list_value_with::<Src, Ctx, N>(inp).map(Into::into)
         } else {
-          const_object_value_with::<Src, Ctx, N>(inp).map(ConstInputValueOf::Object)
+          const_object_value_with::<Src, Ctx, N>(inp).map(Into::into)
         }
       }
     }
@@ -1138,7 +1151,7 @@ value_parser!(
 numeric_value_parser!(
   committed_default_value_with,
   inp,
-  DefaultInputValueOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
+  ValueDefault<GraphqlSlice<'inp, Src>, N>,
   [contextual, delimited],
   {
     let validated_const_tail = |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
@@ -1173,7 +1186,7 @@ numeric_value_parser!(
     equal
       .ignore_then(validated_const_tail)
       .token_spanned()
-      .map(|Spanned { span, data: value }| DefaultInputValueOf::new(span, value))
+      .map(|Spanned { span, data: value }| DefaultInputValueNode::new(span, value))
       .parse_input(inp)
   }
 );
@@ -1181,7 +1194,7 @@ numeric_value_parser!(
 numeric_value_parser!(
   try_default_value_with,
   inp,
-  ParseAttempt<DefaultInputValueOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>>,
+  ParseAttempt<ValueDefault<GraphqlSlice<'inp, Src>, N>>,
   [contextual, delimited],
   {
     committed_default_value_with::<Src, Ctx, N>
@@ -1202,7 +1215,7 @@ numeric_value_parser!(
 numeric_value_parser!(
   default_value_with,
   inp,
-  Option<DefaultInputValueOf<GraphqlSlice<'inp, Src>, N::Int, N::Float>>,
+  Option<ValueDefault<GraphqlSlice<'inp, Src>, N>>,
   [contextual, delimited],
   { try_default_value_with::<Src, Ctx, N>(inp).map(Into::into) }
 );

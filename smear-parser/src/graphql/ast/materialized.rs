@@ -1,15 +1,27 @@
-//! The materialised-number view of the GraphQL value AST: **a second set of aliases, and no new
-//! types at all.**
+//! The materialised-number view of the GraphQL value AST: **the same productions, a second tree.**
 //!
-//! Every alias here binds [`ast::InputValueOf`](crate::graphql::ast::InputValueOf)'s two numeric
-//! payload parameters to `i64` and `f64` and leaves everything else alone. Nothing in this module
-//! declares a `struct` or an `enum`; the nodes are the same nodes the slice parser builds, at a
-//! different instantiation of the same carrier. That is what "materialisation varies the payload"
-//! means concretely, and it is why a second materialised dialect would cost nothing here either.
+//! Two enums and seven aliases. The enums are [`InputValue`] and [`ConstInputValue`], variant for
+//! variant the shape of their slice twins in [`ast`](crate::graphql::ast) with `Int` and `Float`
+//! carrying [`i64`] and [`f64`]; the aliases bind the shared list, object and default-value
+//! carriers to them, at the arity and argument positions their slice twins publish. Every leaf
+//! type is the *same* type on both sides, and every production is the same production — see
+//! [`syntactic::materialized`](crate::graphql::syntactic::value::materialized), whose entries are
+//! [`super`]'s bodies at this tree.
 //!
-//! Each alias also keeps the arity and the argument positions of its slice twin — `List<S>` takes
-//! its `Container` second on both sides — so the two sets differ in what they *mean* and in
-//! nothing a caller has to spell.
+//! # Why a second tree and not a second instantiation of one
+//!
+//! Because a Rust type alias is not a module. Making the slice `InputValue<S>` an alias of a
+//! three-parameter carrier — one tree, two instantiations, no second enum — costs
+//! `use ast::InputValue::{Int, String}`, which is `E0432` against an alias and compiles against an
+//! enum. It also has to be got exactly right in three other ways at once: a parameter default
+//! does not constrain an unmentioned parameter during variant construction, and inserting the
+//! payloads ahead of `List`'s `Container` argument silently reinterprets `List<S, MyContainer>`.
+//!
+//! Two nominal enums have none of those problems and one cost — the variant lists are written
+//! twice. `the_two_value_trees_have_the_same_variants` pays for that cost with a wildcard-free
+//! census on both, rather than with a comment asking the next reader to keep them in step.
+//! `graphql/ast/value.rs` is then **byte-identical to the revision before this axis existed**,
+//! which is a stronger compatibility statement than any test.
 //!
 //! # What is materialised, and what is not
 //!
@@ -45,9 +57,16 @@
 //! [`syntactic::materialized`](crate::graphql::syntactic::value::materialized) for the
 //! productions and the exact error.
 
-use tokora::SimpleSpan;
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
+use tokora::{
+  SimpleSpan,
+  span::{AsSpan, IntoSpan},
+};
 
-use super::DefaultVec;
+use super::{
+  BooleanValue as AstBooleanValue, DefaultVec, EnumValue as AstEnumValue, Name,
+  NullValue as AstNullValue, StringValue as AstStringValue, VariableValue as AstVariableValue,
+};
 
 /// A GraphQL integer literal, materialised as [`i64`].
 pub type IntValue<Span = SimpleSpan> = super::IntValue<i64, Span>;
@@ -55,32 +74,150 @@ pub type IntValue<Span = SimpleSpan> = super::IntValue<i64, Span>;
 /// A GraphQL floating-point literal, materialised as [`f64`].
 pub type FloatValue<Span = SimpleSpan> = super::FloatValue<f64, Span>;
 
-/// A GraphQL input value whose numeric leaves are materialised.
-pub type InputValue<S> = super::InputValueOf<S, i64, f64>;
+/// A GraphQL input value (executable context) whose numeric leaves are materialised.
+///
+/// Variant for variant [`ast::InputValue`](crate::graphql::ast::InputValue), with `Int` and
+/// `Float` carrying [`i64`] and [`f64`]. Every other leaf is the *same type* the slice tree
+/// holds, not a copy of it.
+#[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum InputValue<S> {
+  /// Variable reference (e.g., `$userId`).
+  Variable(AstVariableValue<S>),
+  /// Boolean value (`true` or `false`).
+  Boolean(AstBooleanValue<S>),
+  /// String value (inline or block string).
+  String(AstStringValue<S>),
+  /// Floating-point number, materialised.
+  Float(FloatValue),
+  /// Integer number, materialised.
+  Int(IntValue),
+  /// Enum value name.
+  Enum(AstEnumValue<S>),
+  /// The `null` literal.
+  Null(AstNullValue<S>),
+  /// List of values.
+  List(List<S>),
+  /// Object value with named fields.
+  Object(Object<S>),
+}
 
-/// A GraphQL constant input value whose numeric leaves are materialised.
-pub type ConstInputValue<S> = super::ConstInputValueOf<S, i64, f64>;
+impl<S> AsSpan<SimpleSpan> for InputValue<S> {
+  #[inline]
+  fn as_span(&self) -> &SimpleSpan {
+    match self {
+      Self::Variable(v) => v.as_span(),
+      Self::Boolean(v) => v.as_span(),
+      Self::String(v) => v.as_span(),
+      Self::Float(v) => v.as_span(),
+      Self::Int(v) => v.as_span(),
+      Self::Enum(v) => v.as_span(),
+      Self::Null(v) => v.as_span(),
+      Self::List(v) => v.as_span(),
+      Self::Object(v) => v.as_span(),
+    }
+  }
+}
+
+impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
+  #[inline]
+  fn into_span(self) -> SimpleSpan {
+    match self {
+      Self::Variable(v) => v.into_span(),
+      Self::Boolean(v) => v.into_span(),
+      Self::String(v) => v.into_span(),
+      Self::Float(v) => v.into_span(),
+      Self::Int(v) => v.into_span(),
+      Self::Enum(v) => v.into_span(),
+      Self::Null(v) => v.into_span(),
+      Self::List(v) => v.into_span(),
+      Self::Object(v) => v.into_span(),
+    }
+  }
+}
+
+/// A GraphQL constant input value (schema context) whose numeric leaves are materialised.
+///
+/// Variant for variant [`ast::ConstInputValue`](crate::graphql::ast::ConstInputValue).
+#[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum ConstInputValue<S> {
+  /// Boolean value (`true` or `false`).
+  Boolean(AstBooleanValue<S>),
+  /// String value (inline or block string).
+  String(AstStringValue<S>),
+  /// Floating-point number, materialised.
+  Float(FloatValue),
+  /// Integer number, materialised.
+  Int(IntValue),
+  /// Enum value name.
+  Enum(AstEnumValue<S>),
+  /// The `null` literal.
+  Null(AstNullValue<S>),
+  /// List of constant values.
+  List(ConstList<S>),
+  /// Object value with named fields (all values must be constant).
+  Object(ConstObject<S>),
+}
+
+impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
+  #[inline]
+  fn as_span(&self) -> &SimpleSpan {
+    match self {
+      Self::Boolean(v) => v.as_span(),
+      Self::String(v) => v.as_span(),
+      Self::Float(v) => v.as_span(),
+      Self::Int(v) => v.as_span(),
+      Self::Enum(v) => v.as_span(),
+      Self::Null(v) => v.as_span(),
+      Self::List(v) => v.as_span(),
+      Self::Object(v) => v.as_span(),
+    }
+  }
+}
+
+impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
+  #[inline]
+  fn into_span(self) -> SimpleSpan {
+    match self {
+      Self::Boolean(v) => v.into_span(),
+      Self::String(v) => v.into_span(),
+      Self::Float(v) => v.into_span(),
+      Self::Int(v) => v.into_span(),
+      Self::Enum(v) => v.into_span(),
+      Self::Null(v) => v.into_span(),
+      Self::List(v) => v.into_span(),
+      Self::Object(v) => v.into_span(),
+    }
+  }
+}
 
 /// A list value whose numeric leaves are materialised.
-pub type List<S, Container = DefaultVec<InputValue<S>>> = super::ListOf<S, i64, f64, Container>;
+pub type List<S, Container = DefaultVec<InputValue<S>>> =
+  crate::value::List<InputValue<S>, SimpleSpan, Container>;
 
 /// An object value whose numeric leaves are materialised.
 pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
-  super::ObjectOf<S, i64, f64, Container>;
+  crate::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
 
 /// An object field whose value's numeric leaves are materialised.
-pub type ObjectField<S> = super::ObjectFieldOf<S, i64, f64>;
+pub type ObjectField<S> = crate::value::ObjectField<Name<S>, InputValue<S>>;
 
 /// A constant list value whose numeric leaves are materialised.
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  super::ConstListOf<S, i64, f64, Container>;
+  crate::value::List<ConstInputValue<S>, SimpleSpan, Container>;
 
 /// A constant object value whose numeric leaves are materialised.
 pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
-  super::ConstObjectOf<S, i64, f64, Container>;
+  crate::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
 
 /// A constant object field whose value's numeric leaves are materialised.
-pub type ConstObjectField<S> = super::ConstObjectFieldOf<S, i64, f64>;
+pub type ConstObjectField<S> = crate::value::ObjectField<Name<S>, ConstInputValue<S>>;
 
 /// A default value whose numeric leaves are materialised.
-pub type DefaultInputValue<S> = super::DefaultInputValueOf<S, i64, f64>;
+pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<S>>;
+
+#[cfg(test)]
+mod tests;

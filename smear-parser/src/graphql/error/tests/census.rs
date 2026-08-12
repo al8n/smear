@@ -13,8 +13,8 @@ use crate::graphql::error::{
 /// parameters the dialect pins.
 type Data = ErrorData<&'static str, SyntacticTokenKind>;
 
-/// Census: every [`ErrorData`] variant **this configuration declares** must be producible
-/// without naming the variant.
+/// Census: every [`ErrorData`] variant must be producible without naming the variant, in every
+/// configuration whose build contains its producer.
 ///
 /// Three things make it non-vacuous, and they are different things.
 ///
@@ -34,13 +34,22 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 ///   reported them green. Same defect as tokora's `FinishError::InvalidDialectKind` and
 ///   `smear-lexer`'s `LosslessTokenKind::Boolean` (28 declared, 27 producible).
 ///
-/// **Per configuration, not over the union of them.** The two conversion variants exist only
-/// under `materialized-numbers`, so the variant, its constructor and its entry here carry the
-/// same `#[cfg]`, and each build checks exactly the enum it compiled. A census written over the
-/// union — the shape `ci/source_census`'s D1–D4 necessarily has, since it reads the source as
-/// text with `syn` and strips only `#[cfg(test)]` — cannot tell "no configuration can produce
-/// this" from "this configuration cannot", and would answer the first question when asked the
-/// second.
+/// **The exhaustive match and the sample set are gated differently, and that is the point.**
+/// `ErrorData` declares the same 22 variants in every configuration, so the `match` below is
+/// wildcard-free over all 22 everywhere and a new variant is `E0004` in a default build. What
+/// `materialized-numbers` gates is the two *producers*, so only their two samples carry a
+/// `#[cfg]`: 22 samples with the feature, 20 without.
+///
+/// Putting the `#[cfg]` on the match arm as well — the shape this test had first — would have
+/// made each build check only the enum it compiled, which sounds stricter and is weaker: it lets
+/// a variant be declared-and-unproducible in *every* configuration as long as no single
+/// configuration sees both halves. The all-features run is what rules that out, and it can only
+/// do so because it samples all 22.
+///
+/// A census over the union of configurations — the shape `ci/source_census`'s D1–D4 necessarily
+/// has, since it reads the source as text with `syn` and strips only `#[cfg(test)]` — cannot tell
+/// "no configuration can produce this" from "this configuration cannot", and would answer the
+/// first question when asked the second.
 ///
 /// The two conversion variants are additionally produced **by a real parse** in
 /// `graphql::syntactic::value::materialized::tests`. A constructor existing is the weaker claim;
@@ -49,10 +58,12 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 fn error_data_variant_census() {
   macro_rules! census {
     ($($(#[$attr:meta])* $variant:ident => $sample:expr),+ $(,)?) => {
-      // Wildcard-free and generated from the same list as the samples below.
+      // Wildcard-free and generated from the same list as the samples below. NO `$attr` here:
+      // the enum's variant set is configuration-independent, so this arm list is too, and a
+      // variant added in any configuration is `E0004` in every one.
       fn tag(data: &Data) -> &'static str {
         match data {
-          $($(#[$attr])* ErrorData::$variant { .. } => stringify!($variant),)+
+          $(ErrorData::$variant { .. } => stringify!($variant),)+
         }
       }
 
