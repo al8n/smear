@@ -91,7 +91,9 @@
 //! [the two-door agreement test]: https://github.com/al8n/smear/blob/main/smear/tests/validator_introspection.rs
 //! [`Schema::build`]: super::Schema::build
 
+mod decode;
 mod error;
+mod json;
 mod model;
 mod sdl;
 

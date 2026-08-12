@@ -21,9 +21,13 @@
 //! twenty consequences of that bug helps nobody. A schema is authored, and its author wants the
 //! whole list.
 
-use std::{boxed::Box, string::String};
+use std::{boxed::Box, format, string::String};
 
-use super::super::error::SchemaErrors;
+use super::{
+  super::error::SchemaErrors,
+  decode::Owner,
+  json::{Mark, line_column},
+};
 use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
 /// Which rule of the draft §4 shape a [`ResponseError`] reports.
@@ -34,7 +38,11 @@ use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ResponseErrorKind {
-  /// The bytes are not JSON, or nest deeper than `serde_json` will read.
+  /// The bytes are not JSON, or nest deeper than the reader will go.
+  ///
+  /// The nesting bound is 128 containers — the limit the previous reader enforced, kept because a
+  /// `__Type` reference chain is walked recursively and this is what keeps a hostile response from
+  /// driving that walk off the stack.
   MalformedJson,
   /// The bytes are JSON, but not the shape draft §4 describes — a required field absent or null,
   /// or a value of the wrong JSON type.
@@ -42,6 +50,9 @@ pub enum ResponseErrorKind {
   /// The response carries no `__schema`, under `data` or at its root.
   MissingSchema,
   /// A `__Type.kind` is not one of the eight `__TypeKind` values.
+  ///
+  /// Reported where the literal is read, not where a rendered kind is compared, so the subject is
+  /// the spelling the response actually wrote.
   UnknownTypeKind,
   /// A named type was required and a `LIST` or `NON_NULL` wrapper was given.
   ///
@@ -163,11 +174,76 @@ impl core::fmt::Display for ResponseErrorKind {
 /// no human wrote. The owner path is the locator.
 ///
 /// [`SchemaError`]: crate::SchemaError
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ResponseError {
   kind: ResponseErrorKind,
   subject: Box<str>,
   owner: Option<Box<str>>,
+  /// The derivations this refusal staged instead of performing, resolved by
+  /// [`read`](super::decode::read) on the one refusal the door returns.
+  ///
+  /// Always `Pending::default()` on any error that has left the door.
+  pending: Pending,
+  /// Where the reader may carry on, when this refusal names a value it consumed whole.
+  ///
+  /// A refusal held until its object's closing brace is a refusal *about a value already walked to
+  /// its end*, so the member that receives it can put the cursor here rather than rewind and walk
+  /// the value a second time — which, without the mark, every enclosing member does in turn.
+  ///
+  /// Always `None` on any error that has left the door.
+  resume: Option<Mark>,
+}
+
+/// What a refusal has staged rather than derived, because deriving it walks the response.
+///
+/// # One invariant, which is why this is a type and not two fields
+///
+/// **Constructing a refusal does work bounded by the value it names; anything proportional to bytes
+/// the refusal did not itself read happens once, on the refusal that escapes.**
+///
+/// The reader builds refusals it may then discard — a member written twice replaces the first
+/// occurrence's failure along with its value, as `decode`'s `Slot` describes — so a derivation
+/// performed at construction is performed once per *occurrence*. A response repeating one bad
+/// member k times then pays k times whatever a construction costs, for an answer it throws k−1
+/// copies of away, and if that cost is proportional to the response the product is quadratic in
+/// what a network peer sends.
+///
+/// Two derivations cost exactly that much, and they were found one review round apart:
+///
+/// - the **owner**, which is a path and is read back by walking the object that owns it, and
+/// - the **position**, which is a line and a column and is counted by walking every byte before the
+///   cursor.
+///
+/// They are one staged field rather than two repairs so that a third expensive derivation added
+/// later inherits the invariant instead of re-learning it: being here is what makes a thing staged,
+/// and `ResponseError::resolve` is the one place any of it is paid for.
+///
+/// # What is *not* staged, and why it does not have to be
+///
+/// A refusal's subject is a copy of the literal it refuses, which is not constant work — but it is
+/// bounded by bytes the reader had already read in order to refuse them, so the subjects of every
+/// occurrence together are bounded by the response. That is linear and not a product, which is the
+/// property that matters; `smear-schema/tests/introspection_allocation.rs` is what measures it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Pending {
+  /// The artifact that owns the subject, as the offsets its name will be read back from.
+  owner: Owner,
+  /// The offset the refusal was raised at, whose line and column the subject ends with.
+  at: Option<usize>,
+}
+
+/// The three fields a `ResponseError` reports, and not the two the reader staged them from.
+///
+/// `pending` and `resume` are implementation details of the reader's error path, and both are their
+/// default on every error a caller can hold, so printing them would be printing a constant.
+impl core::fmt::Debug for ResponseError {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("ResponseError")
+      .field("kind", &self.kind)
+      .field("subject", &self.subject)
+      .field("owner", &self.owner)
+      .finish()
+  }
 }
 
 impl ResponseError {
@@ -177,12 +253,58 @@ impl ResponseError {
       kind,
       subject: subject.into().into_boxed_str(),
       owner: None,
+      pending: Pending::default(),
+      resume: None,
     }
   }
 
   /// Qualifies the subject with the artifact that owns it.
   pub(super) fn owned_by(mut self, owner: impl Into<String>) -> Self {
     self.owner = Some(owner.into().into_boxed_str());
+    self
+  }
+
+  /// Records the artifact that owns the subject, as the offsets its name will be read back from.
+  pub(super) fn owned_at(mut self, owner: Owner) -> Self {
+    self.pending.owner = owner;
+    self
+  }
+
+  /// Records where in the response the refusal was raised, as the offset its line and column will
+  /// be counted from.
+  pub(super) const fn raised_at(mut self, at: usize) -> Self {
+    self.pending.at = Some(at);
+    self
+  }
+
+  /// Records that the value this refusal is about was consumed whole, and where it ends.
+  pub(super) const fn resume_at(mut self, mark: Mark) -> Self {
+    self.resume = Some(mark);
+    self
+  }
+
+  /// Returns where the reader may carry on, when the refused value was consumed whole.
+  pub(super) const fn resume(&self) -> Option<Mark> {
+    self.resume
+  }
+
+  /// Performs every derivation the refusal staged, which is the last thing the door does.
+  ///
+  /// One walk of the response per *response*, however many refusals were built and discarded on the
+  /// way — which is the whole of `Pending`'s invariant, discharged in the one place.
+  pub(super) fn resolve(mut self, response: &str) -> Self {
+    // A resume mark describes a cursor inside a reading that has now finished, so it is not a fact
+    // about the error a caller holds. Cleared here so that two refusals a caller cannot tell apart
+    // do not compare unequal over it.
+    self.resume = None;
+    let Pending { owner, at } = core::mem::take(&mut self.pending);
+    if let Some(at) = at {
+      let (line, column) = line_column(response, at);
+      self.subject = format!("{} at line {line} column {column}", self.subject).into_boxed_str();
+    }
+    if !matches!(owner, Owner::Unowned) {
+      self.owner = owner.resolve(response).map(String::into_boxed_str);
+    }
     self
   }
 
@@ -194,8 +316,11 @@ impl ResponseError {
 
   /// Returns the rejected artifact, unqualified.
   ///
-  /// For a malformed response this is `serde_json`'s own message, which carries the field name and,
-  /// for a syntax error, the line and column.
+  /// Usually the literal the response wrote — a name, a `__TypeKind`, a default value. For the two
+  /// kinds that refuse the document rather than something in it,
+  /// [`MalformedJson`](ResponseErrorKind::MalformedJson) and
+  /// [`MalformedResponse`](ResponseErrorKind::MalformedResponse), it is the reader's own message,
+  /// which carries the member's name and the line and column it stopped at.
   #[inline]
   pub fn subject(&self) -> &str {
     &self.subject
@@ -370,25 +495,4 @@ impl core::error::Error for IntrospectionError {
       Self::Schema(errors) => Some(errors),
     }
   }
-}
-
-/// Splits a `serde_json` failure into "not JSON" and "not the shape".
-///
-/// `serde_json` already draws this line — [`Category::Syntax`] and [`Category::Eof`] are the
-/// reader failing, [`Category::Data`] is the reader succeeding and the *model* rejecting what it
-/// read — so the door reports the distinction rather than flattening two different bugs into one
-/// message. [`Category::Io`] cannot occur here: the input is a `&str` already in memory.
-///
-/// [`Category::Syntax`]: serde_json::error::Category::Syntax
-/// [`Category::Eof`]: serde_json::error::Category::Eof
-/// [`Category::Data`]: serde_json::error::Category::Data
-/// [`Category::Io`]: serde_json::error::Category::Io
-pub(super) fn from_json_error(error: &serde_json::Error) -> ResponseError {
-  use serde_json::error::Category;
-
-  let kind = match error.classify() {
-    Category::Data => ResponseErrorKind::MalformedResponse,
-    Category::Io | Category::Syntax | Category::Eof => ResponseErrorKind::MalformedJson,
-  };
-  ResponseError::new(kind, std::string::ToString::to_string(error))
 }

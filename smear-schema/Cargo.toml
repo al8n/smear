@@ -53,9 +53,21 @@ build = ["dep:smear-parser", "smear-parser/graphql"]
 # §3 runs there too and the two doors cannot drift apart — which is why it implies `build` rather
 # than duplicating it.
 #
-# The one feature here that costs a dependency, which is exactly why it is a feature. `std` is not
-# decoration: the door parses a `&str` out of a network response and reports through
-# `std::error::Error`.
+# The one feature here that costs a dependency, which is exactly why it is a feature.
+#
+# ── WHAT STILL HOLDS `std` HERE, AND IT IS NO LONGER THE DOOR ──────────────────────────────────
+#
+# It used to be. `std` was here because `serde_json` is a `std`-only crate and the reader was
+# `serde_json::from_str`, and because the refusals went through `std::error::Error`. Neither is
+# true now: the reader is `introspection/json.rs` and `introspection/decode.rs`, which are `core` +
+# `alloc` throughout, and the error types implement `core::error::Error`. Measured rather than
+# assumed — with this line reading `["build"]`, `cargo check -p smear-schema
+# --no-default-features --features introspection` succeeds.
+#
+# So the tier is held by the two `dep:` entries below, and those are held by nothing: no `use
+# serde` survives in this crate. **Removing them is deliberately not this change.** "The dependency
+# is unused" and "the dependency is gone" are different claims and only the second is checkable by
+# `cargo tree`, so that step — and what this line should then read — is one decision taken once.
 introspection = ["build", "std", "dep:serde", "dep:serde_json"]
 
 [dependencies]
