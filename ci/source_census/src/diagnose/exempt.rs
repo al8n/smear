@@ -270,6 +270,25 @@ pub const EXEMPTIONS: &[Exemption] = &[
              contract here means changing a gate deliberately, which is the reviewed decision \
              al8n/smear#126's own first correction asks for. Recorded, not accepted.",
   },
+  Exemption {
+    path: "smear::json::Error",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "How the draft §7.2.1 writer refuses: a sink that would not take the bytes, a `Float` \
+             that is not finite, a `\\u` escape naming a surrogate, and a malformed escape. Phase D \
+             of al8n/smear#126 is *the §7 writer together with proto's adoption*, so this is that \
+             phase's third row rather than a new debt beside it — and it has to be decided with \
+             the other two instead of before them, because the phase's open question is where a \
+             draft §7 position gets published, and giving this type codes and an accessor shape \
+             first would settle half of that by accident. It also carries the sharper version of \
+             `StartError`'s own problem: a serialisation refusal has no position in ANY input — \
+             not a span, not a whole document, not a response path — because it is raised while \
+             rendering a response that has already been decided, so its `primary()` would be a \
+             *third* user of `Location::entire` against a gate that pins the count at one, and \
+             `Location`'s own documentation calls that spelling an exception with a named holder \
+             rather than a default. Recorded, not accepted.",
+  },
   // ── The lexer families — al8n/smear#126 phase E ──────────────────────────────────────────────
   Exemption {
     path: "smear::lexer::error::LengthError",
