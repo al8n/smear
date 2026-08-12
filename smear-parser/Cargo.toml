@@ -32,8 +32,20 @@ std = ["smear-lexer/std", "tokora/std", "bytes?/default"]
 graphql = ["smear-lexer/graphql"]
 graphqlx = ["smear-lexer/graphqlx"]
 
-# The value materialisation axis: a second set of GraphQL value productions whose `Int` and
-# `Float` leaves carry `i64` and `f64` instead of a source slice.
+# The value materialisation axis: GraphQL value productions whose `Int` and `Float` leaves carry
+# a number instead of a source slice.
+#
+# ONE FEATURE, TWO WIDTHS, AND THAT IS A DECISION RATHER THAN AN OMISSION. It gates
+# `ast::materialized` + `syntactic::value::materialized` (`i64`, the grammar-permissive reading)
+# AND `ast::materialized32` + `syntactic::value::materialized32` (`i32`, which is what draft
+# §3.5.1 specifies `Int` to be). A width is not a second axis of compilation — it is a second
+# reading on this one — and splitting it would cost more than it saves in three places at once:
+# `smear` needs a second umbrella twin and a second line in its feature fence, `smear-smoke` a
+# second entry in the dependency list its own test parses back out, and `ci/hack.sh` a wider
+# matrix, all to isolate two enums and twenty one-line wrappers. What `--each-feature` proves is
+# what was chosen: the single `materialized-numbers` cell compiles both widths, and
+# `every_value_tree_declares_the_same_variants` fails in that cell if one of them drifts from the
+# slice tree.
 #
 # NAMED FOR WHAT IT CONVERTS AND NOTHING MORE. Numbers are materialised; strings are not. A
 # string literal keeps its slice — unescaping is the consumer's, because doing it here would mean

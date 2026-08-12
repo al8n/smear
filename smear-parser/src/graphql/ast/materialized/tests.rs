@@ -3,6 +3,9 @@ use crate::graphql::ast::{
   materialized::{
     ConstInputValue as MaterializedConstInputValue, InputValue as MaterializedInputValue,
   },
+  materialized32::{
+    ConstInputValue as Materialized32ConstInputValue, InputValue as Materialized32InputValue,
+  },
 };
 
 /// Declares a tree's variant set once, and uses it for both a wildcard-free `match` and the name
@@ -82,34 +85,82 @@ variant_census!(
   Object,
 );
 
-/// The cost of writing the variant lists twice, paid rather than commented.
+variant_census!(
+  MATERIALIZED32_VALUE,
+  materialized32_value_tag,
+  Materialized32InputValue,
+  Variable,
+  Boolean,
+  String,
+  Float,
+  Int,
+  Enum,
+  Null,
+  List,
+  Object,
+);
+
+variant_census!(
+  MATERIALIZED32_CONST,
+  materialized32_const_tag,
+  Materialized32ConstInputValue,
+  Boolean,
+  String,
+  Float,
+  Int,
+  Enum,
+  Null,
+  List,
+  Object,
+);
+
+/// The cost of writing the variant lists once per tree, paid rather than commented.
 ///
-/// The materialised tree is a second `enum` because a type alias is not a module — see this
-/// module's header. What that buys in compatibility it owes in drift, and this is the payment: a
-/// variant added to one tree and not the other fails here, naming the tree that is missing it,
-/// instead of being discovered by a consumer who can pattern-match one and not the other.
+/// Each materialised tree is its own `enum` because a type alias is not a module, and a second
+/// *width* is a second pair of enums for the same reason a second payload was — see this module's
+/// header and [`ast::materialized32`](crate::graphql::ast::materialized32)'s. What that buys in
+/// compatibility it owes in drift, and this is the payment: a variant added to one tree and not
+/// the others fails here, naming the tree that is missing it, instead of being discovered by a
+/// consumer who can pattern-match one and not another.
+///
+/// **Every tree is compared against the slice tree, not against its neighbour.** A chain of
+/// pairwise equalities would pass if two trees drifted together, and the two materialised trees
+/// are exactly the pair most likely to be edited in one sitting.
 #[test]
-fn the_two_value_trees_have_the_same_variants() {
+fn every_value_tree_declares_the_same_variants() {
   // Non-vacuity: two empty lists are equal, which is the failure mode a census has to rule out
   // before its equality means anything.
   assert_eq!(SLICE_VALUE.len(), 9, "the slice value tree lost a variant");
   assert_eq!(SLICE_CONST.len(), 8, "the slice const tree lost a variant");
 
-  assert_eq!(
-    SLICE_VALUE, MATERIALIZED_VALUE,
-    "the two value trees declare different variants",
-  );
-  assert_eq!(
-    SLICE_CONST, MATERIALIZED_CONST,
-    "the two constant value trees declare different variants",
-  );
+  for (name, listed) in [
+    ("materialized", MATERIALIZED_VALUE),
+    ("materialized32", MATERIALIZED32_VALUE),
+  ] {
+    assert_eq!(
+      SLICE_VALUE, listed,
+      "the `{name}` value tree declares different variants from the slice tree",
+    );
+  }
+
+  for (name, listed) in [
+    ("materialized", MATERIALIZED_CONST),
+    ("materialized32", MATERIALIZED32_CONST),
+  ] {
+    assert_eq!(
+      SLICE_CONST, listed,
+      "the `{name}` constant value tree declares different variants from the slice tree",
+    );
+  }
 
   // The `match` arms are what make the lists above describe the enums. Naming the functions is
   // what keeps them compiled.
   let _ = (
     slice_value_tag::<&str>,
     materialized_value_tag::<&str>,
+    materialized32_value_tag::<&str>,
     slice_const_tag::<&str>,
     materialized_const_tag::<&str>,
+    materialized32_const_tag::<&str>,
   );
 }

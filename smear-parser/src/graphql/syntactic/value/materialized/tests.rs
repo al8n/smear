@@ -10,7 +10,7 @@ use super::{const_value, float_value, int_value, list_value, object_value, try_i
 use crate::graphql::{
   GraphQL,
   ast::materialized::{ConstInputValue, InputValue},
-  error::{ErrorData, GraphqlErrors},
+  error::{ErrorData, GraphqlErrors, IntWidth},
   syntactic::{GraphqlInput, GraphqlLexer},
 };
 use tokora::try_parse_input::ParseAttempt;
@@ -127,20 +127,19 @@ fn const_values_materialize_too() {
 }
 
 /// The accepted bound, asserted where the source documents it: a literal the specification calls
-/// syntactically valid becomes a **parse** error in this view, and it names the spelling and the
-/// span so a caller can report it like any other.
+/// syntactically valid becomes a **parse** error in this view, and it names the spelling, the
+/// span and the width so a caller can report it like any other.
 #[test]
-fn out_of_range_integer_is_a_parse_error_naming_the_literal() {
+fn out_of_range_integer_is_a_parse_error_naming_the_literal_and_the_width() {
   let errors = drive_str(int_value, "99999999999999999999999999").expect_err("must reject");
   let error = &errors[0];
-  assert!(
-    matches!(
-      error.data(),
-      ErrorData::IntOverflow("99999999999999999999999999")
-    ),
-    "expected IntOverflow, got {:?}",
-    error.data()
-  );
+  match error.data() {
+    ErrorData::IntOverflow(overflow) => {
+      assert_eq!(*overflow.value(), "99999999999999999999999999");
+      assert_eq!(overflow.width(), IntWidth::I64);
+    }
+    other => panic!("expected IntOverflow, got {other:?}"),
+  }
   assert_eq!(error.span().start(), 0);
   assert_eq!(error.span().end(), 26);
 }

@@ -57,10 +57,10 @@ use crate::value::{
 /// The composite value productions, once, generic over what their numeric leaves carry.
 ///
 /// Identical to `value_parser!` but for the extra `N` parameter and its bound: the body writes
-/// `N::int` / `N::float` where a payload is built and `N::report` where one fails, and the two
-/// instantiations — [`SliceNumbers`] here, `MaterializedNumbers` in
-/// [`materialized`] — are then the same parser at two payloads rather than two parsers that
-/// agree today.
+/// `N::int` / `N::float` where a payload is built and `N::report` where one fails, and the
+/// instantiations — [`SliceNumbers`] here, `MaterializedNumbers` in [`materialized`],
+/// `MaterializedNumbers32` in [`materialized32`] — are then the same parser at three payloads
+/// rather than three parsers that agree today.
 ///
 /// Only the `[contextual, delimited]` bound set exists, and that is not an omission: every
 /// production this macro generates already carried it, so making the family generic added no
@@ -1523,12 +1523,23 @@ impl<S> DefaultInputValue<S> {
   }
 }
 
-/// The materialised-number instantiation of every production in this module.
+/// The materialised-number instantiation of every production in this module, at [`i64`] — the
+/// reading that accepts every literal the grammar admits.
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub mod materialized;
 
-mod numbers;
+/// The same instantiation at [`i32`], the width draft §3.5.1 specifies `Int` to be.
+#[cfg(feature = "materialized-numbers")]
+#[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+pub mod materialized32;
+
+// `pub(crate)` rather than private for one reason, and it is a correctness one:
+// `IntOverflow::checked` in [`graphql::error`](crate::graphql::error) has to decide whether a
+// literal really is out of range at the width a caller named, and the only honest decider is the
+// reader the productions here already use. A second reader written in `error.rs` could disagree
+// with this one, and the constructor's promise would then be about a function nobody calls.
+pub(crate) mod numbers;
 
 #[cfg(test)]
 mod tests;
