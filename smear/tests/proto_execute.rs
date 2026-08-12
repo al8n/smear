@@ -29,8 +29,8 @@ use smear::{
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   proto::{
-    ArgumentSource, Ceiling, Executor, Extensions, Kind, Leaf, Limits, Node, ReqId, Response,
-    SetExtensionsError, StartError, Values,
+    ArgumentSource, Ceiling, Executor, Extensions, Kind, Leaf, Limits, Node, ReqId,
+    RequestErrorResult, Response, SetExtensionsError, StartError, Values,
   },
   validator::{Budget, First, Schema, Scratch, validate_executable},
 };
@@ -5895,8 +5895,17 @@ fn replacing_a_map_hands_its_values_back_rather_than_dropping_them() {
 }
 
 // ------------------------------------------------------------------------------------------
-// the second §7.1.7 site: draft §7.1.3's request error result, which this crate does not build
+// draft §7.1.3's request error result, and the second §7.1.7 site it carries
 // ------------------------------------------------------------------------------------------
+//
+// §7.1.3 makes four demands and `RequestErrorResult` makes each one structural: a map, a non-empty
+// `errors`, no `data`, an optional `extensions`. Two of the four are unrepresentable-otherwise and
+// so have no runtime case here — "is a map" is the type, and "no `data`" is the absence of an
+// accessor, which is pinned by a `compile_fail` doctest on the type because a test that cannot
+// name the method cannot assert about it. What is left to gate from outside is the part a driver
+// observes: that the list is the refusal `start` raised, and that the map behaves as the execution
+// result's does on every axis the container has — acceptance, refusal, and what a refusal does with
+// the driver's values.
 
 /// A **valid** document reaches the request-error path, so §7.1.3's shape is not out of reach by
 /// validity.
@@ -5908,9 +5917,10 @@ fn replacing_a_map_hands_its_values_back_rather_than_dropping_them() {
 /// than of the document, so §5 cannot pre-empt it: two named operations and no operation name is a
 /// perfectly valid document and an unambiguous request error.
 ///
-/// What actually rules the shape out is the construction — `start` refuses before any response
-/// exists, so there is nothing to hang `data`, `errors` or `extensions` on. A driver needing the
-/// §7.1.3 map assembles it itself, and `StartError`'s header says what closing that would take.
+/// What the executor still does not do is *deliver* one: `start` refuses before any response
+/// exists, so `poll_response` has nothing to yield and `set_extensions` has no operation to attach
+/// to. Both halves stay asserted here, because they are what makes `RequestErrorResult` a value the
+/// driver builds rather than a state the executor holds.
 #[test]
 fn a_valid_document_can_still_be_a_request_error_with_no_response_to_carry_it() {
   let sdl = "type Query { greeting: String }";
@@ -5934,14 +5944,320 @@ fn a_valid_document_can_still_be_a_request_error_with_no_response_to_carry_it() 
     );
     assert!(
       executor.poll_response().is_none(),
-      "and there is no response object, so no `data`, no `errors` and no §7.1.7 entry"
+      "and there is no execution result, so no `data` and no §7.1.1 entry of any kind"
     );
     assert!(
       matches!(
         executor.set_extensions(ext_map(vec![("k", J::Int(1))])),
         Err(SetExtensionsError::NoOperation(_))
       ),
-      "and the refused start left no operation for an extensions map to belong to"
+      "and the refused start left no operation for the execution result's map to belong to"
     );
   }
+}
+
+/// Builds §7.1.3's result the way a driver does: from a real refusal, under the refusing
+/// executor's ceilings.
+///
+/// Through `start` rather than by naming a [`StartError`] variant, so the fixture cannot drift away
+/// from the failures the executor actually raises.
+fn request_error_result(
+  sdl: &str,
+  query: &str,
+  operation: Option<&str>,
+  limits: Limits,
+) -> (StartError, RequestErrorResult<J>) {
+  let (schema, document) = compile(sdl, query);
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  let error = executor
+    .start(&mut space, operation, obj(vec![]))
+    .expect_err("the operation does not resolve");
+  (error, RequestErrorResult::new(executor.limits(), error))
+}
+
+/// Every refusal `start` can raise becomes a result whose `errors` is the non-empty list §7.1.3
+/// requires, carrying that refusal's own §7.1.6 `message`.
+///
+/// One case per refusal and not one case, because the list's *content* is the only thing a
+/// serialiser writes and a result that reported the same error for two different refusals would
+/// still be a non-empty list. The message is compared against the refusal's own `Display` rather
+/// than against a transcribed string: the wording is prose that may be improved, and what has to
+/// hold is that the entry is this error's and not a neighbour's.
+///
+/// **Five of `StartError`'s six variants, and the sixth is unreachable from here rather than
+/// omitted.** `NoQueryRoot` needs a schema with no query root, and `Schema::build` refuses one —
+/// `MissingQueryRootOperationType`, observed — so there is no built `Schema` that can produce it
+/// and no `Executor` to raise it. That is what `StartError`'s own header means by `start` being
+/// total over the schemas it is handed: the variant exists for a schema representation this crate
+/// does not construct, not for a request a client can send.
+#[test]
+fn the_errors_entry_is_the_one_refusal_start_raised() {
+  let both = "type Query { a: String } type Mutation { m: String }";
+  for (sdl, query, operation, expected) in [
+    (
+      both,
+      "query one { a } query two { a }",
+      None,
+      StartError::AmbiguousOperation,
+    ),
+    (
+      both,
+      "query one { a }",
+      Some("two"),
+      StartError::UnknownOperation,
+    ),
+    (
+      both,
+      "subscription { m }",
+      None,
+      StartError::NotAQueryOrMutation,
+    ),
+    (
+      both,
+      "fragment F on Query { a }",
+      None,
+      StartError::NoOperation,
+    ),
+    (
+      "type Query { a: String }",
+      "mutation { m }",
+      None,
+      StartError::NoMutationRoot,
+    ),
+  ] {
+    let (raised, result) = request_error_result(sdl, query, operation, Limits::default());
+    assert_eq!(raised, expected);
+    assert_eq!(result.error(), expected);
+
+    let mut errors = result.errors();
+    assert_eq!(
+      errors.len(),
+      1,
+      "§7.1.3 requires a non-empty list, and this crate raises exactly one request error"
+    );
+    let entry = errors.next().expect("non-empty by construction");
+    assert_eq!(entry, expected);
+    assert_eq!(
+      entry.to_string(),
+      expected.to_string(),
+      "§7.1.6's one `must` is `message`, and it has to be this refusal's"
+    );
+    assert!(errors.next().is_none(), "and there is no second entry");
+    assert!(
+      result.extensions().is_none(),
+      "a freshly built result has no §7.1.7 entry, which is a different response from an empty map"
+    );
+  }
+}
+
+/// The second §7.1.7 site carries the driver's map entry for entry, unread, and gives it back.
+///
+/// The same three states the execution result has — absent, present-and-empty, present-with-entries
+/// — because §7.1.7 draws the same line on both: the entry is optional, and an empty map is a map.
+#[test]
+fn the_result_carries_the_second_extensions_site() {
+  let sdl = "type Query { greeting: String }";
+  let query = "query A { greeting } query B { greeting }";
+  let (_, mut result) = request_error_result(sdl, query, None, Limits::default());
+
+  assert!(
+    result.extensions().is_none(),
+    "absent until one is attached"
+  );
+
+  let empty = Extensions::new(&Limits::default());
+  assert!(
+    result
+      .set_extensions(empty)
+      .expect("under the ceilings")
+      .is_none(),
+    "nothing was displaced"
+  );
+  let carried = result.extensions().expect("present, and empty");
+  assert!(carried.is_empty());
+
+  let displaced = result
+    .set_extensions(ext_map(vec![
+      ("tookMs", J::Int(3)),
+      ("trace", J::Str("9f2c".to_owned())),
+    ]))
+    .expect("under the ceilings")
+    .expect("the empty map comes back rather than being dropped");
+  assert!(displaced.is_empty());
+
+  let carried = result.extensions().expect("present, with entries");
+  assert_eq!(
+    carried
+      .iter()
+      .map(|(key, value)| (key.to_owned(), value.clone()))
+      .collect::<Vec<_>>(),
+    vec![
+      ("tookMs".to_owned(), J::Int(3)),
+      ("trace".to_owned(), J::Str("9f2c".to_owned())),
+    ],
+    "entry for entry and in order: §7.1.7 reserves the contents, so nothing between reads one"
+  );
+
+  let taken = result.take_extensions().expect("the map comes back");
+  assert_eq!(taken.len(), 2);
+  assert!(
+    result.extensions().is_none(),
+    "and absence is not a one-way door: the result carries no entry again"
+  );
+}
+
+/// A map built under a laxer `Limits` is refused by whichever ceiling it passed, and comes back.
+///
+/// **The two ceilings are checked separately and each case is over exactly one of them**, because a
+/// refusal that read one ceiling for both would pass a case whose map is over the other, and would
+/// name the wrong knob on the one it caught. That is the same defect the pair exists for on the
+/// insert path: a budget on one factor of a product bounds nothing, and a *diagnosis* on one factor
+/// repairs nothing.
+#[test]
+fn a_map_built_under_laxer_limits_is_refused_and_names_the_ceiling() {
+  let sdl = "type Query { greeting: String }";
+  let query = "query A { greeting } query B { greeting }";
+
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1024).expect("not zero"),
+    ..Limits::default()
+  };
+  // One strict `Limits` per ceiling, each leaving the other wide, so the case that trips one cannot
+  // have tripped the other on the way past.
+  let strict_entries = Limits {
+    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1024).expect("not zero"),
+    ..Limits::default()
+  };
+  let strict_bytes = Limits {
+    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(4).expect("not zero"),
+    ..Limits::default()
+  };
+
+  for (label, limits, entries, expected) in [
+    (
+      "three entries under a ceiling of two, keys well inside the byte ceiling",
+      strict_entries,
+      vec![("a", J::Int(1)), ("b", J::Int(2)), ("c", J::Int(3))],
+      Ceiling::Entries,
+    ),
+    (
+      "one entry under a ceiling of sixty-four, whose key is over the byte ceiling",
+      strict_bytes,
+      vec![("abcdefgh", J::Int(1))],
+      Ceiling::KeyBytes,
+    ),
+  ] {
+    let (_, mut result) = request_error_result(sdl, query, None, limits);
+
+    let mut map = Extensions::new(&lax);
+    for (key, value) in &entries {
+      map
+        .insert(key, value.clone())
+        .expect("the lax map has room");
+    }
+    let refused = result
+      .set_extensions(map)
+      .expect_err("the map is over one of this result's ceilings");
+    assert_eq!(refused.ceiling(), expected, "{label}");
+    assert_eq!(
+      refused.ceiling().field(),
+      match expected {
+        Ceiling::Entries => "max_extension_entries",
+        _ => "max_extension_key_bytes",
+      },
+      "the refusal has to name the knob the caller can move"
+    );
+
+    let back = refused.into_extensions();
+    assert_eq!(
+      back.len(),
+      entries.len(),
+      "and the map comes back whole: an entry's value may be a handle, and a refusal that closed \
+       one would have done more than refuse"
+    );
+    assert!(
+      result.extensions().is_none(),
+      "nothing was retained by the result that refused it"
+    );
+  }
+}
+
+/// A refusal hands the driver's values back rather than dropping them, and so does a take.
+///
+/// The `Drop` counter is the only instrument that can tell those apart from a value that was never
+/// kept, which is why this case is here rather than beside the container.
+#[test]
+fn a_refused_or_taken_map_releases_nothing_of_the_drivers() {
+  let query = r#"{ echo(text: "x") }"#;
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::with_limits(
+    &held.schema,
+    &held.document,
+    Limits {
+      max_extension_entries: NonZeroU32::new(1).expect("not zero"),
+      ..Limits::default()
+    },
+  );
+  // A refusal `start` raises on this executor, so the result's ceilings are the ones above.
+  let error = executor
+    .start(&mut space, Some("Absent"), Counted::obj(&held.tree))
+    .expect_err("the document has no operation with that name");
+  let mut result: RequestErrorResult<Counted> = RequestErrorResult::new(executor.limits(), error);
+  let before = held.tree.get();
+
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(8).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut over = Extensions::new(&lax);
+  over.insert("a", Counted::obj(&held.tree)).expect("room");
+  over.insert("b", Counted::obj(&held.tree)).expect("room");
+  assert_eq!(
+    held.tree.get(),
+    before + 2,
+    "both values are alive, which is what makes the refusal below something to measure"
+  );
+
+  let refused = result
+    .set_extensions(over)
+    .expect_err("two entries under a ceiling of one");
+  assert_eq!(
+    held.tree.get(),
+    before + 2,
+    "still alive: the refused map is the caller's, not dropped inside the result"
+  );
+  drop(refused.into_extensions());
+  assert_eq!(
+    held.tree.get(),
+    before,
+    "and released when the driver drops it"
+  );
+
+  let mut fits = Extensions::new(executor.limits());
+  fits.insert("a", Counted::obj(&held.tree)).expect("room");
+  result.set_extensions(fits).expect("one entry under one");
+  assert_eq!(held.tree.get(), before + 1);
+
+  // The take is read *before* the drop, and that ordering is the whole of this half. A `take` that
+  // cleared the field and answered `None` would drop the value inside the result and leave the
+  // counter at exactly the number a correct hand-back leaves it at once the driver drops the map —
+  // so an assertion written only after the drop passes either way, which is a gate that proves
+  // nothing.
+  let taken = result.take_extensions().expect("the map comes back");
+  assert_eq!(
+    held.tree.get(),
+    before + 1,
+    "still alive: handed to the driver rather than dropped inside the result"
+  );
+  assert_eq!(taken.len(), 1, "and whole");
+  drop(taken);
+  assert_eq!(
+    held.tree.get(),
+    before,
+    "released when the driver drops it, rather than held until the result is"
+  );
 }

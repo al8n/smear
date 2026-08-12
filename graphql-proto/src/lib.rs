@@ -41,7 +41,14 @@
 //! owns representation.** Which fields are collected, in what order they complete, where a null
 //! propagates to and which path an error carries are all `proto`'s. What an `Int` is, is not.
 //!
-//! # The response is a map with three entries, and this crate holds all three
+//! # Two of §7.1's three result kinds are here
+//!
+//! §7.1 *Response Format* defines a *response* as "either an *execution result*, a *response
+//! stream*, or a *request error result*". [`Response`] is the first and [`RequestErrorResult`] is
+//! the third; the second is §7.1.2's response stream, which is a subscription's and arrives with
+//! §6.2.3.
+//!
+//! # The execution result is a map with three entries, and this crate holds all three
 //!
 //! Draft §7.1.8 *Additional Entries* closes it: an execution result "must not contain any entries
 //! other than those described above", so [`Response`] is the whole shape rather than a part of it.
@@ -58,11 +65,13 @@
 //! nothing here reads. That makes `"extensions": null`, a scalar or a list a type error rather than
 //! a rule a driver is asked to keep.
 //!
-//! There is a **second** response-level site this crate does not reach. §7.1.3's *request error
-//! result* also admits `extensions`, and [`Executor::start`] can refuse a **valid** document —
-//! ambiguity between two named operations is a §6.1 `GetOperation` failure, not a validation one.
-//! `start` returns [`StartError`] with no response object, so that shape is the driver's to build.
-//! [`StartError`]'s header says what closing the gap would take and why it is not closed here.
+//! §7.1.7 has a **second** response-level site, and it is [`RequestErrorResult`]'s: the entry is
+//! admitted by "an *execution result* or *request error result*", and [`Executor::start`] can
+//! refuse a **valid** document — ambiguity between two named operations is a §6.1 `GetOperation`
+//! failure, not a validation one. `start` still returns [`StartError`] and builds no response, so
+//! the result is a value the driver constructs from the refusal it was handed, under the ceilings
+//! of the executor that refused. That type's header has the four things §7.1.3 demands and how
+//! each one is made structural.
 //!
 //! **The numbers moved, so the titles are given with them.** The draft renumbered §7.1 when it
 //! separated the result kinds and added *Response Position*: `Data` and `Errors` were §7.1.1 and
@@ -251,6 +260,7 @@ mod error;
 mod execute;
 mod extensions;
 mod request;
+mod request_error;
 mod response;
 mod values;
 
@@ -258,6 +268,7 @@ pub use error::{Error, Kind};
 pub use execute::{Executor, Limits, Response, SetExtensionsError, StartError};
 pub use extensions::{Ceiling, Extensions, Full};
 pub use request::{Argument, ArgumentSource, FieldRequest, ReqId};
+pub use request_error::{RequestErrorResult, TooLarge};
 pub use response::{Children, Node, Path, PathIter, Segment};
 pub use values::{Leaf, Values};
 
