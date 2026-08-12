@@ -41,12 +41,19 @@
 //! owns representation.** Which fields are collected, in what order they complete, where a null
 //! propagates to and which path an error carries are all `proto`'s. What an `Int` is, is not.
 //!
-//! # Two of §7.1's three result kinds are here
+//! # All three of §7.1's result kinds are here, and one of them is not a map
 //!
 //! §7.1 *Response Format* defines a *response* as "either an *execution result*, a *response
-//! stream*, or a *request error result*". [`Response`] is the first and [`RequestErrorResult`] is
-//! the third; the second is §7.1.2's response stream, which is a subscription's and arrives with
-//! §6.2.3.
+//! stream*, or a *request error result*". [`Response`] is the first, [`RequestErrorResult`] is the
+//! third, and [`ResponseStream`] is the second.
+//!
+//! The second is shaped differently from the other two and the type says so. §7.1.1 and §7.1.3 each
+//! specify a **map** with a named set of entries, so each is a type holding those entries. §7.1.2
+//! specifies neither: "A response stream must be a stream of *execution result*" — a sequence over
+//! time, which a crate owning no stream cannot hold. So [`ResponseStream`] is the stream's *state*,
+//! the sequence is successive [`Response`]s out of
+//! [`poll_response`](Executor::poll_response), and the three things §7.1.2 says are each
+//! structural rather than documented. `subscribe.rs`'s header has that argument in full.
 //!
 //! # The execution result is a map with three entries, and this crate holds all three
 //!
@@ -85,7 +92,8 @@
 //!
 //! # Scope
 //!
-//! Queries and mutations. Draft §6.2.2's serial rule for a mutation's top-level fields is expressed
+//! Draft §6.2's three operations, as three values of one at-most-one phase inside one
+//! [`Executor`] — not three types. Draft §6.2.2's serial rule for a mutation's top-level fields is expressed
 //! by *withholding*: [`poll_resolve`](crate::Executor::poll_resolve) offers one of them and
 //! keeps the next off the ready chain until that one's whole subtree is **complete or cancelled**,
 //! so the ordering is structural rather than a contract a driver could forget to honour. Everything
@@ -106,9 +114,17 @@
 //! [`max_in_flight`](crate::Limits::max_in_flight) bounds them at one below itself. The
 //! cost is concurrency, down to a floor of one request at a time, and never progress.
 //!
-//! A `subscription` is refused by [`Executor::start`] with
-//! [`StartError::NotAQueryOrMutation`]: draft §6.2.3
-//! delivers a *stream* of responses over a source event stream, and this surface delivers one.
+//! Draft §6.2.3's subscription is the third value of that phase, and the same surface serves it.
+//! [`Executor::start`] runs §6.2.3.1 `CreateSourceEventStream` and begins no execution;
+//! [`Executor::source_field`] is what the driver calls `ResolveFieldEventStream` with, because
+//! resolving is the driver's; and each source event handed to
+//! [`Executor::handle_source_event`] is one whole execution whose result comes out of
+//! [`poll_response`](Executor::poll_response) like any other. §6.2.3.2's ordering — one execution
+//! result per event, in source order — is owned by the machine rather than published as a rule: the
+//! intake refuses the next event while the previous result is undelivered, which is draft §6.2.2's
+//! withholding applied one level up. `subscribe.rs`'s header has the division of labour, the
+//! `graphql-js` measurement behind the serial intake, and what a subscription retains between
+//! events, which is nothing that holds a driver value.
 //!
 //! Draft §6.1 `CoerceVariableValues` is the driver's: values reaching [`Values::variable`] are
 //! already coerced against their declared types.
@@ -262,14 +278,16 @@ mod extensions;
 mod request;
 mod request_error;
 mod response;
+mod subscribe;
 mod values;
 
 pub use error::{Error, Kind};
 pub use execute::{Executor, Limits, Response, SetExtensionsError, StartError};
 pub use extensions::{Ceiling, Extensions, Full};
-pub use request::{Argument, ArgumentSource, FieldRequest, ReqId};
+pub use request::{Argument, ArgumentSource, FieldRequest, ReqId, SourceField};
 pub use request_error::{RequestErrorResult, TooLarge};
 pub use response::{Children, Node, Path, PathIter, Segment};
+pub use subscribe::{ResponseStream, SourceEventError};
 pub use values::{Leaf, Values};
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
