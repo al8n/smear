@@ -29,6 +29,16 @@
 //! of order, so this file cannot decay into supplying in document order and passing for the wrong
 //! reason.
 //!
+//! That premise is read **one response map at a time**, and a global timeline cannot stand in for
+//! it. A whole-run supply sequence differs from the document's serialized key sequence whatever the
+//! driver does, because the serialization is depth-first while the run is level-by-level — a parent
+//! has to resolve before its children exist to be offered. A whole-run `!=` is therefore satisfied
+//! by the shape of execution rather than by any permutation, and it stays satisfied when every
+//! sibling set arrives in perfect document order: it cannot tell a permuted run from a driver that
+//! has drifted back into answering each offer as it takes it. Per map there is no such slack. A
+//! map's children are offered together, the document gives them exactly one order, and requiring
+//! the arrival order to differ from it is a statement about permutation and nothing else.
+//!
 //! # Aliases, and depth
 //!
 //! The response key is the *alias* when a field has one, and the alias is what a consumer compares
@@ -169,9 +179,14 @@ struct Run {
   keys: Vec<String>,
   /// `data`, serialised — keys *and* the values sitting under them.
   data: String,
-  /// The same dotted paths, in the order the driver supplied their results. The premise of every
-  /// case here, and asserted rather than assumed.
-  supplied: Vec<String>,
+  /// Per response map — the root's under the empty path — the response keys of that map's children
+  /// in the order the driver supplied their results. The premise of every case here, and asserted
+  /// rather than assumed.
+  ///
+  /// A map is the unit because it is the unit the property is about, and because it is the only
+  /// unit a premise can be phrased in: see the module header on why one flat sequence for the whole
+  /// run says nothing.
+  supplied: Vec<(String, Vec<String>)>,
 }
 
 /// Runs `query` to completion against [`SDL`], answering each batch of offers in reverse.
@@ -188,7 +203,7 @@ fn drive_backwards(query: &str) -> Run {
     .start(&mut space, None, Value::Object)
     .expect("the operation resolves");
 
-  let mut supplied = Vec::new();
+  let mut supplied: Vec<(String, Vec<String>)> = Vec::new();
   loop {
     // Take every offer that is available right now. The `FieldRequest` borrows the executor, so
     // each one is reduced to the three owned facts the answer needs before the next poll.
@@ -210,7 +225,8 @@ fn drive_backwards(query: &str) -> Run {
       } else {
         Value::Text(path.clone())
       };
-      supplied.push(path);
+      let (parent, key) = parent_and_key(&path);
+      record(&mut supplied, parent, key);
       executor.handle_resolved(&mut space, id, value);
     }
   }
@@ -281,8 +297,22 @@ fn render(node: &Node<'_, Value>) -> String {
   }
 }
 
-/// Asserts the run's premise against the **document's** order, before anything is asserted about
-/// the response's.
+/// The response map a path sits in, and its response key within that map: `a.p` is `p` under `a`,
+/// and `a` is `a` under the root, whose path is empty.
+fn parent_and_key(path: &str) -> (&str, &str) {
+  path.rsplit_once('.').unwrap_or(("", path))
+}
+
+/// Appends `key` to `parent`'s map, creating that map the first time the parent is seen.
+fn record(maps: &mut Vec<(String, Vec<String>)>, parent: &str, key: &str) {
+  match maps.iter().position(|(name, _)| name == parent) {
+    Some(index) => maps[index].1.push(key.to_owned()),
+    None => maps.push((parent.to_owned(), vec![key.to_owned()])),
+  }
+}
+
+/// Asserts the run's premise against the **document's** order, one response map at a time, before
+/// anything is asserted about the response's.
 ///
 /// Deliberately not a comparison with `run.keys`. Under a correct executor the two questions have
 /// the same answer, and under a completion-ordered one they do not — the response order becomes the
@@ -290,22 +320,68 @@ fn render(node: &Node<'_, Value>) -> String {
 /// fixture where the truth is a broken product. Phrased against the document it stays green exactly
 /// when the fixture is sound, and the case's own assertion is left to say what went wrong.
 ///
-/// Both halves are load-bearing. Without the second, a fixture whose driver quietly began supplying
-/// in document order would keep passing while testing nothing; without the first, a run that
-/// dropped or duplicated a position would satisfy the second by accident.
-fn assert_permuted(run: &Run, document_order: &[&str]) {
+/// `supply_order` names, per map, the order that map's children were expected to arrive in, and the
+/// run's table has to equal it exactly. What is deliberately *not* pinned is the interleaving
+/// between maps: the parents are matched by name rather than by position, because when one map's
+/// children arrive is a fact about depth scheduling, while the order they arrive in is the fact
+/// this file is about. A driver that finished one map before polling for the next would have
+/// permuted every sibling set just as thoroughly.
+///
+/// The loop is what stops `supply_order` from being repaired into a lie. A hand-written table is a
+/// non-vacuity premise only because a reader knows what the document said, so the same sentence is
+/// asked of the machine: per map, the keys that arrived must be exactly that map's children — which
+/// is where a dropped or duplicated position is caught — and must not be in the document's order.
+/// A later round that meets a red premise by copying the run's new order into the table therefore
+/// cannot make it green if that new order is the document's, which is the one outcome the table
+/// exists to exclude.
+fn assert_permuted(run: &Run, document_order: &[&str], supply_order: &[(&str, &[&str])]) {
+  // The document's own reading of each map, derived from the sequence the case already declares
+  // rather than written out a second time and left to drift from it.
+  let mut declared: Vec<(String, Vec<String>)> = Vec::new();
+  for path in document_order {
+    let (parent, key) = parent_and_key(path);
+    record(&mut declared, parent, key);
+  }
+
   let mut supplied = run.supplied.clone();
-  let mut declared: Vec<&str> = document_order.to_vec();
-  supplied.sort_unstable();
-  declared.sort_unstable();
+  let mut expected: Vec<(String, Vec<String>)> = supply_order
+    .iter()
+    .map(|(parent, keys)| {
+      (
+        (*parent).to_owned(),
+        keys.iter().map(|key| (*key).to_owned()).collect(),
+      )
+    })
+    .collect();
+  supplied.sort_by(|left, right| left.0.cmp(&right.0));
+  expected.sort_by(|left, right| left.0.cmp(&right.0));
   assert_eq!(
-    supplied, declared,
-    "the driver answered exactly the positions the document names"
+    supplied, expected,
+    "each response map's children arrived in the order this case names"
   );
-  assert_ne!(
-    run.supplied, document_order,
-    "the driver must complete out of document order, or this case asserts nothing"
+
+  assert_eq!(
+    expected.len(),
+    declared.len(),
+    "the case names a supply order for every map the document has, and for no map it does not"
   );
+  for (parent, children) in &declared {
+    let Some((_, arrival)) = expected.iter().find(|(name, _)| name == parent) else {
+      panic!("the case names no supply order for the `{parent}` map");
+    };
+    let mut sorted_arrival = arrival.clone();
+    let mut sorted_children = children.clone();
+    sorted_arrival.sort_unstable();
+    sorted_children.sort_unstable();
+    assert_eq!(
+      sorted_arrival, sorted_children,
+      "the `{parent}` map was supplied exactly the children the document gives it"
+    );
+    assert_ne!(
+      arrival, children,
+      "the `{parent}` map must be supplied out of document order, or it asserts nothing"
+    );
+  }
 }
 
 /// Parses an SDL and a query into the two borrows an [`Executor`] is built from.
@@ -339,6 +415,8 @@ fn compile<'q>(sdl: &str, query: &'q str) -> (Schema, ExecutableDocument<&'q str
 #[test]
 fn root_response_keys_are_the_document_s_order_and_not_the_driver_s() {
   const DOCUMENT_ORDER: [&str; 3] = ["a", "b", "c"];
+  // The one map this fixture has, and the driver hands it back to front.
+  const SUPPLY_ORDER: [(&str, &[&str]); 1] = [("", &["c", "b", "a"])];
 
   let run = drive_backwards(
     r"{
@@ -348,7 +426,7 @@ fn root_response_keys_are_the_document_s_order_and_not_the_driver_s() {
     }",
   );
 
-  assert_permuted(&run, &DOCUMENT_ORDER);
+  assert_permuted(&run, &DOCUMENT_ORDER, &SUPPLY_ORDER);
   assert_eq!(
     run.keys, DOCUMENT_ORDER,
     "the response key sequence is the document's"
@@ -367,6 +445,14 @@ fn nested_response_keys_are_the_document_s_order_at_every_depth() {
   const DOCUMENT_ORDER: [&str; 12] = [
     "a", "a.p", "a.q", "a.r", "b", "b.p", "b.q", "b.r", "c", "c.p", "c.q", "c.r",
   ];
+  // Four maps, every one of them handed back to front — which is the whole of what this case needs
+  // to be true before its own assertions mean anything, and which no single sequence can say.
+  const SUPPLY_ORDER: [(&str, &[&str]); 4] = [
+    ("", &["c", "b", "a"]),
+    ("a", &["r", "q", "p"]),
+    ("b", &["r", "q", "p"]),
+    ("c", &["r", "q", "p"]),
+  ];
 
   let run = drive_backwards(
     r"{
@@ -376,7 +462,7 @@ fn nested_response_keys_are_the_document_s_order_at_every_depth() {
     }",
   );
 
-  assert_permuted(&run, &DOCUMENT_ORDER);
+  assert_permuted(&run, &DOCUMENT_ORDER, &SUPPLY_ORDER);
   assert_eq!(
     run.keys, DOCUMENT_ORDER,
     "the response key sequence is the document's, outer and inner alike"
