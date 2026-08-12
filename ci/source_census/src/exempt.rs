@@ -71,6 +71,14 @@ pub struct Exemption {
   pub reason: &'static str,
 }
 
+const EXTENSION_KEY: &str = "A draft §7.1.7 `extensions` key, which is not source text: it is a \
+     string the *service* mints at response time to label its own protocol extension, and §7.1.7 \
+     puts the entry's contents under no restriction at all, lexical ones included. Nothing about \
+     it comes out of the document, so there is no source representation for it to be generic \
+     over — a driver holding its document as `&[u8]` still writes `\"tracing\"` here. Test 3 does \
+     not acquit it because `Extensions<V>` is parameterised by the driver's *value* type and has \
+     no source type to hold.";
+
 /// The three lossless roots of each dialect, `fn(&str) -> Parse`.
 const LOSSLESS_ROOT: &str = "The materialization door: it builds a rowan green tree, and rowan's \
    `GreenNodeBuilder::token` takes `&str`, so UTF-8 binds SOMEWHERE on this path. Whether it \
@@ -321,11 +329,11 @@ pub const EXEMPTIONS: &[Exemption] = &[
   },
   // ── Not narrowings: the rule's default-convict misfiring ─────────────────────────────────────
   //
-  // Two, out of the two dozen narrowed parameters this table records over a public surface of
+  // A small minority of the narrowed parameters this table records, over a public surface of
   // several hundred entries. The proportion is the evidence for the rule rather than a note about
-  // it: a rule needing an exemption for every second entry would be the wrong rule. The exact
-  // counts are deliberately not written here — the run prints both on its own summary line, and a
-  // pair copied into a comment goes stale on the next public item anyone adds, as this one had.
+  // it: a rule needing an exemption for every second entry would be the wrong rule. The counts are
+  // deliberately not written here — the run prints them on its own summary line, and a number
+  // copied into a comment goes stale on the next public item anyone adds, as this one twice had.
   Exemption {
     module: "smear::validator::schema::repr::location",
     entry: "DirectiveLocation::from_name",
@@ -348,6 +356,31 @@ pub const EXEMPTIONS: &[Exemption] = &[
              around it — `[Foo!]!`. It comes out of the schema's own name arena, so it is this \
              crate's `&str` and not the caller's buffer. Test 3 does not acquit it because \
              `PackedType` is a `u32` bitfield with no source type to hold.",
+  },
+  // ── §7.1.7 `extensions`, whose keys are the service's and not the document's ─────────────────
+  Exemption {
+    module: "smear::proto::extensions",
+    entry: "Extensions::insert",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: EXTENSION_KEY,
+  },
+  Exemption {
+    module: "smear::proto::extensions",
+    entry: "Extensions::get",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: EXTENSION_KEY,
+  },
+  Exemption {
+    module: "smear::proto::extensions",
+    entry: "Extensions::remove",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: EXTENSION_KEY,
   },
 ];
 

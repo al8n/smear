@@ -29,7 +29,8 @@ use smear::{
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   proto::{
-    ArgumentSource, Executor, Kind, Leaf, Limits, Node, ReqId, Response, StartError, Values,
+    ArgumentSource, Ceiling, Executor, Extensions, Kind, Leaf, Limits, Node, ReqId, Response,
+    SetExtensionsError, StartError, Values,
   },
   validator::{Budget, First, Schema, Scratch, validate_executable},
 };
@@ -5266,4 +5267,681 @@ fn top_level_fields_reached_through_a_fragment_are_still_serial() {
   executor.handle_resolved(&mut space, text, J::Str("1".to_owned()));
   let (path, _) = offer(&mut executor, &mut space).expect("`two`");
   assert_eq!(path, "two");
+}
+
+// ------------------------------------------------------------------------------------------
+// draft §7.1.7 `extensions`
+// ------------------------------------------------------------------------------------------
+//
+// §7.1.7 makes one structural demand — "if set, must have a map as its value" — and then stops:
+// "there are no additional restrictions on its contents". So there is nothing here to test about a
+// map's contents, because the executor never reads one. What is testable is the part §7 does
+// specify — presence, and that absent and present-and-empty are two responses — plus the two
+// systems the container had to join: `Limits`'s budget and the operation lifecycle.
+//
+// The release cases belong in this file for the reason the rest of the held-value cases do: the map
+// holds driver values the response tree does not, so only a `Drop` counter can tell a release from
+// a value that was never kept. The entry-point protocol itself has its own gate in
+// `graphql-proto/src/execute/tests.rs`, which reads the method set out of the source.
+
+const EXT_SDL: &str = r#"
+type Query {
+  greeting: String
+}
+"#;
+
+/// Runs `{ greeting }` to completion, letting `attach` touch the executor between `start` and the
+/// response, and hands the finished response to `take`.
+///
+/// The window is where a service computes an extensions map: timings, cost and cache hints are all
+/// facts about an execution that has already happened. It is also the only phase in which
+/// `set_extensions` is legal, which the cases below pin from both sides.
+fn ext_run<T>(
+  attach: impl FnOnce(&mut Executor<'_, &str, Space>),
+  take: impl FnOnce(&Response<'_, J>) -> T,
+) -> T {
+  let (schema, document) = compile(EXT_SDL, "{ greeting }");
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(
+      &mut space,
+      None,
+      obj(vec![("greeting", J::Str("hi".to_owned()))]),
+    )
+    .expect("the operation resolves");
+
+  attach(&mut executor);
+
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    let name = request.name();
+    let value = request.parent_value().get(name).cloned().unwrap_or(J::Null);
+    executor.handle_resolved(&mut space, id, value);
+  }
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  take(&response)
+}
+
+/// Reads the `extensions` entry as `(key, value)` pairs, and `data` alongside so the run is known
+/// to be real.
+fn ext_of(response: &Response<'_, J>) -> Option<Vec<(String, J)>> {
+  assert_eq!(render(&response.data()), r#"{"greeting":"hi"}"#);
+  assert_eq!(response.error_count(), 0);
+  response.extensions().map(|extensions| {
+    extensions
+      .iter()
+      .map(|(key, value)| (key.to_owned(), value.clone()))
+      .collect()
+  })
+}
+
+/// A map under the default ceilings, filled from `entries`.
+fn ext_map(entries: Vec<(&str, J)>) -> Extensions<J> {
+  let limits = Limits::default();
+  let mut map = Extensions::new(&limits);
+  for (key, value) in entries {
+    map.insert(key, value).expect("well under the ceilings");
+  }
+  map
+}
+
+/// Draft §7.1.1 makes the entry optional, so a response nobody attached a map to has no such key.
+#[test]
+fn a_response_has_no_extensions_entry_unless_one_is_attached() {
+  assert_eq!(ext_run(|_| {}, ext_of), None);
+}
+
+/// The map reaches the response entry for entry and in order, because nothing between reads it.
+#[test]
+fn an_attached_map_reaches_the_response_unread() {
+  let seen = ext_run(
+    |executor| {
+      let mut extensions = Extensions::new(executor.limits());
+      extensions.insert("tracing", J::Int(7)).expect("room");
+      extensions
+        .insert("nested", obj(vec![("deep", J::Bool(true))]))
+        .expect("room");
+      assert!(
+        executor
+          .set_extensions(extensions)
+          .expect("an operation is running")
+          .is_none(),
+        "nothing was attached before this"
+      );
+    },
+    ext_of,
+  );
+  assert_eq!(
+    seen,
+    Some(vec![
+      ("tracing".to_owned(), J::Int(7)),
+      ("nested".to_owned(), obj(vec![("deep", J::Bool(true))])),
+    ]),
+    "insertion order, and the driver's own values under the keys"
+  );
+}
+
+/// Present-and-empty and absent are two responses, and neither is the other.
+///
+/// `{"extensions": {}}` and a response with no `extensions` key are both legal — §7.1.1 makes the
+/// entry optional and §7.1.7 puts no restriction on a map's contents, an empty one included — and
+/// they are different documents. Collapsing them is the defect this case exists to fail, and the
+/// `Option` is the only thing that separates them: an empty `Extensions` is a *present* entry.
+#[test]
+fn an_empty_map_is_present_and_is_not_the_absent_case() {
+  let present = ext_run(
+    |executor| {
+      executor
+        .set_extensions(Extensions::new(executor.limits()))
+        .expect("an operation is running");
+    },
+    ext_of,
+  );
+  assert_eq!(present, Some(Vec::new()), "present, and empty");
+  assert_ne!(
+    present,
+    ext_run(|_| {}, ext_of),
+    "an empty map is an entry; no entry is not"
+  );
+  assert!(
+    ext_run(
+      |executor| {
+        executor
+          .set_extensions(Extensions::new(executor.limits()))
+          .expect("an operation is running");
+      },
+      |response| response.extensions().expect("present").is_empty()
+    ),
+    "and it reads as empty rather than as missing"
+  );
+}
+
+/// A second map replaces the first and hands it back, so nothing is dropped without the driver
+/// seeing it.
+#[test]
+fn attaching_twice_hands_the_first_map_back() {
+  let seen = ext_run(
+    |executor| {
+      executor
+        .set_extensions(ext_map(vec![("n", J::Int(1))]))
+        .expect("running");
+      assert_eq!(
+        executor
+          .set_extensions(ext_map(vec![("n", J::Int(2))]))
+          .expect("running"),
+        Some(ext_map(vec![("n", J::Int(1))])),
+        "the replaced map comes back rather than being dropped inside the executor"
+      );
+    },
+    ext_of,
+  );
+  assert_eq!(seen, Some(vec![("n".to_owned(), J::Int(2))]));
+}
+
+/// Taking the map back returns the response to having no entry, so "absent" is not a one-way door.
+#[test]
+fn taking_the_map_back_returns_the_response_to_no_entry() {
+  let seen = ext_run(
+    |executor| {
+      executor
+        .set_extensions(ext_map(vec![("n", J::Int(1))]))
+        .expect("running");
+      assert_eq!(
+        executor.take_extensions(),
+        Some(ext_map(vec![("n", J::Int(1))]))
+      );
+      assert_eq!(
+        executor.take_extensions(),
+        None,
+        "and taking again finds nothing, rather than the map a second time"
+      );
+    },
+    ext_of,
+  );
+  assert_eq!(seen, None);
+}
+
+// ── the budget ───────────────────────────────────────────────────────────────────────────────
+
+/// A repeated key replaces, costs no allocation, and charges neither ceiling.
+///
+/// The charge half is the one worth a test rather than a comment: an `insert` that took an owning
+/// key would allocate before it could refuse, and one that charged a duplicate would let a driver
+/// exhaust the entry ceiling by writing the same key over and over.
+#[test]
+fn a_repeated_key_replaces_and_charges_nothing() {
+  let limits = Limits::default();
+  let mut map: Extensions<J> = Extensions::new(&limits);
+  assert_eq!(map.insert("k", J::Int(1)).expect("room"), None);
+  let after_first = map.key_bytes();
+
+  for value in 2..500 {
+    assert_eq!(
+      map
+        .insert("k", J::Int(value))
+        .expect("a duplicate never refuses"),
+      Some(J::Int(value - 1))
+    );
+  }
+  assert_eq!(map.len(), 1, "one key, not five hundred");
+  assert_eq!(
+    map.key_bytes(),
+    after_first,
+    "and not one byte charged again"
+  );
+  assert_eq!(map.get("k"), Some(&J::Int(499)));
+  assert_eq!(map.remove("k"), Some(J::Int(499)));
+  assert!(map.is_empty());
+  assert_eq!(map.key_bytes(), 0, "removing gives the bytes back");
+}
+
+/// The entry ceiling refuses, and hands the value back rather than dropping it.
+#[test]
+fn the_entry_ceiling_refuses_and_returns_the_value() {
+  let limits = Limits {
+    max_extension_entries: NonZeroU32::new(3).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut map: Extensions<J> = Extensions::new(&limits);
+  for index in 0..3 {
+    map
+      .insert(&format!("k{index}"), J::Int(index.into()))
+      .expect("within the ceiling");
+  }
+  let refused = map
+    .insert("one-too-many", J::Str("mine".to_owned()))
+    .expect_err("the fourth entry is refused");
+  assert_eq!(refused.ceiling(), Ceiling::Entries);
+  assert_eq!(
+    refused.into_value(),
+    J::Str("mine".to_owned()),
+    "the value comes back: a refusal that drops a handle has done more than refuse"
+  );
+  assert_eq!(map.len(), 3, "and the map is unchanged");
+}
+
+/// The key-byte ceiling refuses independently of the entry count.
+///
+/// Two ceilings and not one, because either alone bounds nothing: this map is three entries under
+/// its entry ceiling and still refused, and `an_empty_key_still_costs_an_entry` is the same
+/// argument from the other side.
+#[test]
+fn the_key_byte_ceiling_refuses_independently_of_the_entry_count() {
+  let limits = Limits {
+    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(16).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut map: Extensions<J> = Extensions::new(&limits);
+  map.insert("0123456789", J::Int(1)).expect("ten bytes");
+  assert_eq!(map.key_bytes(), 10);
+
+  let refused = map
+    .insert("also-ten-x", J::Int(2))
+    .expect_err("ten more would pass sixteen");
+  assert_eq!(refused.ceiling(), Ceiling::KeyBytes);
+  assert_eq!(
+    map.len(),
+    1,
+    "well under `max_extension_entries`, and still refused"
+  );
+  assert_eq!(
+    map.key_bytes(),
+    10,
+    "and nothing was charged for the refusal"
+  );
+}
+
+/// A zero-length key is a legal key, which is why bounding bytes alone would bound nothing.
+#[test]
+fn an_empty_key_still_costs_an_entry() {
+  let limits = Limits {
+    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1024).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut map: Extensions<J> = Extensions::new(&limits);
+  map.insert("", J::Int(0)).expect("an empty key is a key");
+  map.insert("a", J::Int(1)).expect("room");
+  assert_eq!(map.key_bytes(), 1, "the empty key charged no bytes");
+  assert_eq!(
+    map
+      .insert("b", J::Int(2))
+      .expect_err("but it did charge an entry")
+      .ceiling(),
+    Ceiling::Entries
+  );
+}
+
+/// A map built under a laxer `Limits` is refused by an executor with a stricter one.
+///
+/// The ceilings live on the map so `insert` can refuse before allocating, and that alone would make
+/// them advice — a driver picks the `Limits` it constructs with. The re-check in `set_extensions`
+/// is what turns them into a bound, and it hands the map back.
+#[test]
+fn a_map_built_under_laxer_limits_is_refused() {
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
+    ..Limits::default()
+  };
+  let strict = Limits {
+    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+
+  let (schema, document) = compile(EXT_SDL, "{ greeting }");
+  let mut space = Space::default();
+  let mut executor = Executor::with_limits(&schema, &document, strict);
+  executor
+    .start(&mut space, None, obj(vec![]))
+    .expect("the operation resolves");
+
+  let mut oversized: Extensions<J> = Extensions::new(&lax);
+  for index in 0..5 {
+    oversized
+      .insert(&format!("k{index}"), J::Int(index.into()))
+      .expect("the lax map accepts it");
+  }
+  let refused = executor
+    .set_extensions(oversized)
+    .expect_err("five entries against a ceiling of two");
+  assert!(matches!(refused, SetExtensionsError::TooLarge(_)));
+  assert_eq!(
+    refused.into_extensions().len(),
+    5,
+    "and the map comes back whole"
+  );
+}
+
+/// A map grown under a laxer `Limits` and emptied back down is *accepted*, and normalizing its
+/// allocation changes nothing a response can see.
+///
+/// The other side of the repair for the retained-capacity hole, and the side no assertion about
+/// capacity can make. `set_extensions` re-derives an accepted map's spine from its entries, and the
+/// two ways to get that wrong are both invisible to a capacity check: bounding the *content*
+/// instead of the allocation — a `truncate` where a `shrink_to_fit` belongs — passes every capacity
+/// assertion while silently dropping the driver's entries and the values under them, and a rebuild
+/// that reordered them would serialise a different map. So this case reads the entries out of the
+/// finished response, in order, with the driver's own values under the keys.
+///
+/// It is also the acceptance half of the reject-versus-normalize decision: a grown-and-emptied map
+/// is a legal §7.1.7 map, and this is the case that fails if a later round decides to refuse one.
+#[test]
+fn a_map_grown_and_emptied_is_accepted_and_reaches_the_response_unchanged() {
+  /// Well past the executor's default ceiling of 64, so the spine the map arrives holding is one
+  /// no `Limits` the executor was built with would have authorised.
+  const GROWN: usize = 512;
+
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(GROWN as u32).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
+    ..Limits::default()
+  };
+
+  let seen = ext_run(
+    |executor| {
+      let mut map: Extensions<J> = Extensions::new(&lax);
+      for index in 0..GROWN {
+        map
+          .insert(&format!("k{index}"), J::Int(index as i64))
+          .expect("the lax map accepts it");
+      }
+      for index in 0..GROWN - 3 {
+        map
+          .remove(&format!("k{index}"))
+          .expect("every key was inserted");
+      }
+      assert_eq!(
+        map.len(),
+        3,
+        "three left, well under the executor's ceiling"
+      );
+      executor
+        .set_extensions(map)
+        .expect("what it reports is under both ceilings, and how it was built is not a refusal");
+    },
+    ext_of,
+  );
+  assert_eq!(
+    seen,
+    Some(vec![
+      ("k509".to_owned(), J::Int(509)),
+      ("k510".to_owned(), J::Int(510)),
+      ("k511".to_owned(), J::Int(511)),
+    ]),
+    "every surviving entry, in insertion order, with the driver's own value still under its key"
+  );
+}
+
+// ── the lifecycle ────────────────────────────────────────────────────────────────────────────
+
+/// Attaching before `start` is refused rather than accepted and then dropped.
+///
+/// This case used to assert the opposite — that a map attached early "does not survive `start`" —
+/// which was the defect written down as behaviour. A setter that returns success for a value the
+/// very next call will release is a silent loss, and documenting it does not make it one less.
+#[test]
+fn attaching_before_start_is_refused() {
+  let (schema, document) = compile(EXT_SDL, "{ greeting }");
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+
+  let refused = executor
+    .set_extensions(ext_map(vec![("early", J::Int(1))]))
+    .expect_err("no operation is running");
+  assert!(matches!(refused, SetExtensionsError::NoOperation(_)));
+  assert_eq!(
+    refused.into_extensions().len(),
+    1,
+    "handed back, not dropped"
+  );
+
+  executor
+    .start(
+      &mut space,
+      None,
+      obj(vec![("greeting", J::Str("hi".to_owned()))]),
+    )
+    .expect("the operation resolves");
+  assert_eq!(
+    executor.take_extensions(),
+    None,
+    "and nothing was stored behind the refusal"
+  );
+}
+
+/// Attaching after delivery is refused, because no response could ever carry it.
+#[test]
+fn attaching_after_delivery_is_refused() {
+  let query = r#"{ echo(text: "x") }"#;
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+  let echo = executor.poll_resolve(&mut space).expect("echo").id();
+  executor.handle_resolved(&mut space, echo, Counted::text(&held.tree, "E"));
+  {
+    // Scoped rather than `drop`ped: `Response` holds no `Drop` impl, so the borrow is what has to
+    // end and a block is what ends it.
+    let response = executor.poll_response().expect("delivered");
+    assert!(response.extensions().is_none());
+  }
+
+  let before = held.tree.get();
+  let mut late = Extensions::new(executor.limits());
+  late
+    .insert("tookMs", Counted::obj(&held.tree))
+    .expect("room in the map");
+  assert_eq!(held.tree.get(), before + 1, "the value the map holds");
+
+  let refused = executor
+    .set_extensions(late)
+    .expect_err("the response has already been delivered");
+  assert!(matches!(refused, SetExtensionsError::AlreadyDelivered(_)));
+
+  drop(refused.into_extensions());
+  assert_eq!(
+    held.tree.get(),
+    before,
+    "the map came back and the driver dropped it — the executor retains nothing it cannot show"
+  );
+}
+
+/// `take_extensions` is legal in every phase, which is what makes its counterpart's refusals safe.
+///
+/// A driver that has its map refused after delivery still needs the values it put in the *attached*
+/// one back, and this is the channel. Refusing here too would leave them reachable only by dropping
+/// the executor.
+#[test]
+fn taking_is_legal_in_every_phase() {
+  let (schema, document) = compile(EXT_SDL, "{ greeting }");
+  let mut space = Space::default();
+  let mut executor = Executor::new(&schema, &document);
+  assert_eq!(executor.take_extensions(), None, "idle: nothing to take");
+
+  executor
+    .start(
+      &mut space,
+      None,
+      obj(vec![("greeting", J::Str("hi".to_owned()))]),
+    )
+    .expect("the operation resolves");
+  executor
+    .set_extensions(ext_map(vec![("n", J::Int(1))]))
+    .expect("running");
+
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    let name = request.name();
+    let value = request.parent_value().get(name).cloned().unwrap_or(J::Null);
+    executor.handle_resolved(&mut space, id, value);
+  }
+  {
+    // Scoped rather than `drop`ped: `Response` holds no `Drop` impl, so the borrow is what has to
+    // end and a block is what ends it.
+    let response = executor.poll_response().expect("delivered");
+    assert_eq!(
+      response.extensions().map(Extensions::len),
+      Some(1),
+      "the response carried the map"
+    );
+  }
+
+  assert_eq!(
+    executor.take_extensions(),
+    Some(ext_map(vec![("n", J::Int(1))])),
+    "delivered: the map the response carried comes back, so its values can be released"
+  );
+}
+
+// ── release ──────────────────────────────────────────────────────────────────────────────────
+
+/// The next operation releases the map's values, and the counter is the only witness there is.
+#[test]
+fn a_new_operation_releases_the_extensions_map() {
+  let query = r#"{ echo(text: "x") }"#;
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let echo = executor.poll_resolve(&mut space).expect("echo").id();
+  executor.handle_resolved(&mut space, echo, Counted::text(&held.tree, "E"));
+  let before = held.tree.get();
+
+  let mut extensions = Extensions::new(executor.limits());
+  extensions
+    .insert("a", Counted::obj(&held.tree))
+    .expect("room");
+  extensions
+    .insert("b", Counted::obj(&held.tree))
+    .expect("room");
+  executor.set_extensions(extensions).expect("running");
+  assert_eq!(
+    held.tree.get(),
+    before + 2,
+    "both values are held, which is what makes the release below something to measure"
+  );
+
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the second operation resolves");
+  assert_eq!(
+    held.tree.get(),
+    1,
+    "the second operation's root, and nothing the first one left: not its leaf, and neither value \
+     from its extensions map"
+  );
+}
+
+/// Taking the map back releases its values there and then, without waiting for the operation to
+/// end.
+#[test]
+fn taking_the_map_back_releases_its_values_immediately() {
+  let query = r#"{ echo(text: "x") }"#;
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+  let before = held.tree.get();
+
+  let mut extensions = Extensions::new(executor.limits());
+  extensions
+    .insert("a", Counted::obj(&held.tree))
+    .expect("room");
+  executor.set_extensions(extensions).expect("running");
+  assert_eq!(held.tree.get(), before + 1);
+  drop(executor.take_extensions());
+  assert_eq!(
+    held.tree.get(),
+    before,
+    "handed back and dropped by the driver, rather than kept until the next `start`"
+  );
+}
+
+/// Replacing a map releases nothing on its own — the displaced one comes back to the driver.
+#[test]
+fn replacing_a_map_hands_its_values_back_rather_than_dropping_them() {
+  let query = r#"{ echo(text: "x") }"#;
+  let (held, mut space) = watch(query, &[]);
+  let mut executor = Executor::new(&held.schema, &held.document);
+  executor
+    .start(&mut space, None, Counted::obj(&held.tree))
+    .expect("the operation resolves");
+
+  let mut first = Extensions::new(executor.limits());
+  first.insert("a", Counted::obj(&held.tree)).expect("room");
+  executor.set_extensions(first).expect("running");
+  let with_first = held.tree.get();
+
+  let mut second = Extensions::new(executor.limits());
+  second.insert("b", Counted::obj(&held.tree)).expect("room");
+  let displaced = executor
+    .set_extensions(second)
+    .expect("running")
+    .expect("the first map comes back");
+  assert_eq!(
+    held.tree.get(),
+    with_first + 1,
+    "still alive: the displaced map is the caller's now, not dropped inside the executor"
+  );
+  drop(displaced);
+  assert_eq!(held.tree.get(), with_first);
+}
+
+// ------------------------------------------------------------------------------------------
+// the second §7.1.7 site: draft §7.1.3's request error result, which this crate does not build
+// ------------------------------------------------------------------------------------------
+
+/// A **valid** document reaches the request-error path, so §7.1.3's shape is not out of reach by
+/// validity.
+///
+/// This pins a claim that was wrong and is now corrected. `Response::data` used to say the executor
+/// could not produce an absent `data` "because it is only entered with a validated document" —
+/// which reads as though validation is what rules the shape out. It is not. Draft §6.1
+/// `GetOperation` selects *which* operation to run, and that is a property of the request rather
+/// than of the document, so §5 cannot pre-empt it: two named operations and no operation name is a
+/// perfectly valid document and an unambiguous request error.
+///
+/// What actually rules the shape out is the construction — `start` refuses before any response
+/// exists, so there is nothing to hang `data`, `errors` or `extensions` on. A driver needing the
+/// §7.1.3 map assembles it itself, and `StartError`'s header says what closing that would take.
+#[test]
+fn a_valid_document_can_still_be_a_request_error_with_no_response_to_carry_it() {
+  let sdl = "type Query { greeting: String }";
+  for (query, expected) in [
+    (
+      "query A { greeting } query B { greeting }",
+      StartError::AmbiguousOperation,
+    ),
+    ("query Only { greeting }", StartError::UnknownOperation),
+  ] {
+    assert_valid(sdl, query);
+    let (schema, document) = compile(sdl, query);
+    let mut space = Space::default();
+    let mut executor = Executor::new(&schema, &document);
+
+    let name = (expected == StartError::UnknownOperation).then_some("Absent");
+    assert_eq!(
+      executor.start(&mut space, name, obj(vec![])),
+      Err(expected),
+      "a valid document, refused by draft §6.1 rather than by draft §5"
+    );
+    assert!(
+      executor.poll_response().is_none(),
+      "and there is no response object, so no `data`, no `errors` and no §7.1.7 entry"
+    );
+    assert!(
+      matches!(
+        executor.set_extensions(ext_map(vec![("k", J::Int(1))])),
+        Err(SetExtensionsError::NoOperation(_))
+      ),
+      "and the refused start left no operation for an extensions map to belong to"
+    );
+  }
 }

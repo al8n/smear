@@ -18,7 +18,7 @@ use smear_parser::{
 };
 use smear_schema::Schema;
 
-use crate::{Leaf, Node, Values};
+use crate::{Extensions, Leaf, Node, ReqId, Values};
 
 // Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
 // compiles under `--no-default-features`, where `crate::std` is `alloc` and `ToString` is not in
@@ -1166,4 +1166,825 @@ fn a_withheld_top_level_field_is_in_the_tree_and_reads_as_null() {
     "and it reads as `null`, with nothing in `errors` to account for it"
   );
   assert!(fields.next().is_none(), "and the root has no third child");
+}
+
+// ------------------------------------------------------------------------------------------
+// the entry-point protocol, derived from this file rather than remembered
+// ------------------------------------------------------------------------------------------
+
+/// What discharges the entry-point obligation for one public `&mut self` method.
+///
+/// An enum rather than a boolean because the point of the table is that a method may not simply be
+/// *omitted*: the only way out of `on_entry` is to name the alternative that does the same work.
+/// `refactor/crate-split` learned the same lesson one level up, where an exemption table of pairs
+/// to skip hid a real finding and became a table of twins to declare instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Discharge {
+  /// Calls `on_entry` first, which is the ordinary case.
+  OnEntry,
+  /// Calls `reset` first, which retires the arguments and drops the whole slot vector — the parked
+  /// object among them — so it discharges strictly more than `on_entry` does.
+  Reset,
+}
+
+impl Discharge {
+  const fn statement(self) -> &'static str {
+    match self {
+      Self::OnEntry => "self.on_entry();",
+      Self::Reset => "self.reset();",
+    }
+  }
+}
+
+/// Where an operation is when a driver calls in.
+///
+/// **The second axis of this table, and it was missing.** The first version enumerated what each
+/// entry point *releases* and stopped, which is one attribute of the answer; a method can discharge
+/// the release obligation perfectly and still be meaningless — or worse, silently lossy — in the
+/// phase it was called from. `set_extensions` was both: it accepted a map before `start`, which the
+/// next `start` then dropped, and after delivery, where no response could ever carry it. Neither is
+/// a release bug and the release axis could not see either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+  /// `!started`: before the first `start`, or after one that refused.
+  Idle,
+  /// `started && !delivered`: an operation is under way.
+  Running,
+  /// `started && delivered`: `poll_response` has yielded, and it yields at most once.
+  Delivered,
+}
+
+const ALL_PHASES: [Phase; 3] = [Phase::Idle, Phase::Running, Phase::Delivered];
+
+/// A phase test a body performs on the executor's own flags.
+///
+/// Only the two flags, because they are the only two the phase is made of, and the derivation reads
+/// *tests* rather than mentions: `start` writes `self.started = true` and `poll_response` writes
+/// `self.delivered = true`, and an assignment is not a guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Guard {
+  /// `self.started` is read, which is what keeps [`Phase::Idle`] out.
+  Started,
+  /// `self.delivered` is read, which is what keeps [`Phase::Delivered`] out.
+  Delivered,
+}
+
+impl Guard {
+  const fn field(self) -> &'static str {
+    match self {
+      Self::Started => "self.started",
+      Self::Delivered => "self.delivered",
+    }
+  }
+
+  /// The phase this guard excludes.
+  const fn excludes(self) -> Phase {
+    match self {
+      Self::Started => Phase::Idle,
+      Self::Delivered => Phase::Delivered,
+    }
+  }
+}
+
+/// One public `&mut self` method, on both axes.
+struct EntryPoint {
+  name: &'static str,
+  /// How it settles the previous call's lends.
+  discharge: Discharge,
+  /// The phases in which a call can still affect or report state.
+  meaningful: &'static [Phase],
+  /// The flag tests the body performs, checked against the source.
+  guards: &'static [Guard],
+  /// Why an excluded phase that no guard covers needs none.
+  ///
+  /// Required whenever a phase is excluded without a guard, and held to the same minimum length
+  /// `ci/source_census`'s exemption table uses, for the same reason: a reason that says nothing is
+  /// an omission with punctuation.
+  structural: &'static str,
+}
+
+/// The shortest structural reason this gate will accept, matching `ci/source_census`.
+const MIN_REASON: usize = 40;
+
+/// Every `pub fn` in `execute.rs` that takes `&mut self`, on both axes.
+///
+/// Kept in step with the source by the test below, in both directions: a method missing from here
+/// fails, and an entry here matching no method fails too. The second direction is the live canary —
+/// if the reader ever stops finding the surface, this table goes stale in the same instant rather
+/// than reporting a clean file.
+const ENTRY_PROTOCOL: &[EntryPoint] = &[
+  EntryPoint {
+    name: "start",
+    discharge: Discharge::Reset,
+    meaningful: &ALL_PHASES,
+    guards: &[],
+    structural: "",
+  },
+  EntryPoint {
+    name: "poll_resolve",
+    discharge: Discharge::OnEntry,
+    meaningful: &[Phase::Running],
+    guards: &[Guard::Started],
+    structural: "Delivered needs no test: `poll_response` only yields once the ready chain is \
+                 empty and `live` is zero, so after it has there is nothing to offer and this \
+                 answers `None` by construction rather than by check.",
+  },
+  EntryPoint {
+    name: "handle_resolved",
+    discharge: Discharge::OnEntry,
+    meaningful: &[Phase::Running],
+    guards: &[],
+    structural: "Both excluded phases are covered by the `ReqId` itself: an id is validated by \
+                 epoch and generation, `reset` moves the epoch, and delivery happens only once \
+                 every entry is free — so a call in either phase carries an id that is already \
+                 stale and is ignored.",
+  },
+  EntryPoint {
+    name: "handle_field_error",
+    discharge: Discharge::OnEntry,
+    meaningful: &[Phase::Running],
+    guards: &[],
+    structural: "The same `ReqId` validation as `handle_resolved`: epoch and generation make an id \
+                 from before a `reset`, or from after delivery, stale and ignored without any \
+                 phase flag being read.",
+  },
+  EntryPoint {
+    name: "poll_abandoned",
+    discharge: Discharge::OnEntry,
+    // Delivered on purpose: `poll_response` deliberately does not withhold on abandoned entries,
+    // so retiring them afterwards is the channel working rather than a call out of phase.
+    meaningful: &[Phase::Running, Phase::Delivered],
+    guards: &[],
+    structural: "Idle needs no test: `reset` sets the abandoned count to zero and empties the \
+                 slab, so the count is the guard and the loop is never entered.",
+  },
+  EntryPoint {
+    name: "set_extensions",
+    discharge: Discharge::OnEntry,
+    meaningful: &[Phase::Running],
+    guards: &[Guard::Started, Guard::Delivered],
+    structural: "",
+  },
+  EntryPoint {
+    name: "take_extensions",
+    discharge: Discharge::OnEntry,
+    // Every phase, and truthfully in each: before an operation and after delivery there is no map,
+    // so `None` is the right answer rather than an accepted call that cannot be honoured.
+    meaningful: &ALL_PHASES,
+    guards: &[],
+    structural: "",
+  },
+  EntryPoint {
+    name: "poll_response",
+    discharge: Discharge::OnEntry,
+    meaningful: &[Phase::Running],
+    guards: &[Guard::Started, Guard::Delivered],
+    structural: "",
+  },
+];
+
+/// This module's own source, which is where the method set comes from.
+const SOURCE: &str = include_str!("../execute.rs");
+
+/// One public method taking `&mut self`: its name, and its body.
+struct Entry<'s> {
+  name: &'s str,
+  body: &'s str,
+}
+
+/// Returns every `pub fn` in `text` whose receiver is `&mut self`.
+///
+/// Text rather than `syn`, and the trade is stated because it is the risky half of this gate. What
+/// keeps it honest is not the parser's cleverness, it is that the test plants a drift form for each
+/// branch and requires every one to be caught — a checker proven against the one example it was
+/// written for is the failure this repository has already met once.
+///
+/// Three things make the scan safe rather than merely lucky. It anchors on a newline followed by
+/// exactly two spaces and `pub `, which is an inherent-impl method and cannot be reached from
+/// inside a `///` line, whose prefix is `  /// `. The parameter list is found by paren depth. And
+/// the body ends at the first line that is exactly two spaces and a closing brace, which is where
+/// rustfmt puts the end of a method in an impl block and nowhere else — `cargo fmt --check` is a
+/// gate in this repository, so that is a guarantee rather than a hope, and it avoids brace
+/// balancing over string and char literals entirely.
+fn entry_points(text: &str) -> std::vec::Vec<Entry<'_>> {
+  /// A newline, the two-space indent of an inherent-impl method, and `pub `.
+  const ANCHOR: &str = "\n  pub ";
+  /// The line rustfmt closes such a method with.
+  const CLOSE: &str = "\n  }";
+
+  let mut found = std::vec::Vec::new();
+  let mut cursor = 0usize;
+  while let Some(at) = text[cursor..].find(ANCHOR) {
+    // The index of the `p`, which is the anchor's end less the width of `pub `.
+    let start = cursor + at + ANCHOR.len() - "pub ".len();
+    cursor = start + 1;
+    let after = &text[start..];
+
+    // `pub fn`, `pub const fn`, `pub unsafe fn`, `pub async fn` — anything else at this indent is
+    // not a method and is skipped. A form this list does not know about would be missed silently,
+    // so the selftest plants a `pub const fn` to prove the list is wide enough.
+    let Some(signature) = after.strip_prefix("pub ").and_then(|rest| {
+      ["fn ", "const fn ", "unsafe fn ", "async fn "]
+        .iter()
+        .find_map(|prefix| rest.strip_prefix(prefix))
+    }) else {
+      continue;
+    };
+    let name_len = signature
+      .find(|c: char| !c.is_alphanumeric() && c != '_')
+      .unwrap_or(signature.len());
+    let name = &signature[..name_len];
+    let tail = &signature[name_len..];
+
+    // The parameter list, by paren depth. Generic parameters come before it and open no paren.
+    let Some(open) = tail.find('(') else { continue };
+    let mut depth = 0usize;
+    let mut close = None;
+    for (index, character) in tail[open..].char_indices() {
+      match character {
+        '(' => depth += 1,
+        ')' => {
+          depth -= 1;
+          if depth == 0 {
+            close = Some(open + index);
+            break;
+          }
+        }
+        _ => {}
+      }
+    }
+    let Some(close) = close else { continue };
+
+    let receiver: std::string::String = tail[open + 1..close]
+      .split_whitespace()
+      .collect::<std::vec::Vec<_>>()
+      .join(" ");
+    if !receiver.starts_with("&mut self") {
+      continue;
+    }
+
+    // The body starts at the first brace after the signature; a return type and a `where` clause
+    // hold none.
+    let Some(brace) = tail[close..].find('{') else {
+      continue;
+    };
+    let body = &tail[close + brace + 1..];
+    let body = match body.find(CLOSE) {
+      Some(end) => &body[..end],
+      None => body,
+    };
+    found.push(Entry { name, body });
+  }
+  found
+}
+
+/// Returns whether `body`'s first statement is `statement`.
+///
+/// "Before it does anything else" is the obligation's actual wording, so first is what is checked
+/// rather than merely present. Line comments are skipped because the release call is often
+/// introduced by one.
+fn opens_with(body: &str, statement: &str) -> bool {
+  for line in body.lines() {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with("//") {
+      continue;
+    }
+    return line == statement;
+  }
+  false
+}
+
+/// Returns the phase flags `body` **reads**, which is not the same as the ones it mentions.
+///
+/// `start` writes `self.started = true` and `poll_response` writes `self.delivered = true`, and an
+/// assignment is the opposite of a guard — it is the transition the guard exists to notice. So an
+/// occurrence followed by a single `=` is skipped and one followed by anything else, `==` included,
+/// is a read.
+fn guards_read(body: &str) -> std::vec::Vec<Guard> {
+  let mut found = std::vec::Vec::new();
+  for guard in [Guard::Started, Guard::Delivered] {
+    let field = guard.field();
+    let mut cursor = 0usize;
+    while let Some(at) = body[cursor..].find(field) {
+      let rest = body[cursor + at + field.len()..].trim_start();
+      cursor += at + field.len();
+      let assignment = rest.starts_with('=') && !rest.starts_with("==");
+      if !assignment {
+        found.push(guard);
+        break;
+      }
+    }
+  }
+  found.sort_unstable();
+  found
+}
+
+/// Every public `&mut self` entry point declares how it settles the previous call and which phases
+/// it is legal in, and the source agrees with both.
+///
+/// **Two axes, because one round of review found a defect on each and they were the same mistake.**
+/// The release axis came first: `set_extensions` and `take_extensions` shipped without `on_entry`,
+/// so a driver could drop a `FieldRequest`, call one of them, and leave the argument values and a
+/// parked object value held. The phase axis came next: `set_extensions` also accepted a map before
+/// `start` — which the next `start` then dropped — and after delivery, where no response could ever
+/// carry it. Neither of those is a release bug, and a table that ranged only over releases was
+/// complete along its own axis and blind along the other.
+///
+/// That is the shape to keep in mind when a ninth entry point arrives: this table is an enumeration
+/// of *attributes of the answer*, and the failure mode is not a missing row, it is a missing
+/// column.
+#[test]
+fn every_public_entry_point_declares_its_discharge_and_its_phases() {
+  let entries = entry_points(SOURCE);
+  assert!(
+    entries.len() >= ENTRY_PROTOCOL.len(),
+    "the reader found {} public `&mut self` methods and the table names {} — a reader that has \
+     stopped finding the surface reports a clean file, so this fails instead",
+    entries.len(),
+    ENTRY_PROTOCOL.len()
+  );
+
+  for entry in &entries {
+    let Some(declared) = ENTRY_PROTOCOL.iter().find(|row| row.name == entry.name) else {
+      panic!(
+        "`{}` is a public `&mut self` entry point that `ENTRY_PROTOCOL` does not name. Every call \
+         in must settle the previous one's lends before doing anything else, and must say which \
+         phases it is legal in — see `Executor`'s header. Add the row, do not omit it.",
+        entry.name
+      );
+    };
+
+    // Axis 1: the release.
+    assert!(
+      opens_with(entry.body, declared.discharge.statement()),
+      "`{}` declares `{:?}` but its body does not open with `{}`. The obligation is \"before it \
+       does anything else\", so the call has to be first.",
+      entry.name,
+      declared.discharge,
+      declared.discharge.statement()
+    );
+
+    // Axis 2: the phase. The declared guards must be exactly the flags the body reads.
+    let read = guards_read(entry.body);
+    let mut named = declared.guards.to_vec();
+    named.sort_unstable();
+    assert_eq!(
+      read, named,
+      "`{}` declares the phase guards {:?} and its body reads {:?}. A guard the table claims and \
+       the code does not perform is a phase nothing keeps out.",
+      entry.name, named, read
+    );
+
+    // Every excluded phase is either guarded or argued for.
+    for phase in ALL_PHASES {
+      if declared.meaningful.contains(&phase) {
+        continue;
+      }
+      let guarded = declared
+        .guards
+        .iter()
+        .any(|guard| guard.excludes() == phase);
+      assert!(
+        guarded || declared.structural.len() >= MIN_REASON,
+        "`{}` is not meaningful in {phase:?}, performs no guard that excludes it, and gives no \
+         structural reason of at least {MIN_REASON} bytes saying why none is needed. A phase kept \
+         out by nothing and explained by nothing is the `set_extensions` defect again.",
+        entry.name
+      );
+    }
+
+    // A method legal everywhere has nothing to guard and nothing to argue.
+    if declared.meaningful.len() == ALL_PHASES.len() {
+      assert!(
+        declared.guards.is_empty() && declared.structural.is_empty(),
+        "`{}` is declared meaningful in every phase and yet carries a guard or a structural \
+         reason. One of the two claims is wrong.",
+        entry.name
+      );
+    }
+  }
+
+  for row in ENTRY_PROTOCOL {
+    assert!(
+      entries.iter().any(|entry| entry.name == row.name),
+      "`ENTRY_PROTOCOL` names `{}`, which is no longer a public `&mut self` method. Either it was \
+       renamed and the table is stale, or the reader stopped finding the surface.",
+      row.name
+    );
+  }
+}
+
+/// A driver value that says how many of itself are alive.
+///
+/// The in-crate twin of `smear/tests/proto_execute.rs`'s `Counted`, and it is here rather than only
+/// there because this file is where the entry-point table lives: the behavioural half has to read
+/// the same list as the derived half, and a list crossed with itself in two crates is a list that
+/// drifts.
+#[derive(Debug)]
+struct Tracked {
+  live: std::rc::Rc<core::cell::Cell<usize>>,
+  payload: Value,
+}
+
+impl Tracked {
+  fn new(live: &std::rc::Rc<core::cell::Cell<usize>>, payload: Value) -> Self {
+    live.set(live.get() + 1);
+    Self {
+      live: std::rc::Rc::clone(live),
+      payload,
+    }
+  }
+}
+
+impl Drop for Tracked {
+  fn drop(&mut self) {
+    self.live.set(self.live.get() - 1);
+  }
+}
+
+/// A space whose variable table hands each value **over**, so a live count is the executor's.
+struct Counting {
+  mint: std::rc::Rc<core::cell::Cell<usize>>,
+  variables: std::vec::Vec<(&'static str, Tracked)>,
+}
+
+impl Values for Counting {
+  type Value = Tracked;
+
+  fn is_null(&self, _: &Tracked) -> bool {
+    false
+  }
+  fn as_bool(&self, _: &Tracked) -> Option<bool> {
+    None
+  }
+  fn list_len(&self, value: &Tracked) -> Option<usize> {
+    match value.payload {
+      Value::List(len) => Some(len),
+      _ => None,
+    }
+  }
+  fn list_item(&mut self, _: &Tracked, _: usize) -> Tracked {
+    Tracked::new(&self.mint, Value::Obj)
+  }
+  fn type_name<'a>(&'a self, _: &'a Tracked) -> Option<&'a str> {
+    None
+  }
+  fn coerce_leaf(&mut self, value: Tracked, _: Leaf<'_>) -> Option<Tracked> {
+    Some(value)
+  }
+  fn variable(&mut self, name: &str) -> Option<Tracked> {
+    let index = self
+      .variables
+      .iter()
+      .position(|(declared, _)| *declared == name)?;
+    Some(self.variables.remove(index).1)
+  }
+}
+
+const LEND_SDL: &str = r#"
+type Query {
+  nest: Wrap
+}
+type Wrap {
+  echo(text: String): String
+}
+"#;
+
+/// The one query that opens **both** lends at once.
+///
+/// `nest` has exactly one child, so offering `echo` is the last enqueued child departing and parks
+/// `nest` in `deferred`; and `echo` takes a variable argument, so draft §6.4.1's checked value is
+/// sitting in `scratch_args` at the same moment.
+const LEND_QUERY: &str = r#"query ($text: String) { nest { echo(text: $text) } }"#;
+
+/// Drives an executor to the point where a dropped `FieldRequest` has left both lends open, then
+/// hands it to `call`.
+///
+/// Returns `(arguments still held, tree values still held)` after `call` returned.
+fn with_both_lends_open(
+  call: impl FnOnce(&mut Executor<'_, &str, Counting>, ReqId, &std::rc::Rc<core::cell::Cell<usize>>),
+) -> (usize, usize) {
+  let (schema, document) = compile_against(LEND_SDL, LEND_QUERY);
+  let arguments = std::rc::Rc::new(core::cell::Cell::new(0usize));
+  let tree = std::rc::Rc::new(core::cell::Cell::new(0usize));
+  let mut space = Counting {
+    mint: std::rc::Rc::clone(&tree),
+    variables: std::vec::from_elem((), 1)
+      .into_iter()
+      .map(|()| ("text", Tracked::new(&arguments, Value::Text)))
+      .collect(),
+  };
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Tracked::new(&tree, Value::Obj))
+    .expect("the operation resolves");
+
+  let nest = executor.poll_resolve(&mut space).expect("`nest`").id();
+  executor.handle_resolved(&mut space, nest, Tracked::new(&tree, Value::Obj));
+  let echo = executor.poll_resolve(&mut space).expect("`echo`").id();
+
+  assert_eq!(
+    arguments.get(),
+    1,
+    "the checked argument value is lent to the request just offered"
+  );
+  let parked = tree.get();
+  assert!(
+    parked > 0,
+    "`nest` is parked in `deferred` and still holds its object value"
+  );
+
+  call(&mut executor, echo, &tree);
+  (arguments.get(), tree.get())
+}
+
+/// Every public `&mut self` entry point closes the lends the previous call left open.
+///
+/// The behavioural half of the protocol `Executor`'s header states, and the counterpart to
+/// `every_public_entry_point_declares_its_discharge`: that one proves the *table* names every
+/// method, this one proves the discharge each row claims actually happens. Neither is sufficient
+/// alone — a table can be complete and wrong, and a release can be real and unlisted.
+///
+/// Both lends are opened at once so that a method settling only one of them fails here. That is not
+/// hypothetical: `on_entry` is two calls, and the defect this whole gate exists for —
+/// `set_extensions` shipping without it — left *both* held.
+#[test]
+fn every_public_entry_point_settles_the_previous_call() {
+  // Each case drops the offered `FieldRequest` before calling in, which is what makes the two
+  // lends stale rather than live.
+  let covered: std::vec::Vec<&str> = std::vec::Vec::from([
+    "start",
+    "poll_resolve",
+    "handle_resolved",
+    "handle_field_error",
+    "poll_abandoned",
+    "set_extensions",
+    "take_extensions",
+    "poll_response",
+  ]);
+  let mut names: std::vec::Vec<&str> = ENTRY_PROTOCOL.iter().map(|row| row.name).collect();
+  let mut expected = covered.clone();
+  names.sort_unstable();
+  expected.sort_unstable();
+  assert_eq!(
+    names, expected,
+    "this test's cases and `ENTRY_PROTOCOL` must name the same methods, or one of the two halves \
+     is watching a surface the other is not"
+  );
+
+  let after = |label: &str, held: (usize, usize)| {
+    assert_eq!(
+      held.0, 0,
+      "`{label}` left the previous request's argument value held"
+    );
+  };
+
+  after(
+    "start",
+    with_both_lends_open(|executor, _, tree| {
+      let mut space = Counting {
+        mint: std::rc::Rc::clone(tree),
+        variables: std::vec::Vec::new(),
+      };
+      executor
+        .start(&mut space, None, Tracked::new(tree, Value::Obj))
+        .expect("a second operation resolves");
+    }),
+  );
+  after(
+    "poll_resolve",
+    with_both_lends_open(|executor, _, tree| {
+      let mut space = Counting {
+        mint: std::rc::Rc::clone(tree),
+        variables: std::vec::Vec::new(),
+      };
+      let _ = executor.poll_resolve(&mut space);
+    }),
+  );
+  after(
+    "handle_resolved",
+    with_both_lends_open(|executor, echo, tree| {
+      let mut space = Counting {
+        mint: std::rc::Rc::clone(tree),
+        variables: std::vec::Vec::new(),
+      };
+      executor.handle_resolved(&mut space, echo, Tracked::new(tree, Value::Text));
+    }),
+  );
+  after(
+    "handle_field_error",
+    with_both_lends_open(|executor, echo, _| {
+      executor.handle_field_error(echo, "no");
+    }),
+  );
+  after(
+    "poll_abandoned",
+    with_both_lends_open(|executor, _, _| {
+      let _ = executor.poll_abandoned();
+    }),
+  );
+  after(
+    "set_extensions",
+    with_both_lends_open(|executor, _, _| {
+      let _ = executor.set_extensions(Extensions::new(executor.limits()));
+    }),
+  );
+  after(
+    "take_extensions",
+    with_both_lends_open(|executor, _, _| {
+      let _ = executor.take_extensions();
+    }),
+  );
+  after(
+    "poll_response",
+    with_both_lends_open(|executor, _, _| {
+      let _ = executor.poll_response();
+    }),
+  );
+}
+
+/// The deferred object value, specifically, and not only the arguments.
+///
+/// Split out because `on_entry` is two releases and a method could plausibly do one. The count is
+/// read against the same call made through a known-good entry point, so the assertion is "these two
+/// agree" rather than a number written down by hand.
+#[test]
+fn the_extensions_entry_points_settle_the_deferred_object_too() {
+  let through_poll = with_both_lends_open(|executor, _, _| {
+    let _ = executor.poll_abandoned();
+  });
+  for (label, held) in [
+    (
+      "set_extensions",
+      with_both_lends_open(|executor, _, _| {
+        let _ = executor.set_extensions(Extensions::new(executor.limits()));
+      }),
+    ),
+    (
+      "take_extensions",
+      with_both_lends_open(|executor, _, _| {
+        let _ = executor.take_extensions();
+      }),
+    ),
+  ] {
+    assert_eq!(
+      held, through_poll,
+      "`{label}` must leave exactly what `poll_abandoned` leaves; it settled less"
+    );
+  }
+}
+
+/// How many entries the lax map is grown to before it is emptied.
+///
+/// Chosen so the spine's capacity lands on a power of two exactly — `Vec` doubles, so 4,096
+/// pushes leave 4,096 slots — and so the overshoot against the strict ceiling below is a number
+/// rather than an argument. `insert` scans for a duplicate on every call, so growing a map is
+/// quadratic in its own ceiling; that cost is why this is 4,096 and not a million, and it is a
+/// cost the *map's* ceilings bound and the executor's do not.
+const GROWN_ENTRIES: usize = 4096;
+
+/// A map grown under a lax `Limits` and emptied does not carry its allocation into a strict
+/// executor.
+///
+/// The two ceilings `set_extensions` re-checks bound what the map *reports* — `len` and
+/// `key_bytes` — and the resource being bounded is what it *holds*. `remove` gives the key bytes
+/// back to the ceiling and gives no slots back to the allocator, so an empty map can arrive
+/// carrying a spine no `Limits` this executor was built with ever authorised.
+///
+/// Read off the executor's own field rather than through
+/// [`take_extensions`](Executor::take_extensions), because the claim is about what is *retained*:
+/// taking the map back is one of the three things that ends the retention.
+#[test]
+fn an_accepted_map_retains_no_capacity_the_executor_never_authorised() {
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(GROWN_ENTRIES as u32).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
+    ..Limits::default()
+  };
+  // The key-byte ceiling is deliberately *above* the capacity being planted, and not a small
+  // number chosen to look strict. There are two ceilings a repair could read here and only one of
+  // them bounds entry slots; with the other one set low, a repair reading it would shrink anyway
+  // and this case would pass a bound it never checked.
+  let strict = Limits {
+    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(GROWN_ENTRIES as u32 * 2).expect("not zero"),
+    ..Limits::default()
+  };
+
+  let mut map: Extensions<Value> = Extensions::new(&lax);
+  for index in 0..GROWN_ENTRIES {
+    map
+      .insert(&std::format!("k{index}"), Value::Text)
+      .expect("the lax map has room");
+  }
+  let grown = map.capacity();
+  assert!(
+    grown >= GROWN_ENTRIES,
+    "the map did not actually grow: {grown} slots"
+  );
+  for index in 0..GROWN_ENTRIES {
+    map
+      .remove(&std::format!("k{index}"))
+      .expect("every key was inserted");
+  }
+  assert_eq!(map.len(), 0, "empty by every ceiling the executor reads");
+  assert_eq!(map.key_bytes(), 0, "and by the other one");
+  assert_eq!(
+    map.capacity(),
+    grown,
+    "and still holding every slot: `remove` refunds the budget and never the allocation, which is \
+     the whole gap this case is about"
+  );
+
+  let (schema, document) = compile("{ nest { boom } }");
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, strict);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  executor
+    .set_extensions(map)
+    .expect("nothing it reports is over a ceiling");
+
+  let retained = executor
+    .extensions
+    .as_ref()
+    .expect("the map was accepted")
+    .capacity();
+  let slot = core::mem::size_of::<(std::boxed::Box<str>, Value)>();
+  assert!(
+    retained as u64 <= u64::from(strict.max_extension_entries.get()),
+    "the executor is holding {retained} entry slots ({} bytes) under a ceiling of {}, grown to \
+     {grown} under a `Limits` it never agreed to",
+    retained * slot,
+    strict.max_extension_entries.get()
+  );
+}
+
+/// The map [`take_extensions`](Executor::take_extensions) hands back re-enters through the same
+/// gate.
+///
+/// A returned map still carries the ceilings it was *created* under — the lax ones, because
+/// nothing rewrites them on acceptance — so a driver can grow it again well past anything this
+/// executor authorised and attach it a second time. What closes that is not a second check: it is
+/// that `set_extensions` is the only site in this file that writes `self.extensions`, so the round
+/// trip has exactly one way back in and it is the normalizing one.
+#[test]
+fn a_map_taken_back_and_regrown_re_enters_through_the_same_gate() {
+  /// Smaller than the first case's, because this half is about the path and not the size.
+  const REGROWN: usize = 256;
+
+  // One over, because the map keeps the entry it was first attached with while it regrows.
+  let lax = Limits {
+    max_extension_entries: NonZeroU32::new(REGROWN as u32 + 1).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
+    ..Limits::default()
+  };
+  // Above the regrown capacity, for the reason the case above states.
+  let strict = Limits {
+    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(REGROWN as u32 * 8).expect("not zero"),
+    ..Limits::default()
+  };
+
+  let (schema, document) = compile("{ nest { boom } }");
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, strict);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  let mut map: Extensions<Value> = Extensions::new(&lax);
+  map.insert("first", Value::Text).expect("room");
+  executor.set_extensions(map).expect("one entry, under four");
+
+  let mut back = executor.take_extensions().expect("the map comes back");
+  for index in 0..REGROWN {
+    back
+      .insert(&std::format!("k{index}"), Value::Text)
+      .expect("the ceilings that came back with it are still the lax ones");
+  }
+  assert!(
+    back.capacity() > strict.max_extension_entries.get() as usize,
+    "the second growth has to actually exceed the executor's ceiling, or this case proves nothing"
+  );
+  for index in 0..REGROWN {
+    back
+      .remove(&std::format!("k{index}"))
+      .expect("every key was inserted");
+  }
+
+  executor
+    .set_extensions(back)
+    .expect("one entry again, under four");
+  let retained = executor
+    .extensions
+    .as_ref()
+    .expect("the map was accepted")
+    .capacity();
+  assert!(
+    retained as u64 <= u64::from(strict.max_extension_entries.get()),
+    "a second pass through the gate retained {retained} slots under a ceiling of {}",
+    strict.max_extension_entries.get()
+  );
 }

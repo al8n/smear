@@ -64,7 +64,7 @@ absent, it is absent — not partial.
 | §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. There is no introspection **execution** |
 | §5 Validation | All 30 executable-document rules |
 | §6 Execution | **Queries only, behind the non-default `proto` feature.** `smear::proto`'s Sans-I/O executor does collect, coerce arguments, complete, resolve abstract types and propagate nulls. A `mutation` or a `subscription` is refused rather than run, and the connection state machine, backpressure and timers a long-lived operation needs are absent |
-| §7 Response | **The tree, not the document.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. Nothing writes `data`, `errors` and `extensions` out, because serialising a driver's leaf is the driver's |
+| §7 Response | **The tree, not the document.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. The response map's third entry is there too — the driver attaches a §7.1.7 *Extensions* map, a container that cannot hold a non-map, cannot grow past `max_extension_entries` or `max_extension_key_bytes`, and cannot be attached outside the one phase a response could carry it in; the executor hands the values back unread. Two `extensions` sites are deliberately absent: the per-*error* one of §7.1.6's error result format, because it would decide part of the diagnostic contract, and §7.1.3's *request error result*, which `start` refuses before any response object exists — a **valid** document reaches that path, so it is a real gap rather than an unreachable one. Nothing writes `data`, `errors` and `extensions` out, because serialising a driver's leaf is the driver's |
 
 Both counts are enumerable rather than asserted. `Rule::ALL` holds 31 entries — the 29 §5 rules that
 need a runtime check, plus two non-specification resource budgets; §5.1.1 needs no entry because the
@@ -383,7 +383,9 @@ between the current front end and a complete implementation.
   box is unchecked.
 - [ ] **§7 Response** — assembling and serialising the result. Execution hands back a response tree,
   and its field errors carry §7.1.2's `path` and `locations` the same way `smear::diagnostic` does;
-  nothing writes `data`, `errors` and `extensions` out as a document.
+  the execution result's §7.1.7 *Extensions* entry is modelled and carried, the per-error one and
+  §7.1.3's request-error-result one are not, and nothing writes `data`, `errors` and `extensions`
+  out as a document.
 - [ ] **Introspection execution** — a schema can be *built* from an introspection response, and an
   introspection query is *validated* like any other document, because the meta-schema is injected
   into every schema. Nothing here **answers** `__schema` or `__type`.

@@ -135,6 +135,32 @@ pub const EXEMPTIONS: &[Exemption] = &[
              code to answer and no span to point at — asking it for a primary location would mean \
              inventing one for a counter.",
   },
+  // ── §7.1.7 `extensions`: two refusals that hand the caller's value back ──────────────────────
+  Exemption {
+    path: "smear::proto::SetExtensionsError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `Executor::set_extensions` refused an `extensions` map, and the map itself, \
+             returned through `into_extensions` so a refusal cannot close a handle the driver still \
+             owns. It is not a diagnostic about the *document*: all three refusals are properties of \
+             the call — no operation is running, the response has already been delivered, or the map \
+             is over this executor's ceilings — so there is no source position to point at and no \
+             response path to carry. Unlike `proto::StartError` it is not even a draft §6.1 request \
+             error; nothing about it ever reaches a §7 response, because the whole point of the \
+             refusal is that nothing will.",
+  },
+  Exemption {
+    path: "smear::proto::Full",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Which of the two §7.1.7 extension ceilings refused an insert, and the driver's value \
+             handed back unconsumed. The same argument as `SetExtensionsError` and one step \
+             smaller: a ceiling refusing is an outcome about a container the service is filling, \
+             with no document behind it to have a span in. `Ceiling::field` names the `Limits` field \
+             that refused, which is the machine-readable part a code would otherwise have carried.",
+  },
   Exemption {
     path: "smear::validator::LosslessInvalid",
     kind: Kind::Verdict,
