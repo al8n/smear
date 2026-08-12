@@ -112,7 +112,7 @@ pub fn graphql_parser(
 /// own `error_data_variant_census`) stays green whether or not the attribute is there. This
 /// crate is the one it binds. With `#[non_exhaustive]` present, this function is `E0004`.
 #[allow(clippy::type_complexity)]
-fn error_data_is_exhaustively_matchable(
+pub fn error_data_is_exhaustively_matchable(
   error: &smear::parser::graphql::error::GraphqlError<&str>,
 ) -> &'static str {
   use smear::parser::graphql::error::ErrorData;
