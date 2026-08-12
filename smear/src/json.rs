@@ -29,13 +29,33 @@
 //!
 //! # What it costs
 //!
-//! Nothing on the heap. Every entry point writes into a caller's [`core::fmt::Write`], strings are
-//! escaped as they stream past, and the two number formatters ([`itoa`] and [`zmij`], both
-//! `#![no_std]` with zero dependencies) render into stack buffers. The one bound worth naming is
-//! **stack depth**: `data` is written by recursing over the response tree, exactly as
-//! [`Node`](crate::proto::Node)'s own `Debug` does, so the depth of the recursion is the
-//! depth of the response — a document-shape property, fixed before execution began, not something
-//! a driver's answer can grow.
+//! Every entry point writes into a caller's [`core::fmt::Write`], strings are escaped as they
+//! stream past, and the two number formatters ([`itoa`] and [`zmij`], both `#![no_std]` with zero
+//! dependencies) render into stack buffers. Nothing here buffers the response, and no leaf, no key
+//! and no message is ever assembled before it is written.
+//!
+//! **Two `Vec`s, and both are the answer to a cost a remote client chooses.** This module claimed
+//! "nothing on the heap" when it was first written, and the claim was kept by spending the two
+//! resources a client can drive instead — the native stack, and a walk of the document per error —
+//! which is the wrong trade in both cases:
+//!
+//! - `data` is written by an **explicit work stack**, one frame per open container, so the native
+//!   stack does not grow with the response. It used to recurse, which put the depth of an
+//!   attacker-shaped response on the native stack at the last stage of a pipeline that had
+//!   deliberately kept it off — draft §6.3's collection walk runs on an explicit stack for exactly
+//!   this reason, and a budget on what the executor *retains* says nothing about what a serialiser
+//!   *recurses through*. The frames cost one allocation per response, sized by its depth, and a
+//!   response whose `data` is a leaf or a null allocates nothing.
+//! - Draft §7.1.2's `line` and `column` are resolved through a **checkpoint index over the
+//!   document**, built once on the first location and never rebuilt. Deriving them by walking the
+//!   prefix made a response with *k* errors quadratic in the document, which is a remotely
+//!   triggerable cost precisely when a service is already degraded. The index is three words per
+//!   256 bytes of document — 24 bytes per 256 on a 64-bit target, and flat, so that no shape a
+//!   client can send amplifies it — and a response with no locations never builds it.
+//!
+//! Both bounds are measured rather than argued: `json::response`'s own tests count the document
+//! bytes the writer looks at per location, and the native stack it uses per level of response
+//! depth.
 
 use core::fmt;
 
@@ -310,6 +330,21 @@ impl<W: fmt::Write> Json<W> {
       cook_inline(&mut self.out, inline_body(literal))?;
     }
     self.out.write_char('"')?;
+    Ok(())
+  }
+
+  /// Writes one of JSON's structural characters.
+  ///
+  /// **Not public, and not a general escape hatch.** [`Array`] and [`Object`] are how structure is
+  /// written, and the whole point of them is that the separators are not the caller's to remember.
+  /// There is exactly one walk that cannot use them — `response::write_node`, which
+  /// runs on an explicit stack so the native one does not grow with the response, and a scoped
+  /// writer cannot be *kept* on that stack because each one borrows the [`Json`] the enclosing one
+  /// already borrows. That walk places its own separators, and this is the door it does it
+  /// through; being private is what keeps the exception to the one caller that argued for it.
+  #[inline]
+  fn punct(&mut self, ch: char) -> Result<(), Error> {
+    self.out.write_char(ch)?;
     Ok(())
   }
 

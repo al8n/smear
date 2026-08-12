@@ -23,10 +23,30 @@
 //! must be the same text the executor's `ExecutableDocument` was parsed from. Handing over a
 //! different one produces positions that point at nothing, which is why the parameter is required
 //! rather than optional: an `Option<&str>` would make silently dropping `locations` the easy path.
+//!
+//! # The two walks a remote client shapes, and what each of them runs on
+//!
+//! Everything else in this file is proportional to the response by construction. These two are
+//! not, because their cost is chosen by whoever wrote the query and whoever broke the resolvers:
+//!
+//! - **Every location resolved against the document.** [`Locations`] indexes the document once and
+//!   answers each offset in bounded work. Deriving a line and column by walking the prefix is the
+//!   same primitive `smear-schema`'s introspection decoder was repaired for one release earlier,
+//!   met again from the writing side, and the shapes differ in the way that decides the repair:
+//!   there one refusal escapes, so the walk is *staged* and performed once; here every location is
+//!   kept, so there is no single walk to defer and the document is indexed instead.
+//! - **Every container in `data`.** [`write_node`] runs on an explicit work stack.
+//!
+//! Both are stated as bounds and both are measured — see this module's `visited` counter and the
+//! gates in `super::tests` — because a cost claim settled by reading the code is an opinion.
 
 use core::fmt;
 
-use graphql_proto::{Error as FieldError, Extensions, Node, RequestErrorResult, Response, Segment};
+use std::vec::Vec;
+
+use graphql_proto::{
+  Children, Error as FieldError, Extensions, Node, RequestErrorResult, Response, Segment,
+};
 
 use super::{Error, Json, WriteJson};
 
@@ -77,9 +97,13 @@ where
   // §7.1: the `errors` entry is present only when it is non-empty — "if the response contains no
   // errors, it must not contain this entry" — and an empty list would be a different response.
   if response.error_count() > 0 {
+    // ONE index for the whole response, and not one per error: that is the whole of the repair,
+    // so it is a value created here rather than inside the loop where a reader could not see the
+    // difference. A response whose errors carry no locations never builds it.
+    let mut locations = Locations::new(document);
     let mut list = root.key("errors")?.array()?;
     for error in response.errors() {
-      write_field_error(list.element()?, &error, document)?;
+      write_field_error(list.element()?, &error, &mut locations)?;
     }
     list.end()?;
   }
@@ -159,7 +183,7 @@ where
 fn write_field_error<W, V>(
   json: &mut Json<W>,
   error: &FieldError<'_, V>,
-  document: &str,
+  locations: &mut Locations<'_>,
 ) -> Result<(), Error>
 where
   W: fmt::Write,
@@ -168,11 +192,11 @@ where
 
   entry.key("message")?.display(error)?;
 
-  let locations = error.locations();
-  if !locations.is_empty() {
+  let spans = error.locations();
+  if !spans.is_empty() {
     let mut list = entry.key("locations")?.array()?;
-    for span in locations {
-      let (line, column) = line_column(document, span.start());
+    for span in spans {
+      let (line, column) = locations.resolve(span.start());
       let mut position = list.element()?.object()?;
       position.key("line")?.number(line)?;
       position.key("column")?.number(column)?;
@@ -198,49 +222,144 @@ where
   entry.end()
 }
 
+/// One container `write_node` has opened and not yet closed.
+///
+/// [`Children`] is the frame's whole content because it is the whole of what a level has left to
+/// do: it holds the executor's slabs and the index of the next sibling, which is a handful of
+/// words and no borrow of the sink. That is what makes an explicit stack possible here at all — a
+/// stack of
+/// [`Array`](super::Array)/[`Object`](super::Object) scoped writers is not expressible, because
+/// each one borrows the [`Json`] the enclosing one has already borrowed.
+struct Frame<'r, V> {
+  children: Children<'r, V>,
+  /// Whether the children carry response keys, which is also which bracket closes the frame.
+  object: bool,
+  /// Whether the next child is the first, and so is not preceded by a `,`.
+  first: bool,
+}
+
 /// Writes the `data` entry, or any node inside it.
 ///
-/// Recursive, for the reason the module header gives: the depth is the response's, which is the
-/// document's shape and not a driver's answer.
-fn write_node<W, V, F>(
+/// # On an explicit stack, because the depth is not this crate's to bound
+///
+/// One frame per open container, on the heap. It used to recurse, and the reason that was wrong is
+/// one layer down rather than here: `graphql-proto` **deliberately** represents and walks response
+/// state on the heap — draft §6.3's collection runs on an explicit stack, and its own
+/// documentation records that the recursion it replaced aborted the process with `SIGABRT` at a
+/// few thousand links — so the depth of a response is bounded by
+/// [`Limits::max_response_slots`](crate::proto::Limits::max_response_slots) and by nothing that
+/// looks at a native frame. A recursive serialiser spends a native frame per level of a shape
+/// three configurable ceilings admit and no ceiling counts, which turns a response that *executed*
+/// into a process that dies while writing it out, after the status line and part of the body have
+/// already gone to the client.
+///
+/// So the bound is: **the native stack does not grow with the response**, and the frames that do
+/// are one allocation whose length is the response's depth. `Vec::new` allocates nothing, so a
+/// `data` that is a leaf, a `null` or a `__typename` still costs nothing on the heap.
+///
+/// The separators are placed here rather than by [`Array`](super::Array) and
+/// [`Object`](super::Object) for the reason [`Frame`] gives; `Json::punct` is private to keep that
+/// exception to this one walk.
+fn write_node<'r, W, V, F>(
   json: &mut Json<W>,
-  node: Node<'_, V>,
+  node: Node<'r, V>,
   write_leaf: &mut F,
 ) -> Result<(), Error>
 where
   W: fmt::Write,
   F: FnMut(&V, &mut Json<W>) -> Result<(), Error>,
 {
-  match node {
-    Node::Null => json.null(),
-    Node::Leaf(value) => write_leaf(value, json),
-    // Draft §4.4's `__typename` is the executor's own answer and is a `String` in the response,
-    // written the same way a response key is.
-    Node::TypeName(name) => json.string(name),
-    Node::List(children) => {
-      let mut list = json.array()?;
-      for (_, child) in children {
-        write_node(list.element()?, child, write_leaf)?;
-      }
-      list.end()
+  let mut stack: Vec<Frame<'r, V>> = Vec::new();
+  if let Some(frame) = open(json, node, write_leaf)? {
+    stack.push(frame);
+  }
+
+  loop {
+    let Some(top) = stack.last_mut() else {
+      return Ok(());
+    };
+    let object = top.object;
+    // Everything the frame is asked for is taken in one step, so the borrow of the stack ends
+    // before the body below can push onto it.
+    let step = top
+      .children
+      .next()
+      .map(|child| (core::mem::replace(&mut top.first, false), child));
+
+    let Some((first, (key, child))) = step else {
+      stack.pop();
+      json.punct(if object { '}' } else { ']' })?;
+      continue;
+    };
+
+    if !first {
+      json.punct(',')?;
     }
-    Node::Object(children) => {
-      let mut object = json.object()?;
-      for (key, child) in children {
-        let slot = match key {
-          Segment::Field(name) => object.key(name)?,
-          // Unreachable: an object's children are keyed by response key, and only a list's are
-          // keyed by index. Rendered rather than asserted so the walk stays total.
-          Segment::Index(index) => {
-            let mut buffer = itoa::Buffer::new();
-            object.key(buffer.format(index))?
-          }
-        };
-        write_node(slot, child, write_leaf)?;
+    if object {
+      match key {
+        Segment::Field(name) => json.string(name)?,
+        // Unreachable: an object's children are keyed by response key, and only a list's are
+        // keyed by index. Rendered rather than asserted so the walk stays total.
+        Segment::Index(index) => {
+          let mut buffer = itoa::Buffer::new();
+          json.string(buffer.format(index))?;
+        }
       }
-      object.end()
+      json.punct(':')?;
+    }
+    if let Some(frame) = open(json, child, write_leaf)? {
+      stack.push(frame);
     }
   }
+}
+
+/// Writes as much of `node` as can be written without descending, and returns the frame to descend
+/// into when there is one.
+///
+/// A scalar is written whole; a container is opened, and closing it is the walk's business. Both
+/// entrances to a node go through here — the root of `data`, and every child — so a value that a
+/// list writes and an object does not is unrepresentable.
+fn open<'r, W, V, F>(
+  json: &mut Json<W>,
+  node: Node<'r, V>,
+  write_leaf: &mut F,
+) -> Result<Option<Frame<'r, V>>, Error>
+where
+  W: fmt::Write,
+  F: FnMut(&V, &mut Json<W>) -> Result<(), Error>,
+{
+  Ok(match node {
+    Node::Null => {
+      json.null()?;
+      None
+    }
+    Node::Leaf(value) => {
+      write_leaf(value, json)?;
+      None
+    }
+    // Draft §4.4's `__typename` is the executor's own answer and is a `String` in the response,
+    // written the same way a response key is.
+    Node::TypeName(name) => {
+      json.string(name)?;
+      None
+    }
+    Node::List(children) => {
+      json.punct('[')?;
+      Some(Frame {
+        children,
+        object: false,
+        first: true,
+      })
+    }
+    Node::Object(children) => {
+      json.punct('{')?;
+      Some(Frame {
+        children,
+        object: true,
+        first: true,
+      })
+    }
+  })
 }
 
 /// Writes a draft §7.1.7 `extensions` map.
@@ -263,9 +382,154 @@ where
   map.end()
 }
 
-/// Turns a byte offset into draft §7.1.2's one-based line and column.
+// ---------------------------------------------------------------------------------------------
+// what the writer looks at
+// ---------------------------------------------------------------------------------------------
+
+// How many document bytes the writer has looked at, counted only when this crate's own tests are
+// built.
+//
+// ── WHY BYTES, AND NOT ALLOCATIONS OR A CLOCK ─────────────────────────────────────────────────
+//
+// The property below is about *scanning* and about nothing else: deriving a line and column by
+// walking the prefix allocates nothing, so an allocation pin is structurally incapable of seeing
+// it, and a clock sees it along with the machine it ran on. This is `smear-schema`'s introspection
+// reader's instrument, reached for rather than reinvented — that module's own header carries the
+// argument at length, and it learned it by writing the wrong gate first.
+//
+// A byte looked at twice counts twice, because that is precisely the defect.
+#[cfg(test)]
+thread_local! {
+  /// Document bytes the writer has looked at on this thread.
+  static VISITED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// Records that the writer looked at `count` bytes of the document.
 ///
-/// # Two choices, both of which a reader is entitled to know
+/// Compiles to nothing outside this crate's own tests.
+#[inline]
+fn visit(count: usize) {
+  #[cfg(test)]
+  VISITED.with(|visited| visited.set(visited.get() + count as u64));
+  #[cfg(not(test))]
+  let _ = count;
+}
+
+/// Returns how many document bytes the writer has looked at on this thread.
+#[cfg(test)]
+pub(super) fn visited() -> u64 {
+  VISITED.with(core::cell::Cell::get)
+}
+
+mod document {
+  //! The document, behind the one accessor that counts what it reads.
+  //!
+  //! **A module, and not merely a convention.** `smear-schema`'s reader routes every read through
+  //! one function and says so in a comment, and that is as strong as the next person to add a
+  //! derivation — a snippet, a caret, whatever the next field on an error entry turns out to be.
+  //! The measurement is only a measurement of the writer if there is no second way in, so the text
+  //! is a private field of a private module: reaching it without being counted is not a slip, it
+  //! is an edit to this file that has to delete a door to get at another one.
+  //!
+  //! Nothing here is about correctness. Every method would be a one-liner on `&str`; what the
+  //! module buys is that `super`'s ~200 lines of position arithmetic cannot spell `.text`.
+
+  /// The source text a response's positions are resolved against.
+  pub(super) struct Document<'d> {
+    text: &'d str,
+  }
+
+  impl<'d> Document<'d> {
+    /// Wraps the text, reading none of it.
+    pub(super) const fn new(text: &'d str) -> Self {
+      Self { text }
+    }
+
+    /// Returns how many bytes the document has.
+    ///
+    /// Not a look: a length is metadata the `&str` already carries and no byte is read to answer
+    /// it.
+    pub(super) const fn len(&self) -> usize {
+      self.text.len()
+    }
+
+    /// Returns the document's bytes in `from..to`, and records that the writer looked at them.
+    pub(super) fn look(&self, from: usize, to: usize) -> &'d [u8] {
+      let bytes = &self.text.as_bytes()[from..to];
+      super::visit(bytes.len());
+      bytes
+    }
+
+    /// Rounds an offset down to the character boundary at or before it, clamped to the document.
+    ///
+    /// At most three bytes are looked at, and they are counted like any other.
+    pub(super) fn char_boundary(&self, at: usize) -> usize {
+      let mut at = at.min(self.len());
+      while at > 0 && at < self.len() && !super::is_char_start(self.look(at, at + 1)[0]) {
+        at -= 1;
+      }
+      at
+    }
+  }
+}
+
+use document::Document;
+
+// ---------------------------------------------------------------------------------------------
+// draft §7.1.2's line and column, once per document rather than once per error
+// ---------------------------------------------------------------------------------------------
+
+/// How many document bytes one [`Checkpoint`] covers.
+///
+/// It is the two costs traded against each other, so it is one number rather than two: the index
+/// is one checkpoint per this many bytes, and resolving one location scans at most this many
+/// twice. 256 puts the index at three words per 256 bytes — under a tenth of the document on a
+/// 64-bit target — and the scan at a few cache lines' worth of work per error.
+const STRIDE: usize = 256;
+
+/// What the writer knows about the document at a multiple of [`STRIDE`] bytes, so that it does not
+/// have to walk there.
+#[derive(Clone, Copy)]
+struct Checkpoint {
+  /// The one-based line this offset is on.
+  line: usize,
+  /// Where that line starts.
+  line_start: usize,
+  /// How many characters of the document lie before this offset.
+  ///
+  /// A *character* count and not a byte count, because the column is one — see [`Locations`].
+  chars: usize,
+}
+
+/// Draft §7.1.2's `line` and `column` for every location in one response.
+///
+/// # Why an index, when the walk it replaces was two dozen lines
+///
+/// Every error entry carries at least one location and a response may carry as many errors as it
+/// has fields, so deriving each position by walking the prefix is Θ(n²) over a response a remote
+/// client shapes — a valid flat query selects tens of thousands of uniquely aliased fields, a
+/// degraded resolver fails every one of them, and the offsets increase. The cost lands **precisely
+/// when the dependencies are already failing**, which is the worst moment for a service to also
+/// become quadratic. `smear-schema`'s introspection decoder answers the same primitive by staging
+/// the walk and performing it once, because there exactly one refusal escapes; here every location
+/// is kept, so there is nothing to defer and the document is indexed instead.
+///
+/// # Why checkpoints at a fixed stride, and not one entry per line
+///
+/// A line index is the obvious shape and it is the one a document can amplify: it costs a word per
+/// line, so a megabyte of nothing but line terminators becomes a multiple of the document. An
+/// attacker chooses the document. A checkpoint every [`STRIDE`] bytes costs the same three words
+/// per 256 whatever the text is — no shape makes it larger — and it bounds the per-location scan at
+/// the same time, which a line index does not: a single line the length of the document leaves the
+/// column to be counted from its start.
+///
+/// # What it is built lazily for
+///
+/// A response with no `errors` never reaches this type at all, and one whose errors carry no
+/// locations builds nothing: the pass over the document happens on the first
+/// [`resolve`](Locations::resolve) and never again.
+///
+/// # The two choices the positions themselves embody, unchanged by any of the above
 ///
 /// **Line terminators are draft §2.1.1's three**: a line feed, a carriage return, and the pair,
 /// which counts as one. A document written on Windows and a document written on Unix therefore
@@ -277,36 +541,161 @@ where
 /// readings agree, and they diverge only where the line already contains non-ASCII. Counting
 /// characters is the reading a human counting along the line would give, and it is the only one of
 /// the three that does not depend on an encoding the document is not stored in.
-///
-/// Linear in the offset, and deliberately: an index would be a per-response allocation to make a
-/// per-error walk cheaper, and a response with errors has few of them relative to its size. It is
-/// the same trade `smear-schema`'s introspection decoder records.
-pub(super) fn line_column(document: &str, offset: usize) -> (i64, i64) {
-  let mut end = offset.min(document.len());
-  while !document.is_char_boundary(end) {
-    end -= 1;
-  }
+pub(super) struct Locations<'d> {
+  document: Document<'d>,
+  /// One entry per [`STRIDE`] bytes of the document, plus one for its end. Empty until the first
+  /// location is resolved, and never empty afterwards — the offset-zero entry always exists — so
+  /// emptiness is the "not built yet" flag and there is no second field to keep in step with it.
+  checkpoints: Vec<Checkpoint>,
+}
 
-  let mut line = 1i64;
-  let mut column = 1i64;
-  let mut chars = document[..end].chars();
-  while let Some(ch) = chars.next() {
-    match ch {
-      '\n' => {
-        line += 1;
-        column = 1;
-      }
-      '\r' => {
-        // A carriage return followed by a line feed is one terminator, so the feed is consumed
-        // here rather than counted again on the next turn.
-        if chars.clone().next() == Some('\n') {
-          chars.next();
-        }
-        line += 1;
-        column = 1;
-      }
-      _ => column += 1,
+impl<'d> Locations<'d> {
+  /// Prepares to resolve positions against `document`, reading none of it.
+  pub(super) const fn new(document: &'d str) -> Self {
+    Self {
+      document: Document::new(document),
+      checkpoints: Vec::new(),
     }
   }
-  (line, column)
+
+  /// Returns draft §7.1.2's one-based line and column for a byte offset.
+  ///
+  /// Total on any offset. One past the end, or past it by a mile, is the end of the document; one
+  /// interior to a character is that character's own position, which is the walk this replaced
+  /// clamping the same way.
+  pub(super) fn resolve(&mut self, offset: usize) -> (i64, i64) {
+    if self.checkpoints.is_empty() {
+      self.build();
+    }
+
+    let end = self.document.char_boundary(offset);
+
+    // The checkpoint at or before `end`, and then the at most `STRIDE` bytes between them. No
+    // line terminator in that stretch is missed and none is counted twice: the checkpoint holds
+    // the state a walk from zero would have been in, and the one shape that cannot be recovered
+    // from the state alone — a `\r\n` split by the checkpoint — is what `after_cr` carries.
+    let at = end - end % STRIDE;
+    let checkpoint = self.checkpoints[at / STRIDE];
+    let mut line = checkpoint.line;
+    let mut line_start = checkpoint.line_start;
+    let mut chars = checkpoint.chars;
+    let mut after_cr = at > 0 && self.document.look(at - 1, at)[0] == b'\r';
+
+    let mut cursor = at;
+    for &byte in self.document.look(at, end) {
+      cursor += 1;
+      if is_char_start(byte) {
+        chars += 1;
+      }
+      match byte {
+        // A line feed after a carriage return is the second half of one terminator, so the line
+        // was already counted; what it still does is move the start of the line past it.
+        b'\n' => {
+          if !after_cr {
+            line += 1;
+          }
+          line_start = cursor;
+          after_cr = false;
+        }
+        b'\r' => {
+          line += 1;
+          line_start = cursor;
+          after_cr = true;
+        }
+        _ => after_cr = false,
+      }
+    }
+
+    // The column is a *character* count from the start of the line, and the line may have begun
+    // before the checkpoint — a long line is exactly the case a line index would have handled and
+    // this one has to answer, so the count is a difference of two absolute character counts and
+    // not a walk from wherever the line happens to start.
+    let column = chars - self.chars_before(line_start) + 1;
+    (as_i64(line), as_i64(column))
+  }
+
+  /// Returns how many characters of the document lie before `at`, which must be a checkpointed or
+  /// character-boundary offset.
+  fn chars_before(&self, at: usize) -> usize {
+    let base = at - at % STRIDE;
+    let checkpoint = self.checkpoints[base / STRIDE];
+    checkpoint.chars
+      + self
+        .document
+        .look(base, at)
+        .iter()
+        .filter(|&&byte| is_char_start(byte))
+        .count()
+  }
+
+  /// Walks the document once, recording what a walk from zero would know at every [`STRIDE`]
+  /// bytes.
+  fn build(&mut self) {
+    let bytes = self.document.look(0, self.document.len());
+    let mut checkpoints = Vec::with_capacity(bytes.len() / STRIDE + 1);
+
+    let mut line = 1usize;
+    let mut line_start = 0usize;
+    let mut chars = 0usize;
+    let mut after_cr = false;
+
+    for (at, &byte) in bytes.iter().enumerate() {
+      if at.is_multiple_of(STRIDE) {
+        checkpoints.push(Checkpoint {
+          line,
+          line_start,
+          chars,
+        });
+      }
+      if is_char_start(byte) {
+        chars += 1;
+      }
+      match byte {
+        b'\n' => {
+          if !after_cr {
+            line += 1;
+          }
+          line_start = at + 1;
+          after_cr = false;
+        }
+        b'\r' => {
+          line += 1;
+          line_start = at + 1;
+          after_cr = true;
+        }
+        _ => after_cr = false,
+      }
+    }
+    // The end of the document is a resolvable offset like any other, and on an exact multiple of
+    // the stride it is the entry nothing else would have pushed.
+    if bytes.len().is_multiple_of(STRIDE) {
+      checkpoints.push(Checkpoint {
+        line,
+        line_start,
+        chars,
+      });
+    }
+
+    self.checkpoints = checkpoints;
+  }
+}
+
+/// Returns whether a byte begins a character, which is every byte that is not a UTF-8
+/// continuation.
+///
+/// Counting these is counting characters, and it is what lets the column be a difference of two
+/// running totals rather than a `chars()` walk from the start of a line.
+#[inline]
+const fn is_char_start(byte: u8) -> bool {
+  byte & 0xc0 != 0x80
+}
+
+/// Narrows a count to the width draft §7.1.2's numbers are written at.
+///
+/// Saturating rather than wrapping or panicking: a line or column past `i64::MAX` needs a document
+/// of nine exabytes, and the honest answer for one is a number that is merely wrong rather than a
+/// negative position or a dead process.
+#[inline]
+fn as_i64(count: usize) -> i64 {
+  i64::try_from(count).unwrap_or(i64::MAX)
 }

@@ -3,16 +3,28 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
-// The `extern crate alloc as std;` alias that used to sit here is GONE, and its deletion is the
-// last commit's `#[allow(unused_extern_crates)]` coming good: the alias existed so this crate's
-// own modules could spell their allocations `std::boxed::Box`, and this crate has no modules left.
-// Each member carries its own. `#![no_std]` above still means what it says — an umbrella that
-// forwards a `no_std` stack must not itself link `std`.
+// THE ALIAS IS BACK, AND `json` IS WHY. It left when this crate lost its last module — every
+// member carries its own, and an umbrella that forwards a `no_std` stack must not itself link
+// `std` — and the note that replaced it said `json` did not bring it back "because it writes into
+// a caller's `core::fmt::Write` and allocates nothing at all". That sentence was true of the
+// module as first written and is no longer true of it: both of the writer's walks over
+// attacker-shaped input now run on the heap rather than on the native stack or on a rescan, which
+// is two `Vec`s and the reason for each is in `json::response`. The claim it replaces is in
+// `json`'s own header, restated as what the two allocations cost rather than deleted.
 //
-// `json` below is a module and does NOT bring the alias back, which is a property of that module
-// rather than an oversight here: it writes into a caller's `core::fmt::Write` and allocates
-// nothing at all, so it has no `Box`, no `String` and no `Vec` to spell. If a later module in this
-// crate does allocate, the alias comes back with it and this comment is the record of why it left.
+// Gated on `proto`, which is the feature that compiles the module: `#[cfg]`d rather than
+// unconditional so that a lexer-only or parser-only build — neither of which has anything to
+// allocate — still links neither `alloc` nor `std` through this file. Every member spells the
+// alias the same way and for the same reason, and the `#[allow]` is the workspace-wide exception
+// `unused_extern_crates = "deny"` requires: the users are feature-gated, so a configuration that
+// compiles none of them would otherwise fail on the item itself.
+#[cfg(all(feature = "proto", not(feature = "std")))]
+#[allow(unused_extern_crates)]
+extern crate alloc as std;
+
+#[cfg(all(feature = "proto", feature = "std"))]
+#[allow(unused_extern_crates)]
+extern crate std;
 
 // Deliberately no outer doc comment, unlike the modules below. Rustdoc resolves the MERGED
 // fragments of a module's documentation in the scope of whichever attribute came from outside, so

@@ -1,12 +1,25 @@
 //! Unit gates over the parts of the writer that are not reachable from `tests/json_writer.rs`:
-//! the escaping map, the two string-cooking walks, and the line/column arithmetic.
+//! the escaping map, the two string-cooking walks, the line/column arithmetic, and the two costs
+//! a remote client chooses.
+//!
+//! **The two cost gates are here rather than in the integration target for one reason**: the
+//! instrument is the library's own. `response::visited` is `#[cfg(test)]` and so is invisible
+//! across a crate boundary, and the gate has to drive `write_response` itself — one that called
+//! the resolver directly could not see a writer that built a fresh index per error, which is the
+//! defect one edit away from the one being fixed.
 //!
 //! The round-trip gate is the integration target, because its whole point is to read the output
 //! back with a parser that shares no code with this module. What is here is the other half — the
 //! properties a round trip cannot see, because a round trip through *any* correct reader agrees
 //! about `"\u0041"` and `"A"`.
 
-use super::{Error, Json, response::line_column};
+use super::{Error, Json, response::Locations};
+
+/// Draft §7.1.2's line and column for one offset, through the door the writer uses.
+fn line_column(document: &str, offset: usize) -> (i64, i64) {
+  let mut locations = Locations::new(document);
+  locations.resolve(offset)
+}
 
 /// Writes one value through a closure and returns the bytes.
 fn write(f: impl FnOnce(&mut Json<String>) -> Result<(), Error>) -> String {
@@ -342,4 +355,507 @@ fn it_agrees_with_the_graphql_js_differentials_own_counter_on_ascii() {
       "disagreed at offset {offset}"
     );
   }
+}
+
+/// The index answers what the prefix walk answered, at every offset of every shape it was written
+/// for.
+///
+/// **The oracle is the implementation this replaced**, verbatim, and that is the point rather than
+/// a shortcut: the change it is gating is about *cost* and is supposed to change no position
+/// anywhere, so the property is equality with the old walk and the strongest oracle for it is the
+/// old walk. What the numbers *should* be is settled independently, one test up, against the
+/// reference implementation's own counter.
+///
+/// The corpus is chosen over the axes the two implementations could disagree on rather than over
+/// cases: each of the three terminators; a CRLF pair a caller could point *between*; **a CRLF pair
+/// the checkpoint stride falls inside**, which is the one state the index cannot recover from a
+/// checkpoint alone and so the sharpest case in the file; a `\r` on a checkpoint; multi-byte
+/// characters before and after a break; a line longer than the stride, so the column is counted
+/// across one; a document exactly a stride long; and a document of nothing but terminators.
+#[test]
+fn the_index_agrees_with_the_prefix_walk_it_replaced() {
+  /// Draft §7.1.2's line and column, derived by walking the prefix — the pre-index implementation.
+  fn reference(document: &str, offset: usize) -> (i64, i64) {
+    let mut end = offset.min(document.len());
+    while !document.is_char_boundary(end) {
+      end -= 1;
+    }
+
+    let mut line = 1i64;
+    let mut column = 1i64;
+    let mut chars = document[..end].chars();
+    while let Some(ch) = chars.next() {
+      match ch {
+        '\n' => {
+          line += 1;
+          column = 1;
+        }
+        '\r' => {
+          if chars.clone().next() == Some('\n') {
+            chars.next();
+          }
+          line += 1;
+          column = 1;
+        }
+        _ => column += 1,
+      }
+    }
+    (line, column)
+  }
+
+  let long_line = "x".repeat(700);
+  let stride_exact = "y".repeat(256);
+  let mixed = format!(
+    "{}\u{e9}{}\n\u{1f600}tail",
+    "a".repeat(300),
+    "b".repeat(300)
+  );
+  // The line feed of a CRLF lands exactly on the second checkpoint, and then exactly after it.
+  let split_crlf = format!("{}\r\n{}", "a".repeat(255), "b".repeat(300));
+  let crlf_on_checkpoint = format!("{}\r\n{}", "a".repeat(256), "b".repeat(300));
+  let corpus: &[&str] = &[
+    "",
+    "a",
+    "\n",
+    "\r",
+    "\r\n",
+    "a\r\nb",
+    "a\rb\nc\r\nd",
+    "\r\r\n\n\r",
+    "\u{e9}\n\u{1f600}\r\nx",
+    "query Q {\n  a { b }\n}\n",
+    "one\r\ntwo\r\nthree\r\n",
+    &long_line,
+    &stride_exact,
+    &mixed,
+    &split_crlf,
+    &crlf_on_checkpoint,
+    &"\n".repeat(600),
+    &"\r\n".repeat(400),
+  ];
+
+  for document in corpus {
+    let mut locations = Locations::new(document);
+    // One `Locations` for the whole document, walked forwards and then backwards, because the
+    // index is reused across a response's errors and nothing orders their offsets.
+    let offsets = (0..=document.len() + 2).chain((0..=document.len() + 2).rev());
+    for offset in offsets {
+      assert_eq!(
+        locations.resolve(offset),
+        reference(document, offset),
+        "disagreed at offset {offset} of {document:?}"
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// what the writer COSTS, on the two axes a remote client chooses
+// ---------------------------------------------------------------------------------------------
+//
+// ── WHY THESE ARE MEASURED AND NOT ARGUED, AND WHY NEITHER IS AN ALLOCATION PIN ───────────────
+//
+// Both properties below are cost claims about work a hostile input can multiply, and neither of
+// them allocates the thing it spends. Deriving a line and column by walking the prefix allocates
+// nothing at all — it spends CPU over the document — and recursing over the response spends the
+// NATIVE STACK, which no allocator sees and which does not fail: it aborts the process. So the
+// instruments are the quantities the properties are stated in, one each: document bytes looked
+// at, and native stack bytes consumed.
+//
+// The byte counter is `smear-schema`'s introspection reader's, reached for rather than reinvented
+// — that module carries the argument at length and learned it by writing an allocation gate first
+// and discovering it was structurally blind to the walk it was written for. The shape here is its
+// MARGINAL form for the same reason: a bound on the total would pass a writer that walked the
+// document a fixed forty times, and what has to be bounded is what one more error costs.
+
+use graphql_proto::{Executor, Leaf, Response, Values};
+use smear_compiler::Schema;
+use smear_lexer::tokora::{Parse as _, Parser, state::recursion_tracker::RecursionLimiter};
+use smear_parser::graphql::{
+  GraphQL,
+  ast::{ExecutableDocument, TypeSystemDocument},
+  error::GraphqlErrors,
+  syntactic::{GraphqlLexer, executable_document, type_system_document},
+};
+
+use super::{response::visited, write_response_with};
+
+/// The smallest value space an execution can have: one object, and one integer.
+///
+/// Deliberately not the materialised value tree the integration target drives. These gates are
+/// about how much work the WRITER does per error and per level, so the driver is the one that adds
+/// nothing to either — and this way the two cost gates need no feature the module itself does not.
+#[derive(Clone)]
+enum Cell {
+  Object,
+  Int(i64),
+}
+
+/// A driver that answers every structural question the shallowest way it can.
+struct Space;
+
+impl Values for Space {
+  type Value = Cell;
+
+  fn is_null(&self, _: &Cell) -> bool {
+    false
+  }
+
+  fn as_bool(&self, _: &Cell) -> Option<bool> {
+    None
+  }
+
+  fn list_len(&self, _: &Cell) -> Option<usize> {
+    None
+  }
+
+  fn list_item(&mut self, _: &Cell, _: usize) -> Cell {
+    Cell::Object
+  }
+
+  fn type_name<'a>(&'a self, _: &'a Cell) -> Option<&'a str> {
+    None
+  }
+
+  /// The value is already its serialised form, so coercion is the identity.
+  fn coerce_leaf(&mut self, value: Cell, _: Leaf<'_>) -> Option<Cell> {
+    Some(value)
+  }
+
+  fn variable(&mut self, _: &str) -> Option<Cell> {
+    None
+  }
+}
+
+/// Parses one document with an explicit nesting ceiling.
+///
+/// The ceiling is the lexer's, and it is passed rather than defaulted because a chain of response
+/// objects is a chain of `{` in the document: it is the limit that decides how deep a response the
+/// rest of the stack will admit, so a gate about depth has to be the thing that sets it.
+fn parse_executable(query: &str, nesting: usize) -> Result<ExecutableDocument<&str>, ()> {
+  Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str_with_state(query, RecursionLimiter::with_limitation(nesting))
+  .map_err(|_| ())
+}
+
+/// Runs one operation to completion and hands the finished response to `take`.
+///
+/// `resolve` answers one field by name: `Some` is a value, and `None` is a resolver that failed —
+/// which is what puts a draft §7.1.2 error, and so a location, in the response.
+fn run<T>(
+  sdl: &str,
+  query: &str,
+  nesting: usize,
+  mut resolve: impl FnMut(&str) -> Option<Cell>,
+  take: impl FnOnce(&Response<'_, Cell>) -> T,
+) -> T {
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str_with_state(sdl, RecursionLimiter::with_limitation(nesting))
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("the SDL is a schema");
+  let document = parse_executable(query, nesting).expect("the query parses");
+
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Cell::Object)
+    .expect("the operation resolves");
+
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    let answer = resolve(request.name());
+    match answer {
+      Some(value) => executor.handle_resolved(&mut space, id, value),
+      None => executor.handle_field_error(id, "the resolver is degraded"),
+    }
+    while executor.poll_abandoned().is_some() {}
+  }
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  take(&response)
+}
+
+// ── axis one: the document, once per response rather than once per error ─────────────────────
+
+/// The schema the location gates execute against: one nullable leaf, selectable as often as a
+/// client likes.
+const FLAT_SDL: &str = "type Query { f: Int }";
+
+/// `k` uniquely aliased selections of one field, behind `pad` bytes of comment.
+///
+/// **Accepted, and it is the shape a hostile client would send**: every alias is a legal response
+/// key, so nothing about the query is refusable, and every one of them can be failed by a
+/// dependency the service does not control. The offsets increase, which is the ordering the
+/// quadratic walk was worst on.
+fn aliased(k: usize, pad: usize) -> String {
+  let mut query = String::new();
+  if pad > 0 {
+    query.push('#');
+    query.extend(core::iter::repeat_n('p', pad));
+    query.push('\n');
+  }
+  query.push('{');
+  for alias in 0..k {
+    query.push_str(&format!(" a{alias}: f"));
+  }
+  query.push('}');
+  query
+}
+
+/// Document bytes the writer looked at while writing one response, with every field failed.
+fn visits(query: &str) -> u64 {
+  run(
+    FLAT_SDL,
+    query,
+    64,
+    |_| None,
+    |response| {
+      assert_eq!(
+        response.error_count(),
+        response.errors().count(),
+        "the fixture is not the shape these gates assume"
+      );
+      let before = visited();
+      let mut out = String::new();
+      write_response_with(&mut out, response, query, |_, json| json.null()).expect("writable");
+      visited() - before
+    },
+  )
+}
+
+/// How many document bytes one more failed field may cost the writer.
+///
+/// A constant, and that is the whole claim: the cost of one more error is a function of the
+/// index's stride and not of the document the error is in. Measured on the tree that introduced
+/// this gate: 136, 132, 138, 138 across the four intervals below — flat. Measured for the defect
+/// it was written against, the same walk restored: 129, 553, 2 449, 10 486. That plant *passes*
+/// the first interval and fails the second, which is why the assertion is per interval and not on
+/// a total: growing with k is the quadratic, and no single threshold on a sum can say so.
+const BYTES_PER_LOCATION: u64 = 512;
+
+/// Each additional error costs the writer a bounded look at the document, not a walk of it.
+#[test]
+fn each_location_costs_a_constant_number_of_bytes() {
+  let mut previous = (8usize, visits(&aliased(8, 0)));
+  for k in [32usize, 128, 512, 2048] {
+    let cost = visits(&aliased(k, 0));
+    let looks = (cost - previous.1) / (k - previous.0) as u64;
+    assert!(
+      looks <= BYTES_PER_LOCATION,
+      "up to k={k}, each added error cost {looks} document bytes; the writer is deriving a \
+       position by walking the document"
+    );
+    previous = (k, cost);
+  }
+}
+
+/// The document is indexed once for the whole response, not once per error.
+///
+/// The sharper half of the same property, and the one an index rebuilt inside the loop would fail
+/// while still passing the marginal gate above: with the error count held fixed, growing the
+/// document must cost what reading it once costs, and nothing per error.
+#[test]
+fn the_document_is_read_once_however_many_locations_are_resolved() {
+  const K: usize = 512;
+  const PAD: usize = 16 * 1024;
+
+  let plain = visits(&aliased(K, 0));
+  let padded = visits(&aliased(K, PAD));
+  let added = padded - plain;
+  assert!(
+    added <= 4 * PAD as u64,
+    "{PAD} bytes of comment added {added} byte visits across {K} errors; a document read once \
+     costs its own length and a document read per error costs {}",
+    PAD * K
+  );
+}
+
+/// The counter is wired to the writer, and it moves by what the writer reads.
+///
+/// Without this, both gates above could pass because nothing was being counted.
+#[test]
+fn the_byte_gate_counts() {
+  // Every position in the response is derived from the document, so writing one cannot look at
+  // fewer bytes than the document has.
+  let query = aliased(64, 0);
+  let looked = visits(&query);
+  assert!(
+    looked >= query.len() as u64,
+    "writing {} bytes of document registered as {looked} byte visits",
+    query.len()
+  );
+
+  // And a response with nothing to locate does not read the document at all, which is the other
+  // half of "built on the first location": a successful response pays nothing for the index.
+  let ok = run(
+    FLAT_SDL,
+    "{ f }",
+    64,
+    |_| Some(Cell::Int(1)),
+    |response| {
+      assert_eq!(response.error_count(), 0);
+      let before = visited();
+      let mut out = String::new();
+      write_response_with(&mut out, response, "{ f }", |value, json| match value {
+        Cell::Int(number) => json.number(*number),
+        Cell::Object => json.null(),
+      })
+      .expect("writable");
+      assert_eq!(out, r#"{"data":{"f":1}}"#);
+      visited() - before
+    },
+  );
+  assert_eq!(ok, 0, "a response with no locations read the document");
+}
+
+// ── axis two: the response's depth, on the heap rather than on the native stack ───────────────
+
+/// The nesting ceiling these gates configure, which is what decides how deep a response can be.
+///
+/// A chain of response objects is a chain of `{` in the document, so the lexer's nesting limit is
+/// the binding one — `max_response_slots` admits 2²⁰ positions and the merge budget is set
+/// independently. 2048 is a *raised* ceiling: `smear-lexer`'s own default is 500, and the finding
+/// this gate exists for is about a deployment that raises it, so the gate raises it.
+const NESTING: usize = 2048;
+
+/// The deepest chain of objects [`NESTING`] admits, and one level more than it admits.
+///
+/// Derived rather than picked. `DEEPEST` is asserted below to be exactly the ceiling — one level
+/// further is refused before execution — so the gate is about a bound and not about a number that
+/// happens to work today.
+const DEEPEST: usize = NESTING - 1;
+
+/// A schema whose one object type refers to itself, and the query that walks it `depth` deep.
+fn chain(depth: usize) -> (String, String) {
+  let sdl = "type Query { n: Node } type Node { n: Node x: Int }".to_string();
+  let mut query = String::from("{");
+  for _ in 0..depth {
+    query.push_str(" n {");
+  }
+  query.push_str(" x ");
+  for _ in 0..depth {
+    query.push('}');
+  }
+  query.push('}');
+  (sdl, query)
+}
+
+/// Writes a response `depth` objects deep and returns the native stack bytes the writer used.
+///
+/// The probe is a local in the leaf callback, which is the deepest point of the walk, measured
+/// against a local in this frame. A walk that recurses puts one frame per level between them; a
+/// walk on an explicit stack puts the same constant there whatever the depth is, which is the
+/// property and is why the gate compares two depths rather than checking one against a threshold.
+fn stack_used(depth: usize) -> usize {
+  let (sdl, query) = chain(depth);
+  run(
+    &sdl,
+    &query,
+    NESTING,
+    |name| {
+      Some(if name == "x" {
+        Cell::Int(1)
+      } else {
+        Cell::Object
+      })
+    },
+    |response| {
+      let anchor = 0u8;
+      let base = core::ptr::addr_of!(anchor) as usize;
+      let mut deepest = base;
+      let mut out = String::new();
+
+      write_response_with(&mut out, response, &query, |value, json| {
+        let probe = 0u8;
+        deepest = deepest.min(core::ptr::addr_of!(probe) as usize);
+        match value {
+          Cell::Int(number) => json.number(*number),
+          Cell::Object => json.null(),
+        }
+      })
+      .expect("a response the limits admit is writable");
+
+      // The response really is as deep as the fixture claims: the envelope, the root of `data`,
+      // and one object per level. Without this the measurement could be of a walk that never
+      // descended.
+      assert_eq!(
+        out.matches('{').count(),
+        depth + 2,
+        "the response is not {depth} objects deep, so the stack measurement is of something else"
+      );
+      assert_eq!(response.error_count(), 0, "{out}");
+
+      base.saturating_sub(deepest)
+    },
+  )
+}
+
+/// Runs `f` on a thread with room for the PARSER's own recursion.
+///
+/// Not part of the property. Reading a document 2048 selection sets deep is itself a recursive
+/// descent — that is the parser's bound, enforced by the very limiter this gate configures — and a
+/// gate about the writer must not be a gate about whichever stack the harness happened to give the
+/// parse. The writer's own use is measured inside, and is a difference of two addresses, so the
+/// size of this stack cannot flatter it.
+fn with_room<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+  std::thread::Builder::new()
+    .stack_size(256 * 1024 * 1024)
+    .spawn(f)
+    .expect("a thread")
+    .join()
+    .expect("the deep fixture did not abort")
+}
+
+/// A response as deep as the configured limits admit serialises, and the native stack it costs
+/// does not grow with the depth.
+///
+/// **The depth is the ceiling, not a number that works.** One level beyond it is refused before
+/// execution, which is asserted here so that "as deep as the limits admit" is a fact about the
+/// fixture rather than a claim about it.
+#[test]
+fn the_response_depth_does_not_reach_the_native_stack() {
+  // The measurement is a difference, so what is left in it is the constant part of the writer's
+  // own frame — which cancels — plus whatever the platform adds between two calls at the same
+  // depth. A walk that recursed would put thousands of times this in it.
+  const SLACK: usize = 1024;
+
+  let (shallow, deep) = with_room(|| (stack_used(DEEPEST / 2), stack_used(DEEPEST)));
+
+  // The probe measured something, which is what stops the comparison below from being two zeroes
+  // agreeing. Measured on the tree that introduced this gate: 3 152 bytes in debug and 1 848 in
+  // release, the same at both depths; with the recursion restored, 1 559 120 and 3 115 600.
+  assert!(
+    shallow > 0,
+    "the writer used no measurable native stack at all, so the growth below is not a measurement"
+  );
+
+  let growth = deep.saturating_sub(shallow);
+  let levels = DEEPEST - DEEPEST / 2;
+  assert!(
+    growth <= SLACK,
+    "{levels} more levels of response cost {growth} more bytes of native stack ({} per level); \
+     the walk is on the native stack again",
+    growth / levels.max(1)
+  );
+
+  // And the fixture is at the ceiling: one level further is not a deeper response, it is a
+  // refused document.
+  let (_, past) = chain(DEEPEST + 1);
+  assert!(
+    with_room(move || parse_executable(&past, NESTING).is_err()),
+    "a document one level deeper than the ceiling parsed, so {DEEPEST} is not the deepest \
+     response the configured limits admit"
+  );
 }
