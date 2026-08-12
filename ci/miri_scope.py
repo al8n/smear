@@ -60,6 +60,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import pathlib
 import re
 import shutil
@@ -197,93 +198,126 @@ MIRI_IGNORE_BUDGET = 4
 #
 # `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
 # `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
-MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-compiler", "graphql-proto")
+MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto")
 
-# The publishable members deliberately NOT selected, each with the measurement behind it.
+# The publishable member deliberately NOT selected, and the reason is now a BEHAVIOUR rather than a
+# count.
 #
-# A member with no lib unit tests at this cell's feature set contributes nothing to interpret, and
-# selecting it produces an empty harness — which `check()` below fails on purpose, because "a
-# target that compiles to an empty harness passes without testing anything" is #73's mechanism.
-# So they are excluded, and excluded WITH A REASON that `ci/feature_reachability.py` requires to
-# still match a real member.
+# `smear-schema` used to be here, excused by "0 lib unit tests at the feature set these scripts
+# build" — measured with an isolated `cargo test -p smear-schema --lib`, which is not that feature
+# set. Under the resolve the cells actually build, `smear-compiler` takes `smear-schema` WITH
+# `build`, and behind `build` it has three lib unit tests. Measured: the four-member selection lists
+# 505 tests and the five-member one 508. Those three were interpreted by nothing, and an isolated
+# re-measurement said zero every time. Feature unification decides the answer, and the measurement
+# was being taken somewhere unification does not apply — the third time on this branch.
 #
-# Measured on this tree with `cargo test -p <m> --lib -- --list`, at this cell's feature set and at
-# `--all-features`:
-#
-#   smear-lexer    125 / 130      smear           0 / 0
-#   smear-parser   353 / 362      smear-schema    0 / 3
-#   smear-compiler  12 /  12
-#   graphql-proto   15 /  15
+# `smear` cannot be selected at all, and that is a stronger fact than a test count. Co-selecting it
+# with `smear-compiler` does not COMPILE: the compiler forces `smear-schema/build` on, `smear` at
+# default features has `validator` off, and the equivalence assertion in `smear/src/lib.rs` refuses
+# the graph. Measured: `cargo test -p smear -p smear-compiler --lib` exits 101 on
+# `smear-schema/build` and `smear/validator` disagree. It also has no lib unit tests at any feature
+# set, but that is now the second reason rather than the only one.
 MIRI_NOT_SELECTED = {
     "smear": {
-        # The strongest claim in the table, so it is asserted at the strongest configuration: no
-        # feature set of this crate produces a lib unit test, because there is no code to test.
-        "features": ("--all-features",),
-        "why": "the umbrella is re-exports only — `smear/src` is one file — so its lib carries no "
-               "unit tests at ANY feature set, and selecting it would yield a harness with 0 tests",
-    },
-    "smear-schema": {
-        # A NARROWER claim, and the flags are what make it narrow: three unit tests exist behind
-        # `build`, so this is asserted at the feature set these scripts actually build and nowhere
-        # else. Writing `--all-features` here would be a claim the crate does not satisfy, and
-        # `--verify-exclusions` would say so.
-        "features": (),
-        "why": "its three lib unit tests are behind `build`, and these scripts pass no `--features` "
-               "by design; at the feature set they DO build, its harness has 0 tests",
+        "outcome": "forbidden",
+        "why": "co-selecting the umbrella with `smear-compiler` does not compile — the compiler "
+               "forces `smear-schema/build`, the umbrella at default features has `validator` off, "
+               "and `smear/src/lib.rs`'s equivalence assertion refuses that graph. It carries no "
+               "lib unit tests at any feature set either",
     },
 }
 
 
 def verify_exclusions(cargo: str = "cargo") -> int:
-    """Re-run the measurement every `MIRI_NOT_SELECTED` reason rests on.
+    """Re-run every `MIRI_NOT_SELECTED` reason UNDER THE RESOLVE THE CELLS BUILD.
 
-    PROPERTY: a member is excluded from the Miri selection only while it really has no lib unit
-    tests at the configuration the exclusion names.
+    PROPERTY: a member is excluded only while, in the graph the Miri cells actually resolve, it
+    either carries no lib unit tests or cannot be co-selected at all.
 
-    THIS IS THE SECOND TIME THIS FILE'S FAMILY HAS NEEDED THIS. `ci/feature_reachability.py` used to
-    carry `EQ_EXEMPT`, a skip table whose one entry was excused by a measurement nobody re-ran; it
-    was replaced by `EQ_TWIN`, which has no skip path at all. One round later `MIRI_NOT_SELECTED`
-    arrived — a new exemption table whose entries were justified by a measurement nobody re-ran, and
-    guarded by nothing stronger than "the reason is non-empty". A non-empty reason is the guarantee
-    that somebody once thought about it.
+    THE FIRST VERSION MEASURED IN ISOLATION AND THAT WAS THE DEFECT. It ran
+    `cargo test -p <member> --lib` with the entry's own flags, which is a different graph from the
+    one the cells build: `smear-compiler` is selected there and takes `smear-schema` WITH `build`,
+    so `smear-schema` had three lib unit tests that no selected root interpreted while an isolated
+    re-measurement returned zero, every time. Feature unification decides this, and the measurement
+    was taken where unification does not apply.
 
-    So the reason is EXECUTABLE: each entry carries the cargo flags its claim is measured at, and
-    this runs exactly those. Add a `#[test]` to `smear` and this fails; move `smear-schema`'s tests
-    out from behind `build` and this fails; widen a claim to `--all-features` that only holds at the
-    default set and this fails.
+    So each excluded member is now added to the REAL selection and built there:
 
-    Reproduced before it was written: a `#[test]` added to `smear/src/lib.rs` left
-    `feature_reachability` and `miri_scope --selftest` both green while the test would never be
-    interpreted.
+      outcome "empty"      it must co-select and produce a harness with 0 tests
+      outcome "forbidden"  it must fail to build, and fail on the equivalence assertion — a member
+                           that starts building again has an exclusion whose reason has gone
+
+    Counting is per binary rather than by total, so a member's own harness is what is read and not
+    a difference between two runs that unification could move underneath.
     """
+    selection = [arg for package in MIRI_PACKAGES for arg in ("-p", package)]
     failures = []
     for member, entry in sorted(MIRI_NOT_SELECTED.items()):
-        flags = list(entry.get("features", ()))
-        command = [cargo, "test", "-p", member, "--lib", *flags, "--", "--list"]
+        outcome = entry.get("outcome")
+        command = [cargo, "test", *selection, "-p", member, "--lib", "--no-run",
+                   "--message-format=json"]
         printed = " ".join(command)
         result = subprocess.run(command, capture_output=True, text=True)
+
+        if outcome == "forbidden":
+            if result.returncode == 0:
+                failures.append(
+                    f"{member}: `{printed}` now BUILDS, and the exclusion says it cannot. The "
+                    f"reason has gone stale — either it is selectable now and belongs in "
+                    f"MIRI_PACKAGES, or the recorded reason describes something else.\n"
+                    f"      recorded reason: {entry['why']}"
+                )
+            # BOTH STREAMS. With `--message-format=json` the rendered diagnostic is a field of a
+            # JSON object on STDOUT and only cargo's summary reaches stderr, so checking stderr
+            # alone reported "failed for some other reason" about the very assertion it was
+            # looking for.
+            elif "disagree" not in (result.stdout + result.stderr):
+                failures.append(
+                    f"{member}: `{printed}` failed, but not on the equivalence assertion the "
+                    f"reason names — so it is excluded for some other reason nobody has "
+                    f"written down.\n{result.stderr.strip()[-500:]}"
+                )
+            else:
+                print(f"  {member:16} cannot be co-selected, on the equivalence assertion — as recorded")
+            continue
+
+        if outcome != "empty":
+            failures.append(
+                f"{member}: `outcome` is {outcome!r}, which this check cannot measure. Use "
+                f"'empty' (must co-select with a 0-test harness) or 'forbidden' (must not build)."
+            )
+            continue
+
         if result.returncode != 0:
             failures.append(
-                f"{member}: `{printed}` exited {result.returncode}, so the exclusion's claim could "
-                f"not be measured at all\n{result.stderr.strip()[:400]}"
+                f"{member}: `{printed}` exited {result.returncode}, so the claim could not be "
+                f"measured at all\n{result.stderr.strip()[-500:]}"
             )
             continue
-        found = re.search(r"^(\d+) tests?, \d+ benchmarks?$", result.stdout, re.M)
-        if found is None:
+        executable = None
+        for line in result.stdout.splitlines():
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if message.get("reason") != "compiler-artifact" or not message.get("executable"):
+                continue
+            if f"/{member}-" in message["executable"] or f"/{member}/" in message["executable"]:
+                executable = message["executable"]
+        if executable is None:
             failures.append(
-                f"{member}: `{printed}` printed no `N tests, M benchmarks` summary, so this check "
-                f"read nothing — cargo's --list output has changed shape"
+                f"{member}: the build produced no test executable for it, so nothing was measured"
             )
             continue
-        count = int(found.group(1))
-        print(f"  {member:16} {count:>4} lib unit tests at `{' '.join(flags) or 'default features'}`")
+        listed = subprocess.run([executable, "--list"], capture_output=True, text=True)
+        count = len(re.findall(r"^\S+: test$", listed.stdout, re.M))
+        print(f"  {member:16} {count:>4} lib unit tests under the cells' resolve")
         if count:
             failures.append(
-                f"{member}: {count} lib unit test(s) at `{' '.join(flags) or 'default features'}`, "
-                f"and MIRI_NOT_SELECTED excludes it from the Miri selection on the claim that it "
-                f"has none. Those tests are interpreted by nothing. Either add `{member}` to "
-                f"MIRI_PACKAGES, or narrow the recorded reason to a configuration where the count "
-                f"really is zero.\n      recorded reason: {entry['why']}"
+                f"{member}: {count} lib unit test(s) UNDER THE RESOLVE THE CELLS BUILD, and "
+                f"MIRI_NOT_SELECTED excludes it on the claim that it has none. Those tests are "
+                f"interpreted by nothing. Add it to MIRI_PACKAGES.\n"
+                f"      recorded reason: {entry['why']}"
             )
     if failures:
         print("::error::miri_scope: an exclusion from the Miri selection is no longer true",
@@ -291,8 +325,10 @@ def verify_exclusions(cargo: str = "cargo") -> int:
         for failure in failures:
             print(f"  - {failure}", file=sys.stderr)
         return 1
-    print(f"miri_scope: {len(MIRI_NOT_SELECTED)} exclusions re-measured, all still zero")
+    print(f"miri_scope: {len(MIRI_NOT_SELECTED)} exclusion(s) re-measured under the cells' "
+          f"resolve, all still true")
     return 0
+
 
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.
