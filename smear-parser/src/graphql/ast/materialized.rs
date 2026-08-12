@@ -1,11 +1,15 @@
 //! The materialised-number view of the GraphQL value AST: **a second set of aliases, and no new
 //! types at all.**
 //!
-//! Every alias here binds [`ast::InputValue`](crate::graphql::ast::InputValue)'s two numeric
+//! Every alias here binds [`ast::InputValueOf`](crate::graphql::ast::InputValueOf)'s two numeric
 //! payload parameters to `i64` and `f64` and leaves everything else alone. Nothing in this module
 //! declares a `struct` or an `enum`; the nodes are the same nodes the slice parser builds, at a
-//! different instantiation. That is what "materialisation varies the payload" means concretely,
-//! and it is why a second materialised dialect would cost nothing here either.
+//! different instantiation of the same carrier. That is what "materialisation varies the payload"
+//! means concretely, and it is why a second materialised dialect would cost nothing here either.
+//!
+//! Each alias also keeps the arity and the argument positions of its slice twin — `List<S>` takes
+//! its `Container` second on both sides — so the two sets differ in what they *mean* and in
+//! nothing a caller has to spell.
 //!
 //! # What is materialised, and what is not
 //!
@@ -52,30 +56,31 @@ pub type IntValue<Span = SimpleSpan> = super::IntValue<i64, Span>;
 pub type FloatValue<Span = SimpleSpan> = super::FloatValue<f64, Span>;
 
 /// A GraphQL input value whose numeric leaves are materialised.
-pub type InputValue<S> = super::InputValue<S, i64, f64>;
+pub type InputValue<S> = super::InputValueOf<S, i64, f64>;
 
 /// A GraphQL constant input value whose numeric leaves are materialised.
-pub type ConstInputValue<S> = super::ConstInputValue<S, i64, f64>;
+pub type ConstInputValue<S> = super::ConstInputValueOf<S, i64, f64>;
 
 /// A list value whose numeric leaves are materialised.
-pub type List<S, Container = DefaultVec<InputValue<S>>> = super::List<S, i64, f64, Container>;
+pub type List<S, Container = DefaultVec<InputValue<S>>> = super::ListOf<S, i64, f64, Container>;
 
 /// An object value whose numeric leaves are materialised.
-pub type Object<S, Container = DefaultVec<ObjectField<S>>> = super::Object<S, i64, f64, Container>;
+pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
+  super::ObjectOf<S, i64, f64, Container>;
 
 /// An object field whose value's numeric leaves are materialised.
-pub type ObjectField<S> = super::ObjectField<S, i64, f64>;
+pub type ObjectField<S> = super::ObjectFieldOf<S, i64, f64>;
 
 /// A constant list value whose numeric leaves are materialised.
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  super::ConstList<S, i64, f64, Container>;
+  super::ConstListOf<S, i64, f64, Container>;
 
 /// A constant object value whose numeric leaves are materialised.
 pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
-  super::ConstObject<S, i64, f64, Container>;
+  super::ConstObjectOf<S, i64, f64, Container>;
 
 /// A constant object field whose value's numeric leaves are materialised.
-pub type ConstObjectField<S> = super::ConstObjectField<S, i64, f64>;
+pub type ConstObjectField<S> = super::ConstObjectFieldOf<S, i64, f64>;
 
 /// A default value whose numeric leaves are materialised.
-pub type DefaultInputValue<S> = super::DefaultInputValue<S, i64, f64>;
+pub type DefaultInputValue<S> = super::DefaultInputValueOf<S, i64, f64>;

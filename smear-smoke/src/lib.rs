@@ -466,6 +466,163 @@ pub fn materialized_numbers(src: &str) -> Option<(i64, f64)> {
   }
 }
 
+/// `materialized-numbers`, the other half — the value aliases' **source compatibility**, written
+/// the way a dependent writes them.
+///
+/// Generalising the value tree's numeric leaves has two failure modes that nothing inside `smear`
+/// can see, because `smear` contains no caller that writes either shape. Both were live in the
+/// first draft of this axis, and an empty diff over `graphql-proto` and `smear-compiler` was taken
+/// as evidence they were not — which is a claim about the consumers this workspace happens to
+/// have, not about the ones it does not.
+///
+/// * **Unbound payloads at variant construction.** A parameter default does not constrain a
+///   parameter that no argument mentions, so with the payloads defaulted onto the enum itself
+///   `InputValue::String(parsed)` written with no annotation stopped compiling — `E0282`, `type
+///   annotations needed for InputValue<&str, _, _>`. The `let value` below carries no annotation
+///   and is read only through `is_string`, so nothing but the `String` payload can pin it.
+/// * **A `Container` argument that moved.** Payload parameters inserted *ahead* of `Container`
+///   left `List<S, MyContainer>` compiling and silently naming a different type — the container
+///   sitting in the `Int` payload slot. That one raises no diagnostic at the definition and none
+///   at the call, which is why each probe below annotates the element type the container is
+///   supposed to hold: a moved argument is then a mismatch instead of a reinterpretation.
+///
+/// # What it covers, by axis rather than by case
+///
+/// The two failure modes above are one axis each, and the surface they range over is two more:
+/// **which alias set** (slice, materialised), and **which alias**. So the probes are every
+/// combination of them — four unannotated constructions, one per enum per set; eight element-type
+/// pins, one per `Container`-taking alias per set; and a signature naming all twelve aliases that
+/// take no `Container` at the one parameter they have always taken. Written case by case instead,
+/// this gate would cover whichever alias the last defect happened to use.
+///
+/// The containers are empty on purpose — the property is the type each expression *has*, and a
+/// populated `Vec` would be testing the parser.
+pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
+  use smear::{
+    lexer::tokora::SimpleSpan,
+    parser::graphql::{
+      GraphQL,
+      ast::{
+        ConstInputValue, ConstList, ConstObject, ConstObjectField, DefaultInputValue, InputValue,
+        List, Object, ObjectField, StringValue, materialized,
+      },
+      error::GraphqlErrors,
+      syntactic::GraphqlLexer,
+    },
+  };
+
+  /// A dependent's own container — the whole reason `Container` is an argument at all.
+  struct Own<T>(Vec<T>);
+
+  impl<T> AsRef<[T]> for Own<T> {
+    fn as_ref(&self) -> &[T] {
+      &self.0
+    }
+  }
+
+  /// Every value alias that takes no `Container`, named at the one parameter it has always taken.
+  ///
+  /// A payload parameter added back to any of them *without* a default is `E0107` here. Added
+  /// *with* one it is invisible here, and harmless: none of these takes a `Container` argument
+  /// for a new parameter to displace, and the four enum spellings among them are covered by the
+  /// constructions below, which defaults do not rescue.
+  ///
+  /// The two tuples are the census, so their length is the point rather than a smell.
+  #[allow(clippy::type_complexity)]
+  fn arities<S>(
+    _slice: Option<(
+      InputValue<S>,
+      ConstInputValue<S>,
+      ObjectField<S>,
+      ConstObjectField<S>,
+      DefaultInputValue<S>,
+    )>,
+    _materialized: Option<(
+      materialized::InputValue<S>,
+      materialized::ConstInputValue<S>,
+      materialized::ObjectField<S>,
+      materialized::ConstObjectField<S>,
+      materialized::DefaultInputValue<S>,
+      materialized::IntValue,
+      materialized::FloatValue,
+    )>,
+  ) {
+  }
+
+  arities::<&str>(None, None);
+
+  // ── Inference: a variant built with no annotation, once per enum per alias set ────────────
+  let parsed_string = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    StringValue<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(StringValue::<&str>::graphql)
+  .parse_str(src)
+  .expect("the probe's source is a string literal");
+
+  let mut constructions = 0usize;
+
+  let value = InputValue::String(parsed_string.clone());
+  constructions += usize::from(value.is_string());
+
+  let const_value = ConstInputValue::String(parsed_string.clone());
+  constructions += usize::from(const_value.is_string());
+
+  let materialized_value = materialized::InputValue::String(parsed_string.clone());
+  constructions += usize::from(materialized_value.is_string());
+
+  let materialized_const_value = materialized::ConstInputValue::String(parsed_string);
+  constructions += usize::from(materialized_const_value.is_string());
+
+  // ── Position: `Container` is the second argument, on both sides ───────────────────────────
+  let span = SimpleSpan::new(0, 0);
+  let mut positions = 0usize;
+
+  let list = List::<&str, Own<InputValue<&str>>>::new(span, Own(Vec::new()));
+  let _: &[InputValue<&str>] = list.values();
+  positions += 1;
+
+  let object = Object::<&str, Own<ObjectField<&str>>>::new(span, Own(Vec::new()));
+  let _: &[ObjectField<&str>] = object.fields();
+  positions += 1;
+
+  let const_list = ConstList::<&str, Own<ConstInputValue<&str>>>::new(span, Own(Vec::new()));
+  let _: &[ConstInputValue<&str>] = const_list.values();
+  positions += 1;
+
+  let const_object = ConstObject::<&str, Own<ConstObjectField<&str>>>::new(span, Own(Vec::new()));
+  let _: &[ConstObjectField<&str>] = const_object.fields();
+  positions += 1;
+
+  let materialized_list =
+    materialized::List::<&str, Own<materialized::InputValue<&str>>>::new(span, Own(Vec::new()));
+  let _: &[materialized::InputValue<&str>] = materialized_list.values();
+  positions += 1;
+
+  let materialized_object =
+    materialized::Object::<&str, Own<materialized::ObjectField<&str>>>::new(span, Own(Vec::new()));
+  let _: &[materialized::ObjectField<&str>] = materialized_object.fields();
+  positions += 1;
+
+  let materialized_const_list = materialized::ConstList::<
+    &str,
+    Own<materialized::ConstInputValue<&str>>,
+  >::new(span, Own(Vec::new()));
+  let _: &[materialized::ConstInputValue<&str>] = materialized_const_list.values();
+  positions += 1;
+
+  let materialized_const_object = materialized::ConstObject::<
+    &str,
+    Own<materialized::ConstObjectField<&str>>,
+  >::new(span, Own(Vec::new()));
+  let _: &[materialized::ConstObjectField<&str>] = materialized_const_object.fields();
+  positions += 1;
+
+  (constructions, positions)
+}
+
 /// `bytes` — a `bytes::Bytes`-backed source.
 pub fn bytes_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
   keyword_of(bytes::Bytes::from_static(b"query"))
@@ -604,6 +761,20 @@ mod tests {
       None
     );
     assert!(super::graphql_parser("{ f(x: 99999999999999999999999999) }").is_ok());
+  }
+
+  /// The value aliases' arity and argument positions, across the dependency edge.
+  ///
+  /// The function body is the gate — it does not compile if a payload parameter reappears on an
+  /// alias or displaces a `Container` argument. Calling it is what puts the failure in a test
+  /// report instead of in "the workspace does not build", and the two counts are what stop a
+  /// probe from being deleted quietly.
+  #[test]
+  fn the_value_aliases_keep_their_arity_and_container_position() {
+    assert_eq!(
+      super::value_parameters_are_source_compatible("\"probe\""),
+      (4, 8)
+    );
   }
 
   /// The introspection door, driven end to end across the dependency edge.
