@@ -165,6 +165,8 @@ pub mod __features {
   pub const HIPSTR: bool = cfg!(feature = "hipstr");
   /// `lossless-coverage`, as this crate resolved it.
   pub const LOSSLESS_COVERAGE: bool = cfg!(feature = "lossless-coverage");
+  /// `materialized-numbers`, as this crate resolved it.
+  pub const MATERIALIZED_NUMBERS: bool = cfg!(feature = "materialized-numbers");
   /// `rowan`, as this crate resolved it.
   pub const ROWAN: bool = cfg!(feature = "rowan");
   /// `smallvec`, as this crate resolved it.

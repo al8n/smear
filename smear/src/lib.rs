@@ -285,6 +285,10 @@ const _: () = {
     "`smear-parser/lossless-coverage` and `smear/lossless-coverage` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/lossless-coverage` too, or stop enabling\n     `smear-parser/lossless-coverage`."
   );
   assert!(
+    smear_parser::__features::MATERIALIZED_NUMBERS == cfg!(feature = "materialized-numbers"),
+    "`smear-parser/materialized-numbers` and `smear/materialized-numbers` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/materialized-numbers` too, or stop enabling\n     `smear-parser/materialized-numbers`."
+  );
+  assert!(
     smear_parser::__features::ROWAN == cfg!(feature = "rowan"),
     "`smear-parser/rowan` and `smear/rowan` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan` too, or stop enabling\n     `smear-parser/rowan`."
   );

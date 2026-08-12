@@ -102,6 +102,47 @@ pub fn graphql_parser(
   .parse_str(src)
 }
 
+/// `ErrorData`'s 22 variants, matched exhaustively with no wildcard, from outside the crate.
+///
+/// This is the probe row 7 of [`value_parameters_are_source_compatible`]'s table exists for, aimed
+/// at the type that actually broke it: `feat/parser-materialised-values` added
+/// `#[non_exhaustive]` to `smear::parser::graphql::error::ErrorData` with no review, and nothing
+/// in `smear-parser`'s own test suite could have caught it — `#[non_exhaustive]` binds every
+/// crate except the one that declares the enum, so an in-crate wildcard-free match (this crate's
+/// own `error_data_variant_census`) stays green whether or not the attribute is there. This
+/// crate is the one it binds. With `#[non_exhaustive]` present, this function is `E0004`.
+#[allow(clippy::type_complexity)]
+pub fn error_data_is_exhaustively_matchable(
+  error: &smear::parser::graphql::error::GraphqlError<&str>,
+) -> &'static str {
+  use smear::parser::graphql::error::ErrorData;
+
+  match error.data() {
+    ErrorData::Lexer(_) => "Lexer",
+    ErrorData::IntOverflow(_) => "IntOverflow",
+    ErrorData::FloatOverflow(_) => "FloatOverflow",
+    ErrorData::InvalidEnumValue(_) => "InvalidEnumValue",
+    ErrorData::InvalidBooleanValue(_) => "InvalidBooleanValue",
+    ErrorData::InvalidNullValue(_) => "InvalidNullValue",
+    ErrorData::InvalidFragmentName(_) => "InvalidFragmentName",
+    ErrorData::Unclosed(_) => "Unclosed",
+    ErrorData::UnexpectedToken(_) => "UnexpectedToken",
+    ErrorData::UnexpectedKeyword(_) => "UnexpectedKeyword",
+    ErrorData::UnexpectedEndOfVariableValue(_) => "UnexpectedEndOfVariableValue",
+    ErrorData::UnexpectedEndOfObjectFieldValue(_) => "UnexpectedEndOfObjectFieldValue",
+    ErrorData::UnknownDirectiveLocation(_) => "UnknownDirectiveLocation",
+    ErrorData::UnknownOperationType(_) => "UnknownOperationType",
+    ErrorData::UnexpectedEndOfObjectExtension(_) => "UnexpectedEndOfObjectExtension",
+    ErrorData::UnexpectedEndOfInterfaceExtension(_) => "UnexpectedEndOfInterfaceExtension",
+    ErrorData::UnexpectedEndOfEnumExtension(_) => "UnexpectedEndOfEnumExtension",
+    ErrorData::UnexpectedEndOfInputObjectExtension(_) => "UnexpectedEndOfInputObjectExtension",
+    ErrorData::UnexpectedEndOfUnionExtension(_) => "UnexpectedEndOfUnionExtension",
+    ErrorData::UnexpectedEndOfSchemaExtension(_) => "UnexpectedEndOfSchemaExtension",
+    ErrorData::EndOfInput => "EndOfInput",
+    ErrorData::Other(_) => "Other",
+  }
+}
+
 /// `graphqlx` + `parser` — the GraphQLx dialect in the parser, which is where the dialect's
 /// imports, generics and namespaced paths actually live.
 #[allow(clippy::type_complexity)]
@@ -432,6 +473,314 @@ pub fn test_support_scaffolding() {
   >();
 }
 
+/// `materialized-numbers` — the value productions whose `Int` and `Float` leaves are `i64` and
+/// `f64`, reached across the dependency edge.
+///
+/// Both halves of the feature are named on purpose. `ast::materialized` is the alias set, so
+/// naming the return type proves the type path resolves; `syntactic::value::materialized::value`
+/// is the production, so calling it proves the parser half compiles. With the feature off,
+/// neither module exists and this function does not resolve.
+pub fn materialized_numbers(src: &str) -> Option<(i64, f64)> {
+  use smear::parser::graphql::{
+    GraphQL,
+    ast::materialized::InputValue,
+    error::GraphqlErrors,
+    syntactic::{GraphqlLexer, value::materialized},
+  };
+
+  let parsed: InputValue<&str> = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    InputValue<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(materialized::value)
+  .parse_str(src)
+  .ok()?;
+
+  match parsed {
+    InputValue::List(items) => match items.values() {
+      [InputValue::Int(int), InputValue::Float(float)] => Some((*int.source(), *float.source())),
+      _ => None,
+    },
+    _ => None,
+  }
+}
+
+/// The variant namespace, imported the way a dependent imports it.
+///
+/// `use ast::InputValue::{Int, String}` and `use ast::ConstInputValue::*` compile against an
+/// `enum` and are `E0432` against a **type alias**, which is the reason the two value trees are
+/// two enums rather than one carrier at two instantiations. This module *is* the probe: a `use`
+/// cannot be written inside a function, so it has to live where imports live.
+pub mod value_variant_namespace {
+  pub use smear::parser::graphql::ast::{
+    ConstInputValue::*,
+    InputValue::{Int, List, Object, String},
+  };
+
+  /// The materialised tree, which makes the same promise and makes it separately.
+  pub mod materialized {
+    pub use smear::parser::graphql::ast::materialized::{
+      ConstInputValue::*,
+      InputValue::{Int, List, Object, String},
+    };
+  }
+}
+
+/// `materialized-numbers`, the other half — the value types' **source compatibility**, written
+/// the way a dependent writes them.
+///
+/// Generalising the value tree's numeric leaves has failure modes that nothing inside `smear` can
+/// see, because `smear` contains no caller that writes any of these shapes. Three of them were
+/// live in successive drafts of this axis, and an empty diff over `graphql-proto` and
+/// `smear-compiler` was taken as evidence they were not — which is a claim about the consumers
+/// this workspace happens to have, not about the ones it does not.
+///
+/// # The list this is written against
+///
+/// Each draft repaired the surface the last finding named and not the one beside it. So the gate
+/// is written against **what source-equivalence for an `enum` consists of**, rather than against
+/// the findings:
+///
+/// | # | property | probed by |
+/// |---|---|---|
+/// | 1 | nominal identity — the name is an `enum` item, not an alias | [`value_variant_namespace`] |
+/// | 2 | variant namespace — `use Enum::{V}` and `use Enum::*` | [`value_variant_namespace`] |
+/// | 3 | arity | `arities` |
+/// | 4 | parameter positions | the eight element-type pins |
+/// | 5 | inference at variant construction | the four unannotated `let`s |
+/// | 6 | qualified patterns, exhaustive with no wildcard | `exhaustive` |
+/// | 7 | not `#[non_exhaustive]` — an out-of-crate exhaustive match compiles | `exhaustive` |
+/// | 8 | derive output — `Debug`, `Clone`, `PartialEq`, `IsVariant`, `Unwrap`, `TryUnwrap` | `derives` |
+/// | 9 | hand-written impls — `AsSpan`, `IntoSpan` | `derives` |
+/// | 10 | `From`, one per variant | `derives` |
+/// | 11 | associated items and turbofish reached through the name | `turbofish` |
+/// | 12 | a downstream `impl` naming the type | `impl Mine` |
+///
+/// Two of those twelve failed the draft before this one, and both were the variant namespace.
+///
+/// # Why every axis is crossed with the tree
+///
+/// There are two value trees and each promises all twelve separately, so a probe that read only
+/// the slice side would be half a gate. The containers are empty on purpose — the property is the
+/// type each expression *has*, and a populated `Vec` would be testing the parser.
+pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
+  use smear::{
+    lexer::tokora::SimpleSpan,
+    parser::graphql::{
+      GraphQL,
+      ast::{
+        ConstInputValue, ConstList, ConstObject, ConstObjectField, DefaultInputValue, InputValue,
+        List, Object, ObjectField, StringValue, materialized,
+      },
+      error::GraphqlErrors,
+      syntactic::GraphqlLexer,
+    },
+  };
+
+  /// A dependent's own container — the whole reason `Container` is an argument at all.
+  struct Own<T>(Vec<T>);
+
+  impl<T> AsRef<[T]> for Own<T> {
+    fn as_ref(&self) -> &[T] {
+      &self.0
+    }
+  }
+
+  /// Every value alias that takes no `Container`, named at the one parameter it has always taken.
+  ///
+  /// A payload parameter added back to any of them *without* a default is `E0107` here. Added
+  /// *with* one it is invisible here, and harmless: none of these takes a `Container` argument
+  /// for a new parameter to displace, and the four enum spellings among them are covered by the
+  /// constructions below, which defaults do not rescue.
+  ///
+  /// The two tuples are the census, so their length is the point rather than a smell.
+  #[allow(clippy::type_complexity)]
+  fn arities<S>(
+    _slice: Option<(
+      InputValue<S>,
+      ConstInputValue<S>,
+      ObjectField<S>,
+      ConstObjectField<S>,
+      DefaultInputValue<S>,
+    )>,
+    _materialized: Option<(
+      materialized::InputValue<S>,
+      materialized::ConstInputValue<S>,
+      materialized::ObjectField<S>,
+      materialized::ConstObjectField<S>,
+      materialized::DefaultInputValue<S>,
+      materialized::IntValue,
+      materialized::FloatValue,
+    )>,
+  ) {
+  }
+
+  arities::<&str>(None, None);
+
+  // ── Inference: a variant built with no annotation, once per enum per alias set ────────────
+  let parsed_string = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    StringValue<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(StringValue::<&str>::graphql)
+  .parse_str(src)
+  .expect("the probe's source is a string literal");
+
+  let mut constructions = 0usize;
+
+  let value = InputValue::String(parsed_string.clone());
+  constructions += usize::from(value.is_string());
+
+  let const_value = ConstInputValue::String(parsed_string.clone());
+  constructions += usize::from(const_value.is_string());
+
+  let materialized_value = materialized::InputValue::String(parsed_string.clone());
+  constructions += usize::from(materialized_value.is_string());
+
+  let materialized_const_value = materialized::ConstInputValue::String(parsed_string);
+  constructions += usize::from(materialized_const_value.is_string());
+
+  // ── Position: `Container` is the second argument, on both sides ───────────────────────────
+  let span = SimpleSpan::new(0, 0);
+  let mut positions = 0usize;
+
+  let list = List::<&str, Own<InputValue<&str>>>::new(span, Own(Vec::new()));
+  let _: &[InputValue<&str>] = list.values();
+  positions += 1;
+
+  let object = Object::<&str, Own<ObjectField<&str>>>::new(span, Own(Vec::new()));
+  let _: &[ObjectField<&str>] = object.fields();
+  positions += 1;
+
+  let const_list = ConstList::<&str, Own<ConstInputValue<&str>>>::new(span, Own(Vec::new()));
+  let _: &[ConstInputValue<&str>] = const_list.values();
+  positions += 1;
+
+  let const_object = ConstObject::<&str, Own<ConstObjectField<&str>>>::new(span, Own(Vec::new()));
+  let _: &[ConstObjectField<&str>] = const_object.fields();
+  positions += 1;
+
+  let materialized_list =
+    materialized::List::<&str, Own<materialized::InputValue<&str>>>::new(span, Own(Vec::new()));
+  let _: &[materialized::InputValue<&str>] = materialized_list.values();
+  positions += 1;
+
+  let materialized_object =
+    materialized::Object::<&str, Own<materialized::ObjectField<&str>>>::new(span, Own(Vec::new()));
+  let _: &[materialized::ObjectField<&str>] = materialized_object.fields();
+  positions += 1;
+
+  let materialized_const_list = materialized::ConstList::<
+    &str,
+    Own<materialized::ConstInputValue<&str>>,
+  >::new(span, Own(Vec::new()));
+  let _: &[materialized::ConstInputValue<&str>] = materialized_const_list.values();
+  positions += 1;
+
+  let materialized_const_object = materialized::ConstObject::<
+    &str,
+    Own<materialized::ConstObjectField<&str>>,
+  >::new(span, Own(Vec::new()));
+  let _: &[materialized::ConstObjectField<&str>] = materialized_const_object.fields();
+  positions += 1;
+
+  // ── Patterns, exhaustiveness, and the absence of `#[non_exhaustive]` ─────────────────────
+  //
+  // Out of crate, so `#[non_exhaustive]` on either tree would make this `E0004`. Both are
+  // wildcard-free: a variant added to one and not the other fails here as well as in the
+  // parser's own parity census.
+  fn exhaustive(value: &InputValue<&str>) -> u8 {
+    match value {
+      InputValue::Variable(_) => 0,
+      InputValue::Boolean(_) => 1,
+      InputValue::String(_) => 2,
+      InputValue::Float(_) => 3,
+      InputValue::Int(_) => 4,
+      InputValue::Enum(_) => 5,
+      InputValue::Null(_) => 6,
+      InputValue::List(_) => 7,
+      InputValue::Object(_) => 8,
+    }
+  }
+
+  fn exhaustive_materialized(value: &materialized::InputValue<&str>) -> u8 {
+    match value {
+      materialized::InputValue::Variable(_) => 0,
+      materialized::InputValue::Boolean(_) => 1,
+      materialized::InputValue::String(_) => 2,
+      materialized::InputValue::Float(_) => 3,
+      materialized::InputValue::Int(_) => 4,
+      materialized::InputValue::Enum(_) => 5,
+      materialized::InputValue::Null(_) => 6,
+      materialized::InputValue::List(_) => 7,
+      materialized::InputValue::Object(_) => 8,
+    }
+  }
+
+  // ── Derive output and the two hand-written span impls ────────────────────────────────────
+  fn derives(value: &InputValue<&str>, materialized: &materialized::InputValue<&str>) -> bool {
+    use smear::lexer::tokora::span::{AsSpan, IntoSpan};
+
+    let _ = format!("{value:?}{materialized:?}");
+    let _: &SimpleSpan = value.as_span();
+    let _: &SimpleSpan = materialized.as_span();
+    let _: SimpleSpan = value.clone().into_span();
+    let _: SimpleSpan = materialized.clone().into_span();
+    let _ = value.clone().try_unwrap_string().is_ok();
+    let _ = materialized.clone().try_unwrap_string().is_ok();
+    let _ = value.try_unwrap_string_ref().is_ok() && materialized.is_string();
+    value.clone() == *value && materialized.clone() == *materialized
+  }
+
+  // ── Turbofish at a variant, on both trees ────────────────────────────────────────────────
+  fn turbofish(
+    text: StringValue<&'static str>,
+  ) -> (
+    InputValue<&'static str>,
+    materialized::InputValue<&'static str>,
+  ) {
+    (
+      InputValue::<&'static str>::String(text.clone()),
+      materialized::InputValue::<&'static str>::String(text),
+    )
+  }
+
+  let _ = (
+    exhaustive(&value),
+    exhaustive_materialized(&materialized_value),
+  );
+  assert!(derives(&value, &materialized_value));
+  let _ = turbofish;
+
+  (constructions, positions)
+}
+
+/// A downstream `impl` naming both trees.
+///
+/// A dependent can only write this if the tree is a type it can name, which an alias to a
+/// crate-private carrier would not be. `pub` because the probe is the pair of impls below, and a
+/// private trait implemented for a foreign type is dead code rather than a claim.
+pub trait ValueDepth {
+  /// Nominal — the body is not the point, the two `impl` headers are.
+  fn depth(&self) -> usize;
+}
+
+impl ValueDepth for smear::parser::graphql::ast::InputValue<&str> {
+  fn depth(&self) -> usize {
+    1
+  }
+}
+
+impl ValueDepth for smear::parser::graphql::ast::materialized::InputValue<&str> {
+  fn depth(&self) -> usize {
+    1
+  }
+}
+
 /// `bytes` — a `bytes::Bytes`-backed source.
 pub fn bytes_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
   keyword_of(bytes::Bytes::from_static(b"query"))
@@ -549,6 +898,64 @@ mod tests {
     let (leaf, errors) = super::graphql_execute("type Query { ok: String! }", "{ ok }", None);
     assert_eq!(leaf, None);
     assert_eq!(errors, 1);
+  }
+
+  /// The materialised-number productions, driven across the dependency edge.
+  ///
+  /// Run rather than merely compiled, because the feature's whole claim is about the *payload* a
+  /// leaf carries: a probe that only type-checked would pass against a parser that returned
+  /// `Default::default()` for both.
+  #[test]
+  fn the_materialized_numbers_door_carries_the_converted_payloads() {
+    assert_eq!(
+      super::materialized_numbers("[-7, 1.5e2]"),
+      Some((-7, 150.0))
+    );
+
+    // The documented bound: a literal that is valid GraphQL and outside `i64` is refused here,
+    // where the slice parser above accepts it.
+    assert_eq!(
+      super::materialized_numbers("[99999999999999999999999999, 1.0]"),
+      None
+    );
+    assert!(super::graphql_parser("{ f(x: 99999999999999999999999999) }").is_ok());
+  }
+
+  /// The twelve source-equivalence properties of the value trees, across the dependency edge.
+  ///
+  /// The bodies are the gate — none of them compiles if a name stops being an `enum`, loses a
+  /// variant, gains `#[non_exhaustive]`, gains a payload parameter, or displaces a `Container`
+  /// argument. Calling them is what puts a failure in a test report instead of in "the workspace
+  /// does not build", and the two counts are what stop a probe from being deleted quietly.
+  #[test]
+  fn the_value_types_are_source_equivalent_on_every_axis() {
+    assert_eq!(
+      super::value_parameters_are_source_compatible("\"probe\""),
+      (4, 8)
+    );
+
+    // The namespace probe is a `use`, so it is compiled rather than run; naming one item from
+    // each tree is what keeps a broken import from being dead code the compiler tolerates.
+    let _: fn(_) -> smear::parser::graphql::ast::InputValue<&'static str> =
+      super::value_variant_namespace::Int;
+    // The materialised `Int` payload is `i64`, which mentions no `S`, so the tree parameter has
+    // to come from the annotation. That is materialisation's own consequence and not the alias
+    // defect: the slice `Int` above needs none.
+    let _: fn(_) -> smear::parser::graphql::ast::materialized::InputValue<&'static str> =
+      super::value_variant_namespace::materialized::Int;
+    let _ = <smear::parser::graphql::ast::InputValue<&str> as super::ValueDepth>::depth;
+  }
+
+  /// `ErrorData`, matched exhaustively from outside the crate — the check that would have caught
+  /// `#[non_exhaustive]` landing on it unreviewed. Driven by a real parse failure rather than a
+  /// constructor, so the property proven is "this variant, from this crate, right now" and not
+  /// merely "this type-checks".
+  #[test]
+  fn the_error_data_variants_are_exhaustively_matchable_from_outside_the_crate() {
+    let errors = super::graphql_parser("{ f(").expect_err("a truncated document is a parse error");
+    let error = errors.into_iter().next().expect("at least one error");
+    let tag = super::error_data_is_exhaustively_matchable(&error);
+    assert!(!tag.is_empty(), "the match arm returned no tag");
   }
 
   /// The introspection door, driven end to end across the dependency edge.

@@ -376,16 +376,42 @@ pub enum Unclosed {
 }
 
 /// The data of a parser error.
+///
+/// # Two variants have a feature-gated producer, and are themselves unconditional
+///
+/// [`IntOverflow`](ErrorData::IntOverflow) and [`FloatOverflow`](ErrorData::FloatOverflow) are
+/// raised by the materialising value productions and by nothing else, so
+/// [`Error::int_overflow`] and [`Error::float_overflow`] — the paths that *produce* them — carry
+/// `#[cfg(feature = "materialized-numbers")]`. **The variants do not.**
+///
+/// The defect being repaired was real and is worth naming precisely, because the gate that
+/// repairs it is easy to put one level too high. Both variants existed here with **no
+/// constructor and no construction site in any configuration**: declared and unproducible, the
+/// same shape filed twice already against this project — tokora's
+/// `FinishError::InvalidDialectKind`, and `smear-lexer`'s `LosslessTokenKind::Boolean` with 28
+/// declared and 27 producible. What fixes that is a producer, not a `#[cfg]` on the declaration;
+/// gating the variant as well would additionally *remove* two names from the default surface,
+/// which is a second change wearing the first one's justification.
+///
+/// So the two claims the census makes are different claims, and it makes both:
+/// `error_data_variant_census` matches this enum exhaustively and wildcard-free in **every**
+/// configuration — 22 variants, always — and builds a sample through a public constructor for
+/// each one whose producer that configuration compiled: 22 samples with the feature, 20 without.
+/// A variant producible in no configuration is caught by the all-features run.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
-  /// An integer value could not be parsed due to overflow.
+  /// An integer literal is syntactically valid GraphQL but does not fit in [`i64`].
+  ///
+  /// Raised only by the `materialized-numbers` productions; see [`Error::int_overflow`].
   #[from(skip)]
   IntOverflow(S),
-  /// A floating point value could not be parsed due to overflow.
+  /// A float literal is syntactically valid GraphQL but does not convert to a finite [`f64`].
+  ///
+  /// Raised only by the `materialized-numbers` productions; see [`Error::float_overflow`].
   #[from(skip)]
   FloatOverflow(S),
   /// An enum value is invalid.
@@ -652,6 +678,29 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
     Self::new(span, ErrorData::EndOfInput)
+  }
+
+  /// Creates an integer-out-of-range error, carrying the literal's source spelling.
+  ///
+  /// **This is the producer, and it is what the feature gates** — the variant it builds is
+  /// unconditional. See [`ErrorData`] for why the gate belongs here and not one level up, and
+  /// [`graphql::syntactic::materialized`](crate::graphql::syntactic::value::materialized) for the
+  /// documented bound that makes a specification-valid literal a *parse* error in that view.
+  #[cfg(feature = "materialized-numbers")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+  #[inline]
+  pub const fn int_overflow(value: S, span: Span) -> Self {
+    Self::new(span, ErrorData::IntOverflow(value))
+  }
+
+  /// Creates a float-out-of-range error, carrying the literal's source spelling.
+  ///
+  /// The producer, gated where [`Error::int_overflow`] is and for the same reason.
+  #[cfg(feature = "materialized-numbers")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+  #[inline]
+  pub const fn float_overflow(value: S, span: Span) -> Self {
+    Self::new(span, ErrorData::FloatOverflow(value))
   }
 
   /// Returns the span of the error.
@@ -1024,4 +1073,6 @@ mod tests {
       Expectation::LBrace,
     );
   }
+
+  mod census;
 }
