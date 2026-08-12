@@ -36,36 +36,51 @@ pub type BlockStringValue<S, Span = SimpleSpan> = crate::value::BlockStringValue
 pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S>, Span>;
 
 /// List value in GraphQL (can contain variables).
-pub type List<S, Container = DefaultVec<InputValue<S>>> =
-  crate::value::List<InputValue<S>, SimpleSpan, Container>;
+pub type List<S, I = S, F = S, Container = DefaultVec<InputValue<S, I, F>>> =
+  crate::value::List<InputValue<S, I, F>, SimpleSpan, Container>;
 
 /// Object value in GraphQL (can contain variables).
-pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
-  crate::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
+pub type Object<S, I = S, F = S, Container = DefaultVec<ObjectField<S, I, F>>> =
+  crate::value::Object<Name<S>, InputValue<S, I, F>, SimpleSpan, Container>;
 
 /// Object field in GraphQL (can contain variables).
-pub type ObjectField<S> = crate::value::ObjectField<Name<S>, InputValue<S>>;
+pub type ObjectField<S, I = S, F = S> = crate::value::ObjectField<Name<S>, InputValue<S, I, F>>;
 
 /// Constant list value in GraphQL (no variables).
-pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  crate::value::List<ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstList<S, I = S, F = S, Container = DefaultVec<ConstInputValue<S, I, F>>> =
+  crate::value::List<ConstInputValue<S, I, F>, SimpleSpan, Container>;
 
 /// Constant object value in GraphQL (no variables).
-pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
-  crate::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstObject<S, I = S, F = S, Container = DefaultVec<ConstObjectField<S, I, F>>> =
+  crate::value::Object<Name<S>, ConstInputValue<S, I, F>, SimpleSpan, Container>;
 
 /// Constant object field in GraphQL (no variables).
-pub type ConstObjectField<S> = crate::value::ObjectField<Name<S>, ConstInputValue<S>>;
+pub type ConstObjectField<S, I = S, F = S> =
+  crate::value::ObjectField<Name<S>, ConstInputValue<S, I, F>>;
 
 /// Default value for input fields and arguments, using constant expressions
 /// (`= ConstValue`). Copied type-only from the frozen `graphql/ast/default.rs`.
-pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<S>>;
+pub type DefaultInputValue<S, I = S, F = S> =
+  crate::value::DefaultInputValue<ConstInputValue<S, I, F>>;
 
 /// GraphQL input value (executable context).
+///
+/// # The `I` and `F` parameters
+///
+/// `S` is the source slice every text-bearing leaf keeps. `I` and `F` are the payloads of the
+/// `Int` and `Float` leaves, and they **default to `S`** — so `InputValue<S>` is exactly the
+/// source-slice value this parser has always produced, spelled the way it has always been
+/// spelled.
+///
+/// They exist because materialisation varies the payload and nothing else:
+/// `InputValue<S, i64, f64>` is the same tree with its two numeric leaves converted, which is
+/// what the `materialized-numbers` feature's alias set names. Splitting them into two parameters
+/// rather than one is a decision made representable: were a narrower integer ever wanted it would
+/// be `i32` + `f64`, never `i32` + `f32`, because GraphQL's `Float` is IEEE 754 **double**.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum InputValue<S> {
+pub enum InputValue<S, I = S, F = S> {
   /// Variable reference (e.g., `$userId`).
   Variable(VariableValue<S>),
   /// Boolean value (`true` or `false`).
@@ -73,20 +88,20 @@ pub enum InputValue<S> {
   /// String value (inline or block string).
   String(StringValue<S>),
   /// Floating-point number.
-  Float(FloatValue<S>),
+  Float(FloatValue<F>),
   /// Integer number.
-  Int(IntValue<S>),
+  Int(IntValue<I>),
   /// Enum value name.
   Enum(EnumValue<S>),
   /// The `null` literal.
   Null(NullValue<S>),
   /// List of values.
-  List(List<S>),
+  List(List<S, I, F>),
   /// Object value with named fields.
-  Object(Object<S>),
+  Object(Object<S, I, F>),
 }
 
-impl<S> AsSpan<SimpleSpan> for InputValue<S> {
+impl<S, I, F> AsSpan<SimpleSpan> for InputValue<S, I, F> {
   #[inline]
   fn as_span(&self) -> &SimpleSpan {
     match self {
@@ -103,7 +118,7 @@ impl<S> AsSpan<SimpleSpan> for InputValue<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
+impl<S, I, F> IntoSpan<SimpleSpan> for InputValue<S, I, F> {
   #[inline]
   fn into_span(self) -> SimpleSpan {
     match self {
@@ -121,29 +136,32 @@ impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
 }
 
 /// GraphQL constant input value (schema context).
+///
+/// `I` and `F` are the `Int` and `Float` payloads and default to `S`, exactly as on
+/// [`InputValue`].
 #[derive(Debug, Clone, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ConstInputValue<S> {
+pub enum ConstInputValue<S, I = S, F = S> {
   /// Boolean value (`true` or `false`).
   Boolean(BooleanValue<S>),
   /// String value (inline or block string).
   String(StringValue<S>),
   /// Floating-point number.
-  Float(FloatValue<S>),
+  Float(FloatValue<F>),
   /// Integer number.
-  Int(IntValue<S>),
+  Int(IntValue<I>),
   /// Enum value name.
   Enum(EnumValue<S>),
   /// The `null` literal.
   Null(NullValue<S>),
   /// List of constant values.
-  List(ConstList<S>),
+  List(ConstList<S, I, F>),
   /// Object value with named fields (all values must be constant).
-  Object(ConstObject<S>),
+  Object(ConstObject<S, I, F>),
 }
 
-impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
+impl<S, I, F> AsSpan<SimpleSpan> for ConstInputValue<S, I, F> {
   #[inline]
   fn as_span(&self) -> &SimpleSpan {
     match self {
@@ -159,7 +177,7 @@ impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
+impl<S, I, F> IntoSpan<SimpleSpan> for ConstInputValue<S, I, F> {
   #[inline]
   fn into_span(self) -> SimpleSpan {
     match self {

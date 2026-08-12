@@ -17,6 +17,15 @@ pub use ty::*;
 pub use type_system::*;
 pub use value::*;
 
+/// The materialised-number alias set: the same nodes with `i64` and `f64` numeric leaves.
+///
+/// A module rather than a flat re-export because every name in it collides with its slice twin
+/// by design — `materialized::InputValue<S>` *is* `InputValue<S, i64, f64>`, and what the module
+/// boundary says is that the two are one type at two instantiations rather than two types.
+#[cfg(feature = "materialized-numbers")]
+#[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+pub mod materialized;
+
 mod argument;
 mod directive;
 mod executable;

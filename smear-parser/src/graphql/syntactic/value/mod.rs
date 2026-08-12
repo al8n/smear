@@ -44,6 +44,52 @@ use crate::{
   },
 };
 
+use numbers::{Numbers, SliceNumbers};
+
+/// The composite value productions, once, generic over what their numeric leaves carry.
+///
+/// Identical to `value_parser!` but for the extra `N` parameter and its bound: the body writes
+/// `N::int` / `N::float` where a payload is built and `N::report` where one fails, and the two
+/// instantiations — [`SliceNumbers`] here, `MaterializedNumbers` in
+/// [`materialized`] — are then the same parser at two payloads rather than two parsers that
+/// agree today.
+///
+/// Only the `[contextual, delimited]` bound set exists, and that is not an omission: every
+/// production this macro generates already carried it, so making the family generic added no
+/// obligation to any public signature. The four *leaf* productions are hand-written on both
+/// sides instead, precisely because sharing them WOULD have widened
+/// [`int_value`]'s and [`float_value`]'s public where-clauses with a `From<GraphqlError<…>>`
+/// bound the slice parser can never need.
+macro_rules! numeric_value_parser {
+  (
+    $visibility:vis $name:ident,
+    $input:ident,
+    $output:ty,
+    [contextual, delimited],
+    $body:block
+  ) => {
+    #[doc = "Parses or attempts this production with the concrete GraphQL syntactic lexer, over the numeric payloads `N` selects."]
+    $visibility fn $name<'inp, Src, Ctx, N>(
+      $input: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+    ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
+    where
+      Src: Source<usize> + ?Sized,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+      GraphqlLexer<'inp, Src>: Lexer<
+        'inp,
+        Source = Src,
+        Token = GraphqlToken<'inp, Src>,
+        Span = SimpleSpan,
+        Offset = usize,
+      >,
+      GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
+      GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+      N: Numbers<GraphqlSlice<'inp, Src>>,
+      Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+    $body
+  };
+}
+
 macro_rules! value_parser {
   (
     $visibility:vis $name:ident,
@@ -650,13 +696,13 @@ where
   }
 }
 
-value_parser!(
-  pub list_value,
+numeric_value_parser!(
+  list_value_with,
   inp,
-  AstList<GraphqlSlice<'inp, Src>>,
+  AstList<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
-    value
+    value_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
       .collect_with(Vec::new())
@@ -666,13 +712,13 @@ value_parser!(
   }
 );
 
-value_parser!(
-  pub const_list_value,
+numeric_value_parser!(
+  const_list_value_with,
   inp,
-  AstConstList<GraphqlSlice<'inp, Src>>,
+  AstConstList<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
-    const_value
+    const_value_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
       .collect_with(Vec::new())
@@ -682,10 +728,10 @@ value_parser!(
   }
 );
 
-value_parser!(
-  pub object_field,
+numeric_value_parser!(
+  object_field_with,
   inp,
-  ObjectField<GraphqlSlice<'inp, Src>>,
+  ObjectField<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
@@ -697,34 +743,39 @@ value_parser!(
       )?;
       name(inp)
     })
-      .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        guard_object_field_phase(
-          inp,
-          Expectation::Colon,
-          ObjectFieldValueHint::Colon,
-          |token| token.is_colon(),
-        )?;
-        colon(inp)
-      })
-      .then(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        guard_object_field_phase(
-          inp,
-          Expectation::InputValue,
-          ObjectFieldValueHint::Value,
-          |token| value_head_kind::<Src>(token).is_some(),
-        )?;
-        value(inp)
-      })
-      .token_spanned()
-      .map(|Spanned { span, data: (name, value) }| ObjectField::new(span, name, value))
-      .parse_input(inp)
+    .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      guard_object_field_phase(
+        inp,
+        Expectation::Colon,
+        ObjectFieldValueHint::Colon,
+        |token| token.is_colon(),
+      )?;
+      colon(inp)
+    })
+    .then(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      guard_object_field_phase(
+        inp,
+        Expectation::InputValue,
+        ObjectFieldValueHint::Value,
+        |token| value_head_kind::<Src>(token).is_some(),
+      )?;
+      value_with::<Src, Ctx, N>(inp)
+    })
+    .token_spanned()
+    .map(
+      |Spanned {
+         span,
+         data: (name, value),
+       }| ObjectField::new(span, name, value),
+    )
+    .parse_input(inp)
   }
 );
 
-value_parser!(
-  pub const_object_field,
+numeric_value_parser!(
+  const_object_field_with,
   inp,
-  ConstObjectField<GraphqlSlice<'inp, Src>>,
+  ConstObjectField<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
@@ -736,37 +787,42 @@ value_parser!(
       )?;
       name(inp)
     })
-      .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        guard_object_field_phase(
-          inp,
-          Expectation::Colon,
-          ObjectFieldValueHint::Colon,
-          |token| token.is_colon(),
-        )?;
-        colon(inp)
-      })
-      .then(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        guard_object_field_phase(
-          inp,
-          Expectation::ConstInputValue,
-          ObjectFieldValueHint::Value,
-          is_const_value_head::<Src>,
-        )?;
-        const_value(inp)
-      })
-      .token_spanned()
-      .map(|Spanned { span, data: (name, value) }| ConstObjectField::new(span, name, value))
-      .parse_input(inp)
+    .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      guard_object_field_phase(
+        inp,
+        Expectation::Colon,
+        ObjectFieldValueHint::Colon,
+        |token| token.is_colon(),
+      )?;
+      colon(inp)
+    })
+    .then(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      guard_object_field_phase(
+        inp,
+        Expectation::ConstInputValue,
+        ObjectFieldValueHint::Value,
+        is_const_value_head::<Src>,
+      )?;
+      const_value_with::<Src, Ctx, N>(inp)
+    })
+    .token_spanned()
+    .map(
+      |Spanned {
+         span,
+         data: (name, value),
+       }| ConstObjectField::new(span, name, value),
+    )
+    .parse_input(inp)
   }
 );
 
-value_parser!(
-  pub object_value,
+numeric_value_parser!(
+  object_value_with,
   inp,
-  AstObject<GraphqlSlice<'inp, Src>>,
+  AstObject<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
-    object_field
+    object_field_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
       .collect_with(Vec::new())
@@ -776,13 +832,13 @@ value_parser!(
   }
 );
 
-value_parser!(
-  pub const_object_value,
+numeric_value_parser!(
+  const_object_value_with,
   inp,
-  AstConstObject<GraphqlSlice<'inp, Src>>,
+  AstConstObject<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
-    const_object_field
+    const_object_field_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
       .collect_with(Vec::new())
@@ -793,25 +849,75 @@ value_parser!(
 );
 
 value_parser!(
-  pub(super) value,
+  pub list_value,
   inp,
-  InputValue<GraphqlSlice<'inp, Src>>,
+  AstList<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { list_value_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+value_parser!(
+  pub const_list_value,
+  inp,
+  AstConstList<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { const_list_value_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+value_parser!(
+  pub object_field,
+  inp,
+  ObjectField<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { object_field_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+value_parser!(
+  pub const_object_field,
+  inp,
+  ConstObjectField<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { const_object_field_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+value_parser!(
+  pub object_value,
+  inp,
+  AstObject<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { object_value_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+value_parser!(
+  pub const_object_value,
+  inp,
+  AstConstObject<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { const_object_value_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+numeric_value_parser!(
+  value_with,
+  inp,
+  InputValue<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
     let int_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitInt(value) => {
-          Ok(InputValue::Int(IntValue::new(span, value)))
-        }
+        GraphqlToken::<'inp, Src>::LitInt(value) => match N::int(value) {
+          Ok(payload) => Ok(InputValue::Int(IntValue::new(span, payload))),
+          Err(err) => Err(N::report(err, span).into()),
+        },
         _ => unreachable!("fused input-value arm received a non-int token"),
       };
     let float_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitFloat(value) => {
-          Ok(InputValue::Float(FloatValue::new(span, value)))
-        }
+        GraphqlToken::<'inp, Src>::LitFloat(value) => match N::float(value) {
+          Ok(payload) => Ok(InputValue::Float(FloatValue::new(span, payload))),
+          Err(err) => Err(N::report(err, span).into()),
+        },
         _ => unreachable!("fused input-value arm received a non-float token"),
       };
     let inline_string_head_arm =
@@ -836,12 +942,8 @@ value_parser!(
         let keyword = token.downcast_ref();
         match token {
           GraphqlToken::<'inp, Src>::Identifier(value) => Ok(match keyword {
-            Some(ContextualKeyword::True) => {
-              InputValue::Boolean(BooleanValue::new(span, true))
-            }
-            Some(ContextualKeyword::False) => {
-              InputValue::Boolean(BooleanValue::new(span, false))
-            }
+            Some(ContextualKeyword::True) => InputValue::Boolean(BooleanValue::new(span, true)),
+            Some(ContextualKeyword::False) => InputValue::Boolean(BooleanValue::new(span, false)),
             Some(ContextualKeyword::Null) => InputValue::Null(NullValue::new(span, value)),
             _ => InputValue::Enum(EnumValue::new(span, value)),
           }),
@@ -898,51 +1000,53 @@ value_parser!(
         };
 
         if list {
-          list_value(inp).map(InputValue::List)
+          list_value_with::<Src, Ctx, N>(inp).map(InputValue::List)
         } else {
-          object_value(inp).map(InputValue::Object)
+          object_value_with::<Src, Ctx, N>(inp).map(InputValue::Object)
         }
       }
     }
   }
 );
 
-value_parser!(
-  pub(super) const_value,
+numeric_value_parser!(
+  const_value_with,
   inp,
-  ConstInputValue<GraphqlSlice<'inp, Src>>,
+  ConstInputValue<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
     let int_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitInt(value) => {
-          Ok(ConstInputValue::Int(IntValue::new(span, value)))
-        }
+        GraphqlToken::<'inp, Src>::LitInt(value) => match N::int(value) {
+          Ok(payload) => Ok(ConstInputValue::Int(IntValue::new(span, payload))),
+          Err(err) => Err(N::report(err, span).into()),
+        },
         _ => unreachable!("fused const-input-value arm received a non-int token"),
       };
     let float_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitFloat(value) => {
-          Ok(ConstInputValue::Float(FloatValue::new(span, value)))
-        }
+        GraphqlToken::<'inp, Src>::LitFloat(value) => match N::float(value) {
+          Ok(payload) => Ok(ConstInputValue::Float(FloatValue::new(span, payload))),
+          Err(err) => Err(N::report(err, span).into()),
+        },
         _ => unreachable!("fused const-input-value arm received a non-float token"),
       };
     let inline_string_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
-          Ok(ConstInputValue::String(StringValue::new(span, value.into())))
-        }
+        GraphqlToken::<'inp, Src>::LitInlineStr(value) => Ok(ConstInputValue::String(
+          StringValue::new(span, value.into()),
+        )),
         _ => unreachable!("fused const-input-value arm received a non-inline-string token"),
       };
     let block_string_head_arm =
       |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
        _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
-        GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
-          Ok(ConstInputValue::String(StringValue::new(span, value.into())))
-        }
+        GraphqlToken::<'inp, Src>::LitBlockStr(value) => Ok(ConstInputValue::String(
+          StringValue::new(span, value.into()),
+        )),
         _ => unreachable!("fused const-input-value arm received a non-block-string token"),
       };
     let identifier_head_arm =
@@ -1003,9 +1107,9 @@ value_parser!(
         };
 
         if list {
-          const_list_value(inp).map(ConstInputValue::List)
+          const_list_value_with::<Src, Ctx, N>(inp).map(ConstInputValue::List)
         } else {
-          const_object_value(inp).map(ConstInputValue::Object)
+          const_object_value_with::<Src, Ctx, N>(inp).map(ConstInputValue::Object)
         }
       }
     }
@@ -1013,14 +1117,30 @@ value_parser!(
 );
 
 value_parser!(
-  committed_default_value,
+  pub(super) value,
   inp,
-  DefaultInputValue<GraphqlSlice<'inp, Src>>,
+  InputValue<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { value_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+value_parser!(
+  pub(super) const_value,
+  inp,
+  ConstInputValue<GraphqlSlice<'inp, Src>>,
+  [contextual, delimited],
+  { const_value_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
+numeric_value_parser!(
+  committed_default_value_with,
+  inp,
+  DefaultInputValue<GraphqlSlice<'inp, Src>, N::Int, N::Float>,
   [contextual, delimited],
   {
     let validated_const_tail = |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
       let off = *inp.offset();
-      const_value
+      const_value_with::<Src, Ctx, N>
         .peek_then::<_, U1>(
           move |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| match peeked
             .pop_front()
@@ -1055,18 +1175,17 @@ value_parser!(
   }
 );
 
-value_parser!(
-  pub try_default_value,
+numeric_value_parser!(
+  try_default_value_with,
   inp,
-  ParseAttempt<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
+  ParseAttempt<DefaultInputValue<GraphqlSlice<'inp, Src>, N::Int, N::Float>>,
   [contextual, delimited],
   {
-    committed_default_value
+    committed_default_value_with::<Src, Ctx, N>
       .peek_then_try::<_, U1>(
-        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>| -> Result<
-          Action,
-          GraphqlError<'inp, Src, Ctx>,
-        > {
+        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
+         _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>|
+         -> Result<Action, GraphqlError<'inp, Src, Ctx>> {
           Ok(match peeked.pop_front() {
             Some(equal) if equal.token().is_equal() => Action::Continue,
             _ => Action::Stop,
@@ -1077,14 +1196,32 @@ value_parser!(
   }
 );
 
+numeric_value_parser!(
+  default_value_with,
+  inp,
+  Option<DefaultInputValue<GraphqlSlice<'inp, Src>, N::Int, N::Float>>,
+  [contextual, delimited],
+  { try_default_value_with::<Src, Ctx, N>(inp).map(Into::into) }
+);
+
+// No slice-payload wrapper for `committed_default_value_with`: it was private and reached only
+// from `try_default_value`, which now reaches the generic form directly. A wrapper kept for
+// symmetry would be dead code in every configuration.
+
+value_parser!(
+  pub try_default_value,
+  inp,
+  ParseAttempt<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
+  [contextual, delimited],
+  { try_default_value_with::<Src, Ctx, SliceNumbers>(inp) }
+);
+
 value_parser!(
   pub default_value,
   inp,
   Option<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
   [contextual, delimited],
-  {
-    try_default_value(inp).map(Into::into)
-  }
+  { default_value_with::<Src, Ctx, SliceNumbers>(inp) }
 );
 
 macro_rules! graphql_slice_api {
@@ -1369,6 +1506,13 @@ impl<S> DefaultInputValue<S> {
     try_default_value(inp)
   }
 }
+
+/// The materialised-number instantiation of every production in this module.
+#[cfg(feature = "materialized-numbers")]
+#[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+pub mod materialized;
+
+mod numbers;
 
 #[cfg(test)]
 mod tests;

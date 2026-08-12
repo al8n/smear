@@ -432,6 +432,40 @@ pub fn test_support_scaffolding() {
   >();
 }
 
+/// `materialized-numbers` — the value productions whose `Int` and `Float` leaves are `i64` and
+/// `f64`, reached across the dependency edge.
+///
+/// Both halves of the feature are named on purpose. `ast::materialized` is the alias set, so
+/// naming the return type proves the type path resolves; `syntactic::value::materialized::value`
+/// is the production, so calling it proves the parser half compiles. With the feature off,
+/// neither module exists and this function does not resolve.
+pub fn materialized_numbers(src: &str) -> Option<(i64, f64)> {
+  use smear::parser::graphql::{
+    GraphQL,
+    ast::materialized::InputValue,
+    error::GraphqlErrors,
+    syntactic::{GraphqlLexer, value::materialized},
+  };
+
+  let parsed: InputValue<&str> = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    InputValue<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(materialized::value)
+  .parse_str(src)
+  .ok()?;
+
+  match parsed {
+    InputValue::List(items) => match items.values() {
+      [InputValue::Int(int), InputValue::Float(float)] => Some((*int.source(), *float.source())),
+      _ => None,
+    },
+    _ => None,
+  }
+}
+
 /// `bytes` — a `bytes::Bytes`-backed source.
 pub fn bytes_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
   keyword_of(bytes::Bytes::from_static(b"query"))
@@ -549,6 +583,27 @@ mod tests {
     let (leaf, errors) = super::graphql_execute("type Query { ok: String! }", "{ ok }", None);
     assert_eq!(leaf, None);
     assert_eq!(errors, 1);
+  }
+
+  /// The materialised-number productions, driven across the dependency edge.
+  ///
+  /// Run rather than merely compiled, because the feature's whole claim is about the *payload* a
+  /// leaf carries: a probe that only type-checked would pass against a parser that returned
+  /// `Default::default()` for both.
+  #[test]
+  fn the_materialized_numbers_door_carries_the_converted_payloads() {
+    assert_eq!(
+      super::materialized_numbers("[-7, 1.5e2]"),
+      Some((-7, 150.0))
+    );
+
+    // The documented bound: a literal that is valid GraphQL and outside `i64` is refused here,
+    // where the slice parser above accepts it.
+    assert_eq!(
+      super::materialized_numbers("[99999999999999999999999999, 1.0]"),
+      None
+    );
+    assert!(super::graphql_parser("{ f(x: 99999999999999999999999999) }").is_ok());
   }
 
   /// The introspection door, driven end to end across the dependency edge.

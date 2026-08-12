@@ -376,16 +376,36 @@ pub enum Unclosed {
 }
 
 /// The data of a parser error.
+///
+/// # Two variants exist only under `materialized-numbers`
+///
+/// [`IntOverflow`](ErrorData::IntOverflow) and [`FloatOverflow`](ErrorData::FloatOverflow) are
+/// produced by the materialising value productions and by nothing else, so they are declared
+/// only in a build that has them. That is a deliberate repair, not a precaution: both variants
+/// existed here unconditionally and **unproducibly**: no constructor, no construction site. It is
+/// the same shape filed twice already against this project — tokora's
+/// `FinishError::InvalidDialectKind`, and `smear-lexer`'s `LosslessTokenKind::Boolean` with 28
+/// declared and 27 producible. `error_data_variant_census` in this module's tests is the guard,
+/// and it is exhaustive per configuration rather than over the union of them.
+///
+/// The enum is `#[non_exhaustive]` because its variant set is now feature-dependent: a consumer
+/// who matched it exhaustively in a materialising build would otherwise break on the same source
+/// compiled without the feature, which is a semver hazard the attribute removes.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
-  /// An integer value could not be parsed due to overflow.
+  /// An integer literal is syntactically valid GraphQL but does not fit in [`i64`].
+  #[cfg(feature = "materialized-numbers")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
   #[from(skip)]
   IntOverflow(S),
-  /// A floating point value could not be parsed due to overflow.
+  /// A float literal is syntactically valid GraphQL but does not convert to a finite [`f64`].
+  #[cfg(feature = "materialized-numbers")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
   #[from(skip)]
   FloatOverflow(S),
   /// An enum value is invalid.
@@ -652,6 +672,28 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
     Self::new(span, ErrorData::EndOfInput)
+  }
+
+  /// Creates an integer-out-of-range error, carrying the literal's source spelling.
+  ///
+  /// See [`ErrorData::IntOverflow`] for why this exists only under `materialized-numbers`, and
+  /// [`graphql::syntactic::materialized`](crate::graphql::syntactic::value::materialized) for the
+  /// documented bound that makes a specification-valid literal a *parse* error in that view.
+  #[cfg(feature = "materialized-numbers")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+  #[inline]
+  pub const fn int_overflow(value: S, span: Span) -> Self {
+    Self::new(span, ErrorData::IntOverflow(value))
+  }
+
+  /// Creates a float-out-of-range error, carrying the literal's source spelling.
+  ///
+  /// See [`ErrorData::FloatOverflow`] for why this exists only under `materialized-numbers`.
+  #[cfg(feature = "materialized-numbers")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+  #[inline]
+  pub const fn float_overflow(value: S, span: Span) -> Self {
+    Self::new(span, ErrorData::FloatOverflow(value))
   }
 
   /// Returns the span of the error.
@@ -1024,4 +1066,6 @@ mod tests {
       Expectation::LBrace,
     );
   }
+
+  mod census;
 }

@@ -283,6 +283,7 @@ without it, and a gate that can only ever be on is not a gate.
 | `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
 | `proto` | `smear::proto` — draft §6 query execution as a Sans-I/O state machine. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator` and `std`, and is the one validator feature that costs a dependency (`serde`, `serde_json`) | |
+| `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry `i64` and `f64` instead of a source slice. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, declares no new type, and leaves the slice parser in place for the literals `i64` cannot hold | |
 | `rowan` | The lossless CST tower, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
 | `bytes` | Support the `bytes::Bytes` source type | |
 | `bstr` | Support the `bstr::BStr` source type | |
