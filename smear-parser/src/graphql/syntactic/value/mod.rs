@@ -1534,7 +1534,12 @@ pub mod materialized;
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub mod materialized32;
 
-mod numbers;
+// `pub(crate)` rather than private for one reason, and it is a correctness one:
+// `IntOverflow::checked` in [`graphql::error`](crate::graphql::error) has to decide whether a
+// literal really is out of range at the width a caller named, and the only honest decider is the
+// reader the productions here already use. A second reader written in `error.rs` could disagree
+// with this one, and the constructor's promise would then be about a function nobody calls.
+pub(crate) mod numbers;
 
 #[cfg(test)]
 mod tests;

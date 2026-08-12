@@ -14,7 +14,7 @@ use super::{const_value, float_value, int_value, list_value, object_value, try_i
 use crate::graphql::{
   GraphQL,
   ast::materialized32::{ConstInputValue, InputValue},
-  error::{ErrorData, GraphqlErrors, IntWidth},
+  error::{ErrorData, GraphqlErrors, IntOverflow, IntWidth},
   syntactic::{GraphqlInput, GraphqlLexer, value::materialized},
 };
 use tokora::try_parse_input::ParseAttempt;
@@ -174,6 +174,60 @@ fn the_two_widths_disagree_on_the_literal_between_them() {
   let errors =
     drive_str(materialized::int_value, PAST_I64).expect_err("i64::MAX + 1 must not fit i64");
   assert_eq!(overflow_width(&errors), Ok(IntWidth::I64));
+}
+
+/// **The public checked door and the two productions agree, literal for literal.**
+///
+/// `IntOverflow::checked` is the only way a caller outside this crate can name an [`IntWidth`],
+/// and its promise is a claim about *these* productions: it accepts a `(literal, width)` pair
+/// exactly when the production at that width would have refused the literal. A promise about
+/// another function's behaviour is worth what a test comparing them is worth, and this module is
+/// where both productions are already in view.
+///
+/// It is deliberately asked at both widths over one corpus rather than at the boundary the round
+/// was about. A door that answered `I32` correctly and `I64` by always refusing would satisfy the
+/// single interesting literal and fail here.
+#[test]
+fn the_checked_constructor_admits_exactly_what_the_productions_refuse() {
+  let (mut refused_somewhere, mut accepted_somewhere) = (0usize, 0usize);
+
+  for literal in [
+    "0",
+    "-0",
+    "7",
+    "2147483647",
+    "2147483648",
+    "-2147483648",
+    "-2147483649",
+    "9223372036854775807",
+    "9223372036854775808",
+    "-9223372036854775808",
+    "-9223372036854775809",
+    "99999999999999999999999999",
+  ] {
+    for (width, refused) in [
+      (IntWidth::I32, drive_str(int_value, literal).is_err()),
+      (
+        IntWidth::I64,
+        drive_str(materialized::int_value, literal).is_err(),
+      ),
+    ] {
+      assert_eq!(
+        IntOverflow::checked(literal, width).is_ok(),
+        refused,
+        "{literal:?}: the production at {width} refused={refused}, the checked door disagreed",
+      );
+      if refused {
+        refused_somewhere += 1;
+      } else {
+        accepted_somewhere += 1;
+      }
+    }
+  }
+
+  // Non-vacuity: both verdicts occur, so the equality above is not two constants agreeing.
+  assert!(refused_somewhere >= 6, "only {refused_somewhere} refusals");
+  assert!(accepted_somewhere >= 6, "only {accepted_somewhere} values");
 }
 
 /// The literal's spelling survives beside the width — a report needs both, and the width alone

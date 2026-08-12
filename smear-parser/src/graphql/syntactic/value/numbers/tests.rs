@@ -1,7 +1,33 @@
 use super::{
-  MaterializedNumbers, MaterializedNumbers32, Numbers, OutOfRange, parse_f64, parse_i32, parse_i64,
+  MaterializedNumbers, MaterializedNumbers32, Numbers, OutOfRange, is_integer_literal, overflows,
+  parse_f64, parse_i32, parse_i64,
 };
 use crate::graphql::error::IntWidth;
+
+/// Every literal the two predicate properties below reason about, in one place so both are asked
+/// over the same corpus rather than over two lists that happen to agree today.
+const CORPUS: &[&str] = &[
+  "0",
+  "-0",
+  "7",
+  "-7",
+  "007",
+  "2147483647",
+  "2147483648",
+  "-2147483648",
+  "-2147483649",
+  "9223372036854775807",
+  "9223372036854775808",
+  "-9223372036854775808",
+  "-9223372036854775809",
+  "99999999999999999999999999",
+  "",
+  "-",
+  "1x",
+  "1.0",
+  "+7",
+  "hello",
+];
 
 #[test]
 fn i64_reads_the_grammar_it_is_given() {
@@ -202,6 +228,114 @@ fn each_marker_names_its_own_width() {
       ..
     })
   ));
+}
+
+/// The claim `is_integer_literal`'s doc makes, and the reason it is the digit shape rather than
+/// draft §2.9.1's `IntegerPart`: **everything the reader accepts, the shape check accepts.**
+///
+/// A stricter predicate would refuse literals `parse_i64` reads — `007` is the one in the corpus —
+/// and the conjunction in [`overflows`] would then answer "not an overflow" for a literal the
+/// production had converted, which is a disagreement between two readers of the same grammar.
+#[test]
+fn the_digit_shape_admits_everything_the_reader_accepts() {
+  let mut accepted = 0usize;
+  for literal in CORPUS {
+    let bytes = literal.as_bytes();
+    if parse_i64(bytes).is_some() {
+      accepted += 1;
+      assert!(
+        is_integer_literal(bytes),
+        "{literal:?} converts at `i64` and the shape check refuses it",
+      );
+    }
+  }
+
+  // Non-vacuity twice over: the implication above is satisfied by a corpus the reader rejects
+  // wholesale, and the shape check is not the constant `true`.
+  assert!(accepted >= 8, "only {accepted} corpus literals convert");
+  assert!(!is_integer_literal(b"hello"));
+  assert!(!is_integer_literal(b""));
+  assert!(!is_integer_literal(b"-"));
+  assert!(
+    is_integer_literal(b"007"),
+    "a leading zero is not this check's business"
+  );
+}
+
+/// [`overflows`] is the decider behind the public `IntOverflow::checked`, and it is held against
+/// an oracle **this crate did not write**: `core`'s own `str::parse`, which reports an
+/// out-of-range integer as `IntErrorKind::PosOverflow`/`NegOverflow` and a non-number as
+/// `InvalidDigit` or `Empty`. That distinction is exactly the conjunction this predicate makes,
+/// arrived at independently.
+///
+/// An oracle recomputed from `is_integer_literal(bytes) && reader.is_none()` would be the
+/// implementation transcribed, and would stay green over a version of the function that dropped
+/// either conjunct. This one cannot: `core` has no idea what this file does.
+///
+/// **One deliberate divergence, and it is not in the corpus.** `core` accepts a leading `+`;
+/// draft §2.9.1's `IntegerPart` has no unary plus, so `+99999999999999999999999999` is
+/// `PosOverflow` to `core` and not an integer literal here. `the_unary_plus_divergence_is_ours`
+/// below pins it rather than leaving the corpus quietly curated around it.
+#[test]
+fn overflows_agrees_with_cores_own_reader_on_which_failures_are_overflows() {
+  use core::num::IntErrorKind;
+
+  fn core_calls_it_an_overflow(literal: &str, width: IntWidth) -> bool {
+    let kind = match width {
+      IntWidth::I32 => literal.parse::<i32>().err().map(|e| *e.kind()),
+      IntWidth::I64 => literal.parse::<i64>().err().map(|e| *e.kind()),
+    };
+    matches!(
+      kind,
+      Some(IntErrorKind::PosOverflow | IntErrorKind::NegOverflow)
+    )
+  }
+
+  let (mut agreed_overflow, mut agreed_not) = (0usize, 0usize);
+  for literal in CORPUS {
+    for width in [IntWidth::I32, IntWidth::I64] {
+      let expected = core_calls_it_an_overflow(literal, width);
+      assert_eq!(
+        overflows(literal.as_bytes(), width),
+        expected,
+        "{literal:?} at {width}: `core` says overflow={expected}",
+      );
+      if expected {
+        agreed_overflow += 1;
+      } else {
+        agreed_not += 1;
+      }
+    }
+  }
+
+  // Non-vacuity: the equality above is not two constants agreeing.
+  assert!(
+    agreed_overflow >= 8,
+    "only {agreed_overflow} overflow cases"
+  );
+  assert!(agreed_not >= 8, "only {agreed_not} non-overflow cases");
+
+  // The pair the whole round is about, spelled out rather than left to the loop.
+  assert!(overflows(b"2147483648", IntWidth::I32));
+  assert!(!overflows(b"2147483648", IntWidth::I64));
+}
+
+/// The one place [`overflows`] and `core`'s reader are *meant* to disagree, named so the corpus
+/// above is a corpus rather than a curation.
+///
+/// `core` accepts a leading `+` and draft §2.9.1 does not, so a `+`-prefixed literal past a width
+/// is an overflow to `core` and not an integer literal at all here. Ours is the right answer for
+/// a GraphQL `IntValue`, and a payload built for `+99999999999999999999999999` would be quoting
+/// something the grammar cannot produce.
+#[test]
+fn the_unary_plus_divergence_is_ours() {
+  assert!(
+    "+99999999999999999999999999".parse::<i64>().is_err(),
+    "the oracle has to refuse it for the divergence to exist",
+  );
+  assert!(!is_integer_literal(b"+99999999999999999999999999"));
+  assert!(!overflows(b"+99999999999999999999999999", IntWidth::I64));
+  assert!(!overflows(b"+7", IntWidth::I32));
 }
 
 /// `Float` is `f64` at both markers, so the float conversion must be the same conversion.

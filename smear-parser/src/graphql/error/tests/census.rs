@@ -3,13 +3,13 @@
 use smear_lexer::graphql::{error::LexerErrors, syntactic::SyntacticTokenKind};
 use tokora::SimpleSpan as Span;
 
-#[cfg(feature = "materialized-numbers")]
-use crate::graphql::error::IntWidth;
 use crate::graphql::error::{
   EnumTypeExtensionHint, ErrorData, Expectation, GraphqlError, GraphqlErrors,
   InputObjectTypeExtensionHint, InterfaceTypeExtensionHint, ObjectFieldValueHint,
   ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
 };
+#[cfg(feature = "materialized-numbers")]
+use crate::graphql::error::{IntOverflow, IntWidth};
 
 /// The error this census is written over: `S = &str`, with the token, char and expectation
 /// parameters the dialect pins.
@@ -94,10 +94,17 @@ fn error_data_variant_census() {
   census! {
     Lexer => GraphqlError::from_lexer_errors(LexerErrors::default(), span).into_data(),
 
+    // Through BOTH public doors, which is what the sample rule asks for now that there are two:
+    // the checked payload constructor and the producer that takes what it built. `.expect` is not
+    // a shortcut here — a 26-digit literal is outside `i64`, so a refusal would mean the checked
+    // door had stopped agreeing with the reader behind it, and that is worth a loud failure.
     #[cfg(feature = "materialized-numbers")]
-    IntOverflow =>
-      GraphqlError::<&str>::int_overflow("99999999999999999999999999", IntWidth::I64, span)
-        .into_data(),
+    IntOverflow => GraphqlError::<&str>::int_overflow(
+      IntOverflow::checked("99999999999999999999999999", IntWidth::I64)
+        .expect("a 26-digit literal is outside `i64` at any reading"),
+      span,
+    )
+    .into_data(),
 
     #[cfg(feature = "materialized-numbers")]
     FloatOverflow => GraphqlError::<&str>::float_overflow("1e400", span).into_data(),

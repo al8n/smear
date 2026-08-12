@@ -419,6 +419,32 @@ impl IntWidth {
 /// source spelling, so a report can name what the document said, and the [`IntWidth`] the
 /// conversion was attempted at, so a report can name which reading refused it. See [`IntWidth`]
 /// for why two readings exist.
+///
+/// # The width is not a caller's to choose, and that is the whole of this type's job
+///
+/// A payload with **no** width is unrepresentable because every constructor demands one. That is
+/// the easy half, and on its own it buys less than it looks: a payload with the **wrong** width
+/// was representable too, because the constructor took the discriminant as an argument and
+/// accepted whichever one it was handed. `IntOverflow::new("2147483648", IntWidth::I64)` compiled
+/// — in every configuration, including one with `materialized-numbers` off, and through direct
+/// [`ErrorData::IntOverflow`] construction — and `2147483648` is a value at that width. A renderer
+/// trusting the payload then reports a refusal that never happened, which is worse than reporting
+/// none: an unobserved width is a gap a consumer can see, and a false one is not.
+///
+/// So the free-width constructor is crate-private, and the public door is `IntOverflow::checked`,
+/// which refuses a pair the productions would not have produced. The two facts the payload carries
+/// are no longer independent: the width has to be one the literal beside it genuinely overflows.
+///
+/// (`checked` is named in code font rather than linked, here and everywhere else in this file that
+/// an unconditional doc comment reaches a `materialized-numbers` item. An intra-doc link to a
+/// gated item is `rustdoc::broken_intra_doc_links` in every configuration that does not compile
+/// it, and `cargo doc -p smear-parser` — this crate at its own default features, which is what a
+/// direct dependent gets — is exactly such a configuration.)
+///
+/// Without `materialized-numbers` there is no public constructor at all — the same shape as the
+/// variant this payload sits in, which is declared unconditionally and produced only under that
+/// feature. See [`ErrorData`] for why the gate belongs on the producer rather than on the
+/// declaration.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IntOverflow<S> {
   value: S,
@@ -426,10 +452,75 @@ pub struct IntOverflow<S> {
 }
 
 impl<S> IntOverflow<S> {
-  /// Creates an integer-out-of-range payload.
+  /// Creates an integer-out-of-range payload at a width the caller is trusted to have attempted.
+  ///
+  /// **Crate-private, and the check on [`checked`](Self::checked) is what it buys.** The
+  /// conversion sites in
+  /// [`syntactic::value`](crate::graphql::syntactic::value) reach this one because each of them
+  /// has *just* failed a conversion at the width it names, so a range check here would re-read a
+  /// literal the caller already read and answer a question already answered. Every path from
+  /// outside the crate goes through the checked door instead.
+  ///
+  /// Gated with the productions that call it: no configuration compiles a caller for it otherwise.
+  #[cfg(feature = "materialized-numbers")]
   #[inline]
-  pub const fn new(value: S, width: IntWidth) -> Self {
+  pub(crate) const fn new(value: S, width: IntWidth) -> Self {
     Self { value, width }
+  }
+
+  /// Creates an integer-out-of-range payload, refusing a width the literal does not overflow.
+  ///
+  /// The public constructor, and the only way a caller outside this crate can name an
+  /// [`IntWidth`]. It answers `Ok` exactly when `value` is an integer literal — an optional `-`
+  /// and at least one decimal digit — that the materialising production at `width` would have
+  /// refused, decided by the very readers those productions use. Everything else comes back as
+  /// `Err(value)`: a literal that fits, a float, a name, an empty slice.
+  ///
+  /// **The literal comes back unconsumed on refusal**, for the reason the conversion trait behind
+  /// [`syntactic::value`](crate::graphql::syntactic::value) hands its slice back — a caller who is
+  /// told this is not an overflow still has a document to report something else about, and taking
+  /// `&S` instead would force a clone on the path that succeeds.
+  ///
+  /// ```
+  /// use smear_parser::graphql::error::{IntOverflow, IntWidth};
+  ///
+  /// // `2147483648` is `i32::MAX + 1`: out of range at the specified width…
+  /// let overflow = IntOverflow::checked("2147483648", IntWidth::I32).expect("outside i32");
+  /// assert_eq!(overflow.width(), IntWidth::I32);
+  ///
+  /// // …and a perfectly good `i64`, so the other width is a refusal that never happened.
+  /// assert_eq!(IntOverflow::checked("2147483648", IntWidth::I64), Err("2147483648"));
+  ///
+  /// // A literal past both widths may name either, because both readers refuse it.
+  /// assert!(IntOverflow::checked("9223372036854775808", IntWidth::I32).is_ok());
+  /// assert!(IntOverflow::checked("9223372036854775808", IntWidth::I64).is_ok());
+  ///
+  /// // Neither an in-range literal nor a non-literal is an overflow at any width.
+  /// assert_eq!(IntOverflow::checked("7", IntWidth::I32), Err("7"));
+  /// assert_eq!(IntOverflow::checked("1.0", IntWidth::I64), Err("1.0"));
+  /// ```
+  ///
+  /// The free-width constructor beside it is crate-private, so the forgery above has no second
+  /// door:
+  ///
+  /// ```compile_fail,E0624
+  /// use smear_parser::graphql::error::{IntOverflow, IntWidth};
+  ///
+  /// // `2147483648` fits `i64`. Naming that width for it is a fact about no attempt anyone made.
+  /// let forged = IntOverflow::new("2147483648", IntWidth::I64);
+  /// ```
+  #[cfg(feature = "materialized-numbers")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+  #[inline]
+  pub fn checked(value: S, width: IntWidth) -> Result<Self, S>
+  where
+    S: AsRef<[u8]>,
+  {
+    if crate::graphql::syntactic::value::numbers::overflows(value.as_ref(), width) {
+      Ok(Self::new(value, width))
+    } else {
+      Err(value)
+    }
   }
 
   /// Returns the literal's source spelling.
@@ -457,7 +548,7 @@ impl<S> IntOverflow<S> {
 ///
 /// [`IntOverflow`](ErrorData::IntOverflow) and [`FloatOverflow`](ErrorData::FloatOverflow) are
 /// raised by the materialising value productions and by nothing else, so
-/// [`Error::int_overflow`] and [`Error::float_overflow`] — the paths that *produce* them — carry
+/// `Error::int_overflow` and `Error::float_overflow` — the paths that *produce* them — carry
 /// `#[cfg(feature = "materialized-numbers")]`. **The variants do not.**
 ///
 /// The defect being repaired was real and is worth naming precisely, because the gate that
@@ -495,6 +586,15 @@ impl<S> IntOverflow<S> {
 /// `unwrap_int_overflow()` gains `.into_value()`. `ErrorData` stays at 22 variants and no other
 /// variant changes shape.
 ///
+/// **What stops compiling under `materialized-numbers`**, on the producer rather than on the
+/// enum: `Error::int_overflow` took `(value: S, span)` before the branch and now takes
+/// `(overflow: IntOverflow<S>, span)`. The intermediate `(value, width, span)` shape existed only
+/// within this branch and was the wrong-width hole itself, so no released or reviewed surface
+/// carried it. **The migration is `IntOverflow::checked`**: `int_overflow(v, span)` becomes
+/// `int_overflow(IntOverflow::checked(v, width)?, span)`, and there is no infallible spelling on
+/// purpose — a caller who cannot say which width refused the literal does not have an
+/// `IntOverflow` to report.
+///
 /// **Why this rather than the two alternatives**, both of which were considered and are worse:
 ///
 /// - *A twenty-third variant, `IntOverflow32`.* This enum is deliberately not
@@ -514,8 +614,16 @@ impl<S> IntOverflow<S> {
 ///   ErrorData::IntOverflow(v))` and the existing `int_overflow` constructor both build an
 ///   overflow with **no** width, so every consumer must branch on a state this crate would never
 ///   produce, forever. The payload makes that state unrepresentable instead: there is no way to
-///   construct an `IntOverflow` without naming the width, so no path can report a width it did
-///   not attempt, and no path can decline to report one either.
+///   construct an `IntOverflow` without naming the width.
+///
+/// **Unrepresentable on both axes, and the second one had to be added.** The paragraph above used
+/// to end by concluding that no path could report a width it did not attempt. That followed only
+/// for a width-*less* overflow; a **wrong**-width one was still constructible, because the
+/// constructor took the discriminant as an argument. [`IntOverflow`] records what closed it — the
+/// free-width constructor is crate-private and `IntOverflow::checked` is the public door — and
+/// it is worth naming the shape of the miss: the enumeration behind the original claim was over
+/// every path *this crate* takes, all of which name a width they attempted, and said nothing
+/// about the path a caller drives.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -528,7 +636,7 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// The payload names the width as well as the spelling, because the
   /// `materialized-numbers` feature ships two readings of `Int` — see [`IntWidth`] — and
   /// "`2147483648` overflowed" is a different fact about the document under each. Raised only by
-  /// the `materialized-numbers` productions; see [`Error::int_overflow`].
+  /// the `materialized-numbers` productions; see `Error::int_overflow`.
   #[from(skip)]
   IntOverflow(IntOverflow<S>),
   /// A float literal is syntactically valid GraphQL but does not convert to a finite [`f64`].
@@ -538,7 +646,7 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// reading this crate ships converts it to [`f64`] and there is no second reading for a
   /// consumer to distinguish. A width here would name a distinction that does not exist.
   ///
-  /// Raised only by the `materialized-numbers` productions; see [`Error::float_overflow`].
+  /// Raised only by the `materialized-numbers` productions; see `Error::float_overflow`.
   #[from(skip)]
   FloatOverflow(S),
   /// An enum value is invalid.
@@ -807,22 +915,24 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self::new(span, ErrorData::EndOfInput)
   }
 
-  /// Creates an integer-out-of-range error, carrying the literal's source spelling and the
-  /// [`IntWidth`] the conversion was attempted at.
+  /// Creates an integer-out-of-range error from a payload that has already justified its width.
   ///
   /// **This is the producer, and it is what the feature gates** — the variant it builds is
   /// unconditional. See [`ErrorData`] for why the gate belongs here and not one level up, and
   /// [`graphql::syntactic::materialized`](crate::graphql::syntactic::value::materialized) for the
   /// documented bound that makes a specification-valid literal a *parse* error in that view.
   ///
-  /// `width` is an argument rather than two constructors because it is data the caller already
-  /// has and the reader already needs: one producer keeps the census's "one sample per variant"
-  /// rule intact, and a second width added later reaches the error without a third constructor.
+  /// **It takes the payload rather than `(value, width)`, and that is the point.** A `width`
+  /// parameter here would be a second free-width door beside the crate-private one
+  /// [`IntOverflow`] closed: a caller could hand it any [`IntWidth`] and get an error naming a
+  /// refusal that never happened. Taking an [`IntOverflow`] means the only widths that reach a
+  /// report are the ones this crate's conversions attempted and the ones
+  /// `IntOverflow::checked` agreed to.
   #[cfg(feature = "materialized-numbers")]
   #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
   #[inline]
-  pub const fn int_overflow(value: S, width: IntWidth, span: Span) -> Self {
-    Self::new(span, ErrorData::IntOverflow(IntOverflow::new(value, width)))
+  pub const fn int_overflow(overflow: IntOverflow<S>, span: Span) -> Self {
+    Self::new(span, ErrorData::IntOverflow(overflow))
   }
 
   /// Creates a float-out-of-range error, carrying the literal's source spelling.
@@ -1207,4 +1317,6 @@ mod tests {
   }
 
   mod census;
+  #[cfg(feature = "materialized-numbers")]
+  mod int_overflow;
 }

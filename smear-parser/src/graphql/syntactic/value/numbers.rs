@@ -53,7 +53,7 @@ use crate::graphql::ast::{
   },
 };
 #[cfg(feature = "materialized-numbers")]
-use crate::graphql::error::IntWidth;
+use crate::graphql::error::{IntOverflow, IntWidth};
 use crate::graphql::{
   ast::{ConstInputValue, DefaultVec, InputValue, Name},
   error::GraphqlError as DialectGraphqlError,
@@ -196,7 +196,9 @@ pub(crate) enum OutOfRange<S> {
 #[inline]
 fn report_out_of_range<S>(error: OutOfRange<S>, span: SimpleSpan) -> DialectGraphqlError<S> {
   match error {
-    OutOfRange::Int { value, width } => DialectGraphqlError::int_overflow(value, width, span),
+    OutOfRange::Int { value, width } => {
+      DialectGraphqlError::int_overflow(IntOverflow::new(value, width), span)
+    }
     OutOfRange::Float(slice) => DialectGraphqlError::float_overflow(slice, span),
   }
 }
@@ -351,6 +353,50 @@ fn parse_i64(bytes: &[u8]) -> Option<i64> {
 #[cfg(feature = "materialized-numbers")]
 fn parse_i32(bytes: &[u8]) -> Option<i32> {
   i32::try_from(parse_i64(bytes)?).ok()
+}
+
+/// Would the materialising production at `width` have refused this literal?
+///
+/// **The decider behind [`IntOverflow::checked`], and it lives here so there is one reader.** That
+/// constructor is the only public way to name an [`IntWidth`], and its promise is a claim about
+/// *these* functions: that the width a caller supplied is one the production at that width would
+/// have failed on. A predicate written in `error.rs` beside the constructor would be a second
+/// reading of the grammar, free to disagree with the two above and to keep the promise about
+/// nothing.
+///
+/// `is_integer_literal` is the first conjunct because [`parse_i64`] answers `None` to two
+/// different questions — "outside the width" and "not an integer at all" — and only the first one
+/// is an overflow. Without it `checked(b"hello", I64)` would build an error saying `hello`
+/// overflowed a 64-bit integer, which is a checked constructor admitting a claim that is not
+/// merely unproven but false.
+#[cfg(feature = "materialized-numbers")]
+pub(crate) fn overflows(bytes: &[u8], width: IntWidth) -> bool {
+  is_integer_literal(bytes)
+    && match width {
+      IntWidth::I32 => parse_i32(bytes).is_none(),
+      IntWidth::I64 => parse_i64(bytes).is_none(),
+    }
+}
+
+/// An optional `-` followed by at least one decimal digit — the shape [`parse_i64`] walks, without
+/// its range check.
+///
+/// **Deliberately the digit shape and not draft §2.9.1's `IntegerPart`**, which additionally
+/// forbids a leading zero. Two reasons, and the second is the one that matters. `007` has the same
+/// value at both widths, so it cannot make [`overflows`] name the wrong one — the property this
+/// predicate exists to protect is that the *width* is justified by the digits. And this way the
+/// relation to the reader beside it is exact and testable rather than approximate:
+/// `parse_i64(b).is_some()` implies `is_integer_literal(b)` for every input, which
+/// `the_digit_shape_admits_everything_the_reader_accepts` holds. A stricter predicate would
+/// refuse literals the reader accepts and the two would need reconciling forever.
+#[cfg(feature = "materialized-numbers")]
+fn is_integer_literal(bytes: &[u8]) -> bool {
+  let digits = match bytes.split_first() {
+    Some((b'-', rest)) => rest,
+    _ => bytes,
+  };
+
+  !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
 }
 
 /// Reads a GraphQL `FloatValue` (draft §2.9.2) out of its bytes.
