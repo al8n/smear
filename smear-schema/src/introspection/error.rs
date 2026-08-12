@@ -34,7 +34,11 @@ use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ResponseErrorKind {
-  /// The bytes are not JSON, or nest deeper than `serde_json` will read.
+  /// The bytes are not JSON, or nest deeper than the reader will go.
+  ///
+  /// The nesting bound is 128 containers — the limit the previous reader enforced, kept because a
+  /// `__Type` reference chain is walked recursively and this is what keeps a hostile response from
+  /// driving that walk off the stack.
   MalformedJson,
   /// The bytes are JSON, but not the shape draft §4 describes — a required field absent or null,
   /// or a value of the wrong JSON type.
@@ -42,6 +46,9 @@ pub enum ResponseErrorKind {
   /// The response carries no `__schema`, under `data` or at its root.
   MissingSchema,
   /// A `__Type.kind` is not one of the eight `__TypeKind` values.
+  ///
+  /// Reported where the literal is read, not where a rendered kind is compared, so the subject is
+  /// the spelling the response actually wrote.
   UnknownTypeKind,
   /// A named type was required and a `LIST` or `NON_NULL` wrapper was given.
   ///
@@ -194,8 +201,11 @@ impl ResponseError {
 
   /// Returns the rejected artifact, unqualified.
   ///
-  /// For a malformed response this is `serde_json`'s own message, which carries the field name and,
-  /// for a syntax error, the line and column.
+  /// Usually the literal the response wrote — a name, a `__TypeKind`, a default value. For the two
+  /// kinds that refuse the document rather than something in it,
+  /// [`MalformedJson`](ResponseErrorKind::MalformedJson) and
+  /// [`MalformedResponse`](ResponseErrorKind::MalformedResponse), it is the reader's own message,
+  /// which carries the member's name and the line and column it stopped at.
   #[inline]
   pub fn subject(&self) -> &str {
     &self.subject
@@ -370,25 +380,4 @@ impl core::error::Error for IntrospectionError {
       Self::Schema(errors) => Some(errors),
     }
   }
-}
-
-/// Splits a `serde_json` failure into "not JSON" and "not the shape".
-///
-/// `serde_json` already draws this line — [`Category::Syntax`] and [`Category::Eof`] are the
-/// reader failing, [`Category::Data`] is the reader succeeding and the *model* rejecting what it
-/// read — so the door reports the distinction rather than flattening two different bugs into one
-/// message. [`Category::Io`] cannot occur here: the input is a `&str` already in memory.
-///
-/// [`Category::Syntax`]: serde_json::error::Category::Syntax
-/// [`Category::Eof`]: serde_json::error::Category::Eof
-/// [`Category::Data`]: serde_json::error::Category::Data
-/// [`Category::Io`]: serde_json::error::Category::Io
-pub(super) fn from_json_error(error: &serde_json::Error) -> ResponseError {
-  use serde_json::error::Category;
-
-  let kind = match error.classify() {
-    Category::Data => ResponseErrorKind::MalformedResponse,
-    Category::Io | Category::Syntax | Category::Eof => ResponseErrorKind::MalformedJson,
-  };
-  ResponseError::new(kind, std::string::ToString::to_string(error))
 }

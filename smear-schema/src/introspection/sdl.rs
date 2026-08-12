@@ -18,14 +18,18 @@
 //! leaves it true. Dropping them is what makes the two doors produce the same flags, and it costs
 //! nothing: the build puts back exactly what was dropped.
 //!
-//! It emits **nothing it has not checked**. Names go through [`is_name`], type kinds and directive
-//! locations through closed sets, and default values through the parser itself — so the only bytes
-//! that reach the SDL parser unexamined are the renderer's own punctuation.
+//! It emits **nothing it has not checked**, and most of the checking happened before it ran.
+//! [`decode`](super::decode) admits a name only if it spells one, and resolves type kinds and
+//! directive locations to their enums, so what reaches this file is already drawn from the closed
+//! vocabularies. What is left here is everything a *use site* decides — that a union member may
+//! not be a wrapper, that an enum value may not be `true` — and the default value, which is the
+//! one fragment no vocabulary covers and which goes through the parser itself. The only bytes that
+//! reach the SDL parser unexamined are the renderer's own punctuation.
 //!
 //! [`RedefinedBuiltInType`]: super::super::SchemaErrorKind::RedefinedBuiltInType
 //! [`TypeDef::is_built_in`]: super::super::TypeDef::is_built_in
 
-use std::string::{String, ToString};
+use std::string::String;
 
 use tokora::{Parse as _, Parser};
 
@@ -44,12 +48,13 @@ use super::{
     // The SDL door's own owner-path helper, so `Query.hero.first` reads the same whichever door
     // refused it.
     error::owner_path as path,
-    repr::{DirectiveLocation, is_name},
+    repr::TypeKind,
   },
+  decode,
   error::{ResponseError, ResponseErrorKind},
   model::{
     IntrospectedDirective, IntrospectedEnumValue, IntrospectedField, IntrospectedInputValue,
-    IntrospectedSchema, IntrospectedType, TypeRef,
+    IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, TypeRef,
   },
 };
 
@@ -57,47 +62,8 @@ type Rendered<T = ()> = Result<T, ResponseError>;
 
 /// Reads a response and renders the SDL it describes.
 pub(super) fn render(response: &str) -> Rendered<String> {
-  let schema = read(response)?;
+  let schema = decode::read(response)?;
   Renderer::default().schema(&schema)
-}
-
-// ---------------------------------------------------------------------------------------------
-// reading
-// ---------------------------------------------------------------------------------------------
-
-/// Finds the `__Schema` in a response and reads it.
-///
-/// Three envelopes are accepted because all three are what people have in hand: the GraphQL
-/// response a server returns (`{"data":{"__schema":…}}`), the same with the transport layer peeled
-/// off (`{"__schema":…}`), and the `__Schema` object alone, which is what a fixture file usually
-/// holds. They are distinguished by key rather than by trying each in turn, so a response that has
-/// a `data` **and** a malformed `__schema` under it reports the malformation instead of silently
-/// falling through to a different reading.
-fn read(response: &str) -> Rendered<IntrospectedSchema> {
-  let mut root: serde_json::Value =
-    serde_json::from_str(response).map_err(|error| super::error::from_json_error(&error))?;
-
-  let located = match root.get_mut("data") {
-    Some(data) => data.get_mut("__schema"),
-    None => root.get_mut("__schema"),
-  }
-  .map(serde_json::Value::take);
-
-  let value = match located {
-    Some(value) => value,
-    // No `data`, no `__schema`: the object is either the `__Schema` itself or nothing this door
-    // can use. `types` is the discriminator — it is the one field of `__Schema` no other envelope
-    // has at its root.
-    None if root.get("types").is_some() => root,
-    None => {
-      return Err(ResponseError::new(
-        ResponseErrorKind::MissingSchema,
-        "expected `data.__schema`, `__schema`, or a `__Schema` object",
-      ));
-    }
-  };
-
-  serde_json::from_value(value).map_err(|error| super::error::from_json_error(&error))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -110,7 +76,7 @@ struct Renderer {
 }
 
 impl Renderer {
-  fn schema(mut self, schema: &IntrospectedSchema) -> Rendered<String> {
+  fn schema(mut self, schema: &IntrospectedSchema<'_>) -> Rendered<String> {
     self.roots(schema)?;
     for ty in &schema.types {
       self.ty(ty)?;
@@ -127,9 +93,9 @@ impl Renderer {
   /// convention, so the renderer does not either. Writing the block unconditionally also means a
   /// schema whose query root is called something else round-trips, which the convention would
   /// quietly break.
-  fn roots(&mut self, schema: &IntrospectedSchema) -> Rendered {
+  fn roots(&mut self, schema: &IntrospectedSchema<'_>) -> Rendered {
     self.out.push_str("schema {\n");
-    let query = named_root(schema.query_type.name.as_deref(), "query")?;
+    let query = named_root(schema.query_type.name, "query")?;
     self.out.push_str("  query: ");
     self.out.push_str(query);
     self.out.push('\n');
@@ -141,7 +107,7 @@ impl Renderer {
       // A null root slot is the ordinary case — most schemas have no subscription — and is not the
       // same as a root present with a null name, which `named_root` refuses.
       let Some(root) = root else { continue };
-      let name = named_root(root.name.as_deref(), slot)?;
+      let name = named_root(root.name, slot)?;
       self.out.push_str("  ");
       self.out.push_str(slot);
       self.out.push_str(": ");
@@ -152,9 +118,9 @@ impl Renderer {
     Ok(())
   }
 
-  fn ty(&mut self, ty: &IntrospectedType) -> Rendered {
-    let name = match ty.name.as_deref() {
-      Some(name) => name,
+  fn ty(&mut self, ty: &IntrospectedType<'_>) -> Rendered {
+    let name = match ty.name {
+      Some(name) => name.as_str(),
       None => {
         return Err(ResponseError::new(
           ResponseErrorKind::UnnamedType,
@@ -162,9 +128,8 @@ impl Renderer {
         ));
       }
     };
-    check_name(name, None)?;
 
-    let kind = named_kind(&ty.kind, name, None)?;
+    let kind = named_kind(ty.kind, name, None)?;
 
     // The meta-schema is injected by the build, unconditionally, so re-emitting it is a
     // redefinition. Only the eight names the specification defines are dropped: a server exposing
@@ -176,18 +141,18 @@ impl Renderer {
     // Likewise the five built-in scalars — but only when the response agrees they are scalars. A
     // response that calls `Int` an enum is describing a schema in which `Int` is an enum, and
     // dropping it would build a different schema than the one described.
-    if matches!(kind, NamedKind::Scalar) && builtin::BUILT_IN_SCALARS.contains(&name) {
+    if matches!(kind, TypeKind::Scalar) && builtin::BUILT_IN_SCALARS.contains(&name) {
       return Ok(());
     }
 
     match kind {
-      NamedKind::Scalar => {
+      TypeKind::Scalar => {
         self.out.push_str("scalar ");
         self.out.push_str(name);
         self.out.push_str("\n\n");
       }
-      NamedKind::Object | NamedKind::Interface => {
-        self.out.push_str(if matches!(kind, NamedKind::Object) {
+      TypeKind::Object | TypeKind::Interface => {
+        self.out.push_str(if matches!(kind, TypeKind::Object) {
           "type "
         } else {
           "interface "
@@ -196,17 +161,17 @@ impl Renderer {
         self.implements(ty, name)?;
         self.fields(ty.fields.as_deref(), name)?;
       }
-      NamedKind::Union => {
+      TypeKind::Union => {
         self.out.push_str("union ");
         self.out.push_str(name);
         self.members(ty.possible_types.as_deref(), name)?;
       }
-      NamedKind::Enum => {
+      TypeKind::Enum => {
         self.out.push_str("enum ");
         self.out.push_str(name);
         self.enum_values(ty.enum_values.as_deref(), name)?;
       }
-      NamedKind::InputObject => {
+      TypeKind::InputObject => {
         self.out.push_str("input ");
         self.out.push_str(name);
         // The one applied directive that survives into `Schema`, as `TypeFlags::ONE_OF`.
@@ -223,7 +188,7 @@ impl Renderer {
   ///
   /// An empty `interfaces` list is written as no clause at all: `implements` with nothing after it
   /// is a syntax error, and the two mean the same thing.
-  fn implements(&mut self, ty: &IntrospectedType, owner: &str) -> Rendered {
+  fn implements(&mut self, ty: &IntrospectedType<'_>, owner: &str) -> Rendered {
     let Some(interfaces) = ty.interfaces.as_deref() else {
       return Ok(());
     };
@@ -246,7 +211,7 @@ impl Renderer {
   /// "No fields" is left to say itself: draft §3.6.1 refuses an object or interface without them,
   /// and `type Foo` with no block is how SDL spells that, so the build reports
   /// `EmptyFieldsDefinition` for the response exactly as it would for the document.
-  fn fields(&mut self, fields: Option<&[IntrospectedField]>, owner: &str) -> Rendered {
+  fn fields(&mut self, fields: Option<&[IntrospectedField<'_>]>, owner: &str) -> Rendered {
     let fields = fields.unwrap_or(&[]);
     if fields.is_empty() {
       self.out.push_str("\n\n");
@@ -254,12 +219,12 @@ impl Renderer {
     }
     self.out.push_str(" {\n");
     for field in fields {
-      check_name(&field.name, Some(owner))?;
+      let name = field.name.as_str();
       self.out.push_str("  ");
-      self.out.push_str(&field.name);
-      self.arguments(&field.args, &path(&[owner, &field.name]))?;
+      self.out.push_str(name);
+      self.arguments(&field.args, &path(&[owner, name]))?;
       self.out.push_str(": ");
-      let rendered = type_reference(&field.ty, owner, &field.name)?;
+      let rendered = type_reference(&field.ty, owner, name)?;
       self.out.push_str(&rendered);
       self.out.push('\n');
     }
@@ -267,7 +232,7 @@ impl Renderer {
     Ok(())
   }
 
-  fn arguments(&mut self, args: &[IntrospectedInputValue], owner: &str) -> Rendered {
+  fn arguments(&mut self, args: &[IntrospectedInputValue<'_>], owner: &str) -> Rendered {
     if args.is_empty() {
       return Ok(());
     }
@@ -282,7 +247,11 @@ impl Renderer {
     Ok(())
   }
 
-  fn input_fields(&mut self, fields: Option<&[IntrospectedInputValue]>, owner: &str) -> Rendered {
+  fn input_fields(
+    &mut self,
+    fields: Option<&[IntrospectedInputValue<'_>]>,
+    owner: &str,
+  ) -> Rendered {
     let fields = fields.unwrap_or(&[]);
     if fields.is_empty() {
       self.out.push_str("\n\n");
@@ -299,14 +268,15 @@ impl Renderer {
   }
 
   /// `name: Type` with an optional `= default`, shared by arguments and input-object fields.
-  fn input_value(&mut self, value: &IntrospectedInputValue, owner: &str) -> Rendered {
-    check_name(&value.name, Some(owner))?;
-    self.out.push_str(&value.name);
+  fn input_value(&mut self, value: &IntrospectedInputValue<'_>, owner: &str) -> Rendered {
+    let name = value.name.as_str();
+    self.out.push_str(name);
     self.out.push_str(": ");
-    let rendered = type_reference(&value.ty, owner, &value.name)?;
+    let rendered = type_reference(&value.ty, owner, name)?;
     self.out.push_str(&rendered);
-    if let Some(default) = value.default_value.as_deref() {
-      check_default_value(default, owner, &value.name)?;
+    if let Some(default) = value.default_value.as_ref() {
+      let default = default.as_str();
+      check_default_value(default, owner, name)?;
       self.out.push_str(" = ");
       self.out.push_str(default);
     }
@@ -314,7 +284,7 @@ impl Renderer {
   }
 
   /// `= A | B`, or nothing — the same "let the build say it" treatment as an empty field block.
-  fn members(&mut self, members: Option<&[TypeRef]>, owner: &str) -> Rendered {
+  fn members(&mut self, members: Option<&[TypeRef<'_>]>, owner: &str) -> Rendered {
     let members = members.unwrap_or(&[]);
     if members.is_empty() {
       self.out.push_str("\n\n");
@@ -332,7 +302,7 @@ impl Renderer {
     Ok(())
   }
 
-  fn enum_values(&mut self, values: Option<&[IntrospectedEnumValue]>, owner: &str) -> Rendered {
+  fn enum_values(&mut self, values: Option<&[IntrospectedEnumValue<'_>]>, owner: &str) -> Rendered {
     let values = values.unwrap_or(&[]);
     if values.is_empty() {
       self.out.push_str("\n\n");
@@ -340,28 +310,27 @@ impl Renderer {
     }
     self.out.push_str(" {\n");
     for value in values {
-      check_name(&value.name, Some(owner))?;
+      let name = value.name.as_str();
       // The grammar's `EnumValue` is a `Name` but not `true`, `false` or `null`, so a response
-      // carrying one of the three describes an enum no document can write.
-      if matches!(value.name.as_str(), "true" | "false" | "null") {
-        return Err(
-          ResponseError::new(ResponseErrorKind::InvalidEnumValue, value.name.clone())
-            .owned_by(owner.to_string()),
-        );
+      // carrying one of the three describes an enum no document can write. It is a rule about
+      // where the name sits rather than about how it is spelled, which is why it is here and not
+      // in the reader with the rest of the name check.
+      if matches!(name, "true" | "false" | "null") {
+        return Err(ResponseError::new(ResponseErrorKind::InvalidEnumValue, name).owned_by(owner));
       }
       self.out.push_str("  ");
-      self.out.push_str(&value.name);
+      self.out.push_str(name);
       self.out.push('\n');
     }
     self.out.push_str("}\n\n");
     Ok(())
   }
 
-  fn directive(&mut self, directive: &IntrospectedDirective) -> Rendered {
-    check_name(&directive.name, None)?;
+  fn directive(&mut self, directive: &IntrospectedDirective<'_>) -> Rendered {
+    let name = directive.name.as_str();
     // As with the built-in scalars: injected by the build, so re-emitting one would flip
     // `DirectiveDef::is_built_in` for a definition the two doors are supposed to agree on.
-    if builtin::BUILT_IN_DIRECTIVES.contains(&directive.name.as_str()) {
+    if builtin::BUILT_IN_DIRECTIVES.contains(&name) {
       return Ok(());
     }
     if directive.locations.is_empty() {
@@ -373,13 +342,13 @@ impl Renderer {
           ResponseErrorKind::UnknownDirectiveLocation,
           "`locations` is empty",
         )
-        .owned_by(directive.name.clone()),
+        .owned_by(name),
       );
     }
 
     self.out.push_str("directive @");
-    self.out.push_str(&directive.name);
-    self.arguments(&directive.args, &directive.name)?;
+    self.out.push_str(name);
+    self.arguments(&directive.args, name)?;
     if directive.is_repeatable {
       self.out.push_str(" repeatable");
     }
@@ -388,14 +357,7 @@ impl Renderer {
       if index > 0 {
         self.out.push_str(" | ");
       }
-      let known = DirectiveLocation::from_name(location).ok_or_else(|| {
-        ResponseError::new(
-          ResponseErrorKind::UnknownDirectiveLocation,
-          location.clone(),
-        )
-        .owned_by(directive.name.clone())
-      })?;
-      self.out.push_str(known.as_str());
+      self.out.push_str(location.as_str());
     }
     self.out.push_str("\n\n");
     Ok(())
@@ -406,61 +368,39 @@ impl Renderer {
 // checked fragments
 // ---------------------------------------------------------------------------------------------
 
-/// The six kinds that name a type, as opposed to the two that shape a reference.
-#[derive(Debug, Clone, Copy)]
-enum NamedKind {
-  Scalar,
-  Object,
-  Interface,
-  Union,
-  Enum,
-  InputObject,
-}
-
 /// Reads a `__TypeKind` that must name a type.
-fn named_kind(kind: &str, subject: &str, owner: Option<&str>) -> Rendered<NamedKind> {
-  let named = match kind {
-    "SCALAR" => NamedKind::Scalar,
-    "OBJECT" => NamedKind::Object,
-    "INTERFACE" => NamedKind::Interface,
-    "UNION" => NamedKind::Union,
-    "ENUM" => NamedKind::Enum,
-    "INPUT_OBJECT" => NamedKind::InputObject,
-    "LIST" | "NON_NULL" => {
-      return Err(attach(
-        ResponseError::new(ResponseErrorKind::NotANamedType, subject.to_string()),
-        owner,
-      ));
-    }
-    other => {
-      return Err(attach(
-        ResponseError::new(ResponseErrorKind::UnknownTypeKind, other.to_string()),
-        owner,
-      ));
-    }
-  };
-  Ok(named)
+///
+/// The reader already refused a kind that is not one of the eight, so what is left is the question
+/// only a use site can answer: a wrapper kind is the shape of a *reference*, so it names no type
+/// and cannot be a member of `__Schema.types` nor the base a reference bottoms out at.
+fn named_kind(kind: IntrospectedKind, subject: &str, owner: Option<&str>) -> Rendered<TypeKind> {
+  match kind {
+    IntrospectedKind::Named(named) => Ok(named),
+    IntrospectedKind::List | IntrospectedKind::NonNull => Err(attach(
+      ResponseError::new(ResponseErrorKind::NotANamedType, subject),
+      owner,
+    )),
+  }
 }
 
 /// Reads a type reference that must be a bare named type — a union member or an implemented
 /// interface, neither of which may be wrapped.
-fn base_name<'a>(reference: &'a TypeRef, owner: &str, slot: &str) -> Rendered<&'a str> {
-  named_kind(&reference.kind, slot, Some(owner))?;
-  let name = reference.name.as_deref().ok_or_else(|| {
-    ResponseError::new(ResponseErrorKind::UnnamedType, slot.to_string()).owned_by(owner.to_string())
-  })?;
-  check_name(name, Some(owner))?;
-  Ok(name)
+fn base_name<'a>(reference: &TypeRef<'a>, owner: &str, slot: &str) -> Rendered<&'a str> {
+  named_kind(reference.kind, slot, Some(owner))?;
+  match reference.name {
+    Some(name) => Ok(name.as_str()),
+    None => Err(ResponseError::new(ResponseErrorKind::UnnamedType, slot).owned_by(owner)),
+  }
 }
 
 /// Flattens a `__Type` reference chain into its GraphQL spelling.
 ///
-/// The recursion is bounded before it starts: `serde_json` refuses to read JSON nested more than
-/// 128 deep, so the chain this walks cannot be longer than that however hostile the response. The
+/// The recursion is bounded before it starts: the reader refuses JSON nested more than 128 deep,
+/// so the chain this walks cannot be longer than that however hostile the response. The
 /// *representation's* limit is much lower — [`MAX_WRAPPERS`](super::super::MAX_WRAPPERS) is 15 —
 /// and is left to the build, which already reports `TypeReferenceTooDeep` for the SDL that says
 /// the same thing.
-fn type_reference(reference: &TypeRef, owner: &str, subject: &str) -> Rendered<String> {
+fn type_reference(reference: &TypeRef<'_>, owner: &str, subject: &str) -> Rendered<String> {
   let mut out = String::new();
   write_type_reference(&mut out, reference, owner, subject, false)?;
   Ok(out)
@@ -468,77 +408,63 @@ fn type_reference(reference: &TypeRef, owner: &str, subject: &str) -> Rendered<S
 
 fn write_type_reference(
   out: &mut String,
-  reference: &TypeRef,
+  reference: &TypeRef<'_>,
   owner: &str,
   subject: &str,
   in_non_null: bool,
 ) -> Rendered {
-  match reference.kind.as_str() {
-    "LIST" => {
+  match reference.kind {
+    IntrospectedKind::List => {
       out.push('[');
       write_type_reference(out, item(reference, owner, subject)?, owner, subject, false)?;
       out.push(']');
     }
-    "NON_NULL" => {
+    IntrospectedKind::NonNull => {
       // `Int!!` is not a type any grammar can spell — `NonNullType` wraps a `NamedType` or a
       // `ListType`, never another `NonNullType` — so a doubled wrapper is refused here rather than
       // rendered and handed to a parser that would report it as a syntax error with no idea which
       // field it came from.
       if in_non_null {
-        return Err(
-          ResponseError::new(ResponseErrorKind::DoubleNonNull, subject.to_string())
-            .owned_by(owner.to_string()),
-        );
+        return Err(ResponseError::new(ResponseErrorKind::DoubleNonNull, subject).owned_by(owner));
       }
       write_type_reference(out, item(reference, owner, subject)?, owner, subject, true)?;
       out.push('!');
     }
-    kind => {
-      named_kind(kind, subject, Some(owner))?;
-      let name = reference.name.as_deref().ok_or_else(|| {
-        ResponseError::new(ResponseErrorKind::UnnamedType, subject.to_string())
-          .owned_by(owner.to_string())
-      })?;
-      check_name(name, Some(owner))?;
+    IntrospectedKind::Named(_) => {
+      let name = match reference.name {
+        Some(name) => name.as_str(),
+        None => {
+          return Err(ResponseError::new(ResponseErrorKind::UnnamedType, subject).owned_by(owner));
+        }
+      };
       out.push_str(name);
     }
   }
   Ok(())
 }
 
-fn item<'a>(reference: &'a TypeRef, owner: &str, subject: &str) -> Rendered<&'a TypeRef> {
-  reference.of_type.as_deref().ok_or_else(|| {
-    ResponseError::new(ResponseErrorKind::MissingItemType, subject.to_string())
-      .owned_by(owner.to_string())
-  })
-}
-
-/// Refuses a name the grammar cannot spell.
-///
-/// Every name the renderer writes passes through here first, which is what leaves the default
-/// value as the only unexamined text in the output — and that has a check of its own.
-fn check_name(name: &str, owner: Option<&str>) -> Rendered {
-  if is_name(name.as_bytes()) {
-    return Ok(());
-  }
-  Err(attach(
-    ResponseError::new(ResponseErrorKind::InvalidName, name.to_string()),
-    owner,
-  ))
+fn item<'a, 'r>(
+  reference: &'r TypeRef<'a>,
+  owner: &str,
+  subject: &str,
+) -> Rendered<&'r TypeRef<'a>> {
+  reference
+    .of_type
+    .as_deref()
+    .ok_or_else(|| ResponseError::new(ResponseErrorKind::MissingItemType, subject).owned_by(owner))
 }
 
 /// Refuses a root operation type with no name.
-fn named_root<'a>(name: Option<&'a str>, slot: &str) -> Rendered<&'a str> {
-  let name = name.ok_or_else(|| {
-    ResponseError::new(ResponseErrorKind::UnnamedType, slot.to_string()).owned_by("schema")
-  })?;
-  check_name(name, Some("schema"))?;
-  Ok(name)
+fn named_root<'a>(name: Option<Name<'a>>, slot: &str) -> Rendered<&'a str> {
+  match name {
+    Some(name) => Ok(name.as_str()),
+    None => Err(ResponseError::new(ResponseErrorKind::UnnamedType, slot).owned_by("schema")),
+  }
 }
 
 fn attach(error: ResponseError, owner: Option<&str>) -> ResponseError {
   match owner {
-    Some(owner) => error.owned_by(owner.to_string()),
+    Some(owner) => error.owned_by(owner),
     None => error,
   }
 }
@@ -566,11 +492,8 @@ fn attach(error: ResponseError, owner: Option<&str>) -> ResponseError {
 fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
   let probe = std::format!("input P{{f:T={default}}}");
   let refuse = || {
-    ResponseError::new(
-      ResponseErrorKind::MalformedDefaultValue,
-      default.to_string(),
-    )
-    .owned_by(path(&[owner, subject]))
+    ResponseError::new(ResponseErrorKind::MalformedDefaultValue, default)
+      .owned_by(path(&[owner, subject]))
   };
 
   let document = Parser::with_parser::<

@@ -1,4 +1,4 @@
-//! The draft §4 introspection shape, as plain records.
+//! The draft §4 introspection shape, as records **borrowed from the response**.
 //!
 //! One `struct` per meta-schema type, named for it, carrying exactly the fields the door reads.
 //! Unknown fields are ignored — deliberately, and it is the difference between a door that works
@@ -6,11 +6,24 @@
 //! *query* asked for, servers add fields ahead of the specification, and federation gateways add
 //! their own.
 //!
+//! # Every string here is the response's own bytes, except one
+//!
+//! [`Name`] is a `&str` cut out of the response and proved to spell a GraphQL `Name`. It has no
+//! owning variant, so "names are not copied" is a fact about the type rather than a claim about
+//! the code that fills it. [`IntrospectedKind`] and `DirectiveLocation` are resolved to their
+//! enums while the bytes are in hand, so a `__TypeKind` nobody defines is refused where it is read
+//! rather than compared to a string one layer down.
+//!
+//! The exception is [`IntrospectedInputValue::default_value`], which is a literal a *server
+//! printed* and may perfectly well contain a `"` or a `\`. It is a [`Text`], and a [`Text`]
+//! allocates only when the literal actually holds a backslash. Two string paths, said at the
+//! type: **names borrow, printed values may not.**
+//!
 //! # Required means non-null in the meta-schema
 //!
-//! A field without `#[serde(default)]` here is one draft §4 declares non-null, so its absence is a
-//! malformed response and `serde` says so before the door runs at all. The three exceptions each
-//! name a server that omits the field:
+//! A field that is not an `Option` here, and carries no note below, is one draft §4 declares
+//! non-null: its absence is a malformed response and the reader says so before the renderer runs
+//! at all. The four exceptions each name a server that omits the field:
 //!
 //! - `__Field.args` and `__Directive.args` — non-null in the meta-schema, universally emitted, and
 //!   defaulted anyway so a hand-written fixture can leave out the empty list.
@@ -25,31 +38,100 @@
 //! because [`Schema`](crate::Schema) retains none of them — it is the substrate
 //! validation rules stand on, and no draft §5 rule asks whether a field is deprecated. Declaring
 //! them would be declaring that the door drops them, which is
-//! [the module header's](super) job, not the model's.
+//! [the module header's](super) job, not the model's. It is also why prose has exactly one slot in
+//! this file: the only text a response carries that the door keeps is a default value.
 
-use std::{boxed::Box, string::String, vec::Vec};
+use std::{boxed::Box, vec::Vec};
 
-use serde::Deserialize;
+use super::{
+  super::repr::{DirectiveLocation, TypeKind, is_name},
+  json::Text,
+};
+
+/// A GraphQL `Name`, borrowed from the response.
+///
+/// # Why this cannot allocate, and what that costs
+///
+/// A `Name` is `/[_A-Za-z][_0-9A-Za-z]*/` — ASCII, and nothing in it needs a JSON escape. So the
+/// check runs on **the literal's own bytes**, and a response that spells a name with a `\u` escape
+/// or a backslash of any kind fails it and is refused as
+/// [`InvalidName`](super::ResponseErrorKind::InvalidName), with the literal as the subject so the
+/// message shows why.
+///
+/// That is the whole price of the borrow being unconditional, and it is the one input the door
+/// used to accept and now does not, so it is named here rather than discovered: a name written as
+/// a `\u` escape decodes to a name no server has a reason to escape, and honouring it would mean
+/// an owning variant on this type and a copy on every name to pay for it.
+///
+/// The check itself is not overhead. It is [`is_name`], the interner's own admission rule, run
+/// once at the earliest point the bytes exist instead of once per use downstream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Name<'a>(&'a str);
+
+impl<'a> Name<'a> {
+  /// Admits a literal that spells a GraphQL `Name`, and nothing else.
+  #[inline]
+  pub(super) fn new(literal: &'a str) -> Option<Self> {
+    is_name(literal.as_bytes()).then_some(Self(literal))
+  }
+
+  /// Returns the name, still borrowed from the response.
+  #[inline]
+  pub(super) const fn as_str(&self) -> &'a str {
+    self.0
+  }
+}
+
+/// One of `__TypeKind`'s eight values, resolved while the response's bytes are in hand.
+///
+/// Six of them name a type and two shape a *reference*, and the split is in the type because it is
+/// the distinction every use makes: a member of `__Schema.types` and the base of a reference must
+/// be [`Named`](Self::Named), and only a reference may be a wrapper.
+///
+/// The match runs on the literal's own bytes, for the same reason [`Name`]'s does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IntrospectedKind {
+  /// One of the six kinds that name a type.
+  Named(TypeKind),
+  /// `LIST`.
+  List,
+  /// `NON_NULL`.
+  NonNull,
+}
+
+impl IntrospectedKind {
+  /// Resolves a `__TypeKind` from its spelling.
+  pub(super) fn from_name(literal: &str) -> Option<Self> {
+    Some(match literal.as_bytes() {
+      b"SCALAR" => Self::Named(TypeKind::Scalar),
+      b"OBJECT" => Self::Named(TypeKind::Object),
+      b"INTERFACE" => Self::Named(TypeKind::Interface),
+      b"UNION" => Self::Named(TypeKind::Union),
+      b"ENUM" => Self::Named(TypeKind::Enum),
+      b"INPUT_OBJECT" => Self::Named(TypeKind::InputObject),
+      b"LIST" => Self::List,
+      b"NON_NULL" => Self::NonNull,
+      _ => return None,
+    })
+  }
+}
 
 /// `__Schema` — the root of an introspection result.
-#[derive(Debug, Deserialize)]
-pub(super) struct IntrospectedSchema {
+#[derive(Debug)]
+pub(super) struct IntrospectedSchema<'a> {
   /// Every type the schema defines, the meta-schema and the built-in scalars included.
-  pub(super) types: Vec<IntrospectedType>,
+  pub(super) types: Vec<IntrospectedType<'a>>,
   /// The query root. Non-null in the meta-schema, and draft §3.3 requires one regardless.
-  #[serde(rename = "queryType")]
-  pub(super) query_type: NamedTypeRef,
-  #[serde(rename = "mutationType")]
-  pub(super) mutation_type: Option<NamedTypeRef>,
-  #[serde(rename = "subscriptionType")]
-  pub(super) subscription_type: Option<NamedTypeRef>,
-  pub(super) directives: Vec<IntrospectedDirective>,
+  pub(super) query_type: NamedTypeRef<'a>,
+  pub(super) mutation_type: Option<NamedTypeRef<'a>>,
+  pub(super) subscription_type: Option<NamedTypeRef<'a>>,
+  pub(super) directives: Vec<IntrospectedDirective<'a>>,
 }
 
 /// A `__Type` reduced to its name, as `__Schema`'s three root slots return it.
-#[derive(Debug, Deserialize)]
-pub(super) struct NamedTypeRef {
-  pub(super) name: Option<String>,
+#[derive(Debug)]
+pub(super) struct NamedTypeRef<'a> {
+  pub(super) name: Option<Name<'a>>,
 }
 
 /// `__Type`, as a member of `__Schema.types`.
@@ -59,16 +141,14 @@ pub(super) struct NamedTypeRef {
 /// and so on. Null and empty are not the same thing, and the difference is a refusal — draft §3
 /// rejects an object with no fields, and the door must be able to hand that case to it rather than
 /// silently rendering a type with no field block.
-#[derive(Debug, Deserialize)]
-pub(super) struct IntrospectedType {
-  pub(super) kind: String,
-  pub(super) name: Option<String>,
-  pub(super) fields: Option<Vec<IntrospectedField>>,
-  #[serde(rename = "inputFields")]
-  pub(super) input_fields: Option<Vec<IntrospectedInputValue>>,
-  pub(super) interfaces: Option<Vec<TypeRef>>,
-  #[serde(rename = "enumValues")]
-  pub(super) enum_values: Option<Vec<IntrospectedEnumValue>>,
+#[derive(Debug)]
+pub(super) struct IntrospectedType<'a> {
+  pub(super) kind: IntrospectedKind,
+  pub(super) name: Option<Name<'a>>,
+  pub(super) fields: Option<Vec<IntrospectedField<'a>>>,
+  pub(super) input_fields: Option<Vec<IntrospectedInputValue<'a>>>,
+  pub(super) interfaces: Option<Vec<TypeRef<'a>>>,
+  pub(super) enum_values: Option<Vec<IntrospectedEnumValue<'a>>>,
   /// Read for a union and **ignored for an interface**, deliberately.
   ///
   /// A union's members are only in `possibleTypes`, so there is nowhere else to read them. An
@@ -76,66 +156,63 @@ pub(super) struct IntrospectedType {
   /// path the SDL door takes and the one the build computes a transitive closure from — reading
   /// `possibleTypes` instead would make the implementor relation a second source of truth that a
   /// response could contradict.
-  #[serde(rename = "possibleTypes")]
-  pub(super) possible_types: Option<Vec<TypeRef>>,
+  pub(super) possible_types: Option<Vec<TypeRef<'a>>>,
   /// `@oneOf`, the one applied directive introspection reports that
   /// [`Schema`](crate::Schema) retains.
-  #[serde(rename = "isOneOf", default)]
   pub(super) is_one_of: Option<bool>,
 }
 
 /// `__Field`.
-#[derive(Debug, Deserialize)]
-pub(super) struct IntrospectedField {
-  pub(super) name: String,
-  #[serde(default)]
-  pub(super) args: Vec<IntrospectedInputValue>,
-  #[serde(rename = "type")]
-  pub(super) ty: TypeRef,
+#[derive(Debug)]
+pub(super) struct IntrospectedField<'a> {
+  pub(super) name: Name<'a>,
+  pub(super) args: Vec<IntrospectedInputValue<'a>>,
+  pub(super) ty: TypeRef<'a>,
 }
 
 /// `__InputValue` — a field argument, a directive argument, or an input-object field.
-#[derive(Debug, Deserialize)]
-pub(super) struct IntrospectedInputValue {
-  pub(super) name: String,
-  #[serde(rename = "type")]
-  pub(super) ty: TypeRef,
+#[derive(Debug)]
+pub(super) struct IntrospectedInputValue<'a> {
+  pub(super) name: Name<'a>,
+  pub(super) ty: TypeRef<'a>,
   /// The server's printed spelling of the default, or null for no default.
+  ///
+  /// **The one prose slot in the model**, and therefore the one place a [`Text`] can be
+  /// `Unescaped`: a printed value may contain a `"` or a `\`, unlike every name and every closed
+  /// vocabulary around it.
   ///
   /// `Schema` keeps only [`DefaultKind`](crate::DefaultKind) — presence and
   /// null-ness — so the spelling matters exactly twice: it must parse, and it must be
   /// distinguishable from `null`. Both fall out of handing it back to the const-value parser.
-  #[serde(rename = "defaultValue")]
-  pub(super) default_value: Option<String>,
+  pub(super) default_value: Option<Text<'a>>,
 }
 
 /// `__EnumValue`.
-#[derive(Debug, Deserialize)]
-pub(super) struct IntrospectedEnumValue {
-  pub(super) name: String,
+#[derive(Debug)]
+pub(super) struct IntrospectedEnumValue<'a> {
+  pub(super) name: Name<'a>,
 }
 
 /// `__Directive`.
-#[derive(Debug, Deserialize)]
-pub(super) struct IntrospectedDirective {
-  pub(super) name: String,
-  pub(super) locations: Vec<String>,
-  #[serde(default)]
-  pub(super) args: Vec<IntrospectedInputValue>,
-  #[serde(rename = "isRepeatable", default)]
+#[derive(Debug)]
+pub(super) struct IntrospectedDirective<'a> {
+  pub(super) name: Name<'a>,
+  /// Resolved to the enum while the bytes are in hand, so an unknown location is refused at the
+  /// literal that spells it and the renderer has nothing left to compare.
+  pub(super) locations: Vec<DirectiveLocation>,
+  pub(super) args: Vec<IntrospectedInputValue<'a>>,
   pub(super) is_repeatable: bool,
 }
 
 /// `__Type` in its reference position: a wrapper chain bottoming out at a named type.
 ///
-/// `Box` on `of_type` is what makes the recursion representable. Its depth is bounded by
-/// `serde_json`'s own 128-deep nesting limit, which the reader enforces before this type is ever
-/// constructed, so neither the deserializer nor the renderer that walks it can be driven off the
-/// stack by a hostile response.
-#[derive(Debug, Deserialize)]
-pub(super) struct TypeRef {
-  pub(super) kind: String,
-  pub(super) name: Option<String>,
-  #[serde(rename = "ofType", default)]
-  pub(super) of_type: Option<Box<TypeRef>>,
+/// `Box` on `of_type` is what makes the recursion representable. Its depth is bounded by the
+/// reader's own 128-deep nesting limit, which is enforced before this type is ever constructed, so
+/// neither the reader nor the renderer that walks it can be driven off the stack by a hostile
+/// response.
+#[derive(Debug)]
+pub(super) struct TypeRef<'a> {
+  pub(super) kind: IntrospectedKind,
+  pub(super) name: Option<Name<'a>>,
+  pub(super) of_type: Option<Box<TypeRef<'a>>>,
 }
