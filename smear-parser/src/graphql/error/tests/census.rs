@@ -8,6 +8,8 @@ use crate::graphql::error::{
   InputObjectTypeExtensionHint, InterfaceTypeExtensionHint, ObjectFieldValueHint,
   ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
 };
+#[cfg(feature = "materialized-numbers")]
+use crate::graphql::error::{IntOverflow, IntWidth};
 
 /// The error this census is written over: `S = &str`, with the token, char and expectation
 /// parameters the dialect pins.
@@ -52,6 +54,13 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 /// The two conversion variants are additionally produced **by a real parse** in
 /// `graphql::syntactic::value::materialized::tests`. A constructor existing is the weaker claim;
 /// both are worth making.
+///
+/// **This census is over variants and says nothing about payloads.** `IntOverflow`'s sample
+/// carries [`IntWidth::I64`] because a sample has to carry something, and a second sample at
+/// `I32` would not be a second variant — it would be this census answering a question it is not
+/// asking. That both widths are reachable, and that each names itself, is
+/// `the_two_widths_disagree_on_the_literal_between_them` in
+/// `graphql::syntactic::value::materialized32::tests`.
 #[test]
 fn error_data_variant_census() {
   macro_rules! census {
@@ -85,9 +94,17 @@ fn error_data_variant_census() {
   census! {
     Lexer => GraphqlError::from_lexer_errors(LexerErrors::default(), span).into_data(),
 
+    // Through BOTH public doors, which is what the sample rule asks for now that there are two:
+    // the checked payload constructor and the producer that takes what it built. `.expect` is not
+    // a shortcut here — a 26-digit literal is outside `i64`, so a refusal would mean the checked
+    // door had stopped agreeing with the reader behind it, and that is worth a loud failure.
     #[cfg(feature = "materialized-numbers")]
-    IntOverflow =>
-      GraphqlError::<&str>::int_overflow("99999999999999999999999999", span).into_data(),
+    IntOverflow => GraphqlError::<&str>::int_overflow(
+      IntOverflow::checked("99999999999999999999999999", IntWidth::I64)
+        .expect("a 26-digit literal is outside `i64` at any reading"),
+      span,
+    )
+    .into_data(),
 
     #[cfg(feature = "materialized-numbers")]
     FloatOverflow => GraphqlError::<&str>::float_overflow("1e400", span).into_data(),

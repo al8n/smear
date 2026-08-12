@@ -28,10 +28,27 @@ pub use value::*;
 /// Two enums rather than one at two instantiations is a decision the module's own header argues,
 /// and the short version is that a type alias cannot be used as a module: `use InputValue::{Int}`
 /// has to keep compiling. What it costs — the variant list written twice — is charged to
-/// `the_two_value_trees_have_the_same_variants` rather than to the next reader.
+/// `every_value_tree_declares_the_same_variants` rather than to the next reader.
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub mod materialized;
+
+/// The same tree at the width GraphQL specifies: `Int` is [`i32`], `Float` stays `f64`.
+///
+/// **This one is the spec-exact reading and [`materialized`] is the permissive one**, which is
+/// the opposite of how a "32" beside a "64" usually reads. Draft §3.5.1 defines `Int` as a signed
+/// 32-bit integer, while draft §2.9.1's grammar bounds an `IntValue`'s digits not at all — so
+/// `2147483648` parses, is not a conformant `Int`, and the two trees are the two honest answers
+/// to what the document says. A refusal names its
+/// [`IntWidth`](crate::graphql::error::IntWidth), so the two remain distinguishable in the error
+/// as well as in the type.
+///
+/// A sibling module rather than a payload parameter on [`materialized`]'s enums, and a second
+/// marker rather than a parameterised one: that module's header has the three compile-time
+/// failures the choice avoids.
+#[cfg(feature = "materialized-numbers")]
+#[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+pub mod materialized32;
 
 mod argument;
 mod directive;
