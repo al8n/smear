@@ -29,8 +29,11 @@
 //! against the document's order rather than the response's, that the driver really did answer out
 //! of order, so a named case cannot decay into supplying in document order and passing for the
 //! wrong reason. [`sweep`] answers each document under **every order its values can arrive in** —
-//! 226 800 runs per document — because one permutation, however displaced, leaves exactly one
-//! defect of this shape standing, and the round of this file before this one was standing on it.
+//! 226 800 arrival orders per document, each of them driven twice — because one permutation,
+//! however displaced, leaves exactly one defect of this shape standing, and the round of this file
+//! before this one was standing on it. Twice because the arrival order is not the whole of a run:
+//! [`Polls`] is the second axis, the section on it says what the two schedules cover and what they
+//! do not, and the round before *this* one was standing on that.
 //!
 //! A named case's premise is read **one response map at a time**, and a whole-run inequality cannot
 //! stand in for it. The driver can answer in the document's own serialized key sequence — that is
@@ -351,11 +354,80 @@
 //! root map resumes after an inner map finishes, and the arrival they assert is still exactly the
 //! one they name.
 //!
-//! What survives all of this is no longer a permutation. [`drive`] drains every offer before it
-//! answers the next, so the one thing the sweep does not vary is how many times the driver *polls*
-//! between two answers — and a defect reading that is reading neither the values' order nor the
-//! document. Past it lies the same boundary as before: an assembly that reads the *values*, say, or
-//! the wall clock. The sweep does not close that, and nothing here claims it does.
+//! What survives all of this is no longer a permutation. The round that added the enumeration
+//! above closed with the sentence "the one thing the sweep does not vary is how many times the
+//! driver *polls* between two answers", and named it as a variable left free. It was load-bearing,
+//! and the next two sections are what it cost and what it now buys.
+//!
+//! ### The poll schedule is the second axis, and a defect lives in it
+//!
+//! An arrival order settles *which* value arrives when. It does not settle when the executor is
+//! **told** about a position, and that is a separate and entirely legal freedom. A child sitting on
+//! the ready chain is `Ready`; one the driver has taken off it is `InFlight`; nothing in the API
+//! orders the two, and a driver may sit anywhere between taking every offer before it answers
+//! anything and taking one offer at a time. Every run before this round drained, so **every sibling
+//! was `InFlight` before any of them completed**, in all 453 600 of them.
+//!
+//! The plant that reads it is the front-relink from the table above with one condition added:
+//! relink a completed position to the front of its parent's chain, but **only while a sibling of it
+//! is still `Ready`**. Measured:
+//!
+//! | this file | result |
+//! |---|---|
+//! | the drained-only sweep of the round before | **8 of 8 green** — all 453 600 runs |
+//! | as it now stands | 2 of 8 red — both sweeps, each failing on its `UntilWanted` half |
+//!
+//! Eight of eight, and that is the finding rather than a footnote: the defect is invisible to the
+//! named cases *and* to both exhaustive sweeps, because `Ready` is a state a draining driver never
+//! leaves a sibling in long enough for a completion to see. It corrupts document order under a
+//! driver a caller may legally write — the plainest one there is, poll a request and answer it —
+//! and the whole of the previous round's 453 600 runs is silent about it. The run that catches it
+//! first is [`QUERY`]'s own document order, which comes back `item, item.q, item.zed, item.rho,
+//! bee, …`.
+//!
+//! [`Polls`] is what closes it, and the two sweeps carry it rather than two new tests: every count
+//! in both tables above names a red set that already contains both sweeps, and a test that was red
+//! cannot be made green by giving it more to assert. So the counts stand as measured, and the
+//! front-relink was re-measured against the file as it now ships to pin the argument rather than
+//! rest on it — still 2 of 8, still the two sweeps.
+//!
+//! ### What two schedules do not cover, and what covering it would cost
+//!
+//! Two points are not an axis. A run's full poll/resolve trace is its arrival order **and** how
+//! many offers the driver had taken before each of its answers, and the two disciplines here are
+//! that trace's two endpoints: [`Polls::ToExhaustion`] takes the most offers any schedule may at
+//! every answer and [`Polls::UntilWanted`] the fewest, so every legal schedule lies pointwise
+//! between them — which [`sweep`] asserts per run rather than assuming, because a second driver
+//! that turned out to be a second spelling of the first would be decoration.
+//!
+//! Between the endpoints there is room, and it is measurable. Once an arrival order is fixed the
+//! executor's offer *sequence* is fixed with it — the ready chain is FIFO and grows only when an
+//! object completes — so a schedule is one non-decreasing count per answer, bounded below by the
+//! offer that answer needs and above by what has been enqueued, and the traces of an arrival order
+//! are the lattice paths between those bounds. Each of the two documents, whose position forests
+//! are isomorphic, admits **74 372 175** traces against its 226 800 arrival orders: 226 240 of
+//! those orders admit more than one schedule, the document's own order admits 225, and exactly one
+//! order admits the fully sequential run. The two endpoints are 907 200 runs across the pair, which
+//! is **0.61%** of the 148 744 350 the pair admits.
+//!
+//! So the bound, stated rather than left to be discovered: **this file covers exactly two poll
+//! schedules, and a defect that fires only on a schedule strictly between them is not excluded by
+//! anything here.** What *is* excluded is a defect at either extreme of the `Ready`/`InFlight`
+//! boundary — which is where the plant above lived, and where a sequential caller drives.
+//!
+//! The price of the rest is measured, not guessed. This sweep runs at 12.3 µs a run in a debug
+//! build — 11.1 s for the 907 200 it now does, against a workspace suite that executes in 23.7 s
+//! all told — so 148 744 350 traces is about **half an hour**, single-threaded, and 165 times what
+//! this file costs today. The time is the smaller half. The enumeration would also need what
+//! [`arrival_order_count`] gives the arrival orders: an independent count, by a route sharing no
+//! code with the generator, so completeness is proved rather than hoped. The per-order schedule
+//! count above is a dynamic program over lattice paths, and a closed form for the total — the hook
+//! length formula's counterpart one level up — is not something anyone here has. That is research,
+//! this is a test-only change to a property the executor already satisfies, and the trade is
+//! recorded here so the next reader inherits a priced decision instead of an omission.
+//!
+//! Past all of it lies the same boundary as before: an assembly that reads the *values*, say, or
+//! the wall clock. Neither sweep closes that, and nothing here claims it does.
 //!
 //! ### What the neighbouring suites see, and why it is not the key order
 //!
@@ -501,6 +573,37 @@ impl Values for Space {
   }
 }
 
+/// How many offers the driver takes off the executor before it answers the next position.
+///
+/// A second axis, and not a second sample of the first. [`sweep`] exhausts the order the values
+/// arrive in; this is *when the executor is told about a position at all*, which the arrival order
+/// leaves entirely free. A sibling the driver has not been handed yet is `Ready` inside the
+/// executor and one it has been handed is `InFlight`, both states are legal at every moment, no
+/// call in the API orders them, and an assembly that reads the difference is invisible to a file
+/// that drives only one way. The module header prices the dimension and says what these two cover.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Polls {
+  /// Take every offer the executor has before answering the next position.
+  ///
+  /// The **maximal** schedule: by the time any position is answered, every sibling of it has been
+  /// offered and none of them is still `Ready`. Draining is also what makes an arbitrary arrival
+  /// order reachable at all — a driver cannot answer a position it has not been handed — so this
+  /// is the schedule [`drive_backwards`] and the named cases use.
+  ToExhaustion,
+  /// Take offers one at a time, and stop as soon as the position about to be answered is among
+  /// them.
+  ///
+  /// The **minimal** schedule for a given arrival order: no offer is taken that the answer about to
+  /// be made does not require. On exactly one arrival order — the executor's own offer order, which
+  /// is the document's read breadth-first — that is the plainest driver there is: poll one request,
+  /// answer it, poll the next, never holding a second. Every sibling past the one in hand is
+  /// `Ready` at every answer of that run, which is the state no drained schedule reaches at any
+  /// answer and which the shared driver of the suites next door — `proto_execute.rs`'s, which polls
+  /// one request and answers it — runs the executor in. [`sweep`] asserts the run is among its own
+  /// rather than claiming it.
+  UntilWanted,
+}
+
 /// What one run of a fixture answered, read three ways, and what its document said it should be.
 struct Run {
   /// Every response key, as a dotted draft §7.1.2 path, in the order the finished response yields
@@ -516,6 +619,15 @@ struct Run {
   /// for, so a driver that quietly answered something else fails as a broken fixture rather than
   /// passing as a correct executor.
   answered: Vec<String>,
+  /// How many offers the driver was holding — taken from the executor and not yet answered — at
+  /// the moment it made each of the answers [`Self::answered`] records.
+  ///
+  /// The run's poll schedule, in the one form the driver can observe from outside: an offer it has
+  /// not taken is a position the executor still has `Ready`, and one it holds is `InFlight`. Under
+  /// [`Polls::ToExhaustion`] the count is everything offerable, under [`Polls::UntilWanted`] it is
+  /// the least the answer allows, and [`sweep`] asserts the two apart rather than assuming a
+  /// second driver drove differently.
+  holds: Vec<usize>,
   /// The same table as the document declares it, derived by [`document_maps`] from the very
   /// [`ExecutableDocument`] this run's [`Executor`] was built from.
   ///
@@ -601,27 +713,43 @@ fn drive_backwards(query: &str) -> Run {
     .map(|(path, keys)| (path, keys.into_iter().rev().collect()))
     .collect();
   let arrival = positions(&backwards);
-  drive(&schema, &document, &borrowed_paths(&arrival))
+  drive(
+    &schema,
+    &document,
+    &borrowed_paths(&arrival),
+    Polls::ToExhaustion,
+  )
 }
 
 /// Runs `document` to completion against `schema`, answering its positions in the order `arrival`
-/// names.
+/// names and taking offers on the schedule `polls` names.
 ///
 /// `arrival` is the sequence of [`Executor::handle_resolved`] calls the run will make, written as
-/// response paths. That is the whole of a run: there is nothing else about a completion order for a
-/// caller to name, and nothing about the order that a second representation could disagree with.
+/// response paths. That settles *which* value arrives when, and it is what a completion order is;
+/// `polls` settles the one thing it leaves free, which is how many offers the driver takes between
+/// two of those calls. The pair is the whole of a run, and [`Polls`] says why the second is a
+/// dimension rather than an implementation detail.
 ///
-/// The driver takes every offer available before it answers the next position, and holds the ones
-/// it is not answering yet. Holding is what makes an arrival order possible at all — a driver that
-/// answers each offer as it takes it can only ever complete in the order the executor offered — and
-/// draining before each answer is what makes *every* arrival order possible, including one that
-/// answers a child before a position at its own depth. The executor's ceiling on outstanding
-/// requests is far above these fixtures' ten positions, so nothing here is throttled.
+/// Under [`Polls::ToExhaustion`] the driver takes every offer available before it answers the next
+/// position, and holds the ones it is not answering yet. Holding is what makes an arrival order
+/// possible at all — a driver that answers each offer as it takes it can only ever complete in the
+/// order the executor offered — and draining before each answer is what makes *every* arrival order
+/// possible, including one that answers a child before a position at its own depth. The executor's
+/// ceiling on outstanding requests is far above these fixtures' ten positions, so nothing here is
+/// throttled. Under [`Polls::UntilWanted`] it stops the moment the position it is about to answer
+/// has been offered, which is the fewest offers that order can be realised with.
 ///
 /// It refuses rather than falls back. A position `arrival` names before the executor has offered it
 /// is not a run the caller described, and answering something else instead would be a driver
 /// supplying an order nobody asked for — the one failure mode naming an order exists to exclude.
-fn drive(schema: &Schema, document: &ExecutableDocument<&str>, arrival: &[&str]) -> Run {
+/// Both schedules refuse through the same door: a minimal poll that runs the executor dry without
+/// turning up `wanted` has established the same thing a drained one has.
+fn drive(
+  schema: &Schema,
+  document: &ExecutableDocument<&str>,
+  arrival: &[&str],
+  polls: Polls,
+) -> Run {
   // From the same value the executor is about to be handed. This is the one place the document's
   // order is read, and there is nowhere for a second reading to drift from it.
   let declared = document_maps(document);
@@ -632,11 +760,19 @@ fn drive(schema: &Schema, document: &ExecutableDocument<&str>, arrival: &[&str])
     .expect("the operation resolves");
 
   let mut answered: Vec<String> = Vec::new();
+  let mut holds: Vec<usize> = Vec::new();
   // Offers taken and not yet answered. The `FieldRequest` borrows the executor, so each one is
   // reduced to the three owned facts the answer needs before the next poll.
   let mut held: Vec<(ReqId, String, bool)> = Vec::new();
   for wanted in arrival {
-    while let Some(request) = executor.poll_resolve(&mut space) {
+    // `ToExhaustion` never satisfies the guard, so it polls until the executor runs dry, which is
+    // the loop this file drove with before the schedule became a parameter. `UntilWanted` stops on
+    // the first poll that turns `wanted` up, so every position the ready chain holds behind it is
+    // still `Ready` when the answer lands.
+    while !(polls == Polls::UntilWanted && held.iter().any(|(_, path, _)| path == wanted)) {
+      let Some(request) = executor.poll_resolve(&mut space) else {
+        break;
+      };
       held.push((
         request.id(),
         request.path().to_string(),
@@ -646,6 +782,7 @@ fn drive(schema: &Schema, document: &ExecutableDocument<&str>, arrival: &[&str])
     let Some(index) = held.iter().position(|(_, path, _)| path == wanted) else {
       panic!("the arrival order answers `{wanted}` before the executor has offered it");
     };
+    holds.push(held.len());
     let (id, path, object) = held.remove(index);
     let value = if object {
       Value::Object
@@ -679,6 +816,7 @@ fn drive(schema: &Schema, document: &ExecutableDocument<&str>, arrival: &[&str])
     keys,
     data: render(&data),
     answered,
+    holds,
     declared,
   }
 }
@@ -1170,6 +1308,26 @@ fn factorial(count: usize) -> usize {
 ///   equal the order it was handed. That is stronger than the per-map table [`assert_permuted`]
 ///   checks, and it is the same statement: a driver that ignored the order and answered each offer
 ///   as it took it fails here on all but one of the 226 800.
+///
+/// # Every order twice, on the two ends of the poll schedule
+///
+/// An arrival order does not say when the executor was *told* about a position, and [`Polls`] is
+/// that second axis. Each order is run on both of its endpoints, which is the difference between
+/// answering a position whose siblings are all `InFlight` and answering one whose siblings are
+/// still `Ready` — a distinction the module header shows a real defect reading, and one no number
+/// of arrival orders reaches on its own.
+///
+/// A second driver is worth nothing unless it drove differently, so that is asserted too, in the
+/// one form the driver can see from outside: how many offers it was holding at each answer. The
+/// minimal schedule must never hold more than the drained one at the same answer — it is the same
+/// axis's other end, not an unrelated driver — the two must disagree on some order, or the second
+/// pass is the first one run again, and one run must have held exactly one offer at every answer,
+/// which is the plainest possible caller and the schedule the shared driver of the suites next door
+/// runs the executor in.
+///
+/// What it does **not** cover is the schedules between those two ends. The header prices that: the
+/// full trace space is 74 372 175 per document against these 226 800, the two endpoints are 0.61%
+/// of the pair's, and a defect firing only strictly between them is not excluded.
 fn sweep(query: &str) {
   let (schema, document) = compile(SDL, query);
   let declared = document_maps(&document);
@@ -1343,24 +1501,62 @@ fn sweep(query: &str) {
     "the named cases' arrival order is one of the sweep's runs"
   );
 
+  // Whether some run answered every position with exactly one offer in hand — the sequential
+  // driver, which exists in this sweep only because the schedule is a parameter — and whether the
+  // two schedules ever produced different runs at all.
+  let mut sequential = false;
+  let mut schedules_differ = false;
   for order in &orders {
     let arrival: Vec<&str> = order.iter().map(|&index| paths[index].as_str()).collect();
-    let run = drive(&schema, &document, &arrival);
-    assert_eq!(
-      run.answered, arrival,
-      "the run answered the positions in the order the sweep handed it"
-    );
-    assert_eq!(
-      run.keys,
-      run.document_keys(),
-      "the response key sequence is the document's under the arrival order {arrival:?}"
-    );
-    assert_eq!(
-      run.data,
-      run.document_data(),
-      "the response is the document's under the arrival order {arrival:?}"
-    );
+    let drained = drive(&schema, &document, &arrival, Polls::ToExhaustion);
+    let minimal = drive(&schema, &document, &arrival, Polls::UntilWanted);
+    for (polls, run) in [
+      (Polls::ToExhaustion, &drained),
+      (Polls::UntilWanted, &minimal),
+    ] {
+      assert_eq!(
+        run.answered, arrival,
+        "the run answered the positions in the order the sweep handed it, polling {polls:?}"
+      );
+      assert_eq!(
+        run.keys,
+        run.document_keys(),
+        "the response key sequence is the document's under the arrival order {arrival:?}, polling \
+         {polls:?}"
+      );
+      assert_eq!(
+        run.data,
+        run.document_data(),
+        "the response is the document's under the arrival order {arrival:?}, polling {polls:?}"
+      );
+    }
+
+    // The schedules are the two extremes of the same axis, so the minimal driver can never be
+    // holding more than the drained one at the same answer — the drained one has taken every offer
+    // that exists to take. Asserting it is what stops `UntilWanted` from quietly being a second
+    // spelling of the first: a guard that never fired would make the two profiles equal, and a
+    // guard that fired early would make one exceed the other rather than fall short of it.
+    for (at, (few, many)) in minimal.holds.iter().zip(&drained.holds).enumerate() {
+      assert!(
+        few <= many,
+        "answer {at} of {arrival:?} held {few} offers polling minimally and {many} polling to \
+         exhaustion, so the minimal schedule took an offer the drained one had not"
+      );
+    }
+    sequential |= minimal.holds.iter().all(|&held| held == 1);
+    schedules_differ |= minimal.holds != drained.holds;
   }
+  assert!(
+    schedules_differ,
+    "no arrival order distinguished the two poll schedules, so the second driver ran the first \
+     one's runs again and the poll-schedule axis is unswept"
+  );
+  assert!(
+    sequential,
+    "no run answered every position with a single offer in hand, so the sweep never drove the \
+     executor the way a plain synchronous caller does — which is the schedule that leaves every \
+     later sibling `Ready` at every answer"
+  );
 }
 
 /// Asserts that `values` is neither non-decreasing nor non-increasing.
@@ -1476,13 +1672,15 @@ fn the_mirror_document_s_opposite_order_is_served_by_the_same_executor() {
 }
 
 /// [`QUERY`] serialises in [`QUERY`]'s order out of **every** order its results could have arrived
-/// in. The case above is one of the 226 800 runs here — the one that answers each map backwards,
-/// depth-first — and it is kept for what it is readable as, not for what it covers. What this adds
-/// is the other 226 799, and two of them in particular: the identity, which answers every offer in
-/// the document's own serialized order and is the one an assembly emitting in *reverse* completion
-/// order cannot survive, and every run in which one map's children arrive between another's, which
-/// is the one a driver answering a map at a time can never reach. See [`sweep`] for why it carries
-/// no permutation premise and what stands in its place.
+/// in, on both ends of the poll schedule. The case above is one of the 226 800 arrival orders here
+/// — the one that answers each map backwards, depth-first — and it is kept for what it is readable
+/// as, not for what it covers. What this adds is the other 226 799, and three of them in
+/// particular: the identity, which answers every offer in the document's own serialized order and
+/// is the one an assembly emitting in *reverse* completion order cannot survive; every run in which
+/// one map's children arrive between another's, which is the one a driver answering a map at a time
+/// can never reach; and, on the minimal schedule, the run that answers each offer as it takes it,
+/// which is the only one that leaves a sibling `Ready` at every answer. See [`sweep`] for why it
+/// carries no permutation premise and what stands in its place, and [`Polls`] for the axis.
 #[test]
 fn every_arrival_order_of_the_query_serialises_in_the_query_s_order() {
   sweep(QUERY);
