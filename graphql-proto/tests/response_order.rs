@@ -357,7 +357,8 @@
 //! What survives all of this is no longer a permutation. The round that added the enumeration
 //! above closed with the sentence "the one thing the sweep does not vary is how many times the
 //! driver *polls* between two answers", and named it as a variable left free. It was load-bearing,
-//! and the next two sections are what it cost and what it now buys.
+//! and the three sections that follow are what it cost, what the space it opened actually is, and
+//! what covering two points of it now buys.
 //!
 //! ### The poll schedule is the second axis, and a defect lives in it
 //!
@@ -391,40 +392,108 @@
 //! front-relink was re-measured against the file as it now ships to pin the argument rather than
 //! rest on it — still 2 of 8, still the two sweeps.
 //!
+//! ### The space, before anything is a percentage of it
+//!
+//! A run's literal API trace is every call the driver made, and counting *those* is counting
+//! nothing: a caller may poll an executor that has nothing ready as often as it likes, so the
+//! literal trace space is not large, it is **unbounded**, and a percentage of it is not a number.
+//! The round that first priced this axis quoted one anyway.
+//!
+//! So the space is a quotient, and it is named here rather than left to be inferred. A **trace
+//! class** is an arrival order together with one non-decreasing count per answer: how many
+//! *successful* `poll_resolve` calls the driver had made when it made that answer. Two runs are one
+//! class when they agree on those and differ only in how many polls came back `None`, and where.
+//! [`schedule_count`] counts that space, [`Run::holds`] is the coordinate a run reports itself at,
+//! and every number below is of classes.
+//!
+//! The quotient is sound only if an unsuccessful poll is inert, so it is checked rather than
+//! declared. Read off the executor first, because a check needs something to be a check *of*:
+//! `poll_resolve` on a dry chain runs its entry hook, finds nothing ready and returns; the entry
+//! hook drops the object value the previous offer parked and clears the argument scratch, and
+//! `handle_resolved` opens with the same hook. So an empty poll before an answer moves that one
+//! drop a single call earlier and does nothing besides: it enqueues and dequeues nothing, issues no
+//! request id, leaves the ready chain and every position's state as it found them, and the drop it
+//! brought forward happens exactly once either way.
+//!
+//! That is an argument, and [`drive`]'s `empty_polls` is the measurement. The drained sweep makes
+//! [`REPEATED_EMPTY_POLLS`] further polls before **every** answer, each asserted to come back empty
+//! again, and the run they sit in is then required to answer in the order it was handed, to
+//! serialise in the document's order, to carry the document's values, and to hold exactly the
+//! offers [`schedule_bounds`]'s ceiling says it must — four oracles, not one of which knows the
+//! polls happened. The named cases drive the same schedule with one empty poll per answer instead
+//! of three, and [`Polls::UntilWanted`] makes none at all before any answer. Nought, one and three,
+//! and each further call measured to come back empty again, which is what carries the erasure from
+//! three to any number: a poll that returns `None` and leaves the run at the same coordinate is a
+//! poll the next one repeats.
+//!
+//! Where an empty poll can happen is not a free choice either, and that is what makes those three
+//! placements exhaustive rather than a sample. A poll comes back empty exactly when no position is
+//! `Ready`, which at a given answer means the driver has taken every offer enqueued so far — the
+//! ceiling, which is the drained schedule's own coordinate at every answer. A schedule strictly
+//! between the endpoints can be empty-polled only where it touches that ceiling, and where it does
+//! the executor's state is the drained schedule's: the same offers handed out, the same answers
+//! made. So the drained sweep visits every state in which the question can be asked.
+//!
 //! ### What two schedules do not cover, and what covering it would cost
 //!
-//! Two points are not an axis. A run's full poll/resolve trace is its arrival order **and** how
-//! many offers the driver had taken before each of its answers, and the two disciplines here are
-//! that trace's two endpoints: [`Polls::ToExhaustion`] takes the most offers any schedule may at
-//! every answer and [`Polls::UntilWanted`] the fewest, so every legal schedule lies pointwise
-//! between them — which [`sweep`] asserts per run rather than assuming, because a second driver
-//! that turned out to be a second spelling of the first would be decoration.
+//! Two points are not an axis. A run's class is its arrival order **and** how many offers the
+//! driver had taken before each of its answers, and the two disciplines here are that class's two
+//! endpoints: [`Polls::ToExhaustion`] takes the most offers any schedule may at every answer and
+//! [`Polls::UntilWanted`] the fewest, so every legal schedule lies pointwise between them — which
+//! [`sweep`] asserts per run rather than assuming, because a second driver that turned out to be a
+//! second spelling of the first would be decoration.
 //!
-//! Between the endpoints there is room, and it is measurable. Once an arrival order is fixed the
-//! executor's offer *sequence* is fixed with it — the ready chain is FIFO and grows only when an
-//! object completes — so a schedule is one non-decreasing count per answer, bounded below by the
-//! offer that answer needs and above by what has been enqueued, and the traces of an arrival order
-//! are the lattice paths between those bounds. Each of the two documents, whose position forests
-//! are isomorphic, admits **74 372 175** traces against its 226 800 arrival orders: 226 240 of
-//! those orders admit more than one schedule, the document's own order admits 225, and exactly one
-//! order admits the fully sequential run. The two endpoints are 907 200 runs across the pair, which
-//! is **0.61%** of the 148 744 350 the pair admits.
+//! Between the endpoints there is room, and it is counted. Once an arrival order is fixed the
+//! executor's offer *sequence* is fixed with it — the ready chain is FIFO, `start` enqueues the
+//! root map's positions in document order, and a position's children go on the tail the moment its
+//! value lands — so a class is one non-decreasing count per answer, bounded below by the offer that
+//! answer needs and above by what has been enqueued, and an arrival order's classes are the lattice
+//! paths between those bounds. [`schedule_bounds`] derives the corridor and [`schedule_count`] is
+//! the dynamic program over it. Each of the two documents, whose position forests are identical,
+//! admits **74 372 175** classes against its 226 800 arrival orders: 226 240 of those orders admit
+//! more than one schedule, the document's own order admits 225, and exactly one order admits the
+//! fully sequential run.
+//!
+//! Every one of those numbers is now asserted, and asserted *per order*, which is this round's
+//! repair rather than a flourish. The counter is not new — it produced the 74 372 175 the round
+//! before quoted — but it was run once, off to the side, and what the sweep itself asserted was an
+//! `or`: some order distinguished the two schedules, some order ran sequentially. A disjunction
+//! over 226 800 orders is a premise a single order can satisfy. Measured, and it is the same
+//! premise collapse this file has met at every level it has: make [`Polls::UntilWanted`] drain on
+//! every arrival order **except** the one whose minimal schedule is sequential, and the file as the
+//! round before shipped it is **8 of 8 green**, with the whole second axis alive on one run out of
+//! 226 800. Against the file as it now stands the same plant is **2 of 8 red**, both sweeps, each
+//! failing on the *first* order it reaches and naming it. The control that it is a plant and not a
+//! misreading: make it drain on every order including that one, and the earlier file goes 2 of 8
+//! red on the very `or` the plant was written around.
 //!
 //! So the bound, stated rather than left to be discovered: **this file covers exactly two poll
-//! schedules, and a defect that fires only on a schedule strictly between them is not excluded by
-//! anything here.** What *is* excluded is a defect at either extreme of the `Ready`/`InFlight`
-//! boundary — which is where the plant above lived, and where a sequential caller drives.
+//! schedules per arrival order, and a defect that fires only on a schedule strictly between them is
+//! not excluded by anything here.** In classes that is 453 040 per document — two per arrival
+//! order, less the 560 rigid orders whose two endpoints are the same class — and **906 080** across
+//! the pair, which is **0.61%** of the 148 744 350 the pair admits. Not 907 200: that is a count of
+//! *runs*, and this space counts classes. What *is* excluded is a defect at either extreme of the
+//! `Ready`/`InFlight` boundary — which is where the plant above lived, and where a sequential
+//! caller drives.
 //!
-//! The price of the rest is measured, not guessed. This sweep runs at 12.3 µs a run in a debug
-//! build — 11.1 s for the 907 200 it now does, against a workspace suite that executes in 23.7 s
-//! all told — so 148 744 350 traces is about **half an hour**, single-threaded, and 165 times what
-//! this file costs today. The time is the smaller half. The enumeration would also need what
-//! [`arrival_order_count`] gives the arrival orders: an independent count, by a route sharing no
-//! code with the generator, so completeness is proved rather than hoped. The per-order schedule
-//! count above is a dynamic program over lattice paths, and a closed form for the total — the hook
-//! length formula's counterpart one level up — is not something anyone here has. That is research,
-//! this is a test-only change to a property the executor already satisfies, and the trade is
-//! recorded here so the next reader inherits a priced decision instead of an omission.
+//! The price of the rest is time, and only time. The 907 200 runs this file makes cost 24.8 s in a
+//! debug build single-threaded — 27 µs a run — and around 12 s of wall clock on the two threads the
+//! harness gives the two sweeps. So 148 744 350 classes is 164 times the runs made here and **a bit
+//! over an hour** of single-threaded debug CPU. The round before quoted half that, having divided a
+//! two-thread wall clock by the runs and then called the quotient single-threaded; the ratio it
+//! drew from that was right and the hour is what the number should have been. The per-order counter
+//! and the repeated empty polls together cost 8% of the runtime, measured interleaved against the
+//! round before — the enumeration's price is the runs, and nothing that merely reasons about a run
+//! is anywhere near them.
+//!
+//! What the round before also claimed the enumeration would need, and priced as research, it
+//! already had: an independent count by a route sharing no code with the generator, the way
+//! [`arrival_order_count`] backs the arrival orders. The dynamic program **is** that counter. The
+//! rationale said no analogue of the hook length formula exists for this space and the count was
+//! therefore out of reach; a closed form is a convenience, and a program that settles in a hundred
+//! steps is an oracle whether or not one exists. That reasoning was wrong, it is what kept the
+//! counter off the per-order path for a round, and the correction is why the numbers above are
+//! assertions.
 //!
 //! Past all of it lies the same boundary as before: an assembly that reads the *values*, say, or
 //! the wall clock. Neither sweep closes that, and nothing here claims it does.
@@ -589,6 +658,11 @@ enum Polls {
   /// offered and none of them is still `Ready`. Draining is also what makes an arbitrary arrival
   /// order reachable at all — a driver cannot answer a position it has not been handed — so this
   /// is the schedule [`drive_backwards`] and the named cases use.
+  ///
+  /// It is where an *unsuccessful* poll lives, too: coming back empty is how this schedule knows it
+  /// is done, so every answer of every drained run is preceded by one, and [`drive`]'s
+  /// `empty_polls` is what makes more of them there. The module header says why that matters — the
+  /// counted space erases them, and an erasure is only sound if the thing erased does nothing.
   ToExhaustion,
   /// Take offers one at a time, and stop as soon as the position about to be answered is among
   /// them.
@@ -625,8 +699,13 @@ struct Run {
   /// The run's poll schedule, in the one form the driver can observe from outside: an offer it has
   /// not taken is a position the executor still has `Ready`, and one it holds is `InFlight`. Under
   /// [`Polls::ToExhaustion`] the count is everything offerable, under [`Polls::UntilWanted`] it is
-  /// the least the answer allows, and [`sweep`] asserts the two apart rather than assuming a
-  /// second driver drove differently.
+  /// the least the answer allows, and [`sweep`] holds each of them to the corridor
+  /// [`schedule_bounds`] derives rather than assuming a second driver drove differently.
+  ///
+  /// With [`Self::answered`] it is the run's coordinate in the space the module header names: the
+  /// offers taken *successfully*, one running count per answer. A poll that came back empty adds
+  /// nothing here, which is the erasure the space is a quotient by and the reason a run riddled
+  /// with them has to land on this same profile.
   holds: Vec<usize>,
   /// The same table as the document declares it, derived by [`document_maps`] from the very
   /// [`ExecutableDocument`] this run's [`Executor`] was built from.
@@ -713,11 +792,15 @@ fn drive_backwards(query: &str) -> Run {
     .map(|(path, keys)| (path, keys.into_iter().rev().collect()))
     .collect();
   let arrival = positions(&backwards);
+  // No repeated empty poll: the named cases are the readable driver, and the drained schedule
+  // already makes one unsuccessful poll per answer because coming back empty is how it knows to
+  // stop. [`sweep`] is where that number is varied.
   drive(
     &schema,
     &document,
     &borrowed_paths(&arrival),
     Polls::ToExhaustion,
+    0,
   )
 }
 
@@ -744,12 +827,27 @@ fn drive_backwards(query: &str) -> Run {
 /// supplying an order nobody asked for — the one failure mode naming an order exists to exclude.
 /// Both schedules refuse through the same door: a minimal poll that runs the executor dry without
 /// turning up `wanted` has established the same thing a drained one has.
+///
+/// `empty_polls` is the one input that is *supposed* to do nothing, and it is here so that the
+/// nothing is measured. The counted space the module header names is a space of traces modulo their
+/// unsuccessful polls, so a run makes this many further `poll_resolve` calls before each answer, on
+/// top of the one the drained schedule already makes to discover that it is done — each of them
+/// asserted to come back empty again. It is only meaningful under [`Polls::ToExhaustion`]: an empty
+/// poll is possible exactly where no position is `Ready`, and that is the drained schedule's own
+/// stopping condition, whereas a minimal poll stops with the ready chain still holding positions
+/// and a further call would take an offer rather than come back empty.
 fn drive(
   schema: &Schema,
   document: &ExecutableDocument<&str>,
   arrival: &[&str],
   polls: Polls,
+  empty_polls: usize,
 ) -> Run {
+  assert!(
+    empty_polls == 0 || polls == Polls::ToExhaustion,
+    "a minimal poll stops with positions still `Ready`, so a further call there would be a \
+     successful poll and a different member of the counted space rather than an empty one"
+  );
   // From the same value the executor is about to be handed. This is the one place the document's
   // order is read, and there is nowhere for a second reading to drift from it.
   let declared = document_maps(document);
@@ -778,6 +876,16 @@ fn drive(
         request.path().to_string(),
         request.selection_set().is_some(),
       ));
+    }
+    // The drained loop above left the executor dry, and the driver is standing here holding
+    // requests it has not answered. That is the whole of where an unsuccessful poll can happen, so
+    // it is where the erasure the counted space performs is checked.
+    for _ in 0..empty_polls {
+      assert!(
+        executor.poll_resolve(&mut space).is_none(),
+        "a poll repeating one that had just come back empty offered a position, so an unsuccessful \
+         poll makes progress and the counted space is not a space of equivalence classes"
+      );
     }
     let Some(index) = held.iter().position(|(_, path, _)| path == wanted) else {
       panic!("the arrival order answers `{wanted}` before the executor has offered it");
@@ -932,6 +1040,135 @@ fn arrival_order_count(dependencies: &[Option<usize>]) -> usize {
     }
   }
   factorial(dependencies.len()) / subtree.iter().product::<usize>()
+}
+
+/// Per position, the positions the executor enqueues the moment that position's value lands: its
+/// response map's children, in document order. A leaf's list is empty.
+///
+/// One half of the offer sequence; the other is the root map's positions, which the operation's own
+/// expansion enqueues before the driver has answered anything. Document order, because `expand`
+/// enqueues one child per draft §6.3 group as it walks the groups — so the ready chain's order is
+/// the group order and not the sibling chain's, which is why an assembly that reorders the sibling
+/// chain leaves every count below untouched.
+fn enqueued_by(dependencies: &[Option<usize>]) -> Vec<Vec<usize>> {
+  let mut children = vec![Vec::new(); dependencies.len()];
+  // `dependencies` is indexed in the document's depth-first order, so pushing in index order leaves
+  // each parent's children in the order the document declared them.
+  for (index, dependency) in dependencies.iter().enumerate() {
+    if let Some(parent) = dependency {
+      children[*parent].push(index);
+    }
+  }
+  children
+}
+
+/// Per answer of `order`, the fewest and the most **successful** `poll_resolve` calls the driver
+/// can have made by the time it makes that answer.
+///
+/// The offer sequence is a FIFO, and it is fixed once the arrival order is: the root map's
+/// positions go on at `start`, and a position's children go on the tail the moment its value lands.
+/// So both bounds are counts of that queue. The floor is the offer the answer needs — a driver
+/// cannot answer a position it has not been handed — raised to `at + 1`, because the `at` answers
+/// before it each consumed an offer of their own. The ceiling is everything enqueued so far, and it
+/// is non-decreasing by construction, a queue only ever growing.
+///
+/// This is the counter's model of the executor and it shares no code with [`drive`], which is the
+/// whole point of it. [`sweep`] requires the two poll disciplines to realise exactly these two
+/// bounds, so a model with the offer sequence wrong fails there rather than quietly counting a
+/// space the executor does not have.
+fn schedule_bounds(
+  dependencies: &[Option<usize>],
+  enqueued: &[Vec<usize>],
+  order: &[usize],
+) -> (Vec<usize>, Vec<usize>) {
+  let mut offered = vec![usize::MAX; dependencies.len()];
+  let mut queued = 0usize;
+  for (index, dependency) in dependencies.iter().enumerate() {
+    if dependency.is_none() {
+      offered[index] = queued;
+      queued += 1;
+    }
+  }
+
+  let mut floor = Vec::with_capacity(order.len());
+  let mut ceiling = Vec::with_capacity(order.len());
+  for (at, &index) in order.iter().enumerate() {
+    assert_ne!(
+      offered[index],
+      usize::MAX,
+      "answer {at} names a position the executor has not enqueued, which is an arrival order the \
+       dependency check should have refused before this ever ran"
+    );
+    floor.push((offered[index] + 1).max(at + 1));
+    ceiling.push(queued);
+    for &child in &enqueued[index] {
+      offered[child] = queued;
+      queued += 1;
+    }
+  }
+  (floor, ceiling)
+}
+
+/// The pointwise-least schedule at or above `floor` — what a driver that takes no offer it does not
+/// need runs, and the other end of the corridor [`schedule_bounds`]'s ceiling closes.
+///
+/// `floor` is not itself non-decreasing: an answer whose position was offered early needs nothing
+/// new, and its floor drops below the previous answer's. A driver cannot un-take an offer, so the
+/// least schedule is the running maximum.
+fn least_schedule(floor: &[usize]) -> Vec<usize> {
+  let mut taken = 0usize;
+  floor
+    .iter()
+    .map(|&least| {
+      taken = taken.max(least);
+      taken
+    })
+    .collect()
+}
+
+/// A schedule read as the profile [`Run::holds`] records: at answer `at` the driver has taken
+/// `taken` offers and answered `at` of them, so it is holding the difference.
+fn holds_profile(schedule: &[usize]) -> Vec<usize> {
+  schedule
+    .iter()
+    .enumerate()
+    .map(|(at, taken)| taken - at)
+    .collect()
+}
+
+/// How many poll schedules one arrival order admits, counted without enumerating them.
+///
+/// A schedule is a non-decreasing count per answer lying between [`schedule_bounds`]'s two bounds,
+/// so an arrival order's schedules are the monotone lattice paths through that corridor, and this
+/// is the dynamic program over it: `paths[taken]` is how many prefixes reach this answer having
+/// taken `taken` offers, and the next answer's entry is the running sum of every prefix at or below
+/// it. Ten answers and a corridor no wider than the position count, so it settles in a hundred
+/// steps and needs no closed form — which is the correction this round is written around, the round
+/// before it having priced the enumeration as out of reach for want of one.
+///
+/// The same shape of oracle as [`arrival_order_count`], one axis over: an independent route to a
+/// number, sharing no code with anything that would produce the objects it counts.
+fn schedule_count(floor: &[usize], ceiling: &[usize]) -> usize {
+  let Some(&widest) = ceiling.iter().max() else {
+    // No answers is one schedule — the empty one — rather than none.
+    return 1;
+  };
+  let mut paths = vec![0usize; widest + 1];
+  if let Some(first) = paths.get_mut(floor[0]..=ceiling[0]) {
+    first.fill(1);
+  }
+  for (&least, &most) in floor.iter().zip(ceiling).skip(1) {
+    let mut running = 0usize;
+    for (taken, prefixes) in paths.iter_mut().enumerate() {
+      running += *prefixes;
+      *prefixes = if (least..=most).contains(&taken) {
+        running
+      } else {
+        0
+      };
+    }
+  }
+  paths.iter().sum()
 }
 
 /// The response keys of the `path` map's children, in the order `order` answers them — one arrival
@@ -1244,6 +1481,43 @@ fn factorial(count: usize) -> usize {
   (1..=count).product()
 }
 
+/// How many further unsuccessful polls the swept drained runs make before each answer.
+///
+/// Two rather than one, so that what is measured is a *repeated* empty poll and not merely a second
+/// one — three per answer in all, counting the one the drained schedule makes to discover that it
+/// is done. [`drive_backwards`] makes just that one and [`Polls::UntilWanted`] makes none at all
+/// before any answer, so the file spans nought, one and three, which is the whole of the axis the
+/// module header's equivalence erases.
+const REPEATED_EMPTY_POLLS: usize = 2;
+
+/// How many poll schedules one of these documents admits across all of its arrival orders.
+///
+/// The two are one number rather than two because their position forests are identical: a leaf, an
+/// object over three leaves, another, and a leaf. Written down so that a fixture whose shape
+/// changed fails here loudly instead of quietly moving the bound the module header states.
+const TRACE_CLASSES: usize = 74_372_175;
+
+/// How many arrival orders admit exactly one poll schedule, and so cannot tell the two disciplines
+/// apart however hard either drives.
+///
+/// The remaining 226 240 must, and that is asserted per order rather than in aggregate — the
+/// aggregate is here to pin the *fixture*, because a document all of whose orders were rigid would
+/// satisfy every per-order check and leave the poll axis with nothing to sweep.
+const RIGID_ORDERS: usize = 560;
+
+/// How many schedules the document's own serialized arrival order admits.
+///
+/// One number out of the middle of the distribution rather than either tail, so a counter that had
+/// gone wrong in a way the totals absorb has somewhere else to fail.
+const IDENTITY_TRACE_CLASSES: usize = 225;
+
+/// How many distinct trace classes one document's two swept endpoints cover.
+///
+/// Two per arrival order, less the [`RIGID_ORDERS`] whose endpoints are the same class. It is not
+/// `2 · 226 800`: counting a rigid order twice would be counting *runs* where the space counts
+/// classes, and the bound the module header states is the number of classes.
+const SWEPT_TRACE_CLASSES: usize = 453_040;
+
 /// Runs `query` under **every order its values can arrive in** and requires the document's own
 /// order out of each one.
 ///
@@ -1320,14 +1594,25 @@ fn factorial(count: usize) -> usize {
 /// A second driver is worth nothing unless it drove differently, so that is asserted too, in the
 /// one form the driver can see from outside: how many offers it was holding at each answer. The
 /// minimal schedule must never hold more than the drained one at the same answer — it is the same
-/// axis's other end, not an unrelated driver — the two must disagree on some order, or the second
-/// pass is the first one run again, and one run must have held exactly one offer at every answer,
-/// which is the plainest possible caller and the schedule the shared driver of the suites next door
-/// runs the executor in.
+/// axis's other end, not an unrelated driver.
 ///
-/// What it does **not** cover is the schedules between those two ends. The header prices that: the
-/// full trace space is 74 372 175 per document against these 226 800, the two endpoints are 0.61%
-/// of the pair's, and a defect firing only strictly between them is not excluded.
+/// The rest of that used to be an `or` over the whole sweep — *some* order distinguished the two
+/// schedules, *some* order ran fully sequentially — and a disjunction over 226 800 orders is a
+/// premise one of them can satisfy while the other 226 799 drive one way and nothing says so. The
+/// module header measures exactly that. So each order answers for itself instead, against a counter
+/// that reads the document and the arrival order and nothing either driver did: [`schedule_bounds`]
+/// gives the corridor that order's schedules lie in, the minimal run's profile must be its floor
+/// exactly and the drained run's its ceiling exactly, and the two must differ **precisely when**
+/// [`schedule_count`] says the corridor is wider than one point. Over the sweep that leaves four
+/// counts rather than two flags: [`TRACE_CLASSES`] schedules in all, [`RIGID_ORDERS`] orders whose
+/// endpoints coincide and 226 240 that must not, [`IDENTITY_TRACE_CLASSES`] for the document's own
+/// order, and exactly one order held to a single offer throughout — the plainest possible caller,
+/// and the schedule the shared driver of the suites next door runs the executor in.
+///
+/// What it does **not** cover is the schedules between those two ends. The header names the space
+/// and prices the rest: [`TRACE_CLASSES`] classes per document against these 226 800 arrival
+/// orders, of which the two endpoints cover [`SWEPT_TRACE_CLASSES`], and a defect firing only
+/// strictly between them is not excluded.
 fn sweep(query: &str) {
   let (schema, document) = compile(SDL, query);
   let declared = document_maps(&document);
@@ -1501,15 +1786,24 @@ fn sweep(query: &str) {
     "the named cases' arrival order is one of the sweep's runs"
   );
 
-  // Whether some run answered every position with exactly one offer in hand — the sequential
-  // driver, which exists in this sweep only because the schedule is a parameter — and whether the
-  // two schedules ever produced different runs at all.
-  let mut sequential = false;
-  let mut schedules_differ = false;
+  // The poll schedules each arrival order admits, counted off the document and the order alone.
+  // Every statement about the second axis below is per order and against these; the counts are the
+  // fixture's own shape, and they are here so that a document that had lost the axis says so.
+  let enqueued = enqueued_by(&depends);
+  let mut classes = 0usize;
+  let mut rigid = 0usize;
+  let mut sequential = 0usize;
+  let mut identity_classes = 0usize;
   for order in &orders {
     let arrival: Vec<&str> = order.iter().map(|&index| paths[index].as_str()).collect();
-    let drained = drive(&schema, &document, &arrival, Polls::ToExhaustion);
-    let minimal = drive(&schema, &document, &arrival, Polls::UntilWanted);
+    let drained = drive(
+      &schema,
+      &document,
+      &arrival,
+      Polls::ToExhaustion,
+      REPEATED_EMPTY_POLLS,
+    );
+    let minimal = drive(&schema, &document, &arrival, Polls::UntilWanted, 0);
     for (polls, run) in [
       (Polls::ToExhaustion, &drained),
       (Polls::UntilWanted, &minimal),
@@ -1543,18 +1837,69 @@ fn sweep(query: &str) {
          exhaustion, so the minimal schedule took an offer the drained one had not"
       );
     }
-    sequential |= minimal.holds.iter().all(|&held| held == 1);
-    schedules_differ |= minimal.holds != drained.holds;
+    // What the two runs did, against what the counter says the two ends of this order's corridor
+    // are. An `or` over the sweep would let one order carry the whole axis while the rest of it
+    // drove one way, so every order answers for itself and the counter is what it answers to.
+    let (floor, ceiling) = schedule_bounds(&depends, &enqueued, order);
+    assert_eq!(
+      minimal.holds,
+      holds_profile(&least_schedule(&floor)),
+      "the minimal schedule of {arrival:?} takes no offer its next answer does not need, so its \
+       profile is the corridor's floor"
+    );
+    assert_eq!(
+      drained.holds,
+      holds_profile(&ceiling),
+      "the drained schedule of {arrival:?} takes every offer there is to take, so its profile is \
+       the corridor's ceiling"
+    );
+
+    // The two ends of a corridor are the same point exactly when the corridor is one point wide,
+    // and that is the statement the poll axis rests on: the endpoints have to be *distinct runs*
+    // wherever this order admits more than one schedule, and cannot be anywhere it does not.
+    let count = schedule_count(&floor, &ceiling);
+    assert_eq!(
+      count > 1,
+      minimal.holds != drained.holds,
+      "{arrival:?} admits {count} poll schedules, and its two endpoints {} — the counter and the \
+       drivers disagree about whether this order distinguishes them",
+      if minimal.holds == drained.holds {
+        "are the same run"
+      } else {
+        "are two runs"
+      }
+    );
+
+    classes += count;
+    rigid += usize::from(count == 1);
+    sequential += usize::from(minimal.holds.iter().all(|&held| held == 1));
+    if order.iter().copied().eq(0..paths.len()) {
+      identity_classes = count;
+    }
   }
-  assert!(
-    schedules_differ,
-    "no arrival order distinguished the two poll schedules, so the second driver ran the first \
-     one's runs again and the poll-schedule axis is unswept"
+  assert_eq!(
+    classes, TRACE_CLASSES,
+    "the trace classes this document admits, which is what the two swept endpoints are a \
+     percentage of"
   );
-  assert!(
-    sequential,
-    "no run answered every position with a single offer in hand, so the sweep never drove the \
-     executor the way a plain synchronous caller does — which is the schedule that leaves every \
+  assert_eq!(
+    rigid, RIGID_ORDERS,
+    "the arrival orders whose two endpoints coincide — every other order has to distinguish the \
+     schedules, and a sweep in which they all coincided would have no second axis left"
+  );
+  assert_eq!(
+    2 * orders.len() - rigid,
+    SWEPT_TRACE_CLASSES,
+    "the distinct trace classes these two disciplines cover, which is the bound this file states"
+  );
+  assert_eq!(
+    identity_classes, IDENTITY_TRACE_CLASSES,
+    "the schedules the document's own serialized arrival order admits"
+  );
+  assert_eq!(
+    sequential, 1,
+    "exactly one arrival order — the executor's own offer order — is answered with a single offer \
+     in hand throughout, which is the plain synchronous caller and the schedule that leaves every \
      later sibling `Ready` at every answer"
   );
 }
