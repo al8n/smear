@@ -193,16 +193,20 @@ export MIRIFLAGS
 # WHAT THIS CELL COVERS, and it is measured rather than claimed. The half where this project's own
 # `unsafe` lives — the SIMD lexer and the syntactic parser, through `tokora`'s substrate — and all
 # four of those `unsafe` sites are in `smear-lexer/src/string_lexer/`. The selection is
-# `smear-lexer`, `smear-parser`, `smear-compiler` and `graphql-proto`: 125 + 353 + 12 + 15 lib unit
-# tests, counted with `cargo test -p <m> --lib -- --list` at this cell's feature set.
+# `smear-lexer`, `smear-parser`, `smear-schema`, `smear-compiler` and `graphql-proto`:
+# 125 + 353 + 3 + 12 + 15 = 508 lib unit tests, counted per binary UNDER THIS SELECTION rather than
+# one package at a time.
 #
-# `smear` AND `smear-schema` ARE DELIBERATELY OUT, which is not a narrowing. `smear/src` is one
-# file of re-exports and its lib carries no unit tests at any feature set; `smear-schema`'s three
-# are behind `build`, which these scripts do not enable. Selecting either would produce a harness
-# with 0 tests, and `ci/miri_scope.py` fails that on purpose — "a target that compiles to an empty
-# harness passes without testing anything" is #73's mechanism. The reasons live beside the names,
-# in `MIRI_NOT_SELECTED`, and `ci/feature_reachability.py` requires each to still match a real
-# publishable member.
+# THAT DISTINCTION COST A ROUND. `smear-schema` was excluded on "0 lib unit tests", measured with an
+# isolated `cargo test -p smear-schema --lib` — but this selection contains `smear-compiler`, which
+# takes `smear-schema` WITH `build`, and behind `build` it has three. Feature unification decides
+# the count, and an isolated measurement is taken where unification does not apply.
+#
+# `smear` IS DELIBERATELY OUT, and not for a test count: co-selecting it with `smear-compiler` does
+# not COMPILE. The compiler forces `smear-schema/build`, the umbrella at default features has
+# `validator` off, and the equivalence assertion in `smear/src/lib.rs` refuses that graph. It has no
+# lib unit tests either. `MIRI_NOT_SELECTED` records the behaviour, and `--verify-exclusions`
+# re-runs it under this same selection.
 #
 # THE SELECTION BELOW IS NOT WRITTEN HERE. It is read from `MIRI_PACKAGES`. Those were two
 # hand-maintained lists and they drifted: the constant grew to six members through the split while
