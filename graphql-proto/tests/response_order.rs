@@ -57,8 +57,8 @@
 //! Deriving it is not a walk over the selections. Draft §6.3 groups by **response key**: a key that
 //! appears twice is one entry, at the position of its *first* selection, and draft §6.4's
 //! `MergeSelectionSets` concatenates that group's sub-selection sets into the one map underneath
-//! it. So `a { p q } b a { r p }` declares `a, b` with `a` holding `p, q, r` — not `a, b, a`, and
-//! not two `a` maps, and not `p, q, r, p`. Neither fixture below repeats a response key, so the
+//! it. So `b { q p } a b { r q }` declares `b, a` with `b` holding `q, p, r` — not `b, a, b`, and
+//! not two `b` maps, and not `q, p, r, q`. Neither fixture below repeats a response key, so the
 //! grouping is stated against documents that do: [`document_maps`] has its own cases at the end of
 //! this file, and they are the ones a walk over selections fails.
 //!
@@ -70,7 +70,7 @@
 //! # Aliases, and depth
 //!
 //! The response key is the *alias* when a field has one, and the alias is what a consumer compares
-//! against, so each fixture here aliases one field three ways — `a: item(id: 1)`, `b: item(id: 2)`,
+//! against, so each fixture here aliases one field three ways — `b: item(id: 1)`, `a: item(id: 2)`,
 //! `c: item(id: 3)`. Three positions that differ only by response key and argument also rule out a
 //! merge: draft §6.3 groups by response key, so anything grouping by field name instead would
 //! collapse the three rather than reorder them.
@@ -78,6 +78,47 @@
 //! The property is recursive, and a root-only pin says nothing about children. The second case
 //! therefore permutes an inner selection set inside an outer field that is itself permuted, and
 //! asserts the whole flattened key sequence rather than only the top level.
+//!
+//! # Why no sibling set here is in alphabetical order, and why that is a constraint
+//!
+//! Because when it is, two behaviours this file exists to tell apart become the same string. A map
+//! the document declares as `a, b, c` is answered identically by an executor that assembles
+//! positionally and by one that **sorts its response keys** — an ordered-by-key map is the shape a
+//! §7.1.5 violation takes in an implementation where nobody wrote the order down — so a fixture
+//! named that way stays green under a defect that reorders every response map in the schema. Green
+//! for a reason with nothing to do with the property, and no assertion can notice, because the
+//! oracle is right and the *document* is the thing that cannot distinguish them.
+//!
+//! Every sibling set asserted anywhere below is therefore out of alphabetical order in the
+//! document: `b, a, c` at the root, `q, p, r` beneath it, and likewise in the two grouping cases at
+//! the end of the file. Sorting on assembly then yields `a, b, c` and `p, q, r`, which is not what
+//! the document says, and the comparison against it fails. Measured — `push_child` re-sorting its
+//! parent's chain by response key, with **no change to any fixture, query or table below**:
+//!
+//! | suite | result |
+//! |---|---|
+//! | this file's two execution cases | 2 of 2 red, each naming the sorted sequence it got |
+//! | `smear/tests/proto_execute.rs` | 140 of 146 green |
+//! | `proto_mutation_oracle.rs`, `proto_nonnull_oracle.rs` | 2 of 5 green each |
+//!
+//! Both cases fail at the *property*, not at the premise, and that is worth reading: sorting the
+//! sibling chain reorders the response without touching the `next_ready` queue the offers come off,
+//! so the driver supplies exactly what the case named and only the assembled order moves.
+//!
+//! Unlike the relink plant below, this one is not invisible to the incumbents — an ordered-by-key
+//! map reorders every response map in the schema, so the dozen fixtures out there that happen to
+//! hold a non-lexical one do catch it. What an alphabetical fixture here would cost is narrower and
+//! worse: the file whose whole subject is §7.1.5's key order would be the file that stayed green.
+//!
+//! It cuts the other way as well, and the same names answer both. Sorting is a defect the *oracle*
+//! can have — a derivation that sorted its own groups would agree with a sorting executor about
+//! every document there is, and the two would be right about each other and wrong together. So the
+//! fixture has to defeat both, and it does: sorting the groups [`group_by_response_key`] returns
+//! turns four of this file's five cases red, the two grouping cases at the end included.
+//!
+//! Neither the choice of `b, a, c` nor of `q, p, r` is cosmetic, and neither is free to be tidied.
+//! A later round that renames a key back into alphabetical order deletes that detection without
+//! touching a single assertion, and nothing goes red to report it.
 //!
 //! # What this file catches that the suite around it did not
 //!
@@ -640,12 +681,12 @@ fn borrowed(maps: &[(String, Vec<String>)]) -> Vec<(&str, Vec<&str>)> {
 #[test]
 fn root_response_keys_are_the_document_s_order_and_not_the_driver_s() {
   // The one map this fixture has, and the driver hands it back to front.
-  const SUPPLY_ORDER: [(&str, &[&str]); 1] = [("", &["c", "b", "a"])];
+  const SUPPLY_ORDER: [(&str, &[&str]); 1] = [("", &["c", "a", "b"])];
 
   let run = drive_backwards(
     r"{
-      a: label(id: 1)
-      b: label(id: 2)
+      b: label(id: 1)
+      a: label(id: 2)
       c: label(id: 3)
     }",
   );
@@ -670,17 +711,17 @@ fn nested_response_keys_are_the_document_s_order_at_every_depth() {
   // Four maps, every one of them handed back to front — which is the whole of what this case needs
   // to be true before its own assertions mean anything, and which no single sequence can say.
   const SUPPLY_ORDER: [(&str, &[&str]); 4] = [
-    ("", &["c", "b", "a"]),
-    ("a", &["r", "q", "p"]),
-    ("b", &["r", "q", "p"]),
-    ("c", &["r", "q", "p"]),
+    ("", &["c", "a", "b"]),
+    ("b", &["r", "p", "q"]),
+    ("a", &["r", "p", "q"]),
+    ("c", &["r", "p", "q"]),
   ];
 
   let run = drive_backwards(
     r"{
-      a: item(id: 1) { p q r }
-      b: item(id: 2) { p q r }
-      c: item(id: 3) { p q r }
+      b: item(id: 1) { q p r }
+      a: item(id: 2) { q p r }
+      c: item(id: 3) { q p r }
     }",
   );
 
@@ -696,27 +737,32 @@ fn nested_response_keys_are_the_document_s_order_at_every_depth() {
 /// A repeated response key is one entry, where the *first* of its selections put it.
 ///
 /// Neither execution fixture repeats a key, so this is where the derivation's grouping is stated
-/// against a document that needs it, and it is a document draft §5.3.2 allows: both `a` selections
+/// against a document that needs it, and it is a document draft §5.3.2 allows: both `b` selections
 /// name the same field with the same argument, so they merge rather than conflict.
 ///
-/// Three answers a walk over selections gets wrong, all in this one case. `a` stays ahead of `b`
+/// Three answers a walk over selections gets wrong, all in this one case. `b` stays ahead of `a`
 /// rather than moving to where its second selection sits; it appears once rather than twice; and
-/// the map under it is the two sub-selection sets run together *and re-grouped*, so the `p` that
-/// both of them name is one key at its first position and the map reads `p, q, r` rather than
-/// `p, q, r, p`.
+/// the map under it is the two sub-selection sets run together *and re-grouped*, so the `q` that
+/// both of them name is one key at its first position and the map reads `q, p, r` rather than
+/// `q, p, r, q`.
+///
+/// Both orders it asserts are out of alphabetical order, for the reason the module header gives.
+/// Written as `a, b` over `p, q, r` — which is what the natural spelling of this document produces —
+/// the case would be answered identically by a derivation that sorted each group, and would report
+/// nothing when one did.
 #[test]
 fn a_repeated_response_key_is_one_entry_at_its_first_position() {
   let document = parse_query(
     r"{
-      a: item(id: 1) { p q }
-      b: label(id: 2)
-      a: item(id: 1) { r p }
+      b: item(id: 1) { q p }
+      a: label(id: 2)
+      b: item(id: 1) { r q }
     }",
   );
 
   assert_eq!(
     borrowed(&document_maps(&document)),
-    [("", vec!["a", "b"]), ("a", vec!["p", "q", "r"])]
+    [("", vec!["b", "a"]), ("b", vec!["q", "p", "r"])]
   );
 }
 
@@ -726,24 +772,29 @@ fn a_repeated_response_key_is_one_entry_at_its_first_position() {
 /// The complement of the case above, and the reason the derivation reads `alias()` before `name()`:
 /// `item` and `x: item` are the same field and must not merge, while the two `x`s are the same
 /// response key and must. Getting the key from the field's name instead would collapse all four
-/// selections into one map of `p, q, r`, in a file whose fixtures alias every field they use.
+/// selections into one map of `q, r, p`, in a file whose fixtures alias every field they use.
+///
+/// `x` is written ahead of `item` so that all three orders asserted here are out of alphabetical
+/// order. With `item` first — where a reader would naturally put it — the root map's document order
+/// and its sorted order are the same list, and a derivation that sorted its groups would be green on
+/// a map it had reordered.
 #[test]
 fn a_response_key_is_the_alias_and_grouping_follows_it() {
   let document = parse_query(
     r"{
-      item(id: 1) { p }
       x: item(id: 2) { q }
       item(id: 1) { r }
       x: item(id: 2) { p }
+      item(id: 1) { p }
     }",
   );
 
   assert_eq!(
     borrowed(&document_maps(&document)),
     [
-      ("", vec!["item", "x"]),
-      ("item", vec!["p", "r"]),
+      ("", vec!["x", "item"]),
       ("x", vec!["q", "p"]),
+      ("item", vec!["r", "p"]),
     ]
   );
 }
