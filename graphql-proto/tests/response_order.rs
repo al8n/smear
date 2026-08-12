@@ -58,7 +58,7 @@
 //! appears twice is one entry, at the position of its *first* selection, and draft §6.4's
 //! `MergeSelectionSets` concatenates that group's sub-selection sets into the one map underneath
 //! it. So `b { q p } a b { r q }` declares `b, a` with `b` holding `q, p, r` — not `b, a, b`, and
-//! not two `b` maps, and not `q, p, r, q`. Neither fixture below repeats a response key, so the
+//! not two `b` maps, and not `q, p, r, q`. Neither execution fixture repeats a response key, so the
 //! grouping is stated against documents that do: [`document_maps`] has its own cases at the end of
 //! this file, and they are the ones a walk over selections fails.
 //!
@@ -67,65 +67,145 @@
 //! `@skip`/`@include` read variable values; none of the three is a fact about the document, so
 //! [`group_by_response_key`] refuses those selections instead of answering for them.
 //!
-//! # Aliases, and depth
+//! # Two documents, one key set
+//!
+//! [`QUERY`] and [`MIRROR`] are the same four root selections, and the same inner ones, written in
+//! the opposite order. They declare the same three response maps — the root, `item` and `a` — each
+//! holding the same response keys, and each map's order in one document is the other's reversed.
+//! [`the_pair_is_one_key_set_in_two_orders`] asserts that out of the two documents themselves, so
+//! the pair cannot quietly stop being a pair.
+//!
+//! ## What the pair proves, and why it is a proof and not two more samples
+//!
+//! The defect this file exists to catch is a response map whose order comes from somewhere other
+//! than the document. One large family of "somewhere else" is the *keys*: a `BTreeMap` keyed by
+//! response key, a sort by key length, a partition on "was this key an alias", by hash, by first
+//! byte, by anything at all that a comparator can read off the key and nothing else.
+//!
+//! Enumerating that family is hopeless, and this file tried twice. A fixture whose keys were in
+//! alphabetical order could not tell positional assembly from a lexical sort; naming the keys out
+//! of alphabetical order fixed that and left a fixture whose response keys were every one of them a
+//! single character, with every root key an alias and no child key one — which could not tell it
+//! from a stable sort by length or a stable partition on alias-ness, since both tie on such a map
+//! and leave it exactly as written. Each round named an ordering and the round after it named the
+//! next, because there is no last one.
+//!
+//! The pair ends the family in one move. An assembly that reads only the keys is a *function from
+//! key set to sequence*: hand it the set both fixtures share and it answers once. Two documents,
+//! two different orders, one answer — it matches at most one of them, and the other fixture is red.
+//! No ordering has to be named for that to hold, which is the whole point of it.
+//!
+//! One refinement, because the two orderings that survived the previous rounds were **stable**
+//! sorts, and a stable sort is not purely a function of the key set — it reads the document order
+//! too, and leaves a map alone whenever that order already agrees with the comparator. A stable
+//! `cmp`-sort is the identity on a map exactly when the map's keys are non-decreasing under `cmp`.
+//! [`MIRROR`] is [`QUERY`] reversed, so if one map's order is non-decreasing the other's is
+//! non-increasing, and both hold at once only if `cmp` calls **every** pair of that map's keys
+//! equal. So the statement survives the refinement: every key-only comparator that can move a key
+//! in these maps at all moves one of the two fixtures out of its document order.
+//!
+//! What the pair says nothing about is an order derived from the *run* rather than from the keys —
+//! completion order, arrival index, insertion order. Those are a different family and they die to a
+//! different mechanism: the driver answers every map backwards, so any of them reproduces the
+//! reversal in the response. The plants at the end of this file measure both halves.
+//!
+//! ## The belt: what the shared key set has to look like
+//!
+//! One comparator still escapes the argument above, by being inert: a `cmp` that calls every pair
+//! of a map's keys equal leaves both orders alone. That is not luck — such a comparator cannot
+//! reorder *this* map under any document whatsoever — but it can be a live defect on some other
+//! document, and that is precisely what happened here. Every response key in the previous round was
+//! one character long, so "sort by length" tied all of them and passed, while reordering any real
+//! document with mixed-length keys.
+//!
+//! So the shared key set is varied along every axis a cheap comparator might read, and no map's
+//! keys are monotone along any of them:
+//!
+//! | map | keys, in [`QUERY`]'s order | length | first byte | from an alias |
+//! |---|---|---|---|---|
+//! | root | `bee, item, a, label` | 3, 4, 1, 5 | `b, i, a, l` | yes, no, yes, no |
+//! | `item` and `a` | `zed, q, rho` | 3, 1, 3 | `z, q, r` | yes, no, yes |
+//!
+//! Non-monotone rather than merely "not all equal", and that buys the second document for free:
+//! reversing a sequence that is neither non-decreasing nor non-increasing yields another such
+//! sequence, so the one table covers [`MIRROR`] too, and each fixture *individually* survives a
+//! stable sort on each axis without needing its twin.
+//! [`the_pair_is_one_key_set_in_two_orders`] asserts all four axes — the keys themselves, their
+//! lengths, their first bytes and their alias flags — against both documents. Three of the four can
+//! fail on their own; the first-byte column cannot, and its call site says why it is kept anyway.
+//!
+//! Not one of these spellings is cosmetic and none is free to be tidied. `a` is one character and
+//! `label` is five so the length column moves; `item` sits second rather than first so no column is
+//! sorted; two of the four root keys are the field's own name so the alias column holds both
+//! values. A later round that renames a key or straightens an order deletes a detection, and the
+//! pair test is what goes red instead of nothing — measured by straightening each column in turn,
+//! which reddens it and names the column it straightened.
+//!
+//! # Aliases, depth, and leaves beside objects
 //!
 //! The response key is the *alias* when a field has one, and the alias is what a consumer compares
-//! against, so each fixture here aliases one field three ways — `b: item(id: 1)`, `a: item(id: 2)`,
-//! `c: item(id: 3)`. Three positions that differ only by response key and argument also rule out a
-//! merge: draft §6.3 groups by response key, so anything grouping by field name instead would
-//! collapse the three rather than reorder them.
+//! against. `label` appears twice at the root, once as `bee` and once under its own name, and
+//! `item` likewise, once as `a` and once under its own name. Two positions that differ only by
+//! response key and argument rule out a merge: draft §6.3 groups by response key, so anything
+//! grouping by field *name* would collapse the four root keys into two rather than reorder them.
 //!
-//! The property is recursive, and a root-only pin says nothing about children. The second case
-//! therefore permutes an inner selection set inside an outer field that is itself permuted, and
-//! asserts the whole flattened key sequence rather than only the top level.
+//! The property is recursive, and a root-only pin says nothing about children. Both documents put
+//! two object positions at the root, each with a three-key map of its own, and both assert the
+//! whole flattened key sequence rather than only the top level. Both also hold leaf positions at
+//! the root beside those objects — a root map created by `start`'s expansion is the same code path
+//! whether its children are leaves or objects, but a defect that moved only one kind would have
+//! somewhere to hide in a fixture that held only the other.
 //!
-//! # Why no sibling set here is in alphabetical order, and why that is a constraint
-//!
-//! Because when it is, two behaviours this file exists to tell apart become the same string. A map
-//! the document declares as `a, b, c` is answered identically by an executor that assembles
-//! positionally and by one that **sorts its response keys** — an ordered-by-key map is the shape a
-//! §7.1.5 violation takes in an implementation where nobody wrote the order down — so a fixture
-//! named that way stays green under a defect that reorders every response map in the schema. Green
-//! for a reason with nothing to do with the property, and no assertion can notice, because the
-//! oracle is right and the *document* is the thing that cannot distinguish them.
-//!
-//! Every sibling set asserted anywhere below is therefore out of alphabetical order in the
-//! document: `b, a, c` at the root, `q, p, r` beneath it, and likewise in the two grouping cases at
-//! the end of the file. Sorting on assembly then yields `a, b, c` and `p, q, r`, which is not what
-//! the document says, and the comparison against it fails. Measured — `push_child` re-sorting its
-//! parent's chain by response key, with **no change to any fixture, query or table below**:
-//!
-//! | suite | result |
-//! |---|---|
-//! | this file's two execution cases | 2 of 2 red, each naming the sorted sequence it got |
-//! | `smear/tests/proto_execute.rs` | 140 of 146 green |
-//! | `proto_mutation_oracle.rs`, `proto_nonnull_oracle.rs` | 2 of 5 green each |
-//!
-//! Both cases fail at the *property*, not at the premise, and that is worth reading: sorting the
-//! sibling chain reorders the response without touching the `next_ready` queue the offers come off,
-//! so the driver supplies exactly what the case named and only the assembled order moves.
-//!
-//! Unlike the relink plant below, this one is not invisible to the incumbents — an ordered-by-key
-//! map reorders every response map in the schema, so the dozen fixtures out there that happen to
-//! hold a non-lexical one do catch it. What an alphabetical fixture here would cost is narrower and
-//! worse: the file whose whole subject is §7.1.5's key order would be the file that stayed green.
-//!
-//! It cuts the other way as well, and the same names answer both. Sorting is a defect the *oracle*
-//! can have — a derivation that sorted its own groups would agree with a sorting executor about
-//! every document there is, and the two would be right about each other and wrong together. So the
-//! fixture has to defeat both, and it does: sorting the groups [`group_by_response_key`] returns
-//! turns four of this file's five cases red, the two grouping cases at the end included.
-//!
-//! Neither the choice of `b, a, c` nor of `q, p, r` is cosmetic, and neither is free to be tidied.
-//! A later round that renames a key back into alphabetical order deletes that detection without
-//! touching a single assertion, and nothing goes red to report it.
-//!
-//! # What this file catches that the suite around it did not
+//! # Measured, not read off the code
 //!
 //! Assembly here is positional by construction — `push_child` is the sole creator of a position and
 //! appends, `handle_resolved` writes a state into a position that already exists, and rendering
-//! walks the sibling chain — but *by construction* is not *unrepresentable*, so the gate was
-//! calibrated by planting the defect rather than by reading the code.
+//! walks the sibling chain — but *by construction* is not *unrepresentable*, so every claim above
+//! was calibrated by planting the defect rather than by reading the code.
+//!
+//! ## The key-derived family, one plant per comparator
+//!
+//! Three product-only plants, each reordering a response map by reading only its keys, each run
+//! against the fixtures below exactly as they ship:
+//!
+//! | plant | this file | `proto_execute.rs` | `proto_mutation_oracle.rs` | `proto_nonnull_oracle.rs` |
+//! |---|---|---|---|---|
+//! | `push_child` sorts the chain lexically by response key | 2 of 2 red | 140 of 146 | 2 of 5 | 2 of 5 |
+//! | `push_child` stable-sorts the chain by response-key **length** | 2 of 2 red | 136 of 146 | 2 of 5 | 5 of 5 |
+//! | `expand` stable-partitions the finished map, **aliases first** | 2 of 2 red | 144 of 146 | 5 of 5 | 3 of 5 |
+//!
+//! Each of the three fails at the *property*, not at the premise: reordering the sibling chain
+//! moves the response without touching the `next_ready` queue the offers come off, so the driver
+//! supplied exactly what the case named.
+//!
+//! The lexical row is the argument made visible, because the two cases fail with the **same** key
+//! sequence in hand — `a, a.q, a.rho, a.zed, bee, item, …` out of both documents. One key set, one
+//! answer, two documents to be right about: the plant cannot be right about the second without
+//! being wrong about the first. The length row shows the refinement doing its work. `zed` and `rho`
+//! are both three characters, so that comparator ties them and the stable sort hands each document
+//! back its own relative order for that pair — the inner maps come out *differently* in the two
+//! cases. The root map, where all four lengths differ, comes out identically in both. What the tie
+//! costs is only that the case is settled by the reversal rather than by counting: `q` is one
+//! character where the others are three, so a map whose document order was `zed, q, rho` cannot be
+//! non-decreasing in length and neither can its reverse.
+//!
+//! What the right-hand columns are *not* is a claim that these defects are invisible elsewhere. An
+//! assembly that reorders every response map reorders plenty of fixtures that never meant to assert
+//! an order, and all three plants redden neighbours. The relevant number is this file's own column
+//! against the *previous* round's fixture, where the length plant and the alias-first plant were
+//! **5 of 5 green** while the incumbents around them went red — the one file whose subject is
+//! §7.1.5's key order was the file that could not see either defect. That is what the pair fixes,
+//! and it fixes it for the comparators nobody has named yet as well as for these two.
+//!
+//! The same shape of defect can live in the **oracle**: a derivation that sorted its own groups
+//! would agree with a sorting executor about every document there is, and the two would be right
+//! about each other and wrong together. So `group_by_response_key` was planted with a lexical sort
+//! of its own, and it turns five of this file's six cases red — both grouping cases, both execution
+//! cases, and [`the_pair_is_one_key_set_in_two_orders`], which notices first and most directly,
+//! because a derivation that sorts reports the *same* order for two documents that differ only in
+//! order.
+//!
+//! ## The history-derived family
 //!
 //! The plant is `handle_resolved` moving the position to the end of its parent's child chain before
 //! completing it, which is async-graphql's insert-on-completion expressed against this tree; when
@@ -143,22 +223,30 @@
 //!
 //! | suite | result |
 //! |---|---|
-//! | this file's two execution cases | the nested case red, the root case green |
+//! | this file's two execution cases | 2 of 2 red, each naming an inner map's reversal |
 //! | `smear/tests/proto_execute.rs` | **146 of 146 green** |
 //! | `proto_mutation_oracle.rs`, `proto_nonnull_oracle.rs` | all green |
 //!
 //! Not one of the incumbent detections is about response key order. Every one of them is a mutation
 //! or `__typename` fixture, and it fires for the same incidental reason in each: a position that
 //! never passes through [`Executor::handle_resolved`] — draft §4.4's `__typename`, answered at
-//! collection, or a field the driver failed — is the one the plant leaves behind, so the *others*
-//! move around it. The one in-crate failure, `a_drained_subtree_is_not_walked_again`, reads
-//! `next_sibling` directly to find a slot and trips on the relink rather than on the order.
+//! collection, a field the driver failed, or one withheld and never offered — is the one the plant
+//! leaves behind, so the *others* move around it. `graphql-proto`'s own unit tests say the same
+//! thing twice: `a_withheld_top_level_field_is_in_the_tree_and_reads_as_null` holds exactly such a
+//! position at the root and goes red under the relink at every depth but not under the below-root
+//! one, and `a_drained_subtree_is_not_walked_again` reads `next_sibling` directly to find a slot,
+//! so it trips on the relink rather than on the order and goes red under both.
 //!
 //! Which is the same latency that hid the defect upstream, one level down: a driver that answers
 //! each offer as it takes it completes in offer order, offer order is document order, and a
 //! completion-ordered assembly then reproduces document order exactly. Every incumbent fixture
 //! drives that way, so the plant is invisible to all of them but the handful holding a position
 //! that never completes at all.
+//!
+//! Both relink plants redden both execution cases, so which depth broke is not read off the test
+//! name. It is read off the failure, which prints the whole dotted key sequence: under the relink
+//! below the root the root's keys are still the document's and only the inner maps have turned
+//! round, and under the relink at every depth the whole sequence is the supply order.
 
 use graphql_proto::{Executor, Leaf, Node, ReqId, Values};
 use smear_parser::{
@@ -174,12 +262,12 @@ use smear_parser::{
 };
 use smear_schema::Schema;
 
-/// One field at a leaf type and one at an object type, each of which a fixture below aliases three
-/// ways.
+/// One field at a leaf type and one at an object type, each of which the documents below take
+/// twice: once under an alias and once under its own name.
 ///
-/// `id` is here so that the three aliases of a field are distinguishable to a reader as something
+/// `id` is here so that the two spellings of a field are distinguishable to a reader as something
 /// other than a typo: they are the same field with different arguments, which is the shape a client
-/// writes when it wants three rows back in one request.
+/// writes when it wants two rows back in one request.
 const SDL: &str = r#"
 type Query {
   label(id: Int): String
@@ -192,6 +280,32 @@ type Item {
   r: String
 }
 "#;
+
+/// The first of the pair.
+///
+/// Two leaves and two objects at the root, each object holding the same three keys. Every response
+/// key here is in [`MIRROR`] as well; what differs is only the order, and the module header is why
+/// that is the entire mechanism of this file.
+const QUERY: &str = r"{
+  bee: label(id: 1)
+  item(id: 2) { zed: p q rho: r }
+  a: item(id: 3) { zed: p q rho: r }
+  label(id: 4)
+}";
+
+/// The second of the pair: [`QUERY`]'s selections, and every inner selection set, written in the
+/// opposite order.
+///
+/// Reversal rather than some other permutation for the reason [`drive_backwards`] reverses: it is
+/// the maximum displacement available, it needs no maintenance when a fixture grows a field, and it
+/// is what makes the stable-sort half of the header's argument go through — a stable sort leaves
+/// both a sequence and its reverse alone only if it ties every key in the map.
+const MIRROR: &str = r"{
+  label(id: 4)
+  a: item(id: 3) { rho: r q zed: p }
+  item(id: 2) { rho: r q zed: p }
+  bee: label(id: 1)
+}";
 
 /// The driver's values.
 ///
@@ -459,6 +573,20 @@ fn record(maps: &mut Vec<(String, Vec<String>)>, parent: &str, key: &str) {
   }
 }
 
+/// One draft §6.3 group: the response key, whether the document reached it through an alias, and
+/// the concatenation draft §6.4's `MergeSelectionSets` makes of the group's sub-selection sets.
+struct Group<'a> {
+  key: &'a str,
+  /// The key differs from the name of the field its *first* selection named.
+  ///
+  /// The first selection rather than any of them, because that is the one whose field the executor
+  /// records against the position, and this has to be the executor's notion of an alias rather than
+  /// a second one: `q: q` is an alias to the parser and is indistinguishable from a bare `q` to
+  /// everything downstream, so the comparison is against the name and not against `alias().is_some()`.
+  aliased: bool,
+  merged: Vec<&'a Selection<&'a str>>,
+}
+
 /// Draft §6.3 `CollectFields`, as much of it as a document alone can decide: one entry per response
 /// key, in the order of each key's *first* selection, carrying the concatenation of every
 /// sub-selection set the selections under that key declared.
@@ -482,10 +610,8 @@ fn record(maps: &mut Vec<(String, Vec<String>)>, parent: &str, key: &str) {
 /// fixtures it was written for and quietly wrong past them, which is the shape of defect it exists
 /// to remove — so it panics instead, and a fixture that grows either construct gets a red test with
 /// the reason in it rather than an answer.
-fn group_by_response_key<'a>(
-  selections: &[&'a Selection<&'a str>],
-) -> Vec<(&'a str, Vec<&'a Selection<&'a str>>)> {
-  let mut groups: Vec<(&str, Vec<&Selection<&str>>)> = Vec::new();
+fn group_by_response_key<'a>(selections: &[&'a Selection<&'a str>]) -> Vec<Group<'a>> {
+  let mut groups: Vec<Group<'a>> = Vec::new();
   for selection in selections {
     let field = match selection {
       Selection::Field(field) => field,
@@ -498,44 +624,63 @@ fn group_by_response_key<'a>(
       field.directives().is_none(),
       "`@skip`/`@include` decide membership from variable values, which the document does not carry"
     );
-    let key: &'a str = field
-      .alias()
-      .map_or_else(|| field.name().source(), |alias| alias.name().source());
+    let name: &'a str = field.name().source();
+    let key: &'a str = field.alias().map_or(name, |alias| alias.name().source());
     let sub = match field.selection_set() {
       Some(set) => set.selections(),
       None => &[],
     };
-    match groups.iter().position(|(name, _)| *name == key) {
-      Some(index) => groups[index].1.extend(sub.iter()),
-      None => groups.push((key, sub.iter().collect())),
+    match groups.iter().position(|group| group.key == key) {
+      Some(index) => groups[index].merged.extend(sub.iter()),
+      None => groups.push(Group {
+        key,
+        aliased: key != name,
+        merged: sub.iter().collect(),
+      }),
     }
   }
   groups
 }
 
-/// Every response map `selections` declares at `path` and below, and the response keys each holds
-/// in document order.
-fn document_maps_under<'a>(
+/// One response map, as the document declares it.
+struct Declared {
+  /// The map's dotted response path; the root's is empty.
+  path: String,
+  /// Its response keys, in document order.
+  keys: Vec<String>,
+  /// Whether each of those keys came through an alias, in the same order.
+  ///
+  /// Read by [`the_pair_is_one_key_set_in_two_orders`] and nothing else. Alias-ness is not a
+  /// function of the key, so unlike the key's length or its first byte it cannot be recovered from
+  /// [`Self::keys`] after the fact — and it is one of the axes a cheap comparator reads, so the
+  /// derivation has to carry it rather than let the header's table be prose.
+  aliased: Vec<bool>,
+}
+
+/// Every response map `selections` declares at `path` and below.
+fn declare_maps_under<'a>(
   selections: &[&'a Selection<&'a str>],
   path: &str,
-  out: &mut Vec<(String, Vec<String>)>,
+  out: &mut Vec<Declared>,
 ) {
   let groups = group_by_response_key(selections);
-  out.push((
-    path.to_owned(),
-    groups.iter().map(|(key, _)| (*key).to_owned()).collect(),
-  ));
-  for (key, merged) in groups {
+  out.push(Declared {
+    path: path.to_owned(),
+    keys: groups.iter().map(|group| group.key.to_owned()).collect(),
+    aliased: groups.iter().map(|group| group.aliased).collect(),
+  });
+  for group in groups {
     // A key with no sub-selection is a leaf position, and a leaf holds no map. The recursion runs
     // on the *merged* list, so a key repeated inside one of these groups regroups by the same rule.
-    if !merged.is_empty() {
-      document_maps_under(&merged, &join(path, key), out);
+    if !group.merged.is_empty() {
+      declare_maps_under(&group.merged, &join(path, group.key), out);
     }
   }
 }
 
-/// The document's own answer to "which response keys does each response map hold, and in what
-/// order", for the operation draft §6.1 `GetOperation` selects when it is given no operation name.
+/// The document's own answer to "which response keys does each response map hold, in what order,
+/// and which of them are aliases", for the operation draft §6.1 `GetOperation` selects when it is
+/// given no operation name.
 ///
 /// No operation name because that is the `None` every fixture here hands [`Executor::start`], and
 /// the two have to be reading the same operation for any of this to mean anything. `GetOperation`
@@ -545,7 +690,7 @@ fn document_maps_under<'a>(
 ///
 /// The schema is not a parameter, and it is not an oversight: which keys a response map holds and
 /// what order they come in is settled by draft §6.3 out of the document alone.
-fn document_maps(document: &ExecutableDocument<&str>) -> Vec<(String, Vec<String>)> {
+fn document_declares(document: &ExecutableDocument<&str>) -> Vec<Declared> {
   let operations: Vec<_> = document
     .definitions()
     .iter()
@@ -567,8 +712,17 @@ fn document_maps(document: &ExecutableDocument<&str>) -> Vec<(String, Vec<String
 
   let selections: Vec<&Selection<&str>> = selection_set.selections().iter().collect();
   let mut maps = Vec::new();
-  document_maps_under(&selections, "", &mut maps);
+  declare_maps_under(&selections, "", &mut maps);
   maps
+}
+
+/// [`document_declares`] projected onto the pair every other reader here needs: each map's path and
+/// its response keys in document order.
+fn document_maps(document: &ExecutableDocument<&str>) -> Vec<(String, Vec<String>)> {
+  document_declares(document)
+    .into_iter()
+    .map(|map| (map.path, map.keys))
+    .collect()
 }
 
 /// Asserts the run's premise against the **document's** order, one response map at a time, before
@@ -636,8 +790,29 @@ fn assert_permuted(run: &Run, supply_order: &[(&str, &[&str])]) {
   }
 }
 
-/// Parses an executable document, which is all [`document_maps`] needs and the second of the two
-/// borrows an [`Executor`] is built from.
+/// Asserts that `values` is neither non-decreasing nor non-increasing.
+///
+/// A stable sort by some comparator is the identity on a sequence exactly when that sequence is
+/// already non-decreasing under it, so a map whose keys are monotone along an axis is a map that
+/// axis's sort leaves alone. Requiring non-monotone rather than merely "the axis distinguishes two
+/// of these keys" is what makes each document catch such a sort on its own, without the other half
+/// of the pair — and because reversing a non-monotone sequence yields another one, asserting it on
+/// one document would already have covered the other.
+fn assert_not_monotone<T: Ord + core::fmt::Debug>(axis: &str, path: &str, values: &[T]) {
+  assert!(
+    values.windows(2).any(|pair| pair[0] > pair[1]),
+    "the `{path}` map's keys are non-decreasing in {axis} — {values:?} — so a stable sort on that \
+     axis would leave this map exactly as the document wrote it"
+  );
+  assert!(
+    values.windows(2).any(|pair| pair[0] < pair[1]),
+    "the `{path}` map's keys are non-increasing in {axis} — {values:?} — so a stable sort on that \
+     axis would leave this map exactly as the document wrote it"
+  );
+}
+
+/// Parses an executable document, which is all [`document_declares`] needs and the second of the
+/// two borrows an [`Executor`] is built from.
 fn parse_query(query: &str) -> ExecutableDocument<&str> {
   Parser::with_parser::<
     GraphqlLexer<'_, str>,
@@ -674,56 +849,22 @@ fn borrowed(maps: &[(String, Vec<String>)]) -> Vec<(&str, Vec<&str>)> {
     .collect()
 }
 
-/// Three root fields answered backwards still serialise in the document's order.
+/// [`QUERY`] answered backwards still serialises in [`QUERY`]'s order.
 ///
-/// The narrowest statement of the property: one depth, three response keys, and the only difference
-/// between this run and a correct one is *when* each value arrived.
+/// One half of the pair the module header is about, and on its own the plain statement of the
+/// property: two depths, ten response keys, and the only difference between this run and a correct
+/// one is *when* each value arrived.
 #[test]
-fn root_response_keys_are_the_document_s_order_and_not_the_driver_s() {
-  // The one map this fixture has, and the driver hands it back to front.
-  const SUPPLY_ORDER: [(&str, &[&str]); 1] = [("", &["c", "a", "b"])];
-
-  let run = drive_backwards(
-    r"{
-      b: label(id: 1)
-      a: label(id: 2)
-      c: label(id: 3)
-    }",
-  );
-
-  assert_permuted(&run, &SUPPLY_ORDER);
-  assert_eq!(
-    run.keys,
-    run.document_keys(),
-    "the response key sequence is the document's"
-  );
-  assert_eq!(run.data, run.document_data());
-}
-
-/// The same property one level down, inside an outer field that is itself out of order.
-///
-/// Assembly being positional at the root says nothing about a selection set assembled later: the
-/// root's positions are created once, by `start`, while an object's children are created when that
-/// object's own value comes back — a different call, at a different time, with the driver's
-/// permutation already applied above it. This is the case that separates the two.
-#[test]
-fn nested_response_keys_are_the_document_s_order_at_every_depth() {
-  // Four maps, every one of them handed back to front — which is the whole of what this case needs
+fn response_keys_are_the_document_s_order_at_every_depth_and_not_the_driver_s() {
+  // Every one of the three maps handed back to front — which is the whole of what this case needs
   // to be true before its own assertions mean anything, and which no single sequence can say.
-  const SUPPLY_ORDER: [(&str, &[&str]); 4] = [
-    ("", &["c", "a", "b"]),
-    ("b", &["r", "p", "q"]),
-    ("a", &["r", "p", "q"]),
-    ("c", &["r", "p", "q"]),
+  const SUPPLY_ORDER: [(&str, &[&str]); 3] = [
+    ("", &["label", "a", "item", "bee"]),
+    ("a", &["rho", "q", "zed"]),
+    ("item", &["rho", "q", "zed"]),
   ];
 
-  let run = drive_backwards(
-    r"{
-      b: item(id: 1) { q p r }
-      a: item(id: 2) { q p r }
-      c: item(id: 3) { q p r }
-    }",
-  );
+  let run = drive_backwards(QUERY);
 
   assert_permuted(&run, &SUPPLY_ORDER);
   assert_eq!(
@@ -732,6 +873,93 @@ fn nested_response_keys_are_the_document_s_order_at_every_depth() {
     "the response key sequence is the document's, outer and inner alike"
   );
   assert_eq!(run.data, run.document_data());
+}
+
+/// [`MIRROR`] answered backwards serialises in [`MIRROR`]'s order — the opposite one, out of the
+/// same keys.
+///
+/// This is the other half, and it is not a second sample of the same thing. Together with the case
+/// above it rules out every assembly whose order is a function of the response keys, because such
+/// an assembly answers one order for the key set the two documents share and there are two orders
+/// to match. See the module header; [`the_pair_is_one_key_set_in_two_orders`] is what keeps the two
+/// documents in that relationship.
+#[test]
+fn the_mirror_document_s_opposite_order_is_served_by_the_same_executor() {
+  const SUPPLY_ORDER: [(&str, &[&str]); 3] = [
+    ("", &["bee", "item", "a", "label"]),
+    ("a", &["zed", "q", "rho"]),
+    ("item", &["zed", "q", "rho"]),
+  ];
+
+  let run = drive_backwards(MIRROR);
+
+  assert_permuted(&run, &SUPPLY_ORDER);
+  assert_eq!(
+    run.keys,
+    run.document_keys(),
+    "the response key sequence is the document's, outer and inner alike"
+  );
+  assert_eq!(run.data, run.document_data());
+}
+
+/// The two execution documents declare one key set in two orders, and each order is varied along
+/// every axis a comparator could cheaply read.
+///
+/// Without this, the pair is a coincidence of how the two queries happen to be spelled. A round
+/// that renamed `zed` to `s`, or moved `item` to the front, or dropped the one unaliased key from a
+/// map, would delete a detection and leave five green tests behind it — which is exactly the way
+/// the previous two rounds of this file lost theirs. The header's table is asserted here rather
+/// than merely written down.
+#[test]
+fn the_pair_is_one_key_set_in_two_orders() {
+  let document = parse_query(QUERY);
+  let mirror = parse_query(MIRROR);
+  let declared = document_declares(&document);
+  let mirrored = document_declares(&mirror);
+
+  assert_eq!(
+    declared.len(),
+    mirrored.len(),
+    "the two documents declare the same number of response maps"
+  );
+  for map in &declared {
+    let Some(other) = mirrored.iter().find(|other| other.path == map.path) else {
+      panic!("the mirror declares no `{}` map", map.path);
+    };
+    assert!(
+      map.keys.len() > 1,
+      "the `{}` map holds one key, so it has only one order and the pair says nothing about it",
+      map.path
+    );
+    let reversed: Vec<&String> = other.keys.iter().rev().collect();
+    let forward: Vec<&String> = map.keys.iter().collect();
+    assert_eq!(
+      forward, reversed,
+      "the mirror's `{}` map must hold the same keys in the reverse order",
+      map.path
+    );
+
+    // Both documents, though one would do: a reversed non-monotone sequence is non-monotone, so
+    // this is a second reading of the same fact rather than a second fact. It is here because the
+    // header's table names both documents and a reader should be able to see it checked for both.
+    for side in [map, other] {
+      assert_not_monotone("the keys themselves", &side.path, &side.keys);
+      let lengths: Vec<usize> = side.keys.iter().map(String::len).collect();
+      assert_not_monotone("key length", &side.path, &lengths);
+      // Redundant today and deliberately kept. No two keys in either map begin with the same byte,
+      // and where first bytes are distinct the first-byte order *is* the lexical order, so the
+      // check above already covers this one and nothing can reach the panic below. It stops being
+      // redundant the moment a map holds two keys with a shared first byte, which is exactly when a
+      // reader would otherwise have to notice on their own that an axis had gone uncovered.
+      let first: Vec<u8> = side
+        .keys
+        .iter()
+        .map(|key| *key.as_bytes().first().expect("a response key is not empty"))
+        .collect();
+      assert_not_monotone("first byte", &side.path, &first);
+      assert_not_monotone("alias-ness", &side.path, &side.aliased);
+    }
+  }
 }
 
 /// A repeated response key is one entry, where the *first* of its selections put it.
@@ -746,10 +974,11 @@ fn nested_response_keys_are_the_document_s_order_at_every_depth() {
 /// both of them name is one key at its first position and the map reads `q, p, r` rather than
 /// `q, p, r, q`.
 ///
-/// Both orders it asserts are out of alphabetical order, for the reason the module header gives.
-/// Written as `a, b` over `p, q, r` — which is what the natural spelling of this document produces —
-/// the case would be answered identically by a derivation that sorted each group, and would report
-/// nothing when one did.
+/// Both orders it asserts are out of alphabetical order, and that is not cosmetic either. Written
+/// as `a, b` over `p, q, r` — which is the natural spelling of this document — the case would be
+/// answered identically by a derivation that sorted each group, and would report nothing when one
+/// did. The execution cases are protected from that by the pair; a derivation case has no pair, so
+/// it is protected the old way.
 #[test]
 fn a_repeated_response_key_is_one_entry_at_its_first_position() {
   let document = parse_query(
@@ -772,7 +1001,8 @@ fn a_repeated_response_key_is_one_entry_at_its_first_position() {
 /// The complement of the case above, and the reason the derivation reads `alias()` before `name()`:
 /// `item` and `x: item` are the same field and must not merge, while the two `x`s are the same
 /// response key and must. Getting the key from the field's name instead would collapse all four
-/// selections into one map of `q, r, p`, in a file whose fixtures alias every field they use.
+/// selections into one map of `q, r, p`, in a file whose execution documents take each of their two
+/// fields twice.
 ///
 /// `x` is written ahead of `item` so that all three orders asserted here are out of alphabetical
 /// order. With `item` first — where a reader would naturally put it — the root map's document order
@@ -820,5 +1050,5 @@ fn a_fragment_is_refused_rather_than_guessed_at() {
     }",
   );
 
-  let _ = document_maps(&document);
+  let _ = document_declares(&document);
 }
