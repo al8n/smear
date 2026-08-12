@@ -103,6 +103,19 @@ UMBRELLA = "smear"
 # So every table that asserts something about the tree is listed here with its checker. A table
 # with no checker is either fixed or recorded as a bound — never left implicit.
 #
+# WHAT THIS TABLE IS NOT, stated because a row of it was cited as clearing something it never
+# looked at. Every row answers ONE question: *is this table's claim re-checked, or can it go stale?*
+# It is a staleness audit. It is not a safety audit, and a row saying "re-checked" says nothing
+# about whether the code around that table is safe to call from the selftest, cheap enough to run,
+# or correct in any other respect.
+#
+# The `SELECTIONS / READERS` row is the case in point. Its verdict — a reader that cannot locate
+# its table reports "coverage is unknown, not empty" — was true when written and is still true.
+# What it did not say, because the question was never asked here, is that `check_selections` used
+# to CALL those readers from inside the selftest, so real files decided planted cases. That
+# property belongs to `audit_containment`, and that is where it was missing. Reading each row's
+# checker, which is what produced the two one-way downgrades below, could not have found it.
+#
 #   TABLE                          CLAIMS                          RE-CHECKED BY
 #   ---------------------------------------------------------------------------------------------
 #   EXEMPT_MEMBERS                 the member has no feature to    audit_exempt_members: it must be
@@ -114,7 +127,9 @@ UMBRELLA = "smear"
 #   FLOOR_BEARING                  only this file may import a     two-sided: others may not, and
 #     (this file)                  floor-bearing stdlib module     the owner must
 #   SELECTIONS / READERS           these are the selections that   a reader that cannot find its
-#     (this file)                  must cover every member         table is a finding
+#     (this file)                  must cover every member         table is a finding; the readers
+#                                                                  now run only in audit_selections,
+#                                                                  never under the selftest
 #   EQ_TWIN                        this pair's umbrella twin is    two-sided: a stale entry, and a
 #     (downstream_pairs)           not its namesake                pair with no twin, both fail
 #   MEMBERS                        these are the crates the        C4: a workspace member with
@@ -704,12 +719,14 @@ def _read_miri_packages() -> set[str]:
   # claim is asserted at and `miri_scope.py --verify-exclusions` runs exactly that; a `why` with no
   # `features` beside it is the shape this table had when it was an unchecked exemption.
   for member, entry in sorted(excluded.items()):
-    if not isinstance(entry, dict) or "features" not in entry or not str(
-      entry.get("why", "")
-    ).strip():
+    if (not isinstance(entry, dict)
+        or entry.get("outcome") not in ("empty", "forbidden")
+        or not str(entry.get("why", "")).strip()):
       raise RuntimeError(
-        f"ci/miri_scope.py's exclusion of `{member}` is not `{{'features': (...), 'why': '...'}}`. "
-        f"The reason must name the configuration it is measured at, or nothing can re-run it."
+        f"ci/miri_scope.py's exclusion of `{member}` is not "
+        f"`{{'outcome': 'empty'|'forbidden', 'why': '...'}}`. The outcome is what "
+        f"`--verify-exclusions` re-runs UNDER THE CELLS' RESOLVE; a reason with no outcome is a "
+        f"sentence nobody can execute, which is what this table was the second time."
       )
   return set(selected) | set(excluded)
 
@@ -818,8 +835,32 @@ READERS = {
 }
 
 
-def check_selections(publishable: set[str]) -> list[str]:
-  """Every publishable member is inside every selection, or exempt with a reason."""
+def audit_selections(publishable: set[str]) -> list[str]:
+  """Read every selection off disk, then hand the results to the pure checker.
+
+  THE SPLIT IS THE POINT. `check_selections` used to do both, and it is called by the selftest with
+  planted inputs — but it reached three real files through `READERS[key]`, a call the containment
+  walk could not follow because `reader` is a local bound from a dict rather than a module-level
+  name. So a `check_*` function was not argument-only, real workspace state could reach a planted
+  case, and the gate that exists to stop exactly that saw nothing.
+  """
+  covered: dict[str, "set[str] | str"] = {}
+  for key in SELECTIONS:
+    label, reader = READERS[key]
+    try:
+      covered[key] = reader()
+    except Exception as err:  # noqa: BLE001 — the message is the finding
+      covered[key] = f"could not be read ({err})"
+  return check_selections(publishable, covered)
+
+
+def check_selections(publishable: set[str], covered: dict) -> list[str]:
+  """PROPERTY: every publishable member is inside every selection, or exempt with a reason.
+
+  ARGUMENT-ONLY BY CONSTRUCTION. `covered` maps each selection key to the set of members it covers,
+  or to a string saying why it could not be read. Nothing here touches the filesystem, so the
+  selftest can plant every input and no real state can leak into a synthetic case.
+  """
   findings: list[str] = []
   used: set[tuple[str, str]] = set()
 
@@ -828,15 +869,18 @@ def check_selections(publishable: set[str]) -> list[str]:
       "cargo metadata reported no publishable workspace member, so this check compared nothing"
     ]
 
+  missing_keys = [key for key in SELECTIONS if key not in covered]
+  if missing_keys:
+    return [f"no coverage was supplied for {missing_keys}, so this check compared nothing"]
+
   for key in SELECTIONS:
-    label, reader = READERS[key]
-    try:
-      covered = reader()
-    except Exception as err:  # noqa: BLE001 — the message is the finding
-      findings.append(f"{label} could not be read ({err}), so its coverage is unknown, not empty")
+    label = READERS[key][0]
+    result = covered[key]
+    if isinstance(result, str):
+      findings.append(f"{label} {result}, so its coverage is unknown, not empty")
       continue
     for member in sorted(publishable):
-      if member in covered:
+      if member in result:
         continue
       if (key, member) in EXEMPT_SELECTION:
         used.add((key, member))
@@ -935,17 +979,42 @@ def _case(name: str, tables: dict, want_findings: bool) -> str | None:
   return None
 
 
+# Calls that touch the world, matched as METHOD calls — `path.read_text()`, `subprocess.run()` —
+# plus the one builtin that does it bare.
+#
+# METHODS AND NOT BARE NAMES, because the first revision of this list matched any call to a name in
+# it and `walk` is also what two local recursion helpers in this file are called. It reported
+# `reachable`, then `check`, then `_case`, then `selftest` itself, through a chain of false
+# positives — a detector wrong in the noisy direction, found by tracing the taint rather than by
+# reading its verdict.
+WORLD_METHODS = ("read_text", "read_bytes", "read", "write_text", "run", "check_output", "glob",
+                 "rglob", "iterdir", "listdir", "walk", "exists", "is_file", "is_dir")
+WORLD_BUILTINS = ("open",)
+# `audit_containment` reads THIS FILE's own source, which is not workspace state and cannot differ
+# between a planted case and a real one, so it is the one world-reader the selftest may reach.
+CONTAINMENT_EXEMPT = ("audit_containment",)
+
+
 def audit_containment() -> list[str]:
-  """PROPERTY: no `audit_*` is reachable from `selftest()`, and every `audit_*` is reachable from
-  `main()`.
+  """PROPERTY: nothing the selftest reaches can read the world, and every audit runs.
 
-  The naming rule, made checkable. `audit_*` compares a table against the real workspace, and the
-  selftest replaces exactly that with planted inputs — so an `audit_` in its call graph fails on
-  every synthetic case and blames the gate. The second direction catches the opposite mistake: an
-  `audit_` nobody calls is a check that does not run.
+  THE NAME IS DOCUMENTATION; THIS IS THE CHECK. The previous revision asked whether a function
+  called something *named* `audit_*`, which is a property of the call site — so
+  `label, reader = READERS[key]` then `reader()` walked straight past it, and `check_selections`
+  read three real files from inside the selftest while this reported nothing. The third check in a
+  row written against the call shape I happened to have used.
 
-  Computed over this file's own syntax tree, transitively, so a helper that reaches an `audit_` is
-  caught as surely as a direct call.
+  So world-reading is derived from what a function DOES — it calls `read_text`, `open`,
+  `subprocess.run`, `glob` — and propagated along every edge this walk can resolve. And an edge it
+  cannot resolve is itself a finding: a call through a value taken out of a subscript is exactly
+  the shape that hid the last one, and a walk that silently drops an edge is a walk whose
+  conclusion is about the edges it happened to follow.
+
+  Three findings, then:
+
+    * a world-reading function reachable from `selftest()`;
+    * a call the walk cannot follow, inside anything `selftest()` reaches;
+    * an `audit_*` no path from `main()` reaches — a check that does not run.
   """
   findings: list[str] = []
   try:
@@ -954,31 +1023,105 @@ def audit_containment() -> list[str]:
     return [f"this file could not be parsed to check its own call graph ({err})"]
   funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
 
+  def called_names(fn: ast.FunctionDef) -> set[str]:
+    out = set()
+    for node in ast.walk(fn):
+      if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        out.add(node.func.id)
+    return out
+
+  def reads_world_directly(fn: ast.FunctionDef) -> bool:
+    for node in ast.walk(fn):
+      if not isinstance(node, ast.Call):
+        continue
+      target = node.func
+      if isinstance(target, ast.Attribute) and target.attr in WORLD_METHODS:
+        return True
+      if isinstance(target, ast.Name) and target.id in WORLD_BUILTINS:
+        return True
+    return False
+
+  # Propagate world-reading along resolvable edges until it stops growing — but NOT through the
+  # exemption. `audit_containment` reads this file's own source, which is the same in a planted
+  # case and a real one; tainting everything that calls it would make `selftest` its own finding,
+  # which is what the first attempt at this did.
+  world = {n for n, fn in funcs.items() if reads_world_directly(fn)}
+  changed = True
+  while changed:
+    changed = False
+    for name, fn in funcs.items():
+      if name in world:
+        continue
+      if (called_names(fn) - set(CONTAINMENT_EXEMPT)) & world:
+        world.add(name)
+        changed = True
+
   def reachable(root: str) -> set[str]:
-    seen: set[str] = set()
-    stack = [root]
+    seen, stack = set(), [root]
     while stack:
       name = stack.pop()
       if name in seen or name not in funcs:
         continue
       seen.add(name)
-      for node in ast.walk(funcs[name]):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-          stack.append(node.func.id)
+      stack.extend(called_names(funcs[name]))
     return seen
 
-  audits = {n for n in funcs if n.startswith("audit_")} - {"audit_containment"}
-  if not audits:
-    return ["no `audit_*` function exists, so this check compared nothing"]
-
   from_selftest = reachable("selftest")
-  for name in sorted(audits & from_selftest):
+  if "selftest" not in funcs:
+    return ["there is no `selftest` in this file, so containment compared nothing"]
+
+  for name in sorted((world & from_selftest) - set(CONTAINMENT_EXEMPT)):
     findings.append(
-      f"`{name}` reads the real workspace and is reachable from `selftest()`, which calls the "
-      f"`check_*` family with PLANTED inputs — so it will fire on every synthetic case and report "
-      f"the gate as broken. Rename it `check_*` and derive its findings from its arguments, or "
-      f"move the call out of the selftest's reach."
+      f"`{name}` reads the world and is reachable from `selftest()`, which supplies PLANTED "
+      f"inputs — so real workspace state can decide a synthetic case, and a change to an unrelated "
+      f"file can redden it. Split it: an `audit_` wrapper does the reading, a `check_` takes the "
+      f"result as an argument."
     )
+
+  # ── IF YOU ARE WRITING A GRAPH WALK IN THIS FILE, THIS IS THE RULE ────────────────────────
+  #
+  #     An edge you cannot resolve is a FINDING, not an edge you drop.
+  #
+  # A walk that silently skips what it cannot follow reports a conclusion about the edges it
+  # happened to manage, and states it in the voice of a conclusion about the graph. That is the
+  # same failure as a reader returning an empty set when it means "I could not look", which is why
+  # `check_selections` says *coverage is unknown, not empty* — and it is the failure that hid the
+  # defect this function was rewritten for: `reader()`, bound from `READERS[key]`, was an edge the
+  # previous walk dropped without a word, so `check_selections` read three real files from inside
+  # the selftest and containment reported nothing.
+  #
+  # Every variation of tonight's work has been a tool reporting ABSENCE when it meant
+  # I COULD NOT LOOK. If your walk meets something it cannot name — a subscript call, a closure, a
+  # value from a table — say so and fail. Do not continue quietly.
+  for name in sorted(from_selftest):
+    fn = funcs[name]
+    from_subscript = {
+      target.id
+      for node in ast.walk(fn)
+      if isinstance(node, ast.Assign) and isinstance(node.value, ast.Subscript)
+      for target in ast.walk(node.targets[0])
+      if isinstance(target, ast.Name)
+    }
+    for node in ast.walk(fn):
+      if not isinstance(node, ast.Call):
+        continue
+      target = node.func
+      if isinstance(target, ast.Subscript):
+        findings.append(
+          f"`{name}` (reachable from `selftest()`) calls through a subscript at line "
+          f"{node.lineno}, an edge this walk cannot follow — and an unfollowable edge is how the "
+          f"last world-read hid"
+        )
+      elif isinstance(target, ast.Name) and target.id in from_subscript:
+        findings.append(
+          f"`{name}` (reachable from `selftest()`) calls `{target.id}()` at line {node.lineno}, "
+          f"which was bound from a dispatch table — the walk cannot follow it, and that is exactly "
+          f"how `READERS[key]` smuggled three file reads into the selftest"
+        )
+
+  audits = {n for n in funcs if n.startswith("audit_")} - set(CONTAINMENT_EXEMPT)
+  if not audits:
+    findings.append("no `audit_*` function exists, so this check compared nothing")
   from_main = reachable("main")
   for name in sorted(audits - from_main):
     findings.append(f"`{name}` is never reached from `main()`, so it is a check that does not run")
@@ -1030,37 +1173,44 @@ def selftest() -> int:
 
   # ── the selection check, planted the same way ─────────────────────────────────────────────
   #
-  # (f) a publishable member outside a selection is the defect this half exists for, and (g) a
-  # table the reader cannot find must fail rather than read as an empty set — the second is the
-  # direction that would otherwise let a rename turn this gate off in silence.
-  real = check_selections({"smear", "smear-lexer", "smear-parser"})
-  if real:
-    problems.append(f"the real tree should have no selection finding and had: {real}")
+  # EVERY INPUT IS PLANTED NOW, coverage included. These cases used to pass only `publishable` and
+  # let `check_selections` read three real files through `READERS`; the case called "the honest
+  # tree" was therefore half real, and a change to `ci/miri_scope.py` could redden a synthetic
+  # case. `covered` is supplied here, so the cases say exactly what they are about.
+  members = {"smear", "smear-lexer", "smear-parser"}
+  honest = {key: set(members) for key in SELECTIONS}
 
-  planted_member = check_selections({"smear", "zzz-planted-member"})
+  real = check_selections(members, honest)
+  if real:
+    problems.append(f"a fully covered tree should have no selection finding and had: {real}")
+
+  planted_member = check_selections(members | {"zzz-planted-member"}, honest)
   if len(planted_member) != len(SELECTIONS):
     problems.append(
       f"plant (f) a publishable member outside every selection: expected one finding per "
       f"selection ({len(SELECTIONS)}) and got {len(planted_member)}: {planted_member}"
     )
 
-  saved = READERS["miri"]
-  def _unreadable() -> set[str]:
-    raise RuntimeError("planted: the table was renamed")
-  READERS["miri"] = (saved[0], _unreadable)
-  planted_reader = check_selections({"smear"})
-  READERS["miri"] = saved
-  if not any("could not be read" in f for f in planted_reader):
+  unreadable = dict(honest)
+  unreadable["miri"] = "could not be read (planted: the table was renamed)"
+  planted_reader = check_selections(members, unreadable)
+  if not any("coverage is unknown" in f for f in planted_reader):
     problems.append(
       f"plant (g) an unreadable selection table: the reader failing must be a finding, got "
       f"{planted_reader}"
     )
 
+  missing = {key: set(members) for key in SELECTIONS if key != "miri"}
+  if not check_selections(members, missing):
+    problems.append(
+      "plant (h) a selection with no coverage supplied at all must be a finding, and was not"
+    )
+
   EXEMPT_SELECTION[("miri", "no-such-member")] = "planted"
-  stale = check_selections({"smear", "smear-lexer", "smear-parser"})
+  stale = check_selections(members, honest)
   del EXEMPT_SELECTION[("miri", "no-such-member")]
   if not any("matches nothing" in f for f in stale):
-    problems.append(f"plant (h) a stale selection exemption must fail, got {stale}")
+    problems.append(f"plant (i) a stale selection exemption must fail, got {stale}")
 
   problems = [p for p in problems if p]
   if problems:
@@ -1069,7 +1219,7 @@ def selftest() -> int:
       print(f"  - {p}")
     return 1
   print(
-    "feature_reachability selftest OK: 10 cases, 5 planted defect shapes across both checks"
+    "feature_reachability selftest OK: 11 cases, 6 planted defect shapes across both checks"
   )
   return 0
 
@@ -1132,7 +1282,7 @@ def main() -> int:
   if args.verbose:
     print("  ok        every member feature is asserted equal to its `smear` twin")
 
-  selection_findings = (check_selections(publishable)
+  selection_findings = (audit_selections(publishable)
                         + audit_miri_scripts_derive()
                         + audit_miri_exclusions(publishable)
                         + audit_exempt_members(tables))
