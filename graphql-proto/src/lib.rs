@@ -131,7 +131,8 @@
 //! holds a driver value.
 //!
 //! Draft §6.1 `CoerceVariableValues` is the driver's: values reaching [`Values::variable`] are
-//! already coerced against their declared types.
+//! already coerced against their declared types. It is one of the §6 preamble's six *request*
+//! members, and the section below has why two of them are the driver's rather than one.
 //!
 //! Of draft §4.4's three meta-fields, one is executed and two are not. `__typename` is answered by
 //! the executor from the object type it resolved and arrives as [`Node::TypeName`];
@@ -140,6 +141,177 @@
 //! are left to the driver as ordinary fields of the query root — draft §4.5 introspection is a
 //! later phase, and until it lands this executor has nothing better to say about them than the
 //! service does.
+//!
+//! ## Draft §6's request has six members, and this crate carries the five `ExecuteRequest` takes
+//!
+//! The preamble to §6 makes *request* a defined term and enumerates it — `schema`, `document`,
+//! `operationName`, `variableValues`, `initialValue`, and, added since the October 2021
+//! specification, `extensions`, "a map reserved for implementation-specific additional
+//! information". It then hands **five** of the six to the algorithm: "the result of
+//! `ExecuteRequest(schema, document, operationName, variableValues, initialValue)` produces the
+//! response".
+//!
+//! `extensions` is the one member the specification withholds from execution, and it withholds it
+//! everywhere. The word occurs three times in the whole of §6 and all three are in that preamble;
+//! no numbered step reads it, and §6.1's `ExecuteRequest` cannot pass on what it was not handed.
+//! What the preamble asks of an implementation is the reverse of a step to run — "implementations
+//! should not add additional properties to a *request* […] instead, `extensions` provides a
+//! reserved location" — so the entry is a place to put things, not a channel with a consumer.
+//!
+//! The five are here. `schema` and `document` are [`Executor::new`]'s, `operationName` and
+//! `initialValue` are [`Executor::start`]'s two arguments, and `variableValues` is
+//! [`Values::variable`]'s. **The sixth is not, and the reason is the fifth's.** `variableValues`
+//! is a member `ExecuteRequest` *does* take and this crate still does not hold it, because its only
+//! reader is the driver. A member the algorithm is never given has the weaker claim of the two.
+//!
+//! ### An `Executor` member would satisfy the lifetime table's rule 2, and that is the point
+//!
+//! [`Limits`]' lifetime table asks every held member to name its reader and calls an empty reader
+//! set a defect by inspection. That rule does **not** decide this, and reading it as though it did
+//! would condemn the map this crate already carries: `proto` reads not one value of a draft §7.1.7
+//! [`Extensions`] either — nothing in it is ever interpreted — and it satisfies the rule because a
+//! *reader* there means an accessor or a lend, which is what every entry in that column is. An
+//! `Executor::request_extensions` would be exactly such an accessor, so rule 2 is satisfiable here
+//! and settles nothing.
+//!
+//! What separates the two maps is a **destination**. §7.1.7's has one this crate owns — the
+//! execution result — so handing the map over buys the driver something it cannot do for itself.
+//! §6's has none: the specification names no consumer for it anywhere, that being the entry's whole
+//! purpose, so the accessor would return exactly what the caller moved in.
+//!
+//! It would also return it *less* usefully than a field on the driver's own type. [`Values`] is the
+//! surface a driver's value logic runs on, and its seven methods see the driver's type and never
+//! the executor — so a map parked on an [`Executor`] is unreadable at the two steps an
+//! implementation-specific request hint exists for, [`Values::variable`] (§6.4.1 steps 5.c–5.f and
+//! §6.3's directive conditions) and [`Values::coerce_leaf`] (§6.4.3 step 4). Between
+//! [`Executor::poll_resolve`] and [`Executor::handle_resolved`] the driver does hold the executor,
+//! and even there it would have to drop the [`FieldRequest`] before it could ask.
+//!
+//! ### It does not survive into the response, and that was checked rather than assumed
+//!
+//! §7.1.8 *Additional Entries* closes the response's entry set: an execution result and a request
+//! error result "must not contain any entries other than those described above", and "clients must
+//! ignore any entries other than those described above". So there is no response entry a request
+//! extension could arrive in. The only map left is the response's own §7.1.7 one — a *different*
+//! map, "reserved for implementers to extend the protocol however they see fit" — and §7 draws no
+//! line between the two.
+//!
+//! A driver that wants one echoed therefore says so, by putting it in an [`Extensions`] and calling
+//! [`Executor::set_extensions`]. Which keys to copy is policy, and policy is the driver's for the
+//! same reason a leaf's representation is. Echoing is also a move or a copy the *driver* makes and
+//! never a clone this crate performs: no `V` here carries a [`Clone`] bound, so the entries come
+//! from the driver's own value or out of its map with [`Extensions::remove`].
+//!
+//! ### So the map goes on the driver's [`Values`] implementation
+//!
+//! Which is the one place both of its readers reach it: the trait's methods during execution, and
+//! the driver's own loop between them.
+//!
+//! ```
+//! use graphql_proto::{Executor, Extensions, Leaf, Node, Values};
+//! # use smear_parser::{
+//! #   graphql::{
+//! #     GraphQL,
+//! #     ast::{ExecutableDocument, TypeSystemDocument},
+//! #     error::GraphqlErrors,
+//! #     syntactic::{GraphqlLexer, executable_document, type_system_document},
+//! #   },
+//! #   lexer::tokora::{Parse as _, Parser},
+//! # };
+//! # use smear_schema::Schema;
+//!
+//! // Draft §6's `extensions`, held where every reader can reach it. §6 asks only that it be a map
+//! // with unique-prefixed keys; nothing reads it but this driver, so nothing else constrains it.
+//! struct Space {
+//!   request_extensions: Vec<(String, String)>,
+//! }
+//!
+//! impl Space {
+//!   fn request_extension(&self, key: &str) -> Option<&str> {
+//!     self
+//!       .request_extensions
+//!       .iter()
+//!       .find(|(name, _)| name == key)
+//!       .map(|(_, value)| value.as_str())
+//!   }
+//! }
+//!
+//! impl Values for Space {
+//!   type Value = String;
+//!
+//!   fn coerce_leaf(&mut self, value: String, _: Leaf<'_>) -> Option<String> {
+//!     // Readable *here*, which is the argument in one line: a `Values` method is handed the
+//!     // driver's type and never the executor, so a map parked on an `Executor` could not be read
+//!     // at this step at all.
+//!     Some(match self.request_extension("com.example.locale") {
+//!       Some(locale) => format!("{value} [{locale}]"),
+//!       None => value,
+//!     })
+//!   }
+//! #   fn is_null(&self, _: &String) -> bool { false }
+//! #   fn as_bool(&self, _: &String) -> Option<bool> { None }
+//! #   fn list_len(&self, _: &String) -> Option<usize> { None }
+//! #   fn list_item(&mut self, _: &String, _: usize) -> String { String::new() }
+//! #   fn type_name<'a>(&'a self, _: &'a String) -> Option<&'a str> { None }
+//! #   fn variable(&mut self, _: &str) -> Option<String> { None }
+//! }
+//!
+//! # let schema = Schema::build(
+//! #   &Parser::with_parser::<GraphqlLexer<'_, str>, TypeSystemDocument<&str>, GraphqlErrors<&str>, _, GraphQL>(
+//! #     type_system_document,
+//! #   )
+//! #   .parse_str("type Query { greeting: String }")
+//! #   .expect("the SDL parses"),
+//! # )
+//! # .expect("the SDL is a schema");
+//! # let document = Parser::with_parser::<GraphqlLexer<'_, str>, ExecutableDocument<&str>, GraphqlErrors<&str>, _, GraphQL>(
+//! #   executable_document,
+//! # )
+//! # .parse_str("{ greeting }")
+//! # .expect("the query parses");
+//! let mut space = Space {
+//!   request_extensions: vec![("com.example.locale".to_owned(), "en-GB".to_owned())],
+//! };
+//! let mut executor = Executor::new(&schema, &document);
+//! executor
+//!   .start(&mut space, None, String::new())
+//!   .expect("the operation resolves");
+//!
+//! while let Some(request) = executor.poll_resolve(&mut space) {
+//!   let id = request.id();
+//!   executor.handle_resolved(&mut space, id, "hello".to_owned());
+//! }
+//!
+//! // §7.1.8 admits no other channel, so echoing one into the response is a call the driver makes
+//! // into draft §7.1.7's map — which is a different map, and the copy is the driver's.
+//! let locale = space
+//!   .request_extension("com.example.locale")
+//!   .expect("the request carried it")
+//!   .to_owned();
+//! let mut echoed = Extensions::new(executor.limits());
+//! echoed
+//!   .insert("com.example.locale", locale)
+//!   .expect("well under `max_extension_entries`");
+//! executor
+//!   .set_extensions(echoed)
+//!   .expect("an operation is running and the response is not delivered");
+//!
+//! let response = executor.poll_response().expect("nothing is outstanding");
+//! let Node::Object(mut fields) = response.data() else {
+//!   panic!("the root is an object")
+//! };
+//! let (_, value) = fields.next().expect("one field was selected");
+//! // The driver read the request extension during execution ...
+//! assert!(matches!(value, Node::Leaf(text) if text == "hello [en-GB]"));
+//! // ... and separately chose to echo it, which is the only way it reaches a response.
+//! assert_eq!(
+//!   response
+//!     .extensions()
+//!     .and_then(|map| map.get("com.example.locale"))
+//!     .map(String::as_str),
+//!   Some("en-GB"),
+//! );
+//! ```
 //!
 //! # Worked example
 //!
