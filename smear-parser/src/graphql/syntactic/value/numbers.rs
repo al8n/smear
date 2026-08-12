@@ -44,6 +44,11 @@ use core::convert::Infallible;
 use tokora::SimpleSpan;
 
 #[cfg(feature = "materialized-numbers")]
+use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
+#[cfg(feature = "materialized-numbers")]
+use tokora::Lexer;
+
+#[cfg(feature = "materialized-numbers")]
 use crate::graphql::ast::{
   materialized::{
     ConstInputValue as MaterializedConstInputValue, InputValue as MaterializedInputValue,
@@ -364,39 +369,50 @@ fn parse_i32(bytes: &[u8]) -> Option<i32> {
 /// reading of the grammar, free to disagree with the two above and to keep the promise about
 /// nothing.
 ///
-/// `is_integer_literal` is the first conjunct because [`parse_i64`] answers `None` to two
-/// different questions — "outside the width" and "not an integer at all" — and only the first one
-/// is an overflow. Without it `checked(b"hello", I64)` would build an error saying `hello`
-/// overflowed a 64-bit integer, which is a checked constructor admitting a claim that is not
-/// merely unproven but false.
+/// [`is_int_literal`] is the first conjunct because [`parse_i64`] answers `None` to two different
+/// questions — "outside the width" and "not an integer at all" — and only the first one is an
+/// overflow. Without it `checked(b"hello", I64)` would build an error saying `hello` overflowed a
+/// 64-bit integer, which is a checked constructor admitting a claim that is not merely unproven
+/// but false.
 #[cfg(feature = "materialized-numbers")]
 pub(crate) fn overflows(bytes: &[u8], width: IntWidth) -> bool {
-  is_integer_literal(bytes)
+  is_int_literal(bytes)
     && match width {
       IntWidth::I32 => parse_i32(bytes).is_none(),
       IntWidth::I64 => parse_i64(bytes).is_none(),
     }
 }
 
-/// An optional `-` followed by at least one decimal digit — the shape [`parse_i64`] walks, without
-/// its range check.
+/// Is this slice the spelling of a GraphQL `IntValue`? — **asked of the lexer, which is the thing
+/// that decides it.**
 ///
-/// **Deliberately the digit shape and not draft §2.9.1's `IntegerPart`**, which additionally
-/// forbids a leading zero. Two reasons, and the second is the one that matters. `007` has the same
-/// value at both widths, so it cannot make [`overflows`] name the wrong one — the property this
-/// predicate exists to protect is that the *width* is justified by the digits. And this way the
-/// relation to the reader beside it is exact and testable rather than approximate:
-/// `parse_i64(b).is_some()` implies `is_integer_literal(b)` for every input, which
-/// `the_digit_shape_admits_everything_the_reader_accepts` holds. A stricter predicate would
-/// refuse literals the reader accepts and the two would need reconciling forever.
+/// Not a grammar written here, and that is the whole content of this function. `smear-lexer`
+/// already grades draft §2.9.1's `IntegerPart`, finely enough to report a leading zero as its own
+/// `LeadingZeros` diagnostic; a `-?[0-9]+` predicate beside it was a *second* answer to that one
+/// question, and it answered differently. `02147483648` is not an `IntValue` — the lexer refuses
+/// it and no production ever converts it — yet the digit shape admitted it, so
+/// `IntOverflow::checked("02147483648", I32)` minted a payload quoting a spelling the parser
+/// cannot emit, and a renderer reported an overflow where the document has a leading zero.
+///
+/// The whole slice has to be the one token. The lexer skips leading trivia and stops at any legal
+/// delimiter, so `" 7"` and `"7 "` each contain an `Int` without being one, and a token as long as
+/// the input is necessarily the input.
+///
+/// **The bytes, not the characters.** `IntOverflow::checked` bounds its source by `AsRef<[u8]>`,
+/// and an `IntValue` is ASCII throughout, so grading the byte source reaches the decision the
+/// `str` source would — `the_decision_is_the_same_on_a_byte_slice_source` pins that from the door
+/// itself.
+///
+/// This runs a token scan where a byte loop would do, on a path reached only by a caller of the
+/// checked constructor — never by a production, which has the lexer's verdict already. That is
+/// the price of there being one answer.
 #[cfg(feature = "materialized-numbers")]
-fn is_integer_literal(bytes: &[u8]) -> bool {
-  let digits = match bytes.split_first() {
-    Some((b'-', rest)) => rest,
-    _ => bytes,
-  };
-
-  !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
+fn is_int_literal(bytes: &[u8]) -> bool {
+  let mut lexer = SyntacticLexer::<'_, [u8]>::new(bytes);
+  match lexer.lex() {
+    Some(Ok(SyntacticToken::LitInt(literal))) => literal.len() == bytes.len(),
+    _ => false,
+  }
 }
 
 /// Reads a GraphQL `FloatValue` (draft §2.9.2) out of its bytes.

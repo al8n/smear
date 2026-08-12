@@ -80,11 +80,13 @@ fn a_literal_that_fits_is_not_an_overflow() {
 /// is the case a check written as "the reader said no" would get wrong in both directions.
 ///
 /// The reader behind the check answers `None` to two different questions — "outside the width"
-/// and "not an integer at all" — and only the first is an overflow. Without the digit-shape
-/// conjunct, `checked("hello", I64)` would build an error saying `hello` overflowed 64 bits.
+/// and "not an integer at all" — and only the first is an overflow. Without the shape conjunct,
+/// `checked("hello", I64)` would build an error saying `hello` overflowed 64 bits.
 #[test]
 fn a_non_literal_is_not_an_overflow_at_any_width() {
-  for literal in ["", "-", "hello", "1.0", "1e400", "1x", "+7", " 7", "7 "] {
+  for literal in [
+    "", "-", "hello", "1.0", "1e400", "1x", "1_000", "0x10", "+7", " 7", "7 ", "007", "-007", "00",
+  ] {
     for width in [IntWidth::I32, IntWidth::I64] {
       assert_eq!(
         IntOverflow::checked(literal, width),
@@ -92,6 +94,43 @@ fn a_non_literal_is_not_an_overflow_at_any_width() {
         "{literal:?} is not an integer literal, so it overflows nothing at {width}",
       );
     }
+  }
+}
+
+/// The R3 finding: a leading zero is a **shape** refusal, and stripping it turns the very same
+/// digits into an overflow the door accepts.
+///
+/// `IntOverflow::checked("02147483648", I32)` used to answer `Ok`. GraphQL forbids a leading zero
+/// (draft §2.9.1) and this crate's lexer says so with its own `LeadingZeros` diagnostic, so the
+/// payload quoted a spelling no production can emit and a renderer would have reported a lexical
+/// error as an integer overflow. The shape conjunct is the lexer now, and it refuses these.
+///
+/// The accepted twin on each row is what makes this a test rather than an `is_err()`: a door that
+/// refused everything would satisfy the first assertion and fail the second, and the two literals
+/// differ in exactly one leading byte.
+#[test]
+fn a_leading_zeroed_literal_is_refused_and_the_same_digits_without_it_are_not() {
+  for (zeroed, bare, width) in [
+    ("02147483648", "2147483648", IntWidth::I32),
+    ("-02147483649", "-2147483649", IntWidth::I32),
+    ("09223372036854775808", "9223372036854775808", IntWidth::I64),
+    (
+      "-09223372036854775809",
+      "-9223372036854775809",
+      IntWidth::I64,
+    ),
+  ] {
+    assert_eq!(
+      IntOverflow::checked(zeroed, width),
+      Err(zeroed),
+      "{zeroed:?} is not an `IntValue`, so it overflows nothing at {width}",
+    );
+    assert_eq!(
+      IntOverflow::checked(bare, width)
+        .expect("the same digits without the zero are an overflow")
+        .width(),
+      width,
+    );
   }
 }
 

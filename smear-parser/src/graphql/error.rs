@@ -471,10 +471,15 @@ impl<S> IntOverflow<S> {
   /// Creates an integer-out-of-range payload, refusing a width the literal does not overflow.
   ///
   /// The public constructor, and the only way a caller outside this crate can name an
-  /// [`IntWidth`]. It answers `Ok` exactly when `value` is an integer literal — an optional `-`
-  /// and at least one decimal digit — that the materialising production at `width` would have
-  /// refused, decided by the very readers those productions use. Everything else comes back as
-  /// `Err(value)`: a literal that fits, a float, a name, an empty slice.
+  /// [`IntWidth`]. It answers `Ok` exactly when `value` is a GraphQL `IntValue` that the
+  /// materialising production at `width` would have refused, decided by the very readers those
+  /// productions use. Everything else comes back as `Err(value)`: a literal that fits, a float,
+  /// a name, an empty slice.
+  ///
+  /// **`IntValue` means draft §2.9.1's, asked of the lexer rather than restated here.** So a
+  /// leading zero is not one — `02147483648` is `LeadingZeros` to this crate's lexer, no
+  /// production ever converts it, and a payload quoting it would name a refusal that could not
+  /// have happened. Nor is a leading `+`, which the grammar has no unary form of.
   ///
   /// **The literal comes back unconsumed on refusal**, for the reason the conversion trait behind
   /// [`syntactic::value`](crate::graphql::syntactic::value) hands its slice back — a caller who is
@@ -498,6 +503,13 @@ impl<S> IntOverflow<S> {
   /// // Neither an in-range literal nor a non-literal is an overflow at any width.
   /// assert_eq!(IntOverflow::checked("7", IntWidth::I32), Err("7"));
   /// assert_eq!(IntOverflow::checked("1.0", IntWidth::I64), Err("1.0"));
+  ///
+  /// // A leading zero is not an `IntValue`, whatever the digits after it add up to.
+  /// assert_eq!(IntOverflow::checked("007", IntWidth::I32), Err("007"));
+  /// assert_eq!(
+  ///   IntOverflow::checked("02147483648", IntWidth::I32),
+  ///   Err("02147483648"),
+  /// );
   /// ```
   ///
   /// The free-width constructor beside it is crate-private, so the forgery above has no second

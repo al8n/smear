@@ -1,33 +1,169 @@
+use smear_lexer::graphql::{
+  error::{DecimalError, LexerErrorData},
+  syntactic::SyntacticLexer,
+};
+use tokora::Lexer;
+
 use super::{
-  MaterializedNumbers, MaterializedNumbers32, Numbers, OutOfRange, is_integer_literal, overflows,
+  MaterializedNumbers, MaterializedNumbers32, Numbers, OutOfRange, is_int_literal, overflows,
   parse_f64, parse_i32, parse_i64,
 };
-use crate::graphql::error::IntWidth;
+use crate::graphql::error::{IntOverflow, IntWidth};
 
-/// Every literal the two predicate properties below reason about, in one place so both are asked
-/// over the same corpus rather than over two lists that happen to agree today.
-const CORPUS: &[&str] = &[
-  "0",
-  "-0",
-  "7",
-  "-7",
-  "007",
-  "2147483647",
-  "2147483648",
-  "-2147483648",
-  "-2147483649",
-  "9223372036854775807",
-  "9223372036854775808",
-  "-9223372036854775808",
-  "-9223372036854775809",
-  "99999999999999999999999999",
-  "",
-  "-",
-  "1x",
-  "1.0",
-  "+7",
-  "hello",
+/// Which of [`overflows`]'s two conjuncts decided a row.
+///
+/// A test that only asks whether the answer was a refusal cannot tell a right answer from a right
+/// answer for the wrong reason: `007` and `2147483647` are both "not an overflow" and they are not
+/// refused by the same thing, and the difference is the whole of the round that produced this
+/// enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+  /// The **shape** conjunct refused: the lexer does not call these bytes an `IntValue`, so there
+  /// is no width at which they overflow anything and no width a payload may name.
+  NotALiteral,
+  /// An `IntValue`, and the reader at this width converted it.
+  Fits,
+  /// An `IntValue`, and the reader at this width refused it — the one case [`overflows`] answers
+  /// `true` to.
+  Overflows,
+}
+
+use Verdict::{Fits, NotALiteral, Overflows};
+
+/// [`overflows`] taken apart into the two questions it asks, in the order it asks them.
+fn verdict(literal: &str, width: IntWidth) -> Verdict {
+  let bytes = literal.as_bytes();
+  let converts = match width {
+    IntWidth::I32 => parse_i32(bytes).is_some(),
+    IntWidth::I64 => parse_i64(bytes).is_some(),
+  };
+  match (is_int_literal(bytes), converts) {
+    (false, _) => NotALiteral,
+    (true, true) => Fits,
+    (true, false) => Overflows,
+  }
+}
+
+/// One row of the boundary table.
+struct Row {
+  literal: &'static str,
+  at_i32: Verdict,
+  at_i64: Verdict,
+  /// Whether `core`'s own integer reader reaches the same overflow/not-overflow answer at both
+  /// widths — see `overflows_agrees_with_cores_own_reader_on_which_failures_are_overflows` for the
+  /// oracle and `the_divergences_from_cores_reader_are_ours` for the two classes that do not.
+  ///
+  /// **A column rather than a curated omission.** Leaving a divergent literal out of the table
+  /// would remove it from the boundary property as well, which is the one it is here for; marking
+  /// it is what keeps both properties asked over one list.
+  core_agrees: bool,
+}
+
+impl Row {
+  const fn agreeing(literal: &'static str, at_i32: Verdict, at_i64: Verdict) -> Self {
+    Self {
+      literal,
+      at_i32,
+      at_i64,
+      core_agrees: true,
+    }
+  }
+
+  const fn diverging(literal: &'static str, at_i32: Verdict, at_i64: Verdict) -> Self {
+    Self {
+      literal,
+      at_i32,
+      at_i64,
+      core_agrees: false,
+    }
+  }
+}
+
+/// Every literal these tests reason about, with the conjunct that must decide it at each width.
+const TABLE: &[Row] = &[
+  // Small values, both signs. `-0` is a well-formed `IntValue`: draft §2.9.1's `IntegerPart` is
+  // `-? (0 | NonZeroDigit Digit*)`, and the sign is outside the leading-zero rule.
+  Row::agreeing("0", Fits, Fits),
+  Row::agreeing("-0", Fits, Fits),
+  Row::agreeing("7", Fits, Fits),
+  Row::agreeing("-7", Fits, Fits),
+  // The four range boundaries and the four literals one past each of them.
+  Row::agreeing("2147483647", Fits, Fits),
+  Row::agreeing("2147483648", Overflows, Fits),
+  Row::agreeing("-2147483648", Fits, Fits),
+  Row::agreeing("-2147483649", Overflows, Fits),
+  Row::agreeing("9223372036854775807", Overflows, Fits),
+  Row::agreeing("9223372036854775808", Overflows, Overflows),
+  Row::agreeing("-9223372036854775808", Overflows, Fits),
+  Row::agreeing("-9223372036854775809", Overflows, Overflows),
+  Row::agreeing("99999999999999999999999999", Overflows, Overflows),
+  // Leading zeroes. The lexer reports these as `LeadingZeros` and no production ever converts one,
+  // so none of them overflows anything — including the four whose *value* is past a width, which
+  // are the payloads the finding was about.
+  Row::agreeing("00", NotALiteral, NotALiteral),
+  Row::agreeing("007", NotALiteral, NotALiteral),
+  Row::agreeing("-007", NotALiteral, NotALiteral),
+  Row::agreeing("0000000000000000007", NotALiteral, NotALiteral),
+  Row::agreeing("02147483647", NotALiteral, NotALiteral),
+  Row::agreeing("-02147483648", NotALiteral, NotALiteral),
+  Row::diverging("02147483648", NotALiteral, NotALiteral),
+  Row::diverging("-02147483649", NotALiteral, NotALiteral),
+  Row::diverging("09223372036854775808", NotALiteral, NotALiteral),
+  Row::diverging("-09223372036854775809", NotALiteral, NotALiteral),
+  // A leading `+`. `core` reads one; draft §2.9.1 has no unary plus.
+  Row::agreeing("+", NotALiteral, NotALiteral),
+  Row::agreeing("+7", NotALiteral, NotALiteral),
+  Row::diverging("+2147483648", NotALiteral, NotALiteral),
+  Row::diverging("+99999999999999999999999999", NotALiteral, NotALiteral),
+  // Nothing, or nothing but a sign.
+  Row::agreeing("", NotALiteral, NotALiteral),
+  Row::agreeing("-", NotALiteral, NotALiteral),
+  // Whitespace is trivia to the lexer, so each of these *contains* an `Int` without being one.
+  Row::agreeing(" 7", NotALiteral, NotALiteral),
+  Row::agreeing("7 ", NotALiteral, NotALiteral),
+  Row::agreeing("\t7", NotALiteral, NotALiteral),
+  Row::agreeing("7\n", NotALiteral, NotALiteral),
+  Row::agreeing(" ", NotALiteral, NotALiteral),
+  Row::agreeing("7 7", NotALiteral, NotALiteral),
+  // Not an integer at all: a separator GraphQL does not have, a suffix, a float, a radix prefix,
+  // a name.
+  Row::agreeing("1_000", NotALiteral, NotALiteral),
+  Row::agreeing("1x", NotALiteral, NotALiteral),
+  Row::agreeing("1.0", NotALiteral, NotALiteral),
+  Row::agreeing("1e400", NotALiteral, NotALiteral),
+  Row::agreeing("0x10", NotALiteral, NotALiteral),
+  Row::agreeing("hello", NotALiteral, NotALiteral),
 ];
+
+/// Does the lexer refuse this spelling *specifically* for a leading zero?
+///
+/// The shape conjunct answers only yes-or-no, so this is how a test says which grammar rule did
+/// the refusing — the difference between "the lexer said no" and "the lexer said `LeadingZeros`".
+fn lexer_refuses_for_leading_zeros(literal: &str) -> bool {
+  let mut lexer = SyntacticLexer::<'_, [u8]>::new(literal.as_bytes());
+  let Some(Err(errors)) = lexer.lex() else {
+    return false;
+  };
+  matches!(
+    errors.first().map(|error| error.data()),
+    Some(LexerErrorData::Int(DecimalError::LeadingZeros(_)))
+  )
+}
+
+/// `core`'s reading of the same question: is this literal's failure at this width an out-of-range
+/// one, as opposed to it not being a number at all?
+fn core_calls_it_an_overflow(literal: &str, width: IntWidth) -> bool {
+  use core::num::IntErrorKind;
+
+  let kind = match width {
+    IntWidth::I32 => literal.parse::<i32>().err().map(|e| *e.kind()),
+    IntWidth::I64 => literal.parse::<i64>().err().map(|e| *e.kind()),
+  };
+  matches!(
+    kind,
+    Some(IntErrorKind::PosOverflow | IntErrorKind::NegOverflow)
+  )
+}
 
 #[test]
 fn i64_reads_the_grammar_it_is_given() {
@@ -230,36 +366,143 @@ fn each_marker_names_its_own_width() {
   ));
 }
 
-/// The claim `is_integer_literal`'s doc makes, and the reason it is the digit shape rather than
-/// draft §2.9.1's `IntegerPart`: **everything the reader accepts, the shape check accepts.**
+/// The boundary table, and **which conjunct refused each row** rather than only that it was
+/// refused.
 ///
-/// A stricter predicate would refuse literals `parse_i64` reads — `007` is the one in the corpus —
-/// and the conjunction in [`overflows`] would then answer "not an overflow" for a literal the
-/// production had converted, which is a disagreement between two readers of the same grammar.
+/// Three assertions per row and width: the conjunct that decided it, that [`overflows`] answers
+/// `true` exactly on `Overflows`, and that the public door — `IntOverflow::checked`, the only way
+/// an out-of-crate caller can name an [`IntWidth`] — reaches the same answer as its decider.
 #[test]
-fn the_digit_shape_admits_everything_the_reader_accepts() {
-  let mut accepted = 0usize;
-  for literal in CORPUS {
-    let bytes = literal.as_bytes();
-    if parse_i64(bytes).is_some() {
-      accepted += 1;
-      assert!(
-        is_integer_literal(bytes),
-        "{literal:?} converts at `i64` and the shape check refuses it",
+fn overflows_reaches_the_tabulated_verdict_and_the_conjunct_that_decided_it() {
+  let (mut shape, mut fits, mut over) = (0usize, 0usize, 0usize);
+
+  for row in TABLE {
+    for (width, expected) in [(IntWidth::I32, row.at_i32), (IntWidth::I64, row.at_i64)] {
+      assert_eq!(
+        verdict(row.literal, width),
+        expected,
+        "{:?} at {width}: the wrong conjunct decided it",
+        row.literal,
       );
+      assert_eq!(
+        overflows(row.literal.as_bytes(), width),
+        expected == Overflows,
+        "{:?} at {width}: `overflows` disagrees with its own conjuncts",
+        row.literal,
+      );
+      assert_eq!(
+        IntOverflow::checked(row.literal, width).is_ok(),
+        expected == Overflows,
+        "{:?} at {width}: the public door disagrees with its decider",
+        row.literal,
+      );
+      match expected {
+        NotALiteral => shape += 1,
+        Fits => fits += 1,
+        Overflows => over += 1,
+      }
     }
   }
 
-  // Non-vacuity twice over: the implication above is satisfied by a corpus the reader rejects
-  // wholesale, and the shape check is not the constant `true`.
-  assert!(accepted >= 8, "only {accepted} corpus literals convert");
-  assert!(!is_integer_literal(b"hello"));
-  assert!(!is_integer_literal(b""));
-  assert!(!is_integer_literal(b"-"));
-  assert!(
-    is_integer_literal(b"007"),
-    "a leading zero is not this check's business"
-  );
+  // Non-vacuity, per verdict: a table that reached only one of the three would satisfy every
+  // equality above while testing one arm.
+  assert!(shape >= 20, "only {shape} shape refusals");
+  assert!(fits >= 8, "only {fits} in-range rows");
+  assert!(over >= 8, "only {over} overflow rows");
+}
+
+/// The row the round turns on: **in range, and refused anyway — for its shape.**
+///
+/// `007` is `7`. Both readers convert it, so the range conjunct cannot be what refuses it, and a
+/// row asserting only `Err` would be satisfied by an implementation that refused it for the wrong
+/// reason — or by one that accepted it at a width and refused it at the other. Each literal here
+/// is checked three ways: the reader accepts it at both widths, the verdict is `NotALiteral` at
+/// both, and the lexer's reason is `LeadingZeros` and not some other refusal.
+#[test]
+fn an_in_range_leading_zeroed_literal_is_refused_for_shape_and_not_for_range() {
+  for literal in [
+    "00",
+    "007",
+    "-007",
+    "0000000000000000007",
+    "-02147483648",
+    "02147483647",
+  ] {
+    let bytes = literal.as_bytes();
+
+    assert!(
+      parse_i32(bytes).is_some() && parse_i64(bytes).is_some(),
+      "{literal:?} has to be in range at both widths, or the range conjunct could be what refuses it",
+    );
+    assert_eq!(verdict(literal, IntWidth::I32), NotALiteral);
+    assert_eq!(verdict(literal, IntWidth::I64), NotALiteral);
+    assert!(
+      lexer_refuses_for_leading_zeros(literal),
+      "{literal:?} must be refused as `LeadingZeros`, not as some other anomaly",
+    );
+  }
+
+  // And the same shape past a width — the payload the finding named. It is refused for the same
+  // reason as `007`, which is the point: its value never enters the question.
+  for (literal, width) in [
+    ("02147483648", IntWidth::I32),
+    ("09223372036854775808", IntWidth::I64),
+  ] {
+    assert!(lexer_refuses_for_leading_zeros(literal));
+    assert_eq!(verdict(literal, width), NotALiteral);
+    assert_eq!(IntOverflow::checked(literal, width), Err(literal));
+  }
+}
+
+/// What the conjunction needs from its second reader, now that the first one is the lexer:
+/// **once the lexer has called a slice an `IntValue`, the only thing left to refuse is its
+/// magnitude.**
+///
+/// That is what makes `parse_i64(b).is_none()` mean "overflow" rather than "not a number" inside
+/// [`overflows`]. The oracle is `core`'s own reader, which reports the two failures as different
+/// [`IntErrorKind`](core::num::IntErrorKind)s and knows nothing about this file: for every
+/// spelling the lexer admits, `core` either converts it or calls it `PosOverflow`/`NegOverflow`,
+/// never `InvalidDigit` or `Empty`.
+///
+/// **The property this replaces was the reverse inclusion** — everything `parse_i64` reads, the
+/// shape check admits — and it is now false on purpose. `007` converts at both widths and is not a
+/// GraphQL `IntValue`. That inclusion is what a `-?[0-9]+` predicate could promise; it is not what
+/// the conjunction needs, and promising it was how the leading-zero payloads got built.
+#[test]
+fn once_the_lexer_admits_it_the_only_refusal_left_is_range() {
+  use core::num::IntErrorKind;
+
+  let (mut admitted, mut converted, mut ranged) = (0usize, 0usize, 0usize);
+  for row in TABLE {
+    if !is_int_literal(row.literal.as_bytes()) {
+      continue;
+    }
+    admitted += 1;
+    for width in [IntWidth::I32, IntWidth::I64] {
+      let kind = match width {
+        IntWidth::I32 => row.literal.parse::<i32>().err().map(|e| *e.kind()),
+        IntWidth::I64 => row.literal.parse::<i64>().err().map(|e| *e.kind()),
+      };
+      match kind {
+        None => converted += 1,
+        Some(IntErrorKind::PosOverflow | IntErrorKind::NegOverflow) => ranged += 1,
+        other => panic!(
+          "{:?} is an `IntValue` to the lexer and `core` refused it as {other:?} — a shape \
+           failure has survived the first conjunct",
+          row.literal,
+        ),
+      }
+    }
+  }
+
+  // Non-vacuity: the loop above is satisfied by admitting nothing, and the disjunction by rows
+  // that only ever convert.
+  assert!(admitted >= 12, "only {admitted} rows reach the reader");
+  assert!(converted >= 8, "only {converted} conversions");
+  assert!(ranged >= 8, "only {ranged} range refusals");
+
+  // The reverse inclusion, named as false rather than left to be rediscovered.
+  assert!(parse_i64(b"007").is_some() && !is_int_literal(b"007"));
 }
 
 /// [`overflows`] is the decider behind the public `IntOverflow::checked`, and it is held against
@@ -268,37 +511,24 @@ fn the_digit_shape_admits_everything_the_reader_accepts() {
 /// `InvalidDigit` or `Empty`. That distinction is exactly the conjunction this predicate makes,
 /// arrived at independently.
 ///
-/// An oracle recomputed from `is_integer_literal(bytes) && reader.is_none()` would be the
+/// An oracle recomputed from `is_int_literal(bytes) && reader.is_none()` would be the
 /// implementation transcribed, and would stay green over a version of the function that dropped
 /// either conjunct. This one cannot: `core` has no idea what this file does.
 ///
-/// **One deliberate divergence, and it is not in the corpus.** `core` accepts a leading `+`;
-/// draft §2.9.1's `IntegerPart` has no unary plus, so `+99999999999999999999999999` is
-/// `PosOverflow` to `core` and not an integer literal here. `the_unary_plus_divergence_is_ours`
-/// below pins it rather than leaving the corpus quietly curated around it.
+/// It is asked over the rows the oracle is *entitled* to answer. `core`'s reader is not GraphQL's
+/// grammar in two respects, and `the_divergences_from_cores_reader_are_ours` holds that column
+/// down so it cannot become a place to park an inconvenient row.
 #[test]
 fn overflows_agrees_with_cores_own_reader_on_which_failures_are_overflows() {
-  use core::num::IntErrorKind;
-
-  fn core_calls_it_an_overflow(literal: &str, width: IntWidth) -> bool {
-    let kind = match width {
-      IntWidth::I32 => literal.parse::<i32>().err().map(|e| *e.kind()),
-      IntWidth::I64 => literal.parse::<i64>().err().map(|e| *e.kind()),
-    };
-    matches!(
-      kind,
-      Some(IntErrorKind::PosOverflow | IntErrorKind::NegOverflow)
-    )
-  }
-
   let (mut agreed_overflow, mut agreed_not) = (0usize, 0usize);
-  for literal in CORPUS {
+  for row in TABLE.iter().filter(|row| row.core_agrees) {
     for width in [IntWidth::I32, IntWidth::I64] {
-      let expected = core_calls_it_an_overflow(literal, width);
+      let expected = core_calls_it_an_overflow(row.literal, width);
       assert_eq!(
-        overflows(literal.as_bytes(), width),
+        overflows(row.literal.as_bytes(), width),
         expected,
-        "{literal:?} at {width}: `core` says overflow={expected}",
+        "{:?} at {width}: `core` says overflow={expected}",
+        row.literal,
       );
       if expected {
         agreed_overflow += 1;
@@ -315,27 +545,53 @@ fn overflows_agrees_with_cores_own_reader_on_which_failures_are_overflows() {
   );
   assert!(agreed_not >= 8, "only {agreed_not} non-overflow cases");
 
-  // The pair the whole round is about, spelled out rather than left to the loop.
+  // The pair the earlier round was about, spelled out rather than left to the loop.
   assert!(overflows(b"2147483648", IntWidth::I32));
   assert!(!overflows(b"2147483648", IntWidth::I64));
 }
 
-/// The one place [`overflows`] and `core`'s reader are *meant* to disagree, named so the corpus
-/// above is a corpus rather than a curation.
+/// The two places [`overflows`] and `core`'s reader are *meant* to disagree, each pinned so the
+/// `core_agrees` column is a declaration rather than a curation.
 ///
-/// `core` accepts a leading `+` and draft §2.9.1 does not, so a `+`-prefixed literal past a width
-/// is an overflow to `core` and not an integer literal at all here. Ours is the right answer for
-/// a GraphQL `IntValue`, and a payload built for `+99999999999999999999999999` would be quoting
-/// something the grammar cannot produce.
+/// `core` accepts a leading `+`, and it accepts leading zeroes; draft §2.9.1's `IntegerPart` has
+/// neither. So `+99999999999999999999999999` and `02147483648` are overflows to `core` and are
+/// not integer literals at all here. Ours is the right answer for a GraphQL `IntValue`: a payload
+/// built for either would be quoting a spelling the grammar cannot produce, and the second one is
+/// the finding this round repaired.
+///
+/// The loop is the part that matters. Every row marked as diverging must actually diverge, so a
+/// row cannot be excused from the oracle by mislabelling it.
 #[test]
-fn the_unary_plus_divergence_is_ours() {
-  assert!(
-    "+99999999999999999999999999".parse::<i64>().is_err(),
-    "the oracle has to refuse it for the divergence to exist",
-  );
-  assert!(!is_integer_literal(b"+99999999999999999999999999"));
+fn the_divergences_from_cores_reader_are_ours() {
+  let mut diverging = 0usize;
+  for row in TABLE.iter().filter(|row| !row.core_agrees) {
+    diverging += 1;
+    let disagrees = [IntWidth::I32, IntWidth::I64].into_iter().any(|width| {
+      overflows(row.literal.as_bytes(), width) != core_calls_it_an_overflow(row.literal, width)
+    });
+    assert!(
+      disagrees,
+      "{:?} is marked as diverging from `core` and agrees with it at both widths",
+      row.literal,
+    );
+  }
+  assert!(diverging >= 6, "only {diverging} declared divergences");
+
+  // The unary plus.
+  assert!("+99999999999999999999999999".parse::<i64>().is_err());
+  assert!(!is_int_literal(b"+99999999999999999999999999"));
   assert!(!overflows(b"+99999999999999999999999999", IntWidth::I64));
   assert!(!overflows(b"+7", IntWidth::I32));
+
+  // The leading zero, and the oracle really does read it as an overflow.
+  assert!(core_calls_it_an_overflow("02147483648", IntWidth::I32));
+  assert!(!is_int_literal(b"02147483648"));
+  assert!(!overflows(b"02147483648", IntWidth::I32));
+  assert!(core_calls_it_an_overflow(
+    "09223372036854775808",
+    IntWidth::I64
+  ));
+  assert!(!overflows(b"09223372036854775808", IntWidth::I64));
 }
 
 /// `Float` is `f64` at both markers, so the float conversion must be the same conversion.

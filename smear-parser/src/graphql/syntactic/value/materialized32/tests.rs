@@ -176,6 +176,37 @@ fn the_two_widths_disagree_on_the_literal_between_them() {
   assert_eq!(overflow_width(&errors), Ok(IntWidth::I64));
 }
 
+/// A leading-zeroed literal never reaches a conversion at either width, so no width is a fact
+/// about it — the other half of the R3 finding, held end to end rather than at the predicate.
+///
+/// `IntOverflow::checked("02147483648", I32)` used to answer `Ok`, and this is the claim that made
+/// it wrong: the lexer refuses the spelling before either production sees an `Int` leaf, so the
+/// `IntOverflow` a caller could mint described a refusal that never happened. The assertion is
+/// therefore about *which* refusal, not that there was one — `overflow_width` returns `Err` with
+/// the report's own text whenever the failure is not an integer overflow.
+///
+/// `007` is the row that separates shape from range: it is `7`, a value at both widths, so a
+/// production that reported an overflow for it could not be blamed on the range check.
+#[test]
+fn a_leading_zeroed_literal_is_refused_before_any_conversion_at_either_width() {
+  for literal in ["007", "02147483648", "09223372036854775808"] {
+    let at_i32 = drive_str(int_value, literal).map(|_| ());
+    let at_i64 = drive_str(materialized::int_value, literal).map(|_| ());
+
+    for (width, outcome) in [(IntWidth::I32, at_i32), (IntWidth::I64, at_i64)] {
+      let errors = outcome.expect_err("the lexer refuses a leading zero");
+      assert!(
+        overflow_width(&errors).is_err(),
+        "{literal:?} at {width}: the production reported an integer overflow for a spelling the \
+         lexer never turns into an `Int`",
+      );
+
+      // …and the public door now says the same thing about the same bytes.
+      assert_eq!(IntOverflow::checked(literal, width), Err(literal));
+    }
+  }
+}
+
 /// **The public checked door and the two productions agree, literal for literal.**
 ///
 /// `IntOverflow::checked` is the only way a caller outside this crate can name an [`IntWidth`],
