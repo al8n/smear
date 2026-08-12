@@ -7,7 +7,13 @@
 //! [`ErrorData`](smear_parser::graphql::error::ErrorData) without saying so. The doc paragraph
 //! introduced beside it argued the attribute belonged there, and a later round read that
 //! justification as evidence the attribute predated the branch — it did not: `ErrorData` was
-//! exhaustive at `c3e35b8`, this branch's merge base into `feat/proto`, and Codex found the gap
+//! exhaustive at `c3e35b8`, the base this branch was cut from, and Codex found the gap
+//!
+//! **The merge base moved and these values did not.** #157 merged into `feat/proto`, so the branch
+//! now sits on `6e0baf0`; `git diff --name-only c3e35b8 6e0baf0 -- smear-parser` is **empty**, so
+//! every attribute string below is what the current merge base says too. Re-read them from the new
+//! base only if that diff ever stops being empty — a table whose provenance commit is no longer
+//! reachable from the base is a table nobody can re-derive.
 //! after the justification had already made it read as settled. Both the attribute and the
 //! paragraph are gone now, and this test is the gate the mistake argues for: **the attribute set
 //! of every public enum in the files this branch touches must equal what it was at the merge
