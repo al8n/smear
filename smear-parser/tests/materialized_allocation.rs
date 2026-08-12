@@ -3,10 +3,11 @@
 //!
 //! Not "allocates little", and not "allocates nothing at all" either — the slice parser already
 //! allocates, one container per list and per object, and that cost is the AST's rather than
-//! materialisation's. The claim is the exact one: parsing a document with `i64`/`f64` leaves makes
-//! the *same* allocations as parsing it with slice leaves. Same count, same bytes. Anything a
-//! normalising design would have added — an owned `String` per unescaped string literal, a
-//! `OnceCell` per numeric node — shows up here as a difference.
+//! materialisation's. The claim is the exact one: parsing a document with materialised numeric
+//! leaves makes the *same* allocations as parsing it with slice leaves, at **every** width the
+//! axis ships. Same count, same bytes. Anything a normalising design would have added — an owned
+//! `String` per unescaped string literal, a `OnceCell` per numeric node — shows up here as a
+//! difference.
 //!
 //! # Why a counting allocator and not a size assertion
 //!
@@ -28,9 +29,15 @@ use std::{
 use smear_parser::{
   graphql::{
     GraphQL,
-    ast::{InputValue, materialized::InputValue as MaterializedInputValue},
+    ast::{
+      InputValue, materialized::InputValue as MaterializedInputValue,
+      materialized32::InputValue as Materialized32InputValue,
+    },
     error::GraphqlErrors,
-    syntactic::{GraphqlInput, GraphqlLexer, value::materialized},
+    syntactic::{
+      GraphqlInput, GraphqlLexer,
+      value::{materialized, materialized32},
+    },
   },
   lexer::graphql::syntactic::SyntacticLexer,
 };
@@ -129,17 +136,26 @@ fn parse_materialized_payload() -> MaterializedInputValue<&'static str> {
   drive(materialized::value, DOCUMENT).expect("the materialising parser must accept the fixture")
 }
 
+fn parse_materialized32_payload() -> Materialized32InputValue<&'static str> {
+  drive(materialized32::value, DOCUMENT)
+    .expect("the specified-width parser must accept the fixture")
+}
+
+/// **Both widths, not just the one that shipped first.** The property is the axis's, so it is
+/// measured once per tree: a second width that quietly allocated — a payload that stopped being
+/// `Copy`, a conversion that grew a buffer — would be invisible to a gate that only ever read
+/// the `i64` tree.
 #[test]
 fn materialization_allocates_nothing() {
   // One un-measured run of each, so a lazily-initialised static cannot land in whichever
   // measurement happens to run first.
   parse_slice_payload();
   parse_materialized_payload();
+  parse_materialized32_payload();
 
   let (slice_events, slice_bytes) = measure(parse_slice_payload);
-  let (materialized_events, materialized_bytes) = measure(parse_materialized_payload);
 
-  // Non-vacuity first. A fixture that allocated nothing at all would make the equality below
+  // Non-vacuity first. A fixture that allocated nothing at all would make the equalities below
   // true for the wrong reason — the shape of gate this repository has shipped before and had to
   // repair.
   assert!(
@@ -147,14 +163,20 @@ fn materialization_allocates_nothing() {
     "the fixture allocated {slice_events} times; the comparison would be near-vacuous",
   );
 
-  assert_eq!(
-    materialized_events, slice_events,
-    "materialisation changed the number of allocations: {slice_events} -> {materialized_events}",
-  );
-  assert_eq!(
-    materialized_bytes, slice_bytes,
-    "materialisation changed the bytes allocated: {slice_bytes} -> {materialized_bytes}",
-  );
+  for (width, measured) in [
+    ("i64", measure(parse_materialized_payload)),
+    ("i32", measure(parse_materialized32_payload)),
+  ] {
+    let (events, bytes) = measured;
+    assert_eq!(
+      events, slice_events,
+      "materialisation at {width} changed the number of allocations: {slice_events} -> {events}",
+    );
+    assert_eq!(
+      bytes, slice_bytes,
+      "materialisation at {width} changed the bytes allocated: {slice_bytes} -> {bytes}",
+    );
+  }
 }
 
 /// The measurement instrument itself, proven to move. Without this the gate above cannot

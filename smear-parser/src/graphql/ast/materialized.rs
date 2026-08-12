@@ -18,10 +18,15 @@
 //! payloads ahead of `List`'s `Container` argument silently reinterprets `List<S, MyContainer>`.
 //!
 //! Two nominal enums have none of those problems and one cost — the variant lists are written
-//! twice. `the_two_value_trees_have_the_same_variants` pays for that cost with a wildcard-free
-//! census on both, rather than with a comment asking the next reader to keep them in step.
+//! twice. `every_value_tree_declares_the_same_variants` pays for that cost with a wildcard-free
+//! census on every tree, rather than with a comment asking the next reader to keep them in step.
 //! `graphql/ast/value.rs` is then **byte-identical to the revision before this axis existed**,
 //! which is a stronger compatibility statement than any test.
+//!
+//! The same argument decided the second *width*:
+//! [`ast::materialized32`](crate::graphql::ast::materialized32) is a third and fourth enum rather
+//! than an `I` parameter on these two, and its header records the three compile-time failures a
+//! payload parameter would have caused.
 //!
 //! # What is materialised, and what is not
 //!
@@ -44,9 +49,14 @@
 //! # Why `i64` and `f64`
 //!
 //! `i64` because GraphQL's `IntValue` grammar carries an optional leading `-`
-//! (draft §2.9.1), so no unsigned type can hold `-5`. `f64` because GraphQL's `Float` **is** IEEE
-//! 754 double precision (draft §3.5.2). Were a narrower integer ever wanted the pair would be
-//! `i32` + `f64`; `f32` is non-conformant and must not follow `i32` down.
+//! (draft §2.9.1), so no unsigned type can hold `-5`, and because that grammar bounds the digits
+//! not at all — this tree is the **grammar-permissive** reading, and it accepts literals draft
+//! §3.5.1's 32-bit `Int` does not. `f64` because GraphQL's `Float` **is** IEEE 754 double
+//! precision (draft §3.5.2).
+//!
+//! The narrower integer named here as hypothetical now exists and is the *specification's* width:
+//! [`ast::materialized32`](crate::graphql::ast::materialized32) is `i32` + `f64`. `f32` did not
+//! follow `i32` down, because it is non-conformant.
 //!
 //! # The bound this view accepts, stated rather than engineered around
 //!

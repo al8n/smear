@@ -19,7 +19,7 @@
 //! of every public enum in the files this branch touches must equal what it was at the merge
 //! base, or the difference must be named below.**
 //!
-//! # Scope: the five files this branch's diff touches
+//! # Scope: the files this branch's diff touches
 //!
 //! Not the whole crate. The defect this test guards was a diff-review blind spot on a branch's
 //! own changes, and that is what [`FILES`] enumerates — `git diff --name-only c3e35b8 bd5d52b`
@@ -27,6 +27,12 @@
 //! still gain `#[non_exhaustive]` unnoticed; widening this list to the whole crate is future work
 //! for whoever decides the cost of auditing every other enum's history is worth it, not a silent
 //! limitation of this one.
+//!
+//! **A stacked branch adds to this list rather than inheriting it.** `feat/parser-materialised-i32`
+//! adds `src/graphql/ast/materialized32.rs`, because a file that declares two public enums and is
+//! absent from [`FILES`] is a scan that reports green over a surface it never read — the same
+//! absence-shaped defect one level out. The count assertion below is what makes forgetting it
+//! fail: it moves whether or not the new file is listed.
 //!
 //! # Why a line scan and not `syn`
 //!
@@ -75,6 +81,10 @@ const FILES: &[SourceFile] = &[
   SourceFile {
     path: "src/graphql/ast/materialized.rs",
     text: include_str!("../src/graphql/ast/materialized.rs"),
+  },
+  SourceFile {
+    path: "src/graphql/ast/materialized32.rs",
+    text: include_str!("../src/graphql/ast/materialized32.rs"),
   },
   SourceFile {
     path: "src/graphql/syntactic/value/mod.rs",
@@ -236,6 +246,29 @@ const RECORDED_DIFFERENCES: &[(&str, &str, &str)] = &[
     "ConstInputValue",
     "new enum, same reason as `materialized::InputValue` above.",
   ),
+  (
+    "src/graphql/error.rs",
+    "IntWidth",
+    "new enum: which signed width a materialised `Int` leaf was read at, carried by \
+     `ErrorData::IntOverflow` now that `materialized-numbers` ships two readings of `Int`. \
+     EXHAUSTIVE deliberately — the enum's own doc argues it, and the argument is that a consumer \
+     reads this precisely to branch on the two, so `#[non_exhaustive]` would force a wildcard \
+     over a closed two-element set. Attribute sets are contracts and this one is a choice, which \
+     is the entry this table exists for.",
+  ),
+  (
+    "src/graphql/ast/materialized32.rs",
+    "InputValue",
+    "new enum: the `i32` value tree's twin of `ast::InputValue`, gated behind \
+     `materialized-numbers` beside the `i64` one. Same attribute set as `materialized::InputValue` \
+     by construction — the two differ in one leaf type and in nothing else. No merge-base entry \
+     exists because the file did not.",
+  ),
+  (
+    "src/graphql/ast/materialized32.rs",
+    "ConstInputValue",
+    "new enum, same reason as `materialized32::InputValue` above.",
+  ),
 ];
 
 fn attrs_match(expected: &[&str], actual: &[String]) -> bool {
@@ -254,12 +287,12 @@ fn public_enum_attributes_match_the_merge_base_or_are_named() {
   }
 
   // Non-vacuity: a scan that silently stopped finding the surface must not pass by having
-  // nothing left to check. 15 = 11 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs;
-  // update the count only after checking why it moved.
+  // nothing left to check. 18 = 12 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs +
+  // 2 in ast/materialized32.rs; update the count only after checking why it moved.
   assert_eq!(
     found.len(),
-    15,
-    "the scan found {} public enum(s) across {} files, expected 15 — a file gained or lost one, \
+    18,
+    "the scan found {} public enum(s) across {} files, expected 18 — a file gained or lost one, \
      or the line-matching in `find_public_enums` stopped seeing the surface",
     found.len(),
     FILES.len(),

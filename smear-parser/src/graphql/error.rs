@@ -375,6 +375,82 @@ pub enum Unclosed {
   Object,
 }
 
+/// Which signed integer width a materialised `Int` leaf was read at.
+///
+/// **Both readings are legitimate and they disagree, which is why the error carries this.**
+/// GraphQL specifies `Int` as a signed 32-bit integer (draft §3.5.1), so [`I32`](Self::I32) is
+/// the spec-exact reading; the grammar in draft §2.9.1 puts no bound on an `IntValue`'s digits at
+/// all, so [`I64`](Self::I64) is the grammar-permissive one that accepts literals the
+/// specification does not. `2147483648` is out of range at one width and a value at the other,
+/// and a consumer handed only "an integer overflowed" cannot tell which fact about the document
+/// it was told.
+///
+/// # Exhaustive, deliberately
+///
+/// No `#[non_exhaustive]`, unlike the hint enums above it and like [`Unclosed`] beside it. The
+/// whole reason to read this is to branch on the two, and a wildcard arm forced onto every
+/// consumer would be a wildcard over a two-element closed set. A third width is not a variant
+/// added here in isolation: it is a third marker and a third value tree in
+/// [`ast`](crate::graphql::ast), so it is a change to the feature's surface either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+pub enum IntWidth {
+  /// 32 bits — GraphQL's specified `Int`.
+  #[display("i32")]
+  I32,
+  /// 64 bits — the grammar-permissive reading, which accepts literals draft §3.5.1 does not.
+  #[display("i64")]
+  I64,
+}
+
+impl IntWidth {
+  /// The width in bits, for a report that renders the number rather than the type name.
+  #[inline]
+  pub const fn bits(self) -> u32 {
+    match self {
+      Self::I32 => 32,
+      Self::I64 => 64,
+    }
+  }
+}
+
+/// An integer literal that is valid GraphQL and does not fit the width it was read at.
+///
+/// It carries both halves of the fact, because neither is the fact on its own: the literal's
+/// source spelling, so a report can name what the document said, and the [`IntWidth`] the
+/// conversion was attempted at, so a report can name which reading refused it. See [`IntWidth`]
+/// for why two readings exist.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IntOverflow<S> {
+  value: S,
+  width: IntWidth,
+}
+
+impl<S> IntOverflow<S> {
+  /// Creates an integer-out-of-range payload.
+  #[inline]
+  pub const fn new(value: S, width: IntWidth) -> Self {
+    Self { value, width }
+  }
+
+  /// Returns the literal's source spelling.
+  #[inline]
+  pub const fn value(&self) -> &S {
+    &self.value
+  }
+
+  /// Returns the width the conversion was attempted at.
+  #[inline]
+  pub const fn width(&self) -> IntWidth {
+    self.width
+  }
+
+  /// Consumes the payload and returns the literal's source spelling.
+  #[inline]
+  pub fn into_value(self) -> S {
+    self.value
+  }
+}
+
 /// The data of a parser error.
 ///
 /// # Two variants have a feature-gated producer, and are themselves unconditional
@@ -404,12 +480,21 @@ pub enum Unclosed {
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
-  /// An integer literal is syntactically valid GraphQL but does not fit in [`i64`].
+  /// An integer literal is syntactically valid GraphQL but does not fit the width it was read
+  /// at.
   ///
-  /// Raised only by the `materialized-numbers` productions; see [`Error::int_overflow`].
+  /// The payload names the width as well as the spelling, because the
+  /// `materialized-numbers` feature ships two readings of `Int` — see [`IntWidth`] — and
+  /// "`2147483648` overflowed" is a different fact about the document under each. Raised only by
+  /// the `materialized-numbers` productions; see [`Error::int_overflow`].
   #[from(skip)]
-  IntOverflow(S),
+  IntOverflow(IntOverflow<S>),
   /// A float literal is syntactically valid GraphQL but does not convert to a finite [`f64`].
+  ///
+  /// **No width here, and the asymmetry with [`IntOverflow`](Self::IntOverflow) is the point.**
+  /// GraphQL's `Float` *is* IEEE 754 double precision (draft §3.5.2), so every materialising
+  /// reading this crate ships converts it to [`f64`] and there is no second reading for a
+  /// consumer to distinguish. A width here would name a distinction that does not exist.
   ///
   /// Raised only by the `materialized-numbers` productions; see [`Error::float_overflow`].
   #[from(skip)]
@@ -680,17 +765,22 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self::new(span, ErrorData::EndOfInput)
   }
 
-  /// Creates an integer-out-of-range error, carrying the literal's source spelling.
+  /// Creates an integer-out-of-range error, carrying the literal's source spelling and the
+  /// [`IntWidth`] the conversion was attempted at.
   ///
   /// **This is the producer, and it is what the feature gates** — the variant it builds is
   /// unconditional. See [`ErrorData`] for why the gate belongs here and not one level up, and
   /// [`graphql::syntactic::materialized`](crate::graphql::syntactic::value::materialized) for the
   /// documented bound that makes a specification-valid literal a *parse* error in that view.
+  ///
+  /// `width` is an argument rather than two constructors because it is data the caller already
+  /// has and the reader already needs: one producer keeps the census's "one sample per variant"
+  /// rule intact, and a second width added later reaches the error without a third constructor.
   #[cfg(feature = "materialized-numbers")]
   #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
   #[inline]
-  pub const fn int_overflow(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::IntOverflow(value))
+  pub const fn int_overflow(value: S, width: IntWidth, span: Span) -> Self {
+    Self::new(span, ErrorData::IntOverflow(IntOverflow::new(value, width)))
   }
 
   /// Creates a float-out-of-range error, carrying the literal's source spelling.

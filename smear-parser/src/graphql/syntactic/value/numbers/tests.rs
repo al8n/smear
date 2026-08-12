@@ -1,4 +1,7 @@
-use super::{MaterializedNumbers, Numbers, OutOfRange, parse_f64, parse_i64};
+use super::{
+  MaterializedNumbers, MaterializedNumbers32, Numbers, OutOfRange, parse_f64, parse_i32, parse_i64,
+};
+use crate::graphql::error::IntWidth;
 
 #[test]
 fn i64_reads_the_grammar_it_is_given() {
@@ -79,7 +82,10 @@ fn failure_returns_the_slice_and_which_leaf_it_came_from() {
   let int = <MaterializedNumbers as Numbers<&str>>::int("99999999999999999999999999");
   assert!(matches!(
     int,
-    Err(OutOfRange::Int("99999999999999999999999999"))
+    Err(OutOfRange::Int {
+      value: "99999999999999999999999999",
+      width: IntWidth::I64,
+    })
   ));
 
   let float = <MaterializedNumbers as Numbers<&str>>::float("1e400");
@@ -93,4 +99,123 @@ fn failure_returns_the_slice_and_which_leaf_it_came_from() {
     <MaterializedNumbers as Numbers<&str>>::float("7.5").ok(),
     Some(7.5)
   );
+}
+
+#[test]
+fn i32_reads_the_grammar_it_is_given() {
+  assert_eq!(parse_i32(b"0"), Some(0));
+  assert_eq!(parse_i32(b"-0"), Some(0));
+  assert_eq!(parse_i32(b"42"), Some(42));
+  assert_eq!(parse_i32(b"-42"), Some(-42));
+  assert_eq!(parse_i32(b"2147483647"), Some(i32::MAX));
+  assert_eq!(parse_i32(b"-2147483648"), Some(i32::MIN));
+}
+
+/// The literal draft §3.5.1 and draft §2.9.1 disagree about: well-formed, and not an `Int`.
+#[test]
+fn i32_refuses_what_the_specification_does_not_admit() {
+  assert_eq!(parse_i32(b"2147483648"), None);
+  assert_eq!(parse_i32(b"-2147483649"), None);
+  assert_eq!(parse_i32(b"9223372036854775808"), None);
+  assert_eq!(parse_i32(b"99999999999999999999999999"), None);
+  assert_eq!(parse_i32(b""), None);
+  assert_eq!(parse_i32(b"-"), None);
+  assert_eq!(parse_i32(b"1x"), None);
+  assert_eq!(parse_i32(b"1.0"), None);
+}
+
+/// The claim `parse_i32`'s doc comment makes: reading at `i64` and narrowing *is* the narrower
+/// read, so there is one digit loop and not two.
+///
+/// The interesting inputs are the two boundaries and the two literals just past them, plus the
+/// two that overflow `i64` outright — the only place a two-step conversion could differ from a
+/// one-step one is where the first step already refused.
+#[test]
+fn i32_is_i64_narrowed_on_every_boundary() {
+  for literal in [
+    "0",
+    "-0",
+    "1",
+    "-1",
+    "2147483647",
+    "2147483648",
+    "-2147483648",
+    "-2147483649",
+    "9223372036854775807",
+    "9223372036854775808",
+    "-9223372036854775808",
+    "-9223372036854775809",
+    "99999999999999999999999999",
+    "",
+    "-",
+    "1x",
+  ] {
+    let bytes = literal.as_bytes();
+    let narrowed = parse_i64(bytes).and_then(|wide| i32::try_from(wide).ok());
+    assert_eq!(
+      parse_i32(bytes),
+      narrowed,
+      "the two-step reading and the direct one disagree on {literal:?}",
+    );
+  }
+
+  // Non-vacuity: the loop above compares two expressions that would agree if both were always
+  // `None`. These two are the ones that make the comparison mean something.
+  assert_eq!(parse_i32(b"2147483647"), Some(i32::MAX));
+  assert_eq!(parse_i32(b"2147483648"), None);
+}
+
+/// The width travels with the failure, and it is the marker's own width rather than a constant.
+///
+/// Both markers refuse `9223372036854775808` and each says so about a different width; if they
+/// ever named the same one, a consumer could not tell "outside the specification's `Int`" from
+/// "outside any integer this crate reads".
+#[test]
+fn each_marker_names_its_own_width() {
+  let past_i32 = <MaterializedNumbers32 as Numbers<&str>>::int("2147483648");
+  assert!(matches!(
+    past_i32,
+    Err(OutOfRange::Int {
+      value: "2147483648",
+      width: IntWidth::I32,
+    })
+  ));
+  assert_eq!(
+    <MaterializedNumbers as Numbers<&str>>::int("2147483648").ok(),
+    Some(2_147_483_648_i64),
+    "the permissive width must accept the literal the specified one refuses",
+  );
+
+  let past_i64_at_32 = <MaterializedNumbers32 as Numbers<&str>>::int("9223372036854775808");
+  let past_i64_at_64 = <MaterializedNumbers as Numbers<&str>>::int("9223372036854775808");
+  assert!(matches!(
+    past_i64_at_32,
+    Err(OutOfRange::Int {
+      width: IntWidth::I32,
+      ..
+    })
+  ));
+  assert!(matches!(
+    past_i64_at_64,
+    Err(OutOfRange::Int {
+      width: IntWidth::I64,
+      ..
+    })
+  ));
+}
+
+/// `Float` is `f64` at both markers, so the float conversion must be the same conversion.
+#[test]
+fn the_float_leaf_is_the_same_at_both_widths() {
+  assert_eq!(
+    <MaterializedNumbers32 as Numbers<&str>>::float("7.5").ok(),
+    <MaterializedNumbers as Numbers<&str>>::float("7.5").ok(),
+  );
+  assert_eq!(
+    <MaterializedNumbers32 as Numbers<&str>>::float("7.5").ok(),
+    Some(7.5)
+  );
+
+  let float = <MaterializedNumbers32 as Numbers<&str>>::float("1e400");
+  assert!(matches!(float, Err(OutOfRange::Float("1e400"))));
 }

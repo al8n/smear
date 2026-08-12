@@ -1,68 +1,46 @@
-//! The GraphQL value productions with `Int` and `Float` materialised as [`i64`] and [`f64`].
+//! The GraphQL value productions with `Int` materialised as [`i32`] — **the width draft §3.5.1
+//! specifies** — and `Float` as [`f64`].
 //!
-//! This is **not a second dialect and not a second parser**. Every composite production here is
-//! [`super`]'s production monomorphised against a different `Numbers` marker, so the two commit
-//! at the same tokens, recover the same way and raise the same errors everywhere except where a
-//! number is converted. Each of the five leaves that materialisation does not touch — strings,
-//! booleans, `null`, enums and variables — delegates straight to [`super`]'s, so there is one
-//! implementation of each and not two.
+//! [`syntactic::value::materialized`](crate::graphql::syntactic::value::materialized) is this
+//! module at the other width, and its header carries every argument the two share: not a second
+//! dialect and not a second parser, one implementation of each untouched leaf, strings keeping
+//! their slices, free functions instead of a `Node::graphql` method, one bound set for the
+//! module. None of it is repeated here. What is different is one type and one sentence.
 //!
-//! It *is* a second value tree: [`ast::materialized`](crate::graphql::ast::materialized) declares
-//! two enums whose variants match their slice twins one for one, and whose leaves are the same
-//! types but for `Int` and `Float`. The marker chooses which tree a body assembles, the same way
-//! it already chose what a numeric leaf carries. That module's header has the argument for two
-//! enums over one at two instantiations.
+//! # The sentence
 //!
-//! # What is converted
+//! **A literal outside `i32` is refused here and accepted next door**, and that is the whole
+//! difference between the two modules. `2147483648` is a well-formed `IntValue` under draft
+//! §2.9.1 and is not a value draft §3.5.1's `Int` can hold, so:
 //!
-//! `Int` becomes [`i64`] and `Float` becomes [`f64`]. **Strings are not touched**: a
-//! [`StringValue`] keeps its source slice, escapes included,
-//! because unescaping means an owned buffer per node and the property this module exists to keep
-//! is that materialisation allocates nothing the slice parser did not already allocate.
-//! `materialization_allocates_nothing` in the tests measures that against the slice parser on the
-//! same document rather than asserting it.
+//! ```text
+//! literal               materialized32        materialized
+//! 2147483648            IntOverflow / i32     2147483648i64
+//! 9223372036854775808   IntOverflow / i32     IntOverflow / i64
+//! ```
 //!
-//! # The accepted bound
+//! The width on the error is not decoration. Without it the first row and the second are the same
+//! report, and they are different facts about the document: one literal is outside the
+//! specification, the other is outside any integer this crate reads.
 //!
-//! A 26-digit integer literal is *syntactically valid GraphQL*. Here it is
-//! [`ErrorData::IntOverflow`](crate::graphql::error::ErrorData::IntOverflow) — a **parse** error
-//! where the specification would raise a **coercion** error, because this view does the
-//! conversion at the point the literal is read. The same holds for a float literal that names no
-//! finite double, as [`ErrorData::FloatOverflow`](crate::graphql::error::ErrorData::FloatOverflow).
+//! # Which width a new consumer should reach for
 //!
-//! That is a documented bound of this view and not a defect to engineer around: the slice parser
-//! in [`super`] is unchanged, still accepts the full grammar, and a consumer that needs
-//! `BigInt`-style handling of beyond-range values parses with it instead. Rendering such a value
-//! back out as a JSON string is the output side's decision and does not belong here.
+//! **This one, unless the document is not a GraphQL document.** A consumer that materialises
+//! `Int` is asking for the value a GraphQL server would see, and that value is 32-bit; the
+//! sibling exists for the caller who has decided that accepting a larger literal is better than
+//! refusing it — a gateway logging what a client sent, a formatter, a migration tool reading
+//! documents written against a server that never enforced §3.5.1. That is a real need and a
+//! deliberate one, which is why both ship, and it is the narrower of the two needs even though it
+//! is the wider of the two types.
 //!
-//! # This is the *permissive* width, and the sibling is the specified one
+//! # What this module does *not* change
 //!
-//! `i64` is not what draft §3.5.1 says an `Int` is — it says 32 bits. This module accepts
-//! `2147483648`, which is a well-formed `IntValue` under §2.9.1's grammar and not a conformant
-//! `Int`, and
-//! [`syntactic::value::materialized32`](crate::graphql::syntactic::value::materialized32) is the
-//! same productions at the width the specification names. Neither is the "safe" choice: this one
-//! answers *what did the author write*, that one answers *what does this document mean under the
-//! specification*, and the [`IntWidth`](crate::graphql::error::IntWidth) on an
-//! [`ErrorData::IntOverflow`](crate::graphql::error::ErrorData::IntOverflow) is how a report says
-//! which question was asked.
-//!
-//! # Why free functions and no `graphql` method
-//!
-//! [`super`] hangs its public entry points off the AST types as `Node::graphql`. **The leaves
-//! here cannot have one**: `IntValue<i64>` is the very type the blanket `impl<S> IntValue<S>`
-//! already carries a `graphql` for, so a second would collide. The composites *could* — they are
-//! this module's own enums — and they deliberately do not, because an entry point that exists on
-//! nine of eleven productions is worse than one that exists on none: the module path then means
-//! two different things depending on which node you reached for. One door per production, all of
-//! them here.
-//!
-//! # The bound set
-//!
-//! Every entry here requires `GraphqlSlice<'inp, Src>: AsRef<[u8]>` — this crate's established
-//! spelling for "a slice whose text can be read", satisfied by every source backing it ships. It
-//! is one bound set for the whole module rather than the narrowest per production, so the
-//! module's contract is one sentence; the slice parser is unchanged and unbounded by it.
+//! [`float_value`](crate::graphql::syntactic::value::materialized32::float_value) and the five
+//! leaves materialisation never touches produce exactly what their twins next door produce, and
+//! delegate to the same bodies. They are re-published here rather than left out because a module
+//! that carried nine of eleven productions would make its own path mean two different things
+//! depending on which node a caller reached for — the argument the sibling's header makes about
+//! `Node::graphql`, applied to the module boundary instead of the type.
 
 use tokora::{
   Lexer, SimpleSpan, Slice, Source,
@@ -74,12 +52,13 @@ use smear_lexer::graphql::ContextualKeyword;
 
 use super::{
   GraphQL, GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, ParseCtx,
-  numbers::{MaterializedNumbers, Numbers},
+  materialized::materialized_parser,
+  numbers::{MaterializedNumbers32, Numbers},
 };
 use crate::graphql::{
   ast::{
     BooleanValue, EnumValue, FloatValue, IntValue, NullValue, StringValue, VariableValue,
-    materialized::{
+    materialized32::{
       ConstInputValue, ConstList, ConstObject, ConstObjectField, DefaultInputValue, InputValue,
       List, Object, ObjectField,
     },
@@ -87,58 +66,14 @@ use crate::graphql::{
   error::GraphqlError as DialectGraphqlError,
 };
 
-/// One bound set for every materialising module, and one doc line per entry.
+/// Converts a parsed slice-payload integer node in place at `i32`, keeping its span.
 ///
-/// Wider than each production strictly needs — `string_value` reads no bytes and `variable_value`
-/// downcasts no keyword — deliberately: a module whose contract is "available wherever the source
-/// text can be read" is one sentence, and every backing this crate ships satisfies it.
-///
-/// [`materialized32`](super::materialized32) imports it rather than declaring its own. The two
-/// modules are the same productions at two integer widths, so their bound sets are the same
-/// question; two copies of a where-clause are two things that can disagree, and a consumer
-/// reading "available wherever the source text can be read" would then have to check which
-/// module it was said about.
-macro_rules! materialized_parser {
-  (
-    $name:ident,
-    $input:ident,
-    $output:ty,
-    $doc:literal,
-    $body:block
-  ) => {
-    #[doc = $doc]
-    ///
-    /// The materialised-number instantiation; see the module header for what that converts.
-    pub fn $name<'inp, Src, Ctx>(
-      $input: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-    ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
-    where
-      Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp,
-      GraphqlLexer<'inp, Src>: Lexer<
-        'inp,
-        Source = Src,
-        Token = GraphqlToken<'inp, Src>,
-        Span = SimpleSpan,
-        Offset = usize,
-      >,
-      GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-      GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
-      Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-    $body
-  };
-}
-
-pub(super) use materialized_parser;
-
-/// Converts a parsed slice-payload integer node in place, keeping its span.
-///
-/// This is the design's `.and_then(|x| x.parse())` with the error mapped: the production above it
-/// is [`super`]'s, unmodified, and this is everything that is added to it.
+/// The twin of [`materialized::materialize_int`](super::materialized) at the other marker: the
+/// production above it is [`super`]'s, unmodified, and this is everything that is added to it.
 #[inline]
 fn materialize_int<'inp, Src, Ctx>(
   node: IntValue<GraphqlSlice<'inp, Src>>,
-) -> Result<IntValue<i64>, GraphqlError<'inp, Src, Ctx>>
+) -> Result<IntValue<i32>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp,
@@ -147,15 +82,18 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
   let (span, slice) = node.into_components();
-  match <MaterializedNumbers as Numbers<GraphqlSlice<'inp, Src>>>::int(slice) {
+  match <MaterializedNumbers32 as Numbers<GraphqlSlice<'inp, Src>>>::int(slice) {
     Ok(payload) => Ok(IntValue::new(span, payload)),
     Err(err) => {
-      Err(<MaterializedNumbers as Numbers<GraphqlSlice<'inp, Src>>>::report(err, span).into())
+      Err(<MaterializedNumbers32 as Numbers<GraphqlSlice<'inp, Src>>>::report(err, span).into())
     }
   }
 }
 
 /// Converts a parsed slice-payload float node in place, keeping its span.
+///
+/// Identical to its twin next door, and it has to be: `Float` is [`f64`] at both widths, because
+/// GraphQL's `Float` *is* IEEE 754 double precision (draft §3.5.2).
 #[inline]
 fn materialize_float<'inp, Src, Ctx>(
   node: FloatValue<GraphqlSlice<'inp, Src>>,
@@ -168,10 +106,10 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
   let (span, slice) = node.into_components();
-  match <MaterializedNumbers as Numbers<GraphqlSlice<'inp, Src>>>::float(slice) {
+  match <MaterializedNumbers32 as Numbers<GraphqlSlice<'inp, Src>>>::float(slice) {
     Ok(payload) => Ok(FloatValue::new(span, payload)),
     Err(err) => {
-      Err(<MaterializedNumbers as Numbers<GraphqlSlice<'inp, Src>>>::report(err, span).into())
+      Err(<MaterializedNumbers32 as Numbers<GraphqlSlice<'inp, Src>>>::report(err, span).into())
     }
   }
 }
@@ -181,8 +119,8 @@ where
 materialized_parser!(
   int_value,
   inp,
-  IntValue<i64>,
-  "Parses an integer literal and converts it to [`i64`].\n\nSee the [GraphQL Int Value specification](https://spec.graphql.org/draft/#sec-Int-Value).",
+  IntValue<i32>,
+  "Parses an integer literal and converts it to [`i32`], the width draft §3.5.1 specifies.\n\nSee the [GraphQL Int Value specification](https://spec.graphql.org/draft/#sec-Int-Value).",
   { super::int_value(inp).and_then(materialize_int::<Src, Ctx>) }
 );
 
@@ -197,8 +135,8 @@ materialized_parser!(
 materialized_parser!(
   try_int_value,
   inp,
-  ParseAttempt<IntValue<i64>>,
-  "Attempts an integer literal, converting it to [`i64`], without consuming on a head mismatch.",
+  ParseAttempt<IntValue<i32>>,
+  "Attempts an integer literal, converting it to [`i32`], without consuming on a head mismatch.",
   { super::try_int_value(inp)?.and_then(materialize_int::<Src, Ctx>) }
 );
 
@@ -299,7 +237,7 @@ materialized_parser!(
   inp,
   InputValue<GraphqlSlice<'inp, Src>>,
   "Parses any GraphQL input value.\n\nSee the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).",
-  { super::value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -307,7 +245,7 @@ materialized_parser!(
   inp,
   ConstInputValue<GraphqlSlice<'inp, Src>>,
   "Parses a GraphQL constant input value.\n\nSee the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).",
-  { super::const_value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::const_value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -315,7 +253,7 @@ materialized_parser!(
   inp,
   List<GraphqlSlice<'inp, Src>>,
   "Parses a list value.\n\nSee the [GraphQL List Value specification](https://spec.graphql.org/draft/#sec-List-Value).",
-  { super::list_value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::list_value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -323,7 +261,7 @@ materialized_parser!(
   inp,
   ConstList<GraphqlSlice<'inp, Src>>,
   "Parses a constant list value.\n\nSee the [GraphQL List Value specification](https://spec.graphql.org/draft/#sec-List-Value).",
-  { super::const_list_value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::const_list_value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -331,7 +269,7 @@ materialized_parser!(
   inp,
   Object<GraphqlSlice<'inp, Src>>,
   "Parses an object value.\n\nSee the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values).",
-  { super::object_value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::object_value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -339,7 +277,7 @@ materialized_parser!(
   inp,
   ConstObject<GraphqlSlice<'inp, Src>>,
   "Parses a constant object value.\n\nSee the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values).",
-  { super::const_object_value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::const_object_value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -347,7 +285,7 @@ materialized_parser!(
   inp,
   ObjectField<GraphqlSlice<'inp, Src>>,
   "Parses one object field.\n\nSee the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values).",
-  { super::object_field_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::object_field_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -355,7 +293,7 @@ materialized_parser!(
   inp,
   ConstObjectField<GraphqlSlice<'inp, Src>>,
   "Parses one constant object field.\n\nSee the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values).",
-  { super::const_object_field_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::const_object_field_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -363,7 +301,7 @@ materialized_parser!(
   inp,
   ParseAttempt<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
   "Attempts a default value, declining without consuming when `=` is absent.\n\nSee the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).",
-  { super::try_default_value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::try_default_value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 materialized_parser!(
@@ -371,7 +309,7 @@ materialized_parser!(
   inp,
   Option<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
   "Parses an optional default value.\n\nSee the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).",
-  { super::default_value_with::<Src, Ctx, MaterializedNumbers>(inp) }
+  { super::default_value_with::<Src, Ctx, MaterializedNumbers32>(inp) }
 );
 
 #[cfg(test)]
