@@ -718,23 +718,29 @@ pub const INT_MEANINGS: [IntMeaning; 3] = [
 /// grain and a property that made one of them claim more than it knows would be testing the test.
 /// `IntOverflow::checked` is told only whether the pair is an overflow: its `Err` is "not an
 /// overflow at this width", which a literal that fits and a spelling that is not one both satisfy.
-/// The production resolves all three. Agreement is therefore the **intersection** being non-empty,
-/// and what the paths agree *on* is the one meaning left in it.
+/// The slice production is width-free — it decides whether the bytes are an `IntValue` and carries
+/// the spelling unconverted — so it rules out one meaning and never picks between the other two.
+/// Only the materialising production resolves all three. Agreement is therefore the
+/// **intersection** being non-empty, and what the paths agree *on* is the one meaning left in it.
 ///
-/// The width is `I`'s own — [`MaterializedInt::WIDTH`] — at every reader here, including the one
-/// that takes it as an argument. That is the join: the door dispatches on a value and the
+/// The width is `I`'s own — [`MaterializedInt::WIDTH`] — at every reader that has one, including
+/// the one that takes it as an argument. That is the join: the door dispatches on a value and the
 /// production dispatches on a type, and this is where the two are made to be the same width.
 ///
 /// # A list, because the defect was a path being added
 ///
-/// `MaterializedInt::parse` was public for one commit and answered `Some(7)` to `007`, which the
-/// production refuses and `checked` refuses. Nothing was wrong with either of those; what was
-/// wrong was that a **third** reader shipped and every property in the tree ranged over one path.
-/// So this is the list, and a path published later belongs in it — the array length is what makes
-/// leaving one out an edit somebody has to make rather than an omission.
+/// `MaterializedInt::parse` was public for one commit and answered `Some(7)` to `007`, which every
+/// path here refuses. Nothing was wrong with any of them; what was wrong was that a **fourth**
+/// reader shipped and every property in the tree ranged over one path. So this is the list, and a
+/// path published later belongs in it — the array length is what makes leaving one out an edit
+/// somebody has to make rather than an omission.
+///
+/// Membership is "a public entry that decides something about an integer literal's spelling or its
+/// magnitude". The lossless tower is not one of those: it records the lexer's diagnostics on a
+/// tree and converts nothing, so it has no reading to contribute and no way to disagree.
 ///
 /// [`MaterializedInt::WIDTH`]: smear::parser::graphql::syntactic::value::materialized::MaterializedInt::WIDTH
-pub fn public_int_readings<I>(literal: &str) -> [(&'static str, &'static [IntMeaning]); 2]
+pub fn public_int_readings<I>(literal: &str) -> [(&'static str, &'static [IntMeaning]); 3]
 where
   I: smear::parser::graphql::syntactic::value::materialized::MaterializedInt,
 {
@@ -743,6 +749,24 @@ where
     ast::IntValue,
     error::{ErrorData, GraphqlErrors, IntOverflow},
     syntactic::{GraphqlLexer, value::materialized},
+  };
+
+  let slice = {
+    let parsed: Result<IntValue<&str>, GraphqlErrors<&str>> = Parser::with_parser::<
+      GraphqlLexer<'_, str>,
+      IntValue<&str>,
+      GraphqlErrors<&str>,
+      _,
+      GraphQL,
+    >(IntValue::<&str>::graphql)
+    .parse_str(literal);
+
+    match parsed {
+      // It converted nothing, so all it has said is that these bytes are an `IntValue` — which
+      // rules out the lexer's refusal and picks between the other two not at all.
+      Ok(_) => &[IntMeaning::Converts, IntMeaning::Overflows][..],
+      Err(_) => &[IntMeaning::NotALiteral][..],
+    }
   };
 
   let production = {
@@ -773,7 +797,8 @@ where
   };
 
   [
-    ("the production", production),
+    ("the slice production", slice),
+    ("the materialising production", production),
     ("IntOverflow::checked", checked),
   ]
 }
@@ -1413,13 +1438,18 @@ mod tests {
   /// **Every public reader of an integer literal reaches one meaning, at both widths.**
   ///
   /// Stated over the reader list rather than as one assertion per reader, because the defect this
-  /// replaces was not a reader being wrong: it was a *third* reader shipping — `MaterializedInt`
+  /// replaces was not a reader being wrong: it was a *fourth* reader shipping — `MaterializedInt`
   /// went public and took its `parse` with it — while the properties in the tree each ranged over
-  /// one path. `007` was `Some(7)` to the new door, refused by the production, and refused by
-  /// `IntOverflow::checked`, and every test in the workspace stayed green.
+  /// one path. `007` was `Some(7)` to the new door and refused by all three below, and every test
+  /// in the workspace stayed green.
   ///
   /// So the quantifier is over [`public_int_readings`](super::public_int_readings): a path
   /// published later has to join that array, and joining it is what puts it under this property.
+  ///
+  /// It holds one thing beyond the leading zero, and holds it on every row: the slice production
+  /// and the materialising one never disagree about which spellings are `IntValue`s, because a
+  /// path ruling the lexer's refusal in where another rules it out leaves the intersection empty.
+  /// Materialisation converts a payload; it does not get to move the grammar.
   #[test]
   fn every_public_reader_of_an_int_literal_reaches_one_meaning() {
     use super::IntMeaning::{Converts, NotALiteral, Overflows};
