@@ -462,7 +462,7 @@ pub use execute::{Executor, Limits, Response, SetExtensionsError, StartError};
 pub use extensions::{Ceiling, Extensions, Full};
 pub use request::{Argument, ArgumentSource, FieldRequest, ReqId, SourceField};
 pub use request_error::{RequestErrorResult, TooLarge};
-pub use response::{Children, Node, Path, PathIter, Segment};
+pub use response::{Ancestors, Children, INLINE_SEGMENTS, Node, Path, PathIter, Segment};
 pub use subscribe::{ResponseStream, SourceEventError};
 pub use values::{Leaf, Values};
 

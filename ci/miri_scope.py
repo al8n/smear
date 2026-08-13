@@ -39,16 +39,27 @@ written, which is the shape of both defects above. It is also why an unmodelled 
 `target_os`, a bare `cfg` name this file does not know — is a hard ERROR rather than a guess:
 a guard that silently assumes is worse than one that stops.
 
-EXCEPT FOR ONE NUMBER, AND THE EXCEPTION IS THE POINT. `MIRI_IGNORE_BUDGET` — how many individual
-tests inside the compiled targets are skipped — is a frozen literal. Deriving it would make it
-unfalsifiable: a per-test `#[cfg_attr(miri, ignore)]` is invisible in the partition above, because
-the target still compiles, still runs and still passes, and the derived per-target count would
-simply agree with whatever the sources now say. Adding a fifth ignore would move the source to 5,
-move the log to 5, and stay green. The whole class of defect this file is about is a coverage cut
-that nobody chose, and this one's signature is ADDITION, which a derivation from the same sources
-erases. So the budget is written down, required in BOTH directions, and required to be restated in
+EXCEPT FOR ONE TABLE, AND THE EXCEPTION IS THE POINT. `MIRI_DECLARED_IGNORES` — which sources carry
+a per-test `#[ignore]`, and how many each — is written down rather than derived. Deriving it would
+make it unfalsifiable: a per-test `#[cfg_attr(miri, ignore)]` is invisible in the partition above,
+because the target still compiles, still runs and still passes, and a derived per-target count
+would simply agree with whatever the sources now say. Adding one more would move the source, move
+the log, and stay green. The whole class of defect this file is about is a coverage cut that nobody
+chose, and this one's signature is ADDITION, which a derivation from the same sources erases. So
+the set is declared, required in BOTH directions, and its total is required to be restated in
 `.github/workflows/miri.yml` — the derived check and the declared one are kept together, not
 traded off.
+
+WHY A TABLE AND NOT A TOTAL, WHICH IS WHAT THIS WAS. A frozen count answers "how many" and the
+question worth asking is "WHICH", and the two came apart in the direction that mattered: the
+derivation read `smear/tests/` and nothing else, so an ignore inside a selected package's LIBRARY
+unit tests was outside the derived count, outside the frozen total, and outside the per-target
+cross-check below — and the lib binaries' own `ignored` digits were parsed and then never compared
+to anything. A guard whose answer to "may this test be skipped?" was "no ignores anywhere" was, for
+the lib half of the very selection it defines, actually answering "any number of them, silently".
+The declared set closes both: it is keyed by repository-relative path over BOTH roots a cell
+compiles, an entry that no longer matches its file is a finding, and a file with an ignore and no
+entry is the finding this file exists for.
 
 Exit 0 on agreement, 1 on any disagreement. The excluded set is printed on every run, pass or
 fail, with the reason each target is on it, because "what this matrix does not cover" belongs in
@@ -148,25 +159,56 @@ MIRI_REASON = (
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 
-# How many individual tests, in total, a Miri cell may skip across the targets it compiles.
+# WHICH SOURCES A MIRI CELL MAY SKIP TESTS IN, AND HOW MANY IN EACH.
 #
-# A FROZEN LITERAL, and deliberately not derived. `declared_ignores()` below counts the `#[ignore]`
-# attributes in the sources and `check()` requires each target's run to report the same number,
-# which catches a RUN that disagrees with the tree. What it cannot catch is the tree moving: add a
-# fifth `#[cfg_attr(miri, ignore)]` and the source and the log agree at five, every per-target
-# check passes, and a coverage cut has ratified itself. An expectation derived from the sources it
-# constrains erases precisely the case whose signature is addition.
+# A FROZEN TABLE, and deliberately not derived. `ignore_sources()` below counts the `#[ignore]`
+# attributes in the files a cell compiles and `check()` requires each binary's run to report the
+# same number, which catches a RUN that disagrees with the tree. What that cannot catch is the tree
+# moving: add one more `#[cfg_attr(miri, ignore)]` and the source and the log agree on the new
+# number, every per-binary check passes, and a coverage cut has ratified itself. An expectation
+# derived from the sources it constrains erases precisely the case whose signature is addition.
 #
-# So the number is written down instead. Every per-test ignore is a deliberate coverage cut whose
-# cost is recorded in its file's header, and CHANGING THIS LITERAL IS THE DECISION BEING RECORDED:
-# the diff to this line is the thing a reviewer is meant to see. Move it in the same commit that
-# adds or removes the ignore, and restate it in `.github/workflows/miri.yml`, which is required
+# So the set is written down instead. Every per-test ignore is a deliberate coverage cut whose cost
+# is recorded in its file's header, and CHANGING THIS TABLE IS THE DECISION BEING RECORDED: the
+# diff to these lines is the thing a reviewer is meant to see. Move it in the same commit that adds
+# or removes the ignore, and restate the total in `.github/workflows/miri.yml`, which is required
 # below so the header cannot drift away from the guard.
+#
+# KEYED BY FILE RATHER THAN SUMMED, because a total cannot say where. It also cannot say where it
+# is not looking: the previous revision was a bare `4`, counted out of `smear/tests/` alone, so an
+# ignore in a selected package's `src/` was invisible to the count AND to the frozen number AND to
+# the run cross-check, which never looked at a lib binary's `ignored` digit at all. The keys below
+# span both roots and `ignore_sources()` derives from both, so "no undeclared ignore" is now a
+# statement about everything a cell builds rather than about half of it.
 #
 # A plain `#[ignore]` counts here too. It is not a Miri decision, but it is equally a test that
 # does not run in a Miri cell, and leaving it out would give the next coverage cut a spelling that
-# this budget does not see.
-MIRI_IGNORE_BUDGET = 4
+# this table does not see.
+#
+#   smear/tests/syntactic_span_extent.rs     the two corpus sweeps; `trivia_injection_leaves_
+#   smear/tests/syntactic_x_span_extent.rs   every_span_on_its_own_tokens` spent 5h40m inside
+#                                            itself on CI run 31318425279 and hit the six-hour job
+#                                            ceiling. Each file's header carries the measurement.
+#   graphql-proto/src/response/tests.rs      `a_deep_path_costs_its_depth_in_links_and_not_its_
+#                                            square`, a COST gate: it asserts slot traversals and
+#                                            allocator calls at depth 1 024, which is a claim about
+#                                            the shape of the work rather than about its soundness,
+#                                            and an interpreter answers the other question out of
+#                                            MIR the file's shallow legs already cover. Neither it
+#                                            nor its neighbour `execute::tests::a_flat_fragment_
+#                                            chain_is_linear` returned inside ten minutes under
+#                                            `cargo miri test`. The attribute's own `ignore = "..."`
+#                                            reason carries the argument.
+MIRI_DECLARED_IGNORES = {
+    "smear/tests/syntactic_span_extent.rs": 2,
+    "smear/tests/syntactic_x_span_extent.rs": 2,
+    "graphql-proto/src/response/tests.rs": 1,
+}
+
+# The same decision as one number, because `.github/workflows/miri.yml` states a total and every
+# run prints one. DERIVED from the table above and never written twice, so the sentence a reader is
+# given and the set the guard enforces cannot say different things.
+MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 
 # PROPERTY: every lib unit test in a publishable member is interpreted by both Miri cells, or its
 # member is recorded here as carrying none at this feature set.
@@ -332,9 +374,9 @@ def verify_exclusions(cargo: str = "cargo") -> int:
 
 # The three ways the budget can be wrong, named once so `check()` and `selftest()` cannot drift
 # apart on what they are calling them.
-BUDGET_OVER = "no per-test `#[ignore]` was added without raising the budget"
-BUDGET_UNDER = "no per-test `#[ignore]` was removed without lowering the budget"
-BUDGET_STATED = "`.github/workflows/miri.yml` restates the budget"
+BUDGET_OVER = "no per-test `#[ignore]` was added without declaring it"
+BUDGET_UNDER = "no per-test `#[ignore]` was removed without undeclaring it"
+BUDGET_STATED = "`.github/workflows/miri.yml` restates the declared total"
 
 # Where `miri.yml`'s header states that same number. Each entry is (what the site is, a pattern
 # with `{n}` standing in for the budget).
@@ -519,48 +561,143 @@ def resolved_features(manifest: pathlib.Path, extra: list[str], defaults: bool) 
     return out
 
 
+def ignores_in(path: pathlib.Path) -> int:
+    """How many of one file's tests a Miri cell will skip, by both spellings."""
+    text = path.read_text(encoding="utf-8")
+    return len(MIRI_IGNORE.findall(text)) + len(PLAIN_IGNORE.findall(text))
+
+
+def repo_relative(path: pathlib.Path) -> str:
+    """A path as `MIRI_DECLARED_IGNORES` spells it, whatever the caller passed.
+
+    The keys are repository-relative and the scripts run from the repository root, so this is
+    usually the identity — but `--tests-dir` accepts an absolute path, and a table compared against
+    absolute keys would match nothing and report the whole tree as undeclared.
+    """
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def declared_ignores(tests_dir: pathlib.Path) -> dict[str, int]:
-    """Per target, how many of its tests the SOURCE says a Miri cell will skip.
+    """Per integration target, how many of its tests the SOURCE says a Miri cell will skip.
 
     A whole target excluded by its `#![cfg(...)]` is loud — it vanishes from the covered list and
     `check` prints it with a reason. A single test carrying `#[cfg_attr(miri, ignore)]` is not: it
     becomes one digit in `2 ignored` that nobody reads, which is #73's mechanism one level down.
     So the count is derived from the files and required to match what the run reports.
+
+    Keyed by target stem, because that is what a `Running tests/<stem>.rs` line gives.
+    [`declared_lib_ignores`] is the same question for the other half of what a cell builds, keyed
+    by package, and [`ignore_sources`] is both of them keyed by file for the declared-set check.
+    """
+    return {path.stem: ignores_in(path) for path in sorted(tests_dir.glob("*.rs"))}
+
+
+def declared_lib_ignores() -> dict[str, int]:
+    """Per selected package, how many of its LIB unit tests the source says a cell will skip.
+
+    The half that was not being asked. Cargo spells every package's unit-test binary the same way,
+    so the `ignored` digit each one prints was parsed and then compared to nothing at all — a
+    `#[cfg_attr(miri, ignore)]` on a lib test moved no number this guard read. The whole `src/` tree
+    is walked rather than a list of files, because the point is to see one that nobody declared.
+    """
+    return {
+        package: sum(
+            ignores_in(path)
+            for path in sorted((REPO_ROOT / package / "src").rglob("*.rs"))
+        )
+        for package in MIRI_PACKAGES
+    }
+
+
+def ignore_sources(tests_dir: pathlib.Path, compiled: list[str]) -> dict[str, int]:
+    """Every source a Miri cell compiles that carries a per-test `#[ignore]`, and how many.
+
+    Keyed the way `MIRI_DECLARED_IGNORES` is keyed, because the two are compared entry by entry.
+
+    TWO ROOTS, and both are what a cell builds:
+
+      * the integration targets this cell's feature set COMPILES — an ignore inside a target the
+        cell does not build changes no coverage here, and a target leaving the compiled set takes
+        its ignores with it, which is itself a coverage change and shows up as the table
+        disagreeing;
+      * every selected package's `src/`, whose lib unit tests are the largest thing a cell
+        interprets and were entirely outside this accounting until the table replaced the total.
+
+    Benches and examples are in neither, because no Miri cell builds them.
     """
     out: dict[str, int] = {}
-    for path in sorted(tests_dir.glob("*.rs")):
-        text = path.read_text(encoding="utf-8")
-        out[path.stem] = len(MIRI_IGNORE.findall(text)) + len(PLAIN_IGNORE.findall(text))
+    for stem in compiled:
+        path = tests_dir / f"{stem}.rs"
+        count = ignores_in(path)
+        if count:
+            out[repo_relative(path)] = count
+    for package in MIRI_PACKAGES:
+        for path in sorted((REPO_ROOT / package / "src").rglob("*.rs")):
+            count = ignores_in(path)
+            if count:
+                out[repo_relative(path)] = count
     return out
 
 
-def budget_findings(compiled: list[str], declared: dict[str, int]) -> dict[str, str]:
-    """The frozen-budget checks, as {case name: finding} for the cases that FAILED.
+def package_of(binary: str) -> str | None:
+    """Which selected package a `Running unittests src/lib.rs (<path>)` line belongs to.
+
+    Cargo names a lib test binary `<package with `-` spelled `_`>-<hash>`, and that file name is
+    the ONLY thing distinguishing one package's unit-test binary from another's in the log — the
+    text before the parentheses is identical for all of them. `None` for a binary that names no
+    selected package, which is a finding rather than something to skip past.
+    """
+    stem = pathlib.Path(binary).name.rsplit("-", 1)[0]
+    for package in MIRI_PACKAGES:
+        if stem == package.replace("-", "_"):
+            return package
+    return None
+
+
+def budget_findings(sources: dict[str, int]) -> dict[str, str]:
+    """The declared-set checks, as {case name: finding} for the cases that FAILED.
 
     Keyed rather than listed because `--selftest` has to show each one failing on its own, and a
-    case that cannot be named separately cannot be proven separately. The counterpart to
-    `declared_ignores()`: that function asks whether the RUN matches the tree, and this one asks
+    case that cannot be named separately cannot be proven separately. The counterpart to the
+    per-binary cross-check in `check()`: that asks whether the RUN matches the tree, and this asks
     whether the tree still matches the decision, which is the half nothing constrained.
 
-    Only the compiled targets count. An ignore inside a target this cell does not build changes no
-    coverage here, and a target moving out of the compiled set takes its ignores with it — which
-    is itself a coverage change, and shows up as the budget dropping.
+    `sources` is what `ignore_sources()` derived — every file a cell compiles that carries an
+    ignore. The finding names the FILE in both directions, because "the total moved" sent a reader
+    looking for a number and what they need is the line.
     """
     out: dict[str, str] = {}
-    total = sum(declared.get(name, 0) for name in compiled)
-    if total != MIRI_IGNORE_BUDGET:
-        carrying = ", ".join(
-            f"{name} ({declared[name]})" for name in compiled if declared.get(name)
+    over = sorted(
+        f"{path} carries {count} and the table declares {MIRI_DECLARED_IGNORES.get(path, 0)}"
+        for path, count in sources.items()
+        if count > MIRI_DECLARED_IGNORES.get(path, 0)
+    )
+    under = sorted(
+        f"{path} carries {sources.get(path, 0)} and the table declares {count}"
+        for path, count in MIRI_DECLARED_IGNORES.items()
+        if sources.get(path, 0) < count
+    )
+    if over:
+        out[BUDGET_OVER] = (
+            "a source a Miri cell compiles carries more `#[ignore]`s than "
+            "`ci/miri_scope.py`'s `MIRI_DECLARED_IGNORES` declares for it: "
+            + "; ".join(over)
+            + ". Skipping a test under Miri is a coverage cut, so adding one is a decision and not "
+            "bookkeeping: if it is intended, move the entry in the same commit, restate the new "
+            f"total in `{WORKFLOW.name}`, and say in the test's own `ignore = \"...\"` reason what "
+            "the cut costs."
         )
-        direction = BUDGET_OVER if total > MIRI_IGNORE_BUDGET else BUDGET_UNDER
-        moved = "added" if total > MIRI_IGNORE_BUDGET else "removed"
-        out[direction] = (
-            f"{total} of the tests in the compiled targets carry `#[ignore]` and the budget in "
-            f"`ci/miri_scope.py` is {MIRI_IGNORE_BUDGET}. Skipping a test under Miri is a coverage "
-            f"cut, so one being {moved} is a decision and not bookkeeping: if it is intended, move "
-            f"`MIRI_IGNORE_BUDGET` to {total} in the same commit, restate it in `{WORKFLOW.name}`, "
-            "and say in the target's header what the cut costs. Currently carrying: "
-            + (carrying or "none")
+    if under:
+        out[BUDGET_UNDER] = (
+            "`ci/miri_scope.py`'s `MIRI_DECLARED_IGNORES` declares more `#[ignore]`s than the "
+            "sources carry: "
+            + "; ".join(under)
+            + ". Either an ignore was removed and this table is stale — drop the entry and restate "
+            f"the new total in `{WORKFLOW.name}` — or the file moved out of what a cell compiles, "
+            "which is itself a coverage change and has to be recorded as one."
         )
 
     try:
@@ -623,20 +760,26 @@ def partition(
     return excluded, compiled
 
 
-def ran_counts(log: pathlib.Path) -> tuple[dict[str, int], list[tuple[str, int]]]:
-    """Read the log into (integration targets -> test count, lib binaries in order).
+def ran_counts(log: pathlib.Path):
+    """Read the log into (targets -> tests, lib binaries in order, target -> ignored,
+    lib binary -> ignored).
 
-    The two are kept apart because cargo spells every package's unit-test binary
-    `Running unittests src/lib.rs (<path>)` — the same text for all of them, distinguished only
-    by the path in parentheses. Collapsing them onto one key silently keeps whichever ran first,
-    and on a workspace-wide selection that is a coin toss between packages: the CI log of run
-    31073592771 has two, `smear`'s and the since-dissolved `smear-apollo-bench`'s, both empty. So
-    they are returned as a LIST and the caller requires exactly one, which is both the truth under
-    `-p smear` and a direct check that the selection is still one package.
+    Integration targets and lib binaries are kept apart because cargo spells every package's
+    unit-test binary `Running unittests src/lib.rs (<path>)` — the same text for all of them,
+    distinguished only by the path in parentheses. Collapsing them onto one key silently keeps
+    whichever ran first, and on a workspace-wide selection that is a coin toss between packages:
+    the CI log of run 31073592771 has two, `smear`'s and the since-dissolved
+    `smear-apollo-bench`'s, both empty. So they are returned as a LIST and the caller requires one
+    per selected package.
+
+    The SAME collapse used to swallow the lib binaries' `ignored` digits — one key, first writer
+    wins, and no reader — so those are returned keyed by binary path, which is the only thing that
+    tells one of them from another.
     """
     counts: dict[str, int] = {}
     libs: list[tuple[str, int]] = []
     ignored: dict[str, int] = {}
+    lib_ignored: dict[str, int] = {}
     current: str | None = None
     binary: str | None = None
     current_path: str = ""
@@ -663,8 +806,11 @@ def ran_counts(log: pathlib.Path) -> tuple[dict[str, int], list[tuple[str, int]]
             continue
         skipped = IGNORED.match(line.strip())
         if skipped and binary is not None:
-            ignored.setdefault(binary, int(skipped.group(1)))
-    return counts, libs, ignored
+            if binary == "<lib>":
+                lib_ignored.setdefault(current_path, int(skipped.group(1)))
+            else:
+                ignored.setdefault(binary, int(skipped.group(1)))
+    return counts, libs, ignored, lib_ignored
 
 
 def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
@@ -696,14 +842,29 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     a_excluded, a_compiled = sorted(excluded)[0], sorted(compiled)[0]
 
     declared = declared_ignores(tests_dir)
+    lib_declared = declared_lib_ignores()
 
-    def log(entries: list[tuple[str, int | None]]) -> str:
+    # A `lib:<package>` entry is a lib unit-test binary and anything else is an integration target.
+    # A PREFIX and not a bare package name, because a test target is free to be called
+    # `graphql-proto` and the two would then be the same key — the collapse this guard has already
+    # been bitten by once, rebuilt inside its own selftest.
+    def log(entries: list[tuple[str, int | None]],
+            ignored_override: dict[str, int] | None = None) -> str:
         out = []
-        for i, (name, count) in enumerate(entries):
-            path = "unittests src/lib.rs" if name == "<lib>" else f"tests/{name}.rs"
-            out.append(f"     Running {path} (/tmp/build/pkg{i}/{name}-deadbeef)")
+        for name, count in entries:
+            package = name[4:] if name.startswith("lib:") else None
+            if package is None:
+                where, binary = f"tests/{name}.rs", name
+            else:
+                where, binary = "unittests src/lib.rs", package.replace("-", "_")
+            out.append(f"     Running {where} (/tmp/build/deps/{binary}-deadbeef)")
             if count is not None:
-                skip = declared.get(name, 0)
+                if ignored_override and name in ignored_override:
+                    skip = ignored_override[name]
+                elif package is None:
+                    skip = declared.get(name, 0)
+                else:
+                    skip = lib_declared.get(package, 0)
                 out.append(f"running {count} tests")
                 out.append(
                     f"test result: ok. {count - skip} passed; 0 failed; {skip} ignored; "
@@ -719,8 +880,12 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     # first case moves a target from 0 ignored to 1, which is the same finding.
     a_skipping = next((n for n in sorted(compiled) if declared.get(n, 0)), a_compiled)
     a_declared = declared.get(a_skipping, 0)
+    # And the same on the library side, which is the half the declared set was introduced for.
+    a_lib_skipping = next((p for p in MIRI_PACKAGES if lib_declared.get(p)), MIRI_PACKAGES[0])
+    a_lib_declared = lib_declared.get(a_lib_skipping, 0)
     # One lib binary per selected package, which is what a correct run produces.
-    libs_clean = [("<lib>", 400 - 10 * i) for i in range(len(MIRI_PACKAGES))]
+    libs_clean = [(f"lib:{package}", 400 - 10 * i)
+                  for i, package in enumerate(MIRI_PACKAGES)]
     clean = (libs_clean
              + [(n, 0) for n in sorted(excluded)]
              + [(n, floor) for n in sorted(compiled)])
@@ -736,7 +901,7 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
         ("a compiled target absent from a run that ABORTED is truncation, not a finding",
          log([e for e in clean if e[0] != a_compiled]), True, 1, 0),
         ("a lib binary reporting zero tests fails",
-         log([("<lib>", 0)] + clean[1:]), True, 0, 1),
+         log([(libs_clean[0][0], 0)] + clean[1:]), True, 0, 1),
         ("a lib binary never running fails",
          log(clean[1:]), True, 0, 1),
         ("`--lib` alone does not require the integration targets to appear",
@@ -750,7 +915,7 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
         # distinguished only by the path. More of them than `MIRI_PACKAGES` names means the
         # selection is wider than the scripts pass.
         ("one lib binary too many fails (#77, from the other end)",
-         log(libs_clean + [("<lib>", 7)] + clean[len(libs_clean):]), True, 0, 1),
+         log(libs_clean + [("lib:smear", 7)] + clean[len(libs_clean):]), True, 0, 1),
         # And the direction the crate split introduced: a package silently leaving the selection
         # takes its unit tests with it and every other check here stays green.
         ("one lib binary too few fails (a package left the selection)",
@@ -769,7 +934,18 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
         ("a target whose every test is ignored fails",
          log([(n, declared.get(n, 0)) if n == a_skipping else (n, c) for n, c in clean]),
          True, 0, 1),
+        # THE HALF THAT WAS NOT BEING ASKED. A lib binary's `ignored` digit was parsed and compared
+        # to nothing, so a `#[cfg_attr(miri, ignore)]` on a lib unit test moved no number this guard
+        # read. Both directions, keyed by binary path rather than by the collapsed `<lib>` line
+        # every package shares.
+        ("a lib binary reporting one more ignored test than its `src/` declares fails",
+         log(clean, {f"lib:{a_lib_skipping}": a_lib_declared + 1}), True, 0, 1),
     ]
+    if a_lib_declared:
+        cases.append(
+            ("a lib binary reporting one fewer ignored test than its `src/` declares fails",
+             log(clean, {f"lib:{a_lib_skipping}": a_lib_declared - 1}), True, 0, 1)
+        )
 
     # Read first, and printed first, because every case below is built out of `declared` and so
     # agrees with the tree by construction: if the tree has drifted off the budget these will say
@@ -779,7 +955,7 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     # one input this guard both reads and is constrained by, so a case that only synthesises a log
     # exercises the half that was never the problem.
     budget_cases = (BUDGET_OVER, BUDGET_UNDER, BUDGET_STATED)
-    found = budget_findings(compiled, declared)
+    found = budget_findings(ignore_sources(tests_dir, compiled))
     bad = 0
     for name in budget_cases:
         finding = found.get(name)
@@ -838,10 +1014,11 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
         print(f"::error::miri_scope selftest: {bad} of {total_cases} cases did "
               "not behave as written — this guard does not check what its header claims")
         return 1
+    sources = ignore_sources(tests_dir, compiled)
     print(f"miri_scope selftest OK: {total_cases} cases, "
           f"{len(excluded)} excluded / {len(compiled)} compiled targets in {tests_dir}, "
-          f"{sum(declared.get(n, 0) for n in compiled)} individual tests skipped against a "
-          f"budget of {MIRI_IGNORE_BUDGET}, "
+          f"{sum(sources.values())} individual tests skipped in {len(sources)} source file(s), "
+          f"against a declared set of {MIRI_IGNORE_BUDGET} in {len(MIRI_DECLARED_IGNORES)}, "
           f"feature set {{{', '.join(sorted(features))}}}")
     return 0
 
@@ -868,8 +1045,10 @@ def check(
               "pass by having nothing to check, which is the defect it exists to catch")
         return 1
 
-    counts, libs, ignored = ran_counts(log)
+    counts, libs, ignored, lib_ignored = ran_counts(log)
     declared = declared_ignores(tests_dir)
+    lib_declared = declared_lib_ignores()
+    sources = ignore_sources(tests_dir, compiled)
 
     print()
     print("── Miri scope ──────────────────────────────────────────────────────────────────")
@@ -880,14 +1059,22 @@ def check(
         print(f"  reason: {reason}")
         for name in sorted(n for n, r in excluded.items() if r == reason):
             print(f"    - {name}")
-    print(f"COVERED: the lib unit tests plus {len(compiled)} integration targets"
+    print(f"COVERED: the lib unit tests of {len(MIRI_PACKAGES)} packages plus {len(compiled)} "
+          "integration targets"
           + ("" if tests_selected else " (this cell runs `--lib` only; see the script header)"))
+    for package in MIRI_PACKAGES:
+        skip = lib_declared.get(package, 0)
+        note = f"  ({skip} of its lib unit tests carry `#[ignore]` here)" if skip else ""
+        print(f"    + {package} (lib){note}")
     for name in compiled:
         skip = declared.get(name, 0)
         note = f"  ({skip} of its tests carry `#[ignore]` here)" if skip else ""
         print(f"    + {name}{note}")
-    print(f"SKIPPED INSIDE THOSE: {sum(declared.get(n, 0) for n in compiled)} individual tests, "
-          f"against a frozen budget of {MIRI_IGNORE_BUDGET}")
+    print(f"SKIPPED INSIDE THOSE: {sum(sources.values())} individual tests in "
+          f"{len(sources)} source file(s), against a declared set of {MIRI_IGNORE_BUDGET} in "
+          f"{len(MIRI_DECLARED_IGNORES)}")
+    for path in sorted(sources):
+        print(f"    ! {path}  ({sources[path]})")
     print("────────────────────────────────────────────────────────────────────────────────")
     print()
 
@@ -916,6 +1103,37 @@ def check(
             "a lib unit-test binary reported `running 0 tests`: "
             + ", ".join(path for path, count in libs if count == 0)
         )
+
+    # The per-test half, for the half of a cell that was never asked. Each lib binary's `ignored`
+    # digit is held against what that package's `src/` declares — the check the integration targets
+    # have had since #73's repair and the libraries did not, even though they are the larger part of
+    # what a cell interprets.
+    for path, _ in libs:
+        package = package_of(path)
+        if package is None:
+            failures.append(
+                f"{path}: a lib unit-test binary whose file name matches no selected package "
+                f"({', '.join(MIRI_PACKAGES)}). Cargo names it after the package it belongs to, so "
+                "either the selection is wider than these scripts pass or this guard can no longer "
+                "tell whose unit tests it is reading — and it cannot check a skip count it cannot "
+                "attribute"
+            )
+            continue
+        want = lib_declared.get(package, 0)
+        got = lib_ignored.get(path)
+        if got is None:
+            (notes if aborted else failures).append(
+                f"{package}: its lib unit-test binary printed no `test result:` line, so this "
+                "guard cannot tell how many of its tests were skipped"
+            )
+        elif got != want:
+            failures.append(
+                f"{package}: its lib unit-test binary reported {got} ignored test(s) and its "
+                f"`src/` declares {want}. A per-test `#[cfg_attr(miri, ignore)]` on a lib test is "
+                "the quietest coverage cut in this repository — the binary still runs, still "
+                "passes, and one digit moves — so it is counted out of the sources and required to "
+                "match, the same way an integration target's is"
+            )
 
     for name in compiled:
         got = counts.get(name)
@@ -973,7 +1191,7 @@ def check(
 
     # Everything above compares the run to the tree. This compares the tree to the decision, and
     # is the only check here that a log cannot satisfy by agreeing with the sources.
-    failures.extend(budget_findings(compiled, declared).values())
+    failures.extend(budget_findings(sources).values())
 
     if notes:
         print(f"miri_scope: `cargo miri test` exited {miri_status}, so the run stopped early "

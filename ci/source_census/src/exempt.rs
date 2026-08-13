@@ -382,7 +382,82 @@ pub const EXEMPTIONS: &[Exemption] = &[
     issue: None,
     reason: EXTENSION_KEY,
   },
+  // ── The draft §7.2.1 writer — three of its `&str`s are output, two are genuinely narrow ──────
+  //
+  // Worth reading as a group, because the rule gets all five right in the direction this table's
+  // header calls evidence FOR it: `smear::json` writes JSON, and JSON is UTF-8 by definition, so
+  // most of its `&str`s are bytes on the way OUT rather than a caller's document on the way in.
+  // The two that really are a document are recorded as debt with an issue.
+  Exemption {
+    module: "smear::json",
+    entry: "Json::string",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: JSON_OUTPUT,
+  },
+  Exemption {
+    module: "smear::json",
+    entry: "Object::key",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: JSON_OUTPUT,
+  },
+  Exemption {
+    module: "smear::json",
+    entry: "Json::graphql_string",
+    param: "literal",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: "A GraphQL string literal's SOURCE spelling, delimiters included, so the rule is right \
+             that this one is a document where `Json::string` beside it is not. What the narrowing \
+             costs today is exact and small: the two `WriteJson` implementations require \
+             `S: AsRef<str>`, so a materialised value tree parsed over a `[u8]` backing — which \
+             `smear-parser`'s own suite drives — has no writer. Widening is not a signature change \
+             alone, which is why it is recorded rather than done: the byte lexer does not validate \
+             UTF-8 INSIDE a string literal — `LitInlineStr<&[u8]>` reaches `LitInlineStr<&str>` \
+             through a `TryFrom` whose error is `Utf8Error` — so an `AsRef<[u8]>` door needs a \
+             fifth `Error` variant for a literal that is not UTF-8, and that variant is a public \
+             API decision about a case draft §2.1 says a conforming document cannot contain. #122 \
+             owns the widening, and this parameter is the whole of what it has to widen here.",
+  },
+  Exemption {
+    module: "smear::json::response",
+    entry: "write_response",
+    param: "document",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: WRITER_DOCUMENT,
+  },
+  Exemption {
+    module: "smear::json::response",
+    entry: "write_response_with",
+    param: "document",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: WRITER_DOCUMENT,
+  },
 ];
+
+/// The writer's output-side `&str`s: not a caller's document in either direction.
+const JSON_OUTPUT: &str = "Bytes on the way OUT, not a document on the way in. This parameter is content the writer quotes \
+   and escapes into a JSON string, and RFC 8259 §8.1 makes a JSON document exchanged between \
+   systems UTF-8 — so the narrow type is the format's and not this crate's. The sink is a \
+   `core::fmt::Write`, which accepts `&str` and nothing else, so a byte-slice door would have to \
+   validate UTF-8 and refuse, adding a failure mode to a call that today cannot fail for a reason \
+   of its own. Test 3 does not acquit it because `Json<W>`'s parameter is the SINK and carries no \
+   source type, which is right: there is no document here for it to have carried.";
+
+/// Why the two response doors take the executed document as `&str`.
+const WRITER_DOCUMENT: &str = "The source text the operation was parsed from, read for exactly one thing: turning the byte \
+   span `graphql-proto` records on a field error into draft §7.1.2's `line` and `column`. It is \
+   genuinely a document and the rule is right to convict it. Widening it belongs to #122 and is \
+   not free the way the schema doors are: the column is counted in CHARACTERS, so an \
+   `AsRef<[u8]>` door either decodes UTF-8 as it walks — and must then decide what a malformed \
+   sequence counts as, inside a function whose whole job is to name a position — or silently \
+   changes the unit to bytes and reports a different column for the same token. Recorded rather \
+   than guessed. One parameter on two doors that share a body.";
 
 /// Refuses a table that would let a narrowing through without an argument.
 pub fn validate() -> Vec<String> {

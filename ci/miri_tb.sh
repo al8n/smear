@@ -110,12 +110,20 @@ MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-ali
 # a `--test`-level list in this script would be a second statement of the same fact, free to
 # drift from the first.
 #
-# The derived count does not stand alone, because on its own it ratifies additions: a fifth
+# The derived count does not stand alone, because on its own it ratifies additions: one more
 # `#[cfg_attr(miri, ignore)]` moves the source and the reported `ignored` together, they agree,
 # and the cell stays green over a coverage cut nobody chose. So `ci/miri_scope.py` also holds
-# `MIRI_IGNORE_BUDGET`, a frozen total that fails the cell in EITHER direction and requires
-# `.github/workflows/miri.yml` to keep stating the same number. Adding or removing one of these
-# ignores is a decision, and it is meant to show up as a diff to that literal.
+# `MIRI_DECLARED_IGNORES`, a frozen file-by-file table that fails the cell in EITHER direction and
+# requires `.github/workflows/miri.yml` to keep stating its total. Adding or removing one of these
+# ignores is a decision, and it is meant to show up as a diff to that table.
+#
+# A TABLE AND NOT A TOTAL, AND THE TOTAL WAS COUNTED SOMEWHERE TOO NARROW. The count used to be
+# derived from `smear/tests/` alone, so an ignore inside a selected package's `src/` was outside
+# it — and the lib binaries' own `ignored` digits were parsed and compared to nothing at all. Both
+# roots are read now, every lib binary's digit is held against its package's sources, and the
+# declared set is keyed by file so a finding names the line rather than a number. There is one
+# entry outside `smear/tests/` today: `graphql-proto/src/response/tests.rs`, a cost gate at
+# response depth 1 024 that measures work rather than soundness.
 #
 # What it costs is small for the question Miri answers. Miri decides whether an execution path has
 # undefined behaviour; those four sweeps vary the INPUT — 56 and 90 corpus entries times eight

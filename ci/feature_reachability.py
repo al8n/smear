@@ -147,9 +147,12 @@ UMBRELLA = "smear"
 #                                                                  post-run binary count checks it
 #   MIRI_NOT_SELECTED              this member's lib harness is    --verify-exclusions re-runs the
 #     (miri_scope)                 empty at these cargo flags      measurement the reason names
-#   MIRI_IGNORE_BUDGET             how many per-test ignores       counted out of the sources, and
-#     (miri_scope)                                                 restated in miri.yml
-#   WORKFLOW_BUDGET_SITES          where miri.yml restates it      matched against miri.yml
+#   MIRI_DECLARED_IGNORES          WHICH sources carry a per-test  counted out of BOTH roots a cell
+#     (miri_scope)                 ignore, and how many in each    compiles, held against every
+#                                                                  binary's `ignored` digit, and its
+#                                                                  total restated in miri.yml
+#   WORKFLOW_BUDGET_SITES          where miri.yml restates the     matched against miri.yml
+#     (miri_scope)                 declared total
 #   CELL_FLAGS                     value of each bare cfg in a     self-verifying: an unmodelled
 #     (miri_scope)                 Miri cell                       cfg raises rather than guesses
 #   EXEMPTIONS (40 entries)        this error type is outside      an entry matching nothing is a

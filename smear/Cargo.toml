@@ -96,11 +96,19 @@ validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build"]
 # §7.1.2's whole *request*-error phase is over before an `Executor` exists, which is why no method
 # on one returns a validation failure.
 #
-# It adds no THIRD-PARTY dependency and defines no value type of its own: the driver's
-# representation reaches it through the `proto::Values` trait, so `graphql-proto` is `core` +
-# `alloc` for the same reason the schema representation is, and it takes `smear-schema` with
-# default features off so reading a schema does not pull the front end.
-proto = ["validator", "dep:graphql-proto"]
+# `graphql-proto` itself adds no THIRD-PARTY dependency and defines no value type of its own: the
+# driver's representation reaches it through the `proto::Values` trait, so it is `core` + `alloc`
+# for the same reason the schema representation is, and it takes `smear-schema` with default
+# features off so reading a schema does not pull the front end.
+#
+# TWO THIRD-PARTY CRATES ARRIVE HERE ANYWAY, and they are this crate's rather than that one's:
+# `smear::json` — the draft §7.2.1 writer, which is a module of THIS package because it needs both
+# the response and the values — renders numbers with `itoa` and `zmij`. The `[dependencies]` block
+# has why those two and why neither undoes the point of the module. They hang off `proto` rather
+# than off a `json` feature of their own so that the module is exactly as reachable as the
+# response it writes, and so that `ci/hack.sh` gains no cell for a gate that could only ever be on
+# where `proto` already is.
+proto = ["validator", "dep:graphql-proto", "dep:itoa", "dep:zmij"]
 
 # The second construction door: building a `Schema` out of a draft §4 introspection response
 # instead of out of SDL (`Schema::from_introspection`).
@@ -228,6 +236,28 @@ graphql-proto = { workspace = true, optional = true }
 # reads one.
 smear-compiler = { workspace = true, optional = true }
 
+# ── THE TWO NUMBER FORMATTERS, BEHIND `proto` WITH THE MODULE THAT USES THEM ─────────────────
+#
+# `smear::json` renders an integer with `itoa` and a double with `zmij`. Turning a number into text
+# is the one part of a JSON writer that is genuinely hard to beat and is already solved twice over,
+# and these two are checkable facts rather than reputation:
+#
+#   * `itoa` is ALREADY IN THIS WORKSPACE'S GRAPH — `serde_json` pulls it for
+#     `smear-schema/introspection` — so it is a new edge and not a new crate in the tree.
+#   * `zmij` is the same author's Schubfach + yy double-to-string, and is the only new crate.
+#
+# Both are `#![no_std]` with ZERO dependencies, which is what makes them coherent with the point of
+# the module they arrived for. That module exists so this workspace can stop depending on serde,
+# whose two crates are `std`-only in a stack carrying a no-std tier; replacing them with anything
+# heavier would undo the reason for doing it.
+#
+# `ryu` IS THE STALE ANSWER, recorded so the next reader does not "correct" this. serde_json
+# 1.0.151's own dependency list is `itoa, memchr, serde, serde_core, zmij` — no `ryu` — and `ryu`
+# is not in this workspace's lock file at all. `zmij` is its successor and ships a
+# `ryu_comparison` benchmark of its own.
+itoa = { version = "1", default-features = false, optional = true }
+zmij = { version = "1", default-features = false, optional = true }
+
 # `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
 # package's own `tests/` name those types directly to build a source of each backing.
 hipstr = { version = "0.8", default-features = false, optional = true }
@@ -299,6 +329,30 @@ cynic-parser = "=0.11.2"
 # any runner, and what lets the 1.4 GB `prefixes` dump be hashed in bounded memory rather than
 # materialised.
 sha2 = { version = "0.10", default-features = false }
+
+# ── THE JSON WRITER'S ORACLE, AND WHY IT HAS TO BE THIS CRATE ────────────────────────────────
+#
+# `tests/json_writer.rs` parses what `smear::json` emits and compares the resulting VALUE against
+# one built by hand. The point is independence: a writer checked against expectations produced by
+# the same writer proves nothing, so the reader on the other side of the round trip must not share
+# a line of code with it — and `serde_json` is a reader this workspace already carries, written by
+# someone else, that has never seen this module.
+#
+# A DEV-DEPENDENCY IS NOT THE DEPENDENCY THE SERDE WORK IS REMOVING. That one is
+# `smear-schema`'s `introspection` feature naming `serde` and `serde_json` in `[dependencies]`,
+# where it reaches a consumer's graph and pins two `std`-only crates into a stack with a no-std
+# tier. Cargo drops dev-dependencies when packaging and keeps them out of `cargo tree -p smear`,
+# so this edge changes neither of those facts. When the removal commit lands, `cargo tree` is what
+# says whether the claim is true, and this entry is not in what it reads.
+#
+# `float_roundtrip` IS LOAD-BEARING AND WAS ADDED AFTER A FAILURE, not by precaution. serde_json's
+# default float parsing is best-effort by design — its own feature list says the exact path "comes
+# at an approximately 2x performance cost" — and measured on this tree it reads `123456789.12345679`
+# back as `419d6f34547e6b76` where Rust's own `str::parse::<f64>` and Python both give
+# `419d6f34547e6b75`. An oracle one ULP away from correct cannot settle whether `zmij` round-trips,
+# and the failure looked exactly like a defect in the writer. The feature makes the reader exact,
+# and this comment is why nobody should drop it to save a build second.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 # The crate depending on itself, so `test-support` is on for every dev target — tests, benches,
 # examples, doctests — and off for every consumer.
