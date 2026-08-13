@@ -51,7 +51,7 @@
 //! opinion. That third gate needs both of its axes and would pass on either one alone, which is why
 //! the counter it reads says so at length.
 //!
-//! # Every growable allocation on this path, enumerated rather than found one round at a time
+//! # The three buffers THIS FILE grows, which are three rows of an enumeration one level up
 //!
 //! **And it is worth saying why this file keeps attracting them.** It is the only place that
 //! touches the whole document and the whole response tree once per error, so every decision made
@@ -62,15 +62,23 @@
 //!
 //! The fourth is why this table exists rather than a fifth repair. A structure that arrives as the
 //! answer to a finding reads as already designed, and the frame stack was: for the one property it
-//! repaired. Nobody priced its own growth. So the answer to "which is the next one" is an
-//! enumeration and not a search — **every buffer this writer can grow, what bounds it, where its
-//! size is known from, and what happens when the allocator says no**:
+//! repaired. Nobody priced its own growth.
 //!
 //! | buffer | what bounds its size | reserved from | growth |
 //! |---|---|---|---|
 //! | [`write_node`]'s frame stack | one frame per open container: the response's depth | [`Response::depth`](graphql_proto::Response::depth), recorded at each position's creation | one `try_reserve_exact`, [`Error::Allocation`] |
 //! | `write_response_with`'s `segments` | the deepest error path in the response | [`Path::len`](graphql_proto::Path::len), the same recorded number | one `try_reserve` per path, [`Error::Allocation`] |
 //! | [`Locations`]'s checkpoints | one per [`STRIDE`] bytes of the document, plus one | the document's length | one `try_reserve_exact`, [`Error::Allocation`] |
+//!
+//! **THE TABLE IS SCOPED TO THIS FILE, AND SAYING SO IS THE REPAIR THE ROUND AFTER IT ASKED FOR.**
+//! It used to be headed "every growable allocation on this path", and that claim was wrong in two
+//! directions at once. The path leaves this file — a response leaf and an `extensions` value are
+//! written by [`super::materialized`] or by the caller — and an allocation is not the only thing a
+//! serialiser can exhaust. The defect that survived this table grew the **native stack**, in that
+//! sibling module, over a value whose nesting [`Response::depth`](graphql_proto::Response::depth)
+//! does not describe. A file-local table asserting a whole-path property is the shape of that
+//! mistake, so the closed list lives in [`super`]'s header, where both modules and both exhaustible
+//! resources can be named, and these three are three of its rows.
 //!
 //! And the rows that are *not* allocations, listed because "there is nothing else" is the claim and
 //! an absence has to be enumerated to be checked: the sink is the caller's `fmt::Write` and this
@@ -82,7 +90,8 @@
 //! [`Path::iter`](graphql_proto::Path::iter) is the one door in `graphql-proto` that still
 //! allocates infallibly, and it is deliberately not on this path: it backs `Debug` and `Display`,
 //! and what this file writes an error *message* with is
-//! [`Json::display`](super::Json::display) over the error's own `Display`, which renders no path.
+//! [`Json::display`](super::Json::display) over the error's own `Display`, which renders no path —
+//! and which is a `match` over one error row, so it adds no native frames either.
 
 use core::fmt;
 
@@ -559,6 +568,8 @@ thread_local! {
   static VISITED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
   /// Allocating events on this thread, whoever made them.
   static ALLOCATED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+  /// The request size, in bytes, at and above which the allocator answers no on this thread.
+  static REFUSE_AT: core::cell::Cell<usize> = const { core::cell::Cell::new(usize::MAX) };
 }
 
 /// Records that the writer looked at `count` bytes of the document.
@@ -594,28 +605,87 @@ struct Counting;
 
 #[cfg(test)]
 // SAFETY: every method forwards to `System` with the layout it was given, unchanged, and returns
-// exactly what `System` returned. The tally is a `Cell<u64>` in thread-local storage, reached
-// through `try_with` so that an allocation made while that storage is being set up or torn down is
-// left uncounted rather than re-entering it.
+// exactly what `System` returned — or a null pointer, which is the spelling of "the allocator said
+// no" and is what every caller of this trait already has to handle. The tally is a `Cell<u64>` in
+// thread-local storage, reached through `try_with` so that an allocation made while that storage is
+// being set up or torn down is left uncounted rather than re-entering it. A refused `realloc`
+// returns null and does **not** forward, so the block it was given is untouched and still the
+// caller's, which is what `GlobalAlloc::realloc` requires of a failure.
 unsafe impl core::alloc::GlobalAlloc for Counting {
   unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
     allocate();
+    if refused(layout.size()) {
+      return core::ptr::null_mut();
+    }
     unsafe { std::alloc::System.alloc(layout) }
   }
 
   unsafe fn alloc_zeroed(&self, layout: core::alloc::Layout) -> *mut u8 {
     allocate();
+    if refused(layout.size()) {
+      return core::ptr::null_mut();
+    }
     unsafe { std::alloc::System.alloc_zeroed(layout) }
   }
 
   unsafe fn realloc(&self, ptr: *mut u8, layout: core::alloc::Layout, new_size: usize) -> *mut u8 {
     allocate();
+    if refused(new_size) {
+      return core::ptr::null_mut();
+    }
     unsafe { std::alloc::System.realloc(ptr, layout, new_size) }
   }
 
   unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
     unsafe { std::alloc::System.dealloc(ptr, layout) }
   }
+}
+
+/// Makes this thread's allocator answer no to any single request of `bytes` or more, until
+/// [`allow_allocations`] puts it back.
+///
+/// # Why an allocator that refuses is the only instrument for the door
+///
+/// `Error::Allocation`'s documentation makes the strongest claim in this module — that **every**
+/// allocation the writer makes is behind that variant, so a refusal is something a server says
+/// rather than something it dies of. Nothing measured it. An allocation *counter* cannot: it sees
+/// how many requests were made and not what happens when one is answered no, and `Vec::push` and
+/// `Vec::with_capacity` register on it identically to `try_reserve` right up to the moment they
+/// abort the process instead of returning.
+///
+/// A size threshold rather than a countdown, because it is what makes the door **attributable**:
+/// each of the four buffers can be put on its own fixture where it is the only request above the
+/// threshold, so the refusal that comes back names one buffer rather than "one of four".
+///
+/// # Nothing may panic between this and [`allow_allocations`]
+///
+/// Not a style rule. Rust's panic machinery allocates — the message, and the backtrace printer's
+/// own buffer — so a panic while the allocator is armed meets a refusal inside the code that is
+/// handling the first one. Observed on this tree while checking one of these fixtures: an unwrap
+/// inside the window printed `memory allocation of 6144 bytes failed`, could not print its
+/// backtrace, and then hung instead of aborting. So every fixture arms the allocator immediately
+/// before the call under test, disarms immediately after, and asserts afterwards.
+#[cfg(test)]
+pub(super) fn refuse_allocations_of_at_least(bytes: usize) {
+  REFUSE_AT.with(|refuse| refuse.set(bytes));
+}
+
+/// Puts this thread's allocator back to answering every request.
+#[cfg(test)]
+pub(super) fn allow_allocations() {
+  REFUSE_AT.with(|refuse| refuse.set(usize::MAX));
+}
+
+/// Returns whether a request of this size is one the armed allocator refuses.
+///
+/// `try_with` and a default of "allowed" for the reason the tally uses it: this runs inside the
+/// global allocator, so a thread whose local storage is being set up or torn down must get an
+/// answer rather than a recursive initialisation.
+#[cfg(test)]
+fn refused(size: usize) -> bool {
+  REFUSE_AT
+    .try_with(|refuse| size >= refuse.get())
+    .unwrap_or(false)
 }
 
 #[cfg(test)]

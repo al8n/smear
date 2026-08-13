@@ -493,7 +493,7 @@ use smear_parser::graphql::{
 };
 
 use super::{
-  response::{allocations, visited},
+  response::{allocations, allow_allocations, refuse_allocations_of_at_least, visited},
   write_response_with,
 };
 
@@ -1175,6 +1175,482 @@ fn into_a_string(depth: usize) -> u64 {
       })
       .expect("writable");
       allocations() - before
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// axis four: a VALUE's depth, which no ceiling in this stack has ever counted
+// ---------------------------------------------------------------------------------------------
+//
+// ── WHY A FOURTH SECTION, WHEN THE THIRD SAID THE LIST WAS CLOSED ─────────────────────────────
+//
+// It was closed over the wrong extent. The table in `json::response`'s header enumerated every
+// buffer THAT FILE grows and called the enumeration exhaustive; the defect that survived it grew
+// the NATIVE STACK, in a SIBLING MODULE, on a subject the response's own depth does not describe.
+// An axis list is only as good as the set of functions it is crossed with, and the census was
+// {heap} × {json::response} while the defect was at {native stack} × {json::materialized}.
+//
+// So the enumeration this file's gates now stand for is the product, and it is in `super`'s header
+// where both modules can be named. What is added here is the pair of readings the product's fourth
+// cell needs: a value's depth on the native stack, and a value's depth on the heap.
+//
+// ── AND WHY THE ALLOCATION READING IS NOT THE ONE THAT SEES THE DEFECT ────────────────────────
+//
+// Said plainly so that nobody reads it as the gate for the recursion: the recursion allocated
+// NOTHING. Its whole cost was native frames. The allocation reading below is a gate on the
+// structure that REPLACED it — the frames must grow geometrically and not once per level — which is
+// the same relationship the third axis has to the second, one subject over. The reading that fails
+// on the recursion is the stack probe; the gate that fails LOUDLY is the small-stack one below,
+// which does not assert anything at all — it aborts, the way the defect did.
+#[cfg(feature = "materialized-numbers")]
+mod value_depth {
+  use core::fmt;
+
+  use smear_lexer::tokora::{Parse as _, Parser, span::AsSpan};
+  use smear_parser::graphql::{
+    GraphQL,
+    ast::materialized::{ConstInputValue, ConstList},
+    error::GraphqlErrors,
+    syntactic::{GraphqlLexer, value::materialized::const_value},
+  };
+
+  use super::{
+    super::{
+      Error, Json, WriteJson,
+      response::{allocations, allow_allocations, refuse_allocations_of_at_least},
+    },
+    Void,
+  };
+
+  /// One value, parsed from the GraphQL literal that spells it.
+  fn leaf(literal: &'static str) -> ConstInputValue<&'static str> {
+    Parser::with_parser::<
+      GraphqlLexer<'_, str>,
+      ConstInputValue<&'static str>,
+      GraphqlErrors<&'static str>,
+      _,
+      GraphQL,
+    >(const_value)
+    .parse_str(literal)
+    .expect("the fixture is a constant GraphQL value")
+  }
+
+  /// A value `depth` lists deep with a `null` at the bottom.
+  ///
+  /// **Built by wrapping and not by parsing**, and that is the finding rather than a convenience:
+  /// the parser has a nesting ceiling and is itself a recursive descent, so a literal this deep
+  /// would be refused before it could be built. `ConstList::new` is public, the variant is public,
+  /// and a driver's value does not come from this crate's parser at all — it comes from whatever
+  /// the driver resolved. Nothing between that constructor and the sink has ever looked at how
+  /// deep the result is.
+  pub(super) fn deep(depth: usize) -> ConstInputValue<&'static str> {
+    let mut value = leaf("null");
+    let span = *value.as_span();
+    for _ in 0..depth {
+      value = ConstInputValue::List(ConstList::new(span, std::vec![value]));
+    }
+    value
+  }
+
+  /// Takes a value apart one level at a time and drops the pieces.
+  ///
+  /// # This is a workaround for a defect this change does not fix, and it is here on purpose
+  ///
+  /// `ConstInputValue`'s derived `Drop` glue recurses, so letting one of these fixtures fall out of
+  /// scope aborts the process at a depth well below the ones measured here — **whether or not the
+  /// writer was ever called**. Measured on this tree: a value 7 734 lists deep dropped and 7 773
+  /// aborted, with nothing in `json` on the stack.
+  ///
+  /// So the repair below bounds the WRITER and does not make a deep value safe to hold. That is a
+  /// property of the AST type rather than of this module, it wants its own change and its own
+  /// review, and until it has one every fixture here has to dismantle what it built.
+  pub(super) fn dismantle(mut value: ConstInputValue<&'static str>) {
+    while let ConstInputValue::List(list) = value {
+      match list.into_values().pop() {
+        Some(inner) => value = inner,
+        None => return,
+      }
+    }
+  }
+
+  /// A sink that records how far down the native stack the writer was when it wrote.
+  ///
+  /// The probe is a local in the sink, which is reached at every level of the walk, measured
+  /// against a local in the caller's frame — the same difference-of-two-addresses shape as the
+  /// response walk's probe, with the leaf callback replaced by the one thing a value walk always
+  /// calls.
+  #[derive(Default)]
+  struct Deepest {
+    /// The lowest address a `write_str` has seen, or `None` before the first one.
+    deepest: Option<usize>,
+    bytes: usize,
+  }
+
+  impl fmt::Write for Deepest {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+      let probe = 0u8;
+      let here = core::ptr::addr_of!(probe) as usize;
+      self.deepest = Some(self.deepest.map_or(here, |lowest| lowest.min(here)));
+      self.bytes += text.len();
+      Ok(())
+    }
+  }
+
+  /// Writes a value `depth` lists deep and returns the native stack bytes the writer used.
+  fn stack_used(depth: usize) -> usize {
+    let value = deep(depth);
+    let anchor = 0u8;
+    let base = core::ptr::addr_of!(anchor) as usize;
+    let mut sink = Deepest::default();
+
+    value
+      .write_json(&mut Json::new(&mut sink))
+      .expect("a value the allocator has room for is writable");
+
+    // The fixture really is as deep as it claims: one bracket pair per level and a `null`.
+    assert_eq!(
+      sink.bytes,
+      2 * depth + 4,
+      "a {depth}-deep value wrote {} bytes, so the measurement is of a different value",
+      sink.bytes
+    );
+
+    dismantle(value);
+    base.saturating_sub(sink.deepest.expect("the walk wrote something"))
+  }
+
+  /// The shallower of the two depths the readings are taken at.
+  const SHALLOW: usize = 64;
+
+  /// The deeper one, sixteen times further down — `super`'s pair, kept the same so the two
+  /// subjects' numbers can be read side by side.
+  const DEEP: usize = 1024;
+
+  /// What a difference of two depths may still contain: the constant part of the writer's own
+  /// frame, which cancels, plus whatever the platform puts between two calls at the same depth. A
+  /// walk that recursed would put five hundred times this in it per level.
+  const SLACK: usize = 1024;
+
+  /// A value's nesting does not reach the native stack, however deep it is.
+  ///
+  /// **The reading that sees the recursion**, and the only one of the four axes that can: the
+  /// recursive walk allocated nothing, looked at no document byte, and traversed no extra response
+  /// slot. Measured on this tree in debug: **1 384** bytes at both depths. Measured with the
+  /// recursion restored: **35 704** and **557 944**, which is 544 bytes per level.
+  #[test]
+  fn a_values_depth_does_not_reach_the_native_stack() {
+    let shallow = stack_used(SHALLOW);
+    let deep = stack_used(DEEP);
+
+    assert!(
+      shallow > 0,
+      "the writer used no measurable native stack at all, so the growth below is not a measurement"
+    );
+
+    let growth = deep.saturating_sub(shallow);
+    let levels = DEEP - SHALLOW;
+    assert!(
+      growth <= SLACK,
+      "{levels} more levels of value cost {growth} more bytes of native stack ({} per level); the \
+       value walk is on the native stack",
+      growth / levels.max(1)
+    );
+  }
+
+  /// Allocating events one write of a `depth`-deep value costs.
+  fn allocated(depth: usize) -> u64 {
+    let value = deep(depth);
+    let mut sink = Void::default();
+    let before = allocations();
+    value
+      .write_json(&mut Json::new(&mut sink))
+      .expect("a value the allocator has room for is writable");
+    let cost = allocations() - before;
+    dismantle(value);
+    cost
+  }
+
+  /// The frames a value walk grows are its only allocation, and they double rather than crawl.
+  ///
+  /// # What this can and cannot see
+  ///
+  /// It cannot see the defect it was written beside — a recursive walk allocates **zero** and
+  /// passes every bound below. What it pins is the structure that replaced the recursion, on the
+  /// axis the replacement moved the cost onto, which is exactly the relationship
+  /// `the_frame_stack_is_one_allocation_however_deep_the_response` has to the response walk.
+  ///
+  /// The bound is logarithmic and not the constant the response walk gets, because the reservation
+  /// here cannot be exact: nothing recorded a value's depth and measuring one costs a walk with the
+  /// same stack. `json::materialized`'s header argues that at length. Measured on this tree: **5**
+  /// at depth 64 and **9** at depth 1 024. Measured with `try_reserve` replaced by
+  /// `try_reserve_exact(1)` — the reservation that is exact and therefore per level: **64** and
+  /// **1 024**.
+  #[test]
+  fn a_value_walks_frames_are_the_only_thing_it_allocates() {
+    // A scalar opens no container, and `Vec::new` does not allocate — so the overwhelmingly common
+    // leaf, the one a schema without a composite custom scalar has, costs nothing at all. Without
+    // this the bound below could be met by a walk that allocated once for every value.
+    for scalar in ["null", "true", r#""text""#, "1", "1.5", "ENUM"] {
+      let value = leaf(scalar);
+      let mut sink = Void::default();
+      let before = allocations();
+      value
+        .write_json(&mut Json::new(&mut sink))
+        .expect("writable");
+      assert_eq!(
+        allocations() - before,
+        0,
+        "writing the scalar {scalar} went to the allocator"
+      );
+    }
+
+    for depth in [SHALLOW, DEEP] {
+      // A doubling sequence from an empty `Vec`, plus room for the first request being for more
+      // than one frame. Linear growth is `depth`, which no slack on a logarithm reaches.
+      let bound = u64::from(depth.ilog2()) + 2;
+      let cost = allocated(depth);
+      assert!(
+        cost <= bound,
+        "writing a value {depth} lists deep cost {cost} allocating events against a bound of \
+         {bound}; the frames are being grown once per level rather than doubled"
+      );
+    }
+  }
+
+  /// Runs `f` on a thread with a *small* stack, so that using the native one is fatal.
+  ///
+  /// The opposite of `super::with_room`, and deliberately: that helper exists so a gate about the
+  /// writer is not a gate about the harness's stack, and this one exists so the writer cannot hide
+  /// in a generous one. At the 544 bytes per level the recursion was measured at, the depth below
+  /// wants about ten megabytes and this thread has half of one.
+  fn on_a_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+      .stack_size(512 * 1024)
+      .spawn(f)
+      .expect("a thread")
+      .join()
+      .expect("the deep fixture did not abort")
+  }
+
+  /// How deep the loud gate's fixture is.
+  ///
+  /// Five times the depth the recursive walk died at on the harness's own eight-megabyte stack, on
+  /// a thread with a sixteenth of it.
+  const PAST_THE_OLD_ABORT: usize = 20_000;
+
+  /// A value far past the depth the recursion died at writes, on a stack far smaller than the one
+  /// it died on.
+  ///
+  /// **The gate that fails the way the defect did.** The two readings above are assertions about
+  /// numbers; this one is the process surviving, and a walk that recursed does not fail it — it
+  /// aborts the whole test binary with `SIGABRT`, which is the same signal the finding is about and
+  /// is not a failure any assertion can be written to be kinder about.
+  #[test]
+  fn a_value_deeper_than_the_old_abort_writes_on_a_small_stack() {
+    let written = on_a_small_stack(|| {
+      let value = deep(PAST_THE_OLD_ABORT);
+      let mut out = String::new();
+      value
+        .write_json(&mut Json::new(&mut out))
+        .expect("writable");
+      dismantle(value);
+      out
+    });
+
+    // And it is the right response and not merely a response: the surviving process is the
+    // finding, but a walk that survived by stopping early would be a different defect at the same
+    // signal.
+    assert_eq!(written.len(), 2 * PAST_THE_OLD_ABORT + 4);
+    let (open, rest) = written.split_at(PAST_THE_OLD_ABORT);
+    let (leaf, close) = rest.split_at(4);
+    assert!(open.bytes().all(|byte| byte == b'['), "{}", &open[..8]);
+    assert_eq!(leaf, "null");
+    assert!(close.bytes().all(|byte| byte == b']'), "{}", &close[..8]);
+  }
+
+  /// Writes a 4 096-deep value with the allocator refusing any single request of `refuse_at` bytes
+  /// or more.
+  ///
+  /// The value walk's own row of
+  /// `super::every_buffer_the_writer_grows_refuses_rather_than_aborts`, which is where the argument
+  /// for the instrument is. Here because `deep` is. Straight through the trait, so the frames are
+  /// the only request there is, and the refusal is not a coincidence of one platform's layout: a
+  /// frame holds a slice cursor, so it cannot be under two words, and 4 096 of them are at least
+  /// sixteen times the threshold. Nothing else in the window asks the allocator for anything.
+  pub(super) fn a_value_the_allocator_may_refuse(refuse_at: usize) -> Result<(), Error> {
+    let value = deep(4096);
+    let mut sink = Void::default();
+    refuse_allocations_of_at_least(refuse_at);
+    let outcome = value.write_json(&mut Json::new(&mut sink));
+    allow_allocations();
+    dismantle(value);
+    outcome
+  }
+}
+
+// ── the door itself: what happens when the allocator says no ─────────────────────────────────
+
+/// The size, in bytes, above which the armed allocator answers no.
+///
+/// Small enough that each fixture's own buffer is a request over it, and large enough that nothing
+/// incidental is: the fixtures below write into [`Void`], which allocates nothing, and everything
+/// else in the window is a stack buffer.
+const REFUSE_AT: usize = 4096;
+
+/// The threshold that refuses nothing, which is how each fixture is read a second time.
+const NEVER: usize = usize::MAX;
+
+/// Every buffer the writer grows answers a refusal with [`Error::Allocation`], and the process
+/// lives.
+///
+/// # The claim this measures, and why no other instrument could
+///
+/// [`Error::Allocation`]'s documentation says that **every** allocation this writer makes is behind
+/// that variant, so "the allocator said no" is something a server can say mid-response rather than
+/// something it dies of. Until this gate that sentence was prose. The allocation counter cannot
+/// check it: it sees how many requests were made, and `Vec::push` registers on it exactly as
+/// `try_reserve` does — right up to the moment one returns an error and the other calls the
+/// allocation-error handler and aborts. So the instrument is an allocator that says no, and the
+/// reading is that the call *returned at all*.
+///
+/// # Four fixtures, because a refusal has to be attributable
+///
+/// One armed threshold and four shapes, each arranged so that exactly one of the writer's four
+/// buffers is a request above it. A single fixture with all four live would report "one of them
+/// refused" and would pass with the other three nailed shut, which is this file's recurring
+/// failure in miniature.
+///
+/// - **the value walk's frames** — the trait method alone, so nothing else is even asked for;
+/// - **`data`'s frame stack** — a 1 024-level response with no errors, so neither the index nor the
+///   path buffer is built;
+/// - **the checkpoint index** — one error in a document padded to a megabyte, where the response is
+///   one level deep and its one path is one segment long;
+/// - **the path buffer** — one error at the bottom of a 1 024-level chain, whose document is small
+///   enough that the index is well under the threshold and whose frames are never reached, because
+///   §7.1 writes `errors` before `data`.
+#[test]
+fn every_buffer_the_writer_grows_refuses_rather_than_aborts() {
+  #[cfg(feature = "materialized-numbers")]
+  door(
+    "the value walk's frames",
+    value_depth::a_value_the_allocator_may_refuse,
+  );
+
+  let (frames, path) = with_room(|| {
+    (
+      (refused_frame_stack(REFUSE_AT), refused_frame_stack(NEVER)),
+      (refused_path_buffer(REFUSE_AT), refused_path_buffer(NEVER)),
+    )
+  });
+  outcomes("`data`'s frame stack", frames);
+  outcomes("an error's path buffer", path);
+  door("the checkpoint index", refused_checkpoint_index);
+}
+
+/// Reads one buffer's door both ways: armed, and with the same fixture unarmed.
+///
+/// **Both directions, because one of them is not a reading.** A fixture that returned
+/// [`Error::Allocation`] for some reason of its own would satisfy the armed half alone, and a gate
+/// that only ever arms the allocator cannot tell that apart from the door working.
+fn door(buffer: &str, fixture: impl Fn(usize) -> Result<(), Error>) {
+  outcomes(buffer, (fixture(REFUSE_AT), fixture(NEVER)));
+}
+
+/// The pair [`door`] checks, for the two fixtures that have to be run inside one `with_room`.
+fn outcomes(buffer: &str, (armed, unarmed): (Result<(), Error>, Result<(), Error>)) {
+  assert_eq!(
+    armed,
+    Err(Error::Allocation),
+    "with the allocator refusing, {buffer} did not come back as a refusal"
+  );
+  assert_eq!(
+    unarmed,
+    Ok(()),
+    "with the allocator answering, the same fixture for {buffer} is still not writable, so the \
+     refusal beside it is not about the allocator"
+  );
+}
+
+/// Writes a 1 024-level response with no errors, so `data`'s frames are the only buffer built.
+fn refused_frame_stack(refuse_at: usize) -> Result<(), Error> {
+  let (sdl, query) = chain(DEEP);
+  run(
+    &sdl,
+    &query,
+    NESTING,
+    |name| {
+      Some(if name == "x" {
+        Cell::Int(1)
+      } else {
+        Cell::Object
+      })
+    },
+    |response| {
+      assert_eq!(response.error_count(), 0, "the fixture failed a resolver");
+      let mut sink = Void::default();
+      refuse_allocations_of_at_least(refuse_at);
+      let outcome = write_response_with(&mut sink, response, &query, |value, json| match value {
+        Cell::Int(number) => json.number(*number),
+        Cell::Object => json.null(),
+      });
+      allow_allocations();
+      outcome
+    },
+  )
+}
+
+/// Writes one error at the bottom of a 1 024-level chain, whose path is the only large buffer.
+///
+/// The document is the query, about five kilobytes, so the index is a couple of dozen checkpoints
+/// and well under the threshold; the frames are never reached, because §7.1 writes `errors` first.
+fn refused_path_buffer(refuse_at: usize) -> Result<(), Error> {
+  let (sdl, query) = chain(DEEP);
+  run(
+    &sdl,
+    &query,
+    NESTING,
+    |name| (name != "x").then_some(Cell::Object),
+    |response| {
+      assert_eq!(
+        response.error_count(),
+        1,
+        "the fixture failed the wrong set"
+      );
+      let mut sink = Void::default();
+      refuse_allocations_of_at_least(refuse_at);
+      let outcome = write_response_with(&mut sink, response, &query, |value, json| match value {
+        Cell::Int(number) => json.number(*number),
+        Cell::Object => json.null(),
+      });
+      allow_allocations();
+      outcome
+    },
+  )
+}
+
+/// Writes one error against a megabyte of document, where the index is the only large buffer.
+///
+/// The response is one level deep and its one path is one segment long, so neither the frames nor
+/// the path buffer is anywhere near the threshold.
+fn refused_checkpoint_index(refuse_at: usize) -> Result<(), Error> {
+  let query = aliased(1, 1024 * 1024);
+  run(
+    FLAT_SDL,
+    &query,
+    64,
+    |_| None,
+    |response| {
+      assert_eq!(
+        response.error_count(),
+        1,
+        "the fixture failed the wrong set"
+      );
+      let mut sink = Void::default();
+      refuse_allocations_of_at_least(refuse_at);
+      let outcome = write_response_with(&mut sink, response, &query, |_, json| json.null());
+      allow_allocations();
+      outcome
     },
   )
 }

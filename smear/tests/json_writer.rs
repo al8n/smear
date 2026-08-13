@@ -674,3 +674,328 @@ fn the_i32_width_cannot_produce_an_out_of_range_int() {
      writer's string branch unreachable for it"
   );
 }
+
+// ------------------------------------------------------------------------------------------
+// the value walk: what it writes, and the three doors it is reached through
+// ------------------------------------------------------------------------------------------
+//
+// The unit gates in `smear::json::tests` measure what the value walk COSTS — its native stack, its
+// frames, and what it does when the allocator says no. Two things they cannot check are here
+// instead: that the walk still writes the right bytes, container by container, and that each of
+// this crate's three public doors reaches it. A response leaf, a §7.1.7 `extensions` entry on an
+// execution result, and a §7.1.3 `extensions` entry on a request error result that never executed
+// anything — three routes, one walk, and before the repair all three aborted the process after
+// 3 001 bytes of the response had already gone to the sink.
+
+/// A composite value survives the round trip through an `extensions` entry, container by
+/// container.
+///
+/// # The branch nothing else in this file reaches
+///
+/// A container only arrives at `WriteJson` when it is the whole of a **leaf's** value or of an
+/// `extensions` entry: everywhere else the executor has already taken a list or an object apart
+/// into response positions, and what reaches the writer is a scalar. So the value walk's `List` and
+/// `Object` arms — its separators, its keys, and its two empty-container paths — are not covered by
+/// a single one of the response fixtures above, and were not covered before this gate existed
+/// either. That is uncomfortable to write down and is exactly why it is written down: the walk was
+/// rewritten in this change, and a rewrite of an uncovered branch is a rewrite nothing checks.
+///
+/// Read back with `serde_json` and compared against a hand-built value: this file's first oracle,
+/// on the one part of the writer it had never been pointed at.
+#[test]
+fn a_composite_value_survives_the_round_trip_through_an_extension() {
+  const ONE: &str = "{ hero { name } }";
+  const COMPOSITE: &str = r#"{
+    empty_object: {},
+    empty_list: [],
+    scalars: [1, 2.5, true, null, "s", JEDI, 2147483648],
+    nested: { a: [ { b: [ { c: "deep" } ] } ] },
+    escaped: [ "cooked\nand\u0000escaped", [], {} ]
+  }"#;
+
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(SDL)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(ONE)
+  .expect("the query parses");
+
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, root())
+    .expect("the operation resolves");
+  let mut map = Extensions::new(executor.limits());
+  map
+    .insert("composite", value(COMPOSITE))
+    .expect("under the ceilings");
+  executor
+    .set_extensions(map)
+    .expect("an operation is running");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    let answer = field(request.parent_value(), request.name())
+      .cloned()
+      .unwrap_or_else(value_null);
+    executor.handle_resolved(&mut space, id, answer);
+    while executor.poll_abandoned().is_some() {}
+  }
+  let response = executor.poll_response().expect("nothing is outstanding");
+
+  let mut out = String::new();
+  json::write_response(&mut out, &response, ONE).expect("the response is writable");
+  let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+
+  assert_eq!(
+    parsed["extensions"]["composite"],
+    serde_json::json!({
+      "empty_object": {},
+      "empty_list": [],
+      // `2147483648` is past draft §3.5.1's `Int`, so it is a JSON string — the same rule the
+      // response's own leaves follow, met here inside a container.
+      "scalars": [1, 2.5, true, null, "s", "JEDI", "2147483648"],
+      "nested": { "a": [ { "b": [ { "c": "deep" } ] } ] },
+      // A GraphQL string leaf INSIDE a container takes the same cooking-then-escaping path a
+      // response leaf does, and the two empty containers beside it are the walk's two immediate
+      // close paths.
+      "escaped": ["cooked\nand\u{0}escaped", [], {}],
+    }),
+    "{out}"
+  );
+}
+
+/// One value `depth` lists deep, built out of nothing but this crate's public API.
+///
+/// **Built by wrapping and not by parsing**, which is the point rather than a shortcut: the parser
+/// is a recursive descent with a nesting ceiling, so this shape cannot come out of it. A driver's
+/// value does not come out of it either — `ConstList::new` is public, `ConstInputValue::List` is a
+/// public variant, and what a resolver returns is whatever the driver built.
+fn nested(depth: usize) -> ConstInputValue<&'static str> {
+  let mut value = value_null();
+  let span = *smear::__private::tokora::span::AsSpan::as_span(&value);
+  for _ in 0..depth {
+    value = ConstInputValue::List(smear::parser::graphql::ast::materialized::ConstList::new(
+      span,
+      vec![value],
+    ));
+  }
+  value
+}
+
+/// How deep the fixtures below are.
+///
+/// Five times the depth at which the recursive walk aborted on the harness's own test-thread stack.
+const NESTED: usize = 20_000;
+
+/// What one of these values writes as: an opening bracket per level, a `null`, and the closing
+/// brackets.
+fn nested_json() -> String {
+  let mut expected = String::with_capacity(2 * NESTED + 4);
+  expected.extend(core::iter::repeat_n('[', NESTED));
+  expected.push_str("null");
+  expected.extend(core::iter::repeat_n(']', NESTED));
+  expected
+}
+
+/// A deeply nested value in a response **leaf** is written rather than fatal.
+///
+/// `note: String` is a leaf, so draft §6.4.3 hands the driver's value to `CoerceResult` and stores
+/// whatever comes back — this driver's coercion is the identity, which is the arrangement any
+/// service with a composite custom scalar has. The response is one position deep whatever the value
+/// is, which is the whole finding: `Response::depth` counts positions, and a value is one.
+#[test]
+fn a_deeply_nested_leaf_is_written() {
+  const ONE: &str = "{ hero { note } }";
+
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(SDL)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(ONE)
+  .expect("the query parses");
+
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, root())
+    .expect("the operation resolves");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    let answer = if request.name() == "note" {
+      nested(NESTED)
+    } else {
+      field(request.parent_value(), request.name())
+        .cloned()
+        .unwrap_or_else(value_null)
+    };
+    executor.handle_resolved(&mut space, id, answer);
+    while executor.poll_abandoned().is_some() {}
+  }
+  let response = executor.poll_response().expect("nothing is outstanding");
+
+  let mut out = String::new();
+  json::write_response(&mut out, &response, ONE).expect("the response is writable");
+  assert_eq!(
+    out,
+    format!(r#"{{"data":{{"hero":{{"note":{}}}}}}}"#, nested_json())
+  );
+
+  // `response` borrows the executor and has no `Drop`, so its borrow ends at its last use above
+  // and the executor can be moved out from under it.
+  leak_rather_than_drop(executor);
+}
+
+/// The same value as a §7.1.7 `extensions` entry on an execution result.
+#[test]
+fn a_deeply_nested_extension_on_an_execution_result_is_written() {
+  const ONE: &str = "{ hero { name } }";
+
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(SDL)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(ONE)
+  .expect("the query parses");
+
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, root())
+    .expect("the operation resolves");
+  let mut map = Extensions::new(executor.limits());
+  map
+    .insert("trace", nested(NESTED))
+    .expect("under the ceilings");
+  executor
+    .set_extensions(map)
+    .expect("an operation is running");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    let answer = field(request.parent_value(), request.name())
+      .cloned()
+      .unwrap_or_else(value_null);
+    executor.handle_resolved(&mut space, id, answer);
+    while executor.poll_abandoned().is_some() {}
+  }
+  let response = executor.poll_response().expect("nothing is outstanding");
+
+  let mut out = String::new();
+  json::write_response(&mut out, &response, ONE).expect("the response is writable");
+  assert!(
+    out.ends_with(&format!(r#","extensions":{{"trace":{}}}}}"#, nested_json())),
+    "the deep extension is not the last entry of the response"
+  );
+
+  // `response` borrows the executor and has no `Drop`, so its borrow ends at its last use above
+  // and the executor can be moved out from under it.
+  leak_rather_than_drop(executor);
+}
+
+/// And as a §7.1.3 `extensions` entry on a request error result, where nothing executed at all.
+///
+/// The sharpest of the three: there is no `data`, no response tree and no executor state — the only
+/// thing in the map is the driver's value, so `Response::depth` does not merely fail to bound it,
+/// there is no response to have a depth.
+#[test]
+fn a_deeply_nested_extension_on_a_request_error_result_is_written() {
+  const TWO: &str = "query A { hero { name } } query B { hero { name } }";
+
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(SDL)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(TWO)
+  .expect("the query parses");
+
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  let refusal = executor
+    .start(&mut space, None, root())
+    .expect_err("two operations and no name is draft §6.1's ambiguity");
+  let mut result: RequestErrorResult<ConstInputValue<&'static str>> =
+    RequestErrorResult::new(executor.limits(), refusal);
+  let mut map = Extensions::new(executor.limits());
+  map
+    .insert("trace", nested(NESTED))
+    .expect("under the ceilings");
+  result.set_extensions(map).expect("under the ceilings");
+
+  let mut out = String::new();
+  json::write_request_error_result(&mut out, &result).expect("the result is writable");
+  assert!(
+    out.ends_with(&format!(r#","extensions":{{"trace":{}}}}}"#, nested_json())),
+    "the deep extension is not the last entry of the result"
+  );
+
+  leak_rather_than_drop(result);
+}
+
+/// Leaks whatever still owns one of these fixtures instead of dropping it.
+///
+/// # This is a defect this change does not fix, recorded where it bites
+///
+/// `ConstInputValue`'s derived `Drop` glue **recurses**: releasing a value this deep aborts the
+/// process with `SIGABRT` whether or not anything ever wrote it out — measured on this tree at a
+/// depth of 7 773, with nothing from `smear::json` on the stack. So what the three gates above
+/// establish is that *writing* one of these no longer spends a native frame per level, and not that
+/// a deeply nested value is safe to hold.
+///
+/// The fix belongs to the AST type rather than to the writer and wants its own change and its own
+/// review. Until it lands, a test that built one of these fixtures and let it fall out of scope
+/// would fail on a defect it is not testing, at a signal no assertion can soften — so the fixtures
+/// are leaked, deliberately and with this comment attached.
+fn leak_rather_than_drop<T>(owner: T) {
+  core::mem::forget(owner);
+}

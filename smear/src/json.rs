@@ -34,7 +34,7 @@
 //! dependencies) render into stack buffers. Nothing here buffers the response, and no leaf, no key
 //! and no message is ever assembled before it is written.
 //!
-//! **Three `Vec`s, and each is the answer to a cost a remote client chooses.** This module claimed
+//! **Four `Vec`s, and each is the answer to a cost a remote client chooses.** This module claimed
 //! "nothing on the heap" when it was first written, and the claim was kept by spending the
 //! resources a client can drive instead — the native stack, a walk of the document per error, and a
 //! re-climb of the response tree per path segment — which is the wrong trade in every case:
@@ -55,14 +55,89 @@
 //! - Every error's **response path** is turned around into one buffer that serves the whole
 //!   response, sized from a depth the executor recorded, rather than into a fresh unhinted `Vec`
 //!   per error.
+//! - A **materialised value** is walked on an explicit stack of its own, for the same reason `data`
+//!   is and against a depth that is bounded by even less: a value lives *inside* one response
+//!   position, so nothing in this stack — not [`Response::depth`](crate::proto::Response::depth),
+//!   not `graphql-proto`'s ceilings, not the parser's nesting limit — has ever looked at how deep
+//!   one is. [`materialized`] has that argument and the numbers.
 //!
-//! **The list is exhaustive and that is a property rather than a description**, because three
-//! consecutive review rounds each found one of them and left the next: they are enumerated in
-//! `json::response`'s header with what bounds each, all three are reserved once from a quantity
-//! known before the fill, all three carry a refusal as [`Error::Allocation`] instead of aborting,
-//! and a test counts the allocator calls one whole write makes. Every bound is measured rather than
-//! argued — the document bytes the writer looks at per location, the native stack it uses per level
-//! of response depth, and the allocations it makes at two depths sixteen apart.
+//! # What can grow without bound, and the argument that this list is all of it
+//!
+//! **Read this before adding anything to the enumeration below, because the enumeration is the
+//! part that keeps failing.** Four rounds of review found four costs here, and every one of them
+//! got past an instrument that had been written, carefully, for the round before: an allocation pin
+//! could not see a byte walk, a traversal counter could not see reallocation, a native-stack probe
+//! stayed green on a heap buffer doubling to 64 MiB, and an enumeration of every allocation could
+//! not see a recursion. Each instrument was right about its own axis. What was wrong each time was
+//! the belief that the axis was the only one.
+//!
+//! So the list is argued from what a function *is* rather than from what the last defect was. A
+//! serialiser is a pure function of a value and a sink, and what such a function can spend is:
+//!
+//! 1. **Automatic storage — the native stack.** Grows with recursion depth. Exhausting it is not an
+//!    error a caller sees: the guard page faults and the process aborts, mid-response, after the
+//!    status line and part of the body have gone to the client. Rust offers no fallible form, so
+//!    the only bounds are *do not recurse* and *bound the depth first*.
+//! 2. **Dynamic storage — the heap.** Grows with container capacity. `try_reserve` makes exhausting
+//!    it an answer; `push`, `reserve` and `with_capacity` make it the same abort as (1).
+//! 3. **CPU time.** Superlinear work over an input a client shapes. It does not kill the process,
+//!    it makes the service the amplifier — the axis the quadratic prefix walk lived on and the one
+//!    an allocation pin is structurally blind to.
+//! 4. **Bytes handed to the sink.** Output amplification. The sink is the caller's, so exhausting
+//!    it is the caller's, but the expansion factor is this module's choice, and it is a constant:
+//!    at most six output bytes per byte of string content, where a control character becomes
+//!    `\u00XX`; two per container; and a bounded rendering per number.
+//!
+//! The first two kill the process and the last two degrade it, which is why the enumeration below
+//! has a column for the first two and a sentence for the others.
+//!
+//! And the two that are listed to be closed rather than tracked. **Operating-system resources** —
+//! descriptors, handles, threads, locks — is empty by construction: this module's whole import list
+//! is [`core::fmt`], `std::vec::Vec`, [`itoa`] and [`zmij`], and it opens, spawns and locks
+//! nothing. **Non-termination** is not a fifth resource but a way of making any of the four
+//! infinite, and it needs a cycle: the response tree is the executor's slabs, which are a tree by
+//! construction, and a materialised value is an owned tree over `Vec` with no shared and no
+//! interior-mutable node, so neither can contain one. A driver's own `WriteJson` can, and that is
+//! the driver's.
+//!
+//! **Static storage is deliberately not on the list, and it is the one to check next.** A `Vec` in
+//! a `static` or a thread-local is (2) plus *retention*: a peak that is freed with the call is
+//! bounded by one call and a cached one is not. This module has no such state — the only
+//! thread-locals it declares are the `#[cfg(test)]` counters, which are `Cell<u64>` — and every
+//! buffer below is a local, freed when the write returns.
+//!
+//! # The enumeration, which is the two fatal axes crossed with every function on the path
+//!
+//! An axis list is worth only as much as the extent it is crossed with, and that is precisely how
+//! the previous enumeration failed: it was complete over {heap} × {`json::response`}, and the
+//! defect that survived it was at {native stack} × {`json::materialized`}. So both columns:
+//!
+//! | growth point | axis | what bounds it | on refusal |
+//! |---|---|---|---|
+//! | `response::write_node`'s frame stack | heap | the response's depth, recorded by the executor | one `try_reserve_exact`, [`Error::Allocation`] |
+//! | `write_response_with`'s `segments` | heap | the deepest error path in the response | one `try_reserve` per path, [`Error::Allocation`] |
+//! | `response::Locations`'s checkpoints | heap | the document's length | one `try_reserve_exact`, [`Error::Allocation`] |
+//! | [`materialized`]'s value stack | heap | the value's own nesting, which nothing recorded | `try_reserve` per level, amortised, [`Error::Allocation`] |
+//! | every walk in this module | native stack | **nothing recurses**: `write_node`, the value walk, both string-cooking walks, the location arithmetic and the escape scan are loops, and the only frame locals that are not words are [`itoa`]'s and [`zmij`]'s fixed buffers | — |
+//! | the caller's `write_leaf`, `WriteJson` and `Display` | both | the caller's | the caller's |
+//!
+//! **And which rows are measured, said exactly, because "measured" is what the last enumeration
+//! was not.** The four heap rows are measured twice over. First an allocation count, on a fixture
+//! shaped so that the row's own buffer is the one that would grow: two response depths sixteen
+//! apart for the frames, two error counts for the index and the path, two value depths for the
+//! value stack. Then an allocator that says no — again one fixture per buffer, so that the refusal
+//! is attributable — against which the write **returns** [`Error::Allocation`] rather than
+//! aborting. The
+//! native-stack row is measured for the two walks that could plausibly grow, `write_node` and the
+//! value walk, as a difference of two addresses at two depths each; for the rest of that row it is
+//! read off the code, which is sound because "this function does not call itself" is a syntactic
+//! property and not a quantity. Time is measured as document bytes per location. Output
+//! amplification is not measured at all; it is a constant factor over the two escape maps.
+//!
+//! The last row is the boundary and not an omission. `write_leaf` is a closure, a driver's
+//! [`WriteJson`] is a driver's, and [`Json::display`] renders whatever `Display` it was handed; a
+//! recursive one spends native frames this module cannot count. What this module owes is that
+//! *it* adds no unbounded term, and `graphql-proto`'s own `Display` adds none.
 
 use core::fmt;
 
@@ -116,28 +191,41 @@ pub enum Error {
   ///
   /// That sentence is the claim, and it is worth having as one because the variant it replaces
   /// said the opposite — it named the response path alone and recorded, correctly at the time, that
-  /// the frame stack "aborts". Three of this module's four rounds each repaired one growable buffer
-  /// and left the next one, so what closes the class is not a fourth repair but an **enumeration**:
-  /// there are exactly three, they are listed in `json::response`'s header with what bounds each,
-  /// and each is reserved once from a quantity that is known before it is filled.
+  /// the frame stack "aborts". Four of this module's five rounds each repaired one growth point and
+  /// left the next one, so what closes the class is not a fifth repair but an **enumeration**: it
+  /// is in this module's header, crossed with the two resources that can be exhausted rather than
+  /// with allocations alone, because the round that enumerated allocations alone is the round the
+  /// native stack survived.
   ///
   /// - `data`'s **frame stack**, one frame per open container, reserved from
   ///   [`Response::depth`](crate::proto::Response::depth).
   /// - An error's **response path**, reserved from [`Path::len`](crate::proto::Path::len) through
   ///   [`Path::collect_into`](crate::proto::Path::collect_into).
   /// - The **checkpoint index** over the document, reserved from the document's length.
+  /// - A materialised **value's own frames**, grown amortised because nothing recorded a value's
+  ///   depth and measuring one costs a walk with the same stack — see [`materialized`].
+  ///
+  /// The first three are reserved once from a quantity known before the fill and the fourth is not,
+  /// which is a difference in exactness and not in the door: all four are `try_reserve`, and
+  /// `tests::every_buffer_the_writer_grows_refuses_rather_than_aborts` puts each of them on its own
+  /// fixture under an allocator that says no and reads back this variant from a call that returned.
   ///
   /// # Why a refusal is an answer here rather than a reason to die
   ///
   /// The first two are as large as the response is deep, and how deep a response is depends on the
   /// query and on how many list elements the driver returned; the third is a fixed fraction of a
-  /// document a client sent. `graphql-proto`'s ceilings bound all of that and the ceilings are
-  /// configurable, so the largest admissible response is a deployment's decision — which makes "the
-  /// allocator said no" something a server should be able to *say*, mid-response, rather than
-  /// something it dies of. `Vec::push` and `Vec::with_capacity` would both have called the
-  /// allocation-error handler instead, after part of the body had already reached the client.
+  /// document a client sent; the fourth is as deep as a value the driver built, which no ceiling
+  /// anywhere in this stack bounds at all. `graphql-proto`'s ceilings bound the first three and the
+  /// ceilings are configurable, so the largest admissible response is a deployment's decision —
+  /// which makes "the allocator said no" something a server should be able to *say*, mid-response,
+  /// rather than something it dies of. `Vec::push` and `Vec::with_capacity` would both have called
+  /// the allocation-error handler instead, after part of the body had already reached the client.
   ///
-  /// # One variant and not three
+  /// It is also why the fourth is not answered with a nesting ceiling of its own. A refusal on a
+  /// depth this writer invented would turn a legal response into an error on a rule no
+  /// specification has; a refusal from the allocator is a fact about the machine.
+  ///
+  /// # One variant and not four
   ///
   /// Which buffer refused is not a distinction a caller can act on — the response is half written
   /// either way, and all three are sized by the same request — so naming them separately would put
@@ -381,11 +469,17 @@ impl<W: fmt::Write> Json<W> {
   ///
   /// **Not public, and not a general escape hatch.** [`Array`] and [`Object`] are how structure is
   /// written, and the whole point of them is that the separators are not the caller's to remember.
-  /// There is exactly one walk that cannot use them — `response::write_node`, which
-  /// runs on an explicit stack so the native one does not grow with the response, and a scoped
-  /// writer cannot be *kept* on that stack because each one borrows the [`Json`] the enclosing one
-  /// already borrows. That walk places its own separators, and this is the door it does it
-  /// through; being private is what keeps the exception to the one caller that argued for it.
+  /// The walks that cannot use them are the ones that run on an explicit stack so the native one
+  /// does not grow — `response::write_node` over the response, and [`materialized`]'s over a
+  /// value — because a scoped writer cannot be *kept* on such a stack: each one borrows the
+  /// [`Json`] the enclosing one already borrows. Those walks place their own separators, and this
+  /// is the door they do it through.
+  ///
+  /// **Two callers and not one, which is the same exception rather than a widened one.** It was one
+  /// when only the response was walked iteratively; the second arrived when the value walk stopped
+  /// recursing, for the identical reason and with the identical borrow in the way. Being private is
+  /// what keeps the exception to callers that have made that argument — a third one is a
+  /// conversation, not an import.
   #[inline]
   fn punct(&mut self, ch: char) -> Result<(), Error> {
     self.out.write_char(ch)?;
