@@ -484,7 +484,10 @@ use core::fmt;
 
 use graphql_proto::{Executor, Leaf, Response, Values};
 use smear_compiler::Schema;
-use smear_lexer::tokora::{Parse as _, Parser, state::recursion_tracker::RecursionLimiter};
+use smear_lexer::{
+  limits::SyntacticLimits,
+  tokora::{Parse as _, Parser},
+};
 use smear_parser::graphql::{
   GraphQL,
   ast::{ExecutableDocument, TypeSystemDocument},
@@ -557,7 +560,7 @@ fn parse_executable(query: &str, nesting: usize) -> Result<ExecutableDocument<&s
     _,
     GraphQL,
   >(executable_document)
-  .parse_str_with_state(query, RecursionLimiter::with_limitation(nesting))
+  .parse_str_with_state(query, SyntacticLimits::with_max_nesting_depth(nesting))
   .map_err(|_| ())
 }
 
@@ -579,7 +582,7 @@ fn run<T>(
     _,
     GraphQL,
   >(type_system_document)
-  .parse_str_with_state(sdl, RecursionLimiter::with_limitation(nesting))
+  .parse_str_with_state(sdl, SyntacticLimits::with_max_nesting_depth(nesting))
   .expect("the SDL parses");
   let schema = Schema::build(&schema_document).expect("the SDL is a schema");
   let document = parse_executable(query, nesting).expect("the query parses");

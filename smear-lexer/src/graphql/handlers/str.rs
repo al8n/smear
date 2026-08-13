@@ -2,7 +2,6 @@ use super::error::{self, FloatError};
 use tokora::{
   SimpleSpan,
   logos::{Lexer, Logos, Source},
-  state::tracker::Limiter,
   utils::{Lexeme, PositionedChar},
 };
 
@@ -11,6 +10,7 @@ type Span = SimpleSpan;
 use crate::{
   handlers::{self, is_ignored_char},
   hints::{ExponentHint, FloatHint},
+  limits::LosslessLimits,
 };
 
 type LexerError<Extras> = error::LexerError<char, Extras>;
@@ -38,7 +38,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<char, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Limiter>,
+  T: Logos<'a, Source = S, Extras = LosslessLimits>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {

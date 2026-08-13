@@ -236,6 +236,8 @@ lossless_production! {
   /// [`selection`] dispatches only on heads its arms consume, and `unexpected` guarantees progress
   /// on everything else.
   fn selection_set<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::SelectionSet.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {

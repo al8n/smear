@@ -44,10 +44,11 @@ macro_rules! token_impl {
       #[allow(unused_imports)]
       use tokora::utils::IntoEquivalent;
       use tokora::{
-        logos::Logos, lexer::Lexable, state::tracker::{LimitExceeded, Limiter},
+        logos::Logos, lexer::Lexable, state::tracker::LimitExceeded,
       };
       use crate::{
         error::StringErrors,
+        limits::LosslessLimits,
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -90,7 +91,7 @@ macro_rules! token_impl {
       )]
       #[logos(
         crate = tokora::logos,
-        extras = Limiter,
+        extras = LosslessLimits,
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::cst_default_error)
       )]
@@ -324,10 +325,11 @@ macro_rules! token_impl {
       #[allow(unused_imports)]
       use tokora::utils::IntoEquivalent;
       use tokora::{
-        logos::Logos, lexer::Lexable, state::tracker::{LimitExceeded, Limiter},
+        logos::Logos, lexer::Lexable, state::tracker::LimitExceeded,
       };
       use crate::{
         error::StringErrors,
+        limits::LosslessLimits,
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -370,7 +372,7 @@ macro_rules! token_impl {
       )]
       #[logos(
         crate = tokora::logos,
-        extras = Limiter,
+        extras = LosslessLimits,
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::cst_default_error)
       )]

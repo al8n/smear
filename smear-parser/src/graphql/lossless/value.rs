@@ -250,6 +250,8 @@ lossless_production! {
   /// `[ Value* ]` — `[ Value[Const]* ]` when `konst` says so, the parameter riding down to
   /// every element.
   fn list_value<'inp, Src, Ctx>(inp, konst: Constness) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::ListValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -275,6 +277,8 @@ lossless_production! {
 
   /// `{ ObjectField* }` — const-parameterised exactly as [`list_value`] is.
   fn object_value<'inp, Src, Ctx>(inp, konst: Constness) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::ObjectValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {

@@ -1,13 +1,14 @@
 use tokora::{
   error::{UnexpectedEnd, UnexpectedLexeme},
   logos::{Lexer, Logos, Source},
-  state::tracker::{LimitExceeded, Limiter},
+  state::tracker::LimitExceeded,
   utils::Lexeme,
 };
 
 use crate::{
   handlers::{self, ValidateNumberChar, handle_number_suffix},
   hints::{FloatHint, HexFloatHint},
+  limits::LosslessLimits,
 };
 
 use super::error;
@@ -20,7 +21,7 @@ pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
 {
   handlers::increase_recursion_depth_and_token(lexer)
 }
@@ -31,7 +32,7 @@ pub(super) fn tt_hook_and_then<'a, C, T, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,
 ) -> Result<O, error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
 {
   handlers::tt_hook_and_then(lexer, f)
 }
@@ -43,7 +44,7 @@ pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerErrors<C, LimitExceeded>>,
 ) -> Result<O, error::LexerErrors<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
 {
   handlers::tt_hook_and_then_into_errors(lexer, f)
 }
@@ -54,7 +55,7 @@ pub(super) fn tt_hook_map<'a, C, T, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
 ) -> Result<O, error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
 {
   handlers::tt_hook_map(lexer, f)
 }
@@ -64,7 +65,7 @@ pub(super) fn tt_hook<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
 {
   handlers::tt_hook(lexer)
 }

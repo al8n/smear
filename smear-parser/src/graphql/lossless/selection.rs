@@ -232,6 +232,8 @@ lossless_production! {
   /// progress on everything else. Deleting that guarantee hangs the suite rather than failing
   /// it.
   fn selection_set<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::SelectionSet.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {

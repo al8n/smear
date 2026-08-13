@@ -32,6 +32,8 @@ pub mod ast;
 
 pub mod coverage;
 
+pub mod depth;
+
 // Gated on there being a dialect assembly to consume them. `rowan` alone — which is what
 // `cargo hack --each-feature` builds, and what `lossless-coverage` implies — compiles this
 // substrate with no dialect in the crate, and three macros nobody invokes are three

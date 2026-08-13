@@ -19,7 +19,9 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::{format, string::String};
 
-use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokora::Lexer;
+
+use crate::limits::SyntacticLimits;
 
 use crate::graphqlx::syntactic::SyntacticLexer;
 
@@ -322,7 +324,7 @@ fn full_trait_parity_low_recursion_limit() {
   assert_eq!(
     render_full!(SyntacticLexer::<str>::with_state(
       src,
-      RecursionLimiter::with_limitation(limit)
+      SyntacticLimits::with_max_nesting_depth(limit)
     )),
     expected
   );
@@ -332,7 +334,7 @@ fn full_trait_parity_low_recursion_limit() {
   {
     let simd_panicked = panics(|| {
       let mut simd =
-        SyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
+        SyntacticLexer::<str>::with_state(src, SyntacticLimits::with_max_nesting_depth(limit));
       while simd.lex().is_some() {}
       simd.bump(&1usize);
     });

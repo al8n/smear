@@ -2,11 +2,11 @@ use crate::{
   graphqlx::error::{BinaryError, HexError, OctalError},
   handlers::{self, is_ignored_byte},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
+  limits::LosslessLimits,
 };
 use tokora::{
   error::UnexpectedEnd,
   logos::{Lexer, Logos, Source},
-  state::tracker::Limiter,
   utils::Lexeme,
 };
 
@@ -37,7 +37,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<u8, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Limiter>,
+  T: Logos<'a, Source = S, Extras = LosslessLimits>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {

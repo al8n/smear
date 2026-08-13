@@ -224,6 +224,7 @@ const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
       "crate::lossless",
       "crate::type_system",
       "smear_lexer::graphql",
+      "smear_lexer::limits",
     ],
   ),
   (
@@ -233,6 +234,7 @@ const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
       "crate::graphqlx",
       "crate::lossless",
       "smear_lexer::graphqlx",
+      "smear_lexer::limits",
     ],
   ),
 ];

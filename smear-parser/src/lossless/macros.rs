@@ -57,11 +57,16 @@
 /// }
 /// ```
 ///
-/// # The seven names a dialect owes this macro
+/// # The eight names a dialect owes this macro
 ///
-/// `Input`, `Error`, `Token`, `Lexer`, `Brand`, `TokenKind` and `Keyword`, at
+/// `Input`, `Error`, `Token`, `Lexer`, `LexerState`, `Brand`, `TokenKind` and `Keyword`, at
 /// `crate::<dialect>::lossless`. They are aliases over whatever that dialect already calls those
 /// things, so adopting the macro renames nothing.
+///
+/// `LexerState` is the eighth and the newest: the `State =` pin on the `Lexer` clause is what lets
+/// a production read the resource budget the parse runs under — which is where the nesting
+/// ceiling lives — through `inp.state()`. Without the equality the projection has nothing to
+/// normalize against over a generic `Src`, exactly as `Kind =` does not for the token.
 ///
 /// # Why the bundle is one block, and why it is here rather than per dialect
 ///
@@ -91,6 +96,11 @@
 /// - **`Ctx::Emitter: CstEmitter`** — the structural gate on the whole `node` family.
 /// - **the three error conversions** — `UnexpectedEot` for every peek, `UnexpectedToken` for every
 ///   declined `expect`, and `FromUnclosed` for the unterminated-delimiter reports.
+/// - **`RecursionLimitReached` and `FromNestingLimit`** — the parser-frame descent
+///   ([`crate::lossless::depth`]). The first is [`InputRef::descend`](tokora::InputRef::descend)'s
+///   own where-clause; the second is how the refusal reaches the dialect's error container. They
+///   ride the whole bundle rather than only the delimiter productions because the bundle is one
+///   block and a per-production subset is the drift this macro exists to prevent.
 ///
 /// # The clause that used to be here and is not
 ///
@@ -138,6 +148,7 @@ macro_rules! lossless_production {
           Token = $crate::$dm::$dl::Token<$lt, $src>,
           Span = ::tokora::SimpleSpan,
           Offset = usize,
+          State = $crate::$dm::$dl::LexerState,
         >,
       $ctx: ::tokora::ParseContext<
         $lt,
@@ -166,7 +177,11 @@ macro_rules! lossless_production {
             $lt,
             $crate::$dm::$dl::Lexer<$lt, $src>,
             $crate::$dm::$dl::Brand,
-          >,
+          >
+          + ::core::convert::From<
+            ::tokora::error::RecursionLimitReached<usize, $crate::$dm::$dl::Brand>,
+          >
+          + $crate::lossless::depth::FromNestingLimit,
     $body
   )*};
 }
@@ -501,6 +516,57 @@ macro_rules! lossless_error_impls {
           )
           .into(),
         }
+      }
+    }
+
+    /// The **parser-frame** nesting refusal, landed in the dialect container.
+    ///
+    /// Raised by [`crate::lossless::depth::descend`] when a production tries to enter one level
+    /// more than the budget admits, and reported at an empty span on the parse's committed end:
+    /// the refused frame has consumed nothing of its own, so there is no lexeme to point at.
+    ///
+    /// **The payload is a message, not a variant, and that is the same ruling the lexer's own
+    /// trip already carries.** A depth trip reaches a consumer through
+    /// [`Parse::diagnostics`](crate::lossless::runner::Parse::diagnostics), which keeps the span
+    /// and the severity and drops the typed payload to stay lifetime-free — so a dedicated
+    /// `ErrorData` variant would be observable nowhere the trip is actually read. The residual is
+    /// the one `lossless/runner.rs` already records: a consumer sees a positioned error rather
+    /// than "this document is too deeply nested", and closing that is a change to the *diagnostic
+    /// surface*, not to this conversion.
+    impl<S> $crate::lossless::depth::FromNestingLimit for $errors<S> {
+      #[inline]
+      fn nesting_limit_exceeded(
+        span: ::tokora::SimpleSpan,
+        _attempted: usize,
+        _limit: usize,
+      ) -> Self {
+        $value::new(
+          span,
+          $error_data::Other(::std::borrow::Cow::Borrowed("nesting limit exceeded")),
+        )
+        .into()
+      }
+    }
+
+    /// tokora's own descent trip, landed on the same message.
+    ///
+    /// [`InputRef::descend`](::tokora::InputRef::descend) carries this conversion as a
+    /// where-clause, so it has to exist for a production to descend at all. It is **not** the
+    /// path a trip normally takes: `depth::descend` checks against tokora's `limitation()` too
+    /// and refuses first, precisely so that every refusal is emitted rather than riding a
+    /// `Result` the lossless door discards. This impl is what makes that check spellable, and the
+    /// backstop if tokora ever trips somewhere smear did not look.
+    impl<S, Lang: ?Sized>
+      ::core::convert::From<::tokora::error::RecursionLimitReached<usize, Lang>> for $errors<S>
+    {
+      #[inline]
+      fn from(err: ::tokora::error::RecursionLimitReached<usize, Lang>) -> Self {
+        let off = err.offset();
+        $value::new(
+          ::tokora::SimpleSpan::new(off, off),
+          $error_data::Other(::std::borrow::Cow::Borrowed("nesting limit exceeded")),
+        )
+        .into()
       }
     }
   };

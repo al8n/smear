@@ -93,6 +93,8 @@ lossless_production! {
   /// a path with no arguments. The first element is parsed unconditionally and the loop handles the
   /// rest, which is what makes the emptiness a diagnostic instead of a silently accepted shape.
   fn type_generics<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::TypeGenerics.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -165,6 +167,8 @@ lossless_production! {
   /// input arrives. `unexpected` consumes at least one token whenever input remains, which is this
   /// loop's whole termination argument.
   fn list_type<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::ListType.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -197,6 +201,8 @@ lossless_production! {
   /// The caller has already crossed the leading trivia at its dispatch peek, so the mark is minted
   /// after that trivia is committed and the node starts at its own `<`.
   fn set_or_map_type<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     let mark = inp.cst_mark();
     expect::<Src, Ctx>(inp, Kind::LAngle)?;
     let open = opener_span(inp.span().end());

@@ -239,8 +239,9 @@ fn graphql_syntactic_simd_oracle() {
 
 // ─── Low-recursion-limit SIMD parity ───────────────────────────────────────
 //
-// The frozen oracle above runs at the default limit (500), which no fixture
-// approaches, so it cannot catch a fast-path arm that emits a token while the
+// The frozen oracle above runs at `smear_lexer::limits::MAX_NESTING_DEPTH`,
+// which no fixture approaches — the deepest reaches 11 — so it cannot catch a
+// fast-path arm that emits a token while the
 // depth is already over the limit. `LogosLexer::lex` re-checks the limiter
 // after every successful token and, while over the limit, returns the
 // recursion error in the token's place; every SIMD fast-path emission must do
@@ -259,7 +260,7 @@ fn graphql_syntactic_simd_oracle() {
 #[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_low_recursion_parity() {
-  use tokora::state::recursion_tracker::RecursionLimiter;
+  use smear::lexer::limits::SyntacticLimits;
 
   // Each input exercises a different set of gated arms past the first
   // over-limit bracket: identifier + close-bracket, nested brackets, the
@@ -361,7 +362,7 @@ fn graphql_syntactic_simd_low_recursion_parity() {
   for (src, expected) in CASES {
     let simd = render_stream!(SyntacticLexer::<str>::with_state(
       src,
-      RecursionLimiter::with_limitation(0),
+      SyntacticLimits::with_max_nesting_depth(0),
     ));
     assert_eq!(&simd, expected, "low-limit stream mismatch for {src:?}");
   }
@@ -916,8 +917,7 @@ fn graphqlx_syntactic_simd_oracle() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
-  use smear::lexer::graphqlx::syntactic::SyntacticLexer;
-  use tokora::state::recursion_tracker::RecursionLimiter;
+  use smear::lexer::{graphqlx::syntactic::SyntacticLexer, limits::SyntacticLimits};
 
   const CASES: &[(&str, &str)] = &[
     (
@@ -1022,7 +1022,7 @@ fn graphqlx_syntactic_simd_low_recursion_parity() {
   for (src, expected) in CASES {
     let simd = render_stream!(SyntacticLexer::<str>::with_state(
       src,
-      RecursionLimiter::with_limitation(0),
+      SyntacticLimits::with_max_nesting_depth(0),
     ));
     assert_eq!(&simd, expected, "low-limit stream mismatch for {src:?}");
   }

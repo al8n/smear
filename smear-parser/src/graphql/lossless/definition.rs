@@ -133,6 +133,8 @@ lossless_production! {
   /// `arguments`' loop with a different member and the opposite emptiness ruling: `syntactic/`
   /// accepts the lenient `()` for `Arguments` and rejects it here.
   fn arguments_definition<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::ArgumentsDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -186,6 +188,8 @@ lossless_production! {
 
   /// `{ FieldDefinition+ }`
   fn fields_definition<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::FieldsDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -218,6 +222,8 @@ lossless_production! {
   /// that had to distinguish them at run time would be paying for a difference the grammar
   /// already makes.
   fn input_fields_definition<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::InputFieldsDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -380,6 +386,8 @@ lossless_production! {
 
   /// `{ EnumValueDefinition+ }`
   fn enum_values_definition<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::EnumValuesDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -454,6 +462,8 @@ lossless_production! {
 
   /// `{ RootOperationTypeDefinition+ }`
   fn root_operation_type_definitions<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::RootOperationTypeDefinitions.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
