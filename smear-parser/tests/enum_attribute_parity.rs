@@ -51,11 +51,14 @@
 //! for whoever decides the cost of auditing every other enum's history is worth it, not a silent
 //! limitation of this one.
 //!
-//! **A stacked branch adds to this list rather than inheriting it.** `feat/parser-materialised-i32`
-//! adds `src/graphql/ast/materialized32.rs`, because a file that declares two public enums and is
-//! absent from [`FILES`] is a scan that reports green over a surface it never read — the same
-//! absence-shaped defect one level out. The count assertion below is what makes forgetting it
-//! fail: it moves whether or not the new file is listed.
+//! **A stacked branch adds to this list rather than inheriting it, and it takes back what it
+//! removes.** `feat/parser-materialised-i32` added `src/graphql/ast/materialized32.rs`, because a
+//! file that declares two public enums and is absent from [`FILES`] is a scan that reports green
+//! over a surface it never read — the same absence-shaped defect one level out.
+//! `refactor/materialised-generic` deletes that file, so the entry goes and four [`Recorded`] rows
+//! go with it. Both directions fail loudly rather than quietly: the count assertions move whether
+//! or not the file is listed, and a `Recorded` row naming an enum this scan can no longer find is
+//! reported as a stale entry by [`audit`].
 //!
 //! # Why a line scan and not `syn`
 //!
@@ -109,16 +112,25 @@
 //! second, unrelated attribute change inherited the first one's justification. Nothing about the
 //! payload axis caused that hole; generalising the table is what exposed it.
 //!
-//! # What the payload axis cannot see
+//! # What the payload axis cannot see, and the blind spot that closed
 //!
-//! It compares the payload as **written**, not as resolved. `materialized::InputValue::Int` and
-//! `materialized32::InputValue::Int` both read `Int(IntValue)` and are different types, because
-//! `IntValue` is a module-local `pub type`. A width swap performed inside one of those aliases
-//! changes no line this census reads. Two other tests hold that axis —
+//! It compares the payload as **written**, not as resolved, so a change made inside a
+//! module-local `pub type` changes no line it reads.
+//!
+//! That used to bite exactly here. `materialized::InputValue::Int` and
+//! `materialized32::InputValue::Int` both read `Int(IntValue)` and were different types, because
+//! each module declared its own `IntValue` alias — one at `i64`, one at `i32`. Two enums whose
+//! recorded variant lists were byte-identical and whose meanings were not is the worst case a text
+//! census can be handed, and the entry for the second one said so.
+//!
+//! **`refactor/materialised-generic` closed it by deleting the second enum.** There is one
+//! materialised tree now and the width is a parameter on it, so the line this census reads is
+//! `Int(IntValue<I>)` — the payload names the parameter that decides it, and two widths are two
+//! instantiations of one recorded list rather than two lists that happen to match. The census
+//! still cannot resolve `IntValue<I>` to `super::IntValue<I, SimpleSpan>`, and that limit is real;
+//! what is gone is the case where resolving it was the only way to tell two enums apart.
 //! `every_value_tree_declares_the_same_variants` and the round trips in
-//! `syntactic::value::materialized32::tests` — and the entry for the enum where it bites says so.
-//! Resolving types here would mean the `syn` dependency the section above explains this census
-//! avoids, and would still not resolve an alias without a name resolver.
+//! `syntactic::value::materialized::tests` hold the resolved axis.
 
 use std::collections::BTreeSet;
 
@@ -142,10 +154,6 @@ const FILES: &[SourceFile] = &[
   SourceFile {
     path: "src/graphql/ast/materialized.rs",
     text: include_str!("../src/graphql/ast/materialized.rs"),
-  },
-  SourceFile {
-    path: "src/graphql/ast/materialized32.rs",
-    text: include_str!("../src/graphql/ast/materialized32.rs"),
   },
   SourceFile {
     path: "src/graphql/syntactic/value/mod.rs",
@@ -615,29 +623,6 @@ const RECORDED_DIFFERENCES: &[Recorded] = &[
        wildcard over a closed two-element set. Attribute sets are contracts and this one is a \
        choice, which is the entry this table exists for.",
   },
-  Recorded {
-    file: "src/graphql/ast/materialized32.rs",
-    name: "InputValue",
-    expected: &[
-      "#[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]",
-      "#[unwrap(ref, ref_mut)]",
-      "#[try_unwrap(ref, ref_mut)]",
-    ],
-    reason: "new enum: the `i32` value tree's twin of `ast::InputValue`, gated behind \
-       `materialized-numbers` beside the `i64` one. Same attribute set as \
-       `materialized::InputValue` by construction — the two differ in one leaf type and in \
-       nothing else. No merge-base entry exists because the file did not.",
-  },
-  Recorded {
-    file: "src/graphql/ast/materialized32.rs",
-    name: "ConstInputValue",
-    expected: &[
-      "#[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]",
-      "#[unwrap(ref, ref_mut)]",
-      "#[try_unwrap(ref, ref_mut)]",
-    ],
-    reason: "new enum, same reason as `materialized32::InputValue` above.",
-  },
 ];
 
 /// Every enum whose current variant signatures do not equal [`MERGE_BASE_VARIANTS`] — new since
@@ -702,15 +687,19 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
       "Boolean(AstBooleanValue<S>)",
       "String(AstStringValue<S>)",
       "Float(FloatValue)",
-      "Int(IntValue)",
+      "Int(IntValue<I>)",
       "Enum(AstEnumValue<S>)",
       "Null(AstNullValue<S>)",
-      "List(List<S>)",
-      "Object(Object<S>)",
+      "List(List<S, I>)",
+      "Object(Object<S, I>)",
     ],
     reason: "new enum: the materialised-number value tree's twin of `ast::InputValue`, variant for \
        variant with the slice tree and differing in the two numeric leaves. No merge-base entry \
-       exists because the file did not.",
+       exists because the file did not. THE PAYLOAD PARAMETER IS PART OF THIS LIST: `Int`, `List` \
+       and `Object` name `I`, and `Float` does not, which is the census reading off the \
+       declaration that the width reaches the integer leaf and the containers over it and nothing \
+       else. Draft §3.5.2 makes `Float` IEEE 754 double precision at every reading of `Int`, so an \
+       `I` appearing on that line would be a defect this row fails on.",
   },
   Recorded {
     file: "src/graphql/ast/materialized.rs",
@@ -719,51 +708,13 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
       "Boolean(AstBooleanValue<S>)",
       "String(AstStringValue<S>)",
       "Float(FloatValue)",
-      "Int(IntValue)",
+      "Int(IntValue<I>)",
       "Enum(AstEnumValue<S>)",
       "Null(AstNullValue<S>)",
-      "List(ConstList<S>)",
-      "Object(ConstObject<S>)",
+      "List(ConstList<S, I>)",
+      "Object(ConstObject<S, I>)",
     ],
-    reason: "new enum, same reason as `materialized::InputValue` above.",
-  },
-  Recorded {
-    file: "src/graphql/ast/materialized32.rs",
-    name: "InputValue",
-    expected: &[
-      "Variable(AstVariableValue<S>)",
-      "Boolean(AstBooleanValue<S>)",
-      "String(AstStringValue<S>)",
-      "Float(FloatValue)",
-      "Int(IntValue)",
-      "Enum(AstEnumValue<S>)",
-      "Null(AstNullValue<S>)",
-      "List(List<S>)",
-      "Object(Object<S>)",
-    ],
-    reason: "new enum: the `i32` value tree's twin. THIS LIST IS BYTE-IDENTICAL TO \
-       `materialized::InputValue`'s above, and that is this census's blind spot stated where it \
-       bites: both write `Int(IntValue)`, and `IntValue` is a module-local `pub type` resolving \
-       to `i32` here and `i64` there. A text census reads declarations, not resolved types, so a \
-       width swap performed inside one of those aliases changes no line it can see. \
-       `every_value_tree_declares_the_same_variants` and the round trips in \
-       `syntactic::value::materialized32::tests` hold that axis; this one holds the declared \
-       shape.",
-  },
-  Recorded {
-    file: "src/graphql/ast/materialized32.rs",
-    name: "ConstInputValue",
-    expected: &[
-      "Boolean(AstBooleanValue<S>)",
-      "String(AstStringValue<S>)",
-      "Float(FloatValue)",
-      "Int(IntValue)",
-      "Enum(AstEnumValue<S>)",
-      "Null(AstNullValue<S>)",
-      "List(ConstList<S>)",
-      "Object(ConstObject<S>)",
-    ],
-    reason: "new enum, same reason as `materialized32::InputValue` above, blind spot included.",
+    reason: "new enum, same reason as `materialized::InputValue` above, payload parameter included.",
   },
 ];
 
@@ -911,21 +862,25 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // A scan that stops finding enums has nothing left to check; a scan that finds them and reads
   // no variants out of them is accounted for on the attribute axis and silent on the payload one.
   //
-  // 18 enums = 12 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs + 2 in
-  // ast/materialized32.rs. 156 variants = 105 + 17 + 17 + 17 across the same four files. Update
-  // either count only after checking why it moved.
+  // 16 enums = 12 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 139 variants =
+  // 105 + 17 + 17 across the same three files. Update either count only after checking why it
+  // moved.
+  //
+  // It moved once, and this is the reading: `refactor/materialised-generic` deleted
+  // ast/materialized32.rs, whose two enums were ast/materialized.rs's with `IntValue` resolving
+  // to a different width. 18 -> 16 and 156 -> 139 is that file leaving, and nothing else.
   assert_eq!(
     found.len(),
-    18,
-    "the scan found {} public enum(s) across {} files, expected 18 — a file gained or lost one, \
+    16,
+    "the scan found {} public enum(s) across {} files, expected 16 — a file gained or lost one, \
      or the line-matching in `find_public_enums` stopped seeing the surface",
     found.len(),
     FILES.len(),
   );
   let variants_read: usize = found.iter().map(|enum_| enum_.variants.len()).sum();
   assert_eq!(
-    variants_read, 156,
-    "the scan read {variants_read} variant(s) out of 18 enums, expected 156 — an enum gained or \
+    variants_read, 139,
+    "the scan read {variants_read} variant(s) out of 16 enums, expected 139 — an enum gained or \
      lost one, or `read_variants` stopped seeing them",
   );
 

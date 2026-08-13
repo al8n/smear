@@ -389,9 +389,16 @@ pub enum Unclosed {
 ///
 /// No `#[non_exhaustive]`, unlike the hint enums above it and like [`Unclosed`] beside it. The
 /// whole reason to read this is to branch on the two, and a wildcard arm forced onto every
-/// consumer would be a wildcard over a two-element closed set. A third width is not a variant
-/// added here in isolation: it is a third marker and a third value tree in
-/// [`ast`](crate::graphql::ast), so it is a change to the feature's surface either way.
+/// consumer would be a wildcard over a two-element closed set.
+///
+/// A third width is not a variant added here in isolation. It used to mean a third marker and a
+/// third value tree in [`ast`](crate::graphql::ast); it now means a third impl of the **sealed**
+/// `MaterialisedInt` — `syntactic::value::materialized`'s trait, whose associated `WIDTH` is a
+/// value of this enum. That is less to write and the same to review, and the seal is what keeps
+/// this list and that impl list the same length: an out-of-crate impl would have to answer
+/// `WIDTH` with one of the two variants below while being neither, which is the forged width
+/// [`IntOverflow`]'s crate-private constructor exists to rule out, arriving through a door in
+/// another module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
 pub enum IntWidth {
   /// 32 bits — GraphQL's specified `Int`.
@@ -434,6 +441,27 @@ impl IntWidth {
 /// So the free-width constructor is crate-private, and the public door is `IntOverflow::checked`,
 /// which refuses a pair the productions would not have produced. The two facts the payload carries
 /// are no longer independent: the width has to be one the literal beside it genuinely overflows.
+///
+/// # Why the checked door survives a refactor that removed every other supplied width
+///
+/// `refactor/materialised-generic` made the width a function of the payload type — a production
+/// reads `MaterialisedInt::WIDTH` off `I` and nothing supplies one — which raises the question of
+/// whether a door taking an [`IntWidth`] as an *argument* still has a caller. It does, and the two
+/// cases are different in kind:
+///
+/// * inside the crate, the width is decided by a type the compiler already chose, so an argument
+///   would be a second chance to be wrong about something already known. There is none left.
+/// * outside it, the width may be a **value** — a gateway told at run time which reading it
+///   enforces, a report replayed from a log, a validator coercing a variable against `Int`.
+///   Turning the argument into a type parameter would only move that choice into a turbofish, not
+///   remove it, and what makes the door safe was never the argument's shape: it is
+///   [`overflows`](crate::graphql::syntactic::value::numbers::overflows) refusing a pair the
+///   production at that width would have converted.
+///
+/// Deleting it was the other option and it costs more than it saves.
+/// [`ErrorData::IntOverflow`] is a public variant whose payload would then have no public
+/// constructor at all, so a consumer could build every other variant of that enum and not this
+/// one — a hole in the error surface bought in exchange for a check that already holds.
 ///
 /// (`checked` is named in code font rather than linked, here and everywhere else in this file that
 /// an unconditional doc comment reaches a `materialized-numbers` item. An intra-doc link to a
