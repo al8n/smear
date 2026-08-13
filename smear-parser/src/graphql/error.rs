@@ -556,6 +556,77 @@ impl<S> IntOverflow<S> {
 
 /// The data of a parser error.
 ///
+/// # `#[non_exhaustive]`, and the rule that decides it
+///
+/// `7b9b293` took the attribute off four enums in this crate and wrote the rule down:
+/// **`#[non_exhaustive]` belongs on vocabulary smear owns, not on vocabulary the GraphQL
+/// specification enumerates.** [`ast::Selection`](crate::graphql::ast::Selection) carries it in
+/// prose — draft §2.4 is `Selection : Field | FragmentSpread | InlineFragment`, so a variant added
+/// there would mean parsing something that is not GraphQL, and the attribute was advertising an
+/// evolution freedom the type structurally does not have. For those four the `E0004` a downstream
+/// exhaustive match gets is *information*: the language moved.
+///
+/// This enum is the other side of that rule, and it transcribes nothing. Its list is what this
+/// parser chose to distinguish about a document it refused, and three parts of the list say so
+/// without being asked:
+///
+/// - [`Other`](Self::Other) exists **because** the list is open. The six `From` conversions at the
+///   foot of this file funnel tokora diagnostics into it exactly where `ErrorData` has no variant
+///   for them; a spec-transcribed enum has no `Other`.
+/// - [`IntOverflow`](Self::IntOverflow) and [`FloatOverflow`](Self::FloatOverflow) are not grammar
+///   refusals at all. Draft §2.9.1 bounds an `IntValue`'s digits at nothing, and these two exist
+///   because this crate ships a *materialising* reading — they arrived with a feature.
+/// - The six `UnexpectedEndOf…Extension` variants are one grammatical situation cut six ways
+///   because this parser carries a per-extension hint. The draft asks for none of the six.
+///
+/// So the list is ours, it has grown for our reasons, and it is committed to growing further:
+/// `graphqlx` is a second dialect in this crate today and more dialects are the plan.
+///
+/// ## What the attribute costs, measured rather than argued
+///
+/// One site in the workspace. `cargo check --workspace --all-features --all-targets --keep-going`
+/// with the attribute applied reports exactly one `error[E0004]`, in `smear-smoke` — the one crate
+/// the attribute binds that held a wildcard-free match. Every other consumer in the tree already
+/// reaches this type through `matches!`, a `let`-else, or a match with a wildcard, because looking
+/// one diagnostic up is what a caller does with a diagnostic. That probe is **replaced and not
+/// deleted**; the section below says what replaced it.
+///
+/// ## Why now, and what the delay already cost
+///
+/// Adding the attribute is itself a source-breaking change, so its price is paid once whenever it
+/// is paid, and every release before then adds consumers to charge it to. This workspace is
+/// `0.0.0` with nothing published, so today's price is the one site above and it only rises. pql
+/// reached the identical conclusion for `PqlError` in its stage 0, on this reasoning, and recorded
+/// it there.
+///
+/// The delay has already been charged for once. #160 wanted a twenty-third variant and could not
+/// have one, because under an exhaustive enum a new variant is `E0004` in every downstream
+/// exhaustive match — including consumers who never touch integer overflow. It reshaped
+/// `IntOverflow`'s payload instead, which is a break of its own. The alternatives section below is
+/// where that choice is recorded, and it is re-priced there rather than rewritten: the attribute
+/// removes the argument that decided it and does not remove the other two.
+///
+/// ## What the attribute takes, and where the notice moved
+///
+/// No consumer can be told at build time that this vocabulary grew: making a downstream match
+/// untotal is the whole of what `#[non_exhaustive]` does. The notice does not disappear, it moves
+/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 22 variants
+/// wildcard-free in **every** configuration, so a twenty-third is `E0004` there before it can
+/// reach anybody, and it must carry a public producer before that test is green again.
+///
+/// What survives outside the crate is the half a wildcard cannot swallow, and `smear-smoke`'s
+/// `error_data_variant_tag` holds it: every variant is named there and reachable from a dependent
+/// through a public constructor, with the wildcard arm the attribute forces returning `None` so an
+/// unlisted variant is a **reported failure** rather than a quiet fall-through.
+///
+/// ## The two enums beside it that stay exhaustive
+///
+/// Neither is an oversight, and both are the rule applied rather than an exception to it.
+/// [`Unclosed`] is the three delimiter pairs GraphQL's grammar opens; a fourth belongs to another
+/// dialect, and `graphqlx`'s own `Unclosed` is where the angle pair lives. [`IntWidth`]'s own doc
+/// argues its case: it is read precisely in order to branch on two, so a forced wildcard there
+/// would be a wildcard over a closed two-element set.
+///
 /// # Two variants have a feature-gated producer, and are themselves unconditional
 ///
 /// [`IntOverflow`](ErrorData::IntOverflow) and [`FloatOverflow`](ErrorData::FloatOverflow) are
@@ -609,11 +680,20 @@ impl<S> IntOverflow<S> {
 ///
 /// **Why this rather than the two alternatives**, both of which were considered and are worse:
 ///
-/// - *A twenty-third variant, `IntOverflow32`.* This enum is deliberately not
-///   `#[non_exhaustive]`, and `smear-smoke`'s `error_data_is_exhaustively_matchable` pins that
-///   from outside the crate. A new variant is therefore `E0004` in every downstream exhaustive
-///   match — a break too, and a wider one, since it reaches consumers who never touch integer
-///   overflow at all.
+/// - *A twenty-third variant, `IntOverflow32`.* **Re-priced by the attribute above, and kept at
+///   the price it was decided at rather than rewritten to the price it has now.** When #160 chose,
+///   this enum was exhaustive and a new variant was `E0004` in every downstream exhaustive match —
+///   a break too, and a wider one, since it reaches consumers who never touch integer overflow at
+///   all. That argument is gone: an additive variant now costs a downstream consumer nothing, and
+///   it was the argument that decided the round.
+///
+///   Two survive it, and neither is about breakage. A variant *pair* puts the width in the
+///   discriminant, which makes it unforgettable and leaves it unchecked — `IntOverflow32(v)` for a
+///   `v` that fits `i32` is still constructible and still names a refusal that never happened, so
+///   the hole `IntOverflow::checked` closed would have to be closed once per width instead of
+///   once. And a consumer who wants *"an integer overflowed"* would match one name per width
+///   forever, where the payload leaves one variant and moves the width into a field. What the
+///   undecided attribute cost was the rounds spent reaching that, not the shape reached.
 /// - *A private `Option<IntWidth>` beside `data` on [`Error`], read through additive accessors.*
 ///   It breaks nothing in the type system, and it is the wrong shape for two reasons that are
 ///   about what a consumer does rather than about taste. First, `Error::into_data` and
@@ -639,6 +719,7 @@ impl<S> IntOverflow<S> {
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),

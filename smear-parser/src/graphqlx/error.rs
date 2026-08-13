@@ -172,9 +172,17 @@ pub enum Unclosed {
 }
 
 /// The data carried by a GraphQLx parser error.
+///
+/// `#[non_exhaustive]` under the rule `7b9b293` wrote down and `387dc34` applied to the sibling
+/// `graphql::error::ErrorData`: the attribute belongs on vocabulary this crate owns, not on
+/// vocabulary a specification enumerates. This list is ours — [`Other`](Self::Other) exists
+/// because it is open, [`Source`](Self::Source) exists only to retain `S` and could not appear in
+/// a spec-transcribed enum at all, and the `From` impls below already funnel diagnostics into
+/// `Other` wherever no dedicated variant fits.
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more lexer errors.
   Lexer(LexerErrors<Char, StateError>),
