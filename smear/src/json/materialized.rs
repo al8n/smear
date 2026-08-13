@@ -1,35 +1,37 @@
-//! [`WriteJson`] for the two materialised value trees.
+//! [`WriteJson`] for the materialised value tree, at every width it is read at.
 //!
-//! # Why these two and not their four siblings
+//! # Why the constant tree and not its sibling
 //!
-//! Each width declares two enums — `InputValue`, which can hold a `Variable`, and
-//! `ConstInputValue`, which cannot. **Only the constant ones are implemented**, and the reason is
+//! The materialised AST declares two enums — `InputValue`, which can hold a `Variable`, and
+//! `ConstInputValue`, which cannot. **Only the constant one is implemented**, and the reason is
 //! not tidiness: a response has no variables in it. Draft §6.1 coerces every variable before
 //! execution begins, so a `$name` reaching a response value would mean a value that was never
 //! resolved, and there is no JSON for it — writing the name would invent a string the schema
 //! never promised, and writing `null` would answer a question nobody asked. An unimplemented trait
 //! is a compile error at the site that tried; either alternative is a wrong response.
 //!
-//! # One body, two widths
+//! # One body, every width
 //!
-//! The two implementations are one macro at two instantiations rather than two hand-written
-//! copies, for the reason `syntactic::value::materialized` gives about its own leaves: they are
-//! the same production at two payloads, so there should be one of them. What the widths disagree
-//! about is a single expression — how the integer reaches [`Json::int_leaf`] — and that
-//! disagreement is the argument of the macro, so a reader can see the whole of the difference in
-//! one place.
+//! This was a macro at two instantiations, because the tree was two enums at two widths. It is
+//! **one `impl`** now: `ConstInputValue<S, I>` is one type, and the only thing the widths ever
+//! disagreed about — how the integer reaches [`Json::int_leaf`], which takes an [`i64`] — is
+//! `I: Into<i64>`, a bound rather than a macro argument. Both widths satisfy it, and no third
+//! payload can reach this impl at all, because the parser's `MaterialisedInt` is sealed to those
+//! two.
 //!
-//! `Frame` is outside the macro because it does *not* differ: it is written once and instantiated
-//! at each width's element and field types, which is the same argument one level down.
+//! `Frame` was already outside the macro because it did not differ, and it stays a free
+//! declaration instantiated at whatever element and field types the width picks.
 //!
 //! # Where the widths show
 //!
-//! [`Json::int_leaf`] renders an integer outside draft §3.5.1's 32-bit range as a JSON string. The
-//! `i32` tree cannot produce one — its parser refused the literal, as
+//! [`Json::int_leaf`] renders an integer outside draft §3.5.1's 32-bit range as a JSON string. At
+//! `I = i32` the tree cannot produce one — its parser refused the literal, as
 //! `ErrorData::IntOverflow` — so for that width the branch is unreachable and every `Int` in the
-//! response is a JSON number. The `i64` tree can, and `2147483648` comes out of it as
-//! `"2147483648"`. That is the permissive reading and the specification's, told apart in the
-//! response rather than only in the parse.
+//! response is a JSON number. At `i64` it can, and `2147483648` comes out as `"2147483648"`. That
+//! is the permissive reading and the specification's, told apart in the response rather than only
+//! in the parse. **Nothing here branches on the width to do it**: the body branches on the value,
+//! which is why one impl serves both and why the `i32` claim is a fact about the parser rather
+//! than about this file.
 //!
 //! # A value is walked on an explicit stack, and the response's depth does not bound it
 //!
@@ -99,7 +101,7 @@ use core::{fmt, slice};
 
 use std::vec::Vec;
 
-use smear_parser::graphql::ast::{materialized, materialized32};
+use smear_parser::graphql::ast::materialized;
 
 use super::{Error, Json, WriteJson};
 
@@ -148,99 +150,93 @@ fn push<'v, Element, Field>(
   Ok(())
 }
 
-/// Declares [`WriteJson`] for one width's `ConstInputValue`.
-///
-/// `$int` says how that width's integer payload reaches [`Json::int_leaf`], which is the whole of
-/// what the two widths disagree about.
-macro_rules! const_input_value {
-  ($tree:ident, $int:expr) => {
-    impl<S> WriteJson for $tree::ConstInputValue<S>
-    where
-      S: AsRef<str>,
-    {
-      fn write_json<W: fmt::Write>(&self, out: &mut Json<W>) -> Result<(), Error> {
-        // One frame per open container, on the heap, so that the native stack does not grow with a
-        // depth nothing measured. Empty until a container is met: a scalar value allocates nothing.
-        let mut stack: Vec<Frame<'_, Self, $tree::ConstObjectField<S>>> = Vec::new();
-        let mut node = self;
+impl<S, I> WriteJson for materialized::ConstInputValue<S, I>
+where
+  S: AsRef<str>,
+  // `Copy` because the leaf hands out a `&I` and [`Json::int_leaf`] wants the value; `Into<i64>`
+  // because that is the widest integer JSON's number branch is written against, and it is the
+  // whole of what the two widths disagree about. The parser's `MaterialisedInt` is sealed to `i32`
+  // and `i64`, so nothing else reaches this impl however permissive these two bounds read.
+  I: Copy + Into<i64>,
+{
+  fn write_json<W: fmt::Write>(&self, out: &mut Json<W>) -> Result<(), Error> {
+    // One frame per open container, on the heap, so that the native stack does not grow with a
+    // depth nothing measured. Empty until a container is met: a scalar value allocates nothing.
+    let mut stack: Vec<Frame<'_, Self, materialized::ConstObjectField<S, I>>> = Vec::new();
+    let mut node = self;
 
-        loop {
-          match node {
-            Self::Null(_) => out.null()?,
-            Self::Boolean(value) => out.bool(value.value())?,
-            // The leaf keeps its source slice, escapes and all — that is what makes
-            // materialisation allocate nothing — so the value is cooked on the way out.
-            Self::String(value) => out.graphql_string(value.source().as_ref())?,
-            // Draft §6.4.3 serialises an enum value as its member name, which is a `String` in the
-            // response.
-            Self::Enum(value) => out.string(value.source().as_ref())?,
-            Self::Int(value) => out.int_leaf($int(*value.source()))?,
-            Self::Float(value) => out.double(*value.source())?,
-            Self::List(list) => {
-              out.punct('[')?;
-              push(
-                &mut stack,
-                Frame::List {
-                  rest: list.values().iter(),
-                  first: true,
-                },
-              )?;
-            }
-            Self::Object(object) => {
-              out.punct('{')?;
-              push(
-                &mut stack,
-                Frame::Object {
-                  rest: object.fields().iter(),
-                  first: true,
-                },
-              )?;
-            }
-          }
-
-          // Climb back out of every container that has nothing left, then take one step into the
-          // next value. An empty stack is the whole value written.
-          node = loop {
-            let Some(top) = stack.last_mut() else {
-              return Ok(());
-            };
-            let object = matches!(top, Frame::Object { .. });
-            // Everything the frame is asked for is taken in one step, so the borrow of the stack
-            // ends before the body below can pop it. The references this yields borrow the value,
-            // not the stack, which is what makes that possible.
-            let step = match top {
-              Frame::List { rest, first } => rest
-                .next()
-                .map(|element| (core::mem::replace(first, false), None, element)),
-              Frame::Object { rest, first } => rest.next().map(|field| {
-                (
-                  core::mem::replace(first, false),
-                  Some(field.name()),
-                  field.value(),
-                )
-              }),
-            };
-
-            let Some((first, key, value)) = step else {
-              stack.pop();
-              out.punct(if object { '}' } else { ']' })?;
-              continue;
-            };
-
-            if !first {
-              out.punct(',')?;
-            }
-            if let Some(key) = key {
-              out.string(key.source().as_ref())?;
-              out.punct(':')?;
-            }
-            break value;
-          };
+    loop {
+      match node {
+        Self::Null(_) => out.null()?,
+        Self::Boolean(value) => out.bool(value.value())?,
+        // The leaf keeps its source slice, escapes and all — that is what makes
+        // materialisation allocate nothing — so the value is cooked on the way out.
+        Self::String(value) => out.graphql_string(value.source().as_ref())?,
+        // Draft §6.4.3 serialises an enum value as its member name, which is a `String` in the
+        // response.
+        Self::Enum(value) => out.string(value.source().as_ref())?,
+        Self::Int(value) => out.int_leaf((*value.source()).into())?,
+        Self::Float(value) => out.double(*value.source())?,
+        Self::List(list) => {
+          out.punct('[')?;
+          push(
+            &mut stack,
+            Frame::List {
+              rest: list.values().iter(),
+              first: true,
+            },
+          )?;
+        }
+        Self::Object(object) => {
+          out.punct('{')?;
+          push(
+            &mut stack,
+            Frame::Object {
+              rest: object.fields().iter(),
+              first: true,
+            },
+          )?;
         }
       }
-    }
-  };
-}
 
-const_input_value!(materialized, core::convert::identity::<i64>);
-const_input_value!(materialized32, i64::from);
+      // Climb back out of every container that has nothing left, then take one step into the
+      // next value. An empty stack is the whole value written.
+      node = loop {
+        let Some(top) = stack.last_mut() else {
+          return Ok(());
+        };
+        let object = matches!(top, Frame::Object { .. });
+        // Everything the frame is asked for is taken in one step, so the borrow of the stack
+        // ends before the body below can pop it. The references this yields borrow the value,
+        // not the stack, which is what makes that possible.
+        let step = match top {
+          Frame::List { rest, first } => rest
+            .next()
+            .map(|element| (core::mem::replace(first, false), None, element)),
+          Frame::Object { rest, first } => rest.next().map(|field| {
+            (
+              core::mem::replace(first, false),
+              Some(field.name()),
+              field.value(),
+            )
+          }),
+        };
+
+        let Some((first, key, value)) = step else {
+          stack.pop();
+          out.punct(if object { '}' } else { ']' })?;
+          continue;
+        };
+
+        if !first {
+          out.punct(',')?;
+        }
+        if let Some(key) = key {
+          out.string(key.source().as_ref())?;
+          out.punct(':')?;
+        }
+        break value;
+      };
+    }
+  }
+}

@@ -37,7 +37,7 @@ use smear::{
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
     GraphQL,
-    ast::{ExecutableDocument, TypeSystemDocument, materialized::ConstInputValue},
+    ast::{ExecutableDocument, TypeSystemDocument, materialized},
     error::GraphqlErrors,
     syntactic::{
       GraphqlLexer, executable_document, type_system_document, value::materialized::const_value,
@@ -46,6 +46,15 @@ use smear::{
   proto::{Executor, Extensions, Leaf, RequestErrorResult, Response, StartError, Values},
   validator::Schema,
 };
+
+/// The width every fixture in this file is built at.
+///
+/// `i64` and not `i32`, because it is the width whose `Int` leaf can reach
+/// [`json::Json::int_leaf`]'s string branch — the writer behaviour this file exists to pin. The
+/// other width is exercised where its own claim lives, in
+/// `the_i32_width_cannot_produce_an_out_of_range_int` below, which asserts the parser refusal that
+/// makes that branch unreachable there.
+type ConstInputValue<S> = materialized::ConstInputValue<S, i64>;
 
 // ------------------------------------------------------------------------------------------
 // a driver whose value space is the materialised value tree
@@ -62,7 +71,7 @@ fn value(literal: &'static str) -> ConstInputValue<&'static str> {
     GraphqlErrors<&'static str>,
     _,
     GraphQL,
-  >(const_value)
+  >(const_value::<_, _, i64>)
   .parse_str(literal)
   .expect("the fixture is a constant GraphQL value")
 }
@@ -646,10 +655,7 @@ fn the_int_boundary_is_draft_3_5_1s() {
 /// claim "unreachable" is about that refusal and not about the writer.
 #[test]
 fn the_i32_width_cannot_produce_an_out_of_range_int() {
-  use smear::parser::graphql::{
-    ast::materialized32::ConstInputValue as ConstInputValue32,
-    syntactic::value::materialized32::const_value as const_value32,
-  };
+  type ConstInputValue32<S> = materialized::ConstInputValue<S, i32>;
 
   let parse = |literal: &'static str| {
     Parser::with_parser::<
@@ -658,7 +664,7 @@ fn the_i32_width_cannot_produce_an_out_of_range_int() {
       GraphqlErrors<&'static str>,
       _,
       GraphQL,
-    >(const_value32)
+    >(const_value::<_, _, i32>)
     .parse_str(literal)
   };
 
@@ -787,7 +793,7 @@ fn nested(depth: usize) -> ConstInputValue<&'static str> {
   let mut value = value_null();
   let span = *smear::__private::tokora::span::AsSpan::as_span(&value);
   for _ in 0..depth {
-    value = ConstInputValue::List(smear::parser::graphql::ast::materialized::ConstList::new(
+    value = ConstInputValue::List(materialized::ConstList::<&'static str, i64>::new(
       span,
       vec![value],
     ));

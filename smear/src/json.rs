@@ -10,7 +10,7 @@
 //! What unblocked it is the materialised value layer — with
 //! [`parser::graphql::ast::materialized`](crate::parser::graphql::ast::materialized) there is a
 //! concrete tree to write, so the writer lives *above* both and neither layer has to grow an
-//! eighth question. [`materialized`] holds the two implementations, one per width.
+//! eighth question. [`materialized`] holds the implementation, one for every width.
 //!
 //! # What the writer refuses to guess
 //!
@@ -285,7 +285,8 @@ impl From<fmt::Error> for Error {
 
 /// A value that can write itself as one JSON value.
 ///
-/// Implemented here for both materialised value trees (see [`materialized`]); a driver whose
+/// Implemented here for the materialised constant value tree at every width (see
+/// [`materialized`]); a driver whose
 /// values are self-describing implements it for its own type and gets
 /// [`write_response`] for free.
 ///
@@ -365,11 +366,11 @@ impl<W: fmt::Write> Json<W> {
   /// does, and for the reason they do it: JSON has one number type and a consumer that reads it as
   /// an IEEE 754 double silently loses the value.
   ///
-  /// **This is where the two materialised widths meet the writer.** The `i32` tree
-  /// ([`materialized32`](crate::parser::graphql::ast::materialized32)) cannot reach the string
-  /// branch at all — its parser refused the literal — and the `i64` tree can, which is the
-  /// difference between the permissive reading and the specification's made visible in the
-  /// response rather than only in the parse.
+  /// **This is where the two materialised widths meet the writer.** The materialised tree at
+  /// `i32` cannot reach the string branch at all — its parser refused the literal — and at `i64`
+  /// it can, which is the difference between the permissive reading and the specification's made
+  /// visible in the response rather than only in the parse. The branch below is on the *value*,
+  /// so one body serves both and the `i32` claim stays a fact about the parser.
   ///
   /// No escaping on the string branch: a decimal integer's spelling is `-` and ASCII digits.
   pub fn int_leaf(&mut self, value: i64) -> Result<(), Error> {
