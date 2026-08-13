@@ -251,6 +251,42 @@ pub(crate) fn report_out_of_range<S>(
 /// neither, so every error it produced would name a width that is not its own — the forgery the
 /// crate-private `IntOverflow::new` and the checked public door exist to rule out, arriving
 /// through a third door. So the trait is sealed, and a third width is a change to this crate.
+///
+/// The seal is asserted rather than described, from outside the crate, which is the only place it
+/// means anything:
+///
+/// ```compile_fail,E0277
+/// use smear_parser::graphql::{
+///   error::IntWidth,
+///   syntactic::value::materialized::MaterialisedInt,
+/// };
+///
+/// struct Narrow(i16);
+///
+/// // `Narrow` is not `i32` and not `i64`, so whichever width it named would be a fact about no
+/// // reader in the crate. The private supertrait is what stops it compiling.
+/// impl MaterialisedInt for Narrow {
+///   const WIDTH: IntWidth = IntWidth::I32;
+///   fn parse(_: &[u8]) -> Option<Self> { None }
+/// }
+/// ```
+///
+/// And the two that do implement it are reachable and answer different widths, so the failure
+/// above is the seal and not the trait being unusable:
+///
+/// ```
+/// use smear_parser::graphql::{
+///   error::IntWidth,
+///   syntactic::value::materialized::MaterialisedInt,
+/// };
+///
+/// assert_eq!(<i32 as MaterialisedInt>::WIDTH, IntWidth::I32);
+/// assert_eq!(<i64 as MaterialisedInt>::WIDTH, IntWidth::I64);
+///
+/// // `2147483648` is the literal the two readings disagree about.
+/// assert_eq!(<i64 as MaterialisedInt>::parse(b"2147483648"), Some(2_147_483_648));
+/// assert_eq!(<i32 as MaterialisedInt>::parse(b"2147483648"), None);
+/// ```
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub trait MaterialisedInt: Sized + sealed::MaterialisedInt {

@@ -141,12 +141,12 @@ fn parse_slice_payload() -> InputValue<&'static str> {
   drive(InputValue::<&str>::graphql, DOCUMENT).expect("the slice parser must accept the fixture")
 }
 
-fn parse_materialized_payload() -> MaterializedInputValue<&'static str, i64> {
+fn parse_materialized_i64_payload() -> MaterializedInputValue<&'static str, i64> {
   drive(materialized::value::<_, _, i64>, DOCUMENT)
     .expect("the materialising parser must accept the fixture")
 }
 
-fn parse_materialized32_payload() -> MaterializedInputValue<&'static str, i32> {
+fn parse_materialized_i32_payload() -> MaterializedInputValue<&'static str, i32> {
   drive(materialized::value::<_, _, i32>, DOCUMENT)
     .expect("the specified-width parser must accept the fixture")
 }
@@ -165,8 +165,8 @@ fn materialization_allocates_nothing() {
   // One un-measured run of each, so a lazily-initialised static cannot land in whichever
   // measurement happens to run first.
   parse_slice_payload();
-  parse_materialized_payload();
-  parse_materialized32_payload();
+  parse_materialized_i64_payload();
+  parse_materialized_i32_payload();
 
   let (slice_events, slice_bytes) = measure(parse_slice_payload);
 
@@ -179,8 +179,8 @@ fn materialization_allocates_nothing() {
   );
 
   for (width, measured) in [
-    ("i64", measure(parse_materialized_payload)),
-    ("i32", measure(parse_materialized32_payload)),
+    ("i64", measure(parse_materialized_i64_payload)),
+    ("i32", measure(parse_materialized_i32_payload)),
   ] {
     let (events, bytes) = measured;
     assert_eq!(
