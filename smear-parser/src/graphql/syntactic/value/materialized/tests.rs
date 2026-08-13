@@ -28,7 +28,7 @@
 use tokora::{FatalContext, Parse, Parser, span::AsSpan};
 
 use super::{
-  MaterialisedInt, const_value, float_value, int_value, list_value, object_value, try_int_value,
+  MaterializedInt, const_value, float_value, int_value, list_value, object_value, try_int_value,
   value,
 };
 use crate::graphql::{
@@ -68,8 +68,8 @@ fn drive_slice<'inp, O>(
 ///
 /// `Into<i64>` rather than a per-width expected value, so a shared body states its expectation in
 /// one type and the widths differ only where they are *meant* to.
-trait TestInt: MaterialisedInt + Copy + core::fmt::Debug + Into<i64> {}
-impl<I> TestInt for I where I: MaterialisedInt + Copy + core::fmt::Debug + Into<i64> {}
+trait TestInt: MaterializedInt + Copy + core::fmt::Debug + Into<i64> {}
+impl<I> TestInt for I where I: MaterializedInt + Copy + core::fmt::Debug + Into<i64> {}
 
 /// The `IntWidth` an `IntOverflow` names, or a description of whatever else came back.
 fn overflow_width(errors: &GraphqlErrors<&str>) -> Result<IntWidth, String> {

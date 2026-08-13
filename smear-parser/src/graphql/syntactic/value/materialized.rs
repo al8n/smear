@@ -16,7 +16,7 @@
 //! # The width is a parameter, and the twelve productions that take it are the ones that carry it
 //!
 //! `I` is [`i32`] — the width draft §3.5.1 specifies — or [`i64`], the reading that takes draft
-//! §2.9.1's unbounded `IntValue` grammar at its word. [`MaterialisedInt`](crate::graphql::syntactic::value::materialized::MaterialisedInt)
+//! §2.9.1's unbounded `IntValue` grammar at its word. [`MaterializedInt`](crate::graphql::syntactic::value::materialized::MaterializedInt)
 //! is the trait that admits
 //! them, it is sealed, and its `WIDTH` is what an out-of-range refusal names.
 //!
@@ -120,9 +120,9 @@ use numbers::{Materialized, Numbers};
 /// that takes one.
 ///
 /// Declared beside the readers it dispatches — `numbers` is where the two conversions and the
-/// out-of-range failure live — and published here because a public `where I: MaterialisedInt`
+/// out-of-range failure live — and published here because a public `where I: MaterializedInt`
 /// has to name something a caller can reach.
-pub use super::numbers::MaterialisedInt;
+pub use super::numbers::MaterializedInt;
 
 /// One bound set for every entry in this module, and one doc line per entry.
 ///
@@ -131,7 +131,7 @@ pub use super::numbers::MaterialisedInt;
 /// text can be read" is one sentence, and every backing this crate ships satisfies it.
 ///
 /// This arm is for the twelve productions whose output carries the width;
-/// [`width_free_parser`] is the other twelve. The bound sets differ in `I: MaterialisedInt` and
+/// [`width_free_parser`] is the other twelve. The bound sets differ in `I: MaterializedInt` and
 /// in nothing else, which is what makes the split a statement about where the payload reaches
 /// rather than a second contract.
 macro_rules! materialized_parser {
@@ -162,7 +162,7 @@ macro_rules! materialized_parser {
       GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
       GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-      I: MaterialisedInt,
+      I: MaterializedInt,
     $body
   };
 }
@@ -211,7 +211,7 @@ macro_rules! width_free_parser {
 ///
 /// This is the design's `.and_then(|x| x.parse())` with the error mapped: the production above it
 /// is [`super`]'s, unmodified, and this is everything that is added to it. The width the failure
-/// names is `I`'s own — `Materialized<I>` reads it off [`MaterialisedInt::WIDTH`] — so there is no
+/// names is `I`'s own — `Materialized<I>` reads it off [`MaterializedInt::WIDTH`] — so there is no
 /// argument here for a caller or a future edit to get wrong.
 #[inline]
 fn materialize_int<'inp, Src, Ctx, I>(
@@ -223,7 +223,7 @@ where
   GraphqlLexer<'inp, Src>: Lexer<'inp>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  I: MaterialisedInt,
+  I: MaterializedInt,
 {
   let (span, slice) = node.into_components();
   match <Materialized<I> as Numbers<GraphqlSlice<'inp, Src>>>::int(slice) {

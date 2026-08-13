@@ -46,7 +46,7 @@ graphqlx = ["smear-lexer/graphqlx"]
 #
 # It gated FOUR modules before `refactor/materialised-generic`, because each width had its own AST
 # module and its own production module. Those pairs were each other with one type substituted, and
-# the width is a parameter now — `MaterialisedInt`, sealed, with the width as an associated const —
+# the width is a parameter now — `MaterializedInt`, sealed, with the width as an associated const —
 # so there are two modules and one tree.
 #
 # NAMED FOR WHAT IT CONVERTS AND NOTHING MORE. Numbers are materialised; strings are not. A

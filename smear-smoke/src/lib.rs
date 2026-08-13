@@ -652,11 +652,11 @@ pub fn test_support_scaffolding() {
 /// feature gates one tree at two readings of draft §3.5.1, and a door that only ever named the
 /// permissive one described half of it: `materialized32` could have been deleted from the crate
 /// and this probe would not have noticed. It notices now — `I` is bound by the parser's own
-/// `MaterialisedInt`, so this signature stops compiling if the trait, the seal or either impl
+/// `MaterializedInt`, so this signature stops compiling if the trait, the seal or either impl
 /// goes, and the caller below runs it at `i32` and at `i64`.
 pub fn materialized_numbers<I>(src: &str) -> Option<(I, f64)>
 where
-  I: smear::parser::graphql::syntactic::value::materialized::MaterialisedInt + Copy,
+  I: smear::parser::graphql::syntactic::value::materialized::MaterializedInt + Copy,
 {
   use smear::parser::graphql::{
     GraphQL,

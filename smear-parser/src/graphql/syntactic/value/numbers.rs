@@ -4,7 +4,7 @@
 //! monomorphic in nothing else. [`SliceNumbers`] keeps the source slice and is what
 //! [`value`](super::value) and its siblings resolve to; [`Materialized<I>`](Materialized)
 //! converts to `I` and [`f64`] and is what [`materialized::value`](super::materialized::value)
-//! resolves to at each width [`MaterialisedInt`] admits. The parsers are then the *same* parser —
+//! resolves to at each width [`MaterializedInt`] admits. The parsers are then the *same* parser —
 //! same commit points, same recovery, the same error at every position but the two leaves — which
 //! is a property held by construction rather than by files being kept in step. Value modules
 //! drifting apart is the failure this shape is chosen against.
@@ -31,7 +31,7 @@
 //! What it *cost* is the reason this shape replaced it. With a marker per width, the width at a
 //! conversion site is a **supplied** value: something has to say `IntWidth::I32` beside
 //! `MaterializedNumbers32`, and nothing but a reader's attention keeps the two in step. Under
-//! [`MaterialisedInt::WIDTH`] the width is a **function of the payload type**, so no internal site
+//! [`MaterializedInt::WIDTH`] the width is a **function of the payload type**, so no internal site
 //! supplies it and none can get it wrong. The one place a width is still a value a caller chooses
 //! is `IntOverflow::checked`, and [`overflows`] is the check that keeps that choice honest.
 //!
@@ -191,10 +191,10 @@ impl<S> Numbers<S> for SliceNumbers {
 ///
 /// A `const WIDTH` on [`Numbers`] would have to be answered by [`SliceNumbers`] too, which
 /// converts nothing and has no width; whatever it answered would be a value no code can reach
-/// and every reader has to interpret. It sits on [`MaterialisedInt`] instead — the trait only a
+/// and every reader has to interpret. It sits on [`MaterializedInt`] instead — the trait only a
 /// materialised *payload* implements — so the question is asked of the one type that has an
 /// answer, [`SliceNumbers`] is never asked it, and the failure below carries what
-/// [`MaterialisedInt::WIDTH`] said at the one place that knows it. [`SliceNumbers`] never
+/// [`MaterializedInt::WIDTH`] said at the one place that knows it. [`SliceNumbers`] never
 /// constructs one because its `Error` is [`Infallible`].
 #[cfg(feature = "materialized-numbers")]
 pub(crate) enum OutOfRange<S> {
@@ -258,14 +258,14 @@ pub(crate) fn report_out_of_range<S>(
 /// ```compile_fail,E0277
 /// use smear_parser::graphql::{
 ///   error::IntWidth,
-///   syntactic::value::materialized::MaterialisedInt,
+///   syntactic::value::materialized::MaterializedInt,
 /// };
 ///
 /// struct Narrow(i16);
 ///
 /// // `Narrow` is not `i32` and not `i64`, so whichever width it named would be a fact about no
 /// // reader in the crate. The private supertrait is what stops it compiling.
-/// impl MaterialisedInt for Narrow {
+/// impl MaterializedInt for Narrow {
 ///   const WIDTH: IntWidth = IntWidth::I32;
 ///   fn parse(_: &[u8]) -> Option<Self> { None }
 /// }
@@ -277,19 +277,19 @@ pub(crate) fn report_out_of_range<S>(
 /// ```
 /// use smear_parser::graphql::{
 ///   error::IntWidth,
-///   syntactic::value::materialized::MaterialisedInt,
+///   syntactic::value::materialized::MaterializedInt,
 /// };
 ///
-/// assert_eq!(<i32 as MaterialisedInt>::WIDTH, IntWidth::I32);
-/// assert_eq!(<i64 as MaterialisedInt>::WIDTH, IntWidth::I64);
+/// assert_eq!(<i32 as MaterializedInt>::WIDTH, IntWidth::I32);
+/// assert_eq!(<i64 as MaterializedInt>::WIDTH, IntWidth::I64);
 ///
 /// // `2147483648` is the literal the two readings disagree about.
-/// assert_eq!(<i64 as MaterialisedInt>::parse(b"2147483648"), Some(2_147_483_648));
-/// assert_eq!(<i32 as MaterialisedInt>::parse(b"2147483648"), None);
+/// assert_eq!(<i64 as MaterializedInt>::parse(b"2147483648"), Some(2_147_483_648));
+/// assert_eq!(<i32 as MaterializedInt>::parse(b"2147483648"), None);
 /// ```
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
-pub trait MaterialisedInt: Sized + sealed::MaterialisedInt {
+pub trait MaterializedInt: Sized + sealed::MaterializedInt {
   /// Which width this payload is, for the error a refusal raises.
   const WIDTH: IntWidth;
 
@@ -301,19 +301,19 @@ pub trait MaterialisedInt: Sized + sealed::MaterialisedInt {
   fn parse(bytes: &[u8]) -> Option<Self>;
 }
 
-/// The seal on [`MaterialisedInt`]. Named in a public supertrait position and reachable from
+/// The seal on [`MaterializedInt`]. Named in a public supertrait position and reachable from
 /// nowhere, which is what makes the trait's impl list this file's.
 #[cfg(feature = "materialized-numbers")]
 mod sealed {
   /// The supertrait no out-of-crate type can name and therefore cannot implement.
-  pub trait MaterialisedInt {}
+  pub trait MaterializedInt {}
 
-  impl MaterialisedInt for i32 {}
-  impl MaterialisedInt for i64 {}
+  impl MaterializedInt for i32 {}
+  impl MaterializedInt for i64 {}
 }
 
 #[cfg(feature = "materialized-numbers")]
-impl MaterialisedInt for i64 {
+impl MaterializedInt for i64 {
   const WIDTH: IntWidth = IntWidth::I64;
 
   #[inline]
@@ -323,7 +323,7 @@ impl MaterialisedInt for i64 {
 }
 
 #[cfg(feature = "materialized-numbers")]
-impl MaterialisedInt for i32 {
+impl MaterializedInt for i32 {
   const WIDTH: IntWidth = IntWidth::I32;
 
   #[inline]
@@ -336,7 +336,7 @@ impl MaterialisedInt for i32 {
 ///
 /// One marker at two widths rather than a marker each, and the module header has the argument.
 /// The short version is that a marker per width makes the width a value somebody has to supply
-/// beside the marker, and this makes it [`MaterialisedInt::WIDTH`] — a fact about the payload type
+/// beside the marker, and this makes it [`MaterializedInt::WIDTH`] — a fact about the payload type
 /// that no site can restate incorrectly because no site restates it at all.
 ///
 /// `Float` is [`f64`] at every width and `f32` never appears: GraphQL's `Float` **is** IEEE 754
@@ -358,7 +358,7 @@ pub(crate) struct Materialized<I> {
 impl<S, I> Numbers<S> for Materialized<I>
 where
   S: AsRef<[u8]>,
-  I: MaterialisedInt,
+  I: MaterializedInt,
 {
   type Int = I;
   type Float = f64;
@@ -473,7 +473,7 @@ fn parse_i32(bytes: &[u8]) -> Option<i32> {
 /// # The one place a width is still a value, and why it stays one
 ///
 /// Nothing else in this crate takes a width as an argument any more:
-/// [`MaterialisedInt::WIDTH`] answers it from the payload type at every production site. This
+/// [`MaterializedInt::WIDTH`] answers it from the payload type at every production site. This
 /// door is different in kind, because its caller is outside the type system that decided the
 /// question — a gateway told at run time which reading it enforces has an [`IntWidth`] as a
 /// *value*, and taking it as a type parameter would only move the choice, not remove it. What
@@ -481,7 +481,7 @@ fn parse_i32(bytes: &[u8]) -> Option<i32> {
 /// production at that width would have converted comes back as `Err`.
 ///
 /// The `match` below is therefore the second statement of a correspondence
-/// [`MaterialisedInt::WIDTH`] states first — that `I32` is the width `i32` reads at and `I64` is
+/// [`MaterializedInt::WIDTH`] states first — that `I32` is the width `i32` reads at and `I64` is
 /// `i64`'s. `the_widths_the_door_dispatches_on_are_the_widths_the_readers_name` is the assertion
 /// that the two statements are the same one; without it, a wrong `WIDTH` would leave this
 /// function promising something about a production that does not exist.

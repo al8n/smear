@@ -16,7 +16,7 @@
 //! **one `impl`** now: `ConstInputValue<S, I>` is one type, and the only thing the widths ever
 //! disagreed about — how the integer reaches [`Json::int_leaf`], which takes an [`i64`] — is
 //! `I: Into<i64>`, a bound rather than a macro argument. Both widths satisfy it, and no third
-//! payload can reach this impl at all, because the parser's `MaterialisedInt` is sealed to those
+//! payload can reach this impl at all, because the parser's `MaterializedInt` is sealed to those
 //! two.
 //!
 //! `Frame` was already outside the macro because it did not differ, and it stays a free
@@ -155,7 +155,7 @@ where
   S: AsRef<str>,
   // `Copy` because the leaf hands out a `&I` and [`Json::int_leaf`] wants the value; `Into<i64>`
   // because that is the widest integer JSON's number branch is written against, and it is the
-  // whole of what the two widths disagree about. The parser's `MaterialisedInt` is sealed to `i32`
+  // whole of what the two widths disagree about. The parser's `MaterializedInt` is sealed to `i32`
   // and `i64`, so nothing else reaches this impl however permissive these two bounds read.
   I: Copy + Into<i64>,
 {

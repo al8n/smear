@@ -393,7 +393,7 @@ pub enum Unclosed {
 ///
 /// A third width is not a variant added here in isolation. It used to mean a third marker and a
 /// third value tree in [`ast`](crate::graphql::ast); it now means a third impl of the **sealed**
-/// `MaterialisedInt` — `syntactic::value::materialized`'s trait, whose associated `WIDTH` is a
+/// `MaterializedInt` — `syntactic::value::materialized`'s trait, whose associated `WIDTH` is a
 /// value of this enum. That is less to write and the same to review, and the seal is what keeps
 /// this list and that impl list the same length: an out-of-crate impl would have to answer
 /// `WIDTH` with one of the two variants below while being neither, which is the forged width
@@ -445,7 +445,7 @@ impl IntWidth {
 /// # Why the checked door survives a refactor that removed every other supplied width
 ///
 /// `refactor/materialised-generic` made the width a function of the payload type — a production
-/// reads `MaterialisedInt::WIDTH` off `I` and nothing supplies one — which raises the question of
+/// reads `MaterializedInt::WIDTH` off `I` and nothing supplies one — which raises the question of
 /// whether a door taking an [`IntWidth`] as an *argument* still has a caller. It does, and the two
 /// cases are different in kind:
 ///

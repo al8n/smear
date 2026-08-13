@@ -5,7 +5,7 @@ use smear_lexer::graphql::{
 use tokora::Lexer;
 
 use super::{
-  MaterialisedInt, Materialized, Numbers, OutOfRange, is_int_literal, overflows, parse_f64,
+  Materialized, MaterializedInt, Numbers, OutOfRange, is_int_literal, overflows, parse_f64,
   parse_i32, parse_i64,
 };
 use crate::graphql::error::{IntOverflow, IntWidth};
@@ -331,7 +331,7 @@ fn i32_is_i64_narrowed_on_every_boundary() {
 /// they ever named the same one, a consumer could not tell "outside the specification's `Int`"
 /// from "outside any integer this crate reads".
 ///
-/// This is where a wrong [`MaterialisedInt::WIDTH`] surfaces first: `Materialized<I>::int` builds
+/// This is where a wrong [`MaterializedInt::WIDTH`] surfaces first: `Materialized<I>::int` builds
 /// the failure and the width it names from one type, so an impl answering the other's constant
 /// moves every row here for that width and leaves the other width's alone.
 #[test]
@@ -372,8 +372,8 @@ fn each_instantiation_names_its_own_width() {
 ///
 /// [`overflows`] dispatches on a runtime [`IntWidth`] — because `IntOverflow::checked` takes one
 /// as a value — and reaches [`parse_i32`] for `I32` and [`parse_i64`] for `I64`. A production
-/// reaches the same readers the other way round, through [`MaterialisedInt`], and names
-/// [`MaterialisedInt::WIDTH`] on what it refuses. Those are two spellings of "`i32` is the reader
+/// reaches the same readers the other way round, through [`MaterializedInt`], and names
+/// [`MaterializedInt::WIDTH`] on what it refuses. Those are two spellings of "`i32` is the reader
 /// at `I32`", and everything the door promises about the productions rests on them being the same
 /// spelling.
 ///
@@ -383,15 +383,15 @@ fn each_instantiation_names_its_own_width() {
 /// are the reason that cannot happen quietly.
 #[test]
 fn the_widths_the_door_dispatches_on_are_the_widths_the_readers_name() {
-  assert_eq!(<i32 as MaterialisedInt>::WIDTH, IntWidth::I32);
-  assert_eq!(<i64 as MaterialisedInt>::WIDTH, IntWidth::I64);
+  assert_eq!(<i32 as MaterializedInt>::WIDTH, IntWidth::I32);
+  assert_eq!(<i64 as MaterializedInt>::WIDTH, IntWidth::I64);
 
   // And that each reader really is the one the door reaches for that width, on a literal only
   // one of them converts — so the equalities above are about the readers and not about two names.
-  assert!(<i64 as MaterialisedInt>::parse(b"2147483648").is_some());
-  assert!(<i32 as MaterialisedInt>::parse(b"2147483648").is_none());
-  assert!(overflows(b"2147483648", <i32 as MaterialisedInt>::WIDTH));
-  assert!(!overflows(b"2147483648", <i64 as MaterialisedInt>::WIDTH));
+  assert!(<i64 as MaterializedInt>::parse(b"2147483648").is_some());
+  assert!(<i32 as MaterializedInt>::parse(b"2147483648").is_none());
+  assert!(overflows(b"2147483648", <i32 as MaterializedInt>::WIDTH));
+  assert!(!overflows(b"2147483648", <i64 as MaterializedInt>::WIDTH));
 }
 
 /// The boundary table, and **which conjunct refused each row** rather than only that it was
