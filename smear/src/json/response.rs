@@ -45,17 +45,44 @@
 //!   while building the tree, so filling it costs one allocation rather than a doubling sequence
 //!   with the old buffer and the new one both live at the peak.
 //!
-//! All three are stated as bounds and all three are measured — see this module's `visited` counter
-//! and the gates in `super::tests`, and `graphql-proto`'s own slot-traversal **and allocation**
-//! gate for the third — because a cost claim settled by reading the code is an opinion. That third
-//! gate needs both of its axes and would pass on either one alone, which is why the counter it
-//! reads says so at length.
+//! All three are stated as bounds and all three are measured — see this module's `visited` and
+//! `allocations` counters and the gates in `super::tests`, and `graphql-proto`'s own slot-traversal
+//! **and allocation** gate for the third — because a cost claim settled by reading the code is an
+//! opinion. That third gate needs both of its axes and would pass on either one alone, which is why
+//! the counter it reads says so at length.
+//!
+//! # Every growable allocation on this path, enumerated rather than found one round at a time
 //!
 //! **And it is worth saying why this file keeps attracting them.** It is the only place that
 //! touches the whole document and the whole response tree once per error, so every decision made
 //! elsewhere on the grounds that an item is cheap meets its worst case here, all at once and with
-//! the count chosen by the client. Three findings, three different mechanisms — a prefix rescan, a
-//! native recursion, and a parent-link re-walk — and none of the three was cheap by accident.
+//! the count chosen by the client. Four findings, four different mechanisms — a prefix rescan, a
+//! native recursion, a parent-link re-walk, and the *repair* for the second one growing
+//! geometrically — and none of the four was cheap by accident.
+//!
+//! The fourth is why this table exists rather than a fifth repair. A structure that arrives as the
+//! answer to a finding reads as already designed, and the frame stack was: for the one property it
+//! repaired. Nobody priced its own growth. So the answer to "which is the next one" is an
+//! enumeration and not a search — **every buffer this writer can grow, what bounds it, where its
+//! size is known from, and what happens when the allocator says no**:
+//!
+//! | buffer | what bounds its size | reserved from | growth |
+//! |---|---|---|---|
+//! | [`write_node`]'s frame stack | one frame per open container: the response's depth | [`Response::depth`](graphql_proto::Response::depth), recorded at each position's creation | one `try_reserve_exact`, [`Error::Allocation`] |
+//! | `write_response_with`'s `segments` | the deepest error path in the response | [`Path::len`](graphql_proto::Path::len), the same recorded number | one `try_reserve` per path, [`Error::Allocation`] |
+//! | [`Locations`]'s checkpoints | one per [`STRIDE`] bytes of the document, plus one | the document's length | one `try_reserve_exact`, [`Error::Allocation`] |
+//!
+//! And the rows that are *not* allocations, listed because "there is nothing else" is the claim and
+//! an absence has to be enumerated to be checked: the sink is the caller's `fmt::Write` and this
+//! writer never buffers into one of its own; [`Json::number`], `int_leaf` and `double` render into
+//! stack buffers; a leaf, a `__typename`, an error message, an `extensions` key and a path segment
+//! are all written straight through, escaped as they stream; and every iterator this file drives —
+//! [`Response::errors`](graphql_proto::Response::errors), [`Children`],
+//! [`Extensions`]'s — is a cursor over a slice the executor already owns.
+//! [`Path::iter`](graphql_proto::Path::iter) is the one door in `graphql-proto` that still
+//! allocates infallibly, and it is deliberately not on this path: it backs `Debug` and `Display`,
+//! and what this file writes an error *message* with is
+//! [`Json::display`](super::Json::display) over the error's own `Display`, which renders no path.
 
 use core::fmt;
 
@@ -143,7 +170,13 @@ where
     list.end()?;
   }
 
-  write_node(root.key("data")?, response.data(), &mut write_leaf)?;
+  // The depth travels with the node because the frame stack is sized from it — see `write_node`.
+  write_node(
+    root.key("data")?,
+    response.data(),
+    response.depth(),
+    &mut write_leaf,
+  )?;
 
   if let Some(extensions) = response.extensions() {
     write_extensions(root.key("extensions")?, extensions, &mut write_leaf)?;
@@ -235,7 +268,7 @@ where
   if !spans.is_empty() {
     let mut list = entry.key("locations")?.array()?;
     for span in spans {
-      let (line, column) = locations.resolve(span.start());
+      let (line, column) = locations.resolve(span.start())?;
       let mut position = list.element()?.object()?;
       position.key("line")?.number(line)?;
       position.key("column")?.number(column)?;
@@ -256,7 +289,7 @@ where
   let path = error
     .path()
     .collect_into(segments)
-    .map_err(|_| Error::PathAllocation)?;
+    .map_err(|_| Error::Allocation)?;
   if !path.is_empty() {
     let mut list = entry.key("path")?.array()?;
     for &segment in path {
@@ -307,12 +340,42 @@ struct Frame<'r, V> {
 /// are one allocation whose length is the response's depth. `Vec::new` allocates nothing, so a
 /// `data` that is a leaf, a `null` or a `__typename` still costs nothing on the heap.
 ///
+/// # And the frames are one allocation because they are reserved, which they were not
+///
+/// "One allocation whose length is the response's depth" is what this walk was introduced claiming,
+/// and moving the depth off the native stack is not what makes it true. An empty `Vec` pushed once
+/// per container reallocates and copies its way up in powers of two, with the old buffer and the
+/// new one live together at the peak, and `Vec::push` calls the allocation-error handler on a
+/// refusal — so the repair for a process that died of the *native* stack was a process that dies of
+/// the *heap*, at roughly 64 MiB of frames for a response at the default 2²⁰-slot ceiling, after
+/// the status line and part of the body have gone to the client. That is the same defect one
+/// structure over from the path buffer, and it survived a round because a structure that arrives as
+/// the answer to a finding reads as already designed. It was — for the one property it repaired.
+///
+/// The fix is the one that buffer already got, from the number the executor already records:
+/// `depth` is [`Response::depth`](graphql_proto::Response::depth), the deepest position in the
+/// tree, so `depth + 1` frames is everything this stack can reach and one `try_reserve_exact`
+/// buys it. **Exact and not amortised**, which is the opposite of the choice
+/// [`Path::collect_into`](graphql_proto::Path::collect_into) makes and for the reason that one
+/// gives: that buffer is shared by every error in the response, so its reservation is almost never
+/// the last one made on it, and this one is filled once and freed with the walk.
+///
+/// The `+ 1` is the root's own frame — the root is at depth zero and is a container — and the
+/// bound is slack by at most one more when the deepest position is a leaf, which takes no frame.
+/// `Response::depth` says where the rest of the slack comes from.
+///
 /// The separators are placed here rather than by [`Array`](super::Array) and
 /// [`Object`](super::Object) for the reason [`Frame`] gives; `Json::punct` is private to keep that
 /// exception to this one walk.
+///
+/// # Errors
+///
+/// [`Error::Allocation`] when the allocator refuses room for the frames, and whatever the sink or a
+/// leaf reports.
 fn write_node<'r, W, V, F>(
   json: &mut Json<W>,
   node: Node<'r, V>,
+  depth: usize,
   write_leaf: &mut F,
 ) -> Result<(), Error>
 where
@@ -321,6 +384,13 @@ where
 {
   let mut stack: Vec<Frame<'r, V>> = Vec::new();
   if let Some(frame) = open(json, node, write_leaf)? {
+    // After the root is written and only if it opened one: a `data` that is a leaf or a null has no
+    // frames to reserve for, and reserving before `open` would charge it for the response's depth
+    // anyway. `depth + 1` cannot overflow — a depth is at most one less than the number of slots
+    // and that count is a `u32`.
+    stack
+      .try_reserve_exact(depth + 1)
+      .map_err(|_| Error::Allocation)?;
     stack.push(frame);
   }
 
@@ -358,6 +428,19 @@ where
       json.punct(':')?;
     }
     if let Some(frame) = open(json, child, write_leaf)? {
+      // The reservation above is the whole of this stack's growth, and it is an invariant rather
+      // than a hope: a frame for the position at depth `d` sits at index `d`, and `d` is at most
+      // the depth the reservation came from. A `push` past the capacity would still write a correct
+      // response — which is why this is an assertion and not a refusal, since truncating a response
+      // is a worse answer to a broken bound than paying for a reallocation — but it would be the
+      // finding this reservation exists for, so the gate in `super::tests` fails on it too.
+      debug_assert!(
+        stack.len() < stack.capacity(),
+        "the frame stack reserved {} frames and a {}th container was opened, so the depth it was \
+         sized from does not bound this walk",
+        stack.capacity(),
+        stack.len() + 1
+      );
       stack.push(frame);
     }
   }
@@ -433,25 +516,49 @@ where
 }
 
 // ---------------------------------------------------------------------------------------------
-// what the writer looks at
+// what the writer spends — THREE axes, and no two of them can see each other's defect
 // ---------------------------------------------------------------------------------------------
 
-// How many document bytes the writer has looked at, counted only when this crate's own tests are
-// built.
+// How many document bytes the writer has looked at, and how many times it went to the allocator.
+// Both counted only when this crate's own tests are built. The third axis — native stack bytes —
+// needs no counter here: `super::tests` reads it as a difference of two addresses.
 //
-// ── WHY BYTES, AND NOT ALLOCATIONS OR A CLOCK ─────────────────────────────────────────────────
+// ── WHY BYTES ─────────────────────────────────────────────────────────────────────────────────
 //
-// The property below is about *scanning* and about nothing else: deriving a line and column by
+// The location property is about *scanning* and about nothing else: deriving a line and column by
 // walking the prefix allocates nothing, so an allocation pin is structurally incapable of seeing
 // it, and a clock sees it along with the machine it ran on. This is `smear-schema`'s introspection
 // reader's instrument, reached for rather than reinvented — that module's own header carries the
 // argument at length, and it learned it by writing the wrong gate first.
 //
 // A byte looked at twice counts twice, because that is precisely the defect.
+//
+// ── AND WHY ALLOCATIONS, BESIDE IT RATHER THAN INSTEAD OF IT ──────────────────────────────────
+//
+// Because each of the other two is blind to the frame stack's own growth, and this file's history
+// is that blindness four times over:
+//
+//   | round   | the gate measured  | it was blind to                                  |
+//   |---------|--------------------|--------------------------------------------------|
+//   | #162 R2 | document bytes     | a walk spending the NATIVE stack                 |
+//   | #162 R2 | native stack bytes | the heap the walk that replaced it grew           |
+//   | #162 R3 | slot traversals    | reallocation and copying (`graphql-proto`)        |
+//   | #162 R4 | those two, jointly | a THIRD buffer, one structure over                |
+//
+// The native-stack probe is the sharpest case. It was written for this very walk, it passes on a
+// stack that reallocates its way to 64 MiB, and it would go on passing: moving a cost off the
+// native stack is exactly what makes an allocation counter the instrument that can see what
+// happened to it. A gate needs every axis its subject can grow along, and the answer to "is two
+// enough" is the enumeration in this module's header rather than another round.
+//
+// `realloc` counts, and counts as one event. Geometric growth is mostly `realloc`, so an allocator
+// that forwarded it silently would report the defect this instrument exists for as one allocation.
 #[cfg(test)]
 thread_local! {
   /// Document bytes the writer has looked at on this thread.
   static VISITED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+  /// Allocating events on this thread, whoever made them.
+  static ALLOCATED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
 }
 
 /// Records that the writer looked at `count` bytes of the document.
@@ -469,6 +576,62 @@ fn visit(count: usize) {
 #[cfg(test)]
 pub(super) fn visited() -> u64 {
   VISITED.with(core::cell::Cell::get)
+}
+
+/// A pass-through global allocator that tallies every allocating event on the calling thread.
+///
+/// `graphql-proto`'s shape, one crate down, and here for the reason that one is in a *library* test
+/// rather than an integration target: the counter has to be read beside `visited`, which is private
+/// to this module. A `#[global_allocator]` belongs to a binary and an integration target's is not
+/// reachable from a lib test, so there is nothing to import.
+///
+/// It counts the whole thread and not this module, which is what the gate wants: the claim is about
+/// how many times *writing a response* goes to the allocator, and a buffer some other layer grows
+/// on the writer's behalf would be exactly the kind of thing a module-scoped counter would miss.
+/// The gate's fixture writes into a sink that allocates nothing, so what it reads is the writer's.
+#[cfg(test)]
+struct Counting;
+
+#[cfg(test)]
+// SAFETY: every method forwards to `System` with the layout it was given, unchanged, and returns
+// exactly what `System` returned. The tally is a `Cell<u64>` in thread-local storage, reached
+// through `try_with` so that an allocation made while that storage is being set up or torn down is
+// left uncounted rather than re-entering it.
+unsafe impl core::alloc::GlobalAlloc for Counting {
+  unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+    allocate();
+    unsafe { std::alloc::System.alloc(layout) }
+  }
+
+  unsafe fn alloc_zeroed(&self, layout: core::alloc::Layout) -> *mut u8 {
+    allocate();
+    unsafe { std::alloc::System.alloc_zeroed(layout) }
+  }
+
+  unsafe fn realloc(&self, ptr: *mut u8, layout: core::alloc::Layout, new_size: usize) -> *mut u8 {
+    allocate();
+    unsafe { std::alloc::System.realloc(ptr, layout, new_size) }
+  }
+
+  unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+    unsafe { std::alloc::System.dealloc(ptr, layout) }
+  }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
+
+/// Records one allocating event.
+#[cfg(test)]
+fn allocate() {
+  let _ = ALLOCATED.try_with(|allocated| allocated.set(allocated.get() + 1));
+}
+
+/// Returns how many allocating events this thread has caused.
+#[cfg(test)]
+pub(super) fn allocations() -> u64 {
+  ALLOCATED.with(core::cell::Cell::get)
 }
 
 mod document {
@@ -613,9 +776,14 @@ impl<'d> Locations<'d> {
   /// Total on any offset. One past the end, or past it by a mile, is the end of the document; one
   /// interior to a character is that character's own position, which is the walk this replaced
   /// clamping the same way.
-  pub(super) fn resolve(&mut self, offset: usize) -> (i64, i64) {
+  ///
+  /// # Errors
+  ///
+  /// [`Error::Allocation`] when the allocator refuses room for the index, which is the first
+  /// location's cost and no later one's.
+  pub(super) fn resolve(&mut self, offset: usize) -> Result<(i64, i64), Error> {
     if self.checkpoints.is_empty() {
-      self.build();
+      self.build()?;
     }
 
     let end = self.document.char_boundary(offset);
@@ -661,7 +829,7 @@ impl<'d> Locations<'d> {
     // this one has to answer, so the count is a difference of two absolute character counts and
     // not a walk from wherever the line happens to start.
     let column = chars - self.chars_before(line_start) + 1;
-    (as_i64(line), as_i64(column))
+    Ok((as_i64(line), as_i64(column)))
   }
 
   /// Returns how many characters of the document lie before `at`, which must be a checkpointed or
@@ -680,9 +848,24 @@ impl<'d> Locations<'d> {
 
   /// Walks the document once, recording what a walk from zero would know at every [`STRIDE`]
   /// bytes.
-  fn build(&mut self) {
+  ///
+  /// # Errors
+  ///
+  /// [`Error::Allocation`]. The whole size is a function of the document's length, so it is one
+  /// exact request made before the walk — `try_reserve_exact` and not `try_reserve`, because
+  /// unlike the `segments` buffer this one is filled once and never added to again, and unlike the
+  /// frame stack the fill reaches the reservation exactly rather than at most.
+  ///
+  /// **Fallible at all** because it is the third buffer, and the point of the table in this
+  /// module's header is that there is no fourth: the document is a client's and the index is a
+  /// fixed fraction of it, so an allocator refusing one is an answer this writer can give.
+  /// `Vec::with_capacity` was the ordinary Rust behaviour here and would abort the process instead.
+  fn build(&mut self) -> Result<(), Error> {
     let bytes = self.document.look(0, self.document.len());
-    let mut checkpoints = Vec::with_capacity(bytes.len() / STRIDE + 1);
+    let mut checkpoints = Vec::new();
+    checkpoints
+      .try_reserve_exact(bytes.len() / STRIDE + 1)
+      .map_err(|_| Error::Allocation)?;
 
     let mut line = 1usize;
     let mut line_start = 0usize;
@@ -727,6 +910,7 @@ impl<'d> Locations<'d> {
     }
 
     self.checkpoints = checkpoints;
+    Ok(())
   }
 }
 

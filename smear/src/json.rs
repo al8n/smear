@@ -34,10 +34,10 @@
 //! dependencies) render into stack buffers. Nothing here buffers the response, and no leaf, no key
 //! and no message is ever assembled before it is written.
 //!
-//! **Two `Vec`s, and both are the answer to a cost a remote client chooses.** This module claimed
-//! "nothing on the heap" when it was first written, and the claim was kept by spending the two
-//! resources a client can drive instead — the native stack, and a walk of the document per error —
-//! which is the wrong trade in both cases:
+//! **Three `Vec`s, and each is the answer to a cost a remote client chooses.** This module claimed
+//! "nothing on the heap" when it was first written, and the claim was kept by spending the
+//! resources a client can drive instead — the native stack, a walk of the document per error, and a
+//! re-climb of the response tree per path segment — which is the wrong trade in every case:
 //!
 //! - `data` is written by an **explicit work stack**, one frame per open container, so the native
 //!   stack does not grow with the response. It used to recurse, which put the depth of an
@@ -52,10 +52,17 @@
 //!   triggerable cost precisely when a service is already degraded. The index is three words per
 //!   256 bytes of document — 24 bytes per 256 on a 64-bit target, and flat, so that no shape a
 //!   client can send amplifies it — and a response with no locations never builds it.
+//! - Every error's **response path** is turned around into one buffer that serves the whole
+//!   response, sized from a depth the executor recorded, rather than into a fresh unhinted `Vec`
+//!   per error.
 //!
-//! Both bounds are measured rather than argued: `json::response`'s own tests count the document
-//! bytes the writer looks at per location, and the native stack it uses per level of response
-//! depth.
+//! **The list is exhaustive and that is a property rather than a description**, because three
+//! consecutive review rounds each found one of them and left the next: they are enumerated in
+//! `json::response`'s header with what bounds each, all three are reserved once from a quantity
+//! known before the fill, all three carry a refusal as [`Error::Allocation`] instead of aborting,
+//! and a test counts the allocator calls one whole write makes. Every bound is measured rather than
+//! argued — the document bytes the writer looks at per location, the native stack it uses per level
+//! of response depth, and the allocations it makes at two depths sixteen apart.
 
 use core::fmt;
 
@@ -103,27 +110,42 @@ pub enum Error {
   /// a `StringValue` exists — and present because the cooking walk must be total. A `panic!` here
   /// would be the same walk with the failure mode of the two crates it was written to avoid.
   MalformedEscape,
-  /// The allocator refused room for a draft §7.1.2 response `path`.
+  /// The allocator refused room for one of the writer's own buffers.
   ///
-  /// A path is as long as the response is deep, and how deep a response is depends on the query
-  /// and on how many list elements the driver returned. `graphql-proto`'s ceilings bound that, and
-  /// the ceilings are configurable, so the deepest admissible path is a deployment's decision —
-  /// which makes "the allocator said no" an answer a server should be able to give rather than a
-  /// reason for it to die. [`Path::collect_into`](crate::proto::Path::collect_into) is the
-  /// fallible door it arrives through.
+  /// # Every allocation this writer makes is behind this variant
   ///
-  /// **Not every allocation this writer makes is behind this variant**, and it is worth being
-  /// exact about which is. The response path is the one whose whole size is known before a byte of
-  /// it is taken, so it is reserved in a single up-front request that the allocator can refuse and
-  /// this writer can carry back. `write_node`'s frame stack also grows with the response, one
-  /// `push` at a time, and an allocation failure there aborts — the ordinary Rust behaviour, and
-  /// not something this variant is quietly claiming to have replaced.
+  /// That sentence is the claim, and it is worth having as one because the variant it replaces
+  /// said the opposite — it named the response path alone and recorded, correctly at the time, that
+  /// the frame stack "aborts". Three of this module's four rounds each repaired one growable buffer
+  /// and left the next one, so what closes the class is not a fourth repair but an **enumeration**:
+  /// there are exactly three, they are listed in `json::response`'s header with what bounds each,
+  /// and each is reserved once from a quantity that is known before it is filled.
   ///
-  /// It carries nothing, for the reason [`Sink`](Error::Sink) carries nothing and one more:
-  /// `TryReserveError` separates a layout that cannot exist from an allocator that refused, and
-  /// that is not a distinction a half-written response can act on. It is also not `Copy`, and this
+  /// - `data`'s **frame stack**, one frame per open container, reserved from
+  ///   [`Response::depth`](crate::proto::Response::depth).
+  /// - An error's **response path**, reserved from [`Path::len`](crate::proto::Path::len) through
+  ///   [`Path::collect_into`](crate::proto::Path::collect_into).
+  /// - The **checkpoint index** over the document, reserved from the document's length.
+  ///
+  /// # Why a refusal is an answer here rather than a reason to die
+  ///
+  /// The first two are as large as the response is deep, and how deep a response is depends on the
+  /// query and on how many list elements the driver returned; the third is a fixed fraction of a
+  /// document a client sent. `graphql-proto`'s ceilings bound all of that and the ceilings are
+  /// configurable, so the largest admissible response is a deployment's decision — which makes "the
+  /// allocator said no" something a server should be able to *say*, mid-response, rather than
+  /// something it dies of. `Vec::push` and `Vec::with_capacity` would both have called the
+  /// allocation-error handler instead, after part of the body had already reached the client.
+  ///
+  /// # One variant and not three
+  ///
+  /// Which buffer refused is not a distinction a caller can act on — the response is half written
+  /// either way, and all three are sized by the same request — so naming them separately would put
+  /// three of this module's internals in a public enum to carry no decision. It is the same reason
+  /// the variant carries no payload: `TryReserveError` separates a layout that cannot exist from an
+  /// allocator that refused, which is also not actionable here, and it is not `Copy` while this
   /// type is.
-  PathAllocation,
+  Allocation,
 }
 
 impl fmt::Display for Error {
@@ -133,7 +155,7 @@ impl fmt::Display for Error {
       Self::NonFiniteFloat => "a Float that is not finite has no JSON number literal",
       Self::SurrogateEscape => "a \\u escape named a UTF-16 surrogate, which is not a character",
       Self::MalformedEscape => "a string literal carried a malformed escape",
-      Self::PathAllocation => "the allocator refused room for a response path",
+      Self::Allocation => "the allocator refused room for a buffer this response needs",
     })
   }
 }

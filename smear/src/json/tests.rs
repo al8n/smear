@@ -1,12 +1,12 @@
 //! Unit gates over the parts of the writer that are not reachable from `tests/json_writer.rs`:
-//! the escaping map, the two string-cooking walks, the line/column arithmetic, and the two costs
+//! the escaping map, the two string-cooking walks, the line/column arithmetic, and the three costs
 //! a remote client chooses.
 //!
-//! **The two cost gates are here rather than in the integration target for one reason**: the
-//! instrument is the library's own. `response::visited` is `#[cfg(test)]` and so is invisible
-//! across a crate boundary, and the gate has to drive `write_response` itself — one that called
-//! the resolver directly could not see a writer that built a fresh index per error, which is the
-//! defect one edit away from the one being fixed.
+//! **The cost gates are here rather than in the integration target for one reason**: the
+//! instrument is the library's own. `response::visited` and `response::allocations` are
+//! `#[cfg(test)]` and so are invisible across a crate boundary, and the gate has to drive
+//! `write_response` itself — one that called the resolver directly could not see a writer that
+//! built a fresh index per error, which is the defect one edit away from the one being fixed.
 //!
 //! The round-trip gate is the integration target, because its whole point is to read the output
 //! back with a parser that shares no code with this module. What is here is the other half — the
@@ -18,7 +18,9 @@ use super::{Error, Json, response::Locations};
 /// Draft §7.1.2's line and column for one offset, through the door the writer uses.
 fn line_column(document: &str, offset: usize) -> (i64, i64) {
   let mut locations = Locations::new(document);
-  locations.resolve(offset)
+  locations
+    .resolve(offset)
+    .expect("the index for a fixture-sized document fits")
 }
 
 /// Writes one value through a closure and returns the bytes.
@@ -441,7 +443,7 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
     let offsets = (0..=document.len() + 2).chain((0..=document.len() + 2).rev());
     for offset in offsets {
       assert_eq!(
-        locations.resolve(offset),
+        locations.resolve(offset).expect("the corpus is small"),
         reference(document, offset),
         "disagreed at offset {offset} of {document:?}"
       );
@@ -450,12 +452,12 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// what the writer COSTS, on the two axes a remote client chooses
+// what the writer COSTS, on the three axes a remote client chooses
 // ---------------------------------------------------------------------------------------------
 //
-// ── WHY THESE ARE MEASURED AND NOT ARGUED, AND WHY NEITHER IS AN ALLOCATION PIN ───────────────
+// ── WHY THREE INSTRUMENTS, AND WHY THE FIRST TWO ARE NOT ALLOCATION PINS ──────────────────────
 //
-// Both properties below are cost claims about work a hostile input can multiply, and neither of
+// The first two properties are cost claims about work a hostile input can multiply, and neither of
 // them allocates the thing it spends. Deriving a line and column by walking the prefix allocates
 // nothing at all — it spends CPU over the document — and recursing over the response spends the
 // NATIVE STACK, which no allocator sees and which does not fail: it aborts the process. So the
@@ -467,6 +469,18 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
 // and discovering it was structurally blind to the walk it was written for. The shape here is its
 // MARGINAL form for the same reason: a bound on the total would pass a writer that walked the
 // document a fixed forty times, and what has to be bounded is what one more error costs.
+//
+// ── AND THEN THE THIRD, WHICH IS THE ONE THE SECOND CREATED ───────────────────────────────────
+//
+// Taking the depth off the native stack put it on the heap, and the native-stack probe cannot see
+// what happens to it there: that gate passes, unchanged and at the same numbers, on a frame stack
+// that doubles its way to 64 MiB and calls the allocation-error handler on refusal. A repair is
+// where a cost MOVED to, so an instrument written for the old resource is by construction the one
+// that cannot price the new one. That is why the allocation counter is here, why it is beside the
+// other two rather than instead of either, and why `json::response`'s header answers "which is the
+// next buffer" with a table instead of leaving it to a fifth round.
+
+use core::fmt;
 
 use graphql_proto::{Executor, Leaf, Response, Values};
 use smear_compiler::Schema;
@@ -478,7 +492,10 @@ use smear_parser::graphql::{
   syntactic::{GraphqlLexer, executable_document, type_system_document},
 };
 
-use super::{response::visited, write_response_with};
+use super::{
+  response::{allocations, visited},
+  write_response_with,
+};
 
 /// The smallest value space an execution can have: one object, and one integer.
 ///
@@ -858,4 +875,306 @@ fn the_response_depth_does_not_reach_the_native_stack() {
     "a document one level deeper than the ceiling parsed, so {DEEPEST} is not the deepest \
      response the configured limits admit"
   );
+}
+
+// ── axis three: the frames themselves, one allocation rather than a doubling sequence ─────────
+
+/// A sink that allocates nothing, so every allocating event the counter sees is the writer's.
+///
+/// A `String` would double its way up as the response streamed into it and would be most of the
+/// reading — the *caller's* buffer measured under the writer's name. What this keeps instead is the
+/// two facts the fixture has to be checked against before its cost means anything: how many bytes
+/// came out, and how many containers were opened.
+#[derive(Default)]
+struct Void {
+  bytes: usize,
+  braces: usize,
+}
+
+impl fmt::Write for Void {
+  fn write_str(&mut self, text: &str) -> fmt::Result {
+    self.bytes += text.len();
+    self.braces += text.bytes().filter(|&byte| byte == b'{').count();
+    Ok(())
+  }
+}
+
+/// What one write of a `depth`-deep response cost, and what it was a write of.
+struct Written {
+  /// Allocating events the write caused on this thread.
+  allocated: u64,
+  /// The depth the writer sized its frame stack from.
+  recorded: usize,
+  /// Containers the output actually opened.
+  containers: usize,
+  /// Bytes the output actually had.
+  bytes: usize,
+}
+
+/// Writes a response `depth` objects deep, with nothing failed, and counts what it allocated.
+///
+/// Nothing failed **on purpose**: an error would build the checkpoint index and the path buffer
+/// too, and the reading would then be the sum of three buffers rather than the one this gate is
+/// about. `a_whole_response_is_one_allocation_per_buffer` is the other fixture, where all three are
+/// live at once and the total is still a constant.
+fn written(depth: usize) -> Written {
+  let (sdl, query) = chain(depth);
+  run(
+    &sdl,
+    &query,
+    NESTING,
+    |name| {
+      Some(if name == "x" {
+        Cell::Int(1)
+      } else {
+        Cell::Object
+      })
+    },
+    |response| {
+      let mut sink = Void::default();
+      let recorded = response.depth();
+      let before = allocations();
+      write_response_with(&mut sink, response, &query, |value, json| match value {
+        Cell::Int(number) => json.number(*number),
+        Cell::Object => json.null(),
+      })
+      .expect("a response the limits admit is writable");
+      let allocated = allocations() - before;
+      assert_eq!(response.error_count(), 0, "the fixture failed a resolver");
+      Written {
+        allocated,
+        recorded,
+        containers: sink.braces,
+        bytes: sink.bytes,
+      }
+    },
+  )
+}
+
+/// The shallower of the two depths the allocation curve is read at.
+const SHALLOW: usize = 64;
+
+/// The deeper one, sixteen times further down.
+///
+/// Sixteen times, deliberately, and the number to separate is a **logarithm**: an unhinted `Vec`
+/// of 64-byte frames doubles from a capacity of four, so 65 frames cost it six allocations and
+/// 1 025 cost it ten. Two readings four apart cannot be mistaken for one constant, and no slack a
+/// logarithmic bound could carry would separate them. It is `graphql-proto`'s own pair for its own
+/// buffer, kept the same so that the two gates' numbers can be read side by side.
+const DEEP: usize = 1024;
+
+/// How many times writing a response's `data` may go to the allocator.
+///
+/// **A constant, and it has to be a constant**, for the reason `graphql-proto`'s
+/// `ALLOCATIONS_PER_DERIVATION` gives about the buffer one layer down: the natural bound here is
+/// `log₂(depth)`, that is exactly what the defect costs, and a gate shaped like the defect's own
+/// curve is a gate the defect passes.
+///
+/// Measured on this tree: **1** at 65 frames and **1** at 1 025. Measured with the reservation
+/// removed and the `push` left exactly as it was: **6** and **10**, while the native-stack reading
+/// stayed at its constant and the document-byte readings did not move at all — three axes, and only
+/// this one can see it.
+///
+/// `<=` rather than `==` for the reason the layout assertions in `graphql-proto` use it: a future
+/// `Vec` that satisfied the request without going to the allocator would be an improvement, and a
+/// gate that failed a green tree for one is a gate nobody keeps. [`the_allocation_gate_counts`] is
+/// what stops `0` from being an instrument that is not attached.
+const ALLOCATIONS_PER_WRITE: u64 = 1;
+
+/// Writing `data` costs one allocation, however deep the response is.
+///
+/// # The axis the other two gates in this file are blind to
+///
+/// `the_response_depth_does_not_reach_the_native_stack` was written for this exact walk and passes,
+/// at the same numbers, on a frame stack that reallocates and copies its way to 64 MiB with two
+/// buffers live at the peak — because taking a cost off the native stack is what makes an allocator
+/// the only instrument that can still see it. The byte gates never look at the frames at all. So
+/// the reading below is the third axis, and the plant for it was checked against both of the
+/// others: they do not move.
+#[test]
+fn the_frame_stack_is_one_allocation_however_deep_the_response() {
+  let (shallow, deep) = with_room(|| (written(SHALLOW), written(DEEP)));
+
+  for (levels, run) in [(SHALLOW, shallow), (DEEP, deep)] {
+    // The fixture really is as deep as it claims, and the reservation really is sized from that.
+    // Without the first the cost below is a measurement of a walk that stopped early; without the
+    // second it is a measurement of a constant that happens to be big enough for both readings.
+    assert_eq!(
+      run.containers,
+      levels + 2,
+      "a {levels}-level chain wrote {} containers in {} bytes, so the measurement is of a \
+       different response",
+      run.containers,
+      run.bytes
+    );
+    assert_eq!(
+      run.recorded,
+      levels + 1,
+      "a {levels}-level chain reported a response depth of {}, so the frame stack was not sized \
+       from this response",
+      run.recorded
+    );
+
+    assert!(
+      run.allocated <= ALLOCATIONS_PER_WRITE,
+      "writing a response {levels} objects deep cost {} allocating events; the frame stack is \
+       growing into the walk instead of being reserved before it",
+      run.allocated
+    );
+  }
+}
+
+/// How many times writing a whole response — `data`, `errors`, `locations` and `path` — may go to
+/// the allocator.
+///
+/// **One per buffer, and the number IS the census.** `json::response`'s header enumerates three
+/// growable buffers on this path and claims there is no fourth; this is that claim as an integer.
+/// A buffer added later, or one of these three reserved inside a loop instead of before it, moves
+/// this number whether or not anybody remembers to update the table.
+///
+/// Measured on this tree: **3** on every fixture below — the checkpoint index, the path buffer's
+/// first fill, and `data`'s frames. Measured with each of the three reservations removed in turn,
+/// on the fixture that can see it: **12** on the deep one for the frames, **12** on the deep one
+/// for the path buffer, **8** at 2 048 errors for the index. Each plant leaves at least one of
+/// these fixtures at 3, which is why there is more than one of them.
+const ALLOCATIONS_PER_RESPONSE: u64 = 3;
+
+/// A whole response with errors costs one allocation per buffer, and there are three of them.
+///
+/// # Two fixtures, because one of them can only see one buffer
+///
+/// The flat one fails *k* aliases of one field, so it is the reading that moves if a buffer is
+/// grown **per error** — and it is blind to two of the three, because its response is one level
+/// deep and every path in it is one segment long, so neither the frames nor the path buffer ever
+/// has to grow. Measured: removing either reservation leaves this fixture at 3.
+///
+/// The deep one fails the innermost leaf of a chain, so it is one error at the far end of a long
+/// path in a deeply nested `data` — the reading that moves if a buffer is grown **per level**, on
+/// either of the two that are sized by a depth. Neither fixture subsumes the other, which is the
+/// same lesson as the three counters and is why both are here.
+#[test]
+fn a_whole_response_is_one_allocation_per_buffer() {
+  for k in [8usize, 2048] {
+    let query = aliased(k, 0);
+    let allocated = run(
+      FLAT_SDL,
+      &query,
+      64,
+      |_| None,
+      |response| {
+        assert_eq!(
+          response.error_count(),
+          k,
+          "the fixture failed a different number of fields"
+        );
+        let mut sink = Void::default();
+        let before = allocations();
+        write_response_with(&mut sink, response, &query, |_, json| json.null()).expect("writable");
+        allocations() - before
+      },
+    );
+    assert!(
+      allocated <= ALLOCATIONS_PER_RESPONSE,
+      "a response with {k} errors cost {allocated} allocating events; one of the writer's buffers \
+       is being grown per error rather than reserved per response"
+    );
+  }
+
+  let (levels, allocated) = with_room(|| (DEEP, one_deep_error(DEEP)));
+  assert!(
+    allocated <= ALLOCATIONS_PER_RESPONSE,
+    "a response {levels} objects deep with one error at the bottom of it cost {allocated} \
+     allocating events; one of the writer's buffers is being grown per level rather than reserved \
+     per response"
+  );
+}
+
+/// Allocating events one write costs on a `depth`-deep response whose innermost leaf failed.
+///
+/// The one error is at the bottom, so its path is as long as the response is deep and every one of
+/// the three buffers is live at once: the index over the document, the path buffer, and the frames.
+/// `x: Int` is nullable, so draft §6.4.4 nulls the leaf and propagates no further — the response
+/// keeps its full depth, which is what makes this a reading about levels.
+fn one_deep_error(depth: usize) -> u64 {
+  let (sdl, query) = chain(depth);
+  run(
+    &sdl,
+    &query,
+    NESTING,
+    |name| (name != "x").then_some(Cell::Object),
+    |response| {
+      assert_eq!(
+        response.error_count(),
+        1,
+        "the deep fixture did not fail exactly its innermost leaf"
+      );
+      assert_eq!(
+        response.depth(),
+        depth + 1,
+        "the deep fixture is not {depth} levels deep"
+      );
+      let mut sink = Void::default();
+      let before = allocations();
+      write_response_with(&mut sink, response, &query, |value, json| match value {
+        Cell::Int(number) => json.number(*number),
+        Cell::Object => json.null(),
+      })
+      .expect("writable");
+      allocations() - before
+    },
+  )
+}
+
+/// The allocation counter is wired to the writer, and it moves by what the writer does.
+///
+/// Without this, both gates above could pass because nothing was being counted — and a zero from an
+/// allocation pin looks exactly like the property holding, which is the failure mode an
+/// allocation-shaped gate has and a byte-shaped one does not.
+#[test]
+fn the_allocation_gate_counts() {
+  let (shallow, into_string) = with_room(|| (written(4), into_a_string(SHALLOW)));
+
+  // A stack of frames cannot be filled from an empty `Vec` without the allocator being asked once,
+  // so a reading of zero here is the counting allocator not being the one this binary runs on.
+  assert!(
+    shallow.allocated >= 1,
+    "writing a response {} containers deep registered no allocating event",
+    shallow.containers
+  );
+
+  // And the sink is not the thing being measured: the same response into a `String`, which doubles
+  // as it fills, costs strictly more. Without this the reading above could be a counter that sees
+  // one allocation whatever happens.
+  assert!(
+    into_string > ALLOCATIONS_PER_WRITE,
+    "writing into a growing `String` cost {into_string} allocating events, the same as writing \
+     into a sink that allocates nothing; the counter is not seeing the allocator"
+  );
+}
+
+/// Allocating events the same write costs into a `String`, which grows as it fills.
+fn into_a_string(depth: usize) -> u64 {
+  let (sdl, query) = chain(depth);
+  run(
+    &sdl,
+    &query,
+    NESTING,
+    |name| {
+      Some(if name == "x" {
+        Cell::Int(1)
+      } else {
+        Cell::Object
+      })
+    },
+    |response| {
+      let mut out = String::new();
+      let before = allocations();
+      write_response_with(&mut out, response, &query, |value, json| match value {
+        Cell::Int(number) => json.number(*number),
+        Cell::Object => json.null(),
+      })
+      .expect("writable");
+      allocations() - before
+    },
+  )
 }
