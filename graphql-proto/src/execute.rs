@@ -1437,6 +1437,22 @@ where
   typename: Option<Sym>,
 
   slots: std::vec::Vec<Slot<V::Value>>,
+  /// The greatest [`Slot::depth`] any position in `slots` carries.
+  ///
+  /// A high-water mark and not a scan, for the reason [`Slot::depth`] is a field and not a walk:
+  /// the only two places a position is created both know its depth as they write it, so keeping the
+  /// maximum costs one comparison and reading it costs nothing. It is what
+  /// [`Response::depth`](Response::depth) answers, and what lets a serialiser size a per-level
+  /// structure — one frame per open container — before it descends.
+  ///
+  /// **Over the positions this executor CREATED, which is not quite the positions a reader will
+  /// see.** Draft §6.4.4's discard marks a subtree and leaves it in place — that is the whole of
+  /// how it is cheap — so a chain that was built and then nulled still counts here while it renders
+  /// as a single `null`. Lowering it again would need the number of live positions at each depth,
+  /// which is a table on the executor's hot path; what it is instead is an upper bound, bounded in
+  /// turn by [`Limits::max_response_slots`] like the slab it is a fact about. `Response::depth`
+  /// says the same thing to a caller.
+  max_depth: u32,
   meta: std::vec::Vec<Meta<'a, S>>,
   merged: std::vec::Vec<&'a Field<S>>,
   locations: std::vec::Vec<SimpleSpan>,
@@ -1595,6 +1611,7 @@ where
       limits,
       typename: schema.sym(builtin::TYPENAME_FIELD.as_bytes()),
       slots: std::vec::Vec::new(),
+      max_depth: 0,
       meta: std::vec::Vec::new(),
       merged: std::vec::Vec::new(),
       locations: std::vec::Vec::new(),
@@ -1871,6 +1888,9 @@ where
     let root_ty = PackedType::named(self.schema.type_def(root_type).name(), root_type);
     self.slots.push(Slot::new(
       NONE,
+      // Draft §7.1.2's path of the root is the empty one, so its depth is zero and every depth
+      // under it is counted from here — see `push_child`, the only other place the number is set.
+      0,
       Key::Root,
       root_ty,
       State::Object {
@@ -2341,6 +2361,7 @@ where
     Some(Response {
       schema: self.schema,
       slots: &self.slots,
+      depth: self.max_depth,
       names: self.interner.bytes(),
       name_spans: self.interner.spans(),
       locations: &self.locations,
@@ -3760,6 +3781,11 @@ where
   /// covers and, precisely, what it does not.
   fn reset(&mut self) {
     self.slots.clear();
+    // A fact about the population above, so it dies with it. A subscription event that inherited
+    // the previous event's deepest chain would have the next serialiser reserve for a response that
+    // is no longer in the tree, which is this rule's own "nothing kept may make a second operation
+    // cheaper than the first" read in the direction where the cost is memory rather than admission.
+    self.max_depth = 0;
     self.meta.clear();
     self.merged.clear();
     self.locations.clear();
@@ -3852,6 +3878,27 @@ where
   /// The `as u32` below is exact for the same reason. `self.slots.len()` is strictly less than the
   /// ceiling whenever this returns `Some`, and the ceiling is a `u32`, so the new index is at most
   /// `max_response_slots - 1` — never [`NONE`], which is `u32::MAX` and means "no such slot".
+  ///
+  /// # Where a path's length is written down
+  ///
+  /// This is also the only place a position's depth is decided, and it costs an increment because
+  /// the parent is in hand. That is the whole reason it is recorded here rather than counted later:
+  /// draft §7.1.2's order is the reverse of the links, so a serialiser has to turn the chain around
+  /// into a buffer, and a buffer with no size hint reallocates and copies its way up. Knowing the
+  /// depth without walking is what makes that one exactly-sized allocation —
+  /// [`Path::collect_into`](super::Path::collect_into) — instead of `log₂(depth)` of them with two
+  /// live at the peak. Measuring the depth first and then filling would trade the quadratic this
+  /// crate already removed for a constant factor of two over the same links.
+  ///
+  /// The addition cannot overflow: a depth is at most one less than the number of slots, and the
+  /// ceiling checked above is a `u32`.
+  ///
+  /// The running maximum is kept in the same breath and for the same kind of reason one buffer
+  /// down: a serialiser walking `data` on an explicit stack holds one frame per open container, and
+  /// the deepest that stack gets is this number plus one. Both of the writer's per-level buffers
+  /// are then sized before they are filled, from two numbers this line writes — one comparison
+  /// against a walk of the finished tree. See [`max_depth`](Self::max_depth) for why it is an upper
+  /// bound rather than an equality.
   fn push_child(
     &mut self,
     parent: u32,
@@ -3863,7 +3910,11 @@ where
       return None;
     }
     let index = self.slots.len() as u32;
-    self.slots.push(Slot::new(parent, key, ty, state));
+    let depth = self.slots[parent as usize].depth + 1;
+    if depth > self.max_depth {
+      self.max_depth = depth;
+    }
+    self.slots.push(Slot::new(parent, depth, key, ty, state));
     // A list element inherits the field's metadata wholesale, which is what makes an error at
     // `items.1` report `Query.items` and the field group's locations while its path stays the
     // element's. Draft §6.4.3's list clause reuses the field's node for exactly that reason, and
@@ -4339,6 +4390,7 @@ where
 pub struct Response<'r, V> {
   schema: &'r Schema,
   slots: &'r [Slot<V>],
+  depth: u32,
   names: &'r [u8],
   name_spans: &'r [(u32, u32)],
   locations: &'r [SimpleSpan],
@@ -4371,6 +4423,51 @@ impl<'r, V> Response<'r, V> {
   #[inline]
   pub fn data(&self) -> Node<'r, V> {
     node(self.slots, self.names, self.name_spans, 0)
+  }
+
+  /// Returns an upper bound on how deep this response is, in draft §7.1.2 path segments.
+  ///
+  /// `0` for a response whose `data` is a leaf or a `null`: the root has no segment, so it has no
+  /// depth either.
+  ///
+  /// # What it is for, which is sizing a buffer and not reporting a statistic
+  ///
+  /// It is the number a serialiser needs before it can walk `data` without recursing. Such a walk
+  /// holds one frame per open container, the deepest it can get is a container at the deepest
+  /// position, and a frame is also open for the root — so **`depth() + 1` frames is the whole of
+  /// what that stack can reach**, and reserving it once is the difference between one allocation
+  /// and a doubling sequence with the old buffer and the new one both live at the peak. It is the
+  /// same answer [`Path::len`](super::Path::len) gives for one error's path, asked of the response
+  /// instead of a position, and it comes from the same field for the same reason: the executor
+  /// wrote each depth down as it created the position, so this is a number rather than a walk of
+  /// the finished tree.
+  ///
+  /// # An upper bound, and here is exactly where the slack is
+  ///
+  /// Three things put a position in this maximum that a reader will not descend into:
+  ///
+  /// - **A deepest position that is a leaf.** A leaf takes no frame, so a tree whose deepest
+  ///   position is a `String` needs `depth()` frames rather than `depth() + 1`. One frame.
+  /// - **A subtree draft §6.4.4 discarded.** A discard marks and leaves the positions in place —
+  ///   that is what makes it cheap, see [`Node::Null`] — so a chain that was built and then nulled
+  ///   still counts here while it renders as a single `null`. This one is not bounded by a
+  ///   constant: a response that executed a deep chain and then nulled it reports the depth it
+  ///   *had*.
+  /// - **An expansion a ceiling refused.** The positions it created are truncated away and this is
+  ///   not lowered with them, which is at most one level: a refused expansion's children are all
+  ///   one deeper than the position it was refused at.
+  ///
+  /// All three are over-*reservation* and never under-reservation, which is the direction that
+  /// matters for a caller sizing a buffer from it — a walk can never need more. The first and third
+  /// are one level each; the second is the open-ended one, and it is bounded by
+  /// [`Limits::max_response_slots`], the same ceiling that bounds the slab those positions are
+  /// still sitting in, so it is inside the per-response memory a deployment has already sized.
+  /// Removing it would take a live-position count per depth level, maintained on `push_child` and
+  /// on every discard, which is a table on the executor's hot path to save a serialiser one
+  /// allocation it is going to release immediately.
+  #[inline]
+  pub const fn depth(&self) -> usize {
+    self.depth as usize
   }
 
   /// Returns the response's `errors`, in the order they were raised.

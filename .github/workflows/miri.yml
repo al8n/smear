@@ -149,9 +149,9 @@ name: Miri
 # ── WHAT THIS MATRIX DOES NOT COVER, AND WHY IT IS STATED HERE ──────────────────────────────
 #
 # Of the 50 integration targets in `smear/tests/`, 46 are NOT built with anything in them by any
-# cell in this file, on any target, under either aliasing model, and 4 of the tests inside the
-# ones that ARE built are skipped. All of it is derived and all of it is printed by
-# `ci/miri_scope.py` at the end of every cell:
+# cell in this file, on any target, under either aliasing model, and 5 of the tests inside the
+# targets and libraries that ARE built are skipped. All of it is derived and all of it is printed
+# by `ci/miri_scope.py` at the end of every cell:
 #
 #   37  `#![cfg(feature = "rowan")]` — the entire lossless CST tower. `rowan` itself has
 #       undefined behaviour reachable from its ordinary public API, live in every published
@@ -162,25 +162,40 @@ name: Miri
 #       and these scripts do not pass. They are `core` + `alloc` rule engines with no `unsafe`
 #       reachable from them that the lib tests do not already interpret, so the cost of turning
 #       the features on is minutes per cell for nothing Miri can answer.
-#    4  individual tests, not targets: the two corpus sweeps in each of
-#       `tests/syntactic_span_extent.rs` and `tests/syntactic_x_span_extent.rs`, each carrying
-#       `#[cfg_attr(miri, ignore)]`. These are why this workflow had never produced a verdict on
-#       any 64-bit target — `trivia_injection_leaves_every_span_on_its_own_tokens` spent 5h40m
-#       inside itself on CI run 31318425279 and hit the six-hour job ceiling without returning.
-#       The four witnesses in each file still run here. The files' headers carry the measurement.
+#    5  individual tests, not targets, and not all of them in `smear/tests/`:
+#
+#       * the two corpus sweeps in each of `tests/syntactic_span_extent.rs` and
+#         `tests/syntactic_x_span_extent.rs`. These are why this workflow had never produced a
+#         verdict on any 64-bit target — `trivia_injection_leaves_every_span_on_its_own_tokens`
+#         spent 5h40m inside itself on CI run 31318425279 and hit the six-hour job ceiling without
+#         returning. The four witnesses in each file still run here.
+#       * `graphql-proto`'s `response::tests::a_deep_path_costs_its_depth_in_links_and_not_its_
+#         square`, a LIB unit test and a COST gate: it asserts slot traversals and allocator calls
+#         at depth 1 024, which is a claim about the shape of the work, and an interpreter answers
+#         a different question out of MIR that the same file's shallow legs already cover.
+#
+#       Each carries `#[cfg_attr(miri, ignore)]` with its own reason, and each file's header
+#       carries the measurement.
 #
 # It is a per-test exclusion precisely so the interpretable tests survive it, and it is audited
 # rather than counted on trust: `ci/miri_scope.py` derives the number of `#[ignore]`s from the
-# sources and fails the cell if a run reports a different one, or if a target ends up with every
-# test ignored — the case where the per-test form has quietly become the per-file one.
+# sources — the compiled integration targets AND every selected package's `src/` — and fails the
+# cell if a binary reports a different one, or if a target ends up with every test ignored, which
+# is the case where the per-test form has quietly become the per-file one.
 #
-# THE NUMBER ABOVE IS PINNED, in both spellings. A derived count cannot catch a per-test ignore
-# being ADDED: the source moves to five, the log moves to five, they agree, and a coverage cut has
-# ratified itself. So `ci/miri_scope.py` also carries `MIRI_IGNORE_BUDGET` as a frozen literal,
-# fails if the total moves in either direction, and fails if this file stops stating that same
-# number — both at the count-list row above and in the sentence before it. Adding or removing a
-# per-test ignore therefore takes three edits in one commit: the attribute, the budget, and this
-# header. That is the decision being recorded, and the diff is the point.
+# THE NUMBER ABOVE IS PINNED, in both spellings, and what it is pinned against is a TABLE. A
+# derived count cannot catch a per-test ignore being ADDED: the source moves to six, the log moves
+# to six, they agree, and a coverage cut has ratified itself. So `ci/miri_scope.py` carries
+# `MIRI_DECLARED_IGNORES`, a frozen file-by-file set; it fails if any file disagrees with its
+# entry in either direction, if a file carrying an ignore has no entry at all, and if this header
+# stops stating the same total — both at the count-list row above and in the sentence before it.
+# Adding or removing a per-test ignore therefore takes three edits in one commit: the attribute,
+# the table entry, and this header. That is the decision being recorded, and the diff is the point.
+#
+# A TABLE RATHER THAN A TOTAL, because the total was counted over `smear/tests/` alone. A lib unit
+# test carrying an ignore was outside the count, outside the frozen number, and outside the
+# per-binary cross-check — the guard parsed each lib binary's `ignored` digit and compared it to
+# nothing. The row above exists because that gap was found while adding it.
 #
 # What is left in a cell is the lib unit tests, `tests/oracle.rs`,
 # `tests/tokora_conformance.rs` and the eight span-extent witnesses — the SIMD lexer over a

@@ -46,10 +46,24 @@
 //! walk that stops at the first position whose type is nullable, which is draft §6.4.4 read
 //! literally, including its list clause: `[String!]` puts `String!` on every element slot, so one
 //! null element propagates to the list, and `[String]` does not.
+//!
+//! # Every link points up, and draft §7.1.2 reads down
+//!
+//! One `parent` per slot is all the upward structure there is, and it is all §6.4.4 needs. But
+//! §7.1.2's `path` is the same chain read the other way, and a tree that can only be climbed has
+//! no cheap way to be descended: whoever wants the specified order has to reverse the chain, and
+//! reversing it *per segment* is quadratic in the depth. [`Path`]'s own header says what this
+//! module does about that, why the answer is three entries on it rather than one, and why its two
+//! formatters are none of the three.
 
 use core::fmt;
 
+use std::collections::TryReserveError;
+
 use smear_schema::{PackedType, TypeId};
+
+#[cfg(all(test, feature = "std"))]
+mod tests;
 
 /// The sentinel for "no such slot".
 pub(super) const NONE: u32 = u32::MAX;
@@ -58,6 +72,18 @@ pub(super) const NONE: u32 = u32::MAX;
 #[derive(Debug)]
 pub(super) struct Slot<V> {
   pub(super) parent: u32,
+  /// How many draft §7.1.2 segments the path of this position has — the root's is `0`.
+  ///
+  /// The chain's length, written down where the chain is *built* instead of counted where it is
+  /// read. The executor creates a position only under a parent it already holds, so this is the
+  /// parent's depth plus one and costs an increment; recovering it afterwards costs the depth,
+  /// which is exactly the walk [`Path::collect_into`] exists to perform once. Storing it is what
+  /// lets that walk size its buffer **before** filling it, with no preliminary pass to measure —
+  /// see that method, and see the block below for what the field measured.
+  ///
+  /// Structural, so nothing rewrites it: `discard` and `reset` overwrite a slot's *state*, and a
+  /// position's distance from the root is not part of it.
+  pub(super) depth: u32,
   pub(super) next_sibling: u32,
   pub(super) first_child: u32,
   pub(super) last_child: u32,
@@ -78,9 +104,16 @@ pub(super) struct Slot<V> {
 
 impl<V> Slot<V> {
   #[inline]
-  pub(super) const fn new(parent: u32, key: Key, ty: PackedType, state: State<V>) -> Self {
+  pub(super) const fn new(
+    parent: u32,
+    depth: u32,
+    key: Key,
+    ty: PackedType,
+    state: State<V>,
+  ) -> Self {
     Self {
       parent,
+      depth,
       next_sibling: NONE,
       first_child: NONE,
       last_child: NONE,
@@ -169,11 +202,28 @@ pub(super) enum State<V> {
 /// Bounds rather than equalities, deliberately. `repr(Rust)` layout is unspecified, so a future
 /// compiler is entitled to pack this better and a `==` would fail a green tree for an improvement.
 /// A `<=` still fails the thing worth failing: a field added here that grows the slot again.
+///
+/// # And what [`Slot::depth`] cost, measured the same way and the other way round
+///
+/// The `pending` row above is the eight-aligned case paying and the four-aligned case being
+/// cheap. `depth` is the inverse, and again the measurement is the only thing that says so:
+///
+/// | `V` | `Slot<V>` without `depth` | with |
+/// |---|---|---|
+/// | `u64` (align 8) | 72 | **72** |
+/// | `u32` (align 4) | 60 | **64** |
+///
+/// Free for an eight-aligned driver value, because `State<u64>`'s alignment already rounds the
+/// slot up and left seven spare bytes at the end that nothing was using; four bytes per slot for a
+/// four-aligned one, where there was no such tail. So at the default 2²⁰-slot ceiling the field
+/// costs between nothing and 4 MiB, depending on the driver's value — against a scratch buffer
+/// that reached 16 MiB and briefly held two of them, which is what the field is here to make
+/// unnecessary. Neither number was predicted; both were read off the compiler.
 const _: () = {
   assert!(core::mem::size_of::<State<u64>>() <= 24);
   assert!(core::mem::size_of::<Slot<u64>>() <= 72);
   assert!(core::mem::size_of::<State<u32>>() <= 16);
-  assert!(core::mem::size_of::<Slot<u32>>() <= 60);
+  assert!(core::mem::size_of::<Slot<u32>>() <= 64);
 };
 
 /// A slot's key in its parent.
@@ -206,73 +256,318 @@ impl fmt::Display for Segment<'_> {
   }
 }
 
+/// How many segments a [`Path`]'s formatters turn around inside their own frame.
+///
+/// **Public because it is the contract rather than an implementation detail**: it is how much of a
+/// path `{}` and `{:?}` render, and it is something a caller deciding what to log is entitled to
+/// check. Past it the *outermost* segments are dropped and the rendering says so — see [`Path`]'s
+/// header. Neither formatter reaches the allocator at any depth, and neither has a failure of its
+/// own to report.
+///
+/// Thirty-two [`Segment`]s is 512 bytes of automatic storage, held for the length of one
+/// `write!` and by a function that cannot recurse — a fixed frame cost of the kind
+/// [`itoa`](https://docs.rs/itoa)'s and `zmij`'s number buffers already are, one crate up.
+///
+/// Chosen against what a response path *is* rather than as a round number. A segment is a field a
+/// query asked for or an index into a list the driver returned, so a path is as deep as the
+/// selection set is nested plus the list nesting the schema's types declare; both of those are
+/// written by hand, and neither reaches thirty-two in a schema anybody maintains. What *can* reach
+/// it is a fragment chain, which is exactly the construction this module's tests use to drive the
+/// depth to 1 024 — and which is the case the window deliberately does not try to serve.
+pub const INLINE_SEGMENTS: usize = 32;
+
+/// What a [`Path`]'s formatters write in place of the segments above the window.
+///
+/// **It cannot be mistaken for a segment.** A [`Segment::Field`] is a GraphQL name —
+/// `[_A-Za-z][_0-9A-Za-z]*`, established by the lexer — and a [`Segment::Index`] is digits, so
+/// nothing a path can hold renders as this. A path of exactly [`INLINE_SEGMENTS`] segments and one
+/// cut at [`INLINE_SEGMENTS`] therefore do not render alike, which is the whole reason the marker
+/// exists rather than the truncation being silent.
+///
+/// One character rather than `...`, because [`Display`](fmt::Display) joins segments with `.` and
+/// an ASCII elision beside that separator is four dots a reader has to count.
+const ELIDED: &str = "…";
+
 /// A draft §7.1.2 response path, outermost segment first.
 ///
 /// Derived from the response tree rather than stored: an error records the slot it happened at and
 /// the path is the chain of keys from the root down to it. That is not only cheaper — nothing is
-/// allocated per error — it is also the only way the path can be *right*. A path assembled while
-/// descending would have to be copied at every field, and the copy is where implementations lose a
-/// list index.
-#[derive(Clone)]
+/// allocated when the error is *recorded* — it is also the only way the path can be *right*. A path
+/// assembled while descending would have to be copied at every field, and the copy is where
+/// implementations lose a list index.
+///
+/// # The links point up, so the turn-around happens here and it happens once
+///
+/// A path is *discovered* innermost-first. A slot's `parent` is the only link along it — there is
+/// no "which child leads to this slot" to follow downwards — and draft §7.1.2 wants the other order.
+/// Something therefore has to reverse the chain, and the only reversal that is not quadratic is one
+/// that walks it **once**, into a buffer.
+///
+/// That is why the surface below is three entries rather than one, and each of them is a different
+/// answer to "whose buffer":
+///
+/// | | order | per segment | buffer | on refusal |
+/// |---|---|---|---|---|
+/// | [`ancestors`](Path::ancestors) | innermost first | one parent link | none | cannot refuse |
+/// | [`collect_into`](Path::collect_into) | outermost first | one parent link | the caller's, reused across a whole response | [`TryReserveError`] |
+/// | [`try_iter`](Path::try_iter) | outermost first | one parent link | its own, one per call | [`TryReserveError`] |
+/// | [`Debug`](fmt::Debug), [`Display`](fmt::Display) | outermost first, innermost [`INLINE_SEGMENTS`] only | one parent link, and at most [`INLINE_SEGMENTS`] + 1 of them in all | **[`INLINE_SEGMENTS`] of frame, and never the heap** | **cannot refuse** — what does not fit is elided |
+///
+/// # One walk is not one allocation, and the buffer is the half a link counter cannot see
+///
+/// Walking the chain once says nothing about how the buffer that receives it *grows*. An
+/// [`Ancestors`] has no size hint, so filling an empty `Vec` from it reallocates and copies its way
+/// up in powers of two — a walk that is linear in links and still `log₂(depth)` allocations, the
+/// last of which briefly holds the old buffer and the new one at once. At the default 2²⁰-slot
+/// ceiling a [`Segment`] is 16 bytes and that peak is 24 MiB.
+///
+/// So both entries that fill a buffer reserve it **up front** against [`len`](Path::len), which is
+/// a number the executor recorded on the position as it built the chain rather than one this type
+/// counts — so the size is known without a preliminary walk to measure it. Filling a fresh buffer
+/// is then one allocation of exactly the right size at every depth, which is the number the gate
+/// in this module's tests asserts.
+///
+/// # And a formatter does not need a buffer at all, which is the part that was got wrong
+///
+/// The two entries above are for a caller assembling something. [`Debug`](fmt::Debug) and
+/// [`Display`](fmt::Display) are not assembling anything — they already hold the sink they are
+/// reversing the chain *into*, so the only thing a `Vec` bought them was somewhere to put the
+/// segments while the order was turned around. That is [`INLINE_SEGMENTS`] segments of this type's
+/// own frame for every path a service actually produces, and **no allocator call at all**: a
+/// depth-three path used to cost a `malloc` and a `free` to print twenty bytes.
+///
+/// Past the window there is no free reversal left. A chain in a shared slice cannot be turned
+/// around in constant space without walking it once per output segment, and *that* is the
+/// quadratic this whole section exists to remove — trading the heap for it would move the cost onto
+/// the one axis with no refusal at all, since an allocator can say no and a spent second cannot.
+///
+/// # And a formatter has nowhere to put a refusal either, which is the part after that
+///
+/// The obvious remaining answer is a fallible buffer past the window, answering a refusal with
+/// [`fmt::Error`]. **That error is not a formatter's to invent.** `core` reserves it for a failure
+/// the [`Formatter`](fmt::Formatter) itself reported — string formatting is otherwise infallible —
+/// so `format!` and `ToString` `expect` on what a trait implementation returns. A `Display` that
+/// manufactured one to report an allocation failure would therefore *panic* its caller through
+/// `{}`, which is the abort this section removed wearing a different coat.
+///
+/// So both halves of the answer are the same half: **these two never allocate, at any depth, and
+/// so the only [`fmt::Error`] either can answer is one the sink gave it.** A path deeper than the
+/// window renders its innermost [`INLINE_SEGMENTS`] segments
+/// with `…` standing where the outer ones were — the innermost end, because that is the one that
+/// names the field, and because it is the end the upward links reach first, so the whole rendering
+/// costs [`INLINE_SEGMENTS`] + 1 links however deep the path is. A truncated log line is what a
+/// deep path gets, and exact rendering stays where a caller has a `Result` to receive a refusal in:
+/// [`collect_into`](Path::collect_into) and [`try_iter`](Path::try_iter).
+///
+/// The marker is what makes the truncation *readable*: a [`Segment::Field`] is a GraphQL name and a
+/// [`Segment::Index`] is digits, so nothing a path can hold renders as `…`, and a path of exactly
+/// [`INLINE_SEGMENTS`] segments is therefore not the same rendering as one cut at them.
+///
+/// **This was found as a dismissal and not as a defect**, which is worth recording where the next
+/// reader will meet it: the allocation below was enumerated, and then crossed off because the JSON
+/// writer one crate up reaches paths through `collect_into`. It is off *that* caller's path and it
+/// is public, and `Debug`/`Display` are how anything else reaches a path — so the criterion was
+/// about the wrong caller, and a `log::warn!` carrying a request-shaped path was enough to abort
+/// the process. A dismissal by entry point has to name the *widest* entry point.
+///
+/// **There is deliberately no random accessor.** `get(i)` over upward links costs the depth per
+/// call, so the `0..len()` loop every caller eventually writes over it is exactly the quadratic
+/// this section exists to remove — and an accessor whose only non-quadratic use is a single call is
+/// not an accessor. It existed, unused, and its shape was the shape the defect took.
 pub struct Path<'r, V> {
-  pub(super) slots: &'r [Slot<V>],
-  pub(super) names: &'r [u8],
-  pub(super) name_spans: &'r [(u32, u32)],
-  pub(super) slot: u32,
+  slots: &'r [Slot<V>],
+  names: &'r [u8],
+  name_spans: &'r [(u32, u32)],
+  slot: u32,
 }
 
-impl<V> Path<'_, V> {
+// Written out rather than derived, for the reason [`Children`]'s is: a derive would demand
+// `V: Clone` for a type that holds no `V`, only a shared slice of slots that happen to contain
+// some. The driver's value is never cloned here and never could be.
+impl<V> Clone for Path<'_, V> {
+  #[inline]
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
+impl<V> Copy for Path<'_, V> {}
+
+impl<'r, V> Path<'r, V> {
+  /// The path of the position at `slot`.
+  #[inline]
+  pub(super) const fn new(
+    slots: &'r [Slot<V>],
+    names: &'r [u8],
+    name_spans: &'r [(u32, u32)],
+    slot: u32,
+  ) -> Self {
+    Self {
+      slots,
+      names,
+      name_spans,
+      slot,
+    }
+  }
+
   /// Returns the number of segments.
+  ///
+  /// One slot and no buffer, whatever the depth. The executor wrote the answer onto the position
+  /// as it created it, so this reads a number rather than counting a chain — and that is what lets
+  /// [`collect_into`](Path::collect_into) size its buffer exactly without a pass to measure it
+  /// first.
   pub fn len(&self) -> usize {
-    self.iter().count()
+    if self.slot == NONE {
+      return 0;
+    }
+    self.at(self.slot).depth as usize
   }
 
   /// Returns whether the path is empty, which happens only at the root.
+  ///
+  /// One slot, whatever the depth — the root is the only position with no segment, so the question
+  /// is about this position and not about the chain above it.
   #[inline]
   pub fn is_empty(&self) -> bool {
-    self.iter().next().is_none()
+    self.slot == NONE || matches!(self.at(self.slot).key, Key::Root)
   }
 
-  /// Returns the segments, outermost first.
+  /// Returns the segments, innermost first — the direction the tree's links point.
   ///
-  /// Collected into the caller's buffer rather than returned as a lazy iterator over a reversed
-  /// walk, because the tree links point *up*: a path is discovered innermost-first and has to be
-  /// turned around. Doing that once here beats every caller doing it.
-  pub fn iter(&self) -> PathIter<'_, V> {
-    let mut depth = 0;
-    let mut cursor = self.slot;
-    while cursor != NONE && !matches!(self.slots[cursor as usize].key, Key::Root) {
-      depth += 1;
-      cursor = self.slots[cursor as usize].parent;
-    }
-    PathIter {
-      path: self,
-      depth,
-      next: 0,
+  /// One parent link per step and nothing allocated, which is what makes this the primitive the
+  /// other two are written over. A caller writing draft §7.1.2's `path` wants one of those, since
+  /// this is the reverse of the order §7.1.2 specifies; a caller *asking* something of the path —
+  /// which field this error is under, how deep it is — wants this one, and stops as soon as it has
+  /// the answer.
+  #[inline]
+  pub fn ancestors(&self) -> Ancestors<'r, V> {
+    Ancestors {
+      path: *self,
+      cursor: self.slot,
     }
   }
 
-  /// Returns the segment at `index`, counted from the outermost.
-  pub fn get(&self, index: usize) -> Option<Segment<'_>> {
-    let mut stack = self.slot;
-    let mut depth = 0usize;
-    while stack != NONE && !matches!(self.slots[stack as usize].key, Key::Root) {
-      depth += 1;
-      stack = self.slots[stack as usize].parent;
-    }
-    if index >= depth {
-      return None;
-    }
-    // Walk up `depth - 1 - index` times to land on the requested segment.
-    let mut cursor = self.slot;
-    for _ in 0..(depth - 1 - index) {
-      cursor = self.slots[cursor as usize].parent;
-    }
-    self.segment(cursor)
+  /// Collects the segments into `buf`, outermost first, and returns them.
+  ///
+  /// `buf` is cleared first and stays the caller's, which is the point: one buffer serves every
+  /// error in a response, so a serialiser writing draft §7.1.2 pays one allocation for the whole
+  /// response rather than one per path — and pays it once across responses if it keeps the buffer.
+  ///
+  /// The room is reserved from [`len`](Path::len) before the chain is walked, so an empty buffer
+  /// takes **one** allocation of exactly the right size at any depth, and a buffer that has
+  /// already held a path this long takes none — instead of the `log₂(depth)` reallocations that
+  /// filling an unhinted `Vec` costs, the last of which holds the old buffer and the new one at
+  /// once. See the type's header for what that peaked at.
+  ///
+  /// # `try_reserve` and not `try_reserve_exact`, because the buffer is *shared*
+  ///
+  /// Worth writing down, because "reserve exactly what this path needs" is the obvious reading and
+  /// it is wrong here for the reason the first sentence of this method gives: `buf` serves every
+  /// error in a response, so a reservation is almost never the last one made on it. `std` says the
+  /// same thing about the choice — "prefer `try_reserve` if future insertions are expected" — and
+  /// the case that decides it is a response whose error depths *increase*, which a fragment chain
+  /// failing a leaf at every level produces. Exact growth reallocates and recopies for each of
+  /// them, which is a quadratic in the depth over a shared buffer; amortised growth costs
+  /// `log₂(depth)` for the whole response. Where the finding that prompted this actually bites —
+  /// one deep path into a fresh buffer — the two are identical, because doubling from nothing
+  /// lands on exactly the requested capacity.
+  ///
+  /// # Errors
+  ///
+  /// [`TryReserveError`] when the allocator cannot give the buffer room for a path this deep.
+  /// **Fallible rather than aborting**, and the reason is what this crate is: the depth is chosen
+  /// by whoever wrote the query and by however many list elements the driver returned, both of
+  /// which a ceiling bounds and neither of which a server should die of. A caller that has already
+  /// written part of a response gets to answer it. `buf` is left empty.
+  pub fn collect_into<'b>(
+    &self,
+    buf: &'b mut std::vec::Vec<Segment<'r>>,
+  ) -> Result<&'b [Segment<'r>], TryReserveError> {
+    buf.clear();
+    buf.try_reserve(self.len())?;
+    Ok(self.fill(buf))
   }
 
-  fn segment(&self, slot: u32) -> Option<Segment<'_>> {
-    match self.slots[slot as usize].key {
+  /// Returns the segments, outermost first, in a buffer the iterator owns.
+  ///
+  /// The chain is walked once, into a buffer reserved up front from [`len`](Path::len) — see the
+  /// type's header for why there is a buffer at all. A caller with more than one path to write
+  /// wants [`collect_into`](Path::collect_into), which lends its own instead of allocating one per
+  /// call.
+  ///
+  /// # Errors
+  ///
+  /// [`TryReserveError`] when the allocator cannot give the buffer room for a path this deep, for
+  /// the reason [`collect_into`](Path::collect_into) is fallible: the depth is the client's and a
+  /// server should not die of it. **There is deliberately no infallible spelling of this.** There
+  /// was, it took `Vec::with_capacity`, and it was left infallible on the argument that the two
+  /// formatters below had nowhere to put a refusal — which was true of them and said nothing about
+  /// this method, whose caller has a `Result` to receive one in. The formatters no longer come
+  /// through here at all.
+  pub fn try_iter(&self) -> Result<PathIter<'r>, TryReserveError> {
+    let mut segments = std::vec::Vec::new();
+    segments.try_reserve(self.len())?;
+    self.fill(&mut segments);
+    Ok(PathIter {
+      segments: segments.into_iter(),
+    })
+  }
+
+  /// Fills `into` with the innermost segments and says whether the chain ran on past them.
+  ///
+  /// The returned slice is innermost first — the direction the links point — so a formatter
+  /// reverses it, and a `true` beside it means the segments *above* the slice were dropped. Both
+  /// formatters below share this so that the two renderings are one walk read two ways.
+  ///
+  /// At most [`INLINE_SEGMENTS`] + 1 links however deep the path is: the window's worth, and one
+  /// more to ask whether there was another. Nothing here allocates and nothing here can fail, which
+  /// is the whole of what the two callers need — see [`Path`]'s header for why a formatter is not
+  /// allowed to have a failure to report.
+  ///
+  /// Bounded by the window and not by [`len`](Path::len), deliberately: a *strategy* may be chosen
+  /// from a number the executor recorded, and what is **written** may not be. Nothing rendered below
+  /// comes from anywhere but the chain itself, the elision included.
+  fn window<'w>(&self, into: &'w mut [Segment<'r>; INLINE_SEGMENTS]) -> (&'w [Segment<'r>], bool) {
+    let mut ancestors = self.ancestors();
+    let mut filled = 0;
+    while filled < INLINE_SEGMENTS {
+      let Some(segment) = ancestors.next() else {
+        break;
+      };
+      into[filled] = segment;
+      filled += 1;
+    }
+    // `Ancestors` is fused, so this is `None` when the loop above ran out rather than filled up.
+    (&into[..filled], ancestors.next().is_some())
+  }
+
+  /// Walks the chain into `buf` and turns it around.
+  ///
+  /// `buf` must be empty and must already have room for [`len`](Path::len) segments; both callers
+  /// above make it so, and the reservation is theirs because whose buffer it is is the only thing
+  /// that separates them — [`collect_into`](Path::collect_into) reserves in the caller's and
+  /// [`try_iter`](Path::try_iter) in one of its own.
+  fn fill<'b>(&self, buf: &'b mut std::vec::Vec<Segment<'r>>) -> &'b [Segment<'r>] {
+    buf.extend(self.ancestors());
+    buf.reverse();
+    buf
+  }
+
+  /// Reads one slot, and records the traversal.
+  ///
+  /// **The only way this file reaches a slot while deriving a path**, which is what makes
+  /// `traversals` a measurement of the derivation rather than of whichever walk someone remembered
+  /// to instrument. The field it reads is private to this module for the same reason.
+  #[inline]
+  fn at(&self, index: u32) -> &'r Slot<V> {
+    traverse();
+    &self.slots[index as usize]
+  }
+
+  /// Turns one position's key into its segment. The root has none.
+  #[inline]
+  fn segment(&self, key: Key) -> Option<Segment<'r>> {
+    match key {
       Key::Root => None,
       Key::Index(index) => Some(Segment::Index(index)),
       Key::Field(name) => Some(Segment::Field(interned(self.names, self.name_spans, name))),
@@ -281,55 +576,303 @@ impl<V> Path<'_, V> {
 }
 
 impl<V> fmt::Debug for Path<'_, V> {
+  /// The innermost [`INLINE_SEGMENTS`] segments, `…` in front of them when the path had more.
+  ///
+  /// Allocates nothing at any depth, and the only [`fmt::Error`] it can answer is one the
+  /// [`Formatter`](fmt::Formatter) handed it — see [`Path`]'s header for why that is the contract
+  /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_list().entries(self.iter()).finish()
+    let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
+    let (window, elided) = self.window(&mut storage);
+    let mut list = f.debug_list();
+    if elided {
+      // `format_args!` rather than a `&str`, so the marker is not rendered as the quoted string a
+      // segment never is.
+      list.entry(&format_args!("{ELIDED}"));
+    }
+    for segment in window.iter().rev() {
+      list.entry(segment);
+    }
+    list.finish()
   }
 }
 
 impl<V> fmt::Display for Path<'_, V> {
+  /// The innermost [`INLINE_SEGMENTS`] segments, `…` in front of them when the path had more.
+  ///
+  /// Allocates nothing at any depth, and the only [`fmt::Error`] it can answer is one the
+  /// [`Formatter`](fmt::Formatter) handed it — see [`Path`]'s header for why that is the contract
+  /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let mut first = true;
-    for segment in self.iter() {
-      if !first {
+    let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
+    let (window, elided) = self.window(&mut storage);
+    if elided {
+      f.write_str(ELIDED)?;
+    }
+    for (position, segment) in window.iter().rev().enumerate() {
+      // The marker occupies the first position when there is one, so it is what the leading
+      // separator is measured against.
+      if elided || position > 0 {
         f.write_str(".")?;
       }
-      first = false;
       write!(f, "{segment}")?;
     }
     Ok(())
   }
 }
 
-/// The segments of a [`Path`], outermost first.
-pub struct PathIter<'r, V> {
-  path: &'r Path<'r, V>,
-  depth: usize,
-  next: usize,
+/// The segments of a [`Path`], innermost first.
+///
+/// One `parent` link per step, which is the whole of its cost: the chain is walked forwards and
+/// never restarted, so consuming the iterator costs the depth and not its square.
+pub struct Ancestors<'r, V> {
+  path: Path<'r, V>,
+  /// The position whose key is the next segment, or [`NONE`] once the root has been reached.
+  cursor: u32,
 }
 
-impl<'r, V> Iterator for PathIter<'r, V> {
+impl<V> Clone for Ancestors<'_, V> {
+  #[inline]
+  fn clone(&self) -> Self {
+    Self {
+      path: self.path,
+      cursor: self.cursor,
+    }
+  }
+}
+
+impl<'r, V> Iterator for Ancestors<'r, V> {
   type Item = Segment<'r>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    if self.next >= self.depth {
+    if self.cursor == NONE {
       return None;
     }
-    let mut cursor = self.path.slot;
-    for _ in 0..(self.depth - 1 - self.next) {
-      cursor = self.path.slots[cursor as usize].parent;
-    }
-    self.next += 1;
-    self.path.segment(cursor)
+    let slot = self.path.at(self.cursor);
+    // The root carries no segment and is where the chain ends, so it retires the cursor rather
+    // than stepping it — which is also what makes this iterator fused.
+    self.cursor = match slot.key {
+      Key::Root => NONE,
+      _ => slot.parent,
+    };
+    self.path.segment(slot.key)
+  }
+}
+
+impl<V> core::iter::FusedIterator for Ancestors<'_, V> {}
+
+/// The segments of a [`Path`], outermost first.
+///
+/// Backed by the buffer [`Path::try_iter`] filled with one leaf-to-root walk. It is not a lazy view
+/// of the tree, and it cannot be: the links run the other way, so an iterator that held only a
+/// cursor would have to restart at the failing position for every segment it yielded. That is also
+/// why the buffer is a `Vec` and not the window [`Path`]'s formatters use — an iterator outlives
+/// the call that made it, so its storage cannot be a frame.
+pub struct PathIter<'r> {
+  segments: std::vec::IntoIter<Segment<'r>>,
+}
+
+impl<'r> Iterator for PathIter<'r> {
+  type Item = Segment<'r>;
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    self.segments.next()
   }
 
   #[inline]
   fn size_hint(&self) -> (usize, Option<usize>) {
-    let remaining = self.depth - self.next;
-    (remaining, Some(remaining))
+    self.segments.size_hint()
   }
 }
 
-impl<V> ExactSizeIterator for PathIter<'_, V> {}
+impl DoubleEndedIterator for PathIter<'_> {
+  #[inline]
+  fn next_back(&mut self) -> Option<Self::Item> {
+    self.segments.next_back()
+  }
+}
+
+impl ExactSizeIterator for PathIter<'_> {}
+
+impl core::iter::FusedIterator for PathIter<'_> {}
+
+// ---------------------------------------------------------------------------------------------
+// what deriving a path costs — TWO axes, and neither one implies the other
+// ---------------------------------------------------------------------------------------------
+
+// How many response slots a path derivation has followed, and how many times it went to the
+// allocator. Both counted only when this crate's own tests are built.
+//
+// ── WHY SLOTS ─────────────────────────────────────────────────────────────────────────────────
+//
+// A derivation that restarts at the failing position for every segment costs the depth squared in
+// LINKS and nothing extra anywhere else: it fills the same buffer with the same segments and emits
+// the same O(depth) bytes. So neither an allocation pin nor a byte counter can see it, and only
+// the links themselves can. A slot reached twice counts twice, because that is precisely the
+// defect.
+//
+// `smear`'s JSON writer counts document bytes for the same reason and by the same rule; this is
+// that instrument, one crate down, where the traversal actually happens.
+//
+// ── AND WHY ALLOCATIONS, BESIDE IT RATHER THAN INSTEAD OF IT ──────────────────────────────────
+//
+// Because the link counter is blind in exactly the direction the byte counter was. Filling an
+// unhinted `Vec` from `Ancestors` walks each link ONCE — a perfect reading on the axis above —
+// while reallocating and copying its way up in powers of two, with the old buffer and the new one
+// both live at the peak. The link counter cannot see a reallocation; the byte counter cannot see
+// it either, because the emitted document is the same. Only the allocator can.
+//
+// This branch's lineage has now met that shape three times, from both directions:
+//
+//   | round   | the gate measured | it was blind to             |
+//   |---------|-------------------|-----------------------------|
+//   | #157 R3 | allocations       | a walk of the document      |
+//   | #160 R5 | allocations       | the bytes a walk added      |
+//   | #162 R3 | traversal steps   | reallocation and copying    |
+//
+// The last one is the first two INVERTED — there an allocation pin could not see a byte walk, here
+// a traversal pin could not see an allocation — and the conclusion is the same in both directions:
+// **a cost gate needs every axis its subject can grow along, and no axis implies another.** Anyone
+// adding a cost gate to this file should reach for both of these, and ask what a third one would
+// be before deciding two is enough.
+//
+// ── `std`, WHILE THE REPAIR IS NOT ────────────────────────────────────────────────────────────
+//
+// A counter shared by parallel tests has to be thread-local, and `thread_local!` is `std`'s; a
+// counting allocator is `std::alloc::System` plus a `#[global_allocator]`, which is `std`'s too.
+// So `cargo test -p graphql-proto --no-default-features` compiles the exactly-reserved derivation
+// without the gates that measure it; every other test configuration has both.
+#[cfg(all(test, feature = "std"))]
+thread_local! {
+  /// Slots a path derivation has followed on this thread.
+  static TRAVERSED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+  /// Allocating events on this thread, whoever made them.
+  static ALLOCATED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+  /// The size at and above which [`Counting`] answers a request on this thread with null.
+  ///
+  /// Thread-local and not a global, because the harness runs these tests in parallel and a global
+  /// switch would refuse whatever a neighbour happened to be doing.
+  static REFUSE_AT_LEAST: core::cell::Cell<usize> = const { core::cell::Cell::new(usize::MAX) };
+}
+
+/// Records that a path derivation followed one slot.
+///
+/// Compiles to nothing outside this crate's own tests.
+#[inline]
+fn traverse() {
+  #[cfg(all(test, feature = "std"))]
+  TRAVERSED.with(|traversed| traversed.set(traversed.get() + 1));
+}
+
+/// Returns how many slots path derivation has followed on this thread.
+#[cfg(all(test, feature = "std"))]
+fn traversals() -> u64 {
+  TRAVERSED.with(core::cell::Cell::get)
+}
+
+/// A pass-through global allocator that tallies every allocating event on the calling thread.
+///
+/// The shape `smear`, `smear-parser` and `smear-schema` each use in an integration target of their
+/// own; this is the first one that has to live in a crate's *library* tests, because the property
+/// it serves is measured beside [`traversals`] and that counter is private to this module. There
+/// is no shared one to import — a `#[global_allocator]` belongs to a binary, and an integration
+/// target's is not reachable from a lib test.
+///
+/// `realloc` counts, and counts as one event. That is not incidental: geometric growth is mostly
+/// `realloc`, so an allocator that forwarded it silently would report the defect this instrument
+/// exists for as a single allocation.
+///
+/// # And it can say no, which is the only way to read the other half of the claim
+///
+/// A count cannot tell a `try_reserve` from a `with_capacity`: both are one event, right up to the
+/// point where one returns an error and the other calls the process-wide allocation handler. So
+/// [`refuse_allocations_of_at_least`] arms a size threshold on the calling thread and every request
+/// at or above it is answered with null, which is what an allocator does when it has nothing left.
+/// A door that is fallible answers; a door that is not aborts the test binary, loudly.
+///
+/// **Nothing may panic while the threshold is armed.** Rust's panic machinery allocates, so a
+/// panic inside the window meets a refusal inside the code handling the first one. Every fixture
+/// here arms immediately before the call under test, disarms immediately after, and asserts
+/// afterwards.
+#[cfg(all(test, feature = "std"))]
+struct Counting;
+
+#[cfg(all(test, feature = "std"))]
+// SAFETY: every method forwards to `System` with the layout it was given, unchanged, and returns
+// exactly what `System` returned — or, when this thread has armed a refusal at or below the
+// requested size, returns null without calling `System` at all, which `GlobalAlloc` defines as the
+// answer for a request that cannot be served. The tally and the threshold are `Cell`s in
+// thread-local storage, reached through `try_with` so that an allocation made while that storage is
+// being set up or torn down is left uncounted and unrefused rather than re-entering it.
+unsafe impl core::alloc::GlobalAlloc for Counting {
+  unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+    allocate();
+    if refused(layout.size()) {
+      return core::ptr::null_mut();
+    }
+    unsafe { std::alloc::System.alloc(layout) }
+  }
+
+  unsafe fn alloc_zeroed(&self, layout: core::alloc::Layout) -> *mut u8 {
+    allocate();
+    if refused(layout.size()) {
+      return core::ptr::null_mut();
+    }
+    unsafe { std::alloc::System.alloc_zeroed(layout) }
+  }
+
+  unsafe fn realloc(&self, ptr: *mut u8, layout: core::alloc::Layout, new_size: usize) -> *mut u8 {
+    allocate();
+    if refused(new_size) {
+      return core::ptr::null_mut();
+    }
+    unsafe { std::alloc::System.realloc(ptr, layout, new_size) }
+  }
+
+  unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+    unsafe { std::alloc::System.dealloc(ptr, layout) }
+  }
+}
+
+#[cfg(all(test, feature = "std"))]
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
+
+/// Records one allocating event.
+#[cfg(all(test, feature = "std"))]
+fn allocate() {
+  let _ = ALLOCATED.try_with(|allocated| allocated.set(allocated.get() + 1));
+}
+
+/// Returns how many allocating events this thread has caused.
+#[cfg(all(test, feature = "std"))]
+fn allocations() -> u64 {
+  ALLOCATED.with(core::cell::Cell::get)
+}
+
+/// Answers whether this thread has armed a refusal that covers a request of `size`.
+#[cfg(all(test, feature = "std"))]
+fn refused(size: usize) -> bool {
+  REFUSE_AT_LEAST
+    .try_with(|threshold| size >= threshold.get())
+    .unwrap_or(false)
+}
+
+/// Makes every allocation request of `size` bytes or more on this thread answer with null.
+///
+/// A size threshold rather than a switch, because the window has to be wide enough to include the
+/// buffer under test and narrow enough to exclude the harness's own housekeeping.
+#[cfg(all(test, feature = "std"))]
+fn refuse_allocations_of_at_least(size: usize) {
+  REFUSE_AT_LEAST.with(|threshold| threshold.set(size));
+}
+
+/// Puts this thread's allocator back.
+#[cfg(all(test, feature = "std"))]
+fn allow_allocations() {
+  REFUSE_AT_LEAST.with(|threshold| threshold.set(usize::MAX));
+}
 
 /// A completed value in the response.
 ///
@@ -362,13 +905,36 @@ pub enum Node<'r, V> {
 }
 
 impl<V> fmt::Debug for Node<'_, V> {
+  /// **One level, and the level is the keys.** A container renders as its own children's keys and
+  /// stops there, so this walks siblings and never descends.
+  ///
+  /// # Why not the whole tree, which is what this used to render
+  ///
+  /// Because it recursed to do it, one frame per level of a response whose depth is the client's:
+  /// measured at **1 088 bytes per level** on this host, and `{:?}` on a 4 000-deep response
+  /// overflowed a test thread's stack and took the process with it. It is the same defect
+  /// [`Path`]'s formatters had, met on the other fatal axis — the writer's `data` walk one crate up
+  /// was moved onto an explicit stack for exactly this reason, and a `Debug` that recurses through
+  /// the same tree hands the depth straight back to whoever logs a response.
+  ///
+  /// So the shape is the fix rather than a stack: a formatter that descends needs somewhere to keep
+  /// the un-taken siblings, and the only places are the native stack (fatal) and the heap (an
+  /// allocation, in a formatter, sized by the client). Not descending needs neither.
+  ///
+  /// **And nothing is lost that this impl was ever able to give.** It already refuses to render a
+  /// value — [`Node::Leaf`] prints as `<leaf>`, because `V` carries no [`Debug`](fmt::Debug) bound
+  /// anywhere a driver value is reached — so it was never a rendering of the response. Whatever
+  /// wants that wants `smear`'s draft §7.2.1 JSON writer, which is written for it, runs on an
+  /// explicit stack and can refuse.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Self::Null => f.write_str("null"),
       Self::Leaf(_) => f.write_str("<leaf>"),
       Self::TypeName(name) => write!(f, "{name:?}"),
-      Self::List(children) => f.debug_list().entries(children.clone()).finish(),
-      Self::Object(children) => f.debug_list().entries(children.clone()).finish(),
+      // `Children`'s own `Debug` is the keys, so the two arms differ by the name in front of them —
+      // which is the one thing the keys alone do not say.
+      Self::List(children) => f.debug_tuple("List").field(children).finish(),
+      Self::Object(children) => f.debug_tuple("Object").field(children).finish(),
     }
   }
 }
@@ -414,6 +980,8 @@ impl<'r, V> Iterator for Children<'r, V> {
 }
 
 impl<V> fmt::Debug for Children<'_, V> {
+  /// The keys, and not the values under them — which is what [`Node`]'s own `Debug` is written
+  /// over, and why that one does not descend.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_list()
       .entries(self.clone().map(|(key, _)| key))

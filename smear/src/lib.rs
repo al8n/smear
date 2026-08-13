@@ -3,11 +3,28 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
-// The `extern crate alloc as std;` alias that used to sit here is GONE, and its deletion is the
-// last commit's `#[allow(unused_extern_crates)]` coming good: the alias existed so this crate's
-// own modules could spell their allocations `std::boxed::Box`, and this crate has no modules left.
-// Each member carries its own. `#![no_std]` above still means what it says — an umbrella that
-// forwards a `no_std` stack must not itself link `std`.
+// THE ALIAS IS BACK, AND `json` IS WHY. It left when this crate lost its last module — every
+// member carries its own, and an umbrella that forwards a `no_std` stack must not itself link
+// `std` — and the note that replaced it said `json` did not bring it back "because it writes into
+// a caller's `core::fmt::Write` and allocates nothing at all". That sentence was true of the
+// module as first written and is no longer true of it: both of the writer's walks over
+// attacker-shaped input now run on the heap rather than on the native stack or on a rescan, which
+// is two `Vec`s and the reason for each is in `json::response`. The claim it replaces is in
+// `json`'s own header, restated as what the two allocations cost rather than deleted.
+//
+// Gated on `proto`, which is the feature that compiles the module: `#[cfg]`d rather than
+// unconditional so that a lexer-only or parser-only build — neither of which has anything to
+// allocate — still links neither `alloc` nor `std` through this file. Every member spells the
+// alias the same way and for the same reason, and the `#[allow]` is the workspace-wide exception
+// `unused_extern_crates = "deny"` requires: the users are feature-gated, so a configuration that
+// compiles none of them would otherwise fail on the item itself.
+#[cfg(all(feature = "proto", not(feature = "std")))]
+#[allow(unused_extern_crates)]
+extern crate alloc as std;
+
+#[cfg(all(feature = "proto", feature = "std"))]
+#[allow(unused_extern_crates)]
+extern crate std;
 
 // Deliberately no outer doc comment, unlike the modules below. Rustdoc resolves the MERGED
 // fragments of a module's documentation in the scope of whichever attribute came from outside, so
@@ -167,6 +184,26 @@ pub use smear_compiler as validator;
 #[cfg_attr(docsrs, doc(cfg(feature = "proto")))]
 #[doc(inline)]
 pub use graphql_proto as proto;
+
+// THE ONE MODULE THIS CRATE OWNS, and it is here rather than one layer down for a stated reason.
+//
+// `graphql-proto` refuses to write a response out because writing one means writing the driver's
+// `V`, and `Values` asks seven structural questions of which none is "write this". The
+// materialised value layer is what closed that: with a concrete value tree there is something to
+// write, and the writer belongs ABOVE both — over `proto` for the response and over `parser` for
+// the values — which is this crate and no other. Neither layer grows a question it should not
+// have.
+//
+// Gated on `proto` alone. The materialised implementations inside it need
+// `materialized-numbers` too and carry their own `#[cfg]`, so the module and the number formatters
+// are in a `proto` build whether or not the value trees are, and `cargo hack --each-feature`
+// compiles it in the `proto` cell rather than only under `--all-features`. NO NEW FEATURE: a
+// `json` feature would be a fourteenth cell in each of `ci/hack.sh`'s two passes and a pair
+// `ci/feature_reachability.py` would have to be told about, to gate a module that is already
+// exactly as reachable as the crate it writes.
+#[cfg(feature = "proto")]
+#[cfg_attr(docsrs, doc(cfg(feature = "proto")))]
+pub mod json;
 
 #[doc(hidden)]
 pub mod __private {

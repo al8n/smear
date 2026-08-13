@@ -306,12 +306,7 @@ impl<'r, V> Error<'r, V> {
   /// Returns the draft §7.1.2 response path of the field the error happened at.
   #[inline]
   pub fn path(&self) -> Path<'r, V> {
-    Path {
-      slots: self.slots,
-      names: self.names,
-      name_spans: self.name_spans,
-      slot: self.row.slot,
-    }
+    Path::new(self.slots, self.names, self.name_spans, self.row.slot)
   }
 
   /// Returns the spans in the source document this error is attributed to — draft §7.1.2's
