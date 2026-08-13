@@ -536,7 +536,7 @@ pub struct Limits {
   ///
   /// The row this table used to end on is gone rather than answered: draft §6.1's lookup produced
   /// an operation *index* whose only bound was the document's own length, and
-  /// [`Executor::operation_definition`] now returns the definition itself. There is no narrowing
+  /// `Executor::operation_definition` now returns the definition itself. There is no narrowing
   /// left to bound.
   pub max_response_slots: NonZeroU32,
 
@@ -1030,7 +1030,7 @@ pub enum StartError {
   ///
   /// **A named lookup that finds its operation early is not refused for the definitions behind
   /// it**: the charge is taken per definition read rather than for the slice, so the walk stops
-  /// where the answer does. See [`Executor::operation_definition`].
+  /// where the answer does.
   OperationLookupRefused,
   /// A draft §7.1.2 response stream is still open, so beginning another operation would orphan the
   /// source stream behind it.
