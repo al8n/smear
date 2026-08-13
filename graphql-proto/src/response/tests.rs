@@ -47,9 +47,12 @@ use smear_parser::{
 };
 use smear_schema::Schema;
 
-use crate::{Executor, Leaf, Values};
+use crate::{Executor, Leaf, Response, Values};
 
-use super::{Segment, allocations, traversals};
+use super::{
+  INLINE_SEGMENTS, Segment, allocations, allow_allocations, refuse_allocations_of_at_least,
+  traversals,
+};
 
 /// One object type that refers to itself, and one nullable leaf to fail at the bottom of it.
 const SDL: &str = "type Query { n: Node } type Node { n: Node x: Int }";
@@ -460,14 +463,23 @@ fn the_segments_come_back_outermost_first() {
   let error = response.errors().next().expect("the one error");
   let path = error.path();
 
-  // The three entries agree, which is what makes them one path read three ways rather than three
-  // walks free to drift apart.
+  // The four entries agree, which is what makes them one path read four ways rather than four
+  // walks free to drift apart. `Debug` is in here and not only in the cost gates below because it
+  // is now written over a different walk from `try_iter`'s, and a reversal that is dropped is a
+  // defect no cost gate can see.
   assert_eq!(path.len(), 4);
   assert!(!path.is_empty());
   assert_eq!(path.to_string(), "n.n.n.x");
-  assert_eq!(path.iter().collect::<Vec<_>>().len(), 4);
+  assert_eq!(path.try_iter().expect("room for a path").count(), 4);
+  assert_eq!(
+    format!("{path:?}"),
+    r#"[Field("n"), Field("n"), Field("n"), Field("x")]"#
+  );
 
-  let outermost_first = path.iter().collect::<Vec<_>>();
+  let outermost_first = path
+    .try_iter()
+    .expect("room for a path")
+    .collect::<Vec<_>>();
   let mut innermost_first = path.ancestors().collect::<Vec<_>>();
   innermost_first.reverse();
   assert_eq!(outermost_first, innermost_first);
@@ -519,4 +531,326 @@ fn the_root_is_the_empty_path() {
   assert_eq!(path.len(), 1);
   assert_eq!(path.to_string(), "n");
   assert!(!path.is_empty());
+}
+
+// =================================================================================================
+// What the two FORMATTERS cost, which is a different question from what the two collectors cost
+// =================================================================================================
+//
+// The gates above are about `collect_into`: the door a serialiser takes, one buffer for a whole
+// response, one allocation per path. They were complete about that door and they were read as
+// though they were complete about `Path`. They were not, and the row that fell through the gap had
+// been *enumerated* — an infallible `Vec::with_capacity` in the iterator, crossed off a census on
+// the grounds that the JSON writer one crate up does not reach it.
+//
+// It does not. `Debug` and `Display` do, `Error`'s own `Debug` renders a path through them, and the
+// depth is the client's — so one `log::warn!` about a deep field error was an abort. A dismissal by
+// entry point is only as good as the WIDEST entry point it names, and the widest one for a public
+// type is `{}` and `{:?}`.
+//
+// Hence three doors below rather than one, and a fourth gate on the OTHER fatal axis, because the
+// re-audit that found this row found a second one of exactly the same shape: `Node`'s `Debug`
+// recursed through the response tree.
+
+/// A sink that allocates nothing, so that what a write costs is what the formatter cost.
+///
+/// [`Silent::low`] is how the native-stack axis is read: the lowest address the sink was reached
+/// at, against a local in the caller's frame, is how far down the formatter had gone by the time it
+/// produced a byte.
+struct Silent {
+  bytes: usize,
+  low: usize,
+}
+
+impl Silent {
+  const fn new() -> Self {
+    Self { bytes: 0, low: 0 }
+  }
+
+  /// How many bytes of frame the formatter had spent below `base` when it first wrote.
+  fn frame_below(&self, base: usize) -> usize {
+    base.saturating_sub(self.low)
+  }
+}
+
+impl core::fmt::Write for Silent {
+  fn write_str(&mut self, s: &str) -> core::fmt::Result {
+    let here = core::ptr::from_ref(&s) as usize;
+    if self.low == 0 || here < self.low {
+      self.low = here;
+    }
+    self.bytes += s.len();
+    Ok(())
+  }
+}
+
+/// Runs the `levels`-deep chain and hands its finished response to `body`.
+///
+/// The same fixture [`measure`] uses, without the measurement — the response borrows the executor,
+/// so it cannot be returned and is passed to a closure instead.
+fn with_response<R>(levels: usize, body: impl FnOnce(&Response<'_, Value>) -> R) -> R {
+  let query = chain(levels);
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(SDL)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("the SDL is a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(&query)
+  .expect("a chain of two-deep fragment definitions parses");
+
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    if request.name() == "x" {
+      executor.handle_field_error(id, "the resolver is degraded");
+    } else {
+      executor.handle_resolved(&mut space, id, Value::Obj);
+    }
+    while executor.poll_abandoned().is_some() {}
+  }
+  let response = executor.poll_response().expect("nothing is outstanding");
+  body(&response)
+}
+
+/// A chain that produces a path filling the window exactly, and one segment longer.
+///
+/// `chain(n)` fails a leaf `n + 1` segments down, so these are [`INLINE_SEGMENTS`] and one more.
+const FILLS_THE_WINDOW: usize = INLINE_SEGMENTS - 1;
+const OVERFLOWS_THE_WINDOW: usize = INLINE_SEGMENTS;
+
+/// Printing a path allocates nothing, up to the window, and the window is where that stops.
+///
+/// **Zero is the assertion, and it is a stronger one than a refusal.** A formatter that reserves
+/// fallibly still calls the allocator, so it still has a failure to answer and still pays a
+/// `malloc` and a `free` to print twenty bytes; one that does not call it has no failure to answer
+/// at all. Both readings are taken because a bound of zero that is never exceeded could be an
+/// instrument that is not attached — the second one is what shows the counter moves.
+#[test]
+fn printing_a_path_that_fits_the_window_does_not_reach_the_allocator() {
+  use core::fmt::Write as _;
+
+  with_response(FILLS_THE_WINDOW, |response| {
+    let error = response.errors().next().expect("the one error");
+    let path = error.path();
+    assert_eq!(
+      path.len(),
+      INLINE_SEGMENTS,
+      "the fixture is meant to fill the window exactly"
+    );
+
+    let mut display = Silent::new();
+    let before = allocations();
+    write!(display, "{path}").expect("a sink that cannot fail");
+    let display_cost = allocations() - before;
+
+    let mut debug = Silent::new();
+    let before = allocations();
+    write!(debug, "{path:?}").expect("a sink that cannot fail");
+    let debug_cost = allocations() - before;
+
+    assert_eq!(
+      display_cost,
+      0,
+      "`Display` on a {}-segment path went to the allocator {display_cost} times",
+      path.len()
+    );
+    assert_eq!(
+      debug_cost,
+      0,
+      "`Debug` on a {}-segment path went to the allocator {debug_cost} times",
+      path.len()
+    );
+    assert!(
+      display.bytes > 0 && debug.bytes > 0,
+      "neither formatter wrote anything, so the readings above are of nothing"
+    );
+  });
+
+  // One segment further down, the window is not enough and the buffer is taken — which is what
+  // shows the reading above is the window's doing and not the counter's silence.
+  with_response(OVERFLOWS_THE_WINDOW, |response| {
+    let error = response.errors().next().expect("the one error");
+    let path = error.path();
+    assert_eq!(path.len(), INLINE_SEGMENTS + 1);
+
+    let mut display = Silent::new();
+    let before = allocations();
+    write!(display, "{path}").expect("a sink that cannot fail");
+    let cost = allocations() - before;
+
+    assert!(
+      cost >= 1,
+      "a path one segment past the window printed without going to the allocator, so the window \
+       is not {INLINE_SEGMENTS} segments wide and the gate above is measuring something else"
+    );
+
+    // And the *other* branch turns the chain around too. Nothing above reaches it —
+    // `the_segments_come_back_outermost_first` renders a four-segment path, which is the window's
+    // branch — so without this the buffered one could emit innermost first and every gate here
+    // would stay green.
+    let mut innermost_first = path.ancestors().collect::<Vec<_>>();
+    innermost_first.reverse();
+    let expected = innermost_first
+      .iter()
+      .map(|segment| match segment {
+        Segment::Field(name) => (*name).to_string(),
+        Segment::Index(index) => index.to_string(),
+      })
+      .collect::<Vec<_>>()
+      .join(".");
+    assert_eq!(
+      path.to_string(),
+      expected,
+      "the buffered branch rendered a path in a different order from the chain it walked"
+    );
+  });
+}
+
+/// The size at and above which the fixtures below make the allocator answer with null.
+///
+/// Wide enough to exclude anything the harness does incidentally and narrow enough to catch a
+/// buffer for a path one segment past the window: 33 [`Segment`]s is 528 bytes.
+const REFUSE_BYTES: usize = 512;
+
+/// A path too deep for the window refuses at every door rather than aborting the process.
+///
+/// # Three doors, because the defect was the belief that one of them did not count
+///
+/// [`Path::try_iter`] is the door a caller iterating a path takes, and it can hand back a
+/// [`TryReserveError`](std::collections::TryReserveError). [`Debug`](core::fmt::Debug) and
+/// [`Display`](core::fmt::Display) are the doors a *log line* takes, and what they have is
+/// [`fmt::Error`](core::fmt::Error) — which `write!` propagates and `format!` turns into a panic,
+/// both of which a server survives and neither of which is the process-wide allocation handler.
+///
+/// Each door is read twice, armed and unarmed, so that the refusal is a difference and not an
+/// absolute: a door that failed for some other reason would fail both times.
+#[test]
+fn a_path_past_the_window_refuses_at_every_door() {
+  use core::fmt::Write as _;
+
+  with_response(OVERFLOWS_THE_WINDOW, |response| {
+    let error = response.errors().next().expect("the one error");
+    let path = error.path();
+
+    // Unarmed: every door answers. Without this the readings below could be a path that does not
+    // reach the buffer at all.
+    let mut sink = Silent::new();
+    assert!(write!(sink, "{path}").is_ok());
+    assert!(write!(sink, "{path:?}").is_ok());
+    assert!(path.try_iter().is_ok());
+
+    // Armed, one door at a time, with nothing between arming and disarming that could panic — the
+    // panic machinery allocates, and a panic inside the window meets a refusal while it is being
+    // handled.
+    let mut display = Silent::new();
+    refuse_allocations_of_at_least(REFUSE_BYTES);
+    let display_answer = write!(display, "{path}");
+    allow_allocations();
+
+    let mut debug = Silent::new();
+    refuse_allocations_of_at_least(REFUSE_BYTES);
+    let debug_answer = write!(debug, "{path:?}");
+    allow_allocations();
+
+    refuse_allocations_of_at_least(REFUSE_BYTES);
+    let iter_answer = path.try_iter();
+    allow_allocations();
+
+    assert!(
+      display_answer.is_err(),
+      "`Display` served a path the allocator refused room for"
+    );
+    assert!(
+      debug_answer.is_err(),
+      "`Debug` served a path the allocator refused room for"
+    );
+    assert!(
+      iter_answer.is_err(),
+      "`try_iter` served a path the allocator refused room for"
+    );
+  });
+}
+
+/// The shallow reading of the response-tree formatter, and the deep one.
+///
+/// Four times apart rather than sixteen: what is being separated here is a constant from a term
+/// that grows by roughly a kilobyte a level, so four levels of separation is 26 KiB against a
+/// tolerance of 128 bytes — and the fixture stays cheap enough to interpret.
+const SHALLOW_TREE: usize = 8;
+const DEEP_TREE: usize = 32;
+
+/// How much more frame the deeper reading may spend. A constant, because the claim is that the
+/// number does not move with the depth at all.
+const FRAME_SLACK: usize = 128;
+
+/// Rendering a response with `{:?}` does not put its depth on the native stack.
+///
+/// # The second row the re-audit turned up, and it is not on the heap
+///
+/// [`Node`](super::Node)'s `Debug` used to descend into its children, which is one frame per level
+/// of a tree whose depth the client chooses: **1 088 bytes per level** measured on this host, and
+/// `{:?}` on a 4 000-deep response overflowed a test thread's stack and aborted the binary. It is
+/// the [`Path`] finding with the axis swapped — a public formatter, request-shaped input, off the
+/// serialiser's path and reached by anything that logs — which is why it is gated here beside it
+/// rather than reported and left.
+///
+/// Read as a difference of two addresses, because that is the only instrument that sees this: the
+/// allocation counter reads **0** for the recursive version and 0 for this one. That pairing is the
+/// whole reason both gates exist.
+#[test]
+fn rendering_a_response_does_not_reach_the_native_stack() {
+  use core::fmt::Write as _;
+
+  let mut readings = Vec::new();
+  for levels in [SHALLOW_TREE, DEEP_TREE] {
+    let reading = with_response(levels, |response| {
+      let anchor = 0u8;
+      let base = core::ptr::from_ref(&anchor) as usize;
+
+      let mut sink = Silent::new();
+      let before = allocations();
+      write!(sink, "{response:?}").expect("a sink that cannot fail");
+      let allocated = allocations() - before;
+
+      assert!(
+        sink.bytes > 0,
+        "the response rendered no bytes, so the frame reading is of nothing"
+      );
+      (sink.frame_below(base), allocated)
+    });
+    readings.push((levels, reading));
+  }
+
+  let (shallow_levels, (shallow_frame, shallow_allocs)) = readings[0];
+  let (deep_levels, (deep_frame, deep_allocs)) = readings[1];
+
+  assert!(
+    deep_frame <= shallow_frame + FRAME_SLACK,
+    "a {shallow_levels}-deep response rendered {shallow_frame} bytes below the caller's frame and \
+     a {deep_levels}-deep one rendered {deep_frame}; the formatter is descending"
+  );
+
+  // The other axis, in the same breath and for the reason the counters' header gives: a formatter
+  // that swapped the recursion for a work stack would pass the reading above and fail this one.
+  assert_eq!(
+    (shallow_allocs, deep_allocs),
+    (0, 0),
+    "rendering a response went to the allocator"
+  );
 }

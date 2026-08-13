@@ -138,6 +138,31 @@
 //! [`WriteJson`] is a driver's, and [`Json::display`] renders whatever `Display` it was handed; a
 //! recursive one spends native frames this module cannot count. What this module owes is that
 //! *it* adds no unbounded term, and `graphql-proto`'s own `Display` adds none.
+//!
+//! # The third thing an enumeration can get wrong: its dismissals
+//!
+//! The axis list closed which resources exist and the extent closed which functions they are
+//! crossed with. Neither says anything about the rows that were *reached and then crossed off*, and
+//! that is where the round after this table found its defect. The census behind it had a row for
+//! `graphql-proto`'s path iterator — an infallible allocation sized by the client — dismissed with
+//! **"not on the writer's path"**. It was not on the writer's path. It was public, it backed
+//! `Debug` and `Display`, and logging a deep path aborted the process. The criterion was sound and
+//! the caller it was applied to was the wrong one.
+//!
+//! So a dismissal is worth what its criterion is worth, and the criteria are not equal:
+//!
+//! | criterion | what it is worth |
+//! |---|---|
+//! | **by resource** — a fixed-size stack array is not the heap | syntactic; holds for every caller |
+//! | **by absence** — the function contains no growth at all | syntactic; holds for every caller |
+//! | **by ceiling** — the quantity is bounded by a configured constant | holds wherever the ceiling is checked *before* the allocation |
+//! | **by ownership** — the sink and the driver's `V` are the caller's | a boundary rather than a bound, so it has to be stated as one |
+//! | **by entry point** — nothing on this path reaches it | **the suspect one.** Worth only as much as the *widest* entry point it names, and for a `pub` item the widest is `{}` and `{:?}` |
+//!
+//! Every row of the table rests on one of the first three. The last row rests on ownership, and
+//! says so. **Nothing here rests on an entry point**, which is the repair: the extent above is
+//! "every function reachable from an entry point", so a row dismissed by naming a *narrower* path
+//! than that extent is a row that contradicts the enumeration it belongs to.
 
 use core::fmt;
 

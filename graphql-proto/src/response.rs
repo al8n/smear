@@ -53,7 +53,8 @@
 //! §7.1.2's `path` is the same chain read the other way, and a tree that can only be climbed has
 //! no cheap way to be descended: whoever wants the specified order has to reverse the chain, and
 //! reversing it *per segment* is quadratic in the depth. [`Path`]'s own header says what this
-//! module does about that, and why the answer is three entries on it rather than one.
+//! module does about that, why the answer is three entries on it rather than one, and why its two
+//! formatters are none of the three.
 
 use core::fmt;
 
@@ -255,6 +256,25 @@ impl fmt::Display for Segment<'_> {
   }
 }
 
+/// How many segments a [`Path`]'s formatters turn around inside their own frame.
+///
+/// **Public because it is the contract rather than an implementation detail**: it is the depth up
+/// to which rendering a path with `{}` or `{:?}` reaches the allocator zero times, which is
+/// something a caller deciding what to log is entitled to check. Past it a formatter takes one
+/// fallible buffer and can answer [`fmt::Error`].
+///
+/// Thirty-two [`Segment`]s is 512 bytes of automatic storage, held for the length of one
+/// `write!` and by a function that cannot recurse — a fixed frame cost of the kind
+/// [`itoa`](https://docs.rs/itoa)'s and `zmij`'s number buffers already are, one crate up.
+///
+/// Chosen against what a response path *is* rather than as a round number. A segment is a field a
+/// query asked for or an index into a list the driver returned, so a path is as deep as the
+/// selection set is nested plus the list nesting the schema's types declare; both of those are
+/// written by hand, and neither reaches thirty-two in a schema anybody maintains. What *can* reach
+/// it is a fragment chain, which is exactly the construction this module's tests use to drive the
+/// depth to 1 024 — and which is the case the window deliberately does not try to serve.
+pub const INLINE_SEGMENTS: usize = 32;
+
 /// A draft §7.1.2 response path, outermost segment first.
 ///
 /// Derived from the response tree rather than stored: an error records the slot it happened at and
@@ -273,11 +293,12 @@ impl fmt::Display for Segment<'_> {
 /// That is why the surface below is three entries rather than one, and each of them is a different
 /// answer to "whose buffer":
 ///
-/// | | order | per segment | buffer |
-/// |---|---|---|---|
-/// | [`ancestors`](Path::ancestors) | innermost first | one parent link | none |
-/// | [`collect_into`](Path::collect_into) | outermost first | one parent link | the caller's, reused across a whole response |
-/// | [`iter`](Path::iter) | outermost first | one parent link | its own, one per call |
+/// | | order | per segment | buffer | on refusal |
+/// |---|---|---|---|---|
+/// | [`ancestors`](Path::ancestors) | innermost first | one parent link | none | cannot refuse |
+/// | [`collect_into`](Path::collect_into) | outermost first | one parent link | the caller's, reused across a whole response | [`TryReserveError`] |
+/// | [`try_iter`](Path::try_iter) | outermost first | one parent link | its own, one per call | [`TryReserveError`] |
+/// | [`Debug`](fmt::Debug), [`Display`](fmt::Display) | outermost first | one parent link | **[`INLINE_SEGMENTS`] of frame, and the heap only past it** | [`fmt::Error`] |
 ///
 /// # One walk is not one allocation, and the buffer is the half a link counter cannot see
 ///
@@ -292,6 +313,30 @@ impl fmt::Display for Segment<'_> {
 /// counts — so the size is known without a preliminary walk to measure it. Filling a fresh buffer
 /// is then one allocation of exactly the right size at every depth, which is the number the gate
 /// in this module's tests asserts.
+///
+/// # And a formatter does not need a buffer at all, which is the part that was got wrong
+///
+/// The two entries above are for a caller assembling something. [`Debug`](fmt::Debug) and
+/// [`Display`](fmt::Display) are not assembling anything — they already hold the sink they are
+/// reversing the chain *into*, so the only thing a `Vec` bought them was somewhere to put the
+/// segments while the order was turned around. That is [`INLINE_SEGMENTS`] segments of this type's
+/// own frame for every path a service actually produces, and **no allocator call at all**: a
+/// depth-three path used to cost a `malloc` and a `free` to print twenty bytes.
+///
+/// Past the window there is no free reversal left. A chain in a shared slice cannot be turned
+/// around in constant space without walking it once per output segment, and *that* is the
+/// quadratic this whole section exists to remove — trading the heap for it would move the cost onto
+/// the one axis with no refusal at all, since an allocator can say no and a spent second cannot. So
+/// a path deeper than the window takes [`collect_into`](Path::collect_into), the same fallible door
+/// a serialiser takes, and a refusal arrives as [`fmt::Error`] rather than as the process-wide
+/// allocation handler.
+///
+/// **This was found as a dismissal and not as a defect**, which is worth recording where the next
+/// reader will meet it: the allocation below was enumerated, and then crossed off because the JSON
+/// writer one crate up reaches paths through `collect_into`. It is off *that* caller's path and it
+/// is public, and `Debug`/`Display` are how anything else reaches a path — so the criterion was
+/// about the wrong caller, and a `log::warn!` carrying a request-shaped path was enough to abort
+/// the process. A dismissal by entry point has to name the *widest* entry point.
 ///
 /// **There is deliberately no random accessor.** `get(i)` over upward links costs the depth per
 /// call, so the `0..len()` loop every caller eventually writes over it is exactly the quadratic
@@ -411,24 +456,71 @@ impl<'r, V> Path<'r, V> {
     Ok(self.fill(buf))
   }
 
-  /// Returns the segments, outermost first.
+  /// Returns the segments, outermost first, in a buffer the iterator owns.
   ///
-  /// The chain is walked once, into a buffer this iterator owns — see the type's header for why
-  /// there is a buffer at all. A caller with more than one path to write wants
-  /// [`collect_into`](Path::collect_into), which lends its own instead of allocating one per call.
+  /// The chain is walked once, into a buffer reserved up front from [`len`](Path::len) — see the
+  /// type's header for why there is a buffer at all. A caller with more than one path to write
+  /// wants [`collect_into`](Path::collect_into), which lends its own instead of allocating one per
+  /// call.
   ///
-  /// Reserved up front, as `collect_into` is, and **infallible where that one is not**: this
-  /// returns an iterator, and it is what the [`Debug`](fmt::Debug) and [`Display`](fmt::Display)
-  /// impls below are written over — neither of which has anywhere to put an allocation failure.
-  /// So a refusal here aborts, exactly as the unhinted `extend` this replaced already did; what
-  /// changed is that it is now one allocation instead of a sequence of them. A caller that needs
-  /// to *handle* the refusal takes `collect_into`, which is the door that can express it.
-  pub fn iter(&self) -> PathIter<'r> {
-    let mut segments = std::vec::Vec::with_capacity(self.len());
+  /// # Errors
+  ///
+  /// [`TryReserveError`] when the allocator cannot give the buffer room for a path this deep, for
+  /// the reason [`collect_into`](Path::collect_into) is fallible: the depth is the client's and a
+  /// server should not die of it. **There is deliberately no infallible spelling of this.** There
+  /// was, it took `Vec::with_capacity`, and it was left infallible on the argument that the two
+  /// formatters below had nowhere to put a refusal — which was true of them and said nothing about
+  /// this method, whose caller has a `Result` to receive one in. The formatters no longer come
+  /// through here at all.
+  pub fn try_iter(&self) -> Result<PathIter<'r>, TryReserveError> {
+    let mut segments = std::vec::Vec::new();
+    segments.try_reserve(self.len())?;
     self.fill(&mut segments);
-    PathIter {
+    Ok(PathIter {
       segments: segments.into_iter(),
+    })
+  }
+
+  /// Hands every segment to `emit` in draft §7.1.2's order.
+  ///
+  /// The turn-around happens in [`INLINE_SEGMENTS`] segments of this frame, so a path that fits the
+  /// window reaches the allocator zero times. One deeper falls through to
+  /// [`each_segment_buffered`](Path::each_segment_buffered), which is one call and not a cycle —
+  /// nothing here recurses, at any depth.
+  ///
+  /// `&mut dyn FnMut` rather than a generic, because the two callers are the two formatters and one
+  /// copy of this walk is the point.
+  fn each_segment(&self, emit: &mut dyn FnMut(Segment<'r>) -> fmt::Result) -> fmt::Result {
+    let mut window = [Segment::Index(0); INLINE_SEGMENTS];
+    let mut filled = 0;
+    // Bounded by the window and not by `len`, deliberately: the strategy may be chosen from a
+    // recorded number, and what is *written* may not be. An overflowing chain takes the branch
+    // below rather than being truncated to whatever the slot said.
+    for segment in self.ancestors() {
+      if filled == INLINE_SEGMENTS {
+        return self.each_segment_buffered(emit);
+      }
+      window[filled] = segment;
+      filled += 1;
     }
+    for segment in window[..filled].iter().rev() {
+      emit(*segment)?;
+    }
+    Ok(())
+  }
+
+  /// The same, for a path too deep to turn around in a frame.
+  ///
+  /// Re-walks from the leaf, which costs the [`INLINE_SEGMENTS`] links the window had already
+  /// followed and nothing else — the alternative is threading a half-consumed
+  /// [`Ancestors`] through both branches to save a constant.
+  #[cold]
+  fn each_segment_buffered(&self, emit: &mut dyn FnMut(Segment<'r>) -> fmt::Result) -> fmt::Result {
+    let mut buf = std::vec::Vec::new();
+    for segment in self.collect_into(&mut buf).map_err(|_| fmt::Error)? {
+      emit(*segment)?;
+    }
+    Ok(())
   }
 
   /// Walks the chain into `buf` and turns it around.
@@ -465,22 +557,30 @@ impl<'r, V> Path<'r, V> {
 }
 
 impl<V> fmt::Debug for Path<'_, V> {
+  /// Allocates nothing for a path of [`INLINE_SEGMENTS`] segments or fewer, and answers a deeper
+  /// one the allocator refuses with [`fmt::Error`] rather than aborting. See [`Path`]'s header.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_list().entries(self.iter()).finish()
+    let mut list = f.debug_list();
+    self.each_segment(&mut |segment| {
+      list.entry(&segment);
+      Ok(())
+    })?;
+    list.finish()
   }
 }
 
 impl<V> fmt::Display for Path<'_, V> {
+  /// Allocates nothing for a path of [`INLINE_SEGMENTS`] segments or fewer, and answers a deeper
+  /// one the allocator refuses with [`fmt::Error`] rather than aborting. See [`Path`]'s header.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut first = true;
-    for segment in self.iter() {
+    self.each_segment(&mut |segment| {
       if !first {
         f.write_str(".")?;
       }
       first = false;
-      write!(f, "{segment}")?;
-    }
-    Ok(())
+      write!(f, "{segment}")
+    })
   }
 }
 
@@ -526,9 +626,11 @@ impl<V> core::iter::FusedIterator for Ancestors<'_, V> {}
 
 /// The segments of a [`Path`], outermost first.
 ///
-/// Backed by the buffer [`Path::iter`] filled with one leaf-to-root walk. It is not a lazy view of
-/// the tree, and it cannot be: the links run the other way, so an iterator that held only a cursor
-/// would have to restart at the failing position for every segment it yielded.
+/// Backed by the buffer [`Path::try_iter`] filled with one leaf-to-root walk. It is not a lazy view
+/// of the tree, and it cannot be: the links run the other way, so an iterator that held only a
+/// cursor would have to restart at the failing position for every segment it yielded. That is also
+/// why the buffer is a `Vec` and not the window [`Path`]'s formatters use — an iterator outlives
+/// the call that made it, so its storage cannot be a frame.
 pub struct PathIter<'r> {
   segments: std::vec::IntoIter<Segment<'r>>,
 }
@@ -610,6 +712,11 @@ thread_local! {
   static TRAVERSED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
   /// Allocating events on this thread, whoever made them.
   static ALLOCATED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+  /// The size at and above which [`Counting`] answers a request on this thread with null.
+  ///
+  /// Thread-local and not a global, because the harness runs these tests in parallel and a global
+  /// switch would refuse whatever a neighbour happened to be doing.
+  static REFUSE_AT_LEAST: core::cell::Cell<usize> = const { core::cell::Cell::new(usize::MAX) };
 }
 
 /// Records that a path derivation followed one slot.
@@ -638,27 +745,51 @@ fn traversals() -> u64 {
 /// `realloc` counts, and counts as one event. That is not incidental: geometric growth is mostly
 /// `realloc`, so an allocator that forwarded it silently would report the defect this instrument
 /// exists for as a single allocation.
+///
+/// # And it can say no, which is the only way to read the other half of the claim
+///
+/// A count cannot tell a `try_reserve` from a `with_capacity`: both are one event, right up to the
+/// point where one returns an error and the other calls the process-wide allocation handler. So
+/// [`refuse_allocations_of_at_least`] arms a size threshold on the calling thread and every request
+/// at or above it is answered with null, which is what an allocator does when it has nothing left.
+/// A door that is fallible answers; a door that is not aborts the test binary, loudly.
+///
+/// **Nothing may panic while the threshold is armed.** Rust's panic machinery allocates, so a
+/// panic inside the window meets a refusal inside the code handling the first one. Every fixture
+/// here arms immediately before the call under test, disarms immediately after, and asserts
+/// afterwards.
 #[cfg(all(test, feature = "std"))]
 struct Counting;
 
 #[cfg(all(test, feature = "std"))]
 // SAFETY: every method forwards to `System` with the layout it was given, unchanged, and returns
-// exactly what `System` returned. The tally is a `Cell<u64>` in thread-local storage, reached
-// through `try_with` so that an allocation made while that storage is being set up or torn down is
-// left uncounted rather than re-entering it.
+// exactly what `System` returned — or, when this thread has armed a refusal at or below the
+// requested size, returns null without calling `System` at all, which `GlobalAlloc` defines as the
+// answer for a request that cannot be served. The tally and the threshold are `Cell`s in
+// thread-local storage, reached through `try_with` so that an allocation made while that storage is
+// being set up or torn down is left uncounted and unrefused rather than re-entering it.
 unsafe impl core::alloc::GlobalAlloc for Counting {
   unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
     allocate();
+    if refused(layout.size()) {
+      return core::ptr::null_mut();
+    }
     unsafe { std::alloc::System.alloc(layout) }
   }
 
   unsafe fn alloc_zeroed(&self, layout: core::alloc::Layout) -> *mut u8 {
     allocate();
+    if refused(layout.size()) {
+      return core::ptr::null_mut();
+    }
     unsafe { std::alloc::System.alloc_zeroed(layout) }
   }
 
   unsafe fn realloc(&self, ptr: *mut u8, layout: core::alloc::Layout, new_size: usize) -> *mut u8 {
     allocate();
+    if refused(new_size) {
+      return core::ptr::null_mut();
+    }
     unsafe { std::alloc::System.realloc(ptr, layout, new_size) }
   }
 
@@ -681,6 +812,29 @@ fn allocate() {
 #[cfg(all(test, feature = "std"))]
 fn allocations() -> u64 {
   ALLOCATED.with(core::cell::Cell::get)
+}
+
+/// Answers whether this thread has armed a refusal that covers a request of `size`.
+#[cfg(all(test, feature = "std"))]
+fn refused(size: usize) -> bool {
+  REFUSE_AT_LEAST
+    .try_with(|threshold| size >= threshold.get())
+    .unwrap_or(false)
+}
+
+/// Makes every allocation request of `size` bytes or more on this thread answer with null.
+///
+/// A size threshold rather than a switch, because the window has to be wide enough to include the
+/// buffer under test and narrow enough to exclude the harness's own housekeeping.
+#[cfg(all(test, feature = "std"))]
+fn refuse_allocations_of_at_least(size: usize) {
+  REFUSE_AT_LEAST.with(|threshold| threshold.set(size));
+}
+
+/// Puts this thread's allocator back.
+#[cfg(all(test, feature = "std"))]
+fn allow_allocations() {
+  REFUSE_AT_LEAST.with(|threshold| threshold.set(usize::MAX));
 }
 
 /// A completed value in the response.
@@ -714,13 +868,36 @@ pub enum Node<'r, V> {
 }
 
 impl<V> fmt::Debug for Node<'_, V> {
+  /// **One level, and the level is the keys.** A container renders as its own children's keys and
+  /// stops there, so this walks siblings and never descends.
+  ///
+  /// # Why not the whole tree, which is what this used to render
+  ///
+  /// Because it recursed to do it, one frame per level of a response whose depth is the client's:
+  /// measured at **1 088 bytes per level** on this host, and `{:?}` on a 4 000-deep response
+  /// overflowed a test thread's stack and took the process with it. It is the same defect
+  /// [`Path`]'s formatters had, met on the other fatal axis — the writer's `data` walk one crate up
+  /// was moved onto an explicit stack for exactly this reason, and a `Debug` that recurses through
+  /// the same tree hands the depth straight back to whoever logs a response.
+  ///
+  /// So the shape is the fix rather than a stack: a formatter that descends needs somewhere to keep
+  /// the un-taken siblings, and the only places are the native stack (fatal) and the heap (an
+  /// allocation, in a formatter, sized by the client). Not descending needs neither.
+  ///
+  /// **And nothing is lost that this impl was ever able to give.** It already refuses to render a
+  /// value — [`Node::Leaf`] prints as `<leaf>`, because `V` carries no [`Debug`](fmt::Debug) bound
+  /// anywhere a driver value is reached — so it was never a rendering of the response. Whatever
+  /// wants that wants `smear`'s draft §7.2.1 JSON writer, which is written for it, runs on an
+  /// explicit stack and can refuse.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Self::Null => f.write_str("null"),
       Self::Leaf(_) => f.write_str("<leaf>"),
       Self::TypeName(name) => write!(f, "{name:?}"),
-      Self::List(children) => f.debug_list().entries(children.clone()).finish(),
-      Self::Object(children) => f.debug_list().entries(children.clone()).finish(),
+      // `Children`'s own `Debug` is the keys, so the two arms differ by the name in front of them —
+      // which is the one thing the keys alone do not say.
+      Self::List(children) => f.debug_tuple("List").field(children).finish(),
+      Self::Object(children) => f.debug_tuple("Object").field(children).finish(),
     }
   }
 }
@@ -766,6 +943,8 @@ impl<'r, V> Iterator for Children<'r, V> {
 }
 
 impl<V> fmt::Debug for Children<'_, V> {
+  /// The keys, and not the values under them — which is what [`Node`]'s own `Debug` is written
+  /// over, and why that one does not descend.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_list()
       .entries(self.clone().map(|(key, _)| key))

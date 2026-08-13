@@ -87,11 +87,26 @@
 //! are all written straight through, escaped as they stream; and every iterator this file drives —
 //! [`Response::errors`](graphql_proto::Response::errors), [`Children`],
 //! [`Extensions`]'s — is a cursor over a slice the executor already owns.
-//! [`Path::iter`](graphql_proto::Path::iter) is the one door in `graphql-proto` that still
-//! allocates infallibly, and it is deliberately not on this path: it backs `Debug` and `Display`,
-//! and what this file writes an error *message* with is
-//! [`Json::display`](super::Json::display) over the error's own `Display`, which renders no path —
-//! and which is a `match` over one error row, so it adds no native frames either.
+//! What this file writes an error *message* with is [`Json::display`](super::Json::display) over
+//! the error's own `Display`, which renders no path and is a `match` over one error row, so it adds
+//! no native frames either.
+//!
+//! # A row this table crossed off, and the criterion that was wrong
+//!
+//! It used to end with a sentence naming the one door in `graphql-proto` that allocated infallibly
+//! — the iterator behind [`Path`](graphql_proto::Path)'s `Debug` and `Display` — and dismissing it
+//! as "deliberately not on this path". **The row was right and the dismissal was not.** It is not
+//! on this path. It is also public, both standard formatters went through it, and the depth is the
+//! client's, so any driver that logged a field error's path could abort the process on a buffer
+//! this file never touches. `graphql-proto` now turns a path around in a fixed window of its own
+//! frame and answers a deeper one with `fmt::Error`; the same re-audit found [`Node`]'s `Debug`
+//! recursing through the response tree, on the other fatal axis, and that is fixed beside it.
+//!
+//! The lesson is about the *shape* of a dismissal and belongs here rather than in a report, because
+//! this table will attract more of them. **A row crossed off because "the writer does not reach it"
+//! has been checked against the narrowest caller there is.** What a dismissal has to answer is what
+//! the *widest* caller of that item is, and for anything `pub` the widest caller is `{}` and
+//! `{:?}`.
 
 use core::fmt;
 
