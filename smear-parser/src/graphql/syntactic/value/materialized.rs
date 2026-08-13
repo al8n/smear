@@ -16,13 +16,16 @@
 //! # The width is a parameter, and the twelve productions that take it are the ones that carry it
 //!
 //! `I` is [`i32`] — the width draft §3.5.1 specifies — or [`i64`], the reading that takes draft
-//! §2.9.1's unbounded `IntValue` grammar at its word. [`MaterialisedInt`] is the trait that admits
+//! §2.9.1's unbounded `IntValue` grammar at its word. [`MaterialisedInt`](crate::graphql::syntactic::value::materialized::MaterialisedInt)
+//! is the trait that admits
 //! them, it is sealed, and its `WIDTH` is what an out-of-range refusal names.
 //!
 //! Exactly the productions whose *output type* mentions the payload take the parameter:
-//! [`int_value`], [`try_int_value`] and the ten composites. [`float_value`] and the ten delegating
+//! [`int_value`](crate::graphql::syntactic::value::materialized::int_value), [`try_int_value`](crate::graphql::syntactic::value::materialized::try_int_value) and the ten composites.
+//! [`float_value`](crate::graphql::syntactic::value::materialized::float_value) and the ten delegating
 //! leaves do not, because nothing in what they return depends on a width — asking a caller of
-//! [`string_value`] to name one would be asking them to choose between two answers to a question
+//! [`string_value`](crate::graphql::syntactic::value::materialized::string_value) to name one would be asking them to choose between two
+//! answers to a question
 //! it does not ask. Where the parameter stops is therefore where the width stops, visibly, in the
 //! signatures.
 //!
@@ -113,7 +116,13 @@ use crate::graphql::{
 
 use numbers::{Materialized, Numbers};
 
-pub use numbers::MaterialisedInt;
+/// The widths this module parses at, re-exported here because it is the bound on every entry
+/// that takes one.
+///
+/// Declared beside the readers it dispatches — `numbers` is where the two conversions and the
+/// out-of-range failure live — and published here because a public `where I: MaterialisedInt`
+/// has to name something a caller can reach.
+pub use super::numbers::MaterialisedInt;
 
 /// One bound set for every entry in this module, and one doc line per entry.
 ///
@@ -160,7 +169,8 @@ macro_rules! materialized_parser {
 
 /// The same entry, for a production whose output holds no integer payload.
 ///
-/// [`float_value`] and the ten leaves materialisation never touches produce exactly what
+/// [`float_value`](crate::graphql::syntactic::value::materialized::float_value) and the ten leaves materialisation never touches produce
+/// exactly what
 /// [`super`]'s do, at every width, so a width parameter on them would be a parameter no argument
 /// and no return type mentions: uninferable, and about nothing. They are published here rather
 /// than left out because a module that carried twelve of twenty-four productions would make its

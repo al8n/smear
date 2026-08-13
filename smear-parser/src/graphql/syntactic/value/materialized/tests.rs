@@ -82,7 +82,7 @@ fn overflow_width(errors: &GraphqlErrors<&str>) -> Result<IntWidth, String> {
 #[test]
 fn int_leaf_materializes_on_both_backings() {
   fn at<I: TestInt>() {
-        let width = I::WIDTH;
+    let width = I::WIDTH;
 
     let parsed = drive_str(int_value::<_, _, I>, "42").expect("str");
     assert_eq!(Into::<i64>::into(*parsed.source()), 42, "at {width}");
@@ -234,7 +234,8 @@ fn the_two_widths_disagree_on_the_literal_between_them() {
   const PAST_I64: &str = "9223372036854775808";
 
   // i32::MAX + 1 — refused at the specified width, naming 32.
-  let errors = drive_str(int_value::<_, _, i32>, PAST_I32).expect_err("i32::MAX + 1 must not fit i32");
+  let errors =
+    drive_str(int_value::<_, _, i32>, PAST_I32).expect_err("i32::MAX + 1 must not fit i32");
   assert_eq!(overflow_width(&errors), Ok(IntWidth::I32));
   assert_eq!(errors[0].span().start(), 0);
   assert_eq!(errors[0].span().end(), PAST_I32.len());
@@ -244,10 +245,12 @@ fn the_two_widths_disagree_on_the_literal_between_them() {
   assert_eq!(*parsed.source(), 2_147_483_648_i64);
 
   // i64::MAX + 1 — refused at both, and each names its own width.
-  let errors = drive_str(int_value::<_, _, i32>, PAST_I64).expect_err("i64::MAX + 1 must not fit i32");
+  let errors =
+    drive_str(int_value::<_, _, i32>, PAST_I64).expect_err("i64::MAX + 1 must not fit i32");
   assert_eq!(overflow_width(&errors), Ok(IntWidth::I32));
 
-  let errors = drive_str(int_value::<_, _, i64>, PAST_I64).expect_err("i64::MAX + 1 must not fit i64");
+  let errors =
+    drive_str(int_value::<_, _, i64>, PAST_I64).expect_err("i64::MAX + 1 must not fit i64");
   assert_eq!(overflow_width(&errors), Ok(IntWidth::I64));
 }
 
@@ -380,8 +383,8 @@ fn out_of_range_reports_from_inside_a_container() {
   let errors = drive_str(value::<_, _, i32>, "[1, 2147483648]").expect_err("must reject");
   assert_eq!(overflow_width(&errors), Ok(IntWidth::I32));
 
-  let errors = drive_str(value::<_, _, i64>, "[1, 99999999999999999999999999]")
-    .expect_err("must reject");
+  let errors =
+    drive_str(value::<_, _, i64>, "[1, 99999999999999999999999999]").expect_err("must reject");
   assert_eq!(overflow_width(&errors), Ok(IntWidth::I64));
 
   let errors = drive_str(const_value::<_, _, i32>, "{a: 1e400}").expect_err("must reject");

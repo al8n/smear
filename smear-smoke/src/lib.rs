@@ -902,11 +902,11 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
       );
     let _: &[materialized::ConstInputValue<&str, I>] = const_list.values();
 
-    let const_object =
-      materialized::ConstObject::<&str, I, Own<materialized::ConstObjectField<&str, I>>>::new(
-        span,
-        Own(Vec::new()),
-      );
+    let const_object = materialized::ConstObject::<
+      &str,
+      I,
+      Own<materialized::ConstObjectField<&str, I>>,
+    >::new(span, Own(Vec::new()));
     let _: &[materialized::ConstObjectField<&str, I>] = const_object.fields();
 
     4
@@ -1165,7 +1165,10 @@ mod tests {
       super::materialized_numbers::<i64>("[2147483648, 1.0]"),
       Some((2_147_483_648_i64, 1.0))
     );
-    assert_eq!(super::materialized_numbers::<i32>("[2147483648, 1.0]"), None);
+    assert_eq!(
+      super::materialized_numbers::<i32>("[2147483648, 1.0]"),
+      None
+    );
 
     // And past both.
     assert_eq!(

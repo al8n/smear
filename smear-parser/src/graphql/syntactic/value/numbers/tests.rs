@@ -253,10 +253,7 @@ fn failure_returns_the_slice_and_which_leaf_it_came_from() {
   let float = <Materialized<i64> as Numbers<&str>>::float("1e400");
   assert!(matches!(float, Err(OutOfRange::Float("1e400"))));
 
-  assert_eq!(
-    <Materialized<i64> as Numbers<&str>>::int("7").ok(),
-    Some(7)
-  );
+  assert_eq!(<Materialized<i64> as Numbers<&str>>::int("7").ok(), Some(7));
   assert_eq!(
     <Materialized<i64> as Numbers<&str>>::float("7.5").ok(),
     Some(7.5)
@@ -724,7 +721,10 @@ fn the_divergences_from_cores_reader_are_ours() {
 #[test]
 fn the_float_leaf_takes_no_width() {
   assert_eq!(super::float("7.5").ok(), Some(7.5));
-  assert!(matches!(super::float("1e400"), Err(OutOfRange::Float("1e400"))));
+  assert!(matches!(
+    super::float("1e400"),
+    Err(OutOfRange::Float("1e400"))
+  ));
 
   // The markers reach that one function, which is the half a caller sees.
   let at_i32: Result<f64, OutOfRange<&str>> = <Materialized<i32> as Numbers<&str>>::float("7.5");

@@ -454,9 +454,9 @@ impl IntWidth {
 /// * outside it, the width may be a **value** — a gateway told at run time which reading it
 ///   enforces, a report replayed from a log, a validator coercing a variable against `Int`.
 ///   Turning the argument into a type parameter would only move that choice into a turbofish, not
-///   remove it, and what makes the door safe was never the argument's shape: it is
-///   [`overflows`](crate::graphql::syntactic::value::numbers::overflows) refusing a pair the
-///   production at that width would have converted.
+///   remove it, and what makes the door safe was never the argument's shape: it is `overflows`,
+///   the crate-private decider below, refusing a pair the production at that width would have
+///   converted. (Code font and not a link, for the reason the parenthesis above gives.)
 ///
 /// Deleting it was the other option and it costs more than it saves.
 /// [`ErrorData::IntOverflow`] is a public variant whose payload would then have no public
