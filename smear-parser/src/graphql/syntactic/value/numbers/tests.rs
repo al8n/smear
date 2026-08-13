@@ -6,7 +6,7 @@ use tokora::Lexer;
 
 use super::{
   Materialized, MaterializedInt, Numbers, OutOfRange, is_int_literal, overflows, parse_f64,
-  parse_i32, parse_i64,
+  parse_i32, parse_i64, sealed,
 };
 use crate::graphql::error::{IntOverflow, IntWidth};
 
@@ -388,8 +388,14 @@ fn the_widths_the_door_dispatches_on_are_the_widths_the_readers_name() {
 
   // And that each reader really is the one the door reaches for that width, on a literal only
   // one of them converts — so the equalities above are about the readers and not about two names.
-  assert!(<i64 as MaterializedInt>::parse(b"2147483648").is_some());
-  assert!(<i32 as MaterializedInt>::parse(b"2147483648").is_none());
+  //
+  // Spelled through the seal, because that is where the reader lives and it is not public: it
+  // grades a magnitude and not a grammar, so an out-of-crate caller holding it would have a third
+  // answer to "is this a valid `IntValue`" that says yes to `007`. What is public is `WIDTH`, and
+  // `smear-smoke`'s `every_public_reader_of_an_int_literal_reaches_one_meaning` is the property
+  // over the paths that are.
+  assert!(<i64 as sealed::MaterializedInt>::parse(b"2147483648").is_some());
+  assert!(<i32 as sealed::MaterializedInt>::parse(b"2147483648").is_none());
   assert!(overflows(b"2147483648", <i32 as MaterializedInt>::WIDTH));
   assert!(!overflows(b"2147483648", <i64 as MaterializedInt>::WIDTH));
 }

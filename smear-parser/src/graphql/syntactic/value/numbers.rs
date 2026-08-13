@@ -243,6 +243,26 @@ pub(crate) fn report_out_of_range<S>(
 /// A shape where each width was its own marker had to *state* the pairing at every conversion
 /// site instead, which is a thing that can be true today and false after an edit.
 ///
+/// # The width is all of it, because reading a literal is not a caller's question
+///
+/// [`WIDTH`](Self::WIDTH) is the only item, and the reader that turns bytes into an `I` sits on
+/// the private supertrait beside the seal. It is a **range** reader: it grades digits and a
+/// magnitude, and it has no opinion at all about whether the spelling in front of it is an
+/// `IntValue`, because on the one path that reaches it the lexer has already said so.
+///
+/// Published, it answers `Some(7)` to `007` — a spelling this crate's lexer refuses as
+/// `LeadingZeros`, that no production converts, and that [`IntOverflow::checked`] declines. The
+/// crate would then carry three answers to "is this a valid integer literal", one of which is a
+/// range check, and the whole of the round that produced `is_int_literal` was about there being
+/// **one**. Adding the lexer's grammar to a public `parse` is the other way to close that and it
+/// is worse: it is a second statement of draft §2.9.1, free to disagree with the first, which is
+/// the defect that round removed.
+///
+/// So `WIDTH` is public and the reader is not. `WIDTH` is the part that has to be — it is what
+/// makes the width a fact about the payload type rather than an argument — and
+/// [`IntOverflow::checked`] is the public door to the question the reader half-answers, with the
+/// lexer's conjunct in front of it.
+///
 /// # Sealed
 ///
 /// [`IntWidth`] enumerates exactly the two widths this crate reads, and its own documentation
@@ -267,69 +287,91 @@ pub(crate) fn report_out_of_range<S>(
 /// // reader in the crate. The private supertrait is what stops it compiling.
 /// impl MaterializedInt for Narrow {
 ///   const WIDTH: IntWidth = IntWidth::I32;
-///   fn parse(_: &[u8]) -> Option<Self> { None }
 /// }
 /// ```
 ///
-/// And the two that do implement it are reachable and answer different widths, so the failure
-/// above is the seal and not the trait being unusable:
+/// And the reader is asserted to be unreachable the same way, because a seal on the impl list is
+/// not a seal on the surface — the two are different properties and the second one is the one
+/// `007` was about:
+///
+/// ```compile_fail,E0576
+/// use smear_parser::graphql::syntactic::value::materialized::MaterializedInt;
+///
+/// // `007` is `7` to a range reader and is not a GraphQL `IntValue`. There is no public method
+/// // here for that disagreement to arrive through.
+/// let seven = <i32 as MaterializedInt>::parse(b"007");
+/// ```
+///
+/// And the two types that do implement it are reachable, answer different widths, and the widths
+/// they answer are the ones the public door refuses at — so the failures above are the seal and
+/// not the trait being unusable:
 ///
 /// ```
 /// use smear_parser::graphql::{
-///   error::IntWidth,
+///   error::{IntOverflow, IntWidth},
 ///   syntactic::value::materialized::MaterializedInt,
 /// };
 ///
 /// assert_eq!(<i32 as MaterializedInt>::WIDTH, IntWidth::I32);
 /// assert_eq!(<i64 as MaterializedInt>::WIDTH, IntWidth::I64);
 ///
-/// // `2147483648` is the literal the two readings disagree about.
-/// assert_eq!(<i64 as MaterializedInt>::parse(b"2147483648"), Some(2_147_483_648));
-/// assert_eq!(<i32 as MaterializedInt>::parse(b"2147483648"), None);
+/// // `2147483648` is the literal the two readings disagree about, and each constant names the
+/// // width that reading refuses it at.
+/// assert!(IntOverflow::checked("2147483648", <i32 as MaterializedInt>::WIDTH).is_ok());
+/// assert_eq!(
+///   IntOverflow::checked("2147483648", <i64 as MaterializedInt>::WIDTH),
+///   Err("2147483648"),
+/// );
 /// ```
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub trait MaterializedInt: Sized + sealed::MaterializedInt {
   /// Which width this payload is, for the error a refusal raises.
   const WIDTH: IntWidth;
-
-  /// Reads a GraphQL `IntValue` (draft §2.9.1) out of its bytes at this width.
-  ///
-  /// `None` means the literal does not fit — which is the documented bound of the materialised
-  /// view — or that the bytes are not an `IntValue` at all, which the lexer's grammar makes
-  /// unreachable from a production.
-  fn parse(bytes: &[u8]) -> Option<Self>;
 }
 
-/// The seal on [`MaterializedInt`]. Named in a public supertrait position and reachable from
-/// nowhere, which is what makes the trait's impl list this file's.
+/// The seal on [`MaterializedInt`], and **where the width's reader lives**.
+///
+/// Named in a public supertrait position and reachable from nowhere, which is what makes the
+/// trait's impl list this file's — and, since `parse` is declared here rather than above, what
+/// keeps the reader off the public surface. The section on [`MaterializedInt`] has the argument
+/// for the second half.
 #[cfg(feature = "materialized-numbers")]
 mod sealed {
   /// The supertrait no out-of-crate type can name and therefore cannot implement.
-  pub trait MaterializedInt {}
+  pub trait MaterializedInt: Sized {
+    /// Reads a GraphQL `IntValue` (draft §2.9.1) out of its bytes at this width.
+    ///
+    /// `None` means the literal does not fit — which is the documented bound of the materialised
+    /// view — or that the bytes are not an `IntValue` at all, which the lexer's grammar makes
+    /// unreachable from a production: the only caller is `Numbers::int`, whose slice came out of
+    /// a `LitInt` token.
+    fn parse(bytes: &[u8]) -> Option<Self>;
+  }
 
-  impl MaterializedInt for i32 {}
-  impl MaterializedInt for i64 {}
+  impl MaterializedInt for i32 {
+    #[inline]
+    fn parse(bytes: &[u8]) -> Option<Self> {
+      super::parse_i32(bytes)
+    }
+  }
+
+  impl MaterializedInt for i64 {
+    #[inline]
+    fn parse(bytes: &[u8]) -> Option<Self> {
+      super::parse_i64(bytes)
+    }
+  }
 }
 
 #[cfg(feature = "materialized-numbers")]
 impl MaterializedInt for i64 {
   const WIDTH: IntWidth = IntWidth::I64;
-
-  #[inline]
-  fn parse(bytes: &[u8]) -> Option<Self> {
-    parse_i64(bytes)
-  }
 }
 
 #[cfg(feature = "materialized-numbers")]
 impl MaterializedInt for i32 {
   const WIDTH: IntWidth = IntWidth::I32;
-
-  #[inline]
-  fn parse(bytes: &[u8]) -> Option<Self> {
-    parse_i32(bytes)
-  }
 }
 
 /// `I` and [`f64`], read out of the literal's bytes with no allocation anywhere.
@@ -368,7 +410,7 @@ where
 
   #[inline]
   fn int(slice: S) -> Result<I, OutOfRange<S>> {
-    match I::parse(slice.as_ref()) {
+    match <I as sealed::MaterializedInt>::parse(slice.as_ref()) {
       Some(value) => Ok(value),
       // The width is `I`'s own, so this arm cannot name a width the conversion above was not
       // attempted at: there is one type in the expression and it decides both halves.
