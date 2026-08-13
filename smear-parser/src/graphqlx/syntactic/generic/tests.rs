@@ -2,7 +2,7 @@
 
 use std::{format, string::String};
 
-use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
+use smear_lexer::{graphqlx::syntactic::SyntacticTokenKind, limits::SyntacticLimits};
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::super::{GraphqlxInput, GraphqlxLexer};
@@ -30,6 +30,26 @@ fn drive_str<'inp, O>(
     f,
   )
   .parse_str(input)
+}
+
+/// [`drive_str`] with the nesting ceiling raised for the one probe that needs it.
+///
+/// GraphQLx counts `<` and `>` on the same tally as `{`, `[` and `(`, so a type path nested past
+/// `smear_lexer::limits::MAX_NESTING_DEPTH` angle brackets is refused by the lexer before any
+/// production sees it (smear issue #61). One test below deliberately nests 33 deep — its subject
+/// is that the where-clause's *structural lookahead* has no window of its own, and a probe of that
+/// has to be deeper than any window could plausibly be. Lowering it to fit the ceiling would
+/// weaken the claim it makes, so the ceiling moves instead, which is what the knob is for.
+fn drive_str_deep<'inp, O>(
+  f: impl for<'c> FnMut(
+    &mut GraphqlxInput<'inp, 'c, str, StrCtx<'inp>>,
+  ) -> Result<O, GraphqlxErrors<&'inp str>>,
+  input: &'inp str,
+) -> Result<O, GraphqlxErrors<&'inp str>> {
+  Parser::with_parser::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(
+    f,
+  )
+  .parse_str_with_state(input, SyntacticLimits::with_max_nesting_depth(128))
 }
 
 fn drive_slice<'inp, O>(
@@ -346,7 +366,9 @@ fn where_clause_lookahead_leaves_an_ordinary_definition_head_for_the_caller() {
 
   let nested = (0..33).fold(String::from("T"), |path, _| format!("Wrapper<{path}>"));
   let source = format!("where First: Node {nested}: Serializable type Query");
-  let (predicate_count, following) = drive_str(
+  // `drive_str_deep`, not `drive_str`: 33 angle brackets are past the default nesting ceiling and
+  // the lexer would refuse the source before the lookahead under test ran. See that function.
+  let (predicate_count, following) = drive_str_deep(
     |inp| {
       let clause = ast::WhereClause::graphqlx(inp)?;
       let following = super::super::name(inp)?;

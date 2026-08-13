@@ -2,18 +2,21 @@ use tokora::{
   SimpleSpan,
   error::{UnexpectedEnd, UnexpectedLexeme},
   logos::{Lexer, Logos, Source},
-  state::tracker::{LimitExceeded, Limiter},
+  state::tracker::LimitExceeded,
   utils::{CharLen, Lexeme, PositionedChar},
 };
 
 type Span = SimpleSpan;
 
-use crate::error::{BadStateError, UnterminatedSpreadOperatorError};
+use crate::{
+  error::{BadStateError, UnterminatedSpreadOperatorError},
+  limits::LosslessLimits,
+};
 
 #[inline(always)]
 fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
 {
   lexer.extras.increase_token();
 }
@@ -23,7 +26,7 @@ pub(super) fn increase_recursion_depth_and_token<'a, T, E>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), E>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer.extras.increase_recursion();
@@ -40,7 +43,7 @@ pub(super) fn tt_hook_and_then<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -62,7 +65,7 @@ pub(super) fn tt_hook_and_then_into_errors<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -83,7 +86,7 @@ pub(super) fn tt_hook_map<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -100,7 +103,7 @@ where
 #[inline(always)]
 pub(super) fn tt_hook<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -125,7 +128,7 @@ where
 #[inline(always)]
 pub(super) fn decrease_recursion_depth_and_increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = Limiter>,
+  T: Logos<'a, Extras = LosslessLimits>,
 {
   lexer.extras.decrease_recursion();
   // right punctuation also increases the token count

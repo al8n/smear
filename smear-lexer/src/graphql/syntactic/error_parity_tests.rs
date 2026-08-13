@@ -13,7 +13,9 @@
 
 use std::string::String;
 
-use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokora::Lexer;
+
+use crate::limits::SyntacticLimits;
 
 use crate::graphql::syntactic::SyntacticLexer;
 
@@ -150,6 +152,6 @@ fn recursion_limit_region_matches_logos() {
 #20 is_err=false span=SimpleSpan { start: 20, end: 21 } slice=\")\"
 ";
   let simd =
-    SyntacticLexer::<str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit));
+    SyntacticLexer::<str>::with_state(src.as_str(), SyntacticLimits::with_max_nesting_depth(limit));
   assert_eq!(render_error_path(simd, &src), expected);
 }

@@ -1,8 +1,11 @@
 #![cfg(all(feature = "rowan", feature = "graphql"))]
 
-use smear::parser::graphql::{
-  kinds::SyntaxKind as K,
-  lossless::{parse_document, runner::test_support::open_raw_kind},
+use smear::{
+  lexer::limits::MAX_NESTING_DEPTH,
+  parser::graphql::{
+    kinds::SyntaxKind as K,
+    lossless::{parse_document, runner::test_support::open_raw_kind},
+  },
 };
 
 #[test]
@@ -136,24 +139,24 @@ fn brace_offset(level: usize) -> usize {
 
 /// The nesting budget is a **report**, not a panic — smear issue #57.
 ///
-/// # The boundary, measured
+/// # The boundary
 ///
-/// **The 501st simultaneously-open bracket**, exactly. Bisected: 500 nested selection sets are
-/// accepted with no diagnostic at all and 501 trip, while `{ f(a: [[[…]]]) }` trips at 499 nested
-/// lists — its two enclosing brackets count toward the same tally, which is what identifies the
-/// budget as one global bracket-depth counter rather than anything per-production.
+/// The bracket **past** [`MAX_NESTING_DEPTH`], exactly, and the count is one global tally over
+/// `{`, `[` and `(` rather than anything per-production: `{ f(a: [[[…]]]) }` trips two lists
+/// earlier than this shape does, because its enclosing brace and paren are on the same counter.
 ///
-/// The issue reported "roughly 512" from two sampled points, and read the clean parse at 256 as
-/// the budget working at lower depths. Neither is what the code does: 256 is not a report, it is
-/// silence — nothing is consulted until the 501st bracket.
+/// The number itself is not this test's subject and is deliberately not spelled here — it is
+/// [`MAX_NESTING_DEPTH`]'s, derived and gated in `nesting_depth.rs`. When #57 was filed it was
+/// tokora's inherited general-purpose 500, and the issue reported "roughly 512" from two sampled
+/// points while reading the clean parse at 256 as the budget working at lower depths. Neither was
+/// what the code did: below the ceiling there is not a softer report, there is silence.
 ///
 /// # Which of the two candidate defects it was
 ///
 /// Neither, as the issue framed them. The budget is not the parser's: nothing in this crate
 /// descends through `InputRef::descend`, so tokora's parser-facing `RecursionLimiter` (64) is
 /// never consulted, and no amount of nesting trips it. It is the **lexer's** — every `{`, `[` and
-/// `(` steps the `Limiter` carried in the Logos `Extras`, whose inherited ceiling is tokora's
-/// general-purpose 500.
+/// `(` steps the budget carried in the Logos `Extras`.
 ///
 /// It does trip, and what follows the trip is what broke. A resource-limit trip **latches a
 /// poison boundary**: the scanner refuses to rebuild a lexer past that offset, so nothing — not
@@ -165,32 +168,32 @@ fn brace_offset(level: usize) -> usize {
 ///
 /// # GraphQLx
 ///
-/// The same three assertions hold for GraphQLx's `parse_document`, at the identical count,
-/// measured on the Phase B branch where that dialect exists. It shares this lexer's `Limiter`
-/// and this runner's materialization step, so it inherits the fix rather than needing its own;
-/// Phase B's own gates cover it.
+/// The same three assertions hold for GraphQLx's `parse_document`, at the identical count. It
+/// shares this lexer's budget type and this runner's materialization step, so it inherits the fix
+/// rather than needing its own; `nesting_depth.rs` holds it to that.
 #[test]
 fn nesting_past_the_lexer_budget_reports_instead_of_panicking() {
-  // The last depth inside the budget: unchanged by the fix, and the control that proves the
-  // assertions below measure the boundary rather than "deep input reports".
-  let inside = nested_selection_sets(500);
+  // The last depth inside the budget: the control that proves the assertions below measure the
+  // boundary rather than "deep input reports".
+  let inside = nested_selection_sets(MAX_NESTING_DEPTH);
   let parse = parse_document(&inside);
   assert!(
     !parse.has_errors(),
-    "500 open brackets is inside the budget and must still parse clean"
+    "{MAX_NESTING_DEPTH} open brackets is inside the budget and must still parse clean"
   );
   assert!(
     parse.diagnostics().is_empty(),
-    "500 open brackets must report nothing at all, not merely no error"
+    "{MAX_NESTING_DEPTH} open brackets must report nothing at all, not merely no error"
   );
   assert_eq!(parse.syntax().text().to_string(), inside);
 
   // One past it. Every assertion here was unreachable before the fix: the call panicked.
-  let over = nested_selection_sets(501);
+  let over = nested_selection_sets(MAX_NESTING_DEPTH + 1);
   let parse = parse_document(&over);
   assert!(
     parse.has_errors(),
-    "501 open brackets must be reported, not accepted"
+    "{} open brackets must be reported, not accepted",
+    MAX_NESTING_DEPTH + 1
   );
   assert_eq!(
     parse.syntax().text().to_string(),
@@ -204,12 +207,14 @@ fn nesting_past_the_lexer_budget_reports_instead_of_panicking() {
     .expect("the trip must be on the diagnostic channel");
   assert_eq!(
     first.span(),
-    brace_offset(501)..brace_offset(501) + 1,
+    brace_offset(MAX_NESTING_DEPTH + 1)..brace_offset(MAX_NESTING_DEPTH + 1) + 1,
     "the diagnostic must sit on the brace that exceeded the budget"
   );
   assert_eq!(first.severity(), tokora::emitter::Severity::Error);
 
-  // Far past it, because a fix that merely moved the cliff would pass everything above.
+  // Far past it, because a fix that merely moved the cliff would pass everything above. Safe to
+  // run only because the two assertions above have already proved the ceiling holds; see
+  // `nesting_depth.rs` for why that ordering is the whole reason this can live in the suite.
   let far = nested_selection_sets(2_000);
   let parse = parse_document(&far);
   assert!(parse.has_errors());

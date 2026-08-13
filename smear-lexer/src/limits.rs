@@ -1,0 +1,408 @@
+//! The resource budget a smear lex runs under, and the nesting ceiling it defaults to.
+//!
+//! # Why these types exist at all
+//!
+//! Both lexers already carried a bracket-depth counter — tokora's
+//! [`RecursionLimiter`](tokora::state::recursion_tracker::RecursionLimiter) for the syntactic
+//! stream, its [`Limiter`](tokora::state::tracker::Limiter) for the lossless one — and both
+//! *inherited* that counter's ceiling instead of choosing it. tokora's own docs are explicit that
+//! the inherited 500 "was never sized against anything", because nothing about tallying lexer
+//! nesting implies a native-stack cost for it to protect against, and that "a grammar that parses
+//! untrusted, deeply nested input should still set its own limit […] against the stack the parse
+//! will actually run on".
+//!
+//! smear never did, and the consequence was measured (issue #61): a **valid** GraphQL document of
+//! about a kilobyte — `{ ... on Query { ... on Query { … } } }` nested 58 deep — overflowed the
+//! native stack of a 2 MiB thread and killed the process with `SIGABRT`. The inherited 500 sat an
+//! order of magnitude above that, so it could not fire first; nothing rejected the document and
+//! there was no diagnostic, because there was no return.
+//!
+//! # Why a newtype rather than a number passed at the call site
+//!
+//! The number has to arrive at the doors that already exist, and one of those doors is not
+//! smear's to change. The lossless entry points are all smear's own six functions, so a limiter
+//! passed there would reach every one of them. The **syntactic** layer ships productions and no
+//! runner: a consumer drives it with `Parser::with_parser(…).parse_str(src)`, which is what this
+//! workspace's own README, `smear-compiler`'s crate docs and `smear-schema`'s builder all write —
+//! and `parse_str` seeds the lexer with `L::State::default()`. The only place smear can name a
+//! number that reaches *that* call is the `Default` of `L::State` itself, and `L::State` was
+//! tokora's type.
+//!
+//! So these two newtypes are the decision: they are what [`Lexer::State`](tokora::Lexer::State)
+//! resolves to for smear's four lexers, and their `Default` is [`MAX_NESTING_DEPTH`]. Every
+//! existing call site — `parse_str`, `Lexer::new`, each `parse_lossless` — picks the ceiling up
+//! without being edited, and a caller who wants a different one hands a different value to
+//! `with_state` / `parse_*_with_state` / a lossless `*_with_limits` entry point.
+
+use tokora::state::{
+  State,
+  recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+  token_tracker::TokenLimiter,
+  tracker::{LimitExceeded, Limiter},
+};
+
+/// The greatest number of **simultaneously open** brackets a smear lex accepts by default. The
+/// next one is refused.
+///
+/// One global tally over `{`, `[` and `(` — and, in GraphQLx, over `<` and `>` as well, because
+/// that dialect delimits generics with them. So a selection set inside an argument list inside a
+/// list value spends three of the 24, not one, and a GraphQLx generic path spends one per
+/// parameter level.
+///
+/// # The measurement this is derived from
+///
+/// The counter is a proxy for native stack use: the parser holds live frames for every open
+/// bracket, so the depth at which the process dies is a fact about the *deployment stack*, not
+/// about the grammar. Bisected on this tree with one parse per process on an explicitly sized
+/// thread, greatest depth that returns before the next one aborts with
+/// `fatal runtime error: stack overflow`:
+///
+/// | stack | 512 KiB | 1 MiB | **2 MiB** | 4 MiB | 8 MiB |
+/// |---|---|---|---|---|---|
+/// | syntactic door, GraphQL, `str`, debug | 12 | 27 | **57** | 118 | 239 |
+///
+/// Linear at roughly 34 KiB per level. **2 MiB is the stack this number is derived from**, and
+/// that is the claim: it is what `std::thread::spawn` gives every thread, what a tokio worker
+/// runs on, and what the libtest harness hands every `#[test]` — the smallest stack a smear parse
+/// is realistically handed. A caller who deliberately spawns a smaller thread, or who wants
+/// deeper documents on a larger one, is the reason this is configurable rather than a hard-coded
+/// wall.
+///
+/// The 2 MiB column varies by shape, dialect, source backing and architecture, and **all of it
+/// was measured** rather than assumed, because the binding cell is the worst one:
+///
+/// | cell (2 MiB, debug) | last depth that returns |
+/// |---|---|
+/// | GraphQL syntactic, inline fragments, `str`, aarch64 | 57 |
+/// | GraphQL syntactic, inline fragments, `str`, x86_64 | 60 |
+/// | GraphQLx syntactic, inline fragments, `str`, aarch64 | **53** |
+/// | GraphQLx syntactic, generic angle brackets, `str`, aarch64 | **52** |
+/// | GraphQL syntactic, inline fragments, `bytes::Bytes`, aarch64 | **51** |
+/// | GraphQL lossless, inline fragments, `str`, aarch64 | ~745 (13x cheaper per level) |
+///
+/// Five shapes were probed per door — inline fragments, field selections, list values, input
+/// objects and list types, plus GraphQLx's generic angle brackets — and inline fragments are the
+/// most expensive of them. x86_64 is not the worse architecture of the two measured. GraphQLx
+/// costs 0.93x of GraphQL and a `bytes::Bytes` backing 0.89x, so the worst *shipped
+/// configuration* — both together, which has no probe of its own — extrapolates to about **47**.
+///
+/// # Why 24, and not the release figure
+///
+/// **24 clears 47 by 1.96x.** That is deliberately the same margin tokora derived its own
+/// parser-facing default at, and for the same asymmetry: a limit that is too low returns a clean,
+/// catchable, documented diagnostic telling the caller to raise it, while a limit that is too high
+/// aborts the process with no diagnostic at all and takes every other request on that process with
+/// it. Only one of those is recoverable, so the default is set where every measured configuration
+/// survives.
+///
+/// The release figures are far higher — the syntactic door costs 4.0 KiB per level optimised
+/// rather than 34, and the lossless door 0.44 — and sizing against them is exactly the mistake
+/// this number avoids. A debug build is what `cargo test` runs, in this workspace and in every
+/// downstream that parses a document in a test, and a `SIGABRT` there does not fail a test: it
+/// kills the runner. Worth recording, because it is the sharpest statement of how thin the
+/// inherited ceiling was: in a *release* build on a 2 MiB thread, 500 levels of the syntactic door
+/// need about 1.95 MiB of the 2 MiB available. It survived by roughly 2%, which is not a margin,
+/// it is a coincidence.
+///
+/// # What it costs a real document
+///
+/// Nothing measurable. The deepest GraphQL document in this repository — 472 fixtures, including
+/// real-world subgraph schemas and one named `bench_07_large_deep_nesting.graphql` — reaches
+/// bracket depth **11**, and the next deepest 9. 24 leaves 2.2x headroom over the deepest document
+/// anyone here has written, and clears the canonical introspection query with room to spare.
+/// `smear/tests/nesting_depth.rs` re-derives that 11 from the fixtures themselves, so the claim
+/// cannot go stale as the corpus grows.
+///
+/// # What it costs a caller who genuinely needs more
+///
+/// One call. Two places in this workspace already need it and say so: `validator_merge.rs`, whose
+/// fixtures nest 200 levels to reach the *validator's* own `merge_depth` budget of 128, and one
+/// GraphQLx generic-lookahead probe that nests 33 angle brackets. Both run under a raised ceiling
+/// rather than a lowered claim — which also records the ordering, because at the shipped defaults
+/// this ceiling binds long before the validator's does.
+pub const MAX_NESTING_DEPTH: usize = 24;
+
+/// The worst depth in the table above that still returns: GraphQLx's syntactic door on a 2 MiB
+/// debug thread (53), discounted by the 0.89x a `bytes::Bytes` backing costs.
+///
+/// A constant rather than only prose so that the assertion below can read it.
+const WORST_MEASURED_BOUNDARY: usize = 47;
+
+/// The deepest GraphQL document in this repository, over 472 fixtures.
+const DEEPEST_DOCUMENT_IN_TREE: usize = 11;
+
+// THE DERIVATION IS AN OBLIGATION, NOT A COMMENT, and it is checked at compile time rather than by
+// a test for a reason that was measured rather than guessed: **a test cannot guard this**. Raising
+// the constant makes every *other* nesting test parse deeper, and past the native boundary those
+// tests do not go red — they abort the harness, which is the very failure #61 is about. Planting
+// `MAX_NESTING_DEPTH = 200` killed `smear/tests/nesting_depth.rs` with `SIGABRT` before that
+// file's own arithmetic check could run, because libtest gives no ordering between tests. A
+// `const` assertion cannot be outrun: a ceiling raised past what the measurement supports fails to
+// *build*.
+//
+// Raising it is therefore deliberately a two-line edit, and the second line is
+// `WORST_MEASURED_BOUNDARY`. Moving that means re-running the bisection behind the table above —
+// which is the point, because a number that can be raised without re-measuring has stopped being
+// derived.
+const _: () = assert!(
+  MAX_NESTING_DEPTH * 19 <= WORST_MEASURED_BOUNDARY * 10,
+  "MAX_NESTING_DEPTH leaves less than the 1.9x margin it was derived at under the worst measured \
+   native-stack boundary. Raising it needs a new measurement, not a new constant."
+);
+
+// The other side of it, and the cheap direction to get wrong: a ceiling below what real documents
+// need refuses real input while every gate in the tree still passes, because the fixtures are all
+// far shallower than the ceiling. Nothing in the suite would notice a ceiling set at 4 until a
+// consumer did.
+const _: () = assert!(
+  MAX_NESTING_DEPTH >= DEEPEST_DOCUMENT_IN_TREE * 2,
+  "MAX_NESTING_DEPTH must keep the documents this repository actually contains clear of the \
+   ceiling by at least 2x."
+);
+
+/// The budget a **syntactic** lex runs under: nesting depth, and nothing else.
+///
+/// This is [`Lexer::State`](tokora::Lexer::State) for
+/// [`graphql::syntactic::SyntacticLexer`](crate::graphql::syntactic::SyntacticLexer) and its
+/// GraphQLx twin, so [`Default`] is what `Parser::with_parser(…).parse_str(src)` seeds a parse
+/// with — which is the whole reason the type exists rather than a bare
+/// [`RecursionLimiter`](tokora::state::recursion_tracker::RecursionLimiter). See the module
+/// header.
+///
+/// ```
+/// use smear_lexer::limits::{MAX_NESTING_DEPTH, SyntacticLimits};
+///
+/// // What every unconfigured syntactic parse gets.
+/// assert_eq!(SyntacticLimits::default().max_nesting_depth(), MAX_NESTING_DEPTH);
+///
+/// // What a caller on an 8 MiB thread with deeper documents asks for instead.
+/// assert_eq!(SyntacticLimits::with_max_nesting_depth(96).max_nesting_depth(), 96);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SyntacticLimits(RecursionLimiter);
+
+impl Default for SyntacticLimits {
+  #[inline(always)]
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl SyntacticLimits {
+  /// A budget at smear's own [`MAX_NESTING_DEPTH`].
+  #[inline(always)]
+  pub const fn new() -> Self {
+    Self(RecursionLimiter::with_limitation(MAX_NESTING_DEPTH))
+  }
+
+  /// A budget at `max` simultaneously open brackets.
+  ///
+  /// The number to pass is a function of the stack the parse will run on; see
+  /// [`MAX_NESTING_DEPTH`] for the measured cost of one level.
+  #[inline(always)]
+  pub const fn with_max_nesting_depth(max: usize) -> Self {
+    Self(RecursionLimiter::with_limitation(max))
+  }
+
+  /// A budget that never trips.
+  ///
+  /// The depth is still counted, so [`depth`](Self::depth) stays readable. Nothing then stands
+  /// between a deeply nested document and the native stack, so this is for a parse whose input is
+  /// trusted or whose depth is bounded before it arrives.
+  #[inline(always)]
+  pub const fn unlimited() -> Self {
+    Self(RecursionLimiter::unlimited())
+  }
+
+  /// The ceiling this budget refuses past.
+  #[inline(always)]
+  pub const fn max_nesting_depth(&self) -> usize {
+    self.0.limitation()
+  }
+
+  /// How many brackets are open right now.
+  #[inline(always)]
+  pub const fn depth(&self) -> usize {
+    self.0.depth()
+  }
+
+  /// Opens one level.
+  #[inline(always)]
+  pub const fn increase(&mut self) {
+    self.0.increase();
+  }
+
+  /// Closes one level.
+  #[inline(always)]
+  pub const fn decrease(&mut self) {
+    self.0.decrease();
+  }
+
+  /// Whether the ceiling is still respected.
+  #[inline(always)]
+  pub const fn check(&self) -> Result<(), RecursionLimitExceeded> {
+    self.0.check()
+  }
+}
+
+impl From<RecursionLimiter> for SyntacticLimits {
+  #[inline(always)]
+  fn from(limiter: RecursionLimiter) -> Self {
+    Self(limiter)
+  }
+}
+
+impl From<SyntacticLimits> for RecursionLimiter {
+  #[inline(always)]
+  fn from(limits: SyntacticLimits) -> Self {
+    limits.0
+  }
+}
+
+impl State for SyntacticLimits {
+  type Error = RecursionLimitExceeded;
+
+  #[inline(always)]
+  fn check(&self) -> Result<(), Self::Error> {
+    Self::check(self)
+  }
+}
+
+/// The budget a **lossless** lex runs under: nesting depth and token count.
+///
+/// This is [`Lexer::State`](tokora::Lexer::State) for
+/// [`graphql::lossless::LosslessLexer`](crate::graphql::lossless::LosslessLexer) and its GraphQLx
+/// twin — the Logos `Extras` those token grammars declare — so [`Default`] is what every
+/// `parse_lossless` call seeds a parse with. See the module header.
+///
+/// The **token** half is left at tokora's unlimited default and is not part of issue #61's
+/// decision: a token count is bounded by the input length, so unlike nesting depth it cannot
+/// exhaust the native stack. It is carried here because the lossless lexer's `Extras` is the
+/// combined tracker, and it is settable so that a caller who wants a total-work bound has one.
+///
+/// ```
+/// use smear_lexer::limits::{LosslessLimits, MAX_NESTING_DEPTH};
+///
+/// assert_eq!(LosslessLimits::default().max_nesting_depth(), MAX_NESTING_DEPTH);
+/// assert_eq!(LosslessLimits::default().max_tokens(), usize::MAX);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LosslessLimits(Limiter);
+
+impl Default for LosslessLimits {
+  #[inline(always)]
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl LosslessLimits {
+  /// A budget at smear's own [`MAX_NESTING_DEPTH`], with no token ceiling.
+  #[inline(always)]
+  pub const fn new() -> Self {
+    Self(Limiter::with_trackers(
+      TokenLimiter::new(),
+      RecursionLimiter::with_limitation(MAX_NESTING_DEPTH),
+    ))
+  }
+
+  /// A budget at `max` simultaneously open brackets, with no token ceiling.
+  #[inline(always)]
+  pub const fn with_max_nesting_depth(max: usize) -> Self {
+    Self(Limiter::with_trackers(
+      TokenLimiter::new(),
+      RecursionLimiter::with_limitation(max),
+    ))
+  }
+
+  /// A budget that never trips on either axis.
+  ///
+  /// See [`SyntacticLimits::unlimited`] for what removing the nesting ceiling gives up.
+  #[inline(always)]
+  pub const fn unlimited() -> Self {
+    Self(Limiter::with_trackers(
+      TokenLimiter::new(),
+      RecursionLimiter::unlimited(),
+    ))
+  }
+
+  /// The same budget with `max` as its token ceiling.
+  #[inline(always)]
+  pub const fn with_max_tokens(self, max: usize) -> Self {
+    Self(Limiter::with_trackers(
+      TokenLimiter::with_limitation(max),
+      *self.0.recursion(),
+    ))
+  }
+
+  /// The nesting ceiling this budget refuses past.
+  #[inline(always)]
+  pub const fn max_nesting_depth(&self) -> usize {
+    self.0.recursion().limitation()
+  }
+
+  /// The token ceiling this budget refuses past.
+  #[inline(always)]
+  pub const fn max_tokens(&self) -> usize {
+    self.0.token().limitation()
+  }
+
+  /// How many brackets are open right now.
+  #[inline(always)]
+  pub const fn depth(&self) -> usize {
+    self.0.recursion().depth()
+  }
+
+  /// The token half, for the handlers that step it.
+  #[inline(always)]
+  pub const fn token(&self) -> &TokenLimiter {
+    self.0.token()
+  }
+
+  /// Counts one token.
+  #[inline(always)]
+  pub const fn increase_token(&mut self) {
+    self.0.increase_token();
+  }
+
+  /// Opens one level.
+  #[inline(always)]
+  pub const fn increase_recursion(&mut self) {
+    self.0.increase_recursion();
+  }
+
+  /// Closes one level.
+  #[inline(always)]
+  pub const fn decrease_recursion(&mut self) {
+    self.0.decrease_recursion();
+  }
+
+  /// Whether both ceilings are still respected.
+  #[inline(always)]
+  pub fn check(&self) -> Result<(), LimitExceeded> {
+    self.0.check()
+  }
+}
+
+impl From<Limiter> for LosslessLimits {
+  #[inline(always)]
+  fn from(limiter: Limiter) -> Self {
+    Self(limiter)
+  }
+}
+
+impl From<LosslessLimits> for Limiter {
+  #[inline(always)]
+  fn from(limits: LosslessLimits) -> Self {
+    limits.0
+  }
+}
+
+impl State for LosslessLimits {
+  type Error = LimitExceeded;
+
+  #[inline(always)]
+  fn check(&self) -> Result<(), Self::Error> {
+    Self::check(self)
+  }
+}

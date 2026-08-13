@@ -255,5 +255,7 @@ pub mod value;
 // one. A consumer picks a root here, once, rather than parsing the mixed form and filtering the
 // tree.
 pub use runner::{
-  Parse, parse_document, parse_executable_document, parse_type_system_document, profile,
+  Parse, parse_document, parse_document_with_limits, parse_executable_document,
+  parse_executable_document_with_limits, parse_type_system_document,
+  parse_type_system_document_with_limits, profile,
 };

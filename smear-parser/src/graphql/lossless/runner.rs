@@ -1,6 +1,7 @@
 //! The Sink runner: binds a source to a `cst::Sink`, drives the document production, and
 //! materializes a `rowan` tree.
 
+use smear_lexer::limits::LosslessLimits;
 use tokora::{
   Source,
   cst::{Cst, CstProfile, KindValidator, parse_lossless},
@@ -106,7 +107,26 @@ pub type Parse = crate::lossless::runner::Parse<crate::graphql::kinds::GraphQLLa
 /// filter to write afterwards — see [`parse_type_system_document`] and
 /// [`parse_executable_document`]. The difference is not cosmetic: those roots reject the other
 /// half *at the parser's own position*, which a caller walking a mixed tree cannot reconstruct.
+///
+/// # The nesting ceiling
+///
+/// [`LosslessLimits::default`], so at most
+/// [`MAX_NESTING_DEPTH`](smear_lexer::limits::MAX_NESTING_DEPTH) simultaneously open brackets;
+/// the next one is reported. That default is derived against a 2 MiB stack, which is what
+/// `std::thread::spawn`, a tokio worker and the libtest harness each give a thread. A caller on a
+/// different stack, or with deeper documents, uses [`parse_document_with_limits`].
 pub fn parse_document(src: &str) -> Parse {
+  parse_document_with_limits(src, LosslessLimits::default())
+}
+
+/// [`parse_document`] under a caller-chosen resource budget.
+///
+/// The reason to reach for this is a stack that is not the 2 MiB
+/// [`MAX_NESTING_DEPTH`](smear_lexer::limits::MAX_NESTING_DEPTH) is derived against — a server on
+/// an 8 MiB main thread can afford roughly four times the depth, and a worker deliberately spawned
+/// smaller can afford less. The cost of one level is measured on
+/// [`MAX_NESTING_DEPTH`](smear_lexer::limits::MAX_NESTING_DEPTH) itself.
+pub fn parse_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
   // `parse_lossless` is the only door that mints a `Sink`: it takes the source ONCE and uses
   // that one argument for both the sink and the input, so the buffer the tree's text comes from
   // and the buffer the parse reads cannot be two different buffers. Argument order is
@@ -128,7 +148,7 @@ pub fn parse_document(src: &str) -> Parse {
   let (cst, _out) =
     parse_lossless::<GraphqlLosslessLexer<'_, str>, crate::graphql::GraphQL, _, _, _, _>(
       src,
-      Default::default(),
+      limits,
       LosslessEmitter::default(),
       profile::<str>(),
       tokora::cache::DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
@@ -158,12 +178,19 @@ pub fn parse_document(src: &str) -> Parse {
 /// assert!(!parse_type_system_document("type T { f: Int }").has_errors());
 /// ```
 pub fn parse_type_system_document(src: &str) -> Parse {
+  parse_type_system_document_with_limits(src, LosslessLimits::default())
+}
+
+/// [`parse_type_system_document`] under a caller-chosen resource budget.
+///
+/// See [`parse_document_with_limits`] for when to reach for one.
+pub fn parse_type_system_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
   // The turbofishes and the `_entry` suffix are `parse_document`'s, for `parse_document`'s
   // reasons; see the comment there rather than a second copy of it here.
   let (cst, _out) =
     parse_lossless::<GraphqlLosslessLexer<'_, str>, crate::graphql::GraphQL, _, _, _, _>(
       src,
-      Default::default(),
+      limits,
       LosslessEmitter::default(),
       profile::<str>(),
       tokora::cache::DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
@@ -188,10 +215,17 @@ pub fn parse_type_system_document(src: &str) -> Parse {
 /// assert!(!parse_executable_document("query Q { f }").has_errors());
 /// ```
 pub fn parse_executable_document(src: &str) -> Parse {
+  parse_executable_document_with_limits(src, LosslessLimits::default())
+}
+
+/// [`parse_executable_document`] under a caller-chosen resource budget.
+///
+/// See [`parse_document_with_limits`] for when to reach for one.
+pub fn parse_executable_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
   let (cst, _out) =
     parse_lossless::<GraphqlLosslessLexer<'_, str>, crate::graphql::GraphQL, _, _, _, _>(
       src,
-      Default::default(),
+      limits,
       LosslessEmitter::default(),
       profile::<str>(),
       tokora::cache::DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),

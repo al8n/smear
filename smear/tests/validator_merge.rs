@@ -22,7 +22,10 @@
 use std::{string::String, thread, time::Instant, vec::Vec};
 
 use smear::{
-  lexer::tokora::{Parse as _, Parser},
+  lexer::{
+    limits::SyntacticLimits,
+    tokora::{Parse as _, Parser},
+  },
   parser::graphql::{
     GraphQL,
     ast::{ExecutableDocument, TypeSystemDocument},
@@ -106,6 +109,22 @@ fn build() -> Schema {
   Schema::build(&document).expect("the SDL is a schema")
 }
 
+/// The nesting ceiling these fixtures parse under, and it is **not** the default.
+///
+/// `smear_lexer::limits::MAX_NESTING_DEPTH` is sized against a 2 MiB thread (smear issue #61),
+/// which is what a caller who has not thought about it gets. These tests have thought about it:
+/// they run on [`on_a_deep_stack`]'s 64 MiB worker precisely so that a 200-level document is a
+/// document rather than a stack overflow, and raising the ceiling to match is the API's own answer
+/// for a caller who has arranged the stack.
+///
+/// It is also the ordering that makes the merge budget below testable at all. The parser's ceiling
+/// is a **native-stack** bound and the validator's `merge_depth` is a **work** bound, and the two
+/// are now ordered the other way round from how they read: at the shipped defaults the parser
+/// refuses at 24, long before the validator's 128 has anything to refuse. So `merge_depth` defends
+/// a document only a caller who raised this ceiling can produce — which is exactly the caller
+/// these tests impersonate.
+const FIXTURE_NESTING_CEILING: usize = 512;
+
 fn parse(source: &str) -> ExecutableDocument<&str> {
   Parser::with_parser::<
     GraphqlLexer<'_, str>,
@@ -114,7 +133,10 @@ fn parse(source: &str) -> ExecutableDocument<&str> {
     _,
     GraphQL,
   >(executable_document)
-  .parse_str(source)
+  .parse_str_with_state(
+    source,
+    SyntacticLimits::with_max_nesting_depth(FIXTURE_NESTING_CEILING),
+  )
   .unwrap_or_else(|errors| panic!("fixture query does not parse: {errors:?}"))
 }
 

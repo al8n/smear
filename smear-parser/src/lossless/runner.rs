@@ -121,23 +121,52 @@ impl<L: rowan::Language> Parse<L> {
 /// public entry point:
 ///
 /// - The nesting budget is the **lexer's**, not the parser's. Every `{`, `[` and `(` steps the
-///   [`Limiter`](tokora::state::tracker::Limiter) carried in the Logos `Extras`, and that
-///   tracker's inherited ceiling is tokora's *general-purpose* **500**
-///   ([`RecursionLimiter::new`](tokora::state::recursion_tracker::RecursionLimiter)), not the
-///   parser-facing 64 — nothing in this crate descends through
+///   budget carried in the Logos `Extras`, and nothing in this crate descends through
 ///   [`InputRef::descend`](tokora::InputRef::descend), so the parser-side limiter is never
-///   consulted at all.
-/// - The **501st** simultaneously-open bracket therefore fails its lex, and a resource-limit trip
-///   *latches a poison boundary*: the scanner refuses to rebuild a lexer past that offset. No
-///   token and no diagnostic can ever cover the tail, and a dialect's `document_entry`
-///   `skip_while` drain cannot reach it either — that drain is the mechanism which otherwise
-///   guarantees coverage.
+///   consulted at all. That budget's ceiling is now the lexer crate's own `MAX_NESTING_DEPTH`,
+///   chosen against a measured native-stack boundary; when #57 was filed it was tokora's
+///   general-purpose **500**, inherited — see issue #61 for why an inherited ceiling was not a
+///   ceiling.
+/// - The bracket **past** the budget therefore fails its lex, and a resource-limit trip *latches a
+///   poison boundary*: the scanner refuses to rebuild a lexer past that offset. No token and no
+///   diagnostic can ever cover the tail, and a dialect's `document_entry` `skip_while` drain
+///   cannot reach it either — that drain is the mechanism which otherwise guarantees coverage.
 /// - So `finish` reported `UncoveredGap` and `parse_document` panicked, at 501 open brackets, for
 ///   input an IDE produces by typing. That was smear issue #57.
 ///
 /// Under this door the same parse hands back a tree over every byte (`tree.text() == source`
 /// still holds, the un-lexable tail tiled as gaps) plus the limit trip already on the diagnostic
 /// channel, which is where a consumer routes on it.
+///
+/// # The trip ends the document, deliberately — smear issue #61's second half
+///
+/// The latch above is tokora's design and smear **keeps** it, which is a posture and therefore
+/// owes a reason. The reason is what the boundary means: a depth trip is a *resource refusal*, not
+/// a syntax error, and `poison_boundary` states exactly that — "no amount of further input will
+/// fix this". Resuming past it would mean re-entering the same unbounded descent the budget exists
+/// to stop, on a document that has already proved it goes there; a ceiling that is re-armed after
+/// every trip bounds one region and not the parse.
+///
+/// The case against it is an IDE, where one over-deep region voiding the rest of the file is close
+/// to the worst available behaviour, and #61 is right that lowering the ceiling from 500 to a
+/// stack-derived number makes the latch that much easier to reach. Three measured facts are why it
+/// is still the right posture:
+///
+/// - **It is not reachable by typing.** A trip needs more simultaneously open brackets than the
+///   ceiling. The deepest GraphQL document in this repository — 472 fixtures, real-world subgraph
+///   schemas included — reaches **11**. A file that trips is machine-generated or hostile.
+/// - **The alternative is worse for the same consumer.** The tree still covers every byte and the
+///   prefix is fully structured; a parse that refused the *whole* document on a depth trip would
+///   give an IDE strictly less.
+/// - **The syntactic door cannot express the question.** There the whole parse returns `Err`, so
+///   there is no partial result for a latch to void. Keeping the two doors' answers the same is
+///   what the acceptance-parity gate compares.
+///
+/// What the latch costs is that a consumer sees the trip as an ordinary error diagnostic on the
+/// tripping bracket plus one opaque region, rather than as "this document is too deeply nested".
+/// [`Diagnostic`] drops the typed payload at this boundary on purpose — that is what keeps
+/// [`Parse`] lifetime-free — so distinguishing the two would be a change to the diagnostic
+/// surface rather than to the latch, and it is recorded here as the residual it is.
 ///
 /// Nothing else is relaxed. Balance underflow, close identity, retro-wrap integrity, kind
 /// hygiene, span discipline and the token-channel wall are enforced identically through both

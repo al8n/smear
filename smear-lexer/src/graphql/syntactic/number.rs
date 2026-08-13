@@ -84,7 +84,7 @@ macro_rules! number_token_impl {
     mod $mod {
       use tokora::{
         logos::Logos,
-        state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+        state::recursion_tracker::RecursionLimitExceeded,
       };
       use crate::graphql::{
         error::{DecimalError, FloatError, LexerErrors},
@@ -100,7 +100,7 @@ macro_rules! number_token_impl {
       #[derive(Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
       #[logos(
         crate = tokora::logos,
-        extras = RecursionLimiter,
+        extras = crate::limits::SyntacticLimits,
         skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*?",
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::default_error)

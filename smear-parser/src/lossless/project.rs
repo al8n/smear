@@ -607,7 +607,10 @@ pub fn verify_source_at<K>(
 ) -> Result<(), ProjectError<K>> {
   // Recursive rather than an explicit stack, which would need a `Vec` this walk otherwise has no
   // reason to allocate. The depth is the tree's, and the tree's is the lexer's bracket budget
-  // (tokora's `RecursionLimiter`, 500) plus a grammar constant — a few tens of KiB of frames.
+  // (the lexer crate's `MAX_NESTING_DEPTH`) plus a grammar constant. That budget used to be
+  // tokora's inherited 500, which put this walk at a few tens of KiB of frames; smear issue #61
+  // replaced it with a number measured against a 2 MiB stack, so the bound this comment relies on
+  // got an order of magnitude cheaper rather than merely staying true.
   fn walk(green: &GreenNodeData, source: &[u8], offset: &mut usize) -> Result<(), Range<usize>> {
     for child in green.children() {
       match child {

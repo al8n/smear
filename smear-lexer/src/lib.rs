@@ -56,6 +56,8 @@ pub mod error;
 pub mod hints;
 /// Keyword tokens for GraphQL and GraphQLx.
 pub mod keywords;
+/// The nesting ceiling every smear lex runs under, and the budget types that carry it.
+pub mod limits;
 /// Punctuation tokens used in GraphQL and GraphQLx.
 pub mod punctuator;
 
