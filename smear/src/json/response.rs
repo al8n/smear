@@ -40,11 +40,16 @@
 //!   draft §7.1.2's order, so the chain has to be reversed; reversing it per segment is quadratic
 //!   in the depth. That reversal belongs to `graphql-proto`, which owns the links, and it is done
 //!   once per path there — [`Path::collect_into`](graphql_proto::Path::collect_into). What this
-//!   file owns is the buffer, hoisted beside [`Locations`] so that one serves the whole response.
+//!   file owns is the buffer, hoisted beside [`Locations`] so that one serves the whole response;
+//!   `graphql-proto` owns how it *grows*, and reserves it against a depth the executor recorded
+//!   while building the tree, so filling it costs one allocation rather than a doubling sequence
+//!   with the old buffer and the new one both live at the peak.
 //!
 //! All three are stated as bounds and all three are measured — see this module's `visited` counter
-//! and the gates in `super::tests`, and `graphql-proto`'s own slot-traversal gate for the third —
-//! because a cost claim settled by reading the code is an opinion.
+//! and the gates in `super::tests`, and `graphql-proto`'s own slot-traversal **and allocation**
+//! gate for the third — because a cost claim settled by reading the code is an opinion. That third
+//! gate needs both of its axes and would pass on either one alone, which is why the counter it
+//! reads says so at length.
 //!
 //! **And it is worth saying why this file keeps attracting them.** It is the only place that
 //! touches the whole document and the whole response tree once per error, so every decision made
@@ -118,6 +123,18 @@ where
     // walk: a path is discovered leaf-first and §7.1.2 wants it root-first, so something has to
     // hold the turned-around chain, and a `Vec` created inside the loop is an allocation per error
     // that no assertion about the *output* could see. Empty until the first path needs it.
+    //
+    // ── AND WHY IT IS NOT KEPT ACROSS RESPONSES, WHICH IS THE NEXT QUESTION ────────────────────
+    //
+    // A subscription writes a response per event through this same function, so a scratch that
+    // lived in a writer object would amortise this allocation over a stream instead of paying it
+    // per event. It is one allocation per response with errors — none at all for a clean one — and
+    // buying it back is not free: a `Segment<'r>` borrows the response's name table, so a buffer
+    // outliving `'r` cannot be typed. Reusing the ALLOCATION across responses means laundering the
+    // element lifetime through `unsafe`, and the price of that is one `malloc` per response, on a
+    // path that has already decided to build a `Locations` index — a strictly larger allocation on
+    // exactly the same schedule. Per event the writer pays two, and both are proportional to
+    // something the event actually has.
     let mut segments = Vec::new();
     let mut list = root.key("errors")?.array()?;
     for error in response.errors() {
@@ -231,7 +248,15 @@ where
   // path is in hand before the first bracket is written. `graphql-proto` owns the climb because
   // `graphql-proto` owns the links; what would be wrong here is asking it for the segments one at
   // a time, which is a request it cannot answer in constant work.
-  let path = error.path().collect_into(segments);
+  //
+  // It owns the buffer's GROWTH for the same reason — it is the side that knows how deep the path
+  // is before walking it — and that is where the refusal comes from: the reservation is fallible,
+  // so a response too deep for the allocator ends this write instead of aborting the process
+  // holding it.
+  let path = error
+    .path()
+    .collect_into(segments)
+    .map_err(|_| Error::PathAllocation)?;
   if !path.is_empty() {
     let mut list = entry.key("path")?.array()?;
     for &segment in path {

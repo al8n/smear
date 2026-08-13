@@ -276,7 +276,8 @@ pub const EXEMPTIONS: &[Exemption] = &[
     element: None,
     issue: Some(126),
     reason: "How the draft §7.2.1 writer refuses: a sink that would not take the bytes, a `Float` \
-             that is not finite, a `\\u` escape naming a surrogate, and a malformed escape. Phase D \
+             that is not finite, a `\\u` escape naming a surrogate, a malformed escape, and an \
+             allocator that would not give a §7.1.2 response path room. Phase D \
              of al8n/smear#126 is *the §7 writer together with proto's adoption*, so this is that \
              phase's third row rather than a new debt beside it — and it has to be decided with \
              the other two instead of before them, because the phase's open question is where a \
@@ -287,7 +288,9 @@ pub const EXEMPTIONS: &[Exemption] = &[
              rendering a response that has already been decided, so its `primary()` would be a \
              *third* user of `Location::entire` against a gate that pins the count at one, and \
              `Location`'s own documentation calls that spelling an exception with a named holder \
-             rather than a default. Recorded, not accepted.",
+             rather than a default. The allocation variant sharpens that again rather than \
+             softening it: it is the one refusal with no position even in the RESPONSE, since it \
+             is raised because the path could not be assembled. Recorded, not accepted.",
   },
   // ── The lexer families — al8n/smear#126 phase E ──────────────────────────────────────────────
   Exemption {

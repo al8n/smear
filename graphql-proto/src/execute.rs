@@ -1871,6 +1871,9 @@ where
     let root_ty = PackedType::named(self.schema.type_def(root_type).name(), root_type);
     self.slots.push(Slot::new(
       NONE,
+      // Draft §7.1.2's path of the root is the empty one, so its depth is zero and every depth
+      // under it is counted from here — see `push_child`, the only other place the number is set.
+      0,
       Key::Root,
       root_ty,
       State::Object {
@@ -3852,6 +3855,20 @@ where
   /// The `as u32` below is exact for the same reason. `self.slots.len()` is strictly less than the
   /// ceiling whenever this returns `Some`, and the ceiling is a `u32`, so the new index is at most
   /// `max_response_slots - 1` — never [`NONE`], which is `u32::MAX` and means "no such slot".
+  ///
+  /// # Where a path's length is written down
+  ///
+  /// This is also the only place a position's depth is decided, and it costs an increment because
+  /// the parent is in hand. That is the whole reason it is recorded here rather than counted later:
+  /// draft §7.1.2's order is the reverse of the links, so a serialiser has to turn the chain around
+  /// into a buffer, and a buffer with no size hint reallocates and copies its way up. Knowing the
+  /// depth without walking is what makes that one exactly-sized allocation —
+  /// [`Path::collect_into`](super::Path::collect_into) — instead of `log₂(depth)` of them with two
+  /// live at the peak. Measuring the depth first and then filling would trade the quadratic this
+  /// crate already removed for a constant factor of two over the same links.
+  ///
+  /// The addition cannot overflow: a depth is at most one less than the number of slots, and the
+  /// ceiling checked above is a `u32`.
   fn push_child(
     &mut self,
     parent: u32,
@@ -3863,7 +3880,8 @@ where
       return None;
     }
     let index = self.slots.len() as u32;
-    self.slots.push(Slot::new(parent, key, ty, state));
+    let depth = self.slots[parent as usize].depth + 1;
+    self.slots.push(Slot::new(parent, depth, key, ty, state));
     // A list element inherits the field's metadata wholesale, which is what makes an error at
     // `items.1` report `Query.items` and the field group's locations while its path stays the
     // element's. Draft §6.4.3's list clause reuses the field's node for exactly that reason, and

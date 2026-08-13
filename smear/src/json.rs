@@ -103,6 +103,27 @@ pub enum Error {
   /// a `StringValue` exists — and present because the cooking walk must be total. A `panic!` here
   /// would be the same walk with the failure mode of the two crates it was written to avoid.
   MalformedEscape,
+  /// The allocator refused room for a draft §7.1.2 response `path`.
+  ///
+  /// A path is as long as the response is deep, and how deep a response is depends on the query
+  /// and on how many list elements the driver returned. `graphql-proto`'s ceilings bound that, and
+  /// the ceilings are configurable, so the deepest admissible path is a deployment's decision —
+  /// which makes "the allocator said no" an answer a server should be able to give rather than a
+  /// reason for it to die. [`Path::collect_into`](crate::proto::Path::collect_into) is the
+  /// fallible door it arrives through.
+  ///
+  /// **Not every allocation this writer makes is behind this variant**, and it is worth being
+  /// exact about which is. The response path is the one whose whole size is known before a byte of
+  /// it is taken, so it is reserved in a single up-front request that the allocator can refuse and
+  /// this writer can carry back. `write_node`'s frame stack also grows with the response, one
+  /// `push` at a time, and an allocation failure there aborts — the ordinary Rust behaviour, and
+  /// not something this variant is quietly claiming to have replaced.
+  ///
+  /// It carries nothing, for the reason [`Sink`](Error::Sink) carries nothing and one more:
+  /// `TryReserveError` separates a layout that cannot exist from an allocator that refused, and
+  /// that is not a distinction a half-written response can act on. It is also not `Copy`, and this
+  /// type is.
+  PathAllocation,
 }
 
 impl fmt::Display for Error {
@@ -112,6 +133,7 @@ impl fmt::Display for Error {
       Self::NonFiniteFloat => "a Float that is not finite has no JSON number literal",
       Self::SurrogateEscape => "a \\u escape named a UTF-16 surrogate, which is not a character",
       Self::MalformedEscape => "a string literal carried a malformed escape",
+      Self::PathAllocation => "the allocator refused room for a response path",
     })
   }
 }

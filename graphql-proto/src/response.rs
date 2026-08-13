@@ -57,6 +57,8 @@
 
 use core::fmt;
 
+use std::collections::TryReserveError;
+
 use smear_schema::{PackedType, TypeId};
 
 #[cfg(all(test, feature = "std"))]
@@ -69,6 +71,18 @@ pub(super) const NONE: u32 = u32::MAX;
 #[derive(Debug)]
 pub(super) struct Slot<V> {
   pub(super) parent: u32,
+  /// How many draft §7.1.2 segments the path of this position has — the root's is `0`.
+  ///
+  /// The chain's length, written down where the chain is *built* instead of counted where it is
+  /// read. The executor creates a position only under a parent it already holds, so this is the
+  /// parent's depth plus one and costs an increment; recovering it afterwards costs the depth,
+  /// which is exactly the walk [`Path::collect_into`] exists to perform once. Storing it is what
+  /// lets that walk size its buffer **before** filling it, with no preliminary pass to measure —
+  /// see that method, and see the block below for what the field measured.
+  ///
+  /// Structural, so nothing rewrites it: `discard` and `reset` overwrite a slot's *state*, and a
+  /// position's distance from the root is not part of it.
+  pub(super) depth: u32,
   pub(super) next_sibling: u32,
   pub(super) first_child: u32,
   pub(super) last_child: u32,
@@ -89,9 +103,16 @@ pub(super) struct Slot<V> {
 
 impl<V> Slot<V> {
   #[inline]
-  pub(super) const fn new(parent: u32, key: Key, ty: PackedType, state: State<V>) -> Self {
+  pub(super) const fn new(
+    parent: u32,
+    depth: u32,
+    key: Key,
+    ty: PackedType,
+    state: State<V>,
+  ) -> Self {
     Self {
       parent,
+      depth,
       next_sibling: NONE,
       first_child: NONE,
       last_child: NONE,
@@ -180,11 +201,28 @@ pub(super) enum State<V> {
 /// Bounds rather than equalities, deliberately. `repr(Rust)` layout is unspecified, so a future
 /// compiler is entitled to pack this better and a `==` would fail a green tree for an improvement.
 /// A `<=` still fails the thing worth failing: a field added here that grows the slot again.
+///
+/// # And what [`Slot::depth`] cost, measured the same way and the other way round
+///
+/// The `pending` row above is the eight-aligned case paying and the four-aligned case being
+/// cheap. `depth` is the inverse, and again the measurement is the only thing that says so:
+///
+/// | `V` | `Slot<V>` without `depth` | with |
+/// |---|---|---|
+/// | `u64` (align 8) | 72 | **72** |
+/// | `u32` (align 4) | 60 | **64** |
+///
+/// Free for an eight-aligned driver value, because `State<u64>`'s alignment already rounds the
+/// slot up and left seven spare bytes at the end that nothing was using; four bytes per slot for a
+/// four-aligned one, where there was no such tail. So at the default 2²⁰-slot ceiling the field
+/// costs between nothing and 4 MiB, depending on the driver's value — against a scratch buffer
+/// that reached 16 MiB and briefly held two of them, which is what the field is here to make
+/// unnecessary. Neither number was predicted; both were read off the compiler.
 const _: () = {
   assert!(core::mem::size_of::<State<u64>>() <= 24);
   assert!(core::mem::size_of::<Slot<u64>>() <= 72);
   assert!(core::mem::size_of::<State<u32>>() <= 16);
-  assert!(core::mem::size_of::<Slot<u32>>() <= 60);
+  assert!(core::mem::size_of::<Slot<u32>>() <= 64);
 };
 
 /// A slot's key in its parent.
@@ -241,6 +279,20 @@ impl fmt::Display for Segment<'_> {
 /// | [`collect_into`](Path::collect_into) | outermost first | one parent link | the caller's, reused across a whole response |
 /// | [`iter`](Path::iter) | outermost first | one parent link | its own, one per call |
 ///
+/// # One walk is not one allocation, and the buffer is the half a link counter cannot see
+///
+/// Walking the chain once says nothing about how the buffer that receives it *grows*. An
+/// [`Ancestors`] has no size hint, so filling an empty `Vec` from it reallocates and copies its way
+/// up in powers of two — a walk that is linear in links and still `log₂(depth)` allocations, the
+/// last of which briefly holds the old buffer and the new one at once. At the default 2²⁰-slot
+/// ceiling a [`Segment`] is 16 bytes and that peak is 24 MiB.
+///
+/// So both entries that fill a buffer reserve it **up front** against [`len`](Path::len), which is
+/// a number the executor recorded on the position as it built the chain rather than one this type
+/// counts — so the size is known without a preliminary walk to measure it. Filling a fresh buffer
+/// is then one allocation of exactly the right size at every depth, which is the number the gate
+/// in this module's tests asserts.
+///
 /// **There is deliberately no random accessor.** `get(i)` over upward links costs the depth per
 /// call, so the `0..len()` loop every caller eventually writes over it is exactly the quadratic
 /// this section exists to remove — and an accessor whose only non-quadratic use is a single call is
@@ -283,9 +335,15 @@ impl<'r, V> Path<'r, V> {
 
   /// Returns the number of segments.
   ///
-  /// One parent link per segment and no buffer: counting a chain does not need it turned around.
+  /// One slot and no buffer, whatever the depth. The executor wrote the answer onto the position
+  /// as it created it, so this reads a number rather than counting a chain — and that is what lets
+  /// [`collect_into`](Path::collect_into) size its buffer exactly without a pass to measure it
+  /// first.
   pub fn len(&self) -> usize {
-    self.ancestors().count()
+    if self.slot == NONE {
+      return 0;
+    }
+    self.at(self.slot).depth as usize
   }
 
   /// Returns whether the path is empty, which happens only at the root.
@@ -317,11 +375,40 @@ impl<'r, V> Path<'r, V> {
   /// `buf` is cleared first and stays the caller's, which is the point: one buffer serves every
   /// error in a response, so a serialiser writing draft §7.1.2 pays one allocation for the whole
   /// response rather than one per path — and pays it once across responses if it keeps the buffer.
-  pub fn collect_into<'b>(&self, buf: &'b mut std::vec::Vec<Segment<'r>>) -> &'b [Segment<'r>] {
+  ///
+  /// The room is reserved from [`len`](Path::len) before the chain is walked, so an empty buffer
+  /// takes **one** allocation of exactly the right size at any depth, and a buffer that has
+  /// already held a path this long takes none — instead of the `log₂(depth)` reallocations that
+  /// filling an unhinted `Vec` costs, the last of which holds the old buffer and the new one at
+  /// once. See the type's header for what that peaked at.
+  ///
+  /// # `try_reserve` and not `try_reserve_exact`, because the buffer is *shared*
+  ///
+  /// Worth writing down, because "reserve exactly what this path needs" is the obvious reading and
+  /// it is wrong here for the reason the first sentence of this method gives: `buf` serves every
+  /// error in a response, so a reservation is almost never the last one made on it. `std` says the
+  /// same thing about the choice — "prefer `try_reserve` if future insertions are expected" — and
+  /// the case that decides it is a response whose error depths *increase*, which a fragment chain
+  /// failing a leaf at every level produces. Exact growth reallocates and recopies for each of
+  /// them, which is a quadratic in the depth over a shared buffer; amortised growth costs
+  /// `log₂(depth)` for the whole response. Where the finding that prompted this actually bites —
+  /// one deep path into a fresh buffer — the two are identical, because doubling from nothing
+  /// lands on exactly the requested capacity.
+  ///
+  /// # Errors
+  ///
+  /// [`TryReserveError`] when the allocator cannot give the buffer room for a path this deep.
+  /// **Fallible rather than aborting**, and the reason is what this crate is: the depth is chosen
+  /// by whoever wrote the query and by however many list elements the driver returned, both of
+  /// which a ceiling bounds and neither of which a server should die of. A caller that has already
+  /// written part of a response gets to answer it. `buf` is left empty.
+  pub fn collect_into<'b>(
+    &self,
+    buf: &'b mut std::vec::Vec<Segment<'r>>,
+  ) -> Result<&'b [Segment<'r>], TryReserveError> {
     buf.clear();
-    buf.extend(self.ancestors());
-    buf.reverse();
-    buf
+    buf.try_reserve(self.len())?;
+    Ok(self.fill(buf))
   }
 
   /// Returns the segments, outermost first.
@@ -329,12 +416,30 @@ impl<'r, V> Path<'r, V> {
   /// The chain is walked once, into a buffer this iterator owns — see the type's header for why
   /// there is a buffer at all. A caller with more than one path to write wants
   /// [`collect_into`](Path::collect_into), which lends its own instead of allocating one per call.
+  ///
+  /// Reserved up front, as `collect_into` is, and **infallible where that one is not**: this
+  /// returns an iterator, and it is what the [`Debug`](fmt::Debug) and [`Display`](fmt::Display)
+  /// impls below are written over — neither of which has anywhere to put an allocation failure.
+  /// So a refusal here aborts, exactly as the unhinted `extend` this replaced already did; what
+  /// changed is that it is now one allocation instead of a sequence of them. A caller that needs
+  /// to *handle* the refusal takes `collect_into`, which is the door that can express it.
   pub fn iter(&self) -> PathIter<'r> {
-    let mut segments = std::vec::Vec::new();
-    self.collect_into(&mut segments);
+    let mut segments = std::vec::Vec::with_capacity(self.len());
+    self.fill(&mut segments);
     PathIter {
       segments: segments.into_iter(),
     }
+  }
+
+  /// Walks the chain into `buf` and turns it around.
+  ///
+  /// `buf` must be empty and must already have room for [`len`](Path::len) segments; both callers
+  /// above make it so, and the reservation is theirs precisely because they answer an allocation
+  /// failure differently.
+  fn fill<'b>(&self, buf: &'b mut std::vec::Vec<Segment<'r>>) -> &'b [Segment<'r>] {
+    buf.extend(self.ancestors());
+    buf.reverse();
+    buf
   }
 
   /// Reads one slot, and records the traversal.
@@ -454,31 +559,57 @@ impl ExactSizeIterator for PathIter<'_> {}
 impl core::iter::FusedIterator for PathIter<'_> {}
 
 // ---------------------------------------------------------------------------------------------
-// what deriving a path costs
+// what deriving a path costs — TWO axes, and neither one implies the other
 // ---------------------------------------------------------------------------------------------
 
-// How many response slots a path derivation has followed, counted only when this crate's own tests
-// are built.
+// How many response slots a path derivation has followed, and how many times it went to the
+// allocator. Both counted only when this crate's own tests are built.
 //
-// ── WHY SLOTS, AND WHY A COUNTER AT ALL ───────────────────────────────────────────────────────
+// ── WHY SLOTS ─────────────────────────────────────────────────────────────────────────────────
 //
-// The property is about *traversal* and about nothing else. Deriving a path allocates at most one
-// buffer whatever the depth, so an allocation pin is structurally incapable of seeing a walk that
-// restarts, and the emitted path is O(depth) bytes however many links were followed to produce it
-// — so neither of the two instruments this workspace already had could see the defect. Only the
-// links themselves can. A slot reached twice counts twice, because that is precisely the defect.
+// A derivation that restarts at the failing position for every segment costs the depth squared in
+// LINKS and nothing extra anywhere else: it fills the same buffer with the same segments and emits
+// the same O(depth) bytes. So neither an allocation pin nor a byte counter can see it, and only
+// the links themselves can. A slot reached twice counts twice, because that is precisely the
+// defect.
 //
 // `smear`'s JSON writer counts document bytes for the same reason and by the same rule; this is
 // that instrument, one crate down, where the traversal actually happens.
 //
-// **`std`, while the repair is not.** A counter shared by parallel tests has to be thread-local,
-// and `thread_local!` is `std`'s. So `cargo test -p graphql-proto --no-default-features` compiles
-// the linear derivation without the gate that measures it; every other test configuration has
-// both.
+// ── AND WHY ALLOCATIONS, BESIDE IT RATHER THAN INSTEAD OF IT ──────────────────────────────────
+//
+// Because the link counter is blind in exactly the direction the byte counter was. Filling an
+// unhinted `Vec` from `Ancestors` walks each link ONCE — a perfect reading on the axis above —
+// while reallocating and copying its way up in powers of two, with the old buffer and the new one
+// both live at the peak. The link counter cannot see a reallocation; the byte counter cannot see
+// it either, because the emitted document is the same. Only the allocator can.
+//
+// This branch's lineage has now met that shape three times, from both directions:
+//
+//   | round   | the gate measured | it was blind to             |
+//   |---------|-------------------|-----------------------------|
+//   | #157 R3 | allocations       | a walk of the document      |
+//   | #160 R5 | allocations       | the bytes a walk added      |
+//   | #162 R3 | traversal steps   | reallocation and copying    |
+//
+// The last one is the first two INVERTED — there an allocation pin could not see a byte walk, here
+// a traversal pin could not see an allocation — and the conclusion is the same in both directions:
+// **a cost gate needs every axis its subject can grow along, and no axis implies another.** Anyone
+// adding a cost gate to this file should reach for both of these, and ask what a third one would
+// be before deciding two is enough.
+//
+// ── `std`, WHILE THE REPAIR IS NOT ────────────────────────────────────────────────────────────
+//
+// A counter shared by parallel tests has to be thread-local, and `thread_local!` is `std`'s; a
+// counting allocator is `std::alloc::System` plus a `#[global_allocator]`, which is `std`'s too.
+// So `cargo test -p graphql-proto --no-default-features` compiles the exactly-reserved derivation
+// without the gates that measure it; every other test configuration has both.
 #[cfg(all(test, feature = "std"))]
 thread_local! {
   /// Slots a path derivation has followed on this thread.
   static TRAVERSED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+  /// Allocating events on this thread, whoever made them.
+  static ALLOCATED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
 }
 
 /// Records that a path derivation followed one slot.
@@ -494,6 +625,62 @@ fn traverse() {
 #[cfg(all(test, feature = "std"))]
 fn traversals() -> u64 {
   TRAVERSED.with(core::cell::Cell::get)
+}
+
+/// A pass-through global allocator that tallies every allocating event on the calling thread.
+///
+/// The shape `smear`, `smear-parser` and `smear-schema` each use in an integration target of their
+/// own; this is the first one that has to live in a crate's *library* tests, because the property
+/// it serves is measured beside [`traversals`] and that counter is private to this module. There
+/// is no shared one to import — a `#[global_allocator]` belongs to a binary, and an integration
+/// target's is not reachable from a lib test.
+///
+/// `realloc` counts, and counts as one event. That is not incidental: geometric growth is mostly
+/// `realloc`, so an allocator that forwarded it silently would report the defect this instrument
+/// exists for as a single allocation.
+#[cfg(all(test, feature = "std"))]
+struct Counting;
+
+#[cfg(all(test, feature = "std"))]
+// SAFETY: every method forwards to `System` with the layout it was given, unchanged, and returns
+// exactly what `System` returned. The tally is a `Cell<u64>` in thread-local storage, reached
+// through `try_with` so that an allocation made while that storage is being set up or torn down is
+// left uncounted rather than re-entering it.
+unsafe impl core::alloc::GlobalAlloc for Counting {
+  unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+    allocate();
+    unsafe { std::alloc::System.alloc(layout) }
+  }
+
+  unsafe fn alloc_zeroed(&self, layout: core::alloc::Layout) -> *mut u8 {
+    allocate();
+    unsafe { std::alloc::System.alloc_zeroed(layout) }
+  }
+
+  unsafe fn realloc(&self, ptr: *mut u8, layout: core::alloc::Layout, new_size: usize) -> *mut u8 {
+    allocate();
+    unsafe { std::alloc::System.realloc(ptr, layout, new_size) }
+  }
+
+  unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+    unsafe { std::alloc::System.dealloc(ptr, layout) }
+  }
+}
+
+#[cfg(all(test, feature = "std"))]
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
+
+/// Records one allocating event.
+#[cfg(all(test, feature = "std"))]
+fn allocate() {
+  let _ = ALLOCATED.try_with(|allocated| allocated.set(allocated.get() + 1));
+}
+
+/// Returns how many allocating events this thread has caused.
+#[cfg(all(test, feature = "std"))]
+fn allocations() -> u64 {
+  ALLOCATED.with(core::cell::Cell::get)
 }
 
 /// A completed value in the response.
