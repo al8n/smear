@@ -99,7 +99,9 @@
 //! on this path. It is also public, both standard formatters went through it, and the depth is the
 //! client's, so any driver that logged a field error's path could abort the process on a buffer
 //! this file never touches. `graphql-proto` now turns a path around in a fixed window of its own
-//! frame and answers a deeper one with `fmt::Error`; the same re-audit found [`Node`]'s `Debug`
+//! frame and *truncates* a deeper one behind a marker — it does not allocate at any depth, and it
+//! does not answer `fmt::Error`, which `core` reserves for a failure the sink reported and which
+//! `format!` and `ToString` therefore `expect` on. The same re-audit found [`Node`]'s `Debug`
 //! recursing through the response tree, on the other fatal axis, and that is fixed beside it.
 //!
 //! The lesson is about the *shape* of a dismissal and belongs here rather than in a report, because

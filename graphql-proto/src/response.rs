@@ -258,10 +258,11 @@ impl fmt::Display for Segment<'_> {
 
 /// How many segments a [`Path`]'s formatters turn around inside their own frame.
 ///
-/// **Public because it is the contract rather than an implementation detail**: it is the depth up
-/// to which rendering a path with `{}` or `{:?}` reaches the allocator zero times, which is
-/// something a caller deciding what to log is entitled to check. Past it a formatter takes one
-/// fallible buffer and can answer [`fmt::Error`].
+/// **Public because it is the contract rather than an implementation detail**: it is how much of a
+/// path `{}` and `{:?}` render, and it is something a caller deciding what to log is entitled to
+/// check. Past it the *outermost* segments are dropped and the rendering says so — see [`Path`]'s
+/// header. Neither formatter reaches the allocator at any depth, and neither has a failure of its
+/// own to report.
 ///
 /// Thirty-two [`Segment`]s is 512 bytes of automatic storage, held for the length of one
 /// `write!` and by a function that cannot recurse — a fixed frame cost of the kind
@@ -274,6 +275,18 @@ impl fmt::Display for Segment<'_> {
 /// it is a fragment chain, which is exactly the construction this module's tests use to drive the
 /// depth to 1 024 — and which is the case the window deliberately does not try to serve.
 pub const INLINE_SEGMENTS: usize = 32;
+
+/// What a [`Path`]'s formatters write in place of the segments above the window.
+///
+/// **It cannot be mistaken for a segment.** A [`Segment::Field`] is a GraphQL name —
+/// `[_A-Za-z][_0-9A-Za-z]*`, established by the lexer — and a [`Segment::Index`] is digits, so
+/// nothing a path can hold renders as this. A path of exactly [`INLINE_SEGMENTS`] segments and one
+/// cut at [`INLINE_SEGMENTS`] therefore do not render alike, which is the whole reason the marker
+/// exists rather than the truncation being silent.
+///
+/// One character rather than `...`, because [`Display`](fmt::Display) joins segments with `.` and
+/// an ASCII elision beside that separator is four dots a reader has to count.
+const ELIDED: &str = "…";
 
 /// A draft §7.1.2 response path, outermost segment first.
 ///
@@ -298,7 +311,7 @@ pub const INLINE_SEGMENTS: usize = 32;
 /// | [`ancestors`](Path::ancestors) | innermost first | one parent link | none | cannot refuse |
 /// | [`collect_into`](Path::collect_into) | outermost first | one parent link | the caller's, reused across a whole response | [`TryReserveError`] |
 /// | [`try_iter`](Path::try_iter) | outermost first | one parent link | its own, one per call | [`TryReserveError`] |
-/// | [`Debug`](fmt::Debug), [`Display`](fmt::Display) | outermost first | one parent link | **[`INLINE_SEGMENTS`] of frame, and the heap only past it** | [`fmt::Error`] |
+/// | [`Debug`](fmt::Debug), [`Display`](fmt::Display) | outermost first, innermost [`INLINE_SEGMENTS`] only | one parent link, and at most [`INLINE_SEGMENTS`] + 1 of them in all | **[`INLINE_SEGMENTS`] of frame, and never the heap** | **cannot refuse** — what does not fit is elided |
 ///
 /// # One walk is not one allocation, and the buffer is the half a link counter cannot see
 ///
@@ -326,10 +339,29 @@ pub const INLINE_SEGMENTS: usize = 32;
 /// Past the window there is no free reversal left. A chain in a shared slice cannot be turned
 /// around in constant space without walking it once per output segment, and *that* is the
 /// quadratic this whole section exists to remove — trading the heap for it would move the cost onto
-/// the one axis with no refusal at all, since an allocator can say no and a spent second cannot. So
-/// a path deeper than the window takes [`collect_into`](Path::collect_into), the same fallible door
-/// a serialiser takes, and a refusal arrives as [`fmt::Error`] rather than as the process-wide
-/// allocation handler.
+/// the one axis with no refusal at all, since an allocator can say no and a spent second cannot.
+///
+/// # And a formatter has nowhere to put a refusal either, which is the part after that
+///
+/// The obvious remaining answer is a fallible buffer past the window, answering a refusal with
+/// [`fmt::Error`]. **That error is not a formatter's to invent.** `core` reserves it for a failure
+/// the [`Formatter`](fmt::Formatter) itself reported — string formatting is otherwise infallible —
+/// so `format!` and `ToString` `expect` on what a trait implementation returns. A `Display` that
+/// manufactured one to report an allocation failure would therefore *panic* its caller through
+/// `{}`, which is the abort this section removed wearing a different coat.
+///
+/// So both halves of the answer are the same half: **these two never allocate, at any depth, and
+/// so the only [`fmt::Error`] either can answer is one the sink gave it.** A path deeper than the
+/// window renders its innermost [`INLINE_SEGMENTS`] segments
+/// with `…` standing where the outer ones were — the innermost end, because that is the one that
+/// names the field, and because it is the end the upward links reach first, so the whole rendering
+/// costs [`INLINE_SEGMENTS`] + 1 links however deep the path is. A truncated log line is what a
+/// deep path gets, and exact rendering stays where a caller has a `Result` to receive a refusal in:
+/// [`collect_into`](Path::collect_into) and [`try_iter`](Path::try_iter).
+///
+/// The marker is what makes the truncation *readable*: a [`Segment::Field`] is a GraphQL name and a
+/// [`Segment::Index`] is digits, so nothing a path can hold renders as `…`, and a path of exactly
+/// [`INLINE_SEGMENTS`] segments is therefore not the same rendering as one cut at them.
 ///
 /// **This was found as a dismissal and not as a defect**, which is worth recording where the next
 /// reader will meet it: the allocation below was enumerated, and then crossed off because the JSON
@@ -481,53 +513,40 @@ impl<'r, V> Path<'r, V> {
     })
   }
 
-  /// Hands every segment to `emit` in draft §7.1.2's order.
+  /// Fills `into` with the innermost segments and says whether the chain ran on past them.
   ///
-  /// The turn-around happens in [`INLINE_SEGMENTS`] segments of this frame, so a path that fits the
-  /// window reaches the allocator zero times. One deeper falls through to
-  /// [`each_segment_buffered`](Path::each_segment_buffered), which is one call and not a cycle —
-  /// nothing here recurses, at any depth.
+  /// The returned slice is innermost first — the direction the links point — so a formatter
+  /// reverses it, and a `true` beside it means the segments *above* the slice were dropped. Both
+  /// formatters below share this so that the two renderings are one walk read two ways.
   ///
-  /// `&mut dyn FnMut` rather than a generic, because the two callers are the two formatters and one
-  /// copy of this walk is the point.
-  fn each_segment(&self, emit: &mut dyn FnMut(Segment<'r>) -> fmt::Result) -> fmt::Result {
-    let mut window = [Segment::Index(0); INLINE_SEGMENTS];
+  /// At most [`INLINE_SEGMENTS`] + 1 links however deep the path is: the window's worth, and one
+  /// more to ask whether there was another. Nothing here allocates and nothing here can fail, which
+  /// is the whole of what the two callers need — see [`Path`]'s header for why a formatter is not
+  /// allowed to have a failure to report.
+  ///
+  /// Bounded by the window and not by [`len`](Path::len), deliberately: a *strategy* may be chosen
+  /// from a number the executor recorded, and what is **written** may not be. Nothing rendered below
+  /// comes from anywhere but the chain itself, the elision included.
+  fn window<'w>(&self, into: &'w mut [Segment<'r>; INLINE_SEGMENTS]) -> (&'w [Segment<'r>], bool) {
+    let mut ancestors = self.ancestors();
     let mut filled = 0;
-    // Bounded by the window and not by `len`, deliberately: the strategy may be chosen from a
-    // recorded number, and what is *written* may not be. An overflowing chain takes the branch
-    // below rather than being truncated to whatever the slot said.
-    for segment in self.ancestors() {
-      if filled == INLINE_SEGMENTS {
-        return self.each_segment_buffered(emit);
-      }
-      window[filled] = segment;
+    while filled < INLINE_SEGMENTS {
+      let Some(segment) = ancestors.next() else {
+        break;
+      };
+      into[filled] = segment;
       filled += 1;
     }
-    for segment in window[..filled].iter().rev() {
-      emit(*segment)?;
-    }
-    Ok(())
-  }
-
-  /// The same, for a path too deep to turn around in a frame.
-  ///
-  /// Re-walks from the leaf, which costs the [`INLINE_SEGMENTS`] links the window had already
-  /// followed and nothing else — the alternative is threading a half-consumed
-  /// [`Ancestors`] through both branches to save a constant.
-  #[cold]
-  fn each_segment_buffered(&self, emit: &mut dyn FnMut(Segment<'r>) -> fmt::Result) -> fmt::Result {
-    let mut buf = std::vec::Vec::new();
-    for segment in self.collect_into(&mut buf).map_err(|_| fmt::Error)? {
-      emit(*segment)?;
-    }
-    Ok(())
+    // `Ancestors` is fused, so this is `None` when the loop above ran out rather than filled up.
+    (&into[..filled], ancestors.next().is_some())
   }
 
   /// Walks the chain into `buf` and turns it around.
   ///
   /// `buf` must be empty and must already have room for [`len`](Path::len) segments; both callers
-  /// above make it so, and the reservation is theirs precisely because they answer an allocation
-  /// failure differently.
+  /// above make it so, and the reservation is theirs because whose buffer it is is the only thing
+  /// that separates them — [`collect_into`](Path::collect_into) reserves in the caller's and
+  /// [`try_iter`](Path::try_iter) in one of its own.
   fn fill<'b>(&self, buf: &'b mut std::vec::Vec<Segment<'r>>) -> &'b [Segment<'r>] {
     buf.extend(self.ancestors());
     buf.reverse();
@@ -557,30 +576,48 @@ impl<'r, V> Path<'r, V> {
 }
 
 impl<V> fmt::Debug for Path<'_, V> {
-  /// Allocates nothing for a path of [`INLINE_SEGMENTS`] segments or fewer, and answers a deeper
-  /// one the allocator refuses with [`fmt::Error`] rather than aborting. See [`Path`]'s header.
+  /// The innermost [`INLINE_SEGMENTS`] segments, `…` in front of them when the path had more.
+  ///
+  /// Allocates nothing at any depth, and the only [`fmt::Error`] it can answer is one the
+  /// [`Formatter`](fmt::Formatter) handed it — see [`Path`]'s header for why that is the contract
+  /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
+    let (window, elided) = self.window(&mut storage);
     let mut list = f.debug_list();
-    self.each_segment(&mut |segment| {
-      list.entry(&segment);
-      Ok(())
-    })?;
+    if elided {
+      // `format_args!` rather than a `&str`, so the marker is not rendered as the quoted string a
+      // segment never is.
+      list.entry(&format_args!("{ELIDED}"));
+    }
+    for segment in window.iter().rev() {
+      list.entry(segment);
+    }
     list.finish()
   }
 }
 
 impl<V> fmt::Display for Path<'_, V> {
-  /// Allocates nothing for a path of [`INLINE_SEGMENTS`] segments or fewer, and answers a deeper
-  /// one the allocator refuses with [`fmt::Error`] rather than aborting. See [`Path`]'s header.
+  /// The innermost [`INLINE_SEGMENTS`] segments, `…` in front of them when the path had more.
+  ///
+  /// Allocates nothing at any depth, and the only [`fmt::Error`] it can answer is one the
+  /// [`Formatter`](fmt::Formatter) handed it — see [`Path`]'s header for why that is the contract
+  /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let mut first = true;
-    self.each_segment(&mut |segment| {
-      if !first {
+    let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
+    let (window, elided) = self.window(&mut storage);
+    if elided {
+      f.write_str(ELIDED)?;
+    }
+    for (position, segment) in window.iter().rev().enumerate() {
+      // The marker occupies the first position when there is one, so it is what the leading
+      // separator is measured against.
+      if elided || position > 0 {
         f.write_str(".")?;
       }
-      first = false;
-      write!(f, "{segment}")
-    })
+      write!(f, "{segment}")?;
+    }
+    Ok(())
   }
 }
 

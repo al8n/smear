@@ -50,7 +50,7 @@ use smear_schema::Schema;
 use crate::{Executor, Leaf, Response, Values};
 
 use super::{
-  INLINE_SEGMENTS, Segment, allocations, allow_allocations, refuse_allocations_of_at_least,
+  ELIDED, INLINE_SEGMENTS, Segment, allocations, allow_allocations, refuse_allocations_of_at_least,
   traversals,
 };
 
@@ -551,6 +551,12 @@ fn the_root_is_the_empty_path() {
 // Hence three doors below rather than one, and a fourth gate on the OTHER fatal axis, because the
 // re-audit that found this row found a second one of exactly the same shape: `Node`'s `Debug`
 // recursed through the response tree.
+//
+// AND THEN THE REPAIR ITSELF HAD A ROW. The three doors were not three: the first fix gave the two
+// formatters a fallible buffer and answered a refusal with `fmt::Error`, which is not an error a
+// formatter may invent — `format!` and `ToString` `expect` on it, so the abort became a panic on
+// the same input. Two of the three doors have no refusal to give at all, and the gate below now
+// reads that: they truncate, and only `try_iter` refuses.
 
 /// A sink that allocates nothing, so that what a write costs is what the formatter cost.
 ///
@@ -634,15 +640,26 @@ fn with_response<R>(levels: usize, body: impl FnOnce(&Response<'_, Value>) -> R)
 const FILLS_THE_WINDOW: usize = INLINE_SEGMENTS - 1;
 const OVERFLOWS_THE_WINDOW: usize = INLINE_SEGMENTS;
 
-/// Printing a path allocates nothing, up to the window, and the window is where that stops.
+/// Printing a path allocates nothing, at **any** depth, and the window is where the rendering
+/// stops.
 ///
 /// **Zero is the assertion, and it is a stronger one than a refusal.** A formatter that reserves
 /// fallibly still calls the allocator, so it still has a failure to answer and still pays a
 /// `malloc` and a `free` to print twenty bytes; one that does not call it has no failure to answer
-/// at all. Both readings are taken because a bound of zero that is never exceeded could be an
-/// instrument that is not attached — the second one is what shows the counter moves.
+/// at all. And "no failure to answer" is the whole property here rather than a saving, because the
+/// only answer a formatter *has* is [`fmt::Error`](core::fmt::Error), which `core` reserves for a
+/// failure the sink reported — see the fixture below.
+///
+/// # What changed under the second reading, and why it is not the same evidence
+///
+/// The deep leg used to assert **one** allocating event, which is what showed the window was
+/// exactly [`INLINE_SEGMENTS`] wide and that the zero above was the window's doing rather than the
+/// counter's silence. There is no allocation past the window any more, so that evidence is gone and
+/// something has to replace it: the **marker**. A path of exactly [`INLINE_SEGMENTS`] segments
+/// renders without one and a path one segment deeper renders with one, which pins the same edge
+/// through the output instead of through the allocator.
 #[test]
-fn printing_a_path_that_fits_the_window_does_not_reach_the_allocator() {
+fn printing_a_path_never_reaches_the_allocator() {
   use core::fmt::Write as _;
 
   with_response(FILLS_THE_WINDOW, |response| {
@@ -680,10 +697,16 @@ fn printing_a_path_that_fits_the_window_does_not_reach_the_allocator() {
       display.bytes > 0 && debug.bytes > 0,
       "neither formatter wrote anything, so the readings above are of nothing"
     );
+
+    // A path that fits carries no marker, which is the other half of the edge the deep leg reads.
+    assert!(
+      !path.to_string().contains(ELIDED) && !format!("{path:?}").contains(ELIDED),
+      "a path of exactly {INLINE_SEGMENTS} segments rendered as though it had been cut"
+    );
   });
 
-  // One segment further down, the window is not enough and the buffer is taken — which is what
-  // shows the reading above is the window's doing and not the counter's silence.
+  // One segment further down. The allocator is still untouched — that is the repair — so the
+  // window's width is read off the rendering instead.
   with_response(OVERFLOWS_THE_WINDOW, |response| {
     let error = response.errors().next().expect("the one error");
     let path = error.path();
@@ -692,99 +715,222 @@ fn printing_a_path_that_fits_the_window_does_not_reach_the_allocator() {
     let mut display = Silent::new();
     let before = allocations();
     write!(display, "{path}").expect("a sink that cannot fail");
-    let cost = allocations() - before;
+    let display_cost = allocations() - before;
 
-    assert!(
-      cost >= 1,
-      "a path one segment past the window printed without going to the allocator, so the window \
-       is not {INLINE_SEGMENTS} segments wide and the gate above is measuring something else"
+    let mut debug = Silent::new();
+    let before = allocations();
+    write!(debug, "{path:?}").expect("a sink that cannot fail");
+    let debug_cost = allocations() - before;
+
+    assert_eq!(
+      (display_cost, debug_cost),
+      (0, 0),
+      "a path one segment past the window went to the allocator {display_cost} times to print and \
+       {debug_cost} times to debug"
     );
 
-    // And the *other* branch turns the chain around too. Nothing above reaches it —
-    // `the_segments_come_back_outermost_first` renders a four-segment path, which is the window's
-    // branch — so without this the buffered one could emit innermost first and every gate here
-    // would stay green.
-    let mut innermost_first = path.ancestors().collect::<Vec<_>>();
-    innermost_first.reverse();
-    let expected = innermost_first
-      .iter()
-      .map(|segment| match segment {
-        Segment::Field(name) => (*name).to_string(),
-        Segment::Index(index) => index.to_string(),
-      })
-      .collect::<Vec<_>>()
-      .join(".");
+    // What the truncation KEEPS, in the order it keeps it, and where the marker sits.
+    //
+    // This assertion used to be a parity check: there were two walks, the window's and a buffered
+    // one, and every pre-existing ordering fixture rendered a four-segment path through the first.
+    // **The two walks are one walk now**, so it is no longer covering a second implementation and
+    // saying so is the point — what it covers instead is which END of a deep path survives
+    // (the innermost, which is the end that names the field), that the survivors still come out
+    // outermost first, and that the marker stands where the dropped ones were.
+    let mut expected = String::from(ELIDED);
+    for _ in 0..INLINE_SEGMENTS - 1 {
+      expected.push_str(".n");
+    }
+    expected.push_str(".x");
     assert_eq!(
       path.to_string(),
       expected,
-      "the buffered branch rendered a path in a different order from the chain it walked"
+      "a path one segment past the window did not render as its innermost {INLINE_SEGMENTS} \
+       segments behind a marker"
     );
   });
 }
 
 /// The size at and above which the fixtures below make the allocator answer with null.
 ///
-/// Wide enough to exclude anything the harness does incidentally and narrow enough to catch a
-/// buffer for a path one segment past the window: 33 [`Segment`]s is 528 bytes.
-const REFUSE_BYTES: usize = 512;
+/// Between the two quantities the fixture has to separate, with a doubling of margin on each side.
+/// **Below it**: everything `format!` and `ToString` allocate for an *answer*, which the window now
+/// caps — the longest rendering below is 67 bytes and a `String` grown from nothing reaches it in
+/// requests of at most 128. **At or above it**: the path buffer for a path one segment past the
+/// window, which is 33 [`Segment`]s and therefore exactly 528 bytes, and which is the one
+/// allocation the fixture is about.
+const REFUSE_BYTES: usize = 256;
 
-/// A path too deep for the window refuses at every door rather than aborting the process.
+/// A path too deep for the window is **truncated**, because a formatter has no refusal to give.
 ///
-/// # Three doors, because the defect was the belief that one of them did not count
+/// # `fmt::Error` is a claim about the sink, and this one would have been false
 ///
-/// [`Path::try_iter`] is the door a caller iterating a path takes, and it can hand back a
-/// [`TryReserveError`](std::collections::TryReserveError). [`Debug`](core::fmt::Debug) and
-/// [`Display`](core::fmt::Display) are the doors a *log line* takes, and what they have is
-/// [`fmt::Error`](core::fmt::Error) — which `write!` propagates and `format!` turns into a panic,
-/// both of which a server survives and neither of which is the process-wide allocation handler.
+/// The round before this one gave [`Debug`](core::fmt::Debug) and [`Display`](core::fmt::Display) a
+/// fallible buffer past the window and answered a refusal with
+/// [`fmt::Error`](core::fmt::Error). `core` reserves that error for a failure the
+/// [`Formatter`](core::fmt::Formatter) itself reported — string formatting is otherwise infallible
+/// — so `format!` ends in `.expect("a formatting trait implementation returned an error when the
+/// underlying stream did not")` and `ToString` in `.expect("a Display implementation returned an
+/// error unexpectedly")`. Manufacturing the error therefore turned an allocation failure into a
+/// **panic in the caller**, which is the abort of two rounds ago wearing a different coat.
 ///
-/// Each door is read twice, armed and unarmed, so that the refusal is a difference and not an
-/// absolute: a door that failed for some other reason would fail both times.
+/// So this reads the repair rather than a refusal: under an allocator that says no, both formatters
+/// *return*, truncated and marked. Four renderings, because the change to the representation
+/// propagates into everything that embeds one and the two nested `Debug`s are not reachable from
+/// each other: [`Error`](crate::Error) exists only once the response is finished and
+/// [`FieldRequest`](crate::FieldRequest) only before it is.
+///
+/// [`Path::try_iter`] is the one door that still refuses, and it is read under the *same* threshold
+/// so that the refusal is a difference rather than an absence — a threshold that stopped nothing
+/// would leave every reading here green for the wrong reason.
+///
+/// # Why the propagating door is read before the two that `expect`
+///
+/// Because a regression has to fail *legibly*. Restoring the manufactured error and running the
+/// `format!` leg first was measured: it panics, the panic machinery asks for 1 792 bytes, the armed
+/// allocator refuses that too, and the binary dies inside `handle_alloc_error` — under `cargo test`
+/// that hangs the harness rather than failing it. `write!` into a sink *propagates* the error
+/// instead of expecting on it, so putting that window first turns the same regression into a plain
+/// assertion failure and the `format!` window is never reached.
 #[test]
-fn a_path_past_the_window_refuses_at_every_door() {
+fn a_path_past_the_window_is_truncated_rather_than_answering_fmt_error() {
   use core::fmt::Write as _;
 
-  with_response(OVERFLOWS_THE_WINDOW, |response| {
-    let error = response.errors().next().expect("the one error");
-    let path = error.path();
+  let query = chain(OVERFLOWS_THE_WINDOW);
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(SDL)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("the SDL is a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(&query)
+  .expect("the chain parses");
 
-    // Unarmed: every door answers. Without this the readings below could be a path that does not
-    // reach the buffer at all.
-    let mut sink = Silent::new();
-    assert!(write!(sink, "{path}").is_ok());
-    assert!(write!(sink, "{path:?}").is_ok());
-    assert!(path.try_iter().is_ok());
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
 
-    // Armed, one door at a time, with nothing between arming and disarming that could panic — the
-    // panic machinery allocates, and a panic inside the window meets a refusal while it is being
-    // handled.
-    let mut display = Silent::new();
-    refuse_allocations_of_at_least(REFUSE_BYTES);
-    let display_answer = write!(display, "{path}");
-    allow_allocations();
+  // The mid-flight door. A `FieldRequest` renders its path inside its own output the way an `Error`
+  // does, and it is handed out *before* the value is resolved, so it cannot be reached from the
+  // finished response below.
+  let mut request_answer = Err(core::fmt::Error);
+  let mut request_rendering = String::new();
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    if request.name() == "x" {
+      // Armed with nothing between arming and disarming that could panic — the panic machinery
+      // allocates, so a panic inside the window meets a refusal while the first one is handled.
+      let mut sink = Silent::new();
+      refuse_allocations_of_at_least(REFUSE_BYTES);
+      request_answer = write!(sink, "{request:?}");
+      allow_allocations();
+      request_rendering = format!("{request:?}");
+      executor.handle_field_error(id, "the resolver is degraded");
+    } else {
+      executor.handle_resolved(&mut space, id, Value::Obj);
+    }
+    while executor.poll_abandoned().is_some() {}
+  }
 
-    let mut debug = Silent::new();
-    refuse_allocations_of_at_least(REFUSE_BYTES);
-    let debug_answer = write!(debug, "{path:?}");
-    allow_allocations();
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let error = response.errors().next().expect("the one error");
+  let path = error.path();
+  assert_eq!(path.len(), INLINE_SEGMENTS + 1);
 
-    refuse_allocations_of_at_least(REFUSE_BYTES);
-    let iter_answer = path.try_iter();
-    allow_allocations();
+  // First window: the door that propagates. Under the plant every one of these is `Err` and the
+  // assertions below fire before anything reaches an `expect`.
+  let mut sink = Silent::new();
+  refuse_allocations_of_at_least(REFUSE_BYTES);
+  let display_answer = write!(sink, "{path}");
+  let debug_answer = write!(sink, "{path:?}");
+  let error_answer = write!(sink, "{error:?}");
+  allow_allocations();
 
-    assert!(
-      display_answer.is_err(),
-      "`Display` served a path the allocator refused room for"
-    );
-    assert!(
-      debug_answer.is_err(),
-      "`Debug` served a path the allocator refused room for"
-    );
-    assert!(
-      iter_answer.is_err(),
-      "`try_iter` served a path the allocator refused room for"
-    );
-  });
+  assert_eq!(
+    (display_answer, debug_answer, error_answer, request_answer),
+    (Ok(()), Ok(()), Ok(()), Ok(())),
+    "a formatter answered `fmt::Error` for a path the allocator refused room for, which is an \
+     error `core` reserves for a failure the sink reported"
+  );
+
+  // Second window: the two spellings that turn an answered `fmt::Error` into a panic, and the one
+  // door that still has a refusal to give.
+  refuse_allocations_of_at_least(REFUSE_BYTES);
+  let displayed = format!("{path}");
+  let stringified = path.to_string();
+  let refused_iter = path.try_iter().is_err();
+  allow_allocations();
+
+  // `{:?}`'s own answer is 389 bytes and needs a 512-byte `String` to hold it, which is *larger*
+  // than the 528-byte buffer under test — so no threshold separates the two and this one is
+  // rendered unarmed. Nothing is lost: `Debug` was read armed above through a sink that cannot
+  // allocate, which is the stronger reading, and a `Debug` that returns `Ok` under refusal has
+  // nothing for `format!` to `expect` on.
+  let debugged = format!("{path:?}");
+
+  assert!(
+    refused_iter,
+    "`try_iter` served a path the allocator refused room for, so the threshold stopped nothing and \
+     every reading here is green for the wrong reason"
+  );
+
+  // What `{}` produces, exactly: the marker, then the innermost `INLINE_SEGMENTS` segments in
+  // §7.1.2's order. The chain fails its leaf `x` under a run of `n`s, so the survivors are the last
+  // of those and the leaf.
+  let mut expected = String::from(ELIDED);
+  for _ in 0..INLINE_SEGMENTS - 1 {
+    expected.push_str(".n");
+  }
+  expected.push_str(".x");
+  assert_eq!(
+    displayed, expected,
+    "`Display` did not truncate a path the allocator refused room for"
+  );
+  assert_eq!(
+    stringified, expected,
+    "`ToString` and `{{}}` rendered the same path differently"
+  );
+
+  // And what `{:?}` produces, exactly. The marker is a bare `…` rather than a quoted one, so it is
+  // not even shaped like the `Field("…")` no `Segment` could render as in the first place.
+  let mut expected_debug = format!("[{ELIDED}");
+  for _ in 0..INLINE_SEGMENTS - 1 {
+    expected_debug.push_str(", Field(\"n\")");
+  }
+  expected_debug.push_str(", Field(\"x\")]");
+  assert_eq!(
+    debugged, expected_debug,
+    "`Debug` did not truncate a path the allocator refused room for"
+  );
+
+  // The two nested renderings carry the truncated path, and carry it where their own field says.
+  assert_eq!(
+    format!("{error:?}"),
+    format!(
+      "Error {{ kind: {:?}, path: {expected_debug}, locations: {:?} }}",
+      error.kind(),
+      error.locations()
+    ),
+    "`Error`'s `Debug` did not render the truncated path in its `path` field"
+  );
+  assert!(
+    request_rendering.starts_with("FieldRequest {")
+      && request_rendering.contains(&format!("path: {expected_debug}")),
+    "`FieldRequest`'s `Debug` rendered {request_rendering}"
+  );
 }
 
 /// The shallow reading of the response-tree formatter, and the deep one.
