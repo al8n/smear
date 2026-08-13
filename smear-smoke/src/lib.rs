@@ -640,14 +640,24 @@ pub fn test_support_scaffolding() {
   >();
 }
 
-/// `materialized-numbers` — the value productions whose `Int` and `Float` leaves are `i64` and
-/// `f64`, reached across the dependency edge.
+/// `materialized-numbers` — the value productions whose `Int` and `Float` leaves carry a number
+/// instead of a source slice, reached across the dependency edge **at both widths**.
 ///
-/// Both halves of the feature are named on purpose. `ast::materialized` is the alias set, so
+/// Both halves of the feature are named on purpose. `ast::materialized` is the type set, so
 /// naming the return type proves the type path resolves; `syntactic::value::materialized::value`
 /// is the production, so calling it proves the parser half compiles. With the feature off,
 /// neither module exists and this function does not resolve.
-pub fn materialized_numbers(src: &str) -> Option<(i64, f64)> {
+///
+/// **Generic over `I` rather than fixed at `i64`, which is what the feature actually ships.** One
+/// feature gates one tree at two readings of draft §3.5.1, and a door that only ever named the
+/// permissive one described half of it: `materialized32` could have been deleted from the crate
+/// and this probe would not have noticed. It notices now — `I` is bound by the parser's own
+/// `MaterialisedInt`, so this signature stops compiling if the trait, the seal or either impl
+/// goes, and the caller below runs it at `i32` and at `i64`.
+pub fn materialized_numbers<I>(src: &str) -> Option<(I, f64)>
+where
+  I: smear::parser::graphql::syntactic::value::materialized::MaterialisedInt + Copy,
+{
   use smear::parser::graphql::{
     GraphQL,
     ast::materialized::InputValue,
@@ -655,13 +665,13 @@ pub fn materialized_numbers(src: &str) -> Option<(i64, f64)> {
     syntactic::{GraphqlLexer, value::materialized},
   };
 
-  let parsed: InputValue<&str> = Parser::with_parser::<
+  let parsed: InputValue<&str, I> = Parser::with_parser::<
     GraphqlLexer<'_, str>,
-    InputValue<&str>,
+    InputValue<&str, I>,
     GraphqlErrors<&str>,
     _,
     GraphQL,
-  >(materialized::value)
+  >(materialized::value::<_, _, I>)
   .parse_str(src)
   .ok()?;
 
@@ -715,8 +725,8 @@ pub mod value_variant_namespace {
 /// | 1 | nominal identity — the name is an `enum` item, not an alias | [`value_variant_namespace`] |
 /// | 2 | variant namespace — `use Enum::{V}` and `use Enum::*` | [`value_variant_namespace`] |
 /// | 3 | arity | `arities` |
-/// | 4 | parameter positions | the eight element-type pins |
-/// | 5 | inference at variant construction | the four unannotated `let`s |
+/// | 4 | parameter positions | the twelve element-type pins |
+/// | 5 | inference at variant construction | the six `let`s, unannotated where a variant names the parameter |
 /// | 6 | qualified patterns, exhaustive with no wildcard | `exhaustive` |
 /// | 7 | not `#[non_exhaustive]` — an out-of-crate exhaustive match compiles | `exhaustive` |
 /// | 8 | derive output — `Debug`, `Clone`, `PartialEq`, `IsVariant`, `Unwrap`, `TryUnwrap` | `derives` |
@@ -733,11 +743,22 @@ pub mod value_variant_namespace {
 /// set. `ErrorData`'s list is smear's, which is why it carries `#[non_exhaustive]` deliberately and
 /// is probed by [`error_data_variant_tag`] instead of by an exhaustive match.
 ///
-/// # Why every axis is crossed with the tree
+/// # Why every axis is crossed with the tree, and now with the width
 ///
 /// There are two value trees and each promises all twelve separately, so a probe that read only
 /// the slice side would be half a gate. The containers are empty on purpose — the property is the
 /// type each expression *has*, and a populated `Vec` would be testing the parser.
+///
+/// **The materialised tree took a second parameter, so the axes that can see one are crossed with
+/// it too.** `I` is the integer width, and the properties it can break are not the ones `S` can:
+/// row 3 is about arity, which changed; row 4 is about *positions*, and inserting `I` ahead of
+/// `Container` is precisely the reinterpretation an earlier draft of this axis committed on
+/// `ast::InputValue` and this probe caught. So the eight container pins below are written at both
+/// widths, and each names `Container` in the argument slot it has always been in — if `I` were
+/// ever given a default, `List<S, Own<…>>` would bind `Own<…>` to the payload and these lines
+/// would stop compiling, which is the check standing in for a defaulted parameter's silence.
+/// Rows 1, 2 and 6–12 do not depend on `I` beyond needing it named, and are crossed with it where
+/// that is free.
 pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
   use smear::{
     lexer::tokora::SimpleSpan,
@@ -761,16 +782,21 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
     }
   }
 
-  /// Every value alias that takes no `Container`, named at the one parameter it has always taken.
+  /// Every value alias that takes no `Container`, named at exactly the parameters it publishes.
   ///
-  /// A payload parameter added back to any of them *without* a default is `E0107` here. Added
-  /// *with* one it is invisible here, and harmless: none of these takes a `Container` argument
-  /// for a new parameter to displace, and the four enum spellings among them are covered by the
-  /// constructions below, which defaults do not rescue.
+  /// **The slice tuple is the one that must not move.** A payload parameter added to any of those
+  /// five *without* a default is `E0107` here; that is the shape an earlier draft of the
+  /// materialisation axis had, and this line is where it failed.
+  ///
+  /// The materialised tuple names two parameters because the tree takes two — `S` and the integer
+  /// width — and `IntValue<I>` beside a `FloatValue` that takes none is the arity reading off the
+  /// declaration that the width reaches the integer leaf and stops there. A width parameter
+  /// silently added to `FloatValue`, or silently removed from `IntValue`, is `E0107` on these
+  /// lines.
   ///
   /// The two tuples are the census, so their length is the point rather than a smell.
   #[allow(clippy::type_complexity)]
-  fn arities<S>(
+  fn arities<S, I>(
     _slice: Option<(
       InputValue<S>,
       ConstInputValue<S>,
@@ -779,18 +805,19 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
       DefaultInputValue<S>,
     )>,
     _materialized: Option<(
-      materialized::InputValue<S>,
-      materialized::ConstInputValue<S>,
-      materialized::ObjectField<S>,
-      materialized::ConstObjectField<S>,
-      materialized::DefaultInputValue<S>,
-      materialized::IntValue,
+      materialized::InputValue<S, I>,
+      materialized::ConstInputValue<S, I>,
+      materialized::ObjectField<S, I>,
+      materialized::ConstObjectField<S, I>,
+      materialized::DefaultInputValue<S, I>,
+      materialized::IntValue<I>,
       materialized::FloatValue,
     )>,
   ) {
   }
 
-  arities::<&str>(None, None);
+  arities::<&str, i32>(None, None);
+  arities::<&str, i64>(None, None);
 
   // ── Inference: a variant built with no annotation, once per enum per alias set ────────────
   let parsed_string = Parser::with_parser::<
@@ -811,11 +838,25 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
   let const_value = ConstInputValue::String(parsed_string.clone());
   constructions += usize::from(const_value.is_string());
 
-  let materialized_value = materialized::InputValue::String(parsed_string.clone());
+  // At the materialised tree, `String` mentions neither parameter, so both come from inference:
+  // `S` from the argument and `I` from the annotation these two carry. That is the honest shape —
+  // a variant that names no payload cannot infer a payload — and it is what a defaulted `I` would
+  // have hidden.
+  let materialized_value: materialized::InputValue<&str, i64> =
+    materialized::InputValue::String(parsed_string.clone());
   constructions += usize::from(materialized_value.is_string());
 
-  let materialized_const_value = materialized::ConstInputValue::String(parsed_string);
+  let materialized_value_32: materialized::InputValue<&str, i32> =
+    materialized::InputValue::String(parsed_string.clone());
+  constructions += usize::from(materialized_value_32.is_string());
+
+  let materialized_const_value: materialized::ConstInputValue<&str, i64> =
+    materialized::ConstInputValue::String(parsed_string.clone());
   constructions += usize::from(materialized_const_value.is_string());
+
+  let materialized_const_value_32: materialized::ConstInputValue<&str, i32> =
+    materialized::ConstInputValue::String(parsed_string);
+  constructions += usize::from(materialized_const_value_32.is_string());
 
   // ── Position: `Container` is the second argument, on both sides ───────────────────────────
   let span = SimpleSpan::new(0, 0);
@@ -837,29 +878,42 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
   let _: &[ConstObjectField<&str>] = const_object.fields();
   positions += 1;
 
-  let materialized_list =
-    materialized::List::<&str, Own<materialized::InputValue<&str>>>::new(span, Own(Vec::new()));
-  let _: &[materialized::InputValue<&str>] = materialized_list.values();
-  positions += 1;
+  // `Container` is the argument AFTER the width on the materialised aliases, and these four are
+  // written at both widths because that is where a positional mistake shows. `Own<…>` in the
+  // third slot is only `Own<…>` while `I` is named in the second; a defaulted `I` would bind it
+  // to the payload instead, which is the silent reinterpretation this probe exists to refuse.
+  fn materialized_positions<I>(span: SimpleSpan) -> usize {
+    let list = materialized::List::<&str, I, Own<materialized::InputValue<&str, I>>>::new(
+      span,
+      Own(Vec::new()),
+    );
+    let _: &[materialized::InputValue<&str, I>] = list.values();
 
-  let materialized_object =
-    materialized::Object::<&str, Own<materialized::ObjectField<&str>>>::new(span, Own(Vec::new()));
-  let _: &[materialized::ObjectField<&str>] = materialized_object.fields();
-  positions += 1;
+    let object = materialized::Object::<&str, I, Own<materialized::ObjectField<&str, I>>>::new(
+      span,
+      Own(Vec::new()),
+    );
+    let _: &[materialized::ObjectField<&str, I>] = object.fields();
 
-  let materialized_const_list = materialized::ConstList::<
-    &str,
-    Own<materialized::ConstInputValue<&str>>,
-  >::new(span, Own(Vec::new()));
-  let _: &[materialized::ConstInputValue<&str>] = materialized_const_list.values();
-  positions += 1;
+    let const_list =
+      materialized::ConstList::<&str, I, Own<materialized::ConstInputValue<&str, I>>>::new(
+        span,
+        Own(Vec::new()),
+      );
+    let _: &[materialized::ConstInputValue<&str, I>] = const_list.values();
 
-  let materialized_const_object = materialized::ConstObject::<
-    &str,
-    Own<materialized::ConstObjectField<&str>>,
-  >::new(span, Own(Vec::new()));
-  let _: &[materialized::ConstObjectField<&str>] = materialized_const_object.fields();
-  positions += 1;
+    let const_object =
+      materialized::ConstObject::<&str, I, Own<materialized::ConstObjectField<&str, I>>>::new(
+        span,
+        Own(Vec::new()),
+      );
+    let _: &[materialized::ConstObjectField<&str, I>] = const_object.fields();
+
+    4
+  }
+
+  positions += materialized_positions::<i64>(span);
+  positions += materialized_positions::<i32>(span);
 
   // ── Patterns, exhaustiveness, and the absence of `#[non_exhaustive]` ─────────────────────
   //
@@ -880,7 +934,9 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
     }
   }
 
-  fn exhaustive_materialized(value: &materialized::InputValue<&str>) -> u8 {
+  // Generic over the width, so the exhaustiveness claim is about the declaration and not about
+  // one instantiation of it.
+  fn exhaustive_materialized<I>(value: &materialized::InputValue<&str, I>) -> u8 {
     match value {
       materialized::InputValue::Variable(_) => 0,
       materialized::InputValue::Boolean(_) => 1,
@@ -895,7 +951,10 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
   }
 
   // ── Derive output and the two hand-written span impls ────────────────────────────────────
-  fn derives(value: &InputValue<&str>, materialized: &materialized::InputValue<&str>) -> bool {
+  fn derives<I: Clone + PartialEq + core::fmt::Debug>(
+    value: &InputValue<&str>,
+    materialized: &materialized::InputValue<&str, I>,
+  ) -> bool {
     use smear::lexer::tokora::span::{AsSpan, IntoSpan};
 
     let _ = format!("{value:?}{materialized:?}");
@@ -914,19 +973,23 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
     text: StringValue<&'static str>,
   ) -> (
     InputValue<&'static str>,
-    materialized::InputValue<&'static str>,
+    materialized::InputValue<&'static str, i64>,
+    materialized::InputValue<&'static str, i32>,
   ) {
     (
       InputValue::<&'static str>::String(text.clone()),
-      materialized::InputValue::<&'static str>::String(text),
+      materialized::InputValue::<&'static str, i64>::String(text.clone()),
+      materialized::InputValue::<&'static str, i32>::String(text),
     )
   }
 
   let _ = (
     exhaustive(&value),
     exhaustive_materialized(&materialized_value),
+    exhaustive_materialized(&materialized_value_32),
   );
   assert!(derives(&value, &materialized_value));
+  assert!(derives(&value, &materialized_value_32));
   let _ = turbofish;
 
   (constructions, positions)
@@ -948,7 +1011,12 @@ impl ValueDepth for smear::parser::graphql::ast::InputValue<&str> {
   }
 }
 
-impl ValueDepth for smear::parser::graphql::ast::materialized::InputValue<&str> {
+/// Row 12 at the materialised tree, and **one `impl` covering every width**.
+///
+/// A blanket over `I` is what a downstream can only write if the width is a parameter on one
+/// `enum`; against two enums it would have taken two impls, which is the duplication this axis
+/// pushed out one crate at a time.
+impl<I> ValueDepth for smear::parser::graphql::ast::materialized::InputValue<&str, I> {
   fn depth(&self) -> usize {
     1
   }
@@ -1079,16 +1147,33 @@ mod tests {
   /// leaf carries: a probe that only type-checked would pass against a parser that returned
   /// `Default::default()` for both.
   #[test]
-  fn the_materialized_numbers_door_carries_the_converted_payloads() {
+  fn the_materialized_numbers_door_carries_the_converted_payloads_at_both_widths() {
     assert_eq!(
-      super::materialized_numbers("[-7, 1.5e2]"),
-      Some((-7, 150.0))
+      super::materialized_numbers::<i64>("[-7, 1.5e2]"),
+      Some((-7_i64, 150.0))
+    );
+    assert_eq!(
+      super::materialized_numbers::<i32>("[-7, 1.5e2]"),
+      Some((-7_i32, 150.0))
     );
 
-    // The documented bound: a literal that is valid GraphQL and outside `i64` is refused here,
-    // where the slice parser above accepts it.
+    // The documented bound: a literal that is valid GraphQL and outside the width is refused
+    // here, where the slice parser above accepts it. The literal that separates the two widths is
+    // the interesting one — refused at the width draft §3.5.1 specifies and carried at the other,
+    // which is the whole reason one feature ships two readings.
     assert_eq!(
-      super::materialized_numbers("[99999999999999999999999999, 1.0]"),
+      super::materialized_numbers::<i64>("[2147483648, 1.0]"),
+      Some((2_147_483_648_i64, 1.0))
+    );
+    assert_eq!(super::materialized_numbers::<i32>("[2147483648, 1.0]"), None);
+
+    // And past both.
+    assert_eq!(
+      super::materialized_numbers::<i64>("[99999999999999999999999999, 1.0]"),
+      None
+    );
+    assert_eq!(
+      super::materialized_numbers::<i32>("[99999999999999999999999999, 1.0]"),
       None
     );
     assert!(super::graphql_parser("{ f(x: 99999999999999999999999999) }").is_ok());
@@ -1102,21 +1187,29 @@ mod tests {
   /// does not build", and the two counts are what stop a probe from being deleted quietly.
   #[test]
   fn the_value_types_are_source_equivalent_on_every_axis() {
+    // 6 constructions = 2 slice enums + the materialised pair at each of the two widths.
+    // 12 container pins = 4 slice aliases + 4 materialised ones at each width. Both counts moved
+    // when the width became a parameter, and they moved because the probe started crossing the
+    // axes that can see one; update either only after checking which.
     assert_eq!(
       super::value_parameters_are_source_compatible("\"probe\""),
-      (4, 8)
+      (6, 12)
     );
 
     // The namespace probe is a `use`, so it is compiled rather than run; naming one item from
     // each tree is what keeps a broken import from being dead code the compiler tolerates.
     let _: fn(_) -> smear::parser::graphql::ast::InputValue<&'static str> =
       super::value_variant_namespace::Int;
-    // The materialised `Int` payload is `i64`, which mentions no `S`, so the tree parameter has
-    // to come from the annotation. That is materialisation's own consequence and not the alias
-    // defect: the slice `Int` above needs none.
-    let _: fn(_) -> smear::parser::graphql::ast::materialized::InputValue<&'static str> =
+    // The materialised `Int` payload mentions no `S`, so the tree parameters have to come from
+    // the annotation. That is materialisation's own consequence and not the alias defect: the
+    // slice `Int` above needs none. Both widths, because a variant import that resolved at one
+    // and not the other would mean the import had stopped being an `enum` variant.
+    let _: fn(_) -> smear::parser::graphql::ast::materialized::InputValue<&'static str, i64> =
+      super::value_variant_namespace::materialized::Int;
+    let _: fn(_) -> smear::parser::graphql::ast::materialized::InputValue<&'static str, i32> =
       super::value_variant_namespace::materialized::Int;
     let _ = <smear::parser::graphql::ast::InputValue<&str> as super::ValueDepth>::depth;
+    let _ = <smear::parser::graphql::ast::materialized::InputValue<&str, i32> as super::ValueDepth>::depth;
   }
 
   /// `ErrorData`'s variant set, from outside the crate: every variant named, every variant
