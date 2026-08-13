@@ -46,10 +46,21 @@
 //! walk that stops at the first position whose type is nullable, which is draft §6.4.4 read
 //! literally, including its list clause: `[String!]` puts `String!` on every element slot, so one
 //! null element propagates to the list, and `[String]` does not.
+//!
+//! # Every link points up, and draft §7.1.2 reads down
+//!
+//! One `parent` per slot is all the upward structure there is, and it is all §6.4.4 needs. But
+//! §7.1.2's `path` is the same chain read the other way, and a tree that can only be climbed has
+//! no cheap way to be descended: whoever wants the specified order has to reverse the chain, and
+//! reversing it *per segment* is quadratic in the depth. [`Path`]'s own header says what this
+//! module does about that, and why the answer is three entries on it rather than one.
 
 use core::fmt;
 
 use smear_schema::{PackedType, TypeId};
+
+#[cfg(all(test, feature = "std"))]
+mod tests;
 
 /// The sentinel for "no such slot".
 pub(super) const NONE: u32 = u32::MAX;
@@ -210,69 +221,137 @@ impl fmt::Display for Segment<'_> {
 ///
 /// Derived from the response tree rather than stored: an error records the slot it happened at and
 /// the path is the chain of keys from the root down to it. That is not only cheaper — nothing is
-/// allocated per error — it is also the only way the path can be *right*. A path assembled while
-/// descending would have to be copied at every field, and the copy is where implementations lose a
-/// list index.
-#[derive(Clone)]
+/// allocated when the error is *recorded* — it is also the only way the path can be *right*. A path
+/// assembled while descending would have to be copied at every field, and the copy is where
+/// implementations lose a list index.
+///
+/// # The links point up, so the turn-around happens here and it happens once
+///
+/// A path is *discovered* innermost-first. A slot's `parent` is the only link along it — there is
+/// no "which child leads to this slot" to follow downwards — and draft §7.1.2 wants the other order.
+/// Something therefore has to reverse the chain, and the only reversal that is not quadratic is one
+/// that walks it **once**, into a buffer.
+///
+/// That is why the surface below is three entries rather than one, and each of them is a different
+/// answer to "whose buffer":
+///
+/// | | order | per segment | buffer |
+/// |---|---|---|---|
+/// | [`ancestors`](Path::ancestors) | innermost first | one parent link | none |
+/// | [`collect_into`](Path::collect_into) | outermost first | one parent link | the caller's, reused across a whole response |
+/// | [`iter`](Path::iter) | outermost first | one parent link | its own, one per call |
+///
+/// **There is deliberately no random accessor.** `get(i)` over upward links costs the depth per
+/// call, so the `0..len()` loop every caller eventually writes over it is exactly the quadratic
+/// this section exists to remove — and an accessor whose only non-quadratic use is a single call is
+/// not an accessor. It existed, unused, and its shape was the shape the defect took.
 pub struct Path<'r, V> {
-  pub(super) slots: &'r [Slot<V>],
-  pub(super) names: &'r [u8],
-  pub(super) name_spans: &'r [(u32, u32)],
-  pub(super) slot: u32,
+  slots: &'r [Slot<V>],
+  names: &'r [u8],
+  name_spans: &'r [(u32, u32)],
+  slot: u32,
 }
 
-impl<V> Path<'_, V> {
+// Written out rather than derived, for the reason [`Children`]'s is: a derive would demand
+// `V: Clone` for a type that holds no `V`, only a shared slice of slots that happen to contain
+// some. The driver's value is never cloned here and never could be.
+impl<V> Clone for Path<'_, V> {
+  #[inline]
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
+impl<V> Copy for Path<'_, V> {}
+
+impl<'r, V> Path<'r, V> {
+  /// The path of the position at `slot`.
+  #[inline]
+  pub(super) const fn new(
+    slots: &'r [Slot<V>],
+    names: &'r [u8],
+    name_spans: &'r [(u32, u32)],
+    slot: u32,
+  ) -> Self {
+    Self {
+      slots,
+      names,
+      name_spans,
+      slot,
+    }
+  }
+
   /// Returns the number of segments.
+  ///
+  /// One parent link per segment and no buffer: counting a chain does not need it turned around.
   pub fn len(&self) -> usize {
-    self.iter().count()
+    self.ancestors().count()
   }
 
   /// Returns whether the path is empty, which happens only at the root.
+  ///
+  /// One slot, whatever the depth — the root is the only position with no segment, so the question
+  /// is about this position and not about the chain above it.
   #[inline]
   pub fn is_empty(&self) -> bool {
-    self.iter().next().is_none()
+    self.slot == NONE || matches!(self.at(self.slot).key, Key::Root)
+  }
+
+  /// Returns the segments, innermost first — the direction the tree's links point.
+  ///
+  /// One parent link per step and nothing allocated, which is what makes this the primitive the
+  /// other two are written over. A caller writing draft §7.1.2's `path` wants one of those, since
+  /// this is the reverse of the order §7.1.2 specifies; a caller *asking* something of the path —
+  /// which field this error is under, how deep it is — wants this one, and stops as soon as it has
+  /// the answer.
+  #[inline]
+  pub fn ancestors(&self) -> Ancestors<'r, V> {
+    Ancestors {
+      path: *self,
+      cursor: self.slot,
+    }
+  }
+
+  /// Collects the segments into `buf`, outermost first, and returns them.
+  ///
+  /// `buf` is cleared first and stays the caller's, which is the point: one buffer serves every
+  /// error in a response, so a serialiser writing draft §7.1.2 pays one allocation for the whole
+  /// response rather than one per path — and pays it once across responses if it keeps the buffer.
+  pub fn collect_into<'b>(&self, buf: &'b mut std::vec::Vec<Segment<'r>>) -> &'b [Segment<'r>] {
+    buf.clear();
+    buf.extend(self.ancestors());
+    buf.reverse();
+    buf
   }
 
   /// Returns the segments, outermost first.
   ///
-  /// Collected into the caller's buffer rather than returned as a lazy iterator over a reversed
-  /// walk, because the tree links point *up*: a path is discovered innermost-first and has to be
-  /// turned around. Doing that once here beats every caller doing it.
-  pub fn iter(&self) -> PathIter<'_, V> {
-    let mut depth = 0;
-    let mut cursor = self.slot;
-    while cursor != NONE && !matches!(self.slots[cursor as usize].key, Key::Root) {
-      depth += 1;
-      cursor = self.slots[cursor as usize].parent;
-    }
+  /// The chain is walked once, into a buffer this iterator owns — see the type's header for why
+  /// there is a buffer at all. A caller with more than one path to write wants
+  /// [`collect_into`](Path::collect_into), which lends its own instead of allocating one per call.
+  pub fn iter(&self) -> PathIter<'r> {
+    let mut segments = std::vec::Vec::new();
+    self.collect_into(&mut segments);
     PathIter {
-      path: self,
-      depth,
-      next: 0,
+      segments: segments.into_iter(),
     }
   }
 
-  /// Returns the segment at `index`, counted from the outermost.
-  pub fn get(&self, index: usize) -> Option<Segment<'_>> {
-    let mut stack = self.slot;
-    let mut depth = 0usize;
-    while stack != NONE && !matches!(self.slots[stack as usize].key, Key::Root) {
-      depth += 1;
-      stack = self.slots[stack as usize].parent;
-    }
-    if index >= depth {
-      return None;
-    }
-    // Walk up `depth - 1 - index` times to land on the requested segment.
-    let mut cursor = self.slot;
-    for _ in 0..(depth - 1 - index) {
-      cursor = self.slots[cursor as usize].parent;
-    }
-    self.segment(cursor)
+  /// Reads one slot, and records the traversal.
+  ///
+  /// **The only way this file reaches a slot while deriving a path**, which is what makes
+  /// `traversals` a measurement of the derivation rather than of whichever walk someone remembered
+  /// to instrument. The field it reads is private to this module for the same reason.
+  #[inline]
+  fn at(&self, index: u32) -> &'r Slot<V> {
+    traverse();
+    &self.slots[index as usize]
   }
 
-  fn segment(&self, slot: u32) -> Option<Segment<'_>> {
-    match self.slots[slot as usize].key {
+  /// Turns one position's key into its segment. The root has none.
+  #[inline]
+  fn segment(&self, key: Key) -> Option<Segment<'r>> {
+    match key {
       Key::Root => None,
       Key::Index(index) => Some(Segment::Index(index)),
       Key::Field(name) => Some(Segment::Field(interned(self.names, self.name_spans, name))),
@@ -300,36 +379,122 @@ impl<V> fmt::Display for Path<'_, V> {
   }
 }
 
-/// The segments of a [`Path`], outermost first.
-pub struct PathIter<'r, V> {
-  path: &'r Path<'r, V>,
-  depth: usize,
-  next: usize,
+/// The segments of a [`Path`], innermost first.
+///
+/// One `parent` link per step, which is the whole of its cost: the chain is walked forwards and
+/// never restarted, so consuming the iterator costs the depth and not its square.
+pub struct Ancestors<'r, V> {
+  path: Path<'r, V>,
+  /// The position whose key is the next segment, or [`NONE`] once the root has been reached.
+  cursor: u32,
 }
 
-impl<'r, V> Iterator for PathIter<'r, V> {
+impl<V> Clone for Ancestors<'_, V> {
+  #[inline]
+  fn clone(&self) -> Self {
+    Self {
+      path: self.path,
+      cursor: self.cursor,
+    }
+  }
+}
+
+impl<'r, V> Iterator for Ancestors<'r, V> {
   type Item = Segment<'r>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    if self.next >= self.depth {
+    if self.cursor == NONE {
       return None;
     }
-    let mut cursor = self.path.slot;
-    for _ in 0..(self.depth - 1 - self.next) {
-      cursor = self.path.slots[cursor as usize].parent;
-    }
-    self.next += 1;
-    self.path.segment(cursor)
+    let slot = self.path.at(self.cursor);
+    // The root carries no segment and is where the chain ends, so it retires the cursor rather
+    // than stepping it — which is also what makes this iterator fused.
+    self.cursor = match slot.key {
+      Key::Root => NONE,
+      _ => slot.parent,
+    };
+    self.path.segment(slot.key)
+  }
+}
+
+impl<V> core::iter::FusedIterator for Ancestors<'_, V> {}
+
+/// The segments of a [`Path`], outermost first.
+///
+/// Backed by the buffer [`Path::iter`] filled with one leaf-to-root walk. It is not a lazy view of
+/// the tree, and it cannot be: the links run the other way, so an iterator that held only a cursor
+/// would have to restart at the failing position for every segment it yielded.
+pub struct PathIter<'r> {
+  segments: std::vec::IntoIter<Segment<'r>>,
+}
+
+impl<'r> Iterator for PathIter<'r> {
+  type Item = Segment<'r>;
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    self.segments.next()
   }
 
   #[inline]
   fn size_hint(&self) -> (usize, Option<usize>) {
-    let remaining = self.depth - self.next;
-    (remaining, Some(remaining))
+    self.segments.size_hint()
   }
 }
 
-impl<V> ExactSizeIterator for PathIter<'_, V> {}
+impl DoubleEndedIterator for PathIter<'_> {
+  #[inline]
+  fn next_back(&mut self) -> Option<Self::Item> {
+    self.segments.next_back()
+  }
+}
+
+impl ExactSizeIterator for PathIter<'_> {}
+
+impl core::iter::FusedIterator for PathIter<'_> {}
+
+// ---------------------------------------------------------------------------------------------
+// what deriving a path costs
+// ---------------------------------------------------------------------------------------------
+
+// How many response slots a path derivation has followed, counted only when this crate's own tests
+// are built.
+//
+// ── WHY SLOTS, AND WHY A COUNTER AT ALL ───────────────────────────────────────────────────────
+//
+// The property is about *traversal* and about nothing else. Deriving a path allocates at most one
+// buffer whatever the depth, so an allocation pin is structurally incapable of seeing a walk that
+// restarts, and the emitted path is O(depth) bytes however many links were followed to produce it
+// — so neither of the two instruments this workspace already had could see the defect. Only the
+// links themselves can. A slot reached twice counts twice, because that is precisely the defect.
+//
+// `smear`'s JSON writer counts document bytes for the same reason and by the same rule; this is
+// that instrument, one crate down, where the traversal actually happens.
+//
+// **`std`, while the repair is not.** A counter shared by parallel tests has to be thread-local,
+// and `thread_local!` is `std`'s. So `cargo test -p graphql-proto --no-default-features` compiles
+// the linear derivation without the gate that measures it; every other test configuration has
+// both.
+#[cfg(all(test, feature = "std"))]
+thread_local! {
+  /// Slots a path derivation has followed on this thread.
+  static TRAVERSED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// Records that a path derivation followed one slot.
+///
+/// Compiles to nothing outside this crate's own tests.
+#[inline]
+fn traverse() {
+  #[cfg(all(test, feature = "std"))]
+  TRAVERSED.with(|traversed| traversed.set(traversed.get() + 1));
+}
+
+/// Returns how many slots path derivation has followed on this thread.
+#[cfg(all(test, feature = "std"))]
+fn traversals() -> u64 {
+  TRAVERSED.with(core::cell::Cell::get)
+}
 
 /// A completed value in the response.
 ///

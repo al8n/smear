@@ -24,9 +24,9 @@
 //! different one produces positions that point at nothing, which is why the parameter is required
 //! rather than optional: an `Option<&str>` would make silently dropping `locations` the easy path.
 //!
-//! # The two walks a remote client shapes, and what each of them runs on
+//! # The three walks a remote client shapes, and what each of them runs on
 //!
-//! Everything else in this file is proportional to the response by construction. These two are
+//! Everything else in this file is proportional to the response by construction. These three are
 //! not, because their cost is chosen by whoever wrote the query and whoever broke the resolvers:
 //!
 //! - **Every location resolved against the document.** [`Locations`] indexes the document once and
@@ -36,9 +36,21 @@
 //!   there one refusal escapes, so the walk is *staged* and performed once; here every location is
 //!   kept, so there is no single walk to defer and the document is indexed instead.
 //! - **Every container in `data`.** [`write_node`] runs on an explicit work stack.
+//! - **Every error's response path, up the response tree.** The links point the wrong way for
+//!   draft §7.1.2's order, so the chain has to be reversed; reversing it per segment is quadratic
+//!   in the depth. That reversal belongs to `graphql-proto`, which owns the links, and it is done
+//!   once per path there — [`Path::collect_into`](graphql_proto::Path::collect_into). What this
+//!   file owns is the buffer, hoisted beside [`Locations`] so that one serves the whole response.
 //!
-//! Both are stated as bounds and both are measured — see this module's `visited` counter and the
-//! gates in `super::tests` — because a cost claim settled by reading the code is an opinion.
+//! All three are stated as bounds and all three are measured — see this module's `visited` counter
+//! and the gates in `super::tests`, and `graphql-proto`'s own slot-traversal gate for the third —
+//! because a cost claim settled by reading the code is an opinion.
+//!
+//! **And it is worth saying why this file keeps attracting them.** It is the only place that
+//! touches the whole document and the whole response tree once per error, so every decision made
+//! elsewhere on the grounds that an item is cheap meets its worst case here, all at once and with
+//! the count chosen by the client. Three findings, three different mechanisms — a prefix rescan, a
+//! native recursion, and a parent-link re-walk — and none of the three was cheap by accident.
 
 use core::fmt;
 
@@ -101,9 +113,15 @@ where
     // so it is a value created here rather than inside the loop where a reader could not see the
     // difference. A response whose errors carry no locations never builds it.
     let mut locations = Locations::new(document);
+    // ONE buffer for the whole response, for the same reason and out of the same round. It is
+    // hoisted to exactly where the index is because it answers the same question about the other
+    // walk: a path is discovered leaf-first and §7.1.2 wants it root-first, so something has to
+    // hold the turned-around chain, and a `Vec` created inside the loop is an allocation per error
+    // that no assertion about the *output* could see. Empty until the first path needs it.
+    let mut segments = Vec::new();
     let mut list = root.key("errors")?.array()?;
     for error in response.errors() {
-      write_field_error(list.element()?, &error, &mut locations)?;
+      write_field_error(list.element()?, &error, &mut locations, &mut segments)?;
     }
     list.end()?;
   }
@@ -180,10 +198,14 @@ where
 ///
 /// No `extensions` on an error entry. §7.1.2 permits one and `graphql-proto` carries none, so
 /// there is nothing to write; writing an empty map would be this writer inventing an entry.
-fn write_field_error<W, V>(
+///
+/// `segments` is the caller's scratch, cleared and refilled per error — see the call site for why
+/// it is the caller's.
+fn write_field_error<'r, W, V>(
   json: &mut Json<W>,
-  error: &FieldError<'_, V>,
+  error: &FieldError<'r, V>,
   locations: &mut Locations<'_>,
+  segments: &mut Vec<Segment<'r>>,
 ) -> Result<(), Error>
 where
   W: fmt::Write,
@@ -205,11 +227,14 @@ where
     list.end()?;
   }
 
-  let path = error.path();
-  let mut segments = path.iter().peekable();
-  if segments.peek().is_some() {
+  // One climb of the response tree per error, into the buffer the caller lends, and the whole
+  // path is in hand before the first bracket is written. `graphql-proto` owns the climb because
+  // `graphql-proto` owns the links; what would be wrong here is asking it for the segments one at
+  // a time, which is a request it cannot answer in constant work.
+  let path = error.path().collect_into(segments);
+  if !path.is_empty() {
     let mut list = entry.key("path")?.array()?;
-    for segment in segments {
+    for &segment in path {
       let slot = list.element()?;
       match segment {
         Segment::Field(name) => slot.string(name)?,

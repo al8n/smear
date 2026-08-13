@@ -259,12 +259,7 @@ impl<'r, 'a, S, V> FieldRequest<'r, 'a, S, V> {
   /// own tracing and to any error it reports back.
   #[inline]
   pub fn path(&self) -> Path<'r, V> {
-    Path {
-      slots: self.slots,
-      names: self.names,
-      name_spans: self.name_spans,
-      slot: self.slot,
-    }
+    Path::new(self.slots, self.names, self.name_spans, self.slot)
   }
 
   /// Returns the span of the field draft §6.4 takes the name and arguments from.
