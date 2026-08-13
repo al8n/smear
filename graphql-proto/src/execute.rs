@@ -533,7 +533,11 @@ pub struct Limits {
   /// | the in-flight slab index | [`max_in_flight`](Limits::max_in_flight) |
   /// | `fail_at`'s location index | [`max_response_metadata`](Limits::max_response_metadata), which `fail_at` now charges, plus at most one for the root's fallback — and `try_from`-checked besides |
   /// | the interner's arena offset, entry length and id | [`max_interned_bytes`](Limits::max_interned_bytes), and each `try_from`-checked independently of it |
-  /// | the operation index in `operation_index` | the document's own length, which no ceiling here bounds and nothing in this module creates |
+  ///
+  /// The row this table used to end on is gone rather than answered: draft §6.1's lookup produced
+  /// an operation *index* whose only bound was the document's own length, and
+  /// [`Executor::operation_definition`] now returns the definition itself. There is no narrowing
+  /// left to bound.
   pub max_response_slots: NonZeroU32,
 
   /// How many merged field selections the executor will record across the whole response.
@@ -562,10 +566,19 @@ pub struct Limits {
   /// How much work draft §6.3's collection may do, across the whole operation.
   ///
   /// Charged per selection *looked at*, surviving or not; per entry a name lookup compares, before
-  /// it compares it; and per definition and fragment the fragment index's one pass handles. The
-  /// first is the difference between this and every other ceiling here, and it is deliberate: the
-  /// others count what was produced, and a document built out of fragments that collect nothing
-  /// produces nothing while walking as far as it likes.
+  /// it compares it; per definition and fragment the fragment index's one pass handles; and per
+  /// definition draft §6.1's operation lookup reads. The first is the difference between this and
+  /// every other ceiling here, and it is deliberate: the others count what was produced, and a
+  /// document built out of fragments that collect nothing produces nothing while walking as far as
+  /// it likes.
+  ///
+  /// **The last of those is the one charge taken outside collection, and it is why this ceiling
+  /// can refuse a `start` before a response exists.** Draft §6.1 walks the definitions to find the
+  /// operation, once per [`start`](Executor::start), over a count the document chooses; it was the
+  /// module's last uncharged walk over a client quantity (al8n/smear#144) and it now spends this
+  /// budget like the rest. The refusal is
+  /// [`StartError::OperationLookupRefused`](StartError::OperationLookupRefused) rather than a
+  /// field error, because §7.1.2 has no response for a failure raised before execution begins.
   ///
   /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
   /// text the *document* chose, and the shared multiply-fold is unkeyed and invertible, so a client
@@ -893,8 +906,11 @@ enum Exhausted {
 
 /// Why [`Executor::start`] refused.
 ///
-/// Every variant is a draft §6.1 `GetOperation` failure — a *request* error, raised before
-/// execution begins, which is why it is returned rather than collected into the response.
+/// Every variant is a draft §7.1.2 *request* error — raised before execution begins, which is why
+/// it is returned rather than collected into the response. Most of them are draft §6.1
+/// `GetOperation` failures; the draft §6.2.3.1 refusals below are not, and neither is
+/// [`ResponseStreamOpen`](Self::ResponseStreamOpen), which is about the executor rather than the
+/// request.
 ///
 /// # A valid document reaches this, and there is a response shape for it
 ///
@@ -1002,6 +1018,20 @@ pub enum StartError {
   /// [`SourceSelectionRefused`](Self::SourceSelectionRefused) for why, and note that upstream does
   /// carry it. This is an unmet "should" of §7.1.6's `locations`, recorded as one.
   SourceFieldArguments,
+  /// The document holds more definitions than
+  /// [`max_selection_visits`](Limits::max_selection_visits) left the draft §6.1 lookup room to
+  /// read.
+  ///
+  /// Draft §6.1 selects the operation by walking the document's definitions, which is a quantity
+  /// the *client* chooses — so the walk is charged the same unit every other document-sized walk
+  /// in this crate is charged, and this is what the refusal looks like. It is reachable only by a
+  /// document with more definitions than the ceiling, so the remedy is a larger
+  /// `max_selection_visits` or a smaller document, and never a change to the operation name.
+  ///
+  /// **A named lookup that finds its operation early is not refused for the definitions behind
+  /// it**: the charge is taken per definition read rather than for the slice, so the walk stops
+  /// where the answer does. See [`Executor::operation_definition`].
+  OperationLookupRefused,
   /// A draft §7.1.2 response stream is still open, so beginning another operation would orphan the
   /// source stream behind it.
   ///
@@ -1041,6 +1071,9 @@ impl fmt::Display for StartError {
       }
       Self::SourceFieldArguments => {
         "the subscription's source field has an argument the request does not satisfy"
+      }
+      Self::OperationLookupRefused => {
+        "the document has more definitions than `max_selection_visits` leaves room to read"
       }
       Self::ResponseStreamOpen => {
         "a response stream is still open, and its source stream must be cancelled through \
@@ -1457,6 +1490,15 @@ where
   merged: std::vec::Vec<&'a Field<S>>,
   locations: std::vec::Vec<SimpleSpan>,
   interner: Interner,
+  /// Definitions the draft §6.1 operation lookup has read, over the executor's whole life.
+  ///
+  /// Counted for the reason `collect::Fragments`'s `walked` is: the lookup charges one unit before
+  /// each definition it reads, so the budget and the read count agree by construction and a
+  /// version that charged *after* the read — or charged the slice length and then walked it —
+  /// would agree with itself just as well. Only a count taken at the read itself can say a refused
+  /// lookup read nothing.
+  #[cfg(test)]
+  operation_definitions_walked: u64,
   errors: std::vec::Vec<Row>,
   /// The draft §7.1.7 *Extensions* entry for this operation, or `None` when the response has none.
   ///
@@ -1616,6 +1658,8 @@ where
       merged: std::vec::Vec::new(),
       locations: std::vec::Vec::new(),
       interner: Interner::new(limits.max_interned_bytes.get()),
+      #[cfg(test)]
+      operation_definitions_walked: 0,
       errors: std::vec::Vec::new(),
       extensions: None,
       inflight: std::vec::Vec::new(),
@@ -1726,15 +1770,7 @@ where
       return Err(StartError::ResponseStreamOpen);
     }
     self.reset();
-    let index = self.operation_index(operation)?;
-    let definition = self
-      .document
-      .definitions()
-      .get(index as usize)
-      .map(|described| described.node());
-    let Some(ExecutableDefinition::Operation(op)) = definition else {
-      return Err(StartError::NoOperation);
-    };
+    let op = self.operation_definition(operation)?;
     // Enumerated rather than tested with `is_query()`, so that a fourth operation keyword would be
     // a compile error here instead of an operation silently executed as a query.
     let (set, operation, missing) = match op {
@@ -3704,6 +3740,13 @@ where
     self.interner.compares()
   }
 
+  /// Definitions the draft §6.1 operation lookup has read, counted independently of what it
+  /// charged. See the field.
+  #[cfg(test)]
+  fn operation_definitions_walked(&self) -> u64 {
+    self.operation_definitions_walked
+  }
+
   /// Links draft §6.2.2's serial release has followed. See [`serial_next`](Self::serial_next).
   ///
   /// The separator for the one product a mutation could have brought back: a scan over the root's
@@ -3824,9 +3867,56 @@ where
     self.delivered = false;
   }
 
-  fn operation_index(&self, name: Option<&str>) -> Result<u32, StartError> {
+  /// Draft §6.1 `GetOperation`: the operation `name` selects, charged **before** each definition
+  /// it reads.
+  ///
+  /// # It is a walk over a quantity the client controls, so it is charged like every other one
+  ///
+  /// This used to be the module's one uncharged scan (al8n/smear#144), performed once per
+  /// [`start`](Self::start) over `definitions()` — an amount the *document* chooses, against no
+  /// ceiling at all. Everything else that walks a document-sized population charges
+  /// [`max_selection_visits`](Limits::max_selection_visits) for it, and this now does too, in the
+  /// unit the rest of the module uses: one per definition.
+  ///
+  /// **Charged per definition rather than `definitions.len()` up front**, which is where it
+  /// departs from `collect::Fragments::build`'s counting pass, and the difference is a wrong
+  /// answer rather than a rounding. That pass reads every definition, so a slice length is what it
+  /// costs; this one **early-returns** on a named match, so a document of ten thousand definitions
+  /// whose named operation is the third costs three. Charging the length would refuse a lookup
+  /// that had budget for the work it was actually going to do. Taking a unit before each read
+  /// keeps "units spent" equal to "definitions read" at every instant, which is also what lets the
+  /// walk be abandoned at the ceiling instead of after it.
+  ///
+  /// # Preferring an index was considered and is a loss here, which is worth recording
+  ///
+  /// The standing preference is to delete a walk rather than price it. An index over the
+  /// operations would have to be built by the same walk, and it can only live on the **executor** —
+  /// `Executor` borrows the document and cannot attach anything to it. So it amortises only across
+  /// repeated [`start`](Self::start) calls on one executor, and it is pure loss under the pattern
+  /// `collect::Fragments` documents, where a service caches the *parse* and builds an executor per
+  /// execution: there the table is built once, probed once, and dropped. The charge is right under
+  /// both patterns; the index is right under one.
+  ///
+  /// What the walk being unnecessary *did* delete is the second lookup. This returned a `u32` that
+  /// `start` immediately resolved back through `definitions()` and re-matched against
+  /// [`ExecutableDefinition::Operation`] — an arm that cannot fail, guarded by a refusal that
+  /// cannot run — which is the same shape `collect::Fragments` removed by carrying the definition
+  /// instead of a key to one. It also removes an `as u32` narrowing whose only bound was the
+  /// document's own length, which is the row [`Limits::max_response_slots`]'s table no longer has
+  /// to answer for.
+  fn operation_definition(
+    &mut self,
+    name: Option<&str>,
+  ) -> Result<&'a OperationDefinition<S>, StartError> {
     let mut found = None;
-    for (index, described) in self.document.definitions().iter().enumerate() {
+    for described in self.document.definitions() {
+      if !self.visits.take(1) {
+        return Err(StartError::OperationLookupRefused);
+      }
+      #[cfg(test)]
+      {
+        self.operation_definitions_walked += 1;
+      }
       let ExecutableDefinition::Operation(operation) = described.node() else {
         continue;
       };
@@ -3835,7 +3925,7 @@ where
           if found.is_some() {
             return Err(StartError::AmbiguousOperation);
           }
-          found = Some(index as u32);
+          found = Some(operation);
         }
         Some(wanted) => {
           if let OperationDefinition::Named(named) = operation
@@ -3843,14 +3933,14 @@ where
               .name()
               .is_some_and(|name| name.source().as_ref() == wanted.as_bytes())
           {
-            return Ok(index as u32);
+            return Ok(operation);
           }
         }
       }
     }
     match (name, found) {
       (Some(_), _) => Err(StartError::UnknownOperation),
-      (None, Some(index)) => Ok(index),
+      (None, Some(operation)) => Ok(operation),
       (None, None) => Err(StartError::NoOperation),
     }
   }
