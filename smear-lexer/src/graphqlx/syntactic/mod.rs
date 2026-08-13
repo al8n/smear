@@ -8,7 +8,7 @@ use tokora::{
     DoubleColon, Equal, Exclamation, FatArrow, Hyphen, OpenAngle, OpenBrace, OpenBracket,
     OpenParen, Pipe, Plus, Spread,
   },
-  state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+  state::recursion_tracker::RecursionLimitExceeded,
   utils::{CharLen, DowncastRef},
 };
 
@@ -27,7 +27,11 @@ use crate::simd::{
   skip_ws_and_comma,
 };
 
-pub use crate::simd::DEFAULT_RECURSION_LIMIT;
+// The nesting ceiling and the budget that carries it, surfaced beside the lexer they govern.
+// This position used to hold `DEFAULT_RECURSION_LIMIT = 500`, a constant that only restated
+// tokora's inherited default and named no decision; smear issue #61 replaced it with one that is
+// derived, and with the type whose `Default` actually delivers it.
+pub use crate::limits::{MAX_NESTING_DEPTH, SyntacticLimits};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -578,7 +582,7 @@ pub struct SyntacticLexer<'inp, S: ?Sized = str> {
   last_span: SimpleSpan,
   /// Span of the most recently returned error token, if any.
   last_error_span: Option<SimpleSpan>,
-  state: RecursionLimiter,
+  state: SyntacticLimits,
 }
 
 impl<'inp, S> Lexer<'inp> for SyntacticLexer<'inp, S>
@@ -593,7 +597,7 @@ where
   NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>: FromLogos<'inp>,
   LogosLexer<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: Lexer<
       'inp,
-      State = RecursionLimiter,
+      State = SyntacticLimits,
       Source = LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
       Token = NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
       Offset = usize,
@@ -602,7 +606,7 @@ where
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
-  type State = RecursionLimiter;
+  type State = SyntacticLimits;
 
   type Source = S;
 
@@ -1002,7 +1006,7 @@ where
   NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>: FromLogos<'inp>,
   LogosLexer<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: Lexer<
       'inp,
-      State = RecursionLimiter,
+      State = SyntacticLimits,
       Source = LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
       Token = NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
       Offset = usize,

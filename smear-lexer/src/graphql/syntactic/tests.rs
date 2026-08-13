@@ -1,4 +1,6 @@
-use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokora::Lexer;
+
+use crate::limits::SyntacticLimits;
 
 use super::*;
 
@@ -178,8 +180,10 @@ fn test_recursion_limit() {
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();
 
-  let mut lexer =
-    SyntacticLexer::<str>::with_state(query.as_str(), RecursionLimiter::with_limitation(depth - 1));
+  let mut lexer = SyntacticLexer::<str>::with_state(
+    query.as_str(),
+    SyntacticLimits::with_max_nesting_depth(depth - 1),
+  );
 
   loop {
     match lexer.lex() {

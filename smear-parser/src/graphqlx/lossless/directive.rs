@@ -83,6 +83,8 @@ lossless_production! {
   /// `Err` and abort the whole list, so `(a: 1, !, b: 2)` would cost the rest of the parse instead
   /// of one token.
   fn arguments<'inp, Src, Ctx>(inp, konst: Constness) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::Arguments.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {

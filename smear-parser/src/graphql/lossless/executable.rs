@@ -125,6 +125,8 @@ lossless_production! {
   /// for `Arguments`. Gate 1 compares the two suites' verdicts input by input, so the two
   /// rulings are followed one production at a time rather than unified into a house rule.
   fn variables_definition<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::VariablesDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {

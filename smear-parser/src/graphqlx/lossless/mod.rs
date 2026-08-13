@@ -32,7 +32,10 @@ use tokora::{
   // macros in `crate::lossless` reach this dialect's lexer by — and a trait and a type alias share
   // one namespace.
   Lexer as TokoraLexer,
+  SimpleSpan,
   Source,
+  error::RecursionLimitReached,
+  input::Descent,
   state::tracker::LimitExceeded,
   utils::Expected,
 };
@@ -43,6 +46,7 @@ use crate::{
     GraphQLx,
     error::{Error as DialectError, ErrorData, Errors as DialectErrors, Expectation},
   },
+  lossless::depth::FromNestingLimit,
 };
 
 pub use crate::graphqlx::kinds::GraphQLxLang;
@@ -95,12 +99,13 @@ where
 = InputRef<'inp, 'input, GraphqlxLosslessLexer<'inp, Src>, Ctx, GraphQLx>;
 
 // ---------------------------------------------------------------------------------------------
-// The seven names the shared macros in `crate::lossless` reach this dialect by.
+// The eight names the shared macros in `crate::lossless` reach this dialect by.
 //
 // Aliases, not renames, exactly as GraphQL's are: the `GraphqlxLossless*` spellings stay, because
 // they are what every signature in this suite reads. What these buy is that
 // `lossless_production!` and `lossless_drivers!` — written once, over `Input`, `Error`, `Token`,
-// `Lexer`, `Brand`, `TokenKind` and `Keyword` — apply here with nothing but a `dialect =` header.
+// `Lexer`, `LexerState`, `Brand`, `TokenKind` and `Keyword` — apply here with nothing but a
+// `dialect =` header.
 //
 // The macros take **two fixed idents** (`graphqlx::lossless`), not a `$dialect:path`. That is not
 // a style choice: a `:path` fragment is an opaque AST node, so `$dialect::Input<…>` parses as an
@@ -126,6 +131,15 @@ pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
 #[allow(type_alias_bounds)]
 pub type Lexer<'inp, Src: Source<usize> + ?Sized> = GraphqlxLosslessLexer<'inp, Src>;
 
+/// The resource budget this dialect's lossless lex runs under — the Logos `Extras`, and the
+/// [`Lexer::State`](tokora::Lexer::State) the shared production bundle pins.
+///
+/// Pinned rather than left as a projection because a production has to *read* it: the nesting
+/// ceiling a parse was configured with lives here, and this module's `descend` hands it to the
+/// parser-frame budget. Over a generic `Src` the projection has nothing to normalize against
+/// without the equality, exactly as the token's `Kind` does not.
+pub type LexerState = smear_lexer::limits::LosslessLimits;
+
 /// [`GraphqlxLosslessToken`], under the name the shared macros reach it by.
 #[allow(type_alias_bounds)]
 pub type Token<'inp, Src: Source<usize> + ?Sized> = GraphqlxLosslessToken<'inp, Src>;
@@ -138,6 +152,44 @@ pub type Input<'inp, 'input, Src: Source<usize> + ?Sized, Ctx> =
 /// [`GraphqlxLosslessError`], under the name the shared macros reach it by.
 #[allow(type_alias_bounds)]
 pub type Error<'inp, Src: Source<usize> + ?Sized, Ctx> = GraphqlxLosslessError<'inp, Src, Ctx>;
+
+/// Enters one level of parser recursion under this dialect's configured nesting ceiling.
+///
+/// The whole body is reading the ceiling off the lexer state and handing it to
+/// [`crate::lossless::depth::descend`], which is where the reasoning lives. It exists per dialect
+/// only because the substrate may not name `smear-lexer`, so the number has to be read on this
+/// side of the line.
+///
+/// **Bind the guard for the whole frame** — `let mut frame = descend(inp)?; let inp = &mut *frame;`
+/// — because dropping it early releases the level before the recursion it was taken for, which
+/// type-checks and silently reinstates the unbounded descent.
+#[inline]
+pub(crate) fn descend<'r, 'inp, 'input, Src, Ctx>(
+  inp: &'r mut GraphqlxLosslessInput<'inp, 'input, Src, Ctx>,
+) -> Result<
+  Descent<'r, 'inp, 'input, GraphqlxLosslessLexer<'inp, Src>, Ctx, GraphQLx>,
+  GraphqlxLosslessError<'inp, Src, Ctx>,
+>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxLosslessToken<'inp, Src>: tokora::Token<'inp, Kind = TokenKind>
+    + tokora::lexer::FromLogos<'inp>
+    + Clone
+    + tokora::utils::DowncastRef<Keyword>,
+  GraphqlxLosslessLexer<'inp, Src>: TokoraLexer<
+      'inp,
+      Token = GraphqlxLosslessToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = LexerState,
+    >,
+  Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
+  GraphqlxLosslessError<'inp, Src, Ctx>:
+    From<RecursionLimitReached<usize, GraphQLx>> + FromNestingLimit,
+{
+  let ceiling = inp.state().max_nesting_depth();
+  crate::lossless::depth::descend(inp, ceiling)
+}
 
 /// One error value a GraphQLx lossless parse can record.
 ///
@@ -255,5 +307,7 @@ pub mod value;
 // one. A consumer picks a root here, once, rather than parsing the mixed form and filtering the
 // tree.
 pub use runner::{
-  Parse, parse_document, parse_executable_document, parse_type_system_document, profile,
+  Parse, parse_document, parse_document_with_limits, parse_executable_document,
+  parse_executable_document_with_limits, parse_type_system_document,
+  parse_type_system_document_with_limits, profile,
 };

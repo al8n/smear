@@ -112,6 +112,8 @@ lossless_production! {
   /// Nonempty (`import.rs:257` is `.at_least(1)`), and the empty form is reported with the
   /// non-consuming recovery so the `}` stays the loop's.
   fn import_list<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::ImportList.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {

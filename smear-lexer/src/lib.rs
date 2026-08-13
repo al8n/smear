@@ -56,6 +56,14 @@ pub mod error;
 pub mod hints;
 /// Keyword tokens for GraphQL and GraphQLx.
 pub mod keywords;
+// NO `///` HERE, and that is a fix rather than an omission. A module with doc fragments from
+// *both* places — a `///` on the `mod` item and a `//!` header in the file — has the intra-doc
+// links of ALL of them resolved against the scope of the FIRST fragment, which is this file's.
+// `limits.rs`'s header links `MAX_NESTING_DEPTH`, which is in scope there and not here, so the
+// pair made a `-D warnings` rustdoc build fail with "no item named `MAX_NESTING_DEPTH` in scope"
+// and no source span to find it by. One fragment, one scope. The same ruling
+// `smear-parser/src/lossless/mod.rs` records for the same reason.
+pub mod limits;
 /// Punctuation tokens used in GraphQL and GraphQLx.
 pub mod punctuator;
 

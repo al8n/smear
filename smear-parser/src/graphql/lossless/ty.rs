@@ -104,6 +104,8 @@ lossless_production! {
   /// consumes at least one token whenever input remains, which is this loop's whole termination
   /// argument.
   fn list_type<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::ListType.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {

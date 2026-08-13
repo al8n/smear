@@ -12,12 +12,9 @@
 use tokora::{
   Lexer, SimpleSpan, Token,
   lexer::{FromLogos, LogosLexer},
-  state::recursion_tracker::RecursionLimiter,
 };
 
-/// Maximum byte recursion depth — matches the default in
-/// [`tokora::state::recursion_tracker::RecursionLimiter`].
-pub const DEFAULT_RECURSION_LIMIT: usize = 500;
+use crate::limits::SyntacticLimits;
 
 pub(crate) type LogosSourceOf<'inp, T> =
   <<T as FromLogos<'inp>>::Logos as tokora::logos::Logos<'inp>>::Source;
@@ -39,7 +36,7 @@ pub(crate) enum Delegated<'inp, T: Token<'inp>> {
   Token {
     token: T,
     end: usize,
-    state: RecursionLimiter,
+    state: SyntacticLimits,
   },
   Error {
     error: <T as Token<'inp>>::Error,
@@ -61,17 +58,11 @@ pub(crate) enum Delegated<'inp, T: Token<'inp>> {
 pub(crate) fn delegate_to_logos<'inp, T>(
   scan_primitive: &'inp LogosSourceOf<'inp, T>,
   cursor: usize,
-  state: RecursionLimiter,
+  state: SyntacticLimits,
 ) -> Option<Delegated<'inp, T>>
 where
   T: FromLogos<'inp>,
-  LogosLexer<'inp, T>: Lexer<
-      'inp,
-      State = RecursionLimiter,
-      Source = LogosSourceOf<'inp, T>,
-      Token = T,
-      Offset = usize,
-    >,
+  LogosLexer<'inp, T>: Lexer<'inp, State = SyntacticLimits, Source = LogosSourceOf<'inp, T>, Token = T, Offset = usize>,
 {
   let mut logos = LogosLexer::with_state(scan_primitive, state);
   logos.bump(&cursor);
