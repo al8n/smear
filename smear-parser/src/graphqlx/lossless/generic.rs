@@ -104,6 +104,8 @@ lossless_production! {
   /// would eat that `>` — a closer is a depth-zero sync point — and the list would then run to end
   /// of input hunting a closer it had already swallowed.
   fn definition_type_generics<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       K::DefinitionTypeGenerics.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -160,6 +162,8 @@ lossless_production! {
   /// get wrong by editing one copy. It is also what a typed accessor distinguishes them by, since
   /// `< T >` is the same bytes in both positions.
   fn angle_name_list<'inp, Src, Ctx>(inp, kind: K) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
     node(
       kind.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {

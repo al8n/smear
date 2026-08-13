@@ -328,3 +328,232 @@ fn no_fixture_in_the_tree_comes_near_the_ceiling() {
     MAX_NESTING_DEPTH
   );
 }
+
+/// `{ ) f { ) f { …` — the shape that walked past the first fix, and the second half of #61.
+///
+/// # What it does to the lexer's counter
+///
+/// Every level opens one brace and closes **one bracket the parser never opened**. The lexer's
+/// tally is one saturating scalar over every opener and every closer, pair-blind, so the `)`
+/// undoes the `{` and the tally oscillates 1, 0, 1, 0 for the whole document — measured maximum
+/// **1**, at every depth. Recovery, meanwhile, reports the `)` and consumes it (a closer is a
+/// sync point, so the balanced skip crosses nothing and the fallback eats one token), the
+/// selection-set loop continues, and the `f {` after it opens **another** selection set.
+///
+/// So the ceiling could not fire, and at `6f39cb9` this aborted a 2 MiB thread at 702 levels —
+/// 3.5 KB of input, from a counter that never exceeded 1. `crate::…` cannot cite it: the
+/// bisection lives outside the suite, in `scratchpad/depth-probe`, for the reason this module's
+/// header gives.
+///
+/// # Why the first assertion is the ordering guard
+///
+/// The same discipline [`deep_input_returns_rather_than_aborting`] uses, and it needs a
+/// **discriminating** signal rather than `has_errors`: this input is an error document either
+/// way, since every `)` is reported. What separates the two worlds is how deep the parse
+/// *recursed*, and the tree records exactly that — one `SelectionSet` node per live frame. The
+/// shallow probe below asserts the tree stops nesting at the ceiling; only then is anything deep
+/// handed to the parser.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn the_recovery_bypass_returns_rather_than_aborting() {
+  use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::parse_document};
+
+  // One `{` per level, and one closer per level that no opener matched.
+  fn bypass(levels: usize) -> String {
+    let mut src = String::with_capacity(levels * 5 + 1);
+    src.push('{');
+    for _ in 0..levels {
+      src.push_str(" ) f {");
+    }
+    src
+  }
+
+  // THE GUARD, AND IT MUST STAY FIRST — see this function's docs. A few dozen levels cannot
+  // overflow anything, so this assertion is reachable even if the budget has regressed.
+  let shallow = parse_document(&bypass(MAX_NESTING_DEPTH + 8));
+  let deepest = shallow
+    .syntax()
+    .descendants()
+    .filter(|n| n.kind() == K::SelectionSet)
+    .map(|n| {
+      n.ancestors()
+        .filter(|a| a.kind() == K::SelectionSet)
+        .count()
+    })
+    .max()
+    .unwrap_or(0);
+  assert!(
+    deepest <= MAX_NESTING_DEPTH,
+    "the parse nested {deepest} selection sets under a ceiling of {MAX_NESTING_DEPTH}: the budget \
+     is being counted on something other than the frames that recurse"
+  );
+
+  // Past the native boundary this shape had at `6f39cb9`: 702 levels aborted a 2 MiB thread, so
+  // 2 000 is 2.8x beyond it. The depth stops there rather than at 100 000 for a cost reason
+  // measured on this branch and recorded in the report: `resync_to_definition`'s scan is
+  // quadratic in the length of a run it can find no definition head in — pre-existing, and
+  // reproduced on a control shape (`! ! ! …`) that this branch does not touch. 2 000 levels cost
+  // 0.44 s; 100 000 cost 407 s, which is a gate nobody would keep.
+  for levels in [100, 2_000] {
+    let parse = parse_document(&bypass(levels));
+    assert!(
+      parse.has_errors(),
+      "{levels} levels of unmatched closers must be reported"
+    );
+    assert_eq!(
+      parse.syntax().text().to_string(),
+      bypass(levels),
+      "the lossless guarantee survives the refusal"
+    );
+  }
+}
+
+/// GraphQLx answers identically, **and with its own fourth closer**.
+///
+/// `>` steps the same tally as `)`, `]` and `}` — that dialect delimits generics with `<` and `>`
+/// — and it is a sync point in its recovery, so it is consumed and the loop continues exactly as
+/// `)` is. Measured at `6f39cb9`: both families abort a 2 MiB thread at 700 levels. A gate on `)`
+/// alone would have proved the dialect and missed the pair that is only GraphQLx's.
+#[cfg(all(feature = "rowan", feature = "graphqlx"))]
+#[test]
+fn the_graphqlx_recovery_bypass_returns_with_both_closer_families() {
+  use smear::parser::graphqlx::{kinds::SyntaxKind as K, lossless::parse_document};
+
+  fn bypass(levels: usize, closer: char) -> String {
+    let mut src = String::with_capacity(levels * 5 + 1);
+    src.push('{');
+    for _ in 0..levels {
+      src.push(' ');
+      src.push(closer);
+      src.push_str(" f {");
+    }
+    src
+  }
+
+  for closer in [')', '>'] {
+    // The ordering guard, per closer family.
+    let shallow = parse_document(&bypass(MAX_NESTING_DEPTH + 8, closer));
+    let deepest = shallow
+      .syntax()
+      .descendants()
+      .filter(|n| n.kind() == K::SelectionSet)
+      .map(|n| {
+        n.ancestors()
+          .filter(|a| a.kind() == K::SelectionSet)
+          .count()
+      })
+      .max()
+      .unwrap_or(0);
+    assert!(
+      deepest <= MAX_NESTING_DEPTH,
+      "`{closer}` nested {deepest} selection sets under a ceiling of {MAX_NESTING_DEPTH}"
+    );
+
+    for levels in [100, 2_000] {
+      let parse = parse_document(&bypass(levels, closer));
+      assert!(parse.has_errors());
+      assert_eq!(parse.syntax().text().to_string(), bypass(levels, closer));
+    }
+  }
+}
+
+/// The converse: a document with far **more** delimiters than the ceiling, none of them nested,
+/// is still accepted.
+///
+/// Moving the count from the lexer's tally to the parse's own frames is only safe if it stays a
+/// *depth* count. A budget that accumulated instead of releasing — a guard bound to the wrong
+/// scope, or one released after the recursion rather than around it — would refuse this document,
+/// and every existing gate in this file would stay green, because they are all about depth and
+/// this one is about width.
+///
+/// Both axes are exercised: siblings at the top level, and siblings *inside* a subtree that is
+/// itself near the ceiling, which is where a leaked level would show first.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn width_costs_nothing_because_the_budget_is_a_depth() {
+  use smear::parser::graphql::lossless::parse_document;
+
+  // `{ a } { b } …` — 8x the ceiling in delimiters, never more than one open at a time.
+  let wide: String = (0..MAX_NESTING_DEPTH * 8)
+    .map(|i| format!("{{ f{i} }}\n"))
+    .collect();
+  let parse = parse_document(&wide);
+  assert!(
+    !parse.has_errors(),
+    "{} sequential selection sets must cost one level, not {}",
+    MAX_NESTING_DEPTH * 8,
+    MAX_NESTING_DEPTH * 8
+  );
+
+  // The same **at** the ceiling: every sibling re-enters the deepest three levels in turn.
+  //
+  // Each `g(x: [1])` spends three of the budget on its own — the selection set it sits in, its
+  // argument list, and its list value — so the outer nesting is sized to put the innermost of
+  // those exactly at `MAX_NESTING_DEPTH`. A budget that leaked one level per sibling would refuse
+  // the second one; a budget that leaked a fraction would refuse a later one.
+  let outer = MAX_NESTING_DEPTH - 3;
+  let mut deep_and_wide = String::new();
+  for _ in 0..outer {
+    deep_and_wide.push_str("{ f ");
+  }
+  for i in 0..MAX_NESTING_DEPTH * 4 {
+    deep_and_wide.push_str(&format!(" g{i}(x: [1]) "));
+  }
+  for _ in 0..outer {
+    deep_and_wide.push('}');
+  }
+  let parse = parse_document(&deep_and_wide);
+  assert!(
+    !parse.has_errors(),
+    "siblings at the deepest accepted level must each be entered and left, not accumulated: {:?}",
+    parse.diagnostics()
+  );
+}
+
+/// The same bypass, aimed at the **value** cycles rather than the selection-set one.
+///
+/// Codex's finding named `{ ) f {`, which is `selection_set` recursing through `field`. It is not
+/// the only cycle a stray closer can drive: `{ f(a: [ ) [ ) [ …` runs `list_value` into
+/// `list_value`, and `{ f(a: { ) k: { ) k: …` runs `object_value` into `object_value`, with the
+/// lexer's tally pinned at **3** in both cases because the `)` cancels each `[` or `{`.
+///
+/// Both were measured to abort a 2 MiB thread at 2 000 levels with only `selection_set` guarded —
+/// which is why the budget is taken at *every* production that commits a nesting delimiter rather
+/// than at the one shape the finding named. Deriving the fix from the exemplar would have left
+/// two live cycles behind it.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
+  use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::parse_document};
+
+  // `{ f(a: ` + one opener and one unmatched `)` per level.
+  fn bypass(open: &str, levels: usize) -> String {
+    let mut src = String::from("{ f(a: ");
+    for _ in 0..levels {
+      src.push_str(open);
+    }
+    src
+  }
+
+  for (open, kind) in [("[ ) ", K::ListValue), ("{ ) k: ", K::ObjectValue)] {
+    // THE ORDERING GUARD, per cycle, on an input too shallow to overflow anything.
+    let shallow = parse_document(&bypass(open, MAX_NESTING_DEPTH + 8));
+    let deepest = shallow
+      .syntax()
+      .descendants()
+      .filter(|n| n.kind() == kind)
+      .map(|n| n.ancestors().filter(|a| a.kind() == kind).count())
+      .max()
+      .unwrap_or(0);
+    assert!(
+      deepest <= MAX_NESTING_DEPTH,
+      "{kind:?} nested {deepest} deep under a ceiling of {MAX_NESTING_DEPTH}"
+    );
+
+    // Past where this cycle aborted with only `selection_set` guarded.
+    let deep = bypass(open, 2_000);
+    let parse = parse_document(&deep);
+    assert!(parse.has_errors());
+    assert_eq!(parse.syntax().text().to_string(), deep);
+  }
+}

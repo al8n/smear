@@ -3,8 +3,8 @@
 //! # Why these types exist at all
 //!
 //! Both lexers already carried a bracket-depth counter — tokora's
-//! [`RecursionLimiter`](tokora::state::recursion_tracker::RecursionLimiter) for the syntactic
-//! stream, its [`Limiter`](tokora::state::tracker::Limiter) for the lossless one — and both
+//! [`RecursionLimiter`] for the syntactic
+//! stream, its [`Limiter`] for the lossless one — and both
 //! *inherited* that counter's ceiling instead of choosing it. tokora's own docs are explicit that
 //! the inherited 500 "was never sized against anything", because nothing about tallying lexer
 //! nesting implies a native-stack cost for it to protect against, and that "a grammar that parses
@@ -33,6 +33,32 @@
 //! existing call site — `parse_str`, `Lexer::new`, each `parse_lossless` — picks the ceiling up
 //! without being edited, and a caller who wants a different one hands a different value to
 //! `with_state` / `parse_*_with_state` / a lossless `*_with_limits` entry point.
+//!
+//! # What this counter is **not**, and the correction that says so
+//!
+//! It is not the stack-safety boundary, and the first version of this module said it was. The
+//! tally here is one saturating scalar over every opener and every closer, **pair-blind**: it
+//! decrements on any `}`, `]`, `)` — or GraphQLx `>` — regardless of which opener the parser is
+//! actually inside. The parse's own recursion is a different quantity, and the lossless recovery
+//! path is where they come apart, because it *consumes* a closer no opener matched and carries on
+//! in the same selection-set loop. Over `{ ) f { ) f { …` this counter's maximum is **1** for the
+//! whole document while every level leaves two more parser frames live: measured at `6f39cb9`,
+//! 3.5 KB of that shape aborted a 2 MiB thread at 702 levels with the ceiling never firing.
+//!
+//! The bound that holds the native stack is therefore `smear-parser`'s `lossless::depth` — one
+//! RAII level per nesting delimiter the **parse** descends through, released by leaving the frame
+//! rather than by seeing a byte. That module carries the reasoning, and every number below is
+//! still what sizes it: the ceiling it enforces is read from these types.
+//!
+//! What this counter keeps is a real job, and two of them:
+//!
+//! - **It is the cheaper check, and it fires first for well-formed input.** The lexer runs ahead
+//!   of the parser, so on a document whose closers match, the tally reaches the ceiling one token
+//!   before the parser reaches it — which is why the diagnostics for ordinary over-deep input are
+//!   unchanged by the parser-side budget.
+//! - **It is what latches tokora's poison boundary**, and that latch is what stops a
+//!   machine-generated file from being lexed to the end after it has already proved it goes too
+//!   deep. See `smear-parser/src/lossless/runner.rs` for why smear keeps the latch.
 
 use tokora::state::{
   State,
@@ -41,19 +67,33 @@ use tokora::state::{
   tracker::{LimitExceeded, Limiter},
 };
 
-/// The greatest number of **simultaneously open** brackets a smear lex accepts by default. The
+/// The greatest number of **simultaneously open** brackets a smear parse accepts by default. The
 /// next one is refused.
 ///
-/// One global tally over `{`, `[` and `(` — and, in GraphQLx, over `<` and `>` as well, because
+/// One global count over `{`, `[` and `(` — and, in GraphQLx, over `<` and `>` as well, because
 /// that dialect delimits generics with them. So a selection set inside an argument list inside a
 /// list value spends three of the 24, not one, and a GraphQLx generic path spends one per
 /// parameter level.
 ///
+/// # Two counters read this number, and only one of them is the stack-safety boundary
+///
+/// The **population is the same** — one per nesting delimiter — but they are counted on different
+/// sides and only one of them equals what recurses:
+///
+/// - the **lexer's** tally, in the types below, which is pair-blind and steps on bytes;
+/// - the **parse's** own frame budget, `smear-parser`'s `lossless::depth`, one RAII level per
+///   delimiter a lossless production descends through.
+///
+/// The second is the one this number exists for. The first is a cheap pre-filter that fires
+/// earlier for well-formed input, and it was the *only* check for one release — which is the
+/// defect the module header records: a closer no opener matched decrements it, so recovery could
+/// walk the parse arbitrarily deep with the tally reading 1.
+///
 /// # The measurement this is derived from
 ///
-/// The counter is a proxy for native stack use: the parser holds live frames for every open
-/// bracket, so the depth at which the process dies is a fact about the *deployment stack*, not
-/// about the grammar. Bisected on this tree with one parse per process on an explicitly sized
+/// Every figure below is a **native stack** measurement, and it is the number of *live frames*
+/// that costs the stack — which is what the parse-side budget counts and what the lexer's tally
+/// only approximates. Bisected on this tree with one parse per process on an explicitly sized
 /// thread, greatest depth that returns before the next one aborts with
 /// `fatal runtime error: stack overflow`:
 ///
@@ -79,6 +119,14 @@ use tokora::state::{
 /// | GraphQLx syntactic, generic angle brackets, `str`, aarch64 | **52** |
 /// | GraphQL syntactic, inline fragments, `bytes::Bytes`, aarch64 | **51** |
 /// | GraphQL lossless, inline fragments, `str`, aarch64 | ~745 (13x cheaper per level) |
+/// | GraphQL lossless, **the recovery bypass** `{ ) f {`, `str`, aarch64 | **702** |
+/// | GraphQLx lossless, the same with `)` and with `>` alike, `str`, aarch64 | **700** |
+///
+/// The last two rows are the shape that walked past the first fix, and they are why the count
+/// moved to the parse. They cost about the same per level as the row above them — a `field` frame
+/// plus a `selection_set` frame — and needed 3.5 KB of input to reach 702, with the lexer's tally
+/// reading **1** the whole way. Under the parse-side budget the same input refuses at 24 and
+/// returns; the mapping did not move, because a level of that shape is a level of any other.
 ///
 /// Five shapes were probed per door — inline fragments, field selections, list values, input
 /// objects and list types, plus GraphQLx's generic angle brackets — and inline fragments are the
@@ -120,6 +168,15 @@ use tokora::state::{
 /// GraphQLx generic-lookahead probe that nests 33 angle brackets. Both run under a raised ceiling
 /// rather than a lowered claim — which also records the ordering, because at the shipped defaults
 /// this ceiling binds long before the validator's does.
+///
+/// **At the lossless door, raising it past 64 does not reach the parse.** tokora's own
+/// parse-side recursion budget is depth 64 and is installed by `InputContext::new`, which
+/// `tokora::cst::parse_lossless` calls with no hook for a caller to raise — so
+/// a lossless parse refuses at `min(this number, 64)`, cleanly and with a positioned diagnostic
+/// rather than an abort. 64 is 5.8x the deepest document in this repository and 2.7x this
+/// default, so nothing shipped is near it; the *syntactic* door has no such cap, because the
+/// context there is the consumer's and `Parser::with_parser_and_context` takes a
+/// `ParserContext::with_recursion_limiter`.
 pub const MAX_NESTING_DEPTH: usize = 24;
 
 /// The worst depth in the table above that still returns: GraphQLx's syntactic door on a 2 MiB
@@ -166,7 +223,7 @@ const _: () = assert!(
 /// [`graphql::syntactic::SyntacticLexer`](crate::graphql::syntactic::SyntacticLexer) and its
 /// GraphQLx twin, so [`Default`] is what `Parser::with_parser(…).parse_str(src)` seeds a parse
 /// with — which is the whole reason the type exists rather than a bare
-/// [`RecursionLimiter`](tokora::state::recursion_tracker::RecursionLimiter). See the module
+/// [`RecursionLimiter`]. See the module
 /// header.
 ///
 /// ```
@@ -204,11 +261,15 @@ impl SyntacticLimits {
     Self(RecursionLimiter::with_limitation(max))
   }
 
-  /// A budget that never trips.
+  /// A budget whose **lexer-side** tally never trips.
   ///
-  /// The depth is still counted, so [`depth`](Self::depth) stays readable. Nothing then stands
-  /// between a deeply nested document and the native stack, so this is for a parse whose input is
-  /// trusted or whose depth is bounded before it arrives.
+  /// The depth is still counted, so [`depth`](Self::depth) stays readable. At the syntactic door
+  /// this removes the last check smear applies, so nothing then stands between a deeply nested
+  /// document and the native stack: it is for a parse whose input is trusted or whose depth is
+  /// bounded before it arrives.
+  ///
+  /// It is deliberately not spelled "unbounded". See [`MAX_NESTING_DEPTH`] for the second counter
+  /// and where it does and does not still apply.
   #[inline(always)]
   pub const fn unlimited() -> Self {
     Self(RecursionLimiter::unlimited())
@@ -315,9 +376,13 @@ impl LosslessLimits {
     ))
   }
 
-  /// A budget that never trips on either axis.
+  /// A budget whose lexer-side tally never trips on either axis.
   ///
-  /// See [`SyntacticLimits::unlimited`] for what removing the nesting ceiling gives up.
+  /// See [`SyntacticLimits::unlimited`] for what removing the nesting ceiling gives up — and note
+  /// the difference at *this* door: a lossless parse still descends through `smear-parser`'s
+  /// `lossless::depth`, whose ceiling this value feeds, so the effective bound here is tokora's
+  /// own parse-side budget of 64 rather than no bound at all. [`MAX_NESTING_DEPTH`] records why
+  /// that cap cannot be raised from a lossless entry point.
   #[inline(always)]
   pub const fn unlimited() -> Self {
     Self(Limiter::with_trackers(

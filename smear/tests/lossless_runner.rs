@@ -153,10 +153,13 @@ fn brace_offset(level: usize) -> usize {
 ///
 /// # Which of the two candidate defects it was
 ///
-/// Neither, as the issue framed them. The budget is not the parser's: nothing in this crate
-/// descends through `InputRef::descend`, so tokora's parser-facing `RecursionLimiter` (64) is
-/// never consulted, and no amount of nesting trips it. It is the **lexer's** — every `{`, `[` and
-/// `(` steps the budget carried in the Logos `Extras`.
+/// Neither, as the issue framed them. The budget that trips *here* is the **lexer's** — every
+/// `{`, `[` and `(` steps the one carried in the Logos `Extras`, and it is what latches the
+/// boundary this test is about. When #57 was filed it was also the only budget: nothing descended
+/// through `InputRef::descend`. That is no longer true — the lossless productions now take a
+/// parser-frame level per delimiter (`smear-parser`'s `lossless::depth`, issue #61's second
+/// half) — but the lexer runs ahead of the parse, so on a document whose closers match, the tally
+/// still reaches the ceiling first and this test's shape is unchanged by it.
 ///
 /// It does trip, and what follows the trip is what broke. A resource-limit trip **latches a
 /// poison boundary**: the scanner refuses to rebuild a lexer past that offset, so nothing — not

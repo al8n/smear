@@ -120,13 +120,14 @@ impl<L: rowan::Language> Parse<L> {
 /// **Both of those are reachable from ordinary input**, so under `finish` they were a panic on a
 /// public entry point:
 ///
-/// - The nesting budget is the **lexer's**, not the parser's. Every `{`, `[` and `(` steps the
-///   budget carried in the Logos `Extras`, and nothing in this crate descends through
-///   [`InputRef::descend`](tokora::InputRef::descend), so the parser-side limiter is never
-///   consulted at all. That budget's ceiling is now the lexer crate's own `MAX_NESTING_DEPTH`,
-///   chosen against a measured native-stack boundary; when #57 was filed it was tokora's
-///   general-purpose **500**, inherited — see issue #61 for why an inherited ceiling was not a
-///   ceiling.
+/// - When #57 was filed the nesting budget was the **lexer's** alone: every `{`, `[` and `(`
+///   stepped the budget carried in the Logos `Extras`, nothing in this crate descended through
+///   [`InputRef::descend`](tokora::InputRef::descend), and its ceiling was tokora's inherited,
+///   general-purpose **500**. Both halves of that have since moved — see issue #61 for why an
+///   inherited ceiling was not a ceiling, and [`crate::lossless::depth`] for why a pair-blind
+///   lexer tally was not the parse's recursion. The lexer's counter is still there, still steps
+///   on every delimiter, and is still what latches the boundary below; what it is no longer is
+///   the only thing between a document and the stack.
 /// - The bracket **past** the budget therefore fails its lex, and a resource-limit trip *latches a
 ///   poison boundary*: the scanner refuses to rebuild a lexer past that offset. No token and no
 ///   diagnostic can ever cover the tail, and a dialect's `document_entry` `skip_while` drain
