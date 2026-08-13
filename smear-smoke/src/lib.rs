@@ -684,6 +684,100 @@ where
   }
 }
 
+/// What a public entry point rules **in** about one integer spelling at one width.
+///
+/// Three meanings and not two, because "refused" is two different facts about a document and the
+/// crate reports them as two different errors: a literal past the width is an `IntOverflow` naming
+/// the width that refused it, and a spelling draft §2.9.1 has no production for is the lexer's
+/// refusal, which names no width at all. A property that collapsed the two could not see the thing
+/// it is here for — `007` is converted by one path and refused by another, and "not an overflow"
+/// is true of it either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntMeaning {
+  /// A GraphQL `IntValue` (draft §2.9.1) this width converts.
+  Converts,
+  /// A GraphQL `IntValue` this width cannot hold — draft §3.5.1's reading refusing a spelling
+  /// §2.9.1's grammar admits.
+  Overflows,
+  /// Not a GraphQL `IntValue` at all. **The lexer's answer**, and the one every path owes a
+  /// leading zero.
+  NotALiteral,
+}
+
+/// Every meaning there is, which is what an intersection over the readers starts from.
+pub const INT_MEANINGS: [IntMeaning; 3] = [
+  IntMeaning::Converts,
+  IntMeaning::Overflows,
+  IntMeaning::NotALiteral,
+];
+
+/// **Every public way to ask `smear` what an integer spelling means**, each answering with the
+/// set of meanings it rules in at `I`'s width.
+///
+/// A *set* rather than a value, because the paths do not all resolve the question to the same
+/// grain and a property that made one of them claim more than it knows would be testing the test.
+/// `IntOverflow::checked` is told only whether the pair is an overflow: its `Err` is "not an
+/// overflow at this width", which a literal that fits and a spelling that is not one both satisfy.
+/// The production resolves all three. Agreement is therefore the **intersection** being non-empty,
+/// and what the paths agree *on* is the one meaning left in it.
+///
+/// The width is `I`'s own — [`MaterializedInt::WIDTH`] — at every reader here, including the one
+/// that takes it as an argument. That is the join: the door dispatches on a value and the
+/// production dispatches on a type, and this is where the two are made to be the same width.
+///
+/// # A list, because the defect was a path being added
+///
+/// `MaterializedInt::parse` was public for one commit and answered `Some(7)` to `007`, which the
+/// production refuses and `checked` refuses. Nothing was wrong with either of those; what was
+/// wrong was that a **third** reader shipped and every property in the tree ranged over one path.
+/// So this is the list, and a path published later belongs in it — the array length is what makes
+/// leaving one out an edit somebody has to make rather than an omission.
+///
+/// [`MaterializedInt::WIDTH`]: smear::parser::graphql::syntactic::value::materialized::MaterializedInt::WIDTH
+pub fn public_int_readings<I>(literal: &str) -> [(&'static str, &'static [IntMeaning]); 2]
+where
+  I: smear::parser::graphql::syntactic::value::materialized::MaterializedInt,
+{
+  use smear::parser::graphql::{
+    GraphQL,
+    ast::IntValue,
+    error::{ErrorData, GraphqlErrors, IntOverflow},
+    syntactic::{GraphqlLexer, value::materialized},
+  };
+
+  let production = {
+    let parsed: Result<IntValue<I>, GraphqlErrors<&str>> =
+      Parser::with_parser::<GraphqlLexer<'_, str>, IntValue<I>, GraphqlErrors<&str>, _, GraphQL>(
+        materialized::int_value::<_, _, I>,
+      )
+      .parse_str(literal);
+
+    match parsed {
+      Ok(_) => &[IntMeaning::Converts][..],
+      Err(errors) => {
+        if errors
+          .into_iter()
+          .any(|error| matches!(error.data(), ErrorData::IntOverflow(_)))
+        {
+          &[IntMeaning::Overflows][..]
+        } else {
+          &[IntMeaning::NotALiteral][..]
+        }
+      }
+    }
+  };
+
+  let checked = match IntOverflow::checked(literal, I::WIDTH) {
+    Ok(_) => &[IntMeaning::Overflows][..],
+    Err(_) => &[IntMeaning::Converts, IntMeaning::NotALiteral][..],
+  };
+
+  [
+    ("the production", production),
+    ("IntOverflow::checked", checked),
+  ]
+}
+
 /// The variant namespace, imported the way a dependent imports it.
 ///
 /// `use ast::InputValue::{Int, String}` and `use ast::ConstInputValue::*` compile against an
@@ -1180,6 +1274,184 @@ mod tests {
       None
     );
     assert!(super::graphql_parser("{ f(x: 99999999999999999999999999) }").is_ok());
+  }
+
+  /// One spelling, and the meaning **every** public reader has to reach for it at each width.
+  struct Spelling {
+    literal: &'static str,
+    at_i32: super::IntMeaning,
+    at_i64: super::IntMeaning,
+  }
+
+  /// The corpus the agreement is asked over.
+  ///
+  /// The leading zeroes are the rows the property exists for, and they are chosen so that no
+  /// reader can reach `NotALiteral` by accident: each one is **in range at both widths**, or is
+  /// in range at one and past the other, so a range reader has an answer for every one of them
+  /// and giving that answer is the failure.
+  ///
+  /// The rest are the non-vacuity: a corpus of leading zeroes alone is satisfied by three readers
+  /// that answer `NotALiteral` to everything, which is a parser that parses nothing.
+  const CORPUS: &[Spelling] = {
+    use super::IntMeaning::{Converts, NotALiteral, Overflows};
+
+    &[
+      // In range at both widths, and not an `IntValue`. `007` is the finding's own row.
+      Spelling {
+        literal: "007",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      Spelling {
+        literal: "00",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      Spelling {
+        literal: "-007",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      Spelling {
+        literal: "0000000000000000007",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      Spelling {
+        literal: "02147483647",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      // Overflow-shaped, and still not an `IntValue`: the value is past a width, so a reader that
+      // answered by range would answer `Overflows` here and `Converts` above. Both are wrong and
+      // they are wrong differently, which is why the corpus carries both shapes.
+      Spelling {
+        literal: "02147483648",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      Spelling {
+        literal: "-02147483649",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      Spelling {
+        literal: "09223372036854775808",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      Spelling {
+        literal: "-09223372036854775809",
+        at_i32: NotALiteral,
+        at_i64: NotALiteral,
+      },
+      // Non-vacuity. A single zero is a leading zero to nobody: draft §2.9.1's `IntegerPart` is
+      // `-? (0 | NonZeroDigit Digit*)`, so `0` and `-0` are the shapes the rows above differ from
+      // by one byte.
+      Spelling {
+        literal: "0",
+        at_i32: Converts,
+        at_i64: Converts,
+      },
+      Spelling {
+        literal: "-0",
+        at_i32: Converts,
+        at_i64: Converts,
+      },
+      Spelling {
+        literal: "7",
+        at_i32: Converts,
+        at_i64: Converts,
+      },
+      Spelling {
+        literal: "-2147483648",
+        at_i32: Converts,
+        at_i64: Converts,
+      },
+      // The literal the two readings disagree about, and the two past both of them.
+      Spelling {
+        literal: "2147483648",
+        at_i32: Overflows,
+        at_i64: Converts,
+      },
+      Spelling {
+        literal: "9223372036854775808",
+        at_i32: Overflows,
+        at_i64: Overflows,
+      },
+      Spelling {
+        literal: "99999999999999999999999999",
+        at_i32: Overflows,
+        at_i64: Overflows,
+      },
+    ]
+  };
+
+  /// The meaning the readers agree on for one spelling at `I`'s width, or a panic naming the
+  /// reader that broke the agreement.
+  fn agreed_meaning<I>(literal: &str) -> super::IntMeaning
+  where
+    I: smear::parser::graphql::syntactic::value::materialized::MaterializedInt,
+  {
+    let readings = super::public_int_readings::<I>(literal);
+
+    let mut admitted: Vec<super::IntMeaning> = super::INT_MEANINGS.to_vec();
+    for (_, ruled_in) in &readings {
+      admitted.retain(|meaning| ruled_in.contains(meaning));
+    }
+
+    assert_eq!(
+      admitted.len(),
+      1,
+      "{literal:?} at {}: the public readers admit {admitted:?} between them, and they have to \
+       admit exactly one meaning — {readings:?}",
+      I::WIDTH,
+    );
+    admitted[0]
+  }
+
+  /// **Every public reader of an integer literal reaches one meaning, at both widths.**
+  ///
+  /// Stated over the reader list rather than as one assertion per reader, because the defect this
+  /// replaces was not a reader being wrong: it was a *third* reader shipping — `MaterializedInt`
+  /// went public and took its `parse` with it — while the properties in the tree each ranged over
+  /// one path. `007` was `Some(7)` to the new door, refused by the production, and refused by
+  /// `IntOverflow::checked`, and every test in the workspace stayed green.
+  ///
+  /// So the quantifier is over [`public_int_readings`](super::public_int_readings): a path
+  /// published later has to join that array, and joining it is what puts it under this property.
+  #[test]
+  fn every_public_reader_of_an_int_literal_reaches_one_meaning() {
+    use super::IntMeaning::{Converts, NotALiteral, Overflows};
+
+    let (mut converts, mut overflows, mut not_a_literal) = (0usize, 0usize, 0usize);
+
+    for row in CORPUS {
+      for (agreed, expected) in [
+        (agreed_meaning::<i32>(row.literal), row.at_i32),
+        (agreed_meaning::<i64>(row.literal), row.at_i64),
+      ] {
+        assert_eq!(
+          agreed, expected,
+          "{:?}: the readers agree, and on the wrong meaning",
+          row.literal,
+        );
+        match agreed {
+          Converts => converts += 1,
+          Overflows => overflows += 1,
+          NotALiteral => not_a_literal += 1,
+        }
+      }
+    }
+
+    // Non-vacuity, per meaning: an intersection that only ever landed on one of the three would
+    // satisfy every equality above while ranging over one arm.
+    assert!(converts >= 9, "only {converts} rows convert");
+    assert!(overflows >= 5, "only {overflows} rows overflow");
+    assert!(
+      not_a_literal >= 18,
+      "only {not_a_literal} rows are refused for shape",
+    );
   }
 
   /// The twelve source-equivalence properties of the value trees, across the dependency edge.
