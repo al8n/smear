@@ -102,22 +102,57 @@ pub fn graphql_parser(
   .parse_str(src)
 }
 
-/// `ErrorData`'s 22 variants, matched exhaustively with no wildcard, from outside the crate.
+/// `ErrorData`'s 22 variants, named from outside the crate, plus the wildcard arm
+/// `#[non_exhaustive]` requires — which fails **closed**.
 ///
-/// This is the probe row 7 of [`value_parameters_are_source_compatible`]'s table exists for, aimed
-/// at the type that actually broke it: `feat/parser-materialised-values` added
-/// `#[non_exhaustive]` to `smear::parser::graphql::error::ErrorData` with no review, and nothing
-/// in `smear-parser`'s own test suite could have caught it — `#[non_exhaustive]` binds every
-/// crate except the one that declares the enum, so an in-crate wildcard-free match (this crate's
-/// own `error_data_variant_census`) stays green whether or not the attribute is there. This
-/// crate is the one it binds. With `#[non_exhaustive]` present, this function is `E0004`.
-#[allow(clippy::type_complexity)]
-pub fn error_data_is_exhaustively_matchable(
+/// # What this replaced, and why it is not the same probe
+///
+/// `error_data_is_exhaustively_matchable` stood here and its match had no wildcard, so its
+/// property was that `smear::parser::graphql::error::ErrorData` carries no `#[non_exhaustive]`.
+/// Only this crate could hold that property: the attribute binds every crate except the one
+/// declaring the enum, so an in-crate wildcard-free match — `smear-parser`'s own
+/// `error_data_variant_census` — stays green whether or not the attribute is there, and this crate
+/// is the one it binds.
+///
+/// That property is now deliberately false. `ErrorData`'s own doc argues it: the variant list is
+/// smear's rather than the specification's, so it grows, and every future variant is otherwise a
+/// major break. The probe therefore cannot be kept — and it is not simply deleted either, because
+/// the thing it was *defending* is real. A wildcard becomes required; being complete and reachable
+/// does not stop being worth pinning.
+///
+/// # What is left, and the two halves it is in
+///
+/// - **Complete.** All 22 variants are still named below, so a dependent can still reach every one
+///   of them by name and a path that stops resolving still fails here. The arm the attribute
+///   forces returns `None` instead of a tag, so a variant nobody listed is a *reported* failure
+///   rather than a quiet fall-through into some neighbour's answer.
+/// - **Reachable.** [`error_data_variant_samples`] builds one value per variant through a public
+///   constructor, from outside the crate, and the test pairs each against the tag it must produce.
+///   The old probe never had this half: it proved 22 names *resolve*, not that a dependent can
+///   *produce* what they name.
+///
+/// # The compile-time notice, and where it went
+///
+/// It is gone from here and cannot be brought back from outside `smear-parser`. A twenty-third
+/// variant now compiles against this function, lands on the wildcard, and is caught at run time by
+/// `tests::the_error_data_variant_set_is_complete_and_reachable_from_outside_the_crate` — a
+/// `#[cfg(test)]` unit test, so a code span and not a link — only once somebody adds a sample for
+/// it. The build-time half lives in `smear-parser` now, at `error_data_variant_census`, whose match
+/// is wildcard-free in every configuration for exactly this reason — the same relocation pql made
+/// for `PqlError`, whose notice moved to `PqlError::span`.
+///
+/// # Planted, because a gate nobody has seen fail is a gate nobody has tested
+///
+/// Deleting the `UnknownOperationType` arm below — which the attribute makes compile — reddens
+/// that test with *the sample built for `UnknownOperationType` did not tag as
+/// `UnknownOperationType`; a `None` here is the wildcard arm*. That is the decay the fail-closed
+/// arm exists to refuse, and it is the whole of what this probe can still see.
+pub fn error_data_variant_tag(
   error: &smear::parser::graphql::error::GraphqlError<&str>,
-) -> &'static str {
+) -> Option<&'static str> {
   use smear::parser::graphql::error::ErrorData;
 
-  match error.data() {
+  Some(match error.data() {
     ErrorData::Lexer(_) => "Lexer",
     ErrorData::IntOverflow(_) => "IntOverflow",
     ErrorData::FloatOverflow(_) => "FloatOverflow",
@@ -140,7 +175,139 @@ pub fn error_data_is_exhaustively_matchable(
     ErrorData::UnexpectedEndOfSchemaExtension(_) => "UnexpectedEndOfSchemaExtension",
     ErrorData::EndOfInput => "EndOfInput",
     ErrorData::Other(_) => "Other",
-  }
+    // The arm `#[non_exhaustive]` requires, and it must stay a `return None`. A tag here would
+    // answer for a variant nobody read, on this arm's authority, and leave the run green while
+    // saying something no one checked.
+    _ => return None,
+  })
+}
+
+/// One sample per `ErrorData` variant, built from outside the crate through the public door, each
+/// paired with the name [`error_data_variant_tag`] must answer for it.
+///
+/// **Built the way a dependent has to build them**, never by writing `ErrorData::Variant(…)`. That
+/// is the rule with teeth, and it is `smear-parser`'s own census rule reapplied across the
+/// dependency edge: `IntOverflow` and `FloatOverflow` once sat in that enum with no constructor and
+/// no construction site anywhere, and a sample naming the variant directly would have reported them
+/// green. Here it also proves the constructor is *public* and its path resolves from a dependent,
+/// which is the half the probe this replaced did not have.
+///
+/// The count is in the type, so dropping a sample is `E0308` in this function rather than a quieter
+/// number somewhere else. What no length can pin from out here is the *enum's* count — that is the
+/// guarantee `#[non_exhaustive]` took, and `smear-parser`'s `error_data_variant_census` is where it
+/// now lives.
+pub fn error_data_variant_samples() -> [(
+  &'static str,
+  smear::parser::graphql::error::GraphqlError<&'static str>,
+); 22] {
+  use smear::{
+    lexer::{
+      graphql::{error::LexerErrors, syntactic::SyntacticTokenKind},
+      tokora::SimpleSpan,
+    },
+    parser::graphql::error::{
+      EnumTypeExtensionHint, Expectation, GraphqlError, GraphqlErrors,
+      InputObjectTypeExtensionHint, IntOverflow, IntWidth, InterfaceTypeExtensionHint,
+      ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
+      VariableValueHint,
+    },
+  };
+
+  let span = SimpleSpan::new(0, 1);
+
+  [
+    (
+      "Lexer",
+      GraphqlError::from_lexer_errors(LexerErrors::default(), span),
+    ),
+    (
+      "IntOverflow",
+      GraphqlError::int_overflow(
+        IntOverflow::checked("99999999999999999999999999", IntWidth::I64)
+          .expect("a 26-digit literal is outside `i64` at any reading"),
+        span,
+      ),
+    ),
+    ("FloatOverflow", GraphqlError::float_overflow("1e400", span)),
+    (
+      "InvalidEnumValue",
+      GraphqlError::invalid_enum_value("x", span),
+    ),
+    (
+      "InvalidBooleanValue",
+      GraphqlError::invalid_boolean_value("x", span),
+    ),
+    (
+      "InvalidNullValue",
+      GraphqlError::invalid_null_value("x", span),
+    ),
+    (
+      "InvalidFragmentName",
+      GraphqlError::invalid_fragment_name("on", span),
+    ),
+    ("Unclosed", GraphqlError::unclosed_list(span)),
+    (
+      "UnexpectedToken",
+      GraphqlError::unexpected_token(SyntacticTokenKind::Colon, Expectation::Name, span),
+    ),
+    (
+      "UnexpectedKeyword",
+      GraphqlError::unexpected_keyword("quary", "query", span),
+    ),
+    (
+      "UnexpectedEndOfVariableValue",
+      GraphqlError::unexpected_end_of_variable_value(VariableValueHint::Name, span),
+    ),
+    (
+      "UnexpectedEndOfObjectFieldValue",
+      GraphqlError::unexpected_end_of_object_field_value(ObjectFieldValueHint::Name, span),
+    ),
+    (
+      "UnknownDirectiveLocation",
+      GraphqlError::unknown_directive_location("NOWHERE", span),
+    ),
+    (
+      "UnknownOperationType",
+      GraphqlError::unknown_operation_type("quary", span),
+    ),
+    (
+      "UnexpectedEndOfObjectExtension",
+      GraphqlError::unexpected_end_of_object_extension(span, ObjectTypeExtensionHint::Name),
+    ),
+    (
+      "UnexpectedEndOfInterfaceExtension",
+      GraphqlError::unexpected_end_of_interface_extension(span, InterfaceTypeExtensionHint::Name),
+    ),
+    (
+      "UnexpectedEndOfEnumExtension",
+      GraphqlError::unexpected_end_of_enum_extension(span, EnumTypeExtensionHint::Name),
+    ),
+    (
+      "UnexpectedEndOfInputObjectExtension",
+      GraphqlError::unexpected_end_of_input_object_extension(
+        span,
+        InputObjectTypeExtensionHint::Name,
+      ),
+    ),
+    (
+      "UnexpectedEndOfUnionExtension",
+      GraphqlError::unexpected_end_of_union_extension(span, UnionTypeExtensionHint::Name),
+    ),
+    (
+      "UnexpectedEndOfSchemaExtension",
+      GraphqlError::unexpected_end_of_schema_extension(span, SchemaExtensionHint::Schema),
+    ),
+    ("EndOfInput", GraphqlError::unexpected_end_of_input(span)),
+    // Not a constructor: `Other`'s only producers are the `From` conversions in `smear-parser`'s
+    // error glue, and this is the cheapest of them to mint from out here.
+    (
+      "Other",
+      GraphqlErrors::from(LexerErrors::<char, ()>::default())
+        .into_iter()
+        .next()
+        .expect("the lexer-error conversion emits one error"),
+    ),
+  ]
 }
 
 /// `graphqlx` + `parser` — the GraphQLx dialect in the parser, which is where the dialect's
@@ -560,6 +727,12 @@ pub mod value_variant_namespace {
 ///
 /// Two of those twelve failed the draft before this one, and both were the variant namespace.
 ///
+/// Row 7 is a property of the *value* trees rather than a house rule, and the enum next door shows
+/// where the line is. `InputValue`'s nine variants are draft §2.9's nine alternatives, so the list
+/// is the specification's and a wildcard forced on a consumer would be a wildcard over a closed
+/// set. `ErrorData`'s list is smear's, which is why it carries `#[non_exhaustive]` deliberately and
+/// is probed by [`error_data_variant_tag`] instead of by an exhaustive match.
+///
 /// # Why every axis is crossed with the tree
 ///
 /// There are two value trees and each promises all twelve separately, so a probe that read only
@@ -946,16 +1119,45 @@ mod tests {
     let _ = <smear::parser::graphql::ast::InputValue<&str> as super::ValueDepth>::depth;
   }
 
-  /// `ErrorData`, matched exhaustively from outside the crate — the check that would have caught
-  /// `#[non_exhaustive]` landing on it unreviewed. Driven by a real parse failure rather than a
-  /// constructor, so the property proven is "this variant, from this crate, right now" and not
-  /// merely "this type-checks".
+  /// `ErrorData`'s variant set, from outside the crate: every variant named, every variant
+  /// reachable through a public constructor, and nothing falling through the wildcard arm
+  /// `#[non_exhaustive]` forces.
+  ///
+  /// This replaces `the_error_data_variants_are_exhaustively_matchable_from_outside_the_crate`,
+  /// which asserted the attribute was absent — see [`error_data_variant_tag`] for why that
+  /// property is now deliberately false and what of it survives.
+  ///
+  /// The last stanza is the old test's whole body, kept: a *real parse failure* rather than a
+  /// constructed value, so at least one arm is proven against "this variant, from this crate, right
+  /// now" and not merely against "this type-checks".
+  ///
+  /// [`error_data_variant_tag`]: super::error_data_variant_tag
   #[test]
-  fn the_error_data_variants_are_exhaustively_matchable_from_outside_the_crate() {
+  fn the_error_data_variant_set_is_complete_and_reachable_from_outside_the_crate() {
+    let samples = super::error_data_variant_samples();
+
+    let names: BTreeSet<&str> = samples.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+      names.len(),
+      samples.len(),
+      "two samples claim the same variant name, so one variant is unsampled and the count hides it"
+    );
+
+    for (name, error) in &samples {
+      assert_eq!(
+        super::error_data_variant_tag(error),
+        Some(*name),
+        "the sample built for `{name}` did not tag as `{name}`; a `None` here is the wildcard arm, \
+         which means the variant is no longer named in `error_data_variant_tag`"
+      );
+    }
+
     let errors = super::graphql_parser("{ f(").expect_err("a truncated document is a parse error");
     let error = errors.into_iter().next().expect("at least one error");
-    let tag = super::error_data_is_exhaustively_matchable(&error);
-    assert!(!tag.is_empty(), "the match arm returned no tag");
+    assert!(
+      super::error_data_variant_tag(&error).is_some(),
+      "a parse error this crate produced fell through to the wildcard arm"
+    );
   }
 
   /// The introspection door, driven end to end across the dependency edge.

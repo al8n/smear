@@ -19,10 +19,22 @@
 //! introduced beside it argued the attribute belonged there, and a later round read that
 //! justification as evidence the attribute predated the branch — it did not: `ErrorData` was
 //! exhaustive at `c3e35b8`, the base this branch was cut from, and Codex found the gap after the
-//! justification had already made it read as settled. Both the attribute and the paragraph are
-//! gone now, and this test is the gate the mistake argues for: **on every axis below, every
-//! public enum in the files this branch touches must read as it did at the merge base, or the
-//! difference must be recorded with the value it was reviewed at.**
+//! justification had already made it read as settled. Both the attribute and the paragraph came
+//! straight back off, and this test is the gate that mistake argues for: **on every axis below,
+//! every public enum in the files this branch touches must read as it did at the merge base, or
+//! the difference must be recorded with the value it was reviewed at.**
+//!
+//! **`ErrorData` carries the attribute again, and the difference between the two rounds is this
+//! table.** Removing it was the right action on an unreviewed change and it settled nothing; the
+//! question was then argued on its own — `7b9b293`'s rule, the measured downstream cost, and what
+//! `#[non_exhaustive]` takes from a consumer — and the attribute won. So there is an entry in
+//! [`RECORDED_DIFFERENCES`] below carrying the exact four attribute lines the review approved, and
+//! that entry is the *only* difference between an attribute that was decided and one that was not.
+//! The gate did not go quiet because the argument was persuasive; it went quiet because the value
+//! was written down — and both directions out of that value were planted to prove it is a value
+//! and not a silence. Taking the attribute back off fails with *its attribute set is back to the
+//! merge base's, but a recorded difference still claims it changed*; adding a second attribute
+//! beside it fails with *a SECOND change has landed under the first one's justification*.
 //!
 //! **The merge base moved and these values did not.** #157 merged into `feat/proto`, so the branch
 //! now sits on `6e0baf0`; `git diff --name-only c3e35b8 6e0baf0 -- smear-parser` is **empty**, so
@@ -66,8 +78,8 @@
 //! match — because it is new since the merge base, or because it changed and the change was
 //! reviewed on its own merits. An enum in neither table for an axis, or one whose current value
 //! differs from the baseline without a matching recorded entry, fails the test with both values
-//! printed. That is the shape `#[non_exhaustive]` on `ErrorData` would have taken: no recorded
-//! entry, because the round that added it believed it was already there.
+//! printed. That is the shape `#[non_exhaustive]` on `ErrorData` took the first time: no recorded
+//! entry, because the round that added it believed it was already there. It has one now.
 //!
 //! **The exception lists are per axis and not per enum**, which is the one structural decision in
 //! here worth arguing. A single entry per enum would let a justification written for one contract
@@ -529,8 +541,32 @@ struct Recorded {
 /// Every enum whose current attribute set does not equal `MERGE_BASE_ATTRS` — new since the
 /// merge base, or changed since it — each with the reviewed value and the reason. This is the
 /// table `#[non_exhaustive]` on `ErrorData` should have gone in and did not: an unreviewed
-/// attribute change is exactly an entry missing from both this table and `MERGE_BASE_ATTRS`.
+/// attribute change is exactly an entry missing from both this table and `MERGE_BASE_ATTRS`. The
+/// first entry below is that attribute, on the second attempt, in the table.
 const RECORDED_DIFFERENCES: &[Recorded] = &[
+  Recorded {
+    file: "src/graphql/error.rs",
+    name: "ErrorData",
+    expected: &[
+      "#[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]",
+      "#[unwrap(ref, ref_mut)]",
+      "#[try_unwrap(ref, ref_mut)]",
+      "#[non_exhaustive]",
+    ],
+    reason: "ONE attribute added: `#[non_exhaustive]`. SOURCE-BREAKING, ARGUED AND ACCEPTED — the \
+       section of that name on `ErrorData` is the argument, and this is the entry the round that \
+       added it the first time did not write. What decided it is `7b9b293`'s own rule: the \
+       attribute belongs on vocabulary SMEAR OWNS and not on vocabulary the GRAPHQL \
+       SPECIFICATION ENUMERATES, and `ErrorData` transcribes no production — its `Other` variant \
+       exists because the list is open, its two overflow variants arrived with a feature, and its \
+       six extension-hint variants are one grammatical situation cut six ways. The four enums \
+       `7b9b293` freed are the other side of the same rule and stay exhaustive, as do `Unclosed` \
+       and `IntWidth` in this very file. MEASURED COST: `cargo check --workspace --all-features \
+       --all-targets --keep-going` with the attribute applied reports exactly one `E0004` in the \
+       whole workspace, `smear-smoke`'s out-of-crate probe, which is replaced rather than deleted \
+       by `error_data_variant_tag`. The three derive lines above are the merge base's, unedited, \
+       and repeating them is the point — this entry approves one attribute, not the enum.",
+  },
   Recorded {
     file: "src/graphql/ast/value.rs",
     name: "ConstInputValue",

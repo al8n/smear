@@ -399,40 +399,60 @@
 //! literal trace space is not large, it is **unbounded**, and a percentage of it is not a number.
 //! The round that first priced this axis quoted one anyway.
 //!
-//! So the space is a quotient, and it is named here rather than left to be inferred. A **trace
-//! class** is an arrival order together with one non-decreasing count per answer: how many
-//! *successful* `poll_resolve` calls the driver had made when it made that answer. Two runs are one
-//! class when they agree on those and differ only in how many polls came back `None`, and where.
+//! So the space is a quotient, and it is named here rather than left to be inferred — **a
+//! deliberately syntactic one**, which is a weaker thing than it reads as. A **trace class** is an
+//! arrival order together with one non-decreasing count per answer: how many *successful*
+//! `poll_resolve` calls the driver had made when it made that answer. Two runs are one class when
+//! they agree on those and differ only in how many polls came back `None`, and where.
 //! [`schedule_count`] counts that space, [`Run::holds`] is the coordinate a run reports itself at,
 //! and every number below is of classes.
 //!
-//! The quotient is sound only if an unsuccessful poll is inert, so it is checked rather than
-//! declared. Read off the executor first, because a check needs something to be a check *of*:
-//! `poll_resolve` on a dry chain runs its entry hook, finds nothing ready and returns; the entry
-//! hook drops the object value the previous offer parked and clears the argument scratch, and
-//! `handle_resolved` opens with the same hook. So an empty poll before an answer moves that one
-//! drop a single call earlier and does nothing besides: it enqueues and dequeues nothing, issues no
-//! request id, leaves the ready chain and every position's state as it found them, and the drop it
-//! brought forward happens exactly once either way.
+//! Unsuccessful polls are erased **by definition of the coordinate**, then, and not because they
+//! were shown to be inert. The distinction is not pedantry, because the file's own reading of the
+//! executor is where the counter-example to the stronger claim already sat. `poll_resolve` on a dry
+//! chain runs its entry hook, finds nothing ready and returns. Most of what that does is nothing:
+//! it enqueues and dequeues nothing, issues no request id, and leaves the ready chain and every
+//! position's state as it found them. But the entry hook drops the object value the previous offer
+//! parked and clears the argument scratch, and `handle_resolved` opens with the same hook — so the
+//! **first** empty poll before an answer moves that drop one call earlier. The drop happens exactly
+//! once either way, which is what makes the quotient a reasonable thing to count in; it is not
+//! *nothing*, which is what makes it a definition rather than a theorem. No coordinate here can see
+//! the difference, [`Run::holds`] least of all: it counts successful offers.
 //!
-//! That is an argument, and [`drive`]'s `empty_polls` is the measurement. The drained sweep makes
-//! [`REPEATED_EMPTY_POLLS`] further polls before **every** answer, each asserted to come back empty
-//! again, and the run they sit in is then required to answer in the order it was handed, to
-//! serialise in the document's order, to carry the document's values, and to hold exactly the
-//! offers [`schedule_bounds`]'s ceiling says it must — four oracles, not one of which knows the
-//! polls happened. The named cases drive the same schedule with one empty poll per answer instead
-//! of three, and [`Polls::UntilWanted`] makes none at all before any answer. Nought, one and three,
-//! and each further call measured to come back empty again, which is what carries the erasure from
-//! three to any number: a poll that returns `None` and leaves the run at the same coordinate is a
-//! poll the next one repeats.
+//! What was measured is narrower than the erasure, and worth having on its own terms. [`drive`]'s
+//! `empty_polls` is it. The drained sweep makes [`REPEATED_EMPTY_POLLS`] further polls before
+//! **every** answer, each asserted to come back empty again, and the run they sit in is then
+//! required to answer in the order it was handed, to serialise in the document's order, to carry
+//! the document's values, and to hold exactly the offers [`schedule_bounds`]'s ceiling says it must
+//! — four oracles, and not one of them knows the polls happened. The named cases drive the same
+//! schedule with one empty poll per answer instead of three, and [`Polls::UntilWanted`] makes none
+//! at all before any answer.
 //!
-//! Where an empty poll can happen is not a free choice either, and that is what makes those three
-//! placements exhaustive rather than a sample. A poll comes back empty exactly when no position is
-//! `Ready`, which at a given answer means the driver has taken every offer enqueued so far — the
-//! ceiling, which is the drained schedule's own coordinate at every answer. A schedule strictly
-//! between the endpoints can be empty-polled only where it touches that ceiling, and where it does
-//! the executor's state is the drained schedule's: the same offers handed out, the same answers
-//! made. So the drained sweep visits every state in which the question can be asked.
+//! **Nought, one and three, and that is the whole of what was run**: three across the 453 600
+//! drained runs of the two sweeps, one across the two named cases, none across the 453 600 minimal
+//! runs. Inert every time, over every one of those runs — which is real evidence *for the
+//! representatives chosen*, and not proof of the quotient. The sentence that stood here carried the
+//! erasure from three to any number, on the grounds that a poll leaving the run at the same
+//! coordinate is a poll the next one repeats. That step is circular. The coordinate omits
+//! unsuccessful polls by construction, so every such poll leaves the run exactly where it was
+//! whatever it did, and the induction is a restatement of the quotient rather than evidence for it
+//! — the class coordinate omits the very thing being inducted over. The four oracles say the same
+//! from the other side: coordinates that exclude the poll count cannot answer a question about the
+//! poll count.
+//!
+//! Where an empty poll can *happen* is not a free choice, and that much is closed. A poll comes
+//! back empty exactly when no position is `Ready`, which at a given answer means the driver has
+//! taken every offer enqueued so far — the ceiling, which is the drained schedule's own coordinate
+//! at every answer. A schedule strictly between the endpoints can be empty-polled only where it
+//! touches that ceiling, and where it does the executor's state is the drained schedule's: the same
+//! offers handed out, the same answers made. So the drained sweep visits every state in which the
+//! question can be asked.
+//!
+//! Visiting every such state is not exercising every *pattern* over them, and the earlier draft of
+//! this paragraph called three counts "exhaustive" on the strength of the first. Both disciplines
+//! here are uniform — the drained one empty-polls before every answer, the minimal one before none
+//! — so an assembly that reads *which* answers were preceded by an empty poll, rather than how many
+//! preceded them all, has no run here that distinguishes it. Placement is as open as count.
 //!
 //! ### What two schedules do not cover, and what covering it would cost
 //!
@@ -475,6 +495,14 @@
 //! *runs*, and this space counts classes. What *is* excluded is a defect at either extreme of the
 //! `Ready`/`InFlight` boundary — which is where the plant above lived, and where a sequential
 //! caller drives.
+//!
+//! **And 0.61% is a percentage of the quotient, so it prices nothing the quotient erased.** Said in
+//! the same breath as the number, because the number cannot otherwise be read for less than it is:
+//! a defect that depends on the **count or the placement of unsuccessful polls** is outside
+//! everything this file establishes — outside that percentage, outside the 148 744 350 it divides
+//! by, and outside all 907 200 runs. Three counts were run, uniformly, and every oracle here reads
+//! a coordinate the count is defined out of. The two axes this file does close are the arrival
+//! order and the two ends of the poll schedule, and the sentence above bounds only the second.
 //!
 //! The price of the rest is time, and only time. The 907 200 runs this file makes cost 24.8 s in a
 //! debug build single-threaded — 27 µs a run — and around 12 s of wall clock on the two threads the
@@ -662,7 +690,8 @@ enum Polls {
   /// It is where an *unsuccessful* poll lives, too: coming back empty is how this schedule knows it
   /// is done, so every answer of every drained run is preceded by one, and [`drive`]'s
   /// `empty_polls` is what makes more of them there. The module header says why that matters — the
-  /// counted space erases them, and an erasure is only sound if the thing erased does nothing.
+  /// counted space erases them by definition of its coordinate, so what running more of them buys
+  /// is evidence about the counts actually run rather than a proof that the erasure was free.
   ToExhaustion,
   /// Take offers one at a time, and stop as soon as the position about to be answered is among
   /// them.
@@ -879,12 +908,13 @@ fn drive(
     }
     // The drained loop above left the executor dry, and the driver is standing here holding
     // requests it has not answered. That is the whole of where an unsuccessful poll can happen, so
-    // it is where the erasure the counted space performs is checked.
+    // it is where the erasure the counted space performs by definition is exercised.
     for _ in 0..empty_polls {
       assert!(
         executor.poll_resolve(&mut space).is_none(),
         "a poll repeating one that had just come back empty offered a position, so an unsuccessful \
-         poll makes progress and the counted space is not a space of equivalence classes"
+         poll makes progress and the counts this file runs are not the inert representatives it \
+         reports them as"
       );
     }
     let Some(index) = held.iter().position(|(_, path, _)| path == wanted) else {
@@ -1486,8 +1516,12 @@ fn factorial(count: usize) -> usize {
 /// Two rather than one, so that what is measured is a *repeated* empty poll and not merely a second
 /// one — three per answer in all, counting the one the drained schedule makes to discover that it
 /// is done. [`drive_backwards`] makes just that one and [`Polls::UntilWanted`] makes none at all
-/// before any answer, so the file spans nought, one and three, which is the whole of the axis the
-/// module header's equivalence erases.
+/// before any answer, so the file spans nought, one and three.
+///
+/// Three representatives of that axis, and not the axis. The module header's equivalence erases
+/// *every* count, by defining its coordinate over successful polls alone; these three are what was
+/// run, uniformly before every answer, and the header says in the same breath as the 0.61% that a
+/// defect reading the count or the placement of an unsuccessful poll is outside all of it.
 const REPEATED_EMPTY_POLLS: usize = 2;
 
 /// How many poll schedules one of these documents admits across all of its arrival orders.
