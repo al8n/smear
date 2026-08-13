@@ -2961,15 +2961,27 @@ fn a_flat_fragment_chain_no_longer_ends_the_process() {
 /// caught by something *only* the counter can catch. This document collects a single field and
 /// walks thousands of fragments to reach it: with the counter removed the metadata ceiling sees
 /// two entries and is content, and the walk is free.
+///
+/// The budget is the document's definitions plus the visits under test, because draft §6.1's
+/// operation lookup is charged the same ceiling and reads every definition before collection
+/// begins — a budget of `WALK` alone refuses this document at the lookup, which is a real refusal
+/// of a different thing.
 #[test]
 fn collection_that_appends_nothing_is_still_charged() {
+  const LINKS: usize = 4_000;
+  /// The operation plus `LINKS + 1` fragments, which is what draft §6.1's lookup reads.
+  const LOOKUP: u32 = LINKS as u32 + 2;
+  /// What is left for the walk once the lookup is paid for.
+  const WALK: u32 = 64;
+  const BUDGET: u32 = LOOKUP + WALK;
+
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(64).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
     "type Query { a: String }",
-    &fragment_chain(4_000),
+    &fragment_chain(LINKS),
     obj(vec![("a", J::Str("A".to_owned()))]),
     limits,
   );
@@ -2978,12 +2990,13 @@ fn collection_that_appends_nothing_is_still_charged() {
     errors
       .iter()
       .any(|(kind, ..)| *kind == Kind::ResponseBudget),
-    "4,000 spreads cannot be walked within 64 visits, though they append two entries in total"
+    "{LINKS} spreads cannot be walked within {WALK} visits, though they append two entries in \
+     total: {errors:?}"
   );
   assert!(
     errors
       .iter()
-      .any(|(_, message, _)| message.contains("64 selection visits")),
+      .any(|(_, message, _)| message.contains(&std::format!("{BUDGET} selection visits"))),
     "and the message names the budget that stopped it: {errors:?}"
   );
 }
@@ -3075,22 +3088,25 @@ fn collection_inside_the_visit_budget_is_unchanged() {
 ///
 /// # The numbers
 ///
-/// A chain of `LINKS` links defines `LINKS + 1` fragments in `LINKS + 2` definitions, so the index
-/// pass costs `2 · LINKS + 3`, and walking it afterwards costs about the same again — one visit per
-/// selection and about one comparison per spread. The ceiling is the pass plus `LINKS`: comfortably
-/// past the pass, so the first run reaches the walk and leaves the table built, and comfortably
-/// short of pass-plus-walk, so it is refused. A second run that skipped the pass would have the
+/// A chain of `LINKS` links defines `LINKS + 1` fragments in `LINKS + 2` definitions, so draft
+/// §6.1's lookup costs `LINKS + 2` and the index pass costs `2 · LINKS + 3`, and walking the chain
+/// afterwards costs about the same again — one visit per selection and about one comparison per
+/// spread. The ceiling is the lookup plus the pass plus `LINKS`: comfortably past both, so the
+/// first run reaches the walk and leaves the table built, and comfortably short of
+/// lookup-plus-pass-plus-walk, so it is refused. A second run that skipped the pass would have the
 /// whole walk inside what is left.
 #[test]
 fn a_refused_request_is_refused_again_on_the_same_executor() {
   const LINKS: usize = 16;
+  /// One unit per definition, read by draft §6.1 before collection begins.
+  const LOOKUP: u32 = LINKS as u32 + 2;
   /// One unit per definition walked and one per fragment pushed.
   const INDEX: u32 = 2 * LINKS as u32 + 3;
 
   let query = fragment_chain(LINKS);
   let (schema, document) = compile("type Query { a: String }", &query);
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(INDEX + LINKS as u32).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(LOOKUP + INDEX + LINKS as u32).expect("not zero"),
     ..Limits::default()
   };
   let mut space = Space::default();
@@ -3338,10 +3354,11 @@ fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
 /// A driver message the *work* ceiling refused says so, rather than blaming the arena.
 #[test]
 fn a_driver_message_refused_for_work_names_the_work_ceiling() {
-  // Exactly what `{ a }` costs: one selection examined, and an intern into an empty table that
-  // compares nothing. So the budget is spent when the driver's failure arrives.
+  // Exactly what `{ a }` costs: draft §6.1's lookup over the document's one definition, one
+  // selection examined, and an intern into an empty table that compares nothing. So the budget is
+  // spent when the driver's failure arrives.
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(1).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(2).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
@@ -3358,7 +3375,7 @@ fn a_driver_message_refused_for_work_names_the_work_ceiling() {
     "the driver's failure is still the finding, whichever ceiling ate the text: {errors:?}"
   );
   assert!(
-    errors[0].1.contains("1 selection visits"),
+    errors[0].1.contains("2 selection visits"),
     "and the message names the ceiling that refused, which is the knob an operator can move: {}",
     errors[0].1
   );
@@ -3372,12 +3389,13 @@ fn a_driver_message_refused_for_work_names_the_work_ceiling() {
 /// An impossible runtime type the *work* ceiling could not quote says so too.
 #[test]
 fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
-  // One selection at the root and an intern that compares nothing, as above. The driver then names
-  // `pet` as the runtime type: the schema knows the spelling — it is a field — so `sym` answers and
-  // `type_of_sym` does not, which is the "not a possible type" branch, and the name it wants to
-  // quote is the response key already sitting in that bucket.
+  // Draft §6.1's lookup over one definition, one selection at the root and an intern that compares
+  // nothing, as above. The driver then names `pet` as the runtime type: the schema knows the
+  // spelling — it is a field — so `sym` answers and `type_of_sym` does not, which is the "not a
+  // possible type" branch, and the name it wants to quote is the response key already sitting in
+  // that bucket.
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(1).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(2).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
@@ -3394,7 +3412,7 @@ fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
     "still the driver naming a type the position cannot hold: {errors:?}"
   );
   assert!(
-    errors[0].1.contains("1 selection visits"),
+    errors[0].1.contains("2 selection visits"),
     "and it names the ceiling that silenced the quote; this arm used to render the arena's cap \
      unconditionally, so it read `16777216 interned bytes` against an arena that was empty: {}",
     errors[0].1
@@ -5986,7 +6004,7 @@ fn request_error_result(
 /// than against a transcribed string: the wording is prose that may be improved, and what has to
 /// hold is that the entry is this error's and not a neighbour's.
 ///
-/// **Nine of `StartError`'s ten variants, and the tenth is unreachable from here rather than
+/// **Ten of `StartError`'s eleven variants, and the eleventh is unreachable from here rather than
 /// omitted.** `NoQueryRoot` needs a schema with no query root, and `Schema::build` refuses one —
 /// `MissingQueryRootOperationType`, observed — so there is no built `Schema` that can produce it
 /// and no `Executor` to raise it. That is what `StartError`'s own header means by `start` being
@@ -5999,7 +6017,11 @@ fn request_error_result(
 /// fourth, `SourceFieldArguments`, is reachable with a validated document: which variables a
 /// request supplies is not a property §5 can see.
 ///
-/// `ResponseStreamOpen` is the ninth and it is built separately, because it is the one refusal that
+/// `OperationLookupRefused` is draft §6.1's own walk meeting `max_selection_visits`, which is the
+/// row al8n/smear#144 added: the lookup is charged per definition it reads, so a ceiling below the
+/// document's definition count refuses before collection begins.
+///
+/// `ResponseStreamOpen` is the tenth and it is built separately, because it is the one refusal that
 /// is not a property of the document, the schema or the request at all: it needs an executor with a
 /// live §6.2.3 subscription, which the fixture below deliberately cannot produce. Its §7.1.3 result
 /// is the same shape as every other refusal's, and that is what this case is for — the driver that
@@ -6071,6 +6093,17 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
       None,
       Limits::default(),
       StartError::SourceFieldArguments,
+    ),
+    (
+      both,
+      // Three definitions and room to read two, so draft §6.1's walk stops inside the document.
+      "query one { a } query two { a } fragment F on Query { a }",
+      Some("two"),
+      Limits {
+        max_selection_visits: NonZeroU32::new(1).expect("one is not zero"),
+        ..Limits::default()
+      },
+      StartError::OperationLookupRefused,
     ),
   ] {
     let (raised, result) = request_error_result(sdl, query, operation, limits);

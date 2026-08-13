@@ -325,18 +325,21 @@ fn collection_work(sdl: &str, query: &str) -> u32 {
   executor.collection_work()
 }
 
-/// `n` repeats of one response key charge exactly `2n - 1`, and the second term is the interner.
+/// `n` repeats of one response key charge exactly `2n`, and the middle term is the interner.
 ///
 /// The exact-value case, and it is exact rather than bounded because nothing about it depends on
 /// the hash: one key means one bucket with one entry, so the first selection interns after
-/// comparing nothing and every later one matches on its first comparison. `n` selections examined
-/// plus `n - 1` comparisons is the whole of it.
+/// comparing nothing and every later one matches on its first comparison. Draft §6.1's lookup over
+/// the document's one definition, plus `n` selections examined, plus `n - 1` comparisons is the
+/// whole of it.
 ///
-/// **This is the plant against an uncharged lookup.** Deleting the charge leaves `n`, and nothing
-/// about the response changes.
+/// **This is the plant against an uncharged lookup.** Deleting the charge leaves `n + 1`, and
+/// nothing about the response changes.
 #[test]
 fn a_repeated_response_key_charges_one_comparison_each_time() {
   const REPEATS: u32 = 1024;
+  /// The document is one shorthand operation, which is what draft §6.1's lookup reads.
+  const LOOKUP: u32 = 1;
 
   let mut query = std::string::String::from("{");
   for _ in 0..REPEATS {
@@ -346,9 +349,10 @@ fn a_repeated_response_key_charges_one_comparison_each_time() {
 
   assert_eq!(
     collection_work(ONE_FIELD, &query),
-    2 * REPEATS - 1,
-    "{REPEATS} selections examined, and {} comparisons to find the one interned key each time \
-     after the first; a smaller total means a name lookup is not charging what it compares",
+    LOOKUP + 2 * REPEATS - 1,
+    "one definition read by draft §6.1, {REPEATS} selections examined, and {} comparisons to find \
+     the one interned key each time after the first; a smaller total means a name lookup is not \
+     charging what it compares",
     REPEATS - 1
   );
 }
@@ -390,8 +394,9 @@ fn distinct_response_keys_are_linear() {
 /// walk stopped spending native frames but still scanned every definition in the document once per
 /// spread, so a chain that no longer killed the process still took quadratic time to answer.
 ///
-/// Four terms, all linear in the chain: the index pass over the definitions, one push per fragment,
-/// one visit per selection, and about one comparison per spread.
+/// Five terms, all linear in the chain: draft §6.1's lookup over the definitions, the index pass
+/// over them again, one push per fragment, one visit per selection, and about one comparison per
+/// spread.
 #[test]
 fn a_flat_fragment_chain_is_linear() {
   const LINKS: u32 = 4096;
@@ -561,8 +566,13 @@ fn fragment_chain(links: u32) -> std::string::String {
 #[test]
 fn a_refused_index_pass_reserves_no_fragment_storage() {
   const LINKS: u32 = 256;
-  /// One selection, then one unit per definition walked. The fragment charge is what will not fit.
-  const UP_TO_THE_POPULATION: u32 = 1 + LINKS + 2;
+  /// Definitions in `fragment_chain(LINKS)`: the operation and `LINKS + 1` fragments.
+  const DEFINITIONS: u32 = LINKS + 2;
+  /// Draft §6.1's lookup, which reads every definition because no operation name is given.
+  const LOOKUP: u32 = DEFINITIONS;
+  /// The lookup, one selection, then one unit per definition the index pass walks. The fragment
+  /// charge is what will not fit.
+  const UP_TO_THE_POPULATION: u32 = LOOKUP + 1 + DEFINITIONS;
 
   let query = fragment_chain(LINKS);
   let (schema, document) = compile_against(ONE_FIELD, &query);
@@ -581,12 +591,13 @@ fn a_refused_index_pass_reserves_no_fragment_storage() {
     .expect("the operation resolves");
 
   let spent = refused.collection_work();
-  assert!(
-    spent >= LINKS + 2,
-    "the fixture only says anything if the definitions charge was accepted and the fragment charge \
-     was the one refused; {spent} units spent is short of the {} the definitions cost, so this run \
-     was refused before the population was ever priced",
-    LINKS + 2
+  assert_eq!(
+    spent, UP_TO_THE_POPULATION,
+    "the fixture only says anything if the index pass's definitions charge was accepted and the \
+     fragment charge was the one refused. {spent} units against the {UP_TO_THE_POPULATION} this \
+     ceiling admits means the run was refused somewhere earlier — at draft §6.1's own lookup, \
+     which now spends {LOOKUP} of them before collection begins, or at the definitions charge \
+     itself"
   );
   let errors = {
     let response = refused.poll_response().expect("nothing is outstanding");
@@ -646,11 +657,18 @@ fn a_refused_index_pass_reserves_no_fragment_storage() {
 /// # The document and the ceiling
 ///
 /// `OPERATIONS` named operations and one fragment, spread by the operation the run selects — which
-/// is the first, so draft §6.1's lookup stops at it and contributes nothing to the walk under test.
-/// The ceiling is what the request costs to the unit: the root's one spread, the pass, the one
-/// comparison that finds the fragment, and the one field inside it. It sits in the window the
-/// defect lives in — above `DEFINITIONS + FRAGMENTS`, so the pass is admitted and the request is
-/// served, and far below `2 × DEFINITIONS + FRAGMENTS`, so the second walk is one nobody paid for.
+/// is the **first**, so draft §6.1's lookup stops at it, reads one definition and contributes
+/// nothing to the walk under test. The ceiling is what the request costs to the unit: that one
+/// definition, the root's one spread, the pass, the one comparison that finds the fragment, and
+/// the one field inside it. It sits in the window the defect lives in — above
+/// `DEFINITIONS + FRAGMENTS`, so the pass is admitted and the request is served, and far below
+/// `2 × DEFINITIONS + FRAGMENTS`, so the second walk is one nobody paid for.
+///
+/// **The `LOOKUP` term is one and not `DEFINITIONS`, which is the second thing this fixture pins.**
+/// `Executor::operation_definition` charges before each definition it reads rather than for the
+/// slice it may read, so a named lookup that matches on the first definition costs one — and a
+/// version charging the length up front needs `DEFINITIONS` more units than this ceiling has and
+/// refuses a request it had the budget to serve.
 ///
 /// **The plant.** Give `Paid` the definitions slice back and let `fill` filter it into `defs`
 /// instead of moving the selection in, counting what it reads as every reader in that module does.
@@ -664,9 +682,11 @@ fn the_index_pass_reads_each_definition_once() {
   const FRAGMENTS: u32 = 1;
   /// What one walk of the document reads.
   const DEFINITIONS: u32 = OPERATIONS + FRAGMENTS;
-  /// The whole request: the root's spread, the pass, the comparison that finds the fragment, and
-  /// the field inside it.
-  const BUDGET: u32 = DEFINITIONS + FRAGMENTS + 3;
+  /// Draft §6.1's lookup, which matches `Op0` on the document's first definition and stops.
+  const LOOKUP: u32 = 1;
+  /// The whole request: the lookup, the root's spread, the pass, the comparison that finds the
+  /// fragment, and the field inside it.
+  const BUDGET: u32 = LOOKUP + DEFINITIONS + FRAGMENTS + 3;
 
   let mut query = std::string::String::from("query Op0 { ...F }\n");
   for index in 1..OPERATIONS {
@@ -733,6 +753,10 @@ const COLLIDING_DEFINITIONS: u32 = COLLIDING as u32 + 1;
 /// pushed.
 const COLLIDING_INDEX: u32 = COLLIDING_DEFINITIONS + COLLIDING as u32;
 
+/// Draft §6.1's lookup over a colliding fixture, which every one of them enters with no operation
+/// name — so it reads every definition, because ambiguity is only decidable at the end.
+const COLLIDING_LOOKUP: u32 = COLLIDING_DEFINITIONS;
+
 /// `COLLIDING` fragment names that the index puts in **one** bucket, in the order it will see them.
 fn colliding_fragment_names() -> std::vec::Vec<std::string::String> {
   colliding_names("f", (COLLIDING.next_power_of_two() * 2 - 1) as u32)
@@ -788,13 +812,13 @@ fn indexing_the_documents_fragments_is_charged() {
   let query = colliding_document(&names, &head);
   let (schema, document) = compile_against(ONE_FIELD, &query);
 
-  let refused = collected_under(&schema, &document, COLLIDING_INDEX - 1);
+  let refused = collected_under(&schema, &document, COLLIDING_LOOKUP + COLLIDING_INDEX - 1);
   assert!(
     refused.is_some(),
     "a budget one unit short of the index pass must refuse rather than index for free"
   );
 
-  let served = collected_under(&schema, &document, COLLIDING_INDEX + 8);
+  let served = collected_under(&schema, &document, COLLIDING_LOOKUP + COLLIDING_INDEX + 8);
   assert_eq!(
     served, None,
     "and eight units past it is enough for the spread, its one comparison and the field it reaches"
@@ -813,10 +837,10 @@ fn a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment() {
   let head = names.last().expect("the set is not empty").clone();
   let query = colliding_document(&names, &head);
 
-  // The index pass, the root's one selection, the one comparison that finds the bucket head, and
-  // the one field inside the fragment. Interning that field's key compares nothing: it is the first
-  // name in an empty arena.
-  let expected = COLLIDING_INDEX + 3;
+  // Draft §6.1's lookup over every definition, the index pass, the root's one selection, the one
+  // comparison that finds the bucket head, and the one field inside the fragment. Interning that
+  // field's key compares nothing: it is the first name in an empty arena.
+  let expected = COLLIDING_LOOKUP + COLLIDING_INDEX + 3;
   assert_eq!(
     collection_work(ONE_FIELD, &query),
     expected,
@@ -848,14 +872,24 @@ fn a_refused_probe_run_stops_at_the_refusal() {
   let (schema, document) = compile_against(ONE_FIELD, &query);
 
   let mut space = Space;
+  let budget = COLLIDING_LOOKUP + COLLIDING_INDEX + 1 + SLACK;
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(COLLIDING_INDEX + 1 + SLACK).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(budget).expect("not zero"),
     ..Limits::default()
   };
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
     .start(&mut space, None, Value::Obj)
     .expect("the operation resolves");
+
+  // Everything but `SLACK` has to have been spent before the probe run begins, or the run is not
+  // the thing the ceiling refused and the bound below holds for a reason the fixture is not about.
+  let spent = executor.collection_work();
+  assert!(
+    spent > COLLIDING_LOOKUP + COLLIDING_INDEX,
+    "{spent} units spent means this run was refused before it reached the bucket — at draft §6.1's \
+     lookup or at the index pass — so the comparison bound below is vacuous"
+  );
 
   let compares = executor.fragment_compares();
   assert!(
@@ -930,6 +964,175 @@ fn a_colliding_set_of_document_variables_cannot_outrun_the_budget() {
      document-derived name without charging lets {COLLIDING} colliding spellings cost about {} \
      comparisons, none of them collection and none of them seen by any ceiling",
     COLLIDING * COLLIDING / 2
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// Draft §6.1's own walk, which was the last uncharged one
+// ------------------------------------------------------------------------------------------
+//
+// al8n/smear#144. `Executor::operation_definition` walks the document's definitions once per
+// `start` to find the operation, over a count the client chooses, and it used to be charged to
+// nothing at all — outside both fences #143 built, in the one site those fences do not reach.
+//
+// It is charged now, one unit before each definition it reads. Two things about that cannot be
+// seen from a verdict and are therefore pinned by a count taken at the read:
+//
+// - **the charge is per definition read, not for the slice it might read**, so a named lookup that
+//   matches early is not refused for definitions it never touches — a version charging
+//   `definitions.len()` up front refuses requests it had the budget to serve, and
+//   `the_index_pass_reads_each_definition_once` is tuned to catch exactly that;
+// - **the charge is taken before the read**, so a refused lookup stops at the ceiling. A version
+//   that walked first and charged afterwards produces the same `OperationLookupRefused` for the
+//   same document, having read the whole of it.
+
+/// A document of `count` named operations, `Op0` first.
+fn many_operations(count: u32) -> std::string::String {
+  let mut query = std::string::String::new();
+  for index in 0..count {
+    query.push_str(&std::format!("query Op{index} {{ a }}\n"));
+  }
+  query
+}
+
+/// Draft §6.1's lookup charges one unit per definition it reads, and reads only what it needs.
+///
+/// Three exact totals over one document, which is what makes them a statement about the *walk*
+/// rather than about a constant: the same 512 definitions cost 1, 512 and 512 units depending only
+/// on which operation is asked for and whether ambiguity has to be decided.
+///
+/// **The plant.** Delete the `visits.take(1)` and the first total falls to one, the second to two
+/// and the third to two, while every response in the file is unchanged.
+#[test]
+fn the_operation_lookup_charges_one_unit_per_definition_read() {
+  const OPERATIONS: u32 = 512;
+
+  let query = many_operations(OPERATIONS);
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+  let mut space = Space;
+
+  // The first operation, by name: the walk stops on the definition that answers.
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, Some("Op0"), Value::Obj)
+    .expect("the operation resolves");
+  assert_eq!(
+    executor.operation_definitions_walked(),
+    1,
+    "a named lookup that matches the first definition read one definition and no more"
+  );
+  assert_eq!(
+    executor.collection_work(),
+    2,
+    "and it cost one unit for that definition plus one for the field it collects"
+  );
+
+  // The last operation, by name: every definition before it has to be read.
+  let wanted = std::format!("Op{}", OPERATIONS - 1);
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, Some(&wanted), Value::Obj)
+    .expect("the operation resolves");
+  assert_eq!(
+    executor.operation_definitions_walked(),
+    u64::from(OPERATIONS),
+    "the last operation is behind every other definition, so the walk reads all of them"
+  );
+  assert_eq!(
+    executor.collection_work(),
+    OPERATIONS + 1,
+    "and pays one unit for each, plus the field"
+  );
+
+  // No name: the walk cannot stop early, because ambiguity is only decidable at the second
+  // operation — which here is the second definition.
+  let mut executor = Executor::new(&schema, &document);
+  let refused = executor
+    .start(&mut space, None, Value::Obj)
+    .expect_err("the document holds more than one operation");
+  assert_eq!(refused, StartError::AmbiguousOperation);
+  assert_eq!(
+    executor.operation_definitions_walked(),
+    2,
+    "ambiguity is decided by the second operation, so the walk stops there rather than at the end"
+  );
+}
+
+/// With no operation name the walk reads the whole document, because it must.
+///
+/// The other of the lookup's two modes, and the one an index has to answer as carefully as the
+/// named one: a single operation followed by fragments is only *unambiguous* once every definition
+/// has been read, so there is nothing to stop early on and the charge is the document.
+#[test]
+fn an_unnamed_lookup_reads_every_definition_before_it_can_say_the_operation_is_the_only_one() {
+  const LINKS: u32 = 64;
+  /// `fragment_chain` is one operation and `LINKS + 1` fragments.
+  const DEFINITIONS: u32 = LINKS + 2;
+
+  let query = fragment_chain(LINKS);
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  assert_eq!(
+    executor.operation_definitions_walked(),
+    u64::from(DEFINITIONS),
+    "one operation and {} fragments, and the lookup has to read every one of them to know the \
+     operation is the only one",
+    LINKS + 1
+  );
+}
+
+/// A refused lookup stops at the ceiling instead of reading the document and refusing afterwards.
+///
+/// # The verdict cannot see this, which is the whole reason the count exists
+///
+/// `OperationLookupRefused` is the answer under both versions and on every retry: `reset` rebuilds
+/// `Visits`, so the same document under the same ceiling reads the same no. What moves is how much
+/// of the document a refusal reads — the work an adversary gets for a request that is going to be
+/// turned away regardless, which is the same property `Fragments::compares` was added for one
+/// table over.
+///
+/// **The plant.** Take the charge after the read instead of before it, or spend
+/// `definitions.len()` up front. The first leaves `walked` at `OPERATIONS`, the second at zero;
+/// the refusal, the message and every response in this file are identical under both.
+#[test]
+fn a_refused_operation_lookup_reads_nothing_past_the_ceiling() {
+  const OPERATIONS: u32 = 512;
+  /// Definitions the ceiling has room for, which is what the walk must stop at.
+  const BUDGET: u32 = 8;
+
+  let query = many_operations(OPERATIONS);
+  let (schema, document) = compile_against(ONE_FIELD, &query);
+  let wanted = std::format!("Op{}", OPERATIONS - 1);
+  let mut space = Space;
+  let mut executor = Executor::with_limits(
+    &schema,
+    &document,
+    Limits {
+      max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
+      ..Limits::default()
+    },
+  );
+
+  let refused = executor
+    .start(&mut space, Some(&wanted), Value::Obj)
+    .expect_err("the document has more definitions than the ceiling admits");
+  assert_eq!(refused, StartError::OperationLookupRefused);
+  assert_eq!(
+    executor.operation_definitions_walked(),
+    u64::from(BUDGET),
+    "the walk read {} definitions against a ceiling of {BUDGET}; a charge taken after the read \
+     lets the whole document be walked before the refusal arrives",
+    executor.operation_definitions_walked()
+  );
+  assert_eq!(
+    executor.collection_work(),
+    BUDGET,
+    "and it spent exactly what it read, which is what makes the two counts separable at all"
   );
 }
 
