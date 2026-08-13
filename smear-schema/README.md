@@ -23,7 +23,7 @@ It validates nothing about a *document* and parses nothing. Draft §5 validation
 |---------|-------------|---------|
 | `std` | Standard library support (off = `no_std`; `alloc` is required either way) | ✓ |
 | `build` | `Schema::build`, `SchemaBuilder` and `SchemaError` — the SDL door. Pulls `smear-parser` | |
-| `introspection` | `Schema::from_introspection` — the draft §4 door. Implies `build`, adds `serde` | |
+| `introspection` | `Schema::from_introspection` — the draft §4 door. Implies `build` | |
 
 ## Why the builder is a feature and not another crate
 

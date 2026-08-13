@@ -33,7 +33,7 @@ default = ["std"]
 
 # Flips the crate attribute and nothing else at this tier: the representation is `core` + `alloc`
 # in both configurations, which `cargo check -p smear-schema --no-default-features` in CI is what
-# says. `serde`/`serde_json` are `introspection`'s and are already `std`-only.
+# says.
 std = ["tokora/std", "smear-parser?/std"]
 
 # Draft §3 "Type Validation" and the SDL door: `Schema::build`, `SchemaBuilder`, `SchemaError` and
@@ -51,24 +51,23 @@ build = ["dep:smear-parser", "smear-parser/graphql"]
 # The second construction door: building a `Schema` out of a draft §4 introspection response
 # instead of out of SDL. It renders the response as SDL and hands it to the same builder, so draft
 # §3 runs there too and the two doors cannot drift apart — which is why it implies `build` rather
-# than duplicating it.
+# than duplicating it. It no longer costs a dependency of its own; what it still gates that `build`
+# does not is the `introspection` module and the `IntrospectionError` it re-exports.
 #
-# The one feature here that costs a dependency, which is exactly why it is a feature.
+# ── WHY THIS LINE NO LONGER NAMES `std`, `dep:serde` OR `dep:serde_json` ─────────────────────
 #
-# ── WHAT STILL HOLDS `std` HERE, AND IT IS NO LONGER THE DOOR ──────────────────────────────────
-#
-# It used to be. `std` was here because `serde_json` is a `std`-only crate and the reader was
+# `std` was here because `serde_json` is a `std`-only crate and the reader was
 # `serde_json::from_str`, and because the refusals went through `std::error::Error`. Neither is
-# true now: the reader is `introspection/json.rs` and `introspection/decode.rs`, which are `core` +
-# `alloc` throughout, and the error types implement `core::error::Error`. Measured rather than
-# assumed — with this line reading `["build"]`, `cargo check -p smear-schema
-# --no-default-features --features introspection` succeeds.
-#
-# So the tier is held by the two `dep:` entries below, and those are held by nothing: no `use
-# serde` survives in this crate. **Removing them is deliberately not this change.** "The dependency
-# is unused" and "the dependency is gone" are different claims and only the second is checkable by
-# `cargo tree`, so that step — and what this line should then read — is one decision taken once.
-introspection = ["build", "std", "dep:serde", "dep:serde_json"]
+# true: the reader is `introspection/json.rs` and `introspection/decode.rs`, which are `core` +
+# `alloc` throughout, and the error types implement `core::error::Error`. That left `std` held only
+# by `serde`/`serde_json` themselves — both declared `features = [..., "std"]` — and those were
+# held by nothing: no `use serde` survived in this crate. "The dependency is unused" and "the
+# dependency is gone" are different claims, and only the second is checkable by `cargo tree`; the
+# two `dep:` entries are gone from `[dependencies]` below, and `cargo tree -p smear-schema
+# --no-default-features --features introspection` lists neither package. Re-measured on this tree,
+# not trusted from the older record: `cargo check` with the same flags still succeeds with this
+# line reading `["build"]`.
+introspection = ["build"]
 
 [dependencies]
 # NOT an empty table, and the design's §2 says it should be. `diagnostic/` moved down with this
@@ -79,9 +78,6 @@ introspection = ["build", "std", "dep:serde", "dep:serde_json"]
 tokora.workspace = true
 
 smear-parser = { workspace = true, optional = true }
-
-serde = { version = "1", default-features = false, features = ["std", "derive"], optional = true }
-serde_json = { version = "1", default-features = false, features = ["std"], optional = true }
 
 [lints]
 workspace = true
