@@ -5,8 +5,8 @@ use smear_lexer::graphql::{
 use tokora::Lexer;
 
 use super::{
-  MaterializedNumbers, MaterializedNumbers32, Numbers, OutOfRange, is_int_literal, overflows,
-  parse_f64, parse_i32, parse_i64,
+  Materialized, MaterializedInt, Numbers, OutOfRange, is_int_literal, overflows, parse_f64,
+  parse_i32, parse_i64, sealed,
 };
 use crate::graphql::error::{IntOverflow, IntWidth};
 
@@ -241,7 +241,7 @@ fn f64_refuses_the_non_finite() {
 /// leaf failed, because the two report as different variants.
 #[test]
 fn failure_returns_the_slice_and_which_leaf_it_came_from() {
-  let int = <MaterializedNumbers as Numbers<&str>>::int("99999999999999999999999999");
+  let int = <Materialized<i64> as Numbers<&str>>::int("99999999999999999999999999");
   assert!(matches!(
     int,
     Err(OutOfRange::Int {
@@ -250,15 +250,12 @@ fn failure_returns_the_slice_and_which_leaf_it_came_from() {
     })
   ));
 
-  let float = <MaterializedNumbers as Numbers<&str>>::float("1e400");
+  let float = <Materialized<i64> as Numbers<&str>>::float("1e400");
   assert!(matches!(float, Err(OutOfRange::Float("1e400"))));
 
+  assert_eq!(<Materialized<i64> as Numbers<&str>>::int("7").ok(), Some(7));
   assert_eq!(
-    <MaterializedNumbers as Numbers<&str>>::int("7").ok(),
-    Some(7)
-  );
-  assert_eq!(
-    <MaterializedNumbers as Numbers<&str>>::float("7.5").ok(),
+    <Materialized<i64> as Numbers<&str>>::float("7.5").ok(),
     Some(7.5)
   );
 }
@@ -327,14 +324,19 @@ fn i32_is_i64_narrowed_on_every_boundary() {
   assert_eq!(parse_i32(b"2147483648"), None);
 }
 
-/// The width travels with the failure, and it is the marker's own width rather than a constant.
+/// The width travels with the failure, and it is **the payload type's own** rather than a
+/// constant written beside it.
 ///
-/// Both markers refuse `9223372036854775808` and each says so about a different width; if they
-/// ever named the same one, a consumer could not tell "outside the specification's `Int`" from
-/// "outside any integer this crate reads".
+/// Both instantiations refuse `9223372036854775808` and each says so about a different width; if
+/// they ever named the same one, a consumer could not tell "outside the specification's `Int`"
+/// from "outside any integer this crate reads".
+///
+/// This is where a wrong [`MaterializedInt::WIDTH`] surfaces first: `Materialized<I>::int` builds
+/// the failure and the width it names from one type, so an impl answering the other's constant
+/// moves every row here for that width and leaves the other width's alone.
 #[test]
-fn each_marker_names_its_own_width() {
-  let past_i32 = <MaterializedNumbers32 as Numbers<&str>>::int("2147483648");
+fn each_instantiation_names_its_own_width() {
+  let past_i32 = <Materialized<i32> as Numbers<&str>>::int("2147483648");
   assert!(matches!(
     past_i32,
     Err(OutOfRange::Int {
@@ -343,13 +345,13 @@ fn each_marker_names_its_own_width() {
     })
   ));
   assert_eq!(
-    <MaterializedNumbers as Numbers<&str>>::int("2147483648").ok(),
+    <Materialized<i64> as Numbers<&str>>::int("2147483648").ok(),
     Some(2_147_483_648_i64),
     "the permissive width must accept the literal the specified one refuses",
   );
 
-  let past_i64_at_32 = <MaterializedNumbers32 as Numbers<&str>>::int("9223372036854775808");
-  let past_i64_at_64 = <MaterializedNumbers as Numbers<&str>>::int("9223372036854775808");
+  let past_i64_at_32 = <Materialized<i32> as Numbers<&str>>::int("9223372036854775808");
+  let past_i64_at_64 = <Materialized<i64> as Numbers<&str>>::int("9223372036854775808");
   assert!(matches!(
     past_i64_at_32,
     Err(OutOfRange::Int {
@@ -364,6 +366,38 @@ fn each_marker_names_its_own_width() {
       ..
     })
   ));
+}
+
+/// **The join between the two statements of one correspondence.**
+///
+/// [`overflows`] dispatches on a runtime [`IntWidth`] — because `IntOverflow::checked` takes one
+/// as a value — and reaches [`parse_i32`] for `I32` and [`parse_i64`] for `I64`. A production
+/// reaches the same readers the other way round, through [`MaterializedInt`], and names
+/// [`MaterializedInt::WIDTH`] on what it refuses. Those are two spellings of "`i32` is the reader
+/// at `I32`", and everything the door promises about the productions rests on them being the same
+/// spelling.
+///
+/// It is the one place a wrong `WIDTH` could otherwise hide: the boundary table below asks
+/// [`overflows`], which does not read `WIDTH` at all, so a `WIDTH` that lied would leave all 41
+/// rows green while every refusal a production raised named the wrong width. Two lines, and they
+/// are the reason that cannot happen quietly.
+#[test]
+fn the_widths_the_door_dispatches_on_are_the_widths_the_readers_name() {
+  assert_eq!(<i32 as MaterializedInt>::WIDTH, IntWidth::I32);
+  assert_eq!(<i64 as MaterializedInt>::WIDTH, IntWidth::I64);
+
+  // And that each reader really is the one the door reaches for that width, on a literal only
+  // one of them converts — so the equalities above are about the readers and not about two names.
+  //
+  // Spelled through the seal, because that is where the reader lives and it is not public: it
+  // grades a magnitude and not a grammar, so an out-of-crate caller holding it would have a third
+  // answer to "is this a valid `IntValue`" that says yes to `007`. What is public is `WIDTH`, and
+  // `smear-smoke`'s `every_public_reader_of_an_int_literal_reaches_one_meaning` is the property
+  // over the paths that are.
+  assert!(<i64 as sealed::MaterializedInt>::parse(b"2147483648").is_some());
+  assert!(<i32 as sealed::MaterializedInt>::parse(b"2147483648").is_none());
+  assert!(overflows(b"2147483648", <i32 as MaterializedInt>::WIDTH));
+  assert!(!overflows(b"2147483648", <i64 as MaterializedInt>::WIDTH));
 }
 
 /// The boundary table, and **which conjunct refused each row** rather than only that it was
@@ -680,18 +714,27 @@ fn the_divergences_from_cores_reader_are_ours() {
   assert!(!overflows(b"09223372036854775808", IntWidth::I64));
 }
 
-/// `Float` is `f64` at both markers, so the float conversion must be the same conversion.
+/// `Float` is `f64` at every width, and this asserts it **once** because there is one conversion.
+///
+/// What used to be here compared `<MaterializedNumbers32>::float` with `<MaterializedNumbers>::
+/// float` and asserted they agreed. They were two bodies then and the comparison could fail; they
+/// are one now — [`super::float`] takes no `I`, and each [`Numbers`] impl's `float` is a call to
+/// it — so the same comparison would be between a function and itself. The property is held by
+/// the call graph, and what is left to test is the conversion itself.
+///
+/// The type-level half is stated where it cannot rot: `Materialized<I>::Float` is written `f64`,
+/// so no instantiation can make it anything else.
 #[test]
-fn the_float_leaf_is_the_same_at_both_widths() {
-  assert_eq!(
-    <MaterializedNumbers32 as Numbers<&str>>::float("7.5").ok(),
-    <MaterializedNumbers as Numbers<&str>>::float("7.5").ok(),
-  );
-  assert_eq!(
-    <MaterializedNumbers32 as Numbers<&str>>::float("7.5").ok(),
-    Some(7.5)
-  );
+fn the_float_leaf_takes_no_width() {
+  assert_eq!(super::float("7.5").ok(), Some(7.5));
+  assert!(matches!(
+    super::float("1e400"),
+    Err(OutOfRange::Float("1e400"))
+  ));
 
-  let float = <MaterializedNumbers32 as Numbers<&str>>::float("1e400");
-  assert!(matches!(float, Err(OutOfRange::Float("1e400"))));
+  // The markers reach that one function, which is the half a caller sees.
+  let at_i32: Result<f64, OutOfRange<&str>> = <Materialized<i32> as Numbers<&str>>::float("7.5");
+  let at_i64: Result<f64, OutOfRange<&str>> = <Materialized<i64> as Numbers<&str>>::float("7.5");
+  assert_eq!(at_i32.ok(), Some(7.5));
+  assert_eq!(at_i64.ok(), Some(7.5));
 }

@@ -2,23 +2,38 @@
 //!
 //! The composite value productions in this module tree are generic over [`Numbers`] and
 //! monomorphic in nothing else. [`SliceNumbers`] keeps the source slice and is what
-//! [`value`](super::value) and its siblings resolve to; [`MaterializedNumbers`] converts to
-//! [`i64`] and [`f64`] and is what [`materialized::value`](super::materialized::value) resolves
-//! to; [`MaterializedNumbers32`] converts to [`i32`] and [`f64`] and is what
-//! [`materialized32::value`](crate::graphql::syntactic::value::materialized32::value) resolves
-//! to. The three parsers are
-//! then the *same* parser — same commit points, same recovery, the same error at every position
-//! but the two leaves — which is a property held by construction rather than by three files
-//! being kept in step. Value modules drifting apart is the failure this shape is chosen against.
+//! [`value`](super::value) and its siblings resolve to; [`Materialized<I>`](Materialized)
+//! converts to `I` and [`f64`] and is what [`materialized::value`](super::materialized::value)
+//! resolves to at each width [`MaterializedInt`] admits. The parsers are then the *same* parser —
+//! same commit points, same recovery, the same error at every position but the two leaves — which
+//! is a property held by construction rather than by files being kept in step. Value modules
+//! drifting apart is the failure this shape is chosen against.
 //!
 //! # Two materialised widths, because GraphQL has two honest answers
 //!
 //! Draft §3.5.1 says `Int` is a signed 32-bit integer. Draft §2.9.1's grammar for an `IntValue`
 //! says nothing about how many digits it may have. So `2147483648` is a well-formed `IntValue`
-//! that no conformant `Int` can hold, and the two markers are the two readings of that: one
+//! that no conformant `Int` can hold, and the two widths are the two readings of that: one
 //! answers *what does this document mean under the specification*, the other *what did the author
-//! write*. A marker per reading, and never a width parameter on one marker — a parameterised
-//! marker would make "which reading" an inference variable at every call site that names it.
+//! write*.
+//!
+//! # Why the width is a parameter on one marker and not a second marker
+//!
+//! A second marker beside this one — `MaterializedNumbers32` beside `MaterializedNumbers` — is
+//! what shipped first, and it was wrong. The reading it generalised from was about
+//! [`ast::InputValue`](crate::graphql::ast::InputValue): an established, public,
+//! consumer-constructed enum where a new parameter breaks unannotated construction and silently
+//! reinterprets a positional `Container` argument. None of that is true of a marker nobody outside
+//! this crate can name, or of a tree this feature introduced with no consumers. What the second
+//! marker bought was a second value tree, a second production module and a second test suite, all
+//! of them the first ones with one type substituted.
+//!
+//! What it *cost* is the reason this shape replaced it. With a marker per width, the width at a
+//! conversion site is a **supplied** value: something has to say `IntWidth::I32` beside
+//! `MaterializedNumbers32`, and nothing but a reader's attention keeps the two in step. Under
+//! [`MaterializedInt::WIDTH`] the width is a **function of the payload type**, so no internal site
+//! supplies it and none can get it wrong. The one place a width is still a value a caller chooses
+//! is `IntOverflow::checked`, and [`overflows`] is the check that keeps that choice honest.
 //!
 //! # `Error` is how the slice parser stays unable to overflow
 //!
@@ -44,18 +59,16 @@ use core::convert::Infallible;
 use tokora::SimpleSpan;
 
 #[cfg(feature = "materialized-numbers")]
+use core::marker::PhantomData;
+
+#[cfg(feature = "materialized-numbers")]
 use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 #[cfg(feature = "materialized-numbers")]
 use tokora::Lexer;
 
 #[cfg(feature = "materialized-numbers")]
-use crate::graphql::ast::{
-  materialized::{
-    ConstInputValue as MaterializedConstInputValue, InputValue as MaterializedInputValue,
-  },
-  materialized32::{
-    ConstInputValue as Materialized32ConstInputValue, InputValue as Materialized32InputValue,
-  },
+use crate::graphql::ast::materialized::{
+  ConstInputValue as MaterializedConstInputValue, InputValue as MaterializedInputValue,
 };
 #[cfg(feature = "materialized-numbers")]
 use crate::graphql::error::{IntOverflow, IntWidth};
@@ -71,13 +84,15 @@ use crate::graphql::{
 ///
 /// # Why the tree is an associated type and not a third parameter
 ///
-/// The trees are separate `enum`s rather than one enum at several instantiations, because a type
-/// alias cannot be used as a module and `use ast::InputValue::{Int, String}` has to keep
-/// compiling — [`ast::materialized`](crate::graphql::ast::materialized) records the whole
-/// argument and [`ast::materialized32`](crate::graphql::ast::materialized32) records what a
-/// second width adds to it. "Which tree" is therefore a property of the marker, exactly as "which
-/// payload" already was, and belongs in the same place. The shared bodies name [`Numbers::Value`]
-/// and convert a leaf into it, so no tree is spelled in a body that serves several.
+/// The slice tree and the materialised tree are separate `enum`s rather than one enum at two
+/// instantiations, because a type alias cannot be used as a module and
+/// `use ast::InputValue::{Int, String}` has to keep compiling —
+/// [`ast::materialized`](crate::graphql::ast::materialized) records the whole argument. That is a
+/// statement about the *slice* boundary and not about the width: the materialised tree spans both
+/// widths as one enum, because `I` there is a parameter on an enum and not an alias over one.
+/// "Which tree" is therefore a property of the marker, exactly as "which payload" already was, and
+/// belongs in the same place. The shared bodies name [`Numbers::Value`] and convert a leaf into it,
+/// so no tree is spelled in a body that serves several.
 pub(crate) trait Numbers<S> {
   /// The payload of an `IntValue` node.
   type Int;
@@ -172,13 +187,15 @@ impl<S> Numbers<S> for SliceNumbers {
 /// It carries the literal's slice back out of the conversion so the error can name the spelling
 /// the document used, and — for an integer — the [`IntWidth`] the conversion was attempted at.
 ///
-/// # Why the width travels with the failure rather than being read off the marker
+/// # Why the width travels with the failure rather than sitting on [`Numbers`]
 ///
 /// A `const WIDTH` on [`Numbers`] would have to be answered by [`SliceNumbers`] too, which
 /// converts nothing and has no width; whatever it answered would be a value no code can reach
-/// and every reader has to interpret. The width is a property of *this failure*, produced at the
-/// one place that knows it, and [`SliceNumbers`] never constructs one because its `Error` is
-/// [`Infallible`].
+/// and every reader has to interpret. It sits on [`MaterializedInt`] instead — the trait only a
+/// materialised *payload* implements — so the question is asked of the one type that has an
+/// answer, [`SliceNumbers`] is never asked it, and the failure below carries what
+/// [`MaterializedInt::WIDTH`] said at the one place that knows it. [`SliceNumbers`] never
+/// constructs one because its `Error` is [`Infallible`].
 #[cfg(feature = "materialized-numbers")]
 pub(crate) enum OutOfRange<S> {
   /// An `IntValue` outside the named width.
@@ -192,14 +209,17 @@ pub(crate) enum OutOfRange<S> {
   Float(S),
 }
 
-/// The one report body both materialising markers use.
+/// The one report body every materialised width uses.
 ///
-/// Shared rather than written twice on purpose: the two markers differ in what an `Int` becomes
-/// and in nothing else, so a divergence here would be a divergence in how the *same* failure is
-/// reported at two widths — which is the defect the width-naming exists to rule out.
+/// A free function rather than a method body so that a failure reported by the slice-free path
+/// reads the same at every width by construction: there is one of it, and the width it prints is
+/// the one [`Numbers::int`] read off the payload type.
 #[cfg(feature = "materialized-numbers")]
 #[inline]
-fn report_out_of_range<S>(error: OutOfRange<S>, span: SimpleSpan) -> DialectGraphqlError<S> {
+pub(crate) fn report_out_of_range<S>(
+  error: OutOfRange<S>,
+  span: SimpleSpan,
+) -> DialectGraphqlError<S> {
   match error {
     OutOfRange::Int { value, width } => {
       DialectGraphqlError::int_overflow(IntOverflow::new(value, width), span)
@@ -208,47 +228,235 @@ fn report_out_of_range<S>(error: OutOfRange<S>, span: SimpleSpan) -> DialectGrap
   }
 }
 
-/// [`i64`] and [`f64`], read out of the literal's bytes with no allocation anywhere.
+/// A width a GraphQL `Int` literal can be materialised at.
 ///
-/// **The grammar-permissive reading.** Draft §2.9.1's `IntValue` puts no bound on its digits, and
-/// this marker accepts every literal a 64-bit signed integer can hold — including the ones
-/// draft §3.5.1's 32-bit `Int` cannot. [`MaterializedNumbers32`] is the spec-exact reading beside
-/// it; neither is a subset of "correct", they answer two different questions about a document.
+/// Two impls ship — [`i32`], which is the width draft §3.5.1 specifies, and [`i64`], the
+/// grammar-permissive reading that also accepts the literals draft §2.9.1 admits and §3.5.1 does
+/// not. Neither is a subset of "correct": they answer two different questions about a document,
+/// and [`WIDTH`](Self::WIDTH) is how a refusal says which one was asked.
+///
+/// # The width is read off the type, which is the whole reason this trait exists
+///
+/// Every internal site that reports an out-of-range literal reads [`WIDTH`](Self::WIDTH) off the
+/// payload type it just failed to build. There is no argument to pass and therefore none to get
+/// wrong — the failure and the width it names are produced by one expression, from one type.
+/// A shape where each width was its own marker had to *state* the pairing at every conversion
+/// site instead, which is a thing that can be true today and false after an edit.
+///
+/// # The width is all of it, because reading a literal is not a caller's question
+///
+/// [`WIDTH`](Self::WIDTH) is the only item, and the reader that turns bytes into an `I` sits on
+/// the private supertrait beside the seal. It is a **range** reader: it grades digits and a
+/// magnitude, and it has no opinion at all about whether the spelling in front of it is an
+/// `IntValue`, because on the one path that reaches it the lexer has already said so.
+///
+/// Reachable out of crate, it answers `Some(7)` to `007` — a spelling this crate's lexer refuses
+/// as `LeadingZeros`, that no production converts, and that [`IntOverflow::checked`] declines. The
+/// crate would then carry three answers to "is this a valid integer literal", one of which is a
+/// range check, and the whole of the round that produced `is_int_literal` was about there being
+/// **one**. Adding the lexer's grammar to a public `parse` is the other way to close that and it
+/// is worse: it is a second statement of draft §2.9.1, free to disagree with the first, which is
+/// the defect that round removed.
+///
+/// So the reader is not reachable, and [`IntOverflow::checked`] is the public door to the question
+/// it half-answers, with the lexer's conjunct in front of it.
+///
+/// # Sealed, and not exported
+///
+/// [`IntWidth`] enumerates exactly the two widths this crate reads, and its own documentation
+/// argues that being exhaustive is a feature rather than an oversight. An out-of-crate impl of
+/// this trait would have to answer [`WIDTH`](Self::WIDTH) with one of those two while being
+/// neither, so every error it produced would name a width that is not its own — the forgery the
+/// crate-private `IntOverflow::new` and the checked public door exist to rule out, arriving
+/// through a third door. So the trait is sealed, and a third width is a change to this crate.
+///
+/// **The seal was not enough, and this is the second half.** `syntactic::value::materialized`
+/// carried a `pub use` of this trait for two commits, on the reasoning that a public
+/// `where I: MaterializedInt` has to name something a caller can reach. Sealing `parse` onto the
+/// private supertrait was supposed to keep the reader off the public surface, and it does not:
+/// **Rust resolves a supertrait's items through a generic subtrait bound**, so a downstream
+/// generic function reaches `parse` without ever naming the seal.
+///
+/// The import is private now, so the trait is not nameable out of crate and neither route exists:
+///
+/// ```compile_fail,E0603
+/// use smear_parser::graphql::syntactic::value::materialized::MaterializedInt;
+///
+/// // THIS COMPILED, and `read::<i32>(b"007")` answered `Some(7)`. `<i32 as MaterializedInt>::parse`
+/// // did NOT compile at the same commit — UFCS on a concrete type resolves differently from
+/// // `I::parse` under a generic bound — which is exactly why asserting only the UFCS form left
+/// // the hole open while looking closed.
+/// fn read<I: MaterializedInt>(bytes: &[u8]) -> Option<I> {
+///   I::parse(bytes)
+/// }
+/// ```
+///
+/// An out-of-crate `impl MaterializedInt for Narrow` now fails at that same `use`, so the impl
+/// seal is **subsumed rather than separately asserted**: a name that cannot be written cannot be
+/// implemented. `sealed::MaterializedInt` stays a supertrait regardless — it is what keeps `parse`
+/// off this trait's own item list, and it is what would still hold if a real consumer ever asked
+/// for the bound back.
+///
+/// One caveat on the annotation above, established by planting a wrong code: **`rustdoc` on
+/// stable does not check it.** A `compile_fail,E0603` on a snippet that fails with `E0425` passes;
+/// only nightly reports *"Some expected error codes were not found"*. What this doctest asserts
+/// under a stable `cargo test` is that the snippet does not compile at all, which is the property
+/// — the code records which failure was observed and is verified by running the doc tests under
+/// nightly.
+///
+/// # Not exported is not unusable
+///
+/// A bound does not have to be nameable for the function it constrains to be **called**. `I`
+/// appears in every materialised return type, so a consumer writes `i32` or `i64` at the call and
+/// inference supplies the rest. Out of crate, at both widths, with the trait unnameable:
+///
+/// ```
+/// use smear_parser::graphql::{
+///   GraphQL,
+///   ast::IntValue,
+///   error::{ErrorData, GraphqlErrors, IntWidth},
+///   syntactic::{GraphqlLexer, value::materialized},
+/// };
+/// use tokora::{Parse as _, Parser};
+///
+/// // `2147483648` is the literal the two readings disagree about. Nothing here names the bound.
+/// let at_i64 = Parser::with_parser::<
+///   GraphqlLexer<'_, str>, IntValue<i64>, GraphqlErrors<&str>, _, GraphQL,
+/// >(materialized::int_value::<_, _, i64>)
+/// .parse_str("2147483648");
+/// assert_eq!(at_i64.map(|node| *node.source()).ok(), Some(2_147_483_648_i64));
+///
+/// // The refusal names the width the call asked for, which is the whole of what `WIDTH` was
+/// // public for — and it arrives on the error rather than out of the trait. Asked at BOTH
+/// // widths, on a literal each one refuses: an assertion at one width only goes on holding while
+/// // the other impl's constant names its neighbour.
+/// let at_i32 = Parser::with_parser::<
+///   GraphqlLexer<'_, str>, IntValue<i32>, GraphqlErrors<&str>, _, GraphQL,
+/// >(materialized::int_value::<_, _, i32>)
+/// .parse_str("2147483648")
+/// .expect_err("past `i32`");
+/// assert_eq!(
+///   at_i32.into_iter().find_map(|error| match error.data() {
+///     ErrorData::IntOverflow(overflow) => Some(overflow.width()),
+///     _ => None,
+///   }),
+///   Some(IntWidth::I32),
+/// );
+///
+/// let at_i64 = Parser::with_parser::<
+///   GraphqlLexer<'_, str>, IntValue<i64>, GraphqlErrors<&str>, _, GraphQL,
+/// >(materialized::int_value::<_, _, i64>)
+/// .parse_str("9223372036854775808")
+/// .expect_err("past `i64`");
+/// assert_eq!(
+///   at_i64.into_iter().find_map(|error| match error.data() {
+///     ErrorData::IntOverflow(overflow) => Some(overflow.width()),
+///     _ => None,
+///   }),
+///   Some(IntWidth::I64),
+/// );
+/// ```
+#[cfg(feature = "materialized-numbers")]
+#[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
+pub trait MaterializedInt: Sized + sealed::MaterializedInt {
+  /// Which width this payload is, for the error a refusal raises.
+  const WIDTH: IntWidth;
+}
+
+/// The seal on [`MaterializedInt`], and **where the width's reader lives**.
+///
+/// Named in a public supertrait position and reachable from nowhere, which is what makes the
+/// trait's impl list this file's — and, since `parse` is declared here rather than above, what
+/// keeps the reader off the public surface. The section on [`MaterializedInt`] has the argument
+/// for the second half.
+#[cfg(feature = "materialized-numbers")]
+mod sealed {
+  /// The supertrait no out-of-crate type can name and therefore cannot implement.
+  pub trait MaterializedInt: Sized {
+    /// Reads a GraphQL `IntValue` (draft §2.9.1) out of its bytes at this width.
+    ///
+    /// `None` means the literal does not fit — which is the documented bound of the materialised
+    /// view — or that the bytes are not an `IntValue` at all, which the lexer's grammar makes
+    /// unreachable from a production: the only caller is `Numbers::int`, whose slice came out of
+    /// a `LitInt` token.
+    fn parse(bytes: &[u8]) -> Option<Self>;
+  }
+
+  impl MaterializedInt for i32 {
+    #[inline]
+    fn parse(bytes: &[u8]) -> Option<Self> {
+      super::parse_i32(bytes)
+    }
+  }
+
+  impl MaterializedInt for i64 {
+    #[inline]
+    fn parse(bytes: &[u8]) -> Option<Self> {
+      super::parse_i64(bytes)
+    }
+  }
+}
+
+#[cfg(feature = "materialized-numbers")]
+impl MaterializedInt for i64 {
+  const WIDTH: IntWidth = IntWidth::I64;
+}
+
+#[cfg(feature = "materialized-numbers")]
+impl MaterializedInt for i32 {
+  const WIDTH: IntWidth = IntWidth::I32;
+}
+
+/// `I` and [`f64`], read out of the literal's bytes with no allocation anywhere.
+///
+/// One marker at two widths rather than a marker each, and the module header has the argument.
+/// The short version is that a marker per width makes the width a value somebody has to supply
+/// beside the marker, and this makes it [`MaterializedInt::WIDTH`] — a fact about the payload type
+/// that no site can restate incorrectly because no site restates it at all.
+///
+/// `Float` is [`f64`] at every width and `f32` never appears: GraphQL's `Float` **is** IEEE 754
+/// double precision (draft §3.5.2), so a 32-bit float would be non-conformant rather than
+/// narrower. `I` is the integer payload and nothing else — which is why the parameter is on the
+/// `Int` leaf alone, and why the float conversion below mentions it nowhere.
 ///
 /// `AsRef<[u8]>` is this crate's established spelling for "a slice whose text can be read", and
 /// every source backing the crate ships satisfies it. It appears here and not on the slice
 /// parser because only this one looks *inside* a literal.
 #[cfg(feature = "materialized-numbers")]
-pub(crate) enum MaterializedNumbers {}
+pub(crate) struct Materialized<I> {
+  /// Uninhabited-in-practice: the marker is a type and never a value. `PhantomData` is what lets
+  /// an empty carrier name the payload the [`Numbers`] impl below is written against.
+  _payload: PhantomData<I>,
+}
 
 #[cfg(feature = "materialized-numbers")]
-impl<S> Numbers<S> for MaterializedNumbers
+impl<S, I> Numbers<S> for Materialized<I>
 where
   S: AsRef<[u8]>,
+  I: MaterializedInt,
 {
-  type Int = i64;
+  type Int = I;
   type Float = f64;
   type Error = OutOfRange<S>;
-  type Value = MaterializedInputValue<S>;
-  type ConstValue = MaterializedConstInputValue<S>;
+  type Value = MaterializedInputValue<S, I>;
+  type ConstValue = MaterializedConstInputValue<S, I>;
 
   #[inline]
-  fn int(slice: S) -> Result<i64, OutOfRange<S>> {
-    match parse_i64(slice.as_ref()) {
+  fn int(slice: S) -> Result<I, OutOfRange<S>> {
+    match <I as sealed::MaterializedInt>::parse(slice.as_ref()) {
       Some(value) => Ok(value),
+      // The width is `I`'s own, so this arm cannot name a width the conversion above was not
+      // attempted at: there is one type in the expression and it decides both halves.
       None => Err(OutOfRange::Int {
         value: slice,
-        width: IntWidth::I64,
+        width: I::WIDTH,
       }),
     }
   }
 
   #[inline]
   fn float(slice: S) -> Result<f64, OutOfRange<S>> {
-    match parse_f64(slice.as_ref()) {
-      Some(value) => Ok(value),
-      None => Err(OutOfRange::Float(slice)),
-    }
+    float(slice)
   }
 
   #[inline]
@@ -257,54 +465,22 @@ where
   }
 }
 
-/// [`i32`] and [`f64`] — **the specification's own reading of `Int`**.
+/// The `Float` conversion, **outside the marker because it is outside the width**.
 ///
-/// Draft §3.5.1 defines GraphQL's `Int` as a signed 32-bit integer, so this marker is not the
-/// narrow option beside [`MaterializedNumbers`]: it is the exact one, and the 64-bit marker is
-/// the one that admits literals the specification does not. A document whose `Int` literals all
-/// convert here is a document whose integers a spec-conformant server can accept; one that
-/// converts only at [`MaterializedNumbers`] has told you something else, and the
-/// [`IntWidth`] on the error is how a consumer learns which.
-///
-/// `Float` stays [`f64`] at both widths and `f32` never appears: GraphQL's `Float` **is** IEEE
-/// 754 double precision (draft §3.5.2), so a 32-bit float would be non-conformant rather than
-/// narrower. The `32` in the name is the integer width and nothing else.
+/// It takes no `I` and there is no width at which it does something else: GraphQL's `Float` *is*
+/// IEEE 754 double precision (draft §3.5.2). Every float path — the [`Numbers`] impl above and
+/// [`materialized::float_value`](super::materialized::float_value) — is this one function, so
+/// "the two widths agree about floats" is a fact about the call graph rather than a claim two
+/// instantiations happen to satisfy.
 #[cfg(feature = "materialized-numbers")]
-pub(crate) enum MaterializedNumbers32 {}
-
-#[cfg(feature = "materialized-numbers")]
-impl<S> Numbers<S> for MaterializedNumbers32
+#[inline]
+pub(crate) fn float<S>(slice: S) -> Result<f64, OutOfRange<S>>
 where
   S: AsRef<[u8]>,
 {
-  type Int = i32;
-  type Float = f64;
-  type Error = OutOfRange<S>;
-  type Value = Materialized32InputValue<S>;
-  type ConstValue = Materialized32ConstInputValue<S>;
-
-  #[inline]
-  fn int(slice: S) -> Result<i32, OutOfRange<S>> {
-    match parse_i32(slice.as_ref()) {
-      Some(value) => Ok(value),
-      None => Err(OutOfRange::Int {
-        value: slice,
-        width: IntWidth::I32,
-      }),
-    }
-  }
-
-  #[inline]
-  fn float(slice: S) -> Result<f64, OutOfRange<S>> {
-    match parse_f64(slice.as_ref()) {
-      Some(value) => Ok(value),
-      None => Err(OutOfRange::Float(slice)),
-    }
-  }
-
-  #[inline]
-  fn report(error: OutOfRange<S>, span: SimpleSpan) -> DialectGraphqlError<S> {
-    report_out_of_range(error, span)
+  match parse_f64(slice.as_ref()) {
+    Some(value) => Ok(value),
+    None => Err(OutOfRange::Float(slice)),
   }
 }
 
@@ -368,6 +544,22 @@ fn parse_i32(bytes: &[u8]) -> Option<i32> {
 /// have failed on. A predicate written in `error.rs` beside the constructor would be a second
 /// reading of the grammar, free to disagree with the two above and to keep the promise about
 /// nothing.
+///
+/// # The one place a width is still a value, and why it stays one
+///
+/// Nothing else in this crate takes a width as an argument any more:
+/// [`MaterializedInt::WIDTH`] answers it from the payload type at every production site. This
+/// door is different in kind, because its caller is outside the type system that decided the
+/// question — a gateway told at run time which reading it enforces has an [`IntWidth`] as a
+/// *value*, and taking it as a type parameter would only move the choice, not remove it. What
+/// makes it safe is not the shape of the argument but the check: a `(literal, width)` pair the
+/// production at that width would have converted comes back as `Err`.
+///
+/// The `match` below is therefore the second statement of a correspondence
+/// [`MaterializedInt::WIDTH`] states first — that `I32` is the width `i32` reads at and `I64` is
+/// `i64`'s. `the_widths_the_door_dispatches_on_are_the_widths_the_readers_name` is the assertion
+/// that the two statements are the same one; without it, a wrong `WIDTH` would leave this
+/// function promising something about a production that does not exist.
 ///
 /// [`is_int_literal`] is the first conjunct because [`parse_i64`] answers `None` to two different
 /// questions — "outside the width" and "not an integer at all" — and only the first one is an

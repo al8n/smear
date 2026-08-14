@@ -1,17 +1,19 @@
-//! The materialised-number view of the GraphQL value AST: **the same productions, a second tree.**
+//! The materialised-number view of the GraphQL value AST: **the same productions, a second tree,
+//! at every width the axis reads.**
 //!
 //! Two enums and seven aliases. The enums are [`InputValue`] and [`ConstInputValue`], variant for
-//! variant the shape of their slice twins in [`ast`](crate::graphql::ast) with `Int` and `Float`
-//! carrying [`i64`] and [`f64`]; the aliases bind the shared list, object and default-value
-//! carriers to them, at the arity and argument positions their slice twins publish. Every leaf
-//! type is the *same* type on both sides, and every production is the same production — see
-//! [`syntactic::materialized`](crate::graphql::syntactic::value::materialized), whose entries are
-//! [`super`]'s bodies at this tree.
+//! variant the shape of their slice twins in [`ast`](crate::graphql::ast) with `Float` carrying
+//! [`f64`] and `Int` carrying `I` — [`i32`], which is the width draft §3.5.1 specifies, or
+//! [`i64`], the grammar-permissive reading. The aliases bind the shared list, object and
+//! default-value carriers to them, at the arity and argument positions their slice twins publish.
+//! Every leaf type is the *same* type on both sides, and every production is the same production —
+//! see [`syntactic::materialized`](crate::graphql::syntactic::value::materialized), whose entries
+//! are [`super`]'s bodies at this tree.
 //!
 //! # Why a second tree and not a second instantiation of one
 //!
 //! Because a Rust type alias is not a module. Making the slice `InputValue<S>` an alias of a
-//! three-parameter carrier — one tree, two instantiations, no second enum — costs
+//! wider carrier — one tree, two instantiations, no second enum — costs
 //! `use ast::InputValue::{Int, String}`, which is `E0432` against an alias and compiles against an
 //! enum. It also has to be got exactly right in three other ways at once: a parameter default
 //! does not constrain an unmentioned parameter during variant construction, and inserting the
@@ -23,10 +25,29 @@
 //! `graphql/ast/value.rs` is then **byte-identical to the revision before this axis existed**,
 //! which is a stronger compatibility statement than any test.
 //!
-//! The same argument decided the second *width*:
-//! [`ast::materialized32`](crate::graphql::ast::materialized32) is a third and fourth enum rather
-//! than an `I` parameter on these two, and its header records the three compile-time failures a
-//! payload parameter would have caused.
+//! # Why the *width* is a parameter here and not a third and fourth enum
+//!
+//! Every clause of the paragraph above is about `ast::InputValue<S>`, and not one of them is true
+//! of this tree. `E0432` is a fact about a type **alias**, and `I` is a parameter on an `enum`, so
+//! `use materialized::InputValue::{Int, String}` compiles exactly as it did. The other two are
+//! facts about an **established, publicly constructed** type: this one arrived with the
+//! `materialized-numbers` feature and has no out-of-crate constructor to break, and `Container`
+//! cannot be silently rebound because there is no default on `I` for a positional argument to slip
+//! past — every site names the width.
+//!
+//! A shape that shipped first got this wrong and paid twice: a `materialized32` module was these
+//! two enums and these seven aliases again with one type substituted, and a `MaterializedNumbers32`
+//! marker was the same production module again beside it. What the second copy bought was a
+//! `git diff` in which the interesting line and the transcribed one look alike.
+//!
+//! # No default on `I`, deliberately
+//!
+//! A default would make `materialized::InputValue<S>` mean *some* width, and the two candidates
+//! are both wrong: `i64` writes the permissive reading into every unannotated spelling, and `i32`
+//! silently changes what an existing `i64` spelling means. It would also re-open the positional
+//! hazard the section above rules out, because `List<S, Own<…>>` binds its second argument to `I`
+//! the moment `I` is defaultable. The width is one word at each site, and the site is where the
+//! reading is chosen.
 //!
 //! # What is materialised, and what is not
 //!
@@ -46,24 +67,26 @@
 //! which a server sharing one parsed persisted-query document across request threads cannot
 //! accept.
 //!
-//! # Why `i64` and `f64`
+//! # The two widths, and why `Float` is not one of them
 //!
-//! `i64` because GraphQL's `IntValue` grammar carries an optional leading `-`
-//! (draft §2.9.1), so no unsigned type can hold `-5`, and because that grammar bounds the digits
-//! not at all — this tree is the **grammar-permissive** reading, and it accepts literals draft
-//! §3.5.1's 32-bit `Int` does not. `f64` because GraphQL's `Float` **is** IEEE 754 double
-//! precision (draft §3.5.2).
+//! `I` is signed at both widths because GraphQL's `IntValue` grammar carries an optional leading
+//! `-` (draft §2.9.1), so no unsigned type can hold `-5`. [`i32`] is what draft §3.5.1 says an
+//! `Int` **is**, and [`i64`] is the reading that takes §2.9.1's grammar at its word — it bounds
+//! the digits not at all, so `2147483648` is a well-formed `IntValue` that no conformant `Int` can
+//! hold. Neither is a subset of "correct": one answers *what does this document mean under the
+//! specification*, the other *what did the author write*, and a refusal names its
+//! [`IntWidth`](crate::graphql::error::IntWidth) so a report can say which was asked.
 //!
-//! The narrower integer named here as hypothetical now exists and is the *specification's* width:
-//! [`ast::materialized32`](crate::graphql::ast::materialized32) is `i32` + `f64`. `f32` did not
-//! follow `i32` down, because it is non-conformant.
+//! `Float` is [`f64`] at both, and `f32` never appears, because GraphQL's `Float` **is** IEEE 754
+//! double precision (draft §3.5.2) — a narrower float would be non-conformant rather than
+//! narrower. That is why the parameter is on the `Int` leaf alone.
 //!
 //! # The bound this view accepts, stated rather than engineered around
 //!
 //! A 26-digit integer literal is *syntactically valid GraphQL*. In this view it becomes a
 //! **parse** error where the specification would make it a **coercion** error, because the
-//! conversion happens where the literal is read. The slice parser remains available for the full
-//! grammar and is unchanged. See
+//! conversion happens where the literal is read. At `i32` the same is true of `2147483648`. The
+//! slice parser remains available for the full grammar and is unchanged. See
 //! [`syntactic::materialized`](crate::graphql::syntactic::value::materialized) for the
 //! productions and the exact error.
 
@@ -78,21 +101,24 @@ use super::{
   NullValue as AstNullValue, StringValue as AstStringValue, VariableValue as AstVariableValue,
 };
 
-/// A GraphQL integer literal, materialised as [`i64`].
-pub type IntValue<Span = SimpleSpan> = super::IntValue<i64, Span>;
+/// A GraphQL integer literal, materialised as `I`.
+pub type IntValue<I, Span = SimpleSpan> = super::IntValue<I, Span>;
 
 /// A GraphQL floating-point literal, materialised as [`f64`].
+///
+/// It takes no width parameter and must not gain one: GraphQL's `Float` *is* IEEE 754 double
+/// precision (draft §3.5.2).
 pub type FloatValue<Span = SimpleSpan> = super::FloatValue<f64, Span>;
 
 /// A GraphQL input value (executable context) whose numeric leaves are materialised.
 ///
-/// Variant for variant [`ast::InputValue`](crate::graphql::ast::InputValue), with `Int` and
-/// `Float` carrying [`i64`] and [`f64`]. Every other leaf is the *same type* the slice tree
-/// holds, not a copy of it.
+/// Variant for variant [`ast::InputValue`](crate::graphql::ast::InputValue), with `Float`
+/// carrying [`f64`] and `Int` carrying `I` — see the module header for the two widths. Every
+/// other leaf is the *same type* the slice tree holds, not a copy of it.
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum InputValue<S> {
+pub enum InputValue<S, I> {
   /// Variable reference (e.g., `$userId`).
   Variable(AstVariableValue<S>),
   /// Boolean value (`true` or `false`).
@@ -101,19 +127,19 @@ pub enum InputValue<S> {
   String(AstStringValue<S>),
   /// Floating-point number, materialised.
   Float(FloatValue),
-  /// Integer number, materialised.
-  Int(IntValue),
+  /// Integer number, materialised at `I`.
+  Int(IntValue<I>),
   /// Enum value name.
   Enum(AstEnumValue<S>),
   /// The `null` literal.
   Null(AstNullValue<S>),
   /// List of values.
-  List(List<S>),
+  List(List<S, I>),
   /// Object value with named fields.
-  Object(Object<S>),
+  Object(Object<S, I>),
 }
 
-impl<S> AsSpan<SimpleSpan> for InputValue<S> {
+impl<S, I> AsSpan<SimpleSpan> for InputValue<S, I> {
   #[inline]
   fn as_span(&self) -> &SimpleSpan {
     match self {
@@ -130,7 +156,7 @@ impl<S> AsSpan<SimpleSpan> for InputValue<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
+impl<S, I> IntoSpan<SimpleSpan> for InputValue<S, I> {
   #[inline]
   fn into_span(self) -> SimpleSpan {
     match self {
@@ -153,26 +179,26 @@ impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ConstInputValue<S> {
+pub enum ConstInputValue<S, I> {
   /// Boolean value (`true` or `false`).
   Boolean(AstBooleanValue<S>),
   /// String value (inline or block string).
   String(AstStringValue<S>),
   /// Floating-point number, materialised.
   Float(FloatValue),
-  /// Integer number, materialised.
-  Int(IntValue),
+  /// Integer number, materialised at `I`.
+  Int(IntValue<I>),
   /// Enum value name.
   Enum(AstEnumValue<S>),
   /// The `null` literal.
   Null(AstNullValue<S>),
   /// List of constant values.
-  List(ConstList<S>),
+  List(ConstList<S, I>),
   /// Object value with named fields (all values must be constant).
-  Object(ConstObject<S>),
+  Object(ConstObject<S, I>),
 }
 
-impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
+impl<S, I> AsSpan<SimpleSpan> for ConstInputValue<S, I> {
   #[inline]
   fn as_span(&self) -> &SimpleSpan {
     match self {
@@ -188,7 +214,7 @@ impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
+impl<S, I> IntoSpan<SimpleSpan> for ConstInputValue<S, I> {
   #[inline]
   fn into_span(self) -> SimpleSpan {
     match self {
@@ -205,29 +231,32 @@ impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
 }
 
 /// A list value whose numeric leaves are materialised.
-pub type List<S, Container = DefaultVec<InputValue<S>>> =
-  crate::value::List<InputValue<S>, SimpleSpan, Container>;
+///
+/// `Container` stays the **last** argument, as it is on the slice twin, so the two sets differ in
+/// one inserted parameter and not in what an existing argument means.
+pub type List<S, I, Container = DefaultVec<InputValue<S, I>>> =
+  crate::value::List<InputValue<S, I>, SimpleSpan, Container>;
 
 /// An object value whose numeric leaves are materialised.
-pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
-  crate::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
+pub type Object<S, I, Container = DefaultVec<ObjectField<S, I>>> =
+  crate::value::Object<Name<S>, InputValue<S, I>, SimpleSpan, Container>;
 
 /// An object field whose value's numeric leaves are materialised.
-pub type ObjectField<S> = crate::value::ObjectField<Name<S>, InputValue<S>>;
+pub type ObjectField<S, I> = crate::value::ObjectField<Name<S>, InputValue<S, I>>;
 
 /// A constant list value whose numeric leaves are materialised.
-pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  crate::value::List<ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstList<S, I, Container = DefaultVec<ConstInputValue<S, I>>> =
+  crate::value::List<ConstInputValue<S, I>, SimpleSpan, Container>;
 
 /// A constant object value whose numeric leaves are materialised.
-pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
-  crate::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstObject<S, I, Container = DefaultVec<ConstObjectField<S, I>>> =
+  crate::value::Object<Name<S>, ConstInputValue<S, I>, SimpleSpan, Container>;
 
 /// A constant object field whose value's numeric leaves are materialised.
-pub type ConstObjectField<S> = crate::value::ObjectField<Name<S>, ConstInputValue<S>>;
+pub type ConstObjectField<S, I> = crate::value::ObjectField<Name<S>, ConstInputValue<S, I>>;
 
 /// A default value whose numeric leaves are materialised.
-pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<S>>;
+pub type DefaultInputValue<S, I> = crate::value::DefaultInputValue<ConstInputValue<S, I>>;
 
 #[cfg(test)]
 mod tests;
