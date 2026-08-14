@@ -705,6 +705,15 @@ pub trait SmokeInt: Copy + core::fmt::Debug + Sized + 'static {
   /// overflow and the error named that width, `Err(None)` when it was refused for its shape. The
   /// width travels out because it is the only place a dependent can observe which reading refused.
   fn committed_int(literal: &str) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>>;
+
+  /// `materialized::try_int_value` — the same conversion behind a head test that declines without
+  /// consuming. `Ok(false)` is the decline.
+  fn attempted_int(literal: &str) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>>;
+
+  /// `materialized::value` — the conversion reached as a **leaf inside a composite**, which is how
+  /// the other nine width-carrying productions reach it. `Ok(false)` is "it parsed as some other
+  /// kind of value".
+  fn fused_value(literal: &str) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>>;
 }
 
 /// The two impls, from one body.
@@ -771,6 +780,63 @@ macro_rules! smoke_int {
           Err(errors) => Err(refusal_width(errors)),
         }
       }
+
+      fn attempted_int(
+        literal: &str,
+      ) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>> {
+        use smear::{
+          lexer::tokora::try_parse_input::ParseAttempt,
+          parser::graphql::{
+            GraphQL,
+            ast::IntValue,
+            error::GraphqlErrors,
+            syntactic::{GraphqlLexer, value::materialized},
+          },
+        };
+
+        let parsed: Result<ParseAttempt<IntValue<$payload>>, GraphqlErrors<&str>> =
+          Parser::with_parser::<
+            GraphqlLexer<'_, str>,
+            ParseAttempt<IntValue<$payload>>,
+            GraphqlErrors<&str>,
+            _,
+            GraphQL,
+          >(materialized::try_int_value::<_, _, $payload>)
+          .parse_str(literal);
+
+        match parsed {
+          Ok(ParseAttempt::Accept(_)) => Ok(true),
+          Ok(ParseAttempt::Decline) => Ok(false),
+          Err(errors) => Err(refusal_width(errors)),
+        }
+      }
+
+      fn fused_value(
+        literal: &str,
+      ) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>> {
+        use smear::parser::graphql::{
+          GraphQL,
+          ast::materialized::InputValue,
+          error::GraphqlErrors,
+          syntactic::{GraphqlLexer, value::materialized},
+        };
+
+        let parsed: Result<InputValue<&str, $payload>, GraphqlErrors<&str>> =
+          Parser::with_parser::<
+            GraphqlLexer<'_, str>,
+            InputValue<&str, $payload>,
+            GraphqlErrors<&str>,
+            _,
+            GraphQL,
+          >(materialized::value::<_, _, $payload>)
+          .parse_str(literal);
+
+        match parsed {
+          Ok(InputValue::Int(_)) => Ok(true),
+          Ok(_) => Ok(false),
+          Err(errors) => Err(refusal_width(errors)),
+        }
+      }
     }
   };
 }
@@ -821,8 +887,87 @@ pub const INT_MEANINGS: [IntMeaning; 3] = [
   IntMeaning::NotALiteral,
 ];
 
-/// **Every public way to ask `smear` what an integer spelling means**, each answering with the
-/// set of meanings it rules in at `I`'s width.
+/// **Which decision procedure a public entry reaches** when it is asked about an integer literal.
+///
+/// The list of *entries* has been under-counted three times running — three readers, then a
+/// fourth, then a fifth — because it was a hand-kept array of names, and a name is exactly the
+/// thing an edit adds without telling anybody. So the census is over the procedures instead:
+/// `syntactic::value::materialized`'s twenty-four public productions collapse onto **three** ways
+/// of reaching the one conversion, and the two entries outside that module are one each. A
+/// production maps to a variant here, [`PRODUCTION_DECIDERS`] is checked against the module's own
+/// source, and [`public_int_readings`] exercises one representative per variant that has a
+/// reading.
+///
+/// The three conversion variants are one implementation reached three ways, and that is the point:
+/// the plumbing differs — a committed head, a head test that may decline, a leaf inside a
+/// composite — so a defect can live in one shape's plumbing while the shared conversion is right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IntDecider {
+  /// The lexer's grammar alone. A slice production converts nothing and carries the spelling out
+  /// unchanged, so all it decides is whether the bytes are an `IntValue`.
+  Grammar,
+  /// The conversion behind a **committed** integer head — `materialized::int_value`.
+  CommittedConversion,
+  /// The conversion behind a head test that declines without consuming —
+  /// `materialized::try_int_value`.
+  AttemptedConversion,
+  /// The conversion reached as a **leaf inside a composite** — `materialized::value` and the nine
+  /// other composites that carry the width.
+  FusedConversion,
+  /// The runtime-width door, `IntOverflow::checked`, which takes an `IntWidth` as a value rather
+  /// than reading one off a type.
+  CheckedWidth,
+  /// The production carries no integer payload at any width, so it has no reading to contribute
+  /// and no way to disagree. The float leaf and the ten delegating leaves.
+  NoIntegerPayload,
+}
+
+/// **Every public production of `syntactic::value::materialized`, and the decider it reaches.**
+///
+/// Checked against that module's source rather than believed:
+/// `every_public_materialised_production_is_classified` parses the file, collects every
+/// `materialized_parser!` and `width_free_parser!` invocation, and requires the two sets to be
+/// equal in both directions. A production added there and not classified here fails; an entry left
+/// here after a production is removed fails too.
+///
+/// The macro each production is generated by is a second oracle on the classification, and the
+/// test uses it: `materialized_parser!` is the arm for the twelve productions whose output carries
+/// the width, so one of those cannot be classified [`NoIntegerPayload`](IntDecider::NoIntegerPayload),
+/// and a `width_free_parser!` production cannot be classified as a conversion.
+pub const PRODUCTION_DECIDERS: &[(&str, IntDecider)] = &[
+  // The integer leaf, in both shapes.
+  ("int_value", IntDecider::CommittedConversion),
+  ("try_int_value", IntDecider::AttemptedConversion),
+  // The composites: each reaches the conversion through `Numbers::int` on a leaf.
+  ("value", IntDecider::FusedConversion),
+  ("const_value", IntDecider::FusedConversion),
+  ("list_value", IntDecider::FusedConversion),
+  ("const_list_value", IntDecider::FusedConversion),
+  ("object_value", IntDecider::FusedConversion),
+  ("const_object_value", IntDecider::FusedConversion),
+  ("object_field", IntDecider::FusedConversion),
+  ("const_object_field", IntDecider::FusedConversion),
+  ("try_default_value", IntDecider::FusedConversion),
+  ("default_value", IntDecider::FusedConversion),
+  // The float leaf is converted and width-free: GraphQL's `Float` is IEEE 754 double precision at
+  // every reading of `Int`, so it takes no width and decides nothing about an integer.
+  ("float_value", IntDecider::NoIntegerPayload),
+  ("try_float_value", IntDecider::NoIntegerPayload),
+  // The five leaves materialisation does not touch, in both shapes.
+  ("string_value", IntDecider::NoIntegerPayload),
+  ("boolean_value", IntDecider::NoIntegerPayload),
+  ("null_value", IntDecider::NoIntegerPayload),
+  ("enum_value", IntDecider::NoIntegerPayload),
+  ("variable_value", IntDecider::NoIntegerPayload),
+  ("try_string_value", IntDecider::NoIntegerPayload),
+  ("try_boolean_value", IntDecider::NoIntegerPayload),
+  ("try_null_value", IntDecider::NoIntegerPayload),
+  ("try_enum_value", IntDecider::NoIntegerPayload),
+  ("try_variable_value", IntDecider::NoIntegerPayload),
+];
+
+/// **One representative of every decider that has a reading**, each answering with the set of
+/// meanings it rules in at `I`'s width.
 ///
 /// A *set* rather than a value, because the paths do not all resolve the question to the same
 /// grain and a property that made one of them claim more than it knows would be testing the test.
@@ -830,27 +975,40 @@ pub const INT_MEANINGS: [IntMeaning; 3] = [
 /// overflow at this width", which a literal that fits and a spelling that is not one both satisfy.
 /// The slice production is width-free — it decides whether the bytes are an `IntValue` and carries
 /// the spelling unconverted — so it rules out one meaning and never picks between the other two.
-/// Only the materialising production resolves all three. Agreement is therefore the
-/// **intersection** being non-empty, and what the paths agree *on* is the one meaning left in it.
+/// Only a materialising path resolves all three. Agreement is therefore the **intersection** being
+/// non-empty, and what the paths agree *on* is the one meaning left in it.
 ///
 /// The width is the same one throughout: [`SmokeInt::WIDTH`] is what the door is asked at and what
-/// the production is instantiated at. That is the join — the door dispatches on a value and the
+/// each production is instantiated at. That is the join — the door dispatches on a value and the
 /// production dispatches on a type — and
 /// `the_width_a_refusal_names_is_the_width_the_call_asked_for` is what keeps the two spellings of
 /// it from drifting, now that a dependent cannot read `MaterializedInt::WIDTH`.
 ///
-/// # A list, because the defect was a path being added
+/// # Keyed by decider, because the defect was a path being added
 ///
 /// `MaterializedInt::parse` was public for two commits and answered `Some(7)` to `007`, which every
 /// path here refuses. Nothing was wrong with any of them; what was wrong was that another reader
-/// shipped and every property in the tree ranged over one path. So this is the list, and a
-/// path published later belongs in it — the array length is what makes leaving one out an edit
-/// somebody has to make rather than an omission.
+/// shipped and every property in the tree ranged over one path. Naming the paths did not fix that
+/// — the next round found a *fifth*, `try_int_value`, missing from the list of names. So the array
+/// is one entry per [`IntDecider`], `PRODUCTION_DECIDERS` is checked against the module's source,
+/// and `every_decider_with_a_reading_is_exercised` closes the loop between them: a production
+/// added upstream must be classified, and a classification nothing exercises fails.
+///
+/// # What is still hand-kept, plainly
+///
+/// Two of the five entries — the slice production and `IntOverflow::checked` — live outside
+/// `syntactic::value::materialized`, so no source scan reaches them, and neither would a reader
+/// published somewhere new: a trait item, as `parse` was, or a door on an error type, as `checked`
+/// is. The mechanical half covers the surface that actually grows with the grammar. The rest is
+/// judgement, and this paragraph is the honest bound on it rather than a claim that the class is
+/// closed.
 ///
 /// Membership is "a public entry that decides something about an integer literal's spelling or its
 /// magnitude". The lossless tower is not one of those: it records the lexer's diagnostics on a
 /// tree and converts nothing, so it has no reading to contribute and no way to disagree.
-pub fn public_int_readings<I>(literal: &str) -> [(&'static str, &'static [IntMeaning]); 3]
+pub fn public_int_readings<I>(
+  literal: &str,
+) -> [(IntDecider, &'static str, &'static [IntMeaning]); 5]
 where
   I: SmokeInt,
 {
@@ -879,21 +1037,37 @@ where
     }
   };
 
-  let production = conversion_reading(I::committed_int(literal));
-
   let checked = match IntOverflow::checked(literal, I::WIDTH) {
     Ok(_) => &[IntMeaning::Overflows][..],
     Err(_) => &[IntMeaning::Converts, IntMeaning::NotALiteral][..],
   };
 
   [
-    ("the slice production", slice),
-    ("the materialising production", production),
-    ("IntOverflow::checked", checked),
+    (IntDecider::Grammar, "the slice production", slice),
+    (
+      IntDecider::CommittedConversion,
+      "materialized::int_value",
+      conversion_reading(I::committed_int(literal)),
+    ),
+    (
+      IntDecider::AttemptedConversion,
+      "materialized::try_int_value",
+      conversion_reading(I::attempted_int(literal)),
+    ),
+    (
+      IntDecider::FusedConversion,
+      "materialized::value",
+      conversion_reading(I::fused_value(literal)),
+    ),
+    (IntDecider::CheckedWidth, "IntOverflow::checked", checked),
   ]
 }
 
-/// The one reading of a materialising outcome.
+/// The one reading of a materialising outcome, shared by all three shapes.
+///
+/// One function rather than one per shape, for the same reason the impls come from one macro body:
+/// the three plumbings are being compared, so the interpretation of what they returned must not be
+/// three interpretations.
 fn conversion_reading(
   outcome: Result<bool, Option<smear::parser::graphql::error::IntWidth>>,
 ) -> &'static [IntMeaning] {
@@ -1525,7 +1699,7 @@ mod tests {
     let readings = super::public_int_readings::<I>(literal);
 
     let mut admitted: Vec<super::IntMeaning> = super::INT_MEANINGS.to_vec();
-    for (_, ruled_in) in &readings {
+    for (_, _, ruled_in) in &readings {
       admitted.retain(|meaning| ruled_in.contains(meaning));
     }
 
@@ -1547,11 +1721,12 @@ mod tests {
   /// one path. `007` was `Some(7)` to the new door and refused by all three below, and every test
   /// in the workspace stayed green.
   ///
-  /// So the quantifier is over [`public_int_readings`](super::public_int_readings): a path
-  /// published later has to join that array, and joining it is what puts it under this property.
+  /// So the quantifier is over [`public_int_readings`](super::public_int_readings), and that array
+  /// is one entry per [`IntDecider`](super::IntDecider) rather than one per name — because naming
+  /// the paths was the previous repair and the round after it found another name missing.
   ///
   /// It holds one thing beyond the leading zero, and holds it on every row: the slice production
-  /// and the materialising one never disagree about which spellings are `IntValue`s, because a
+  /// and the materialising ones never disagree about which spellings are `IntValue`s, because a
   /// path ruling the lexer's refusal in where another rules it out leaves the intersection empty.
   /// Materialisation converts a payload; it does not get to move the grammar.
   #[test]
@@ -1629,9 +1804,187 @@ mod tests {
       Err(Some(<i64 as SmokeInt>::WIDTH))
     );
 
-    // Non-vacuity: the two constants above are different, so the four assertions are not four
+    // The other two shapes reach the same conversion and therefore name the same width.
+    assert_eq!(
+      <i32 as SmokeInt>::attempted_int("2147483648"),
+      Err(Some(IntWidth::I32))
+    );
+    assert_eq!(
+      <i32 as SmokeInt>::fused_value("2147483648"),
+      Err(Some(IntWidth::I32))
+    );
+
+    // Non-vacuity: the two constants above are different, so the assertions are not several
     // spellings of one width.
     assert_ne!(<i32 as SmokeInt>::WIDTH, <i64 as SmokeInt>::WIDTH);
+  }
+
+  /// `syntactic::value::materialized`'s own source, read as text.
+  ///
+  /// No dependency edge is created by this and none is wanted: `smear-smoke` depends on `smear`
+  /// and on nothing else in the workspace, which is the arithmetic the root manifest's header
+  /// turns on. `ci/source_census` reads this workspace's sources the same way and for the same
+  /// reason.
+  const MATERIALIZED_SOURCE: &str =
+    include_str!("../../smear-parser/src/graphql/syntactic/value/materialized.rs");
+
+  /// Every public production that module declares, paired with the macro that generated it.
+  ///
+  /// Parsed rather than grepped: the productions are `macro_rules!` invocations, so a text scan
+  /// would be reading a shape `cargo fmt` is free to move, while `syn` reads the item list. The
+  /// production's name is taken off the token stream's own rendering for the same reason.
+  fn declared_productions() -> Vec<(String, String)> {
+    let file =
+      syn::parse_file(MATERIALIZED_SOURCE).expect("materialized.rs did not parse as Rust source");
+
+    file
+      .items
+      .iter()
+      .filter_map(|item| {
+        let syn::Item::Macro(item) = item else {
+          return None;
+        };
+        let generator = item.mac.path.segments.last()?.ident.to_string();
+        if generator != "materialized_parser" && generator != "width_free_parser" {
+          return None;
+        }
+        let tokens = item.mac.tokens.to_string();
+        let production = tokens.split(',').next()?.trim().to_owned();
+        Some((production, generator))
+      })
+      .collect()
+  }
+
+  /// **Every public production of the materialised module is classified, and classified
+  /// consistently with the macro that generated it.**
+  ///
+  /// This is the repair for a list that was under-counted three times. The previous shape was an
+  /// array of reader *names* in this file, and each round found a name missing from it — three,
+  /// then four, then five — because adding a production upstream is not an edit anybody makes
+  /// here. Now the upstream module's own source is the census: a production that is not in
+  /// [`PRODUCTION_DECIDERS`](super::PRODUCTION_DECIDERS) fails, and so does an entry here for a
+  /// production that no longer exists.
+  ///
+  /// The macro is a second oracle. `materialized_parser!` generates exactly the productions whose
+  /// output type carries the width, so one of those classified `NoIntegerPayload` is a
+  /// misclassification the source can catch, and a `width_free_parser!` production classified as a
+  /// conversion is the mirror of it.
+  #[test]
+  fn every_public_materialised_production_is_classified() {
+    use super::IntDecider;
+
+    let declared = declared_productions();
+
+    // Non-vacuity first. A scan that read nothing would satisfy every set comparison below by
+    // being empty on one side, which is the failure mode this whole crate exists to refuse.
+    assert!(
+      declared.len() >= 24,
+      "read only {} productions out of materialized.rs; the scan is wrong, not the module",
+      declared.len()
+    );
+
+    let classified: BTreeSet<&str> = super::PRODUCTION_DECIDERS
+      .iter()
+      .map(|(name, _)| *name)
+      .collect();
+    assert_eq!(
+      classified.len(),
+      super::PRODUCTION_DECIDERS.len(),
+      "two entries in PRODUCTION_DECIDERS claim the same production, so one production is \
+       unclassified and the length hides it"
+    );
+
+    let scanned: BTreeSet<&str> = declared.iter().map(|(name, _)| name.as_str()).collect();
+
+    let unclassified: Vec<&&str> = scanned.difference(&classified).collect();
+    assert!(
+      unclassified.is_empty(),
+      "materialized.rs declares {unclassified:?} and PRODUCTION_DECIDERS does not classify them, \
+       so nothing says which decision procedure they reach or whether it is exercised — add them \
+       with the decider they delegate to"
+    );
+
+    let stale: Vec<&&str> = classified.difference(&scanned).collect();
+    assert!(
+      stale.is_empty(),
+      "PRODUCTION_DECIDERS classifies {stale:?}, which materialized.rs no longer declares"
+    );
+
+    // The macro that generated each production is the second oracle on its classification.
+    let mut width_carrying = 0usize;
+    for (production, generator) in &declared {
+      let decider = super::PRODUCTION_DECIDERS
+        .iter()
+        .find_map(|(name, decider)| (name == production).then_some(*decider))
+        .expect("the set comparison above proves this entry exists");
+
+      match generator.as_str() {
+        "materialized_parser" => {
+          width_carrying += 1;
+          assert_ne!(
+            decider,
+            IntDecider::NoIntegerPayload,
+            "`{production}` is generated by `materialized_parser!`, so its output carries the \
+             width and it cannot decide nothing about an integer"
+          );
+        }
+        "width_free_parser" => assert_eq!(
+          decider,
+          IntDecider::NoIntegerPayload,
+          "`{production}` is generated by `width_free_parser!`, so its output is the same type at \
+           every width and it has no integer payload to decide about"
+        ),
+        other => panic!("the scan admitted a macro it does not know: {other}"),
+      }
+    }
+
+    assert_eq!(
+      width_carrying, 12,
+      "the module documents twelve width-carrying productions and the scan found \
+       {width_carrying}; whichever moved, the split between the two macros is the statement about \
+       where the width stops"
+    );
+  }
+
+  /// **Every decider that has a reading is exercised**, so classifying a production is what puts
+  /// it under the agreement property.
+  ///
+  /// The other half of the closure. `every_public_materialised_production_is_classified` makes a
+  /// new production pick a decider; this makes that decider have a representative in
+  /// [`public_int_readings`](super::public_int_readings). A production in a genuinely new class
+  /// therefore fails here rather than being silently unread.
+  #[test]
+  fn every_decider_with_a_reading_is_exercised() {
+    use super::IntDecider;
+
+    let readings = super::public_int_readings::<i32>("7");
+    let exercised: BTreeSet<IntDecider> = readings.iter().map(|(decider, _, _)| *decider).collect();
+
+    // Against the array's own length rather than a written-down count. A literal here fired first
+    // when the reading for a decider was deleted, and reported a duplicate instead of naming the
+    // decider that had gone unread — found by planting exactly that deletion.
+    assert_eq!(
+      exercised.len(),
+      readings.len(),
+      "two entries of `public_int_readings` claim the same decider, so one reading is a duplicate \
+       and some decider is unexercised"
+    );
+
+    for (production, decider) in super::PRODUCTION_DECIDERS {
+      if *decider == IntDecider::NoIntegerPayload {
+        continue;
+      }
+      assert!(
+        exercised.contains(decider),
+        "`{production}` is classified {decider:?} and no entry of `public_int_readings` reaches \
+         that decider, so nothing asks it what an integer spelling means"
+      );
+    }
+
+    // The two deciders that come from outside `materialized.rs`, which no source scan reaches and
+    // which the loop above therefore cannot require.
+    assert!(exercised.contains(&IntDecider::Grammar));
+    assert!(exercised.contains(&IntDecider::CheckedWidth));
   }
 
   /// The twelve source-equivalence properties of the value trees, across the dependency edge.
