@@ -81,7 +81,9 @@ use smear_schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, bui
 use super::{
   Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
   SourceEventError, SourceField, Values,
-  collect::{Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields},
+  collect::{
+    Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields, variable_key,
+  },
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
   response::{Key, NONE, Slot, State, node},
@@ -2044,7 +2046,7 @@ where
       id,
       schema: self.schema,
       slots: &self.slots,
-      names: self.interner.bytes(),
+      names: self.interner.names(),
       name_spans: self.interner.spans(),
       slot,
       field,
@@ -2121,7 +2123,7 @@ where
     // Through the same door, but not with the same message. The refusal is carried rather than
     // discarded, because the two doors are two different knobs and an operator told the wrong one
     // resizes an arena that was never the constraint.
-    let raw = match self.interner.intern(message.as_bytes(), &mut self.visits) {
+    let raw = match self.interner.intern(message, &mut self.visits) {
       Ok(message) => Raw::Resolver { message },
       Err(unstored) => Raw::ResolverUnstorable { unstored },
     };
@@ -2398,7 +2400,7 @@ where
       schema: self.schema,
       slots: &self.slots,
       depth: self.max_depth,
-      names: self.interner.bytes(),
+      names: self.interner.names(),
       name_spans: self.interner.spans(),
       locations: &self.locations,
       errors: &self.errors,
@@ -2976,7 +2978,7 @@ where
           // And when it cannot be, the message says which ceiling silenced it. This arm used to
           // render the arena's cap whatever had refused, so a visit budget exhausted by the probe
           // run reported itself as a full arena.
-          let raw = match self.interner.intern(name.as_bytes(), &mut self.visits) {
+          let raw = match self.interner.intern(name, &mut self.visits) {
             Ok(runtime) => Raw::AbstractNotPossible {
               abstract_ty: base,
               runtime,
@@ -3115,7 +3117,13 @@ where
             // the spelling is decoration on a finding that does not depend on it, so both ceilings
             // shorten the same sentence and the reader is not told about a resource at all. The
             // sites that *name* a ceiling carry the refusal instead — see `Unstored`.
-            variable: self.interner.intern(bytes, &mut self.visits).ok(),
+            //
+            // A spelling that is not a name shortens the same sentence, through `variable_key`'s
+            // `None` rather than through a ceiling. It used to be interned raw and rendered as
+            // `""` on the way out, so the honest branch printed `$` with nothing after it — see
+            // al8n/smear#139.
+            variable: variable_key(bytes)
+              .and_then(|name| self.interner.intern(name, &mut self.visits).ok()),
           },
         },
         (raw, _) => raw,
@@ -3201,7 +3209,7 @@ where
           // a name that is somebody else's: the position simply cannot be built.
           let interned = match self
             .interner
-            .intern(self.schema.name_bytes(name), &mut self.visits)
+            .intern(self.schema.name(name), &mut self.visits)
           {
             Ok(interned) => interned,
             Err(unstored) => {
@@ -3336,16 +3344,30 @@ where
       // The variable is read exactly once, here, and the value is kept rather than the name: what
       // reaches the driver has to be the value these steps checked, which is what
       // `ArgumentSource::Variable` carries and why it carries it.
+      //
+      // `variable`'s inner `Option<&str>` is the spelling *as a lookup key*, and `None` there is
+      // draft §6.3's answer read at draft §6.4.1's site: a spelling `variable_key` cannot express
+      // names no variable the request could have supplied, so step 5.d's `hasValue = false` is the
+      // conclusion and the driver is not asked. This used to be
+      // `from_utf8(..).unwrap_or("")`, which asked the driver about a variable named `""`, put
+      // that invented name in `ArgumentSource::Variable` for the resolver to read, and printed it
+      // as `$` with nothing after it — while §6.3's condition, three hundred lines away, refused
+      // the same input. al8n/smear#139.
       let (variable, has_value, is_null) = match supplied.map(|argument| argument.value()) {
         None => (None, false, false),
         Some(InputValue::Variable(spelled)) => {
-          let name = core::str::from_utf8(spelled.name().source().as_ref()).unwrap_or("");
-          match ctx.variable(name) {
-            None => (Some((name, None)), false, false),
-            Some(value) => {
-              let null = ctx.is_null(&value);
-              (Some((name, Some(value))), true, null)
-            }
+          match variable_key(spelled.name().source().as_ref()) {
+            // A variable *was* written, so this is step 5.d and not step 5.b: the outer `Some`
+            // keeps the error `ArgumentVariableMissing` rather than `ArgumentMissing`, which is
+            // the truthful one — the argument names a variable, and the variable has no value.
+            None => (Some((None, None)), false, false),
+            Some(name) => match ctx.variable(name) {
+              None => (Some((Some(name), None)), false, false),
+              Some(value) => {
+                let null = ctx.is_null(&value);
+                (Some((Some(name), Some(value))), true, null)
+              }
+            },
           }
         }
         Some(InputValue::Null(_)) => (None, true, true),
@@ -3358,9 +3380,8 @@ where
         // Step 5.h.i: a declared default applies whatever the type is, so it precedes the non-null
         // check rather than following it.
         if default {
-          let name = core::str::from_utf8(name_bytes).unwrap_or("");
           self.scratch_args.push(Argument {
-            name,
+            name: self.schema.name(argument.name()),
             ty,
             source: ArgumentSource::SchemaDefault,
           });
@@ -3383,7 +3404,10 @@ where
             // the argument is missing whatever the answer, so there is no knob to recommend and
             // nothing to say about a resource. That is the whole set of sites where `.ok()` is the
             // decision rather than an omission.
-            let variable = self.interner.intern(name.as_bytes(), &mut self.visits).ok();
+            //
+            // `and_then` for the same reason: a spelling that is not a name shortens the sentence
+            // exactly as a full arena does, and for a better reason — there is nothing to quote.
+            let variable = name.and_then(|name| self.interner.intern(name, &mut self.visits).ok());
             self.fail_at(
               slot,
               Raw::ArgumentVariableMissing {
@@ -3422,18 +3446,30 @@ where
         return false;
       }
 
-      let name = core::str::from_utf8(name_bytes).unwrap_or("");
       let source = match (variable, supplied.map(|argument| argument.value())) {
-        (Some((variable, Some(value))), _) => ArgumentSource::Variable {
+        // The inner `Some` is the reader: `has_value` is true, so the key was readable and the
+        // driver answered about it. An unreadable one never reaches here — it left at step 5.d.
+        (Some((Some(variable), Some(value))), _) => ArgumentSource::Variable {
           name: variable,
           value,
         },
         (None, Some(literal)) => ArgumentSource::Literal(literal),
         // `has_value` is true, so one of the arms above always matches: a variable with no value
-        // returned at the step 5.d branch above, and an absent argument at 5.b.
-        (Some((_, None)), _) | (None, None) => continue,
+        // returned at the step 5.d branch above — whether the driver said so or the spelling was
+        // never a key — and an absent argument at 5.b. The fourth combination is not a state the
+        // read above can construct at all: a spelling that is not a key is never handed to the
+        // driver, so it cannot come back carrying a value.
+        (Some((_, None)), _) | (Some((None, Some(_))), _) | (None, None) => continue,
       };
-      self.scratch_args.push(Argument { name, ty, source });
+      self.scratch_args.push(Argument {
+        // The *schema's* name for the argument, which its own arena already holds as a `str`: the
+        // builder admits nothing outside draft §2.1.9 (`smear_schema::is_name`), so there is no
+        // conversion to get wrong. The two `from_utf8(..).unwrap_or("")`s that used to stand here
+        // read the same arena the long way round.
+        name: self.schema.name(argument.name()),
+        ty,
+        source,
+      });
     }
     true
   }
@@ -3769,7 +3805,7 @@ where
       visits: self.visits.spent(),
       slots: self.slots.len(),
       metadata: self.merged.len() + self.locations.len(),
-      interned: self.interner.bytes().len(),
+      interned: self.interner.names().len(),
     }
   }
 
@@ -4481,7 +4517,7 @@ pub struct Response<'r, V> {
   schema: &'r Schema,
   slots: &'r [Slot<V>],
   depth: u32,
-  names: &'r [u8],
+  names: &'r str,
   name_spans: &'r [(u32, u32)],
   locations: &'r [SimpleSpan],
   errors: &'r [Row],

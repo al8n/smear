@@ -107,7 +107,13 @@ impl<S, Span, Lang: ?Sized> IntoComponents for FragmentName<S, Span, Lang> {
 }
 
 impl<S, Span, Lang: ?Sized> Name<S, Span, Lang> {
-  /// Creates a valid dialect name.
+  /// Creates a dialect name from a span and a spelling.
+  ///
+  /// It does not check the spelling, and the name says "valid" only of what the *productions*
+  /// build: a name that was lexed is a name, because the lexer's token production is draft
+  /// §2.1.9's. Nothing establishes that for a name assembled here, and a consumer that reads one
+  /// as text — `graphql_proto`'s response keys, its variable lookups — has to answer that question
+  /// itself rather than assume this constructor answered it.
   #[inline]
   pub const fn new(span: Span, source: S) -> Self {
     Self(Ident::new(span, source))
