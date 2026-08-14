@@ -81,7 +81,7 @@ rowan = "0.17"
 # and compares them against the constants in `src/dump.rs`. Hashing in Rust rather than piping to
 # `shasum` is what lets the gate run as an ordinary `cargo test` on any runner, and what lets the
 # 1.4 GB `prefixes` dump be hashed in bounded memory rather than materialised.
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8"
