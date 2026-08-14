@@ -651,37 +651,147 @@ pub fn test_support_scaffolding() {
 /// **Generic over `I` rather than fixed at `i64`, which is what the feature actually ships.** One
 /// feature gates one tree at two readings of draft §3.5.1, and a door that only ever named the
 /// permissive one described half of it: `materialized32` could have been deleted from the crate
-/// and this probe would not have noticed. It notices now — `I` is bound by the parser's own
-/// `MaterializedInt`, so this signature stops compiling if the trait, the seal or either impl
-/// goes, and the caller below runs it at `i32` and at `i64`.
+/// and this probe would not have noticed. It notices now, and the caller below runs it at `i32`
+/// and at `i64`.
+///
+/// The bound is [`SmokeInt`] — **this crate's own** — because the parser's `MaterializedInt` is
+/// not exported and no dependent can write it. Each impl of `SmokeInt` names one width at the
+/// production, so this still stops compiling if either width's impl of the parser's trait goes;
+/// what it no longer does is name the trait.
 pub fn materialized_numbers<I>(src: &str) -> Option<(I, f64)>
 where
-  I: smear::parser::graphql::syntactic::value::materialized::MaterializedInt + Copy,
+  I: SmokeInt,
 {
-  use smear::parser::graphql::{
-    GraphQL,
-    ast::materialized::InputValue,
-    error::GraphqlErrors,
-    syntactic::{GraphqlLexer, value::materialized},
+  I::materialized_numbers(src)
+}
+
+/// **The two widths, named by this crate because `smear` no longer names them.**
+///
+/// The parser's `MaterializedInt` is imported privately by `syntactic::value::materialized` and
+/// not re-exported, so a dependent cannot write `I: MaterializedInt` and a probe cannot be generic
+/// over it. It *could* be exported, and it was — for two commits — and that is precisely how a
+/// reader escaped: a supertrait's items resolve through a generic subtrait bound, so
+/// `fn read<I: MaterializedInt>(b: &[u8]) -> Option<I> { I::parse(b) }` compiled here and answered
+/// `Some(7)` to `007`. The bound being unwriteable is the repair, and this trait is what a probe
+/// uses instead.
+///
+/// Every method is the call a dependent writes **at one width**, and the two impls come from one
+/// macro body below, so the widths cannot drift apart inside the probe itself.
+///
+/// # `WIDTH` is restated here, and the restatement is checked rather than trusted
+///
+/// `MaterializedInt::WIDTH` was the one public item on the parser's trait, and it was what made
+/// the width a fact about the payload type rather than an argument somebody supplies. A dependent
+/// cannot read it now, so this trait pairs `i32` with `IntWidth::I32` and `i64` with
+/// `IntWidth::I64` — the exact restatement the parser's trait exists to avoid.
+///
+/// It is safe *here* because two properties read the pairing back out of the crate rather than
+/// assuming it. `the_width_a_refusal_names_is_the_width_the_call_asked_for` compares the width on
+/// a real refusal against the constant below at both widths, and `IntOverflow::checked` is asked
+/// at that same constant in [`public_int_readings`], so a pairing that lied would put the door and
+/// the production on different widths and empty the intersection. The parser's own
+/// `the_widths_the_door_dispatches_on_are_the_widths_the_readers_name` is the in-crate half of the
+/// same statement.
+pub trait SmokeInt: Copy + core::fmt::Debug + Sized + 'static {
+  /// The width a refusal at this payload type has to name.
+  const WIDTH: smear::parser::graphql::error::IntWidth;
+
+  /// The `materialized-numbers` flagship probe at this width: a list of an `Int` and a `Float`.
+  fn materialized_numbers(src: &str) -> Option<(Self, f64)>;
+
+  /// `materialized::int_value` — a **committed** integer head.
+  ///
+  /// `Ok(true)` when a payload was produced, `Err(Some(width))` when the literal was refused as an
+  /// overflow and the error named that width, `Err(None)` when it was refused for its shape. The
+  /// width travels out because it is the only place a dependent can observe which reading refused.
+  fn committed_int(literal: &str) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>>;
+}
+
+/// The two impls, from one body.
+///
+/// A macro and not two hand-written impls: the point of the probe is that the widths are asked the
+/// *same* question, and two bodies are two questions that agree today.
+macro_rules! smoke_int {
+  ($payload:ty, $width:ident) => {
+    impl SmokeInt for $payload {
+      const WIDTH: smear::parser::graphql::error::IntWidth =
+        smear::parser::graphql::error::IntWidth::$width;
+
+      fn materialized_numbers(src: &str) -> Option<($payload, f64)> {
+        use smear::parser::graphql::{
+          GraphQL,
+          ast::materialized::InputValue,
+          error::GraphqlErrors,
+          syntactic::{GraphqlLexer, value::materialized},
+        };
+
+        let parsed: InputValue<&str, $payload> = Parser::with_parser::<
+          GraphqlLexer<'_, str>,
+          InputValue<&str, $payload>,
+          GraphqlErrors<&str>,
+          _,
+          GraphQL,
+        >(materialized::value::<_, _, $payload>)
+        .parse_str(src)
+        .ok()?;
+
+        match parsed {
+          InputValue::List(items) => match items.values() {
+            [InputValue::Int(int), InputValue::Float(float)] => {
+              Some((*int.source(), *float.source()))
+            }
+            _ => None,
+          },
+          _ => None,
+        }
+      }
+
+      fn committed_int(
+        literal: &str,
+      ) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>> {
+        use smear::parser::graphql::{
+          GraphQL,
+          ast::IntValue,
+          error::GraphqlErrors,
+          syntactic::{GraphqlLexer, value::materialized},
+        };
+
+        let parsed: Result<IntValue<$payload>, GraphqlErrors<&str>> =
+          Parser::with_parser::<
+            GraphqlLexer<'_, str>,
+            IntValue<$payload>,
+            GraphqlErrors<&str>,
+            _,
+            GraphQL,
+          >(materialized::int_value::<_, _, $payload>)
+          .parse_str(literal);
+
+        match parsed {
+          Ok(_) => Ok(true),
+          Err(errors) => Err(refusal_width(errors)),
+        }
+      }
+    }
   };
+}
 
-  let parsed: InputValue<&str, I> = Parser::with_parser::<
-    GraphqlLexer<'_, str>,
-    InputValue<&str, I>,
-    GraphqlErrors<&str>,
-    _,
-    GraphQL,
-  >(materialized::value::<_, _, I>)
-  .parse_str(src)
-  .ok()?;
+smoke_int!(i32, I32);
+smoke_int!(i64, I64);
 
-  match parsed {
-    InputValue::List(items) => match items.values() {
-      [InputValue::Int(int), InputValue::Float(float)] => Some((*int.source(), *float.source())),
-      _ => None,
-    },
+/// The width an `IntOverflow` in this error set named, or `None` when the refusal was not one.
+///
+/// Out of crate this is the *only* place the width a production dispatched on is observable, now
+/// that `MaterializedInt::WIDTH` is not reachable — which is what makes it the join between the
+/// door's runtime width and the production's type-level one.
+pub fn refusal_width(
+  errors: smear::parser::graphql::error::GraphqlErrors<&str>,
+) -> Option<smear::parser::graphql::error::IntWidth> {
+  use smear::parser::graphql::error::ErrorData;
+
+  errors.into_iter().find_map(|error| match error.data() {
+    ErrorData::IntOverflow(overflow) => Some(overflow.width()),
     _ => None,
-  }
+  })
 }
 
 /// What a public entry point rules **in** about one integer spelling at one width.
@@ -723,32 +833,32 @@ pub const INT_MEANINGS: [IntMeaning; 3] = [
 /// Only the materialising production resolves all three. Agreement is therefore the
 /// **intersection** being non-empty, and what the paths agree *on* is the one meaning left in it.
 ///
-/// The width is `I`'s own — [`MaterializedInt::WIDTH`] — at every reader that has one, including
-/// the one that takes it as an argument. That is the join: the door dispatches on a value and the
-/// production dispatches on a type, and this is where the two are made to be the same width.
+/// The width is the same one throughout: [`SmokeInt::WIDTH`] is what the door is asked at and what
+/// the production is instantiated at. That is the join — the door dispatches on a value and the
+/// production dispatches on a type — and
+/// `the_width_a_refusal_names_is_the_width_the_call_asked_for` is what keeps the two spellings of
+/// it from drifting, now that a dependent cannot read `MaterializedInt::WIDTH`.
 ///
 /// # A list, because the defect was a path being added
 ///
-/// `MaterializedInt::parse` was public for one commit and answered `Some(7)` to `007`, which every
-/// path here refuses. Nothing was wrong with any of them; what was wrong was that a **fourth**
-/// reader shipped and every property in the tree ranged over one path. So this is the list, and a
+/// `MaterializedInt::parse` was public for two commits and answered `Some(7)` to `007`, which every
+/// path here refuses. Nothing was wrong with any of them; what was wrong was that another reader
+/// shipped and every property in the tree ranged over one path. So this is the list, and a
 /// path published later belongs in it — the array length is what makes leaving one out an edit
 /// somebody has to make rather than an omission.
 ///
 /// Membership is "a public entry that decides something about an integer literal's spelling or its
 /// magnitude". The lossless tower is not one of those: it records the lexer's diagnostics on a
 /// tree and converts nothing, so it has no reading to contribute and no way to disagree.
-///
-/// [`MaterializedInt::WIDTH`]: smear::parser::graphql::syntactic::value::materialized::MaterializedInt::WIDTH
 pub fn public_int_readings<I>(literal: &str) -> [(&'static str, &'static [IntMeaning]); 3]
 where
-  I: smear::parser::graphql::syntactic::value::materialized::MaterializedInt,
+  I: SmokeInt,
 {
   use smear::parser::graphql::{
     GraphQL,
     ast::IntValue,
-    error::{ErrorData, GraphqlErrors, IntOverflow},
-    syntactic::{GraphqlLexer, value::materialized},
+    error::{GraphqlErrors, IntOverflow},
+    syntactic::GraphqlLexer,
   };
 
   let slice = {
@@ -769,27 +879,7 @@ where
     }
   };
 
-  let production = {
-    let parsed: Result<IntValue<I>, GraphqlErrors<&str>> =
-      Parser::with_parser::<GraphqlLexer<'_, str>, IntValue<I>, GraphqlErrors<&str>, _, GraphQL>(
-        materialized::int_value::<_, _, I>,
-      )
-      .parse_str(literal);
-
-    match parsed {
-      Ok(_) => &[IntMeaning::Converts][..],
-      Err(errors) => {
-        if errors
-          .into_iter()
-          .any(|error| matches!(error.data(), ErrorData::IntOverflow(_)))
-        {
-          &[IntMeaning::Overflows][..]
-        } else {
-          &[IntMeaning::NotALiteral][..]
-        }
-      }
-    }
-  };
+  let production = conversion_reading(I::committed_int(literal));
 
   let checked = match IntOverflow::checked(literal, I::WIDTH) {
     Ok(_) => &[IntMeaning::Overflows][..],
@@ -801,6 +891,20 @@ where
     ("the materialising production", production),
     ("IntOverflow::checked", checked),
   ]
+}
+
+/// The one reading of a materialising outcome.
+fn conversion_reading(
+  outcome: Result<bool, Option<smear::parser::graphql::error::IntWidth>>,
+) -> &'static [IntMeaning] {
+  match outcome {
+    Ok(true) => &[IntMeaning::Converts],
+    // A decline, or a composite that parsed as some other kind of value. Either way these bytes
+    // are not an integer literal this path converted.
+    Ok(false) => &[IntMeaning::NotALiteral],
+    Err(Some(_)) => &[IntMeaning::Overflows],
+    Err(None) => &[IntMeaning::NotALiteral],
+  }
 }
 
 /// The variant namespace, imported the way a dependent imports it.
@@ -1416,7 +1520,7 @@ mod tests {
   /// reader that broke the agreement.
   fn agreed_meaning<I>(literal: &str) -> super::IntMeaning
   where
-    I: smear::parser::graphql::syntactic::value::materialized::MaterializedInt,
+    I: super::SmokeInt,
   {
     let readings = super::public_int_readings::<I>(literal);
 
@@ -1438,8 +1542,8 @@ mod tests {
   /// **Every public reader of an integer literal reaches one meaning, at both widths.**
   ///
   /// Stated over the reader list rather than as one assertion per reader, because the defect this
-  /// replaces was not a reader being wrong: it was a *fourth* reader shipping — `MaterializedInt`
-  /// went public and took its `parse` with it — while the properties in the tree each ranged over
+  /// replaces was not a reader being wrong: it was a reader *shipping* — `MaterializedInt` went
+  /// public and took its `parse` with it — while the properties in the tree each ranged over
   /// one path. `007` was `Some(7)` to the new door and refused by all three below, and every test
   /// in the workspace stayed green.
   ///
@@ -1482,6 +1586,52 @@ mod tests {
       not_a_literal >= 18,
       "only {not_a_literal} rows are refused for shape",
     );
+  }
+
+  /// **The width a refusal names is the width the call asked for**, out of crate, at both widths.
+  ///
+  /// The out-of-crate half of the parser's own
+  /// `the_widths_the_door_dispatches_on_are_the_widths_the_readers_name`, and the thing that keeps
+  /// [`SmokeInt::WIDTH`](super::SmokeInt::WIDTH) honest. This crate has to restate the
+  /// payload-type-to-`IntWidth` pairing now that `MaterializedInt::WIDTH` is unreachable, and a
+  /// restatement that nothing checks is the defect the parser's associated constant exists to
+  /// prevent. So it is checked: the width below is read back off a real refusal that a real
+  /// production raised, and compared with the constant this crate wrote down.
+  ///
+  /// Before the trait went private this property was implicit — the smoke read `I::WIDTH` off the
+  /// parser and a wrong constant emptied the agreement intersection. It is explicit now because
+  /// the smoke no longer reads it, and an implicit property whose mechanism has been removed is a
+  /// property nothing asserts.
+  #[test]
+  fn the_width_a_refusal_names_is_the_width_the_call_asked_for() {
+    use smear::parser::graphql::error::IntWidth;
+
+    use super::SmokeInt;
+
+    assert_eq!(<i32 as SmokeInt>::WIDTH, IntWidth::I32);
+    assert_eq!(<i64 as SmokeInt>::WIDTH, IntWidth::I64);
+
+    // `2147483648` is the literal the two readings disagree about: refused at the width draft
+    // §3.5.1 specifies and carried at the permissive one.
+    assert_eq!(
+      <i32 as SmokeInt>::committed_int("2147483648"),
+      Err(Some(<i32 as SmokeInt>::WIDTH))
+    );
+    assert_eq!(<i64 as SmokeInt>::committed_int("2147483648"), Ok(true));
+
+    // And past both, where each width has to name its own rather than the other's.
+    assert_eq!(
+      <i32 as SmokeInt>::committed_int("9223372036854775808"),
+      Err(Some(<i32 as SmokeInt>::WIDTH))
+    );
+    assert_eq!(
+      <i64 as SmokeInt>::committed_int("9223372036854775808"),
+      Err(Some(<i64 as SmokeInt>::WIDTH))
+    );
+
+    // Non-vacuity: the two constants above are different, so the four assertions are not four
+    // spellings of one width.
+    assert_ne!(<i32 as SmokeInt>::WIDTH, <i64 as SmokeInt>::WIDTH);
   }
 
   /// The twelve source-equivalence properties of the value trees, across the dependency edge.

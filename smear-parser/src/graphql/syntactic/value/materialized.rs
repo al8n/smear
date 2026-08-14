@@ -16,9 +16,12 @@
 //! # The width is a parameter, and the twelve productions that take it are the ones that carry it
 //!
 //! `I` is [`i32`] — the width draft §3.5.1 specifies — or [`i64`], the reading that takes draft
-//! §2.9.1's unbounded `IntValue` grammar at its word. [`MaterializedInt`](crate::graphql::syntactic::value::materialized::MaterializedInt)
-//! is the trait that admits
+//! §2.9.1's unbounded `IntValue` grammar at its word. `MaterializedInt` is the trait that admits
 //! them, it is sealed, and its `WIDTH` is what an out-of-range refusal names.
+//!
+//! **The trait is not exported and a caller never names it.** `I` appears in every return type
+//! that takes the parameter, so `i32` or `i64` at the call site is the whole of what a consumer
+//! writes. The import below has the argument for why an unnameable bound is the point.
 //!
 //! Exactly the productions whose *output type* mentions the payload take the parameter:
 //! [`int_value`](crate::graphql::syntactic::value::materialized::int_value), [`try_int_value`](crate::graphql::syntactic::value::materialized::try_int_value) and the ten composites.
@@ -116,13 +119,21 @@ use crate::graphql::{
 
 use numbers::{Materialized, Numbers};
 
-/// The widths this module parses at, re-exported here because it is the bound on every entry
-/// that takes one.
-///
-/// Declared beside the readers it dispatches — `numbers` is where the two conversions and the
-/// out-of-range failure live — and published here because a public `where I: MaterializedInt`
-/// has to name something a caller can reach.
-pub use super::numbers::MaterializedInt;
+// The widths this module parses at. Imported and NOT re-exported: the bound on every entry here
+// is deliberately not nameable from outside the crate.
+//
+// It was `pub use` for one commit, on the reasoning that a public `where I: MaterializedInt` has
+// to name something a caller can reach. That reasoning is wrong twice over. A bound does not have
+// to be nameable for the function to be CALLED — `I` appears in the return type, so a caller
+// writes `i32` or `i64` and inference does the rest — and publishing the trait published its
+// private supertrait's `parse` along with it, because Rust resolves a supertrait's items through
+// a generic subtrait bound. `fn read<I: MaterializedInt>(b: &[u8]) -> Option<I> { I::parse(b) }`
+// compiled out-of-crate and answered `Some(7)` to `007`, a spelling this crate's lexer refuses,
+// without ever naming the seal. Sealing the item was not enough; not exporting the trait is.
+//
+// What a consumer loses is writing their own `I: MaterializedInt` generic — over a trait sealed to
+// two types. Re-publishing is additive if one ever asks.
+use super::numbers::MaterializedInt;
 
 /// One bound set for every entry in this module, and one doc line per entry.
 ///

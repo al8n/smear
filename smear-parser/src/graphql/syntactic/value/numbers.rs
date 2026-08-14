@@ -250,20 +250,18 @@ pub(crate) fn report_out_of_range<S>(
 /// magnitude, and it has no opinion at all about whether the spelling in front of it is an
 /// `IntValue`, because on the one path that reaches it the lexer has already said so.
 ///
-/// Published, it answers `Some(7)` to `007` — a spelling this crate's lexer refuses as
-/// `LeadingZeros`, that no production converts, and that [`IntOverflow::checked`] declines. The
+/// Reachable out of crate, it answers `Some(7)` to `007` — a spelling this crate's lexer refuses
+/// as `LeadingZeros`, that no production converts, and that [`IntOverflow::checked`] declines. The
 /// crate would then carry three answers to "is this a valid integer literal", one of which is a
 /// range check, and the whole of the round that produced `is_int_literal` was about there being
 /// **one**. Adding the lexer's grammar to a public `parse` is the other way to close that and it
 /// is worse: it is a second statement of draft §2.9.1, free to disagree with the first, which is
 /// the defect that round removed.
 ///
-/// So `WIDTH` is public and the reader is not. `WIDTH` is the part that has to be — it is what
-/// makes the width a fact about the payload type rather than an argument — and
-/// [`IntOverflow::checked`] is the public door to the question the reader half-answers, with the
-/// lexer's conjunct in front of it.
+/// So the reader is not reachable, and [`IntOverflow::checked`] is the public door to the question
+/// it half-answers, with the lexer's conjunct in front of it.
 ///
-/// # Sealed
+/// # Sealed, and not exported
 ///
 /// [`IntWidth`] enumerates exactly the two widths this crate reads, and its own documentation
 /// argues that being exhaustive is a feature rather than an oversight. An out-of-crate impl of
@@ -272,56 +270,76 @@ pub(crate) fn report_out_of_range<S>(
 /// crate-private `IntOverflow::new` and the checked public door exist to rule out, arriving
 /// through a third door. So the trait is sealed, and a third width is a change to this crate.
 ///
-/// The seal is asserted rather than described, from outside the crate, which is the only place it
-/// means anything:
+/// **The seal was not enough, and this is the second half.** `syntactic::value::materialized`
+/// carried a `pub use` of this trait for two commits, on the reasoning that a public
+/// `where I: MaterializedInt` has to name something a caller can reach. Sealing `parse` onto the
+/// private supertrait was supposed to keep the reader off the public surface, and it does not:
+/// **Rust resolves a supertrait's items through a generic subtrait bound**, so a downstream
+/// generic function reaches `parse` without ever naming the seal.
 ///
-/// ```compile_fail,E0277
-/// use smear_parser::graphql::{
-///   error::IntWidth,
-///   syntactic::value::materialized::MaterializedInt,
-/// };
+/// The import is private now, so the trait is not nameable out of crate and neither route exists:
 ///
-/// struct Narrow(i16);
+/// ```compile_fail,E0603
+/// use smear_parser::graphql::syntactic::value::materialized::MaterializedInt;
 ///
-/// // `Narrow` is not `i32` and not `i64`, so whichever width it named would be a fact about no
-/// // reader in the crate. The private supertrait is what stops it compiling.
-/// impl MaterializedInt for Narrow {
-///   const WIDTH: IntWidth = IntWidth::I32;
+/// // THIS COMPILED, and `read::<i32>(b"007")` answered `Some(7)`. `<i32 as MaterializedInt>::parse`
+/// // did NOT compile at the same commit — UFCS on a concrete type resolves differently from
+/// // `I::parse` under a generic bound — which is exactly why asserting only the UFCS form left
+/// // the hole open while looking closed.
+/// fn read<I: MaterializedInt>(bytes: &[u8]) -> Option<I> {
+///   I::parse(bytes)
 /// }
 /// ```
 ///
-/// And the reader is asserted to be unreachable the same way, because a seal on the impl list is
-/// not a seal on the surface — the two are different properties and the second one is the one
-/// `007` was about:
+/// An out-of-crate `impl MaterializedInt for Narrow` now fails at that same `use`, so the impl
+/// seal is **subsumed rather than separately asserted**: a name that cannot be written cannot be
+/// implemented. `sealed::MaterializedInt` stays a supertrait regardless — it is what keeps `parse`
+/// off this trait's own item list, and it is what would still hold if a real consumer ever asked
+/// for the bound back.
 ///
-/// ```compile_fail,E0576
-/// use smear_parser::graphql::syntactic::value::materialized::MaterializedInt;
+/// One caveat on the annotation above, established by planting a wrong code: **`rustdoc` on
+/// stable does not check it.** A `compile_fail,E0603` on a snippet that fails with `E0425` passes;
+/// only nightly reports *"Some expected error codes were not found"*. What this doctest asserts
+/// under a stable `cargo test` is that the snippet does not compile at all, which is the property
+/// — the code records which failure was observed and is verified by running the doc tests under
+/// nightly.
 ///
-/// // `007` is `7` to a range reader and is not a GraphQL `IntValue`. There is no public method
-/// // here for that disagreement to arrive through.
-/// let seven = <i32 as MaterializedInt>::parse(b"007");
-/// ```
+/// # Not exported is not unusable
 ///
-/// And the two types that do implement it are reachable, answer different widths, and the widths
-/// they answer are the ones the public door refuses at — so the failures above are the seal and
-/// not the trait being unusable:
+/// A bound does not have to be nameable for the function it constrains to be **called**. `I`
+/// appears in every materialised return type, so a consumer writes `i32` or `i64` at the call and
+/// inference supplies the rest. Out of crate, at both widths, with the trait unnameable:
 ///
 /// ```
 /// use smear_parser::graphql::{
-///   error::{IntOverflow, IntWidth},
-///   syntactic::value::materialized::MaterializedInt,
+///   GraphQL,
+///   ast::IntValue,
+///   error::{ErrorData, GraphqlErrors, IntWidth},
+///   syntactic::{GraphqlLexer, value::materialized},
 /// };
+/// use tokora::{Parse as _, Parser};
 ///
-/// assert_eq!(<i32 as MaterializedInt>::WIDTH, IntWidth::I32);
-/// assert_eq!(<i64 as MaterializedInt>::WIDTH, IntWidth::I64);
+/// // `2147483648` is the literal the two readings disagree about. Nothing here names the bound.
+/// let at_i64 = Parser::with_parser::<
+///   GraphqlLexer<'_, str>, IntValue<i64>, GraphqlErrors<&str>, _, GraphQL,
+/// >(materialized::int_value::<_, _, i64>)
+/// .parse_str("2147483648");
+/// assert_eq!(at_i64.map(|node| *node.source()).ok(), Some(2_147_483_648_i64));
 ///
-/// // `2147483648` is the literal the two readings disagree about, and each constant names the
-/// // width that reading refuses it at.
-/// assert!(IntOverflow::checked("2147483648", <i32 as MaterializedInt>::WIDTH).is_ok());
-/// assert_eq!(
-///   IntOverflow::checked("2147483648", <i64 as MaterializedInt>::WIDTH),
-///   Err("2147483648"),
-/// );
+/// let at_i32 = Parser::with_parser::<
+///   GraphqlLexer<'_, str>, IntValue<i32>, GraphqlErrors<&str>, _, GraphQL,
+/// >(materialized::int_value::<_, _, i32>)
+/// .parse_str("2147483648");
+/// let width = at_i32
+///   .expect_err("past `i32`")
+///   .into_iter()
+///   .find_map(|error| match error.data() {
+///     ErrorData::IntOverflow(overflow) => Some(overflow.width()),
+///     _ => None,
+///   });
+/// // The refusal names the width the call asked for, which is the whole of what `WIDTH` was
+/// // public for — and it arrives on the error rather than out of the trait.
+/// assert_eq!(width, Some(IntWidth::I32));
 /// ```
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]

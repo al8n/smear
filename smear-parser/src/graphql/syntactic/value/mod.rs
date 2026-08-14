@@ -59,7 +59,7 @@ use crate::value::{
 /// Identical to `value_parser!` but for the extra `N` parameter and its bound: the body writes
 /// `N::int` / `N::float` where a payload is built and `N::report` where one fails, and the
 /// instantiations — [`SliceNumbers`] here, and `Materialized<I>` in [`materialized`] at each
-/// width its [`MaterializedInt`](materialized::MaterializedInt) bound admits — are then the same
+/// width its `MaterializedInt` bound admits — are then the same
 /// parser at every payload rather than several parsers that agree today.
 ///
 /// Only the `[contextual, delimited]` bound set exists, and that is not an omission: every
@@ -1523,9 +1523,13 @@ impl<S> DefaultInputValue<S> {
   }
 }
 
-/// The materialised-number instantiation of every production in this module, at each width
-/// [`MaterializedInt`](materialized::MaterializedInt) admits: [`i32`], which draft §3.5.1
-/// specifies `Int` to be, and [`i64`], the reading that accepts every literal the grammar admits.
+/// The materialised-number instantiation of every production in this module, at each width its
+/// `MaterializedInt` bound admits: [`i32`], which draft §3.5.1 specifies `Int` to be, and [`i64`],
+/// the reading that accepts every literal the grammar admits.
+///
+/// A code span rather than a link because that bound is **not exported**: an out-of-crate caller
+/// names the width by writing `i32` or `i64` at the call, never by naming the trait. The comment
+/// on that module's import of it has the argument.
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub mod materialized;
