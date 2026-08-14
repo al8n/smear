@@ -326,20 +326,35 @@ pub(crate) fn report_out_of_range<S>(
 /// .parse_str("2147483648");
 /// assert_eq!(at_i64.map(|node| *node.source()).ok(), Some(2_147_483_648_i64));
 ///
+/// // The refusal names the width the call asked for, which is the whole of what `WIDTH` was
+/// // public for — and it arrives on the error rather than out of the trait. Asked at BOTH
+/// // widths, on a literal each one refuses: an assertion at one width only goes on holding while
+/// // the other impl's constant names its neighbour.
 /// let at_i32 = Parser::with_parser::<
 ///   GraphqlLexer<'_, str>, IntValue<i32>, GraphqlErrors<&str>, _, GraphQL,
 /// >(materialized::int_value::<_, _, i32>)
-/// .parse_str("2147483648");
-/// let width = at_i32
-///   .expect_err("past `i32`")
-///   .into_iter()
-///   .find_map(|error| match error.data() {
+/// .parse_str("2147483648")
+/// .expect_err("past `i32`");
+/// assert_eq!(
+///   at_i32.into_iter().find_map(|error| match error.data() {
 ///     ErrorData::IntOverflow(overflow) => Some(overflow.width()),
 ///     _ => None,
-///   });
-/// // The refusal names the width the call asked for, which is the whole of what `WIDTH` was
-/// // public for — and it arrives on the error rather than out of the trait.
-/// assert_eq!(width, Some(IntWidth::I32));
+///   }),
+///   Some(IntWidth::I32),
+/// );
+///
+/// let at_i64 = Parser::with_parser::<
+///   GraphqlLexer<'_, str>, IntValue<i64>, GraphqlErrors<&str>, _, GraphQL,
+/// >(materialized::int_value::<_, _, i64>)
+/// .parse_str("9223372036854775808")
+/// .expect_err("past `i64`");
+/// assert_eq!(
+///   at_i64.into_iter().find_map(|error| match error.data() {
+///     ErrorData::IntOverflow(overflow) => Some(overflow.width()),
+///     _ => None,
+///   }),
+///   Some(IntWidth::I64),
+/// );
 /// ```
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
