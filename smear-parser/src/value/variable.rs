@@ -61,8 +61,21 @@ where
 
 impl<Name, Span> VariableValue<Name, Span> {
   /// Creates a new variable from the given span and name.
+  ///
+  /// Public because every other node of this AST is constructible — [`Name::new`], `Field::new`,
+  /// `Argument::new`, `Document::new` — and a document assembled rather than parsed is a
+  /// supported input: `graphql_proto::Executor::new` accepts any `&ExecutableDocument<S>`
+  /// whatever built it. This one was `pub(crate)` with no recorded reason, which left `$name` the
+  /// single production a rewriter, a persisted-query store or an FFI bridge could not spell, and
+  /// made a whole class of executor input unreachable *and* untestable rather than merely
+  /// unusual.
+  ///
+  /// [`FragmentName::new`](crate::name::FragmentName) is deliberately not public and stays so:
+  /// its exclusion of `on` is a grammar rule the syntactic productions establish, and a
+  /// constructor would let a caller past it. There is no analogous rule here — draft §2.1.9's
+  /// name production is [`Name`]'s, and this node adds only the `$`.
   #[inline]
-  pub(crate) const fn new(span: Span, name: Name) -> Self {
+  pub const fn new(span: Span, name: Name) -> Self {
     Self { span, name }
   }
 
