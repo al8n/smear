@@ -4,11 +4,17 @@
 //! nothing about what those bytes are. Draft §2.1.9 makes a *lexed* name `[_A-Za-z][_0-9A-Za-z]*`,
 //! so a document that came out of the parser can only hold ASCII whatever `S` is — but a document
 //! that was **assembled** is the executor's input too, and a persisted-query store, a query
-//! rewriter or an FFI bridge holding foreign bytes assembles one. Every node of the AST has a
-//! public constructor for exactly that reason.
+//! rewriter or an FFI bridge holding foreign bytes assembles one.
 //!
 //! So the fixtures here are built rather than parsed. That is not a way of reaching a private
 //! branch: it is the only way to write down the input the executor's own signature admits.
+//!
+//! What can be written down is narrower than that signature, and worth knowing while reading
+//! these fixtures: `smear-parser` keeps `new` crate-private on every value leaf — `IntValue`,
+//! `FloatValue`, `StringValue`, `BooleanValue`, `NullValue`, `EnumValue` — so an assembled
+//! argument value can only be a variable, a list or an input object, never `1` or `"x"`. Nothing
+//! here needs a scalar literal, but the gap is why `VariableValue::new` is public at all; its own
+//! documentation carries the reason.
 //!
 //! Two paths read a variable's spelling — draft §6.4.1's `CoerceArgumentValues` at a field
 //! argument, and draft §6.3's `@skip`/`@include` condition — and they must reach the same
