@@ -16,14 +16,14 @@
 //! is worse than one that raises: it asks the driver about a variable the document does not
 //! contain, hands the resolver that invented name, and prints it in a diagnostic.
 
-use graphql_proto::{ArgumentSource, Executor, Kind, Leaf, Node, Segment, Values};
+use graphql_proto::{ArgumentSource, Executor, Kind, Leaf, Node, Segment, Values, variable_key};
 use smear_parser::{
   graphql::{
     GraphQL,
     ast::{
       Alias, Argument, ArgumentList, Described, Directive, Directives, ExecutableDefinition,
-      ExecutableDocument, Field, InputValue, Name, OperationDefinition, Selection, SelectionSet,
-      TypeSystemDocument, VariableValue,
+      ExecutableDocument, Field, InputValue, List, Name, Object, ObjectField, OperationDefinition,
+      Selection, SelectionSet, TypeSystemDocument, VariableValue,
     },
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, type_system_document},
@@ -43,10 +43,40 @@ const ALSO_UNREADABLE: &[u8] = b"\xfe\x9f";
 /// The spelling the control uses, which every conversion succeeds on.
 const READABLE: &[u8] = b"flagged";
 
+/// Spellings a `&str` renders perfectly and draft §2.1.9 does not admit.
+///
+/// The half of al8n/smear#139 a UTF-8 check cannot answer. Each of these *converts*, so a
+/// conversion-shaped guard hands it to the driver as a lookup key — and a driver holding that key
+/// then satisfies an argument with a value no variable in the document declared. The empty
+/// spelling is the sharpest, because it is the exact key `from_utf8(..).unwrap_or("")` invented:
+/// the fallback is gone, and a `$` with nothing after it must not arrive by the honest route
+/// either.
+const NOT_NAMES: &[&[u8]] = &[
+  b"",                    // `$`
+  b"1abc",                // draft §2.1.9's first character is `[_A-Za-z]`
+  b"a b",                 // a space is in no position of the production
+  b"a-b",                 // and neither is a hyphen
+  "\u{1f642}".as_bytes(), // `$🙂`: four bytes, one `char`, and not ASCII
+];
+
+/// One spelling in its two Unicode normalisations, neither of which is a `Name`.
+///
+/// Two distinct `&str` keys here and one key in any driver that normalises before it looks up, so
+/// under a UTF-8 check these are two document variables that can resolve to one runtime value.
+/// That is the collapse this issue is about, arriving through the branch that *succeeds*.
+const NFC: &[u8] = "caf\u{e9}".as_bytes();
+const NFD: &[u8] = "cafe\u{301}".as_bytes();
+
 const SDL: &str = r"
 type Query {
   greeting: String
   guarded(flag: Boolean!): String
+  filtered(filter: Filter): String
+  listed(flags: [Boolean!]): String
+}
+
+input Filter {
+  flag: Boolean
 }
 ";
 
@@ -197,6 +227,51 @@ fn at_a_response_key(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8
   ))])
 }
 
+/// `{ filtered(filter: {flag: $spelling}) }` — a variable draft §6.4.1 step 5.j leaves to the
+/// driver.
+///
+/// The argument as a whole is a literal, so step 5's control flow decides about *it* and never
+/// looks inside. Coercing the contents is input coercion, whose product is a value in the
+/// service's representation, which is the one thing this crate cannot build — see
+/// [`ArgumentSource::Literal`].
+fn nested_in_an_object(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]> {
+  argument_value(
+    b"filtered",
+    b"filter",
+    InputValue::Object(Object::new(
+      span(),
+      std::vec![ObjectField::new(span(), name(b"flag"), variable(spelling))],
+    )),
+  )
+}
+
+/// `{ listed(flags: [$spelling]) }` — the same boundary, one literal variant over.
+fn nested_in_a_list(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]> {
+  argument_value(
+    b"listed",
+    b"flags",
+    InputValue::List(List::new(span(), std::vec![variable(spelling)])),
+  )
+}
+
+fn argument_value(
+  field: &'static [u8],
+  argument: &'static [u8],
+  value: InputValue<&'static [u8]>,
+) -> ExecutableDocument<&'static [u8]> {
+  document(std::vec![Selection::Field(Field::new(
+    span(),
+    None,
+    name(field),
+    Some(ArgumentList::new(
+      span(),
+      std::vec![Argument::new(span(), name(argument), value)],
+    )),
+    None,
+    None,
+  ))])
+}
+
 // ------------------------------------------------------------------------------------------
 // driving
 // ------------------------------------------------------------------------------------------
@@ -207,6 +282,13 @@ struct Run {
   asked: Vec<Vec<u8>>,
   /// Every `ArgumentSource::Variable` name handed to the driver with a resolved argument.
   received: Vec<Vec<u8>>,
+  /// Every variable spelling that reached the driver *inside* an
+  /// [`ArgumentSource::Literal`](graphql_proto::ArgumentSource::Literal), in document order.
+  ///
+  /// Not a second reading of `received`: these are the ones the executor deliberately did not
+  /// read, so this is the walk draft §6.4.1 step 5.j puts on the driver, performed here because
+  /// nothing else performs it.
+  nested: Vec<Vec<u8>>,
   /// The response's `errors`, classified.
   kinds: Vec<Kind>,
   /// The response's `errors`, rendered.
@@ -215,12 +297,31 @@ struct Run {
   keys: Vec<String>,
 }
 
+/// Collects every variable spelling nested inside a literal, in document order.
+fn nested_variables<'a>(value: &InputValue<&'a [u8]>, out: &mut Vec<&'a [u8]>) {
+  match value {
+    InputValue::Variable(spelled) => out.push(spelled.name().source()),
+    InputValue::List(list) => {
+      for item in list.values() {
+        nested_variables(item, out);
+      }
+    }
+    InputValue::Object(object) => {
+      for field in object.fields() {
+        nested_variables(field.value(), out);
+      }
+    }
+    _ => {}
+  }
+}
+
 fn run(
   schema: &Schema,
   document: &ExecutableDocument<&'static [u8]>,
   supplied: Option<Value>,
 ) -> Run {
   let mut space = Space::new(supplied);
+  let mut nested: Vec<Vec<u8>> = Vec::new();
   let mut executor = Executor::new(schema, document);
   executor
     .start(&mut space, None, Value::Text)
@@ -235,6 +336,13 @@ fn run(
         _ => None,
       })
       .collect();
+    for argument in request.arguments() {
+      if let ArgumentSource::Literal(literal) = argument.source() {
+        let mut spellings = Vec::new();
+        nested_variables(literal, &mut spellings);
+        nested.extend(spellings.into_iter().map(<[u8]>::to_vec));
+      }
+    }
     space.received.extend(received);
     executor.handle_resolved(&mut space, id, Value::Text);
   }
@@ -253,6 +361,7 @@ fn run(
   Run {
     asked: space.asked,
     received: space.received,
+    nested,
     kinds,
     messages,
     keys,
@@ -415,4 +524,146 @@ fn an_unreadable_response_key_is_reported_rather_than_rendered_empty() {
     "a key stood in for one that could not be read: {:?}",
     unreadable.keys
   );
+}
+
+// ------------------------------------------------------------------------------------------
+// the key space is draft §2.1.9, and not UTF-8
+// ------------------------------------------------------------------------------------------
+
+/// A spelling that converts but is not a `Name` does not supply an argument.
+///
+/// The half a conversion-shaped guard cannot answer. Each of [`NOT_NAMES`] renders perfectly, so
+/// `from_utf8(..).ok()` hands every one of them to the driver as a lookup key — and this driver
+/// answers `Some` for every name it is asked, so reaching it does not merely leak a spelling, it
+/// *satisfies* draft §6.4.1 step 5.f and resolves the field with a value no variable in the
+/// document declared. The question the key space asks is not "can these bytes be printed" but
+/// "can these bytes be a key draft §6.1 could have bound", and only draft §2.1.9 answers it.
+#[test]
+fn a_variable_name_that_is_not_a_name_does_not_supply_an_argument() {
+  let schema = schema();
+  for spelling in NOT_NAMES {
+    let argument = run(&schema, &at_an_argument(spelling), Some(Value::True));
+    let condition = run(&schema, &at_a_condition(spelling), Some(Value::True));
+
+    assert!(
+      argument.asked.is_empty(),
+      "draft §6.4.1 asked the driver about {:?}, which is not a name",
+      argument.asked
+    );
+    assert_eq!(
+      argument.asked, condition.asked,
+      "the two readers disagreed about {spelling:?}"
+    );
+    assert!(
+      argument.received.is_empty(),
+      "the resolver was handed a variable named {:?}",
+      argument.received
+    );
+    assert_eq!(
+      argument.kinds,
+      std::vec![Kind::ArgumentVariableMissing],
+      "{:?}",
+      argument.messages
+    );
+    assert_eq!(
+      condition.kinds,
+      std::vec![Kind::DirectiveCondition],
+      "{:?}",
+      condition.messages
+    );
+  }
+}
+
+/// Two normalisations of one spelling are two variables, and neither is a key.
+///
+/// The empty-name collapse arriving through the branch that *succeeds*: both of these convert, so
+/// a UTF-8 guard hands the driver two distinct `&str` keys that any driver normalising before it
+/// looks up merges into one. Refusing both is what keeps "a spelling that is not a key names no
+/// variable" true of a pair as well as of a single name.
+#[test]
+fn two_normalisations_of_one_spelling_are_neither_of_them_a_key() {
+  assert_ne!(NFC, NFD, "the fixture must be two distinct byte strings");
+  assert!(
+    core::str::from_utf8(NFC).is_ok() && core::str::from_utf8(NFD).is_ok(),
+    "both must convert, or this tests the unreadable case over again"
+  );
+
+  let schema = schema();
+  let composed = run(&schema, &at_an_argument(NFC), Some(Value::True));
+  let decomposed = run(&schema, &at_an_argument(NFD), Some(Value::True));
+
+  assert!(
+    composed.asked.is_empty() && decomposed.asked.is_empty(),
+    "two normalisations reached the driver as {:?} and {:?}",
+    composed.asked,
+    decomposed.asked
+  );
+  assert_eq!(composed.kinds, std::vec![Kind::ArgumentVariableMissing]);
+  assert_eq!(decomposed.kinds, std::vec![Kind::ArgumentVariableMissing]);
+}
+
+/// [`variable_key`] is the whole key space, and a caller can ask it the same question.
+///
+/// The function is `pub` because the executor is not its only reader — see the nested-literal
+/// test below — so what it admits is API and pinned here rather than inferred from a response.
+#[test]
+fn variable_key_admits_exactly_the_name_production() {
+  assert_eq!(variable_key(READABLE), Some("flagged"));
+  assert_eq!(variable_key(b"_"), Some("_"));
+  assert_eq!(variable_key(b"_0aZ"), Some("_0aZ"));
+  for spelling in NOT_NAMES {
+    assert_eq!(variable_key(spelling), None, "admitted {spelling:?}");
+  }
+  assert_eq!(variable_key(UNREADABLE), None);
+  assert_eq!(variable_key(NFC), None);
+  assert_eq!(variable_key(NFD), None);
+}
+
+// ------------------------------------------------------------------------------------------
+// the boundary the executor does not cross
+// ------------------------------------------------------------------------------------------
+
+/// A variable inside a list or an input object reaches the driver unread, whatever it spells.
+///
+/// Draft §6.4.1 step 5.j — coercing a literal's contents — is the driver's, because its product is
+/// a value in the service's representation and this crate builds none. So the executor decides
+/// about the argument *as a whole*, hands the literal over, and never asks
+/// [`Values::variable`] about anything inside it. That is the contract
+/// [`ArgumentSource::Literal`](graphql_proto::ArgumentSource::Literal) states, and it predates
+/// this repair: it is where `ArgumentSource` has drawn the line since the executor was written.
+///
+/// What is pinned here is that the executor does not quietly start reading them — which would
+/// change *which* variables a request must supply — and that the spelling arrives verbatim, so
+/// the driver's own read is a read of the document's bytes and not of something substituted on
+/// the way. [`variable_key`] is what that read must be: the same refusal, in the same function,
+/// rather than a second `from_utf8` per driver.
+#[test]
+fn a_variable_nested_in_a_literal_reaches_the_driver_unread() {
+  let schema = schema();
+  for shape in [
+    nested_in_an_object as fn(&'static [u8]) -> ExecutableDocument<&'static [u8]>,
+    nested_in_a_list,
+  ] {
+    for spelling in [READABLE, UNREADABLE] {
+      let run = run(&schema, &shape(spelling), Some(Value::True));
+
+      assert!(
+        run.asked.is_empty(),
+        "the executor read a nested variable and asked the driver about {:?}",
+        run.asked
+      );
+      assert_eq!(
+        run.nested,
+        std::vec![spelling.to_vec()],
+        "the driver was handed a literal whose variable is not the one the document wrote"
+      );
+      assert!(run.kinds.is_empty(), "{:?}", run.messages);
+    }
+  }
+
+  // And the read the driver then performs is this one, which refuses the spelling the executor's
+  // own readers refuse. Without it every driver writes the conversion again, which is the shape
+  // al8n/smear#139 is about rather than any one occurrence of it.
+  assert_eq!(variable_key(READABLE), Some("flagged"));
+  assert_eq!(variable_key(UNREADABLE), None);
 }

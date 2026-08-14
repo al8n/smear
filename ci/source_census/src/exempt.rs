@@ -335,15 +335,20 @@ pub const EXEMPTIONS: &[Exemption] = &[
              Widening this parameter would not delete the conversion — it would move it inside \
              every driver, once per implementation, where `from_utf8(..).unwrap_or(\"\")` could be \
              written again and no gate in this repository would see it. #139 decided the opposite \
-             direction: the conversion stays on the side that knows both spaces, happens exactly \
-             once (`proto::collect::variable_key`), is called by both readers, and refuses rather \
-             than substitutes — a spelling that is not a key names no variable the request could \
-             have supplied, so draft §6.4.1 step 5.d and draft §6.3's `VariableMissing` are the \
-             answer and the driver is not asked. `graphql-proto/tests/unreadable_name.rs` pins the \
-             two readers taking that same branch, and pins the control where a readable spelling \
-             reaches the driver unchanged from both. STRUCTURAL rather than TRACKED because there \
-             is nothing left to remove; if the driver's key space ever stops being text, this is \
-             the entry that decision is about.",
+             direction: the conversion is ONE IMPLEMENTATION — `proto::variable_key`, which is \
+             `pub` for this reason — and it refuses rather than substitutes. A spelling that is \
+             not a draft §2.1.9 `Name` names no variable the request could have supplied, so \
+             draft §6.4.1 step 5.d and draft §6.3's `VariableMissing` are the answer and the \
+             driver is not asked. One implementation and NOT one call site, which is the claim an \
+             earlier draft of this entry overstated: draft §6.4.1 step 5.j leaves a literal's \
+             contents to the driver, so a variable nested in a list or an input object reaches it \
+             inside `ArgumentSource::Literal` and the driver resolves that one — with this \
+             function, which is what the variant's own documentation now says. \
+             `graphql-proto/tests/unreadable_name.rs` pins the executor's two readers taking that \
+             same branch, pins the nested case reaching the driver unread, and pins the control \
+             where a readable spelling reaches the driver unchanged from both. STRUCTURAL rather \
+             than TRACKED because there is nothing left to remove; if the driver's key space ever \
+             stops being text, this is the entry that decision is about.",
   },
   // ── Not narrowings: the rule's default-convict misfiring ─────────────────────────────────────
   //

@@ -42,7 +42,7 @@ use smear_parser::graphql::ast::{
   Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
   SelectionSet,
 };
-use smear_schema::{Schema, TypeId, bucket, hash_bytes};
+use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name};
 
 use super::{
   Values,
@@ -1759,6 +1759,69 @@ where
   Ok(true)
 }
 
+/// The key [`Values::variable`](super::Values::variable) looks a variable up by, or `None` when
+/// the document's spelling is not a draft §2.1.9 `Name`.
+///
+/// # Why there is a conversion here at all
+///
+/// Not an impedance mismatch to be removed by widening the trait. The two ends genuinely differ:
+/// draft §6.1's `CoerceVariableValues` runs over the *request's* `variableValues`, whose keys
+/// arrive as text and are a driver's `&str`, while a document's spelling is a slice of an
+/// `S: AsRef<[u8]>` that nothing constrains. A conversion at a boundary belongs on the side that
+/// knows both key spaces rather than repeated inside every driver, where the same fallback could
+/// be written again and no gate in this repository would see it.
+///
+/// This is not the *only* place the two spaces meet, which is why the function is public rather
+/// than private to the executor. Draft §6.4.1 step 5.j — coercing a literal's contents — is the
+/// driver's, so a variable nested inside a list or an input object reaches it inside
+/// [`ArgumentSource::Literal`](super::ArgumentSource::Literal) and the driver resolves that one
+/// itself. What "the conversion happens once" can honestly mean is one *implementation*, called by
+/// every reader; a driver walking a literal calls this.
+///
+/// # The grammar, and not merely UTF-8
+///
+/// A UTF-8 check answers "can these bytes be printed", and the question is "can these bytes be a
+/// key the request supplied a value for". Draft §6.1 iterates the operation's
+/// `variableDefinitions`, whose names are `Name`s, so a `variableValues` entry that is not a
+/// `Name` matches no definition and names no variable. `$1abc`, `$ `, `$🙂`, an empty spelling and
+/// a decomposed spelling of a composed one are all valid UTF-8 and none of them is a `Name` — so a
+/// UTF-8 check handed every one of them to the driver as a lookup key, and a driver whose map
+/// happened to hold that key **satisfied** the argument with a value no variable in the document
+/// declared. The pair is the sharper case: two normalisations are two distinct `&str` keys here and
+/// one key in any driver that normalises, which is the collapse this whole issue is about arriving
+/// through the readable branch.
+///
+/// [`is_name`] is the schema arena's own admission rule, reused rather than respelled: the
+/// executor's two name spaces — the schema's and the document's — are then admitted by one
+/// predicate, and a second spelling of draft §2.1.9 cannot drift from the first.
+///
+/// The conversion after it cannot fail, because a `Name` is ASCII. It is still written as the
+/// total conversion: this crate has no `unsafe`, and the alternative to a second pass over a name
+/// that is at most a few bytes is exactly the kind of claim that stops being true when someone
+/// changes [`is_name`].
+///
+/// # `None` is a refusal, and specifically not a substitution
+///
+/// A spelling the driver's key space cannot express names no variable the request could have
+/// supplied, so both readers take their existing "not provided" branch: draft §6.4.1 step 5.d at a
+/// field argument, draft §6.3's `VariableMissing` — reported as
+/// [`Kind::DirectiveCondition`](super::Kind::DirectiveCondition) — at a condition. Neither asks the
+/// driver, because there is no question to ask.
+///
+/// What this must never do is answer with a *different* name. `from_utf8(..).unwrap_or("")` did,
+/// at draft §6.4.1's site, and mapping every unreadable spelling onto one readable one merged two
+/// variables into one, asked the driver about a variable the document does not contain, carried
+/// that invented name to the resolver in
+/// [`ArgumentSource::Variable`](super::ArgumentSource::Variable) and printed it as `$` with
+/// nothing after it. See al8n/smear#139.
+#[inline]
+pub fn variable_key(spelling: &[u8]) -> Option<&str> {
+  if !is_name(spelling) {
+    return None;
+  }
+  core::str::from_utf8(spelling).ok()
+}
+
 /// Whether the directive's `if` argument is `true`, or why it could not be read as a boolean.
 ///
 /// # Why a condition that cannot be read is an error and not a `false`
@@ -1791,36 +1854,6 @@ where
 /// non-`Boolean` variable at the `Boolean!` location — or a driver whose §6.1 did not coerce, so
 /// no conforming request can tell the two apart; and of the two answers only this one is safe
 /// under both senses.
-/// The key [`Values::variable`](super::Values::variable) looks a variable up by, or `None` when
-/// the document's spelling is not one.
-///
-/// # Why there is a conversion here at all
-///
-/// Not an impedance mismatch to be removed by widening the trait. The two ends genuinely differ:
-/// draft §6.1's `CoerceVariableValues` runs over the *request's* `variableValues`, whose keys
-/// arrive as text and are a driver's `&str`, while a document's spelling is a slice of an
-/// `S: AsRef<[u8]>` that nothing constrains. This is the one place the two key spaces meet, and a
-/// conversion at a boundary belongs on the side that knows both — here — rather than repeated
-/// inside every driver, where the same fallback could be written again and no gate would see it.
-///
-/// # `None` is a refusal, and specifically not a substitution
-///
-/// A spelling the driver's key space cannot express names no variable the request could have
-/// supplied, so both readers take their existing "not provided" branch: draft §6.4.1 step 5.d at a
-/// field argument, draft §6.3's [`ConditionFault::VariableMissing`] at a condition. Neither asks
-/// the driver, because there is no question to ask.
-///
-/// What this must never do is answer with a *different* name. `from_utf8(..).unwrap_or("")` did,
-/// at draft §6.4.1's site, and mapping every unreadable spelling onto one readable one merged two
-/// variables into one, asked the driver about a variable the document does not contain, carried
-/// that invented name to the resolver in
-/// [`ArgumentSource::Variable`](super::ArgumentSource::Variable) and printed it as `$` with
-/// nothing after it. See al8n/smear#139.
-#[inline]
-pub(super) fn variable_key(spelling: &[u8]) -> Option<&str> {
-  core::str::from_utf8(spelling).ok()
-}
-
 fn condition_is_true<'a, S, V>(directive: &'a Directive<S>, ctx: &mut V) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,

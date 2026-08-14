@@ -457,6 +457,7 @@ mod response;
 mod subscribe;
 mod values;
 
+pub use collect::variable_key;
 pub use error::{Error, Kind};
 pub use execute::{Executor, Limits, Response, SetExtensionsError, StartError};
 pub use extensions::{Ceiling, Extensions, Full};
