@@ -36,16 +36,18 @@ graphqlx = ["smear-lexer/graphqlx"]
 # a number instead of a source slice.
 #
 # ONE FEATURE, TWO WIDTHS, AND THAT IS A DECISION RATHER THAN AN OMISSION. It gates
-# `ast::materialized` + `syntactic::value::materialized` (`i64`, the grammar-permissive reading)
-# AND `ast::materialized32` + `syntactic::value::materialized32` (`i32`, which is what draft
-# §3.5.1 specifies `Int` to be). A width is not a second axis of compilation — it is a second
-# reading on this one — and splitting it would cost more than it saves in three places at once:
-# `smear` needs a second umbrella twin and a second line in its feature fence, `smear-smoke` a
-# second entry in the dependency list its own test parses back out, and `ci/hack.sh` a wider
-# matrix, all to isolate two enums and twenty one-line wrappers. What `--each-feature` proves is
-# what was chosen: the single `materialized-numbers` cell compiles both widths, and
-# `every_value_tree_declares_the_same_variants` fails in that cell if one of them drifts from the
-# slice tree.
+# `ast::materialized` + `syntactic::value::materialized`, whose `Int` leaf is the type parameter
+# `I`: `i32`, which is what draft §3.5.1 specifies `Int` to be, or `i64`, the grammar-permissive
+# reading of draft §2.9.1. A width is not a second axis of COMPILATION — it is a second
+# instantiation of one generic tree, so there is nothing per-width to gate even if someone wanted
+# to. What `--each-feature` proves is what was chosen: the single `materialized-numbers` cell
+# compiles the tree, and `every_value_tree_declares_the_same_variants` fails in that cell if it
+# drifts from the slice tree.
+#
+# It gated FOUR modules before `refactor/materialised-generic`, because each width had its own AST
+# module and its own production module. Those pairs were each other with one type substituted, and
+# the width is a parameter now — `MaterializedInt`, sealed, with the width as an associated const —
+# so there are two modules and one tree.
 #
 # NAMED FOR WHAT IT CONVERTS AND NOTHING MORE. Numbers are materialised; strings are not. A
 # string literal keeps its slice — unescaping is the consumer's, because doing it here would mean

@@ -60,7 +60,7 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 /// `I32` would not be a second variant — it would be this census answering a question it is not
 /// asking. That both widths are reachable, and that each names itself, is
 /// `the_two_widths_disagree_on_the_literal_between_them` in
-/// `graphql::syntactic::value::materialized32::tests`.
+/// `graphql::syntactic::value::materialized::tests`.
 #[test]
 fn error_data_variant_census() {
   macro_rules! census {

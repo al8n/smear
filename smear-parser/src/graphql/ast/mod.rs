@@ -17,38 +17,30 @@ pub use ty::*;
 pub use type_system::*;
 pub use value::*;
 
-/// The materialised-number value tree: the same shape with `i64` and `f64` numeric leaves.
+/// The materialised-number value tree: the same shape with a numeric `Int` leaf and an `f64`
+/// `Float` one.
 ///
 /// A module rather than a flat re-export because every name in it collides with its slice twin
-/// by design. `materialized::InputValue<S>` is a second `enum`, variant for variant the shape of
-/// [`InputValue`], and every one of its leaves except `Int` and `Float` is the *same type* the
-/// slice tree holds. Each name also keeps its slice twin's arity and argument positions, so
-/// moving a consumer between the sets is a change of import and nothing else.
+/// by design. `materialized::InputValue<S, I>` is a second `enum`, variant for variant the shape
+/// of [`InputValue`], and every one of its leaves except `Int` and `Float` is the *same type* the
+/// slice tree holds. Each name also keeps its slice twin's arity and argument positions with `I`
+/// inserted, so moving a consumer between the sets is a change of import plus one word.
+///
+/// **`I` is the width, and both readings of GraphQL's `Int` are instantiations of this one tree.**
+/// [`i32`] is what draft §3.5.1 specifies; [`i64`] takes draft §2.9.1's unbounded grammar at its
+/// word and accepts literals the specification does not. A refusal names its
+/// [`IntWidth`](crate::graphql::error::IntWidth), so the two stay distinguishable in the error as
+/// well as in the type.
 ///
 /// Two enums rather than one at two instantiations is a decision the module's own header argues,
 /// and the short version is that a type alias cannot be used as a module: `use InputValue::{Int}`
-/// has to keep compiling. What it costs — the variant list written twice — is charged to
+/// has to keep compiling. That argument is about the boundary between the *slice* tree and this
+/// one and says nothing about the width — `I` is a parameter on an `enum`, so the variant imports
+/// resolve at every width. What it costs — the variant list written twice — is charged to
 /// `every_value_tree_declares_the_same_variants` rather than to the next reader.
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub mod materialized;
-
-/// The same tree at the width GraphQL specifies: `Int` is [`i32`], `Float` stays `f64`.
-///
-/// **This one is the spec-exact reading and [`materialized`] is the permissive one**, which is
-/// the opposite of how a "32" beside a "64" usually reads. Draft §3.5.1 defines `Int` as a signed
-/// 32-bit integer, while draft §2.9.1's grammar bounds an `IntValue`'s digits not at all — so
-/// `2147483648` parses, is not a conformant `Int`, and the two trees are the two honest answers
-/// to what the document says. A refusal names its
-/// [`IntWidth`](crate::graphql::error::IntWidth), so the two remain distinguishable in the error
-/// as well as in the type.
-///
-/// A sibling module rather than a payload parameter on [`materialized`]'s enums, and a second
-/// marker rather than a parameterised one: that module's header has the three compile-time
-/// failures the choice avoids.
-#[cfg(feature = "materialized-numbers")]
-#[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
-pub mod materialized32;
 
 mod argument;
 mod directive;

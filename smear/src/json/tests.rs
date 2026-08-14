@@ -1213,7 +1213,7 @@ mod value_depth {
   use smear_lexer::tokora::{Parse as _, Parser, span::AsSpan};
   use smear_parser::graphql::{
     GraphQL,
-    ast::materialized::{ConstInputValue, ConstList},
+    ast::materialized as tree,
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, value::materialized::const_value},
   };
@@ -1226,6 +1226,16 @@ mod value_depth {
     Void,
   };
 
+  /// The value tree these fixtures are built at.
+  ///
+  /// **The width is arbitrary here and named once so that it reads that way.** What this module
+  /// measures is the *walk* — native frames, heap frames, what happens when the allocator says no
+  /// — and a walk over a list of lists never reaches an `Int` leaf at all. Either width would give
+  /// the same numbers; `i64` is the one the response writer's string branch is reachable at, so it
+  /// is the less trivial of the two to have chosen.
+  type ConstInputValue<S> = tree::ConstInputValue<S, i64>;
+  type ConstList<S> = tree::ConstList<S, i64>;
+
   /// One value, parsed from the GraphQL literal that spells it.
   fn leaf(literal: &'static str) -> ConstInputValue<&'static str> {
     Parser::with_parser::<
@@ -1234,7 +1244,7 @@ mod value_depth {
       GraphqlErrors<&'static str>,
       _,
       GraphQL,
-    >(const_value)
+    >(const_value::<_, _, i64>)
     .parse_str(literal)
     .expect("the fixture is a constant GraphQL value")
   }
