@@ -36,6 +36,14 @@
 //! it, so nothing in that signature says the document is already in hand. The three together are
 //! the clearest calibration the table has — same module, same concrete type, opposite verdicts,
 //! each for a reason read off the signature.
+//!
+//! It is also the table's one worked example of a conviction being **answered** rather than
+//! carried. It sat here as `Tracked` against al8n/smear#139 with a reason that ended "Recorded,
+//! not accepted"; #139 read the signature, found that the parameter is not the document's type at
+//! all but the *request's* key space, and decided not to widen it. So the entry is `Structural`
+//! now and names no issue. What the rule caught was real — the two readers of that key space had
+//! drifted apart, and one of them substituted a name — and none of it was the parameter's type.
+//! A conviction the table records is a question, and this is what an answer looks like.
 
 /// The shortest reason the census will accept. Long enough that "rowan" or "#121" alone does not
 /// clear it, short enough that a genuine one-line reason does.
@@ -310,22 +318,32 @@ pub const EXEMPTIONS: &[Exemption] = &[
              one and not the other would leave half the projection's doors narrow under a table \
              that had stopped naming them.",
   },
-  // ── §6 execution, the driver's value trait — al8n/smear#139 ──────────────────────────────────
+  // ── §6 execution, the driver's value trait — al8n/smear#139, DECIDED ─────────────────────────
   Exemption {
     module: "smear::proto::values",
     entry: "Values::variable",
     param: "name",
-    kind: Kind::Tracked,
-    issue: Some(139),
-    reason: "The executor is `Executor<'a, S, V> where S: AsRef<[u8]>` and a variable's name is a \
-             slice of that document, so spelling the driver's lookup key `&str` puts a UTF-8 \
-             conversion between the two. Both call sites perform it and they disagree: draft \
-             §6.4.1's does `from_utf8(..).unwrap_or(\"\")` and asks the driver about a variable \
-             named `\"\"`, draft §6.3's condition does `.ok()` and raises. Draft §2.1.9 makes a \
-             lexed name ASCII, so neither failure branch is reachable from a parsed document — but \
-             `Name::new` is public, so a rewritten one reaches the branch that substitutes a name \
-             for the name it could not read. #139 owns the signature and the fallback together. \
-             Recorded, not accepted.",
+    kind: Kind::Structural,
+    // No issue, and that is the record: al8n/smear#139 asked whether this parameter should widen,
+    // and the answer was no. A `Tracked` entry naming a closed issue is the stale exemption this
+    // table exists to refuse — debt with a home that nobody lives in any more.
+    issue: None,
+    reason: "Not a narrowing of the document's type: the two ends of this call are two different \
+             key spaces, and only one of them is the document. Draft §6.1's `CoerceVariableValues` \
+             runs over the *request's* `variableValues`, whose keys arrive as text and are the \
+             driver's own `&str`, while a variable's spelling is a slice of an `S: AsRef<[u8]>`. \
+             Widening this parameter would not delete the conversion — it would move it inside \
+             every driver, once per implementation, where `from_utf8(..).unwrap_or(\"\")` could be \
+             written again and no gate in this repository would see it. #139 decided the opposite \
+             direction: the conversion stays on the side that knows both spaces, happens exactly \
+             once (`proto::collect::variable_key`), is called by both readers, and refuses rather \
+             than substitutes — a spelling that is not a key names no variable the request could \
+             have supplied, so draft §6.4.1 step 5.d and draft §6.3's `VariableMissing` are the \
+             answer and the driver is not asked. `graphql-proto/tests/unreadable_name.rs` pins the \
+             two readers taking that same branch, and pins the control where a readable spelling \
+             reaches the driver unchanged from both. STRUCTURAL rather than TRACKED because there \
+             is nothing left to remove; if the driver's key space ever stops being text, this is \
+             the entry that decision is about.",
   },
   // ── Not narrowings: the rule's default-convict misfiring ─────────────────────────────────────
   //

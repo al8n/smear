@@ -154,6 +154,18 @@ pub(super) enum Raw {
   /// this one means a response key or a type name could not be recorded, so the position it
   /// belongs to cannot be built at all.
   NameStorage { limit: u32 },
+  /// A field's response key is not a name, so no response can carry it (draft §2.1.9, §7.1.2).
+  ///
+  /// Carries nothing, and cannot: the whole finding is that the spelling has no rendering, so
+  /// quoting it is the one thing this must not do. Naming the *field* instead would name the same
+  /// unreadable bytes whenever the key is the field's own name rather than an alias.
+  ///
+  /// Unreachable from a lexed document — draft §2.1.9 makes a name ASCII and both dialects spell
+  /// exactly that — and reachable from an assembled one, which is an input
+  /// [`Executor::new`](super::Executor::new) admits by signature. Raised rather than skipped
+  /// because the client asked for this position: dropping the key silently is the only outcome
+  /// with nothing in `errors` to account for it.
+  ResponseKeyUnreadable,
   /// The driver reported a field error whose message could not be recorded.
   ///
   /// The failure is the driver's and is reported; only its text is missing, which is why this is
@@ -258,6 +270,18 @@ pub enum Kind {
   /// request-error shape — a response with no `data` key — for a failure raised before execution
   /// begins. By the time a list is being completed, resolvers have already answered.
   ResponseBudget,
+  /// A field's response key is not a name, so no response can carry it (draft §2.1.9, §7.1.2).
+  ///
+  /// Not reachable from a document the lexer produced: draft §2.1.9's `Name` is
+  /// `[_A-Za-z][_0-9A-Za-z]*` and both dialects spell exactly that, so any key that was *lexed* is
+  /// ASCII whatever the source type is. It is reachable from a document that was **assembled** —
+  /// [`Executor::new`](super::Executor::new) takes any `&ExecutableDocument<S>` for any
+  /// `S: AsRef<[u8]>`, and a rewriter, a persisted-query store or an FFI bridge builds one.
+  ///
+  /// Its own kind rather than a shared one because a driver's remedy is unlike every other kind's:
+  /// nothing about the request's size, the schema or the resolved value is wrong, and the position
+  /// cannot be retried. Whatever produced the document produced something that is not GraphQL.
+  ResponseKeyUnreadable,
 }
 
 impl Raw {
@@ -281,6 +305,7 @@ impl Raw {
       | Self::CollectionBudget { .. }
       | Self::MetadataBudget { .. }
       | Self::NameStorage { .. } => Kind::ResponseBudget,
+      Self::ResponseKeyUnreadable => Kind::ResponseKeyUnreadable,
       Self::ResolverUnstorable { .. } => Kind::Resolver,
     }
   }
@@ -290,7 +315,7 @@ impl Raw {
 pub struct Error<'r, V> {
   pub(super) schema: &'r Schema,
   pub(super) slots: &'r [Slot<V>],
-  pub(super) names: &'r [u8],
+  pub(super) names: &'r str,
   pub(super) name_spans: &'r [(u32, u32)],
   pub(super) locations: &'r [SimpleSpan],
   pub(super) row: &'r Row,
@@ -333,9 +358,16 @@ impl<'r, V> Error<'r, V> {
     &self.locations[start as usize..(start + len) as usize]
   }
 
+  /// Returns one entry of the executor's name table.
+  ///
+  /// No conversion and no fallback. The arena is a `str` because a fallback here is not a degraded
+  /// reading — `unwrap_or("")` rendered every spelling it could not read as the *same* one, so
+  /// `ArgumentVariableMissing` printed `$` with nothing after it and two distinct names became one
+  /// message. Both spellings the arena can hold from a document now refuse at admission instead;
+  /// see [`Interner`](super::collect::Interner) and al8n/smear#139.
   fn name(&self, id: u32) -> &'r str {
     let (start, len) = self.name_spans[id as usize];
-    core::str::from_utf8(&self.names[start as usize..(start + len) as usize]).unwrap_or("")
+    &self.names[start as usize..(start + len) as usize]
   }
 }
 
@@ -562,6 +594,11 @@ impl<V> fmt::Display for Error<'_, V> {
       Raw::NameStorage { limit } => write!(
         f,
         "A name in this response would exceed the executor's limit of {limit} interned bytes."
+      ),
+      // No spelling, deliberately: see the variant. "not a name" is the whole finding, and the
+      // bytes that are not one have no rendering this could quote without inventing it.
+      Raw::ResponseKeyUnreadable => f.write_str(
+        "A field's response key is not a name and cannot appear in a response (draft \u{a7}2.1.9).",
       ),
       Raw::ResolverUnstorable { unstored } => match unstored {
         Unstored::Arena { limit } => write!(

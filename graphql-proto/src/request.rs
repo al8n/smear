@@ -200,7 +200,7 @@ pub struct FieldRequest<'r, 'a, S, V> {
   pub(super) id: ReqId,
   pub(super) schema: &'r Schema,
   pub(super) slots: &'r [Slot<V>],
-  pub(super) names: &'r [u8],
+  pub(super) names: &'r str,
   pub(super) name_spans: &'r [(u32, u32)],
   pub(super) slot: u32,
   pub(super) field: &'a Field<S>,

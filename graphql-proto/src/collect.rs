@@ -1082,7 +1082,22 @@ mod groups {
 /// [`max_interned_bytes`]: super::Limits::max_interned_bytes
 #[derive(Debug)]
 pub(super) struct Interner {
-  bytes: std::vec::Vec<u8>,
+  /// # A `String`, and that is the second half of al8n/smear#139
+  ///
+  /// This was a `Vec<u8>`, and both of its readers — [`Error::name`](super::Error) and the
+  /// response's [`Segment::Field`](super::Segment) — ended in
+  /// `core::str::from_utf8(..).unwrap_or("")`. That fallback is not a degraded reading, it is a
+  /// *different name*: every spelling it cannot read becomes the same one, so two response keys
+  /// collapse into one and a diagnostic quotes `$` with nothing after it. Both were reachable, and
+  /// the second one through the *honest* path — draft §6.3's condition refuses a spelling it
+  /// cannot read and then interns the raw bytes for its message, which rendered empty anyway.
+  ///
+  /// A `str` store moves the question to admission, where there is one caller per kind of name and
+  /// each has an answer. The driver's strings are already `&str`; the schema's arena is ASCII by
+  /// its own builder's admission rule; the two that come out of the document convert once, and
+  /// refuse rather than substitute. What is left is a reader that cannot fail, so there is no
+  /// fallback left to choose wrongly.
+  names: std::string::String,
   spans: std::vec::Vec<(u32, u32)>,
   /// Entries compared, over the executor's whole life. See [`Fragments::compares`].
   #[cfg(test)]
@@ -1105,7 +1120,7 @@ impl Interner {
   #[inline]
   pub(super) const fn new(cap: u32) -> Self {
     Self {
-      bytes: std::vec::Vec::new(),
+      names: std::string::String::new(),
       spans: std::vec::Vec::new(),
       #[cfg(test)]
       compares: 0,
@@ -1115,8 +1130,15 @@ impl Interner {
     }
   }
 
-  /// Returns the id for `bytes`, adding it if it is not already there, charging `visits` before
+  /// Returns the id for `name`, adding it if it is not already there, charging `visits` before
   /// **each** entry it compares.
+  ///
+  /// # `&str` and not `&[u8]`
+  ///
+  /// The arena's readers hand a `&str` back — to a diagnostic and to a response key — so the
+  /// question "what if these bytes are not a name" has to be answered *somewhere*, and a parameter
+  /// is the only place it can be answered once. Taking bytes here answered it twice, in two
+  /// readers, and both answered it the same wrong way. See the type's own header.
   ///
   /// # There is no uncharged way in, and that is the point
   ///
@@ -1142,7 +1164,8 @@ impl Interner {
   /// [`Unstored::Arena`] is a storage refusal and never a lookup failure: a name already present is
   /// always returned, whatever the ceiling says, so a full arena degrades what it *records* and
   /// never what it can still *read*.
-  pub(super) fn intern(&mut self, bytes: &[u8], visits: &mut Visits) -> Result<u32, Unstored> {
+  pub(super) fn intern(&mut self, name: &str, visits: &mut Visits) -> Result<u32, Unstored> {
+    let bytes = name.as_bytes();
     let hash = hash_bytes(bytes);
     if !self.heads.is_empty() {
       let mut id = self.heads[self.bucket(hash)];
@@ -1157,14 +1180,14 @@ impl Interner {
           self.compares += 1;
         }
         let (start, len) = self.spans[id as usize];
-        if &self.bytes[start as usize..(start + len) as usize] == bytes {
+        if &self.names.as_bytes()[start as usize..(start + len) as usize] == bytes {
           return Ok(id);
         }
         id = self.chain[id as usize];
       }
     }
     self
-      .insert(bytes, hash)
+      .insert(name, hash)
       .ok_or(Unstored::Arena { limit: self.cap })
   }
 
@@ -1183,25 +1206,25 @@ impl Interner {
   /// survive every operation this executor runs.
   #[cfg(test)]
   pub(super) fn capacity(&self) -> (usize, usize) {
-    (self.spans.capacity(), self.bytes.capacity())
+    (self.spans.capacity(), self.names.capacity())
   }
 
-  /// Appends `bytes` and links it, or `None` when the arena has no room.
+  /// Appends `name` and links it, or `None` when the arena has no room.
   ///
   /// Unbudgeted, and it does not need to be: it runs at most once per selection, which the caller
   /// has already charged, and the rehash it may trigger is amortised over those same insertions.
-  fn insert(&mut self, bytes: &[u8], hash: u64) -> Option<u32> {
+  fn insert(&mut self, name: &str, hash: u64) -> Option<u32> {
     // Checked, not reasoned about. The ceiling below makes each of these unreachable, and they
     // stay because "unreachable given the ceiling" is exactly the kind of claim that stops being
     // true when somebody sets a different ceiling.
-    let start = u32::try_from(self.bytes.len()).ok()?;
-    let len = u32::try_from(bytes.len()).ok()?;
+    let start = u32::try_from(self.names.len()).ok()?;
+    let len = u32::try_from(name.len()).ok()?;
     let end = start.checked_add(len)?;
     if end > self.cap {
       return None;
     }
     let id = u32::try_from(self.spans.len()).ok()?;
-    self.bytes.extend_from_slice(bytes);
+    self.names.push_str(name);
     self.spans.push((start, len));
     self.chain.push(NONE);
     if self.spans.len() > self.heads.len() {
@@ -1236,16 +1259,20 @@ impl Interner {
     self.heads.resize(buckets, NONE);
     for id in 0..self.spans.len() {
       let (start, len) = self.spans[id];
-      let hash = hash_bytes(&self.bytes[start as usize..(start + len) as usize]);
+      let hash = hash_bytes(&self.names.as_bytes()[start as usize..(start + len) as usize]);
       let bucket = self.bucket(hash);
       self.chain[id] = self.heads[bucket];
       self.heads[bucket] = id as u32;
     }
   }
 
+  /// The arena, as the `str` its readers slice.
+  ///
+  /// Every entry was appended whole through [`insert`](Interner::insert), so every `(start, len)`
+  /// in [`spans`](Interner::spans) is a pair of char boundaries and slicing by one cannot panic.
   #[inline]
-  pub(super) fn bytes(&self) -> &[u8] {
-    &self.bytes
+  pub(super) fn names(&self) -> &str {
+    &self.names
   }
 
   #[inline]
@@ -1254,7 +1281,7 @@ impl Interner {
   }
 
   pub(super) fn clear(&mut self) {
-    self.bytes.clear();
+    self.names.clear();
     self.spans.clear();
     self.chain.clear();
     // Emptied rather than refilled with the sentinel: writing `NONE` over every bucket would be
@@ -1271,7 +1298,7 @@ impl Interner {
   /// Where the arena stands, so a failed collection or expansion can put it back.
   #[inline]
   pub(super) fn mark(&self) -> (usize, usize) {
-    (self.bytes.len(), self.spans.len())
+    (self.names.len(), self.spans.len())
   }
 
   /// Undoes every name interned since `mark`.
@@ -1283,10 +1310,10 @@ impl Interner {
   ///
   /// The index is unwound before the arena, because unlinking an entry needs the bytes the
   /// truncation is about to remove.
-  pub(super) fn restore(&mut self, (bytes, spans): (usize, usize)) {
+  pub(super) fn restore(&mut self, (names, spans): (usize, usize)) {
     for id in (spans..self.spans.len()).rev() {
       let (start, len) = self.spans[id];
-      let hash = hash_bytes(&self.bytes[start as usize..(start + len) as usize]);
+      let hash = hash_bytes(&self.names.as_bytes()[start as usize..(start + len) as usize]);
       let bucket = self.bucket(hash);
       debug_assert_eq!(
         self.heads[bucket], id as u32,
@@ -1295,7 +1322,7 @@ impl Interner {
       );
       self.heads[bucket] = self.chain[id];
     }
-    self.bytes.truncate(bytes);
+    self.names.truncate(names);
     self.spans.truncate(spans);
     self.chain.truncate(spans);
   }
@@ -1580,9 +1607,21 @@ where
         if !included(field.directives(), ctx)? {
           continue;
         }
-        let name = match field.alias() {
+        let spelling = match field.alias() {
           Some(alias) => alias.name().source().as_ref(),
           None => field.name().source().as_ref(),
+        };
+        // Draft §7.1.2 makes the response key this spelling verbatim, so a spelling that is not a
+        // name is a key no response can carry. Raised rather than substituted, and raised rather
+        // than skipped: the client asked for this position, and a response that quietly lacks a
+        // key it asked for is the one outcome with nothing in `errors` to account for it. Draft
+        // §2.1.9 puts this beyond a lexed document, so only an assembled one reaches it.
+        let Ok(name) = core::str::from_utf8(spelling) else {
+          return Err(Fault {
+            raw: Raw::ResponseKeyUnreadable,
+            location: *field.span(),
+            name: None,
+          });
         };
         let key = match interner.intern(name, visits) {
           Ok(key) => key,
@@ -1752,6 +1791,36 @@ where
 /// non-`Boolean` variable at the `Boolean!` location — or a driver whose §6.1 did not coerce, so
 /// no conforming request can tell the two apart; and of the two answers only this one is safe
 /// under both senses.
+/// The key [`Values::variable`](super::Values::variable) looks a variable up by, or `None` when
+/// the document's spelling is not one.
+///
+/// # Why there is a conversion here at all
+///
+/// Not an impedance mismatch to be removed by widening the trait. The two ends genuinely differ:
+/// draft §6.1's `CoerceVariableValues` runs over the *request's* `variableValues`, whose keys
+/// arrive as text and are a driver's `&str`, while a document's spelling is a slice of an
+/// `S: AsRef<[u8]>` that nothing constrains. This is the one place the two key spaces meet, and a
+/// conversion at a boundary belongs on the side that knows both — here — rather than repeated
+/// inside every driver, where the same fallback could be written again and no gate would see it.
+///
+/// # `None` is a refusal, and specifically not a substitution
+///
+/// A spelling the driver's key space cannot express names no variable the request could have
+/// supplied, so both readers take their existing "not provided" branch: draft §6.4.1 step 5.d at a
+/// field argument, draft §6.3's [`ConditionFault::VariableMissing`] at a condition. Neither asks
+/// the driver, because there is no question to ask.
+///
+/// What this must never do is answer with a *different* name. `from_utf8(..).unwrap_or("")` did,
+/// at draft §6.4.1's site, and mapping every unreadable spelling onto one readable one merged two
+/// variables into one, asked the driver about a variable the document does not contain, carried
+/// that invented name to the resolver in
+/// [`ArgumentSource::Variable`](super::ArgumentSource::Variable) and printed it as `$` with
+/// nothing after it. See al8n/smear#139.
+#[inline]
+pub(super) fn variable_key(spelling: &[u8]) -> Option<&str> {
+  core::str::from_utf8(spelling).ok()
+}
+
 fn condition_is_true<'a, S, V>(directive: &'a Directive<S>, ctx: &mut V) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,
@@ -1786,10 +1855,7 @@ where
       // Read once. Interning the name costs a scan of the name table, so it happens only on the
       // branch that needs it for a message.
       let spelling = spelled.name().source().as_ref();
-      match core::str::from_utf8(spelling)
-        .ok()
-        .and_then(|name| ctx.variable(name))
-      {
+      match variable_key(spelling).and_then(|name| ctx.variable(name)) {
         // The variable was not supplied, and that is the finding whether or not its spelling can
         // be quoted — so an arena with no room shortens the message and keeps the diagnosis. The
         // spelling travels as bytes because the caller has an arena to restore before it can mint

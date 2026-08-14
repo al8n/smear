@@ -16,12 +16,12 @@
 //! is worse than one that raises: it asks the driver about a variable the document does not
 //! contain, hands the resolver that invented name, and prints it in a diagnostic.
 
-use graphql_proto::{ArgumentSource, Executor, Kind, Leaf, Values};
+use graphql_proto::{ArgumentSource, Executor, Kind, Leaf, Node, Segment, Values};
 use smear_parser::{
   graphql::{
     GraphQL,
     ast::{
-      Argument, ArgumentList, Described, Directive, Directives, ExecutableDefinition,
+      Alias, Argument, ArgumentList, Described, Directive, Directives, ExecutableDefinition,
       ExecutableDocument, Field, InputValue, Name, OperationDefinition, Selection, SelectionSet,
       TypeSystemDocument, VariableValue,
     },
@@ -180,6 +180,23 @@ fn at_a_condition(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]> 
   ))])
 }
 
+/// `{ spelling: greeting }` — draft §7.1.2's response key, which is the alias verbatim.
+///
+/// The *second* place a document's bytes have to become a `&str`, and the one the issue's census
+/// does not name. The field's own name is looked up in the schema and a miss simply omits the
+/// position, so an unreadable field name never reaches a response — an unreadable **alias** on a
+/// resolvable field does.
+fn at_a_response_key(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]> {
+  document(std::vec![Selection::Field(Field::new(
+    span(),
+    Some(Alias::new(span(), name(spelling))),
+    name(b"greeting"),
+    None,
+    None,
+    None,
+  ))])
+}
+
 // ------------------------------------------------------------------------------------------
 // driving
 // ------------------------------------------------------------------------------------------
@@ -194,6 +211,8 @@ struct Run {
   kinds: Vec<Kind>,
   /// The response's `errors`, rendered.
   messages: Vec<String>,
+  /// Every key of `data`, in response order.
+  keys: Vec<String>,
 }
 
 fn run(
@@ -206,10 +225,7 @@ fn run(
   executor
     .start(&mut space, None, Value::Text)
     .expect("the operation resolves");
-  loop {
-    let Some(request) = executor.poll_resolve(&mut space) else {
-      break;
-    };
+  while let Some(request) = executor.poll_resolve(&mut space) {
     let id = request.id();
     let received: Vec<Vec<u8>> = request
       .arguments()
@@ -225,11 +241,21 @@ fn run(
   let response = executor.poll_response().expect("nothing is outstanding");
   let kinds = response.errors().map(|error| error.kind()).collect();
   let messages = response.errors().map(|error| error.to_string()).collect();
+  let keys = match response.data() {
+    Node::Object(children) => children
+      .map(|(key, _)| match key {
+        Segment::Field(key) => key.to_owned(),
+        Segment::Index(index) => index.to_string(),
+      })
+      .collect(),
+    _ => Vec::new(),
+  };
   Run {
     asked: space.asked,
     received: space.received,
     kinds,
     messages,
+    keys,
   }
 }
 
@@ -362,4 +388,31 @@ fn neither_diagnostic_renders_a_dollar_with_nothing_after_it() {
   );
   assert_eq!(argument.kinds, std::vec![Kind::ArgumentVariableMissing]);
   assert_eq!(condition.kinds, std::vec![Kind::DirectiveCondition]);
+}
+
+/// A response key that is not a name is reported, and no key stands in for it.
+///
+/// The second half of the census, and the one the issue does not name: `Segment::Field` handed
+/// back a `&str` read out of the executor's arena through `unwrap_or("")`, so two sibling keys it
+/// could not read became the same key — the same collapse as the variable, one step further on and
+/// reachable without a variable at all.
+#[test]
+fn an_unreadable_response_key_is_reported_rather_than_rendered_empty() {
+  let schema = schema();
+  let readable = run(&schema, &at_a_response_key(READABLE), None);
+  let unreadable = run(&schema, &at_a_response_key(UNREADABLE), None);
+
+  assert_eq!(
+    readable.keys,
+    std::vec![String::from_utf8(READABLE.to_vec()).expect("ASCII")],
+    "the control's alias is the response key, verbatim"
+  );
+  assert!(readable.kinds.is_empty(), "{:?}", readable.messages);
+
+  assert_eq!(unreadable.kinds, std::vec![Kind::ResponseKeyUnreadable]);
+  assert!(
+    !unreadable.keys.iter().any(String::is_empty),
+    "a key stood in for one that could not be read: {:?}",
+    unreadable.keys
+  );
 }
