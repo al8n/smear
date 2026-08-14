@@ -125,6 +125,21 @@ pub enum ArgumentSource<'a, S, V> {
   /// It may also be an input object or a list holding variables, which reach the driver
   /// unsubstituted. Coercing the contents is step 5.j's and therefore the driver's; see this
   /// module's header for where that line falls and what it costs.
+  ///
+  /// # Reading a name out of one
+  ///
+  /// A driver walking these contents meets the same two key spaces the executor does, and must
+  /// not answer the same question a different way. Turn a nested `$name`'s spelling into a lookup
+  /// key with [`variable_key`](super::variable_key) — the function draft §6.4.1's own variable
+  /// read uses — rather than with `from_utf8`, and specifically never with
+  /// `from_utf8(..).unwrap_or("")`, which is al8n/smear#139: it maps every spelling it cannot read
+  /// onto one readable one, so two variables become one and the driver is asked about a variable
+  /// the document does not contain.
+  ///
+  /// The other names in here — an input object's field names, an enum value — are the schema's
+  /// vocabulary rather than the request's, so the driver matches them against its own SDL and a
+  /// spelling that is not a `Name` matches nothing. That is the same refusal by a different route,
+  /// and it is the driver's because the schema is.
   Literal(&'a InputValue<S>),
   /// The document wrote `$name` and the request supplied a value for it: this value.
   ///
@@ -200,7 +215,7 @@ pub struct FieldRequest<'r, 'a, S, V> {
   pub(super) id: ReqId,
   pub(super) schema: &'r Schema,
   pub(super) slots: &'r [Slot<V>],
-  pub(super) names: &'r [u8],
+  pub(super) names: &'r str,
   pub(super) name_spans: &'r [(u32, u32)],
   pub(super) slot: u32,
   pub(super) field: &'a Field<S>,

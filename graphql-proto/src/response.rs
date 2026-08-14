@@ -376,7 +376,7 @@ const ELIDED: &str = "…";
 /// not an accessor. It existed, unused, and its shape was the shape the defect took.
 pub struct Path<'r, V> {
   slots: &'r [Slot<V>],
-  names: &'r [u8],
+  names: &'r str,
   name_spans: &'r [(u32, u32)],
   slot: u32,
 }
@@ -398,7 +398,7 @@ impl<'r, V> Path<'r, V> {
   #[inline]
   pub(super) const fn new(
     slots: &'r [Slot<V>],
-    names: &'r [u8],
+    names: &'r str,
     name_spans: &'r [(u32, u32)],
     slot: u32,
   ) -> Self {
@@ -942,7 +942,7 @@ impl<V> fmt::Debug for Node<'_, V> {
 /// The children of a list or an object, in response order.
 pub struct Children<'r, V> {
   slots: &'r [Slot<V>],
-  names: &'r [u8],
+  names: &'r str,
   name_spans: &'r [(u32, u32)],
   next: u32,
 }
@@ -991,18 +991,21 @@ impl<V> fmt::Debug for Children<'_, V> {
 
 /// Returns one entry of the executor's name table.
 ///
-/// GraphQL names are `[_A-Za-z][_0-9A-Za-z]*`, established by the lexer before any of this can
-/// run, so the slice is ASCII. The fallback is unreachable and costs nothing.
+/// No conversion and no fallback. This used to end in `unwrap_or("")`, justified by the lexer's
+/// draft §2.1.9 name production — a true statement about a *parsed* document, and this executor
+/// also runs assembled ones. What the fallback did there was worse than losing a key: two sibling
+/// response keys it could not read became the same readable one. The arena is a `str` now, and
+/// refuses at admission instead; see [`Interner`](super::collect::Interner).
 #[inline]
-fn interned<'r>(names: &'r [u8], name_spans: &[(u32, u32)], id: u32) -> &'r str {
+fn interned<'r>(names: &'r str, name_spans: &[(u32, u32)], id: u32) -> &'r str {
   let (start, len) = name_spans[id as usize];
-  core::str::from_utf8(&names[start as usize..(start + len) as usize]).unwrap_or("")
+  &names[start as usize..(start + len) as usize]
 }
 
 /// Renders the slot at `index` as a [`Node`].
 pub(super) fn node<'r, V>(
   slots: &'r [Slot<V>],
-  names: &'r [u8],
+  names: &'r str,
   name_spans: &'r [(u32, u32)],
   index: u32,
 ) -> Node<'r, V> {
