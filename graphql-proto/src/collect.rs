@@ -1136,9 +1136,16 @@ impl Interner {
   /// # `&str` and not `&[u8]`
   ///
   /// The arena's readers hand a `&str` back — to a diagnostic and to a response key — so the
-  /// question "what if these bytes are not a name" has to be answered *somewhere*, and a parameter
-  /// is the only place it can be answered once. Taking bytes here answered it twice, in two
-  /// readers, and both answered it the same wrong way. See the type's own header.
+  /// question "can these bytes be printed" has to be answered *somewhere*, and taking bytes here
+  /// left it to the two readers, which both answered it the same wrong way. See the type's own
+  /// header.
+  ///
+  /// It is not the *whole* question, and reading it as the whole question is what
+  /// [`name_key`](super::name_key) exists to stop. This parameter admits every `&str`, which is
+  /// right: the arena also holds a resolver's message and a driver's `type_name`, and neither is a
+  /// draft §2.1.9 `Name` nor should be made one. "Is this spelling a name" is a question only the
+  /// *caller* knows to ask, so it is answered at each admission point rather than here — and for
+  /// the two names that come out of a document, by one function.
   ///
   /// # There is no uncharged way in, and that is the point
   ///
@@ -1616,7 +1623,12 @@ where
         // than skipped: the client asked for this position, and a response that quietly lacks a
         // key it asked for is the one outcome with nothing in `errors` to account for it. Draft
         // §2.1.9 puts this beyond a lexed document, so only an assembled one reaches it.
-        let Ok(name) = core::str::from_utf8(spelling) else {
+        //
+        // `name_key` and not `from_utf8`: the question is draft §2.1.9's and not "do these bytes
+        // print". This line checked only the conversion for one round, and `""`, `1abc`, `a b` and
+        // `🙂` were all interned and handed back as a `Segment::Field` — while `variable_key`, in
+        // this same module, refused every one of them. See `name_key`.
+        let Some(name) = name_key(spelling) else {
           return Err(Fault {
             raw: Raw::ResponseKeyUnreadable,
             location: *field.span(),
@@ -1791,14 +1803,12 @@ where
 /// one key in any driver that normalises, which is the collapse this whole issue is about arriving
 /// through the readable branch.
 ///
-/// [`is_name`] is the schema arena's own admission rule, reused rather than respelled: the
-/// executor's two name spaces — the schema's and the document's — are then admitted by one
-/// predicate, and a second spelling of draft §2.1.9 cannot drift from the first.
-///
-/// The conversion after it cannot fail, because a `Name` is ASCII. It is still written as the
-/// total conversion: this crate has no `unsafe`, and the alternative to a second pass over a name
-/// that is at most a few bytes is exactly the kind of claim that stops being true when someone
-/// changes [`is_name`].
+/// The admission rule is [`is_name`], the schema arena's own, reused rather than respelled — and
+/// reached through the *same private function* draft §7.1.2's response key is admitted by, so the
+/// executor's name spaces share one predicate by calling it rather than by saying so. That
+/// distinction is the whole of al8n/smear#139's third round: an earlier revision of this paragraph
+/// claimed the sharing while the response key's site still checked UTF-8 alone, and a claim in
+/// prose is not something a compiler can read.
 ///
 /// # `None` is a refusal, and specifically not a substitution
 ///
@@ -1816,6 +1826,48 @@ where
 /// nothing after it. See al8n/smear#139.
 #[inline]
 pub fn variable_key(spelling: &[u8]) -> Option<&str> {
+  name_key(spelling)
+}
+
+/// The `&str` `spelling` names, or `None` when it is not a draft §2.1.9 `Name`.
+///
+/// # One function, because the defect was a site that performed half of it
+///
+/// Every name this executor admits **out of a document** is admitted here: draft §7.1.2's response
+/// key, and draft §6.1's variable key through [`variable_key`]. They were not always: the response
+/// key's site checked UTF-8 alone, so `1abc`, `a b`, `🙂` and the empty spelling were interned and
+/// handed back as [`Segment::Field`](super::Segment) with no error — and the round that introduced
+/// that guard is the one whose prose said both spaces shared a predicate. Two sites spelling
+/// "predicate, then conversion" is exactly the shape one of them can write half of; one function
+/// is not.
+///
+/// The predicate is [`is_name`], the schema arena's own admission rule, so the *third* name space
+/// the executor reads — the schema's, which `Schema::build` already gates with it — is admitted by
+/// the same rule rather than by a second spelling of draft §2.1.9 that can drift from the first.
+///
+/// The conversion after it cannot fail, because a `Name` is ASCII. It is still written as the
+/// total conversion: this crate has no `unsafe`, and the alternative to a second pass over a name
+/// that is at most a few bytes is exactly the kind of claim that stops being true when someone
+/// changes [`is_name`].
+///
+/// # What is deliberately *not* admitted here
+///
+/// A spelling this crate never reads as a name does not come through this door, and pushing it
+/// through would refuse readable input for nothing. Three kinds:
+///
+/// - **Byte-exact identity inside one document** — a fragment spread against its definition, an
+///   operation name against the one [`Executor::start`](super::Executor::start) was given. Nothing
+///   is interned, nothing is rendered, and byte equality cannot map two spellings onto one, which
+///   is the failure this whole repair is about.
+/// - **A lookup in a key space that is already gated** — a field name, a type condition, an
+///   argument name, a directive name, a driver's `type_name`. Each is matched against the schema's
+///   arena or against an ASCII literal, and a spelling that is not a `Name` is in neither, so the
+///   miss *is* the refusal. A second check here would be the redundant spelling the paragraph
+///   above refuses.
+/// - **Text that was never a name** — a resolver's message, a draft §7.1.7 extensions key, which
+///   §7.1.7 puts under no lexical restriction at all.
+#[inline]
+pub(super) fn name_key(spelling: &[u8]) -> Option<&str> {
   if !is_name(spelling) {
     return None;
   }

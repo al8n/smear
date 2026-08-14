@@ -156,9 +156,11 @@ pub(super) enum Raw {
   NameStorage { limit: u32 },
   /// A field's response key is not a name, so no response can carry it (draft §2.1.9, §7.1.2).
   ///
-  /// Carries nothing, and cannot: the whole finding is that the spelling has no rendering, so
-  /// quoting it is the one thing this must not do. Naming the *field* instead would name the same
-  /// unreadable bytes whenever the key is the field's own name rather than an alias.
+  /// Carries nothing. Half of what it refuses has no rendering at all — a response key need not be
+  /// UTF-8 — and the other half renders perfectly and is still not a name, so a variant that quoted
+  /// whenever it could would be two messages for one finding, and would spend the arena and the
+  /// visit budget on a diagnostic for a document that is not GraphQL. Naming the *field* instead
+  /// is no way out: the key **is** the field's name whenever there is no alias.
   ///
   /// Unreachable from a lexed document — draft §2.1.9 makes a name ASCII and both dialects spell
   /// exactly that — and reachable from an assembled one, which is an input

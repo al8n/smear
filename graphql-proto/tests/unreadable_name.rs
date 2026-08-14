@@ -219,9 +219,11 @@ fn at_a_condition(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]> 
 /// `{ spelling: greeting }` — draft §7.1.2's response key, which is the alias verbatim.
 ///
 /// The *second* place a document's bytes have to become a `&str`, and the one the issue's census
-/// does not name. The field's own name is looked up in the schema and a miss simply omits the
-/// position, so an unreadable field name never reaches a response — an unreadable **alias** on a
-/// resolvable field does.
+/// does not name. An alias rather than the field's own name because it is the case that survives
+/// every other guard: `greeting` resolves, the schema lookup succeeds, and the only thing standing
+/// between these bytes and a key in `data` is the admission rule at the collection site. The
+/// field's own name reaches that same rule — [`at_a_field_name`] is that branch — but a reader
+/// could believe the schema miss was what stopped it.
 fn at_a_response_key(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]> {
   document(std::vec![Selection::Field(Field::new(
     span(),
@@ -231,6 +233,53 @@ fn at_a_response_key(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8
     None,
     None,
   ))])
+}
+
+/// `{ spelling }` — the same response key, taken from the field's **own** name.
+///
+/// The other arm of the one `match field.alias()` that decides a response key, and not a second
+/// site: draft §7.1.2 makes the key the alias *or* the name, so both arms hand their bytes to the
+/// same admission rule. Worth writing down because the refusal here is the collection's and not the
+/// schema's — draft §6.3 collects before draft §6.4 resolves, so a field name that is not a `Name`
+/// is refused with an error rather than silently omitted by a `sym` miss it never reaches.
+fn at_a_field_name(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]> {
+  document(std::vec![Selection::Field(Field::new(
+    span(),
+    None,
+    name(spelling),
+    None,
+    None,
+    None,
+  ))])
+}
+
+/// `{ first: greeting second: greeting }` — two sibling response keys.
+///
+/// One key can be lost; two are what *collapse*, and the collapse is the finding. A response
+/// carrying one key where the document asked for two is indistinguishable, from the client's side,
+/// from a response that answered both.
+fn two_response_keys(
+  first: &'static [u8],
+  second: &'static [u8],
+) -> ExecutableDocument<&'static [u8]> {
+  document(std::vec![
+    Selection::Field(Field::new(
+      span(),
+      Some(Alias::new(span(), name(first))),
+      name(b"greeting"),
+      None,
+      None,
+      None,
+    )),
+    Selection::Field(Field::new(
+      span(),
+      Some(Alias::new(span(), name(second))),
+      name(b"greeting"),
+      None,
+      None,
+      None,
+    )),
+  ])
 }
 
 /// `{ filtered(filter: {flag: $spelling}) }` — a variable draft §6.4.1 step 5.j leaves to the
@@ -606,6 +655,82 @@ fn two_normalisations_of_one_spelling_are_neither_of_them_a_key() {
   );
   assert_eq!(composed.kinds, std::vec![Kind::ArgumentVariableMissing]);
   assert_eq!(decomposed.kinds, std::vec![Kind::ArgumentVariableMissing]);
+}
+
+/// A response key that is not a name is refused, exactly as a variable key is.
+///
+/// The same predicate applied to the *other* name space, and the reason these cells exist as their
+/// own test rather than as a line in the variable one: the round that introduced the response key's
+/// guard checked UTF-8 there and draft §2.1.9 at the variable, while claiming in prose that both
+/// spaces shared one predicate. Every spelling below converts, so a conversion-shaped guard interns
+/// it and hands it back as a [`Segment::Field`] — an empty JSON object key for `b""`, and `1abc`,
+/// `a b` or `🙂` for the rest, none of which any client asked a GraphQL service for.
+#[test]
+fn a_response_key_that_is_not_a_name_is_refused() {
+  let schema = schema();
+  for spelling in NOT_NAMES {
+    let rendered = core::str::from_utf8(spelling).expect("every NOT_NAMES entry converts");
+
+    for (shape, arm) in [
+      (
+        at_a_response_key as fn(&'static [u8]) -> ExecutableDocument<&'static [u8]>,
+        "alias",
+      ),
+      (at_a_field_name, "field name"),
+    ] {
+      let run = run(&schema, &shape(spelling), None);
+
+      assert_eq!(
+        run.kinds,
+        std::vec![Kind::ResponseKeyUnreadable],
+        "{arm} {spelling:?} was admitted as a response key: {:?}",
+        run.messages
+      );
+      assert!(
+        !run.keys.iter().any(|key| key == rendered),
+        "{arm} {spelling:?} became a key in `data`: {:?}",
+        run.keys
+      );
+      assert!(
+        !run.keys.iter().any(String::is_empty),
+        "a key stood in for {arm} {spelling:?}: {:?}",
+        run.keys
+      );
+    }
+  }
+}
+
+/// Two normalisations of one spelling are two response keys, and neither is one.
+///
+/// The response side of the pair, and the sharper half of it: two distinct `&str` keys reach a
+/// client as two entries of one JSON object, and a client that normalises before it indexes reads
+/// one. That is a response whose shape does not match the document, produced with nothing in
+/// `errors` to say so — so refusing both is what a UTF-8 guard cannot do, since both convert.
+#[test]
+fn two_normalisations_of_one_response_key_are_neither_of_them_a_key() {
+  let schema = schema();
+
+  let control = run(&schema, &two_response_keys(b"a", b"b"), None);
+  assert_eq!(
+    control.keys,
+    std::vec![String::from("a"), String::from("b")],
+    "two readable aliases are two keys, in document order: {:?}",
+    control.messages
+  );
+  assert!(control.kinds.is_empty(), "{:?}", control.messages);
+
+  let pair = run(&schema, &two_response_keys(NFC, NFD), None);
+  assert_eq!(
+    pair.kinds,
+    std::vec![Kind::ResponseKeyUnreadable],
+    "{:?}",
+    pair.messages
+  );
+  assert!(
+    pair.keys.is_empty(),
+    "a normalisation of `café` became a response key: {:?}",
+    pair.keys
+  );
 }
 
 /// [`variable_key`] is the whole key space, and a caller can ask it the same question.
