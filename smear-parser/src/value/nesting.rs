@@ -46,6 +46,12 @@
 //! no `Drop`, [`Nestable::into_children`] takes one **by value** and matches it apart, instead of
 //! reaching through `&mut` and draining containers in place.
 //!
+//! The relocation is not slower, either. Measured on `aarch64-apple-darwin`, release, against the
+//! enum-side `Drop` this module replaced: a leaf-only container costs the same either way, and a
+//! container whose elements themselves nest is *cheaper* here, 2.25x–2.61x the derived glue's
+//! per-element cost against the enum-side design's 2.71x–2.96x. Both shapes pay for not recursing;
+//! only this one also comes out ahead once the tree actually nests.
+//!
 //! # What makes it expressible at all
 //!
 //! **Every recursive position in these trees sits behind a container** — a list's elements, a set's
@@ -60,10 +66,14 @@
 //!
 //! # What the worklist costs
 //!
-//! The worklist holds nodes, and a leaf is released the moment it is reached rather than being put
-//! on it, so a list of a million scalars costs one `Vec::new` — which does not allocate. A tree of
-//! *n* container nodes pays a worklist proportional to its widest frontier of containers, bounded
-//! by the tree that is already resident.
+//! The worklist allocates nothing for a leaf: a leaf is released the moment it is reached rather
+//! than being put on it, so a list of a million scalars never grows `pending` past its initial
+//! `Vec::new`, which does not allocate. Every element still pays a call into
+//! [`Nestable::into_children`] to find that out, though. Measured on `aarch64-apple-darwin`,
+//! release: releasing a leaf this way still costs roughly 3x what the derived glue does, even with
+//! `#[inline]` on all six impls. A tree of *n* container nodes pays that same call plus a worklist
+//! proportional to its widest frontier of containers, bounded by the tree that is already resident
+//! — +12–21 ns per element relative to the derived glue.
 //!
 //! It grows through `Vec`'s infallible `push`, deliberately and unlike `smear::json`'s value walk,
 //! which grows through `try_reserve` and reports `Error::Allocation`. A writer can refuse; a `Drop`
@@ -183,8 +193,12 @@ impl<T: Nestable> Nested<T> {
 
 impl<T: Nestable> Drop for Nested<T> {
   fn drop(&mut self) {
-    // Empty until an element with a nesting child is met, and `Vec::new` does not allocate, so a
-    // container of scalars pays nothing at all for being released this way.
+    // Empty until an element with a nesting child is met, and `Vec::new` does not allocate — a
+    // container of scalars allocates nothing here. It is not released for free, though: every
+    // element still pays a call into `into_children`. Measured on `aarch64-apple-darwin`, release:
+    // a leaf-only container is still roughly 3x slower to release this way than through the derived
+    // glue, about +2.9 ns per element before `#[inline]` reached these impls, less after. That gap
+    // is what the call costs, not what `Vec::new` costs.
     let mut pending: Vec<T::Node> = Vec::new();
     for element in core::mem::take(&mut self.values) {
       element.into_children(&mut pending);

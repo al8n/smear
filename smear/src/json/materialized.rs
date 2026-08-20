@@ -94,7 +94,7 @@
 //! recursed, so *releasing* a deeply nested one aborted the process whether or not this module
 //! ever touched it (measured then: 7 734 lists deep dropped, 7 773 aborted, with the writer never
 //! called). It was a property of the AST type and not of the writer, and it got its own change:
-//! `smear_parser::value::nesting`, a hand-written `Drop` on the value enums that moves their
+//! `smear_parser::value::nesting`, where the tree carries a hand-written `Drop` that moves its
 //! children onto a heap worklist.
 //!
 //! So the two bounds are independent and both hold, and the gates say so rather than working
