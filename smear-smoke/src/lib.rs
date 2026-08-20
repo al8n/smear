@@ -744,7 +744,7 @@ macro_rules! smoke_int {
         .parse_str(src)
         .ok()?;
 
-        match parsed {
+        match &parsed {
           InputValue::List(items) => match items.values() {
             [InputValue::Int(int), InputValue::Float(float)] => {
               Some((*int.source(), *float.source()))
@@ -1359,8 +1359,12 @@ pub fn value_parameters_are_source_compatible(src: &str) -> (usize, usize) {
     let _: &SimpleSpan = materialized.as_span();
     let _: SimpleSpan = value.clone().into_span();
     let _: SimpleSpan = materialized.clone().into_span();
-    let _ = value.clone().try_unwrap_string().is_ok();
-    let _ = materialized.clone().try_unwrap_string().is_ok();
+    // The BY-VALUE `try_unwrap_string` is gone from both trees: they carry a hand-written `Drop`
+    // now (al8n/smear#165) and `E0509` forbids moving a payload out of a type that has one. The
+    // borrowing forms are what survived, and asserting them here is what keeps the two trees'
+    // surfaces in step.
+    let _ = value.try_unwrap_string_ref().is_ok();
+    let _ = materialized.try_unwrap_string_ref().is_ok();
     let _ = value.try_unwrap_string_ref().is_ok() && materialized.is_string();
     value.clone() == *value && materialized.clone() == *materialized
   }

@@ -240,7 +240,7 @@ fn try_variable_value_accepts_and_declines() {
 #[test]
 fn value_int_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    let i = v.unwrap_int();
+    let i = v.unwrap_int_ref();
     assert!("42".equivalent(i.source()));
     assert_eq!(*i.span(), SimpleSpan::new(0, 2));
   }
@@ -250,7 +250,7 @@ fn value_int_arm() {
 #[test]
 fn value_float_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!("1.5e3".equivalent(v.unwrap_float().source()));
+    assert!("1.5e3".equivalent(v.unwrap_float_ref().source()));
   }
   accept_all!(InputValueParser::graphql, "1.5e3", check);
 }
@@ -258,7 +258,7 @@ fn value_float_arm() {
 #[test]
 fn value_string_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!("\"hi\"".equivalent(v.unwrap_string().source()));
+    assert!("\"hi\"".equivalent(v.unwrap_string_ref().source()));
   }
   accept_all!(InputValueParser::graphql, "\"hi\"", check);
 }
@@ -274,7 +274,7 @@ fn value_block_string_arm() {
 #[test]
 fn value_true_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    let b = v.unwrap_boolean();
+    let b = v.unwrap_boolean_ref();
     assert!(b.value());
     assert_eq!(*b.span(), SimpleSpan::new(0, 4));
   }
@@ -284,7 +284,7 @@ fn value_true_arm() {
 #[test]
 fn value_false_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!(!v.unwrap_boolean().value());
+    assert!(!v.unwrap_boolean_ref().value());
   }
   accept_all!(InputValueParser::graphql, "false", check);
 }
@@ -292,7 +292,7 @@ fn value_false_arm() {
 #[test]
 fn value_null_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    let n = v.unwrap_null();
+    let n = v.unwrap_null_ref();
     assert!("null".equivalent(n.source()));
     assert_eq!(*n.span(), SimpleSpan::new(0, 4));
   }
@@ -302,7 +302,7 @@ fn value_null_arm() {
 #[test]
 fn value_enum_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    let e = v.unwrap_enum();
+    let e = v.unwrap_enum_ref();
     assert!("ACTIVE".equivalent(e.source()));
     assert_eq!(*e.span(), SimpleSpan::new(0, 6));
   }
@@ -322,7 +322,7 @@ fn value_enum_arm_accepts_soft_keywords() {
 #[test]
 fn value_variable_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!("x".equivalent(v.unwrap_variable().name().source()));
+    assert!("x".equivalent(v.unwrap_variable_ref().name().source()));
   }
   accept_all!(InputValueParser::graphql, "$x", check);
 }
@@ -330,7 +330,7 @@ fn value_variable_arm() {
 #[test]
 fn value_list_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    let list = v.unwrap_list();
+    let list = v.unwrap_list_ref();
     assert_eq!(list.values().len(), 2);
     assert_eq!(*list.span(), SimpleSpan::new(0, 6));
     assert!(list.values()[0].is_int());
@@ -342,7 +342,7 @@ fn value_list_arm() {
 #[test]
 fn value_empty_list_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!(v.unwrap_list().values().is_empty());
+    assert!(v.unwrap_list_ref().values().is_empty());
   }
   accept_all!(InputValueParser::graphql, "[]", check);
 }
@@ -350,7 +350,7 @@ fn value_empty_list_arm() {
 #[test]
 fn value_object_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    let obj = v.unwrap_object();
+    let obj = v.unwrap_object_ref();
     assert_eq!(obj.fields().len(), 1);
     let field = &obj.fields()[0];
     assert!("a".equivalent(field.name().source()));
@@ -362,7 +362,7 @@ fn value_object_arm() {
 #[test]
 fn value_empty_object_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!(v.unwrap_object().fields().is_empty());
+    assert!(v.unwrap_object_ref().fields().is_empty());
   }
   accept_all!(InputValueParser::graphql, "{}", check);
 }
@@ -370,7 +370,7 @@ fn value_empty_object_arm() {
 #[test]
 fn value_nested_list_and_object() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    let outer = v.unwrap_list();
+    let outer = v.unwrap_list_ref();
     assert_eq!(outer.values().len(), 2);
     // [ [1], { k: $v } ]
     assert_eq!(outer.values()[0].unwrap_list_ref().values().len(), 1);
@@ -491,7 +491,7 @@ fn value_object_field_missing_colon_is_error() {
 #[test]
 fn const_value_int_arm() {
   fn check<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
-    assert!("7".equivalent(v.unwrap_int().source()));
+    assert!("7".equivalent(v.unwrap_int_ref().source()));
   }
   accept_all!(ConstInputValueParser::graphql, "7", check);
 }
@@ -503,7 +503,7 @@ fn const_value_enum_and_scalars() {
   }
   accept_all!(ConstInputValueParser::graphql, "ACTIVE", check_enum);
   fn check_bool<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
-    assert!(v.unwrap_boolean().value());
+    assert!(v.unwrap_boolean_ref().value());
   }
   accept_all!(ConstInputValueParser::graphql, "true", check_bool);
   fn check_null<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
@@ -515,7 +515,7 @@ fn const_value_enum_and_scalars() {
 #[test]
 fn const_value_list_and_object() {
   fn check<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
-    let obj = v.unwrap_object();
+    let obj = v.unwrap_object_ref();
     assert_eq!(obj.fields().len(), 1);
     assert!(obj.fields()[0].value().is_list());
   }

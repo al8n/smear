@@ -185,7 +185,7 @@ fn path_try_api_declines_without_consuming_a_non_path_head() {
 #[test]
 fn extended_values_cover_set_map_object_and_variables() {
   fn check_set<S: AsRef<[u8]>>(value: ast::InputValue<S>) {
-    let set = match value {
+    let set = match &value {
       ast::InputValue::Set(set) => set,
       _ => panic!("expected set"),
     };
@@ -202,7 +202,7 @@ fn extended_values_cover_set_map_object_and_variables() {
   );
 
   fn check_map<S: AsRef<[u8]>>(value: ast::InputValue<S>) {
-    let map = match value {
+    let map = match &value {
       ast::InputValue::Map(map) => map,
       _ => panic!("expected map"),
     };
@@ -218,7 +218,7 @@ fn extended_values_cover_set_map_object_and_variables() {
   );
 
   fn check_object<S: AsRef<[u8]>>(value: ast::InputValue<S>) {
-    let object = match value {
+    let object = match &value {
       ast::InputValue::Object(object) => object,
       _ => panic!("expected object"),
     };
@@ -236,7 +236,7 @@ fn extended_values_cover_set_map_object_and_variables() {
   );
 
   fn check_variable<S: AsRef<[u8]>>(value: ast::InputValue<S>) {
-    let variable = match value {
+    let variable = match &value {
       ast::InputValue::Variable(variable) => variable,
       _ => panic!("expected variable"),
     };
@@ -281,7 +281,7 @@ fn graphqlx_radix_literals_and_enum_paths_preserve_their_heads() {
   accept_all!(ast::FloatValue::graphqlx, "0x1.8p3", hex_float);
 
   fn check_enum<S: AsRef<[u8]>>(value: ast::InputValue<S>) {
-    let value = match value {
+    let value = match &value {
       ast::InputValue::Enum(value) => value,
       _ => panic!("expected an enum path"),
     };

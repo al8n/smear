@@ -103,6 +103,15 @@ impl<Name, Value, Span, Container> Object<Name, Value, Span, Container> {
   pub fn into_fields(self) -> Container {
     self.fields
   }
+
+  /// The fields, mutably, so a release that only borrows this object can empty it.
+  ///
+  /// Crate-private for the reasons on [`List::values_mut`](crate::value::List::values_mut); see
+  /// [`nesting`](crate::value::nesting) for what needs it.
+  #[inline]
+  pub(crate) fn fields_mut(&mut self) -> &mut Container {
+    &mut self.fields
+  }
 }
 
 impl<Name, Value, Span, Container> AsSpan<Span> for Object<Name, Value, Span, Container> {

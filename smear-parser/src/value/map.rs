@@ -102,6 +102,15 @@ impl<Key, Value, Span, Container> Map<Key, Value, Span, Container> {
   pub fn into_entries(self) -> Container {
     self.entries
   }
+
+  /// The entries, mutably, so a release that only borrows this map can empty it.
+  ///
+  /// Crate-private for the reasons on [`List::values_mut`](crate::value::List::values_mut); see
+  /// [`nesting`](crate::value::nesting) for what needs it.
+  #[inline]
+  pub(crate) fn entries_mut(&mut self) -> &mut Container {
+    &mut self.entries
+  }
 }
 
 impl<Key, Value, Span, Container> AsSpan<Span> for Map<Key, Value, Span, Container> {
