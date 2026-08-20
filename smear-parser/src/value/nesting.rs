@@ -81,7 +81,7 @@
 //! exhausted by a request proportional to a tree already in memory, in place of one that arrives at
 //! a fixed depth on every machine.
 
-use core::{fmt, marker::PhantomData, ops::Deref, slice};
+use core::{fmt, ops::Deref, slice};
 
 use std::vec::Vec;
 
@@ -147,18 +147,13 @@ pub trait Nestable: Sized + Sealed {
 /// value enums are what nests.
 pub struct Nested<T: Nestable> {
   values: Vec<T>,
-  /// Keeps the element type in the signature even where `Vec<T>` is emptied out from under it.
-  _element: PhantomData<T>,
 }
 
 impl<T: Nestable> Nested<T> {
   /// Wraps a `Vec` of elements.
   #[inline]
   pub const fn new(values: Vec<T>) -> Self {
-    Self {
-      values,
-      _element: PhantomData,
-    }
+    Self { values }
   }
 
   /// An empty container, allocating nothing.
