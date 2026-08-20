@@ -47,10 +47,16 @@
 //! reaching through `&mut` and draining containers in place.
 //!
 //! The relocation is not slower, either. Measured on `aarch64-apple-darwin`, release, against the
-//! enum-side `Drop` this module replaced: a leaf-only container costs the same either way, and a
-//! container whose elements themselves nest is *cheaper* here, 2.25x–2.61x the derived glue's
-//! per-element cost against the enum-side design's 2.71x–2.96x. Both shapes pay for not recursing;
-//! only this one also comes out ahead once the tree actually nests.
+//! enum-side `Drop` this module replaced, and before the `#[inline]` mitigation reached either of
+//! them: a leaf-only container costs the same both ways, and a container whose elements themselves
+//! nest is *cheaper* here, 2.25x–2.61x the derived glue's per-element cost against the enum-side
+//! design's 2.71x–2.96x — an ordering `#[inline]` does not disturb, since it takes this side to
+//! 2.20x–2.58x. Both shapes pay for not recursing; only this one also comes out ahead once the
+//! tree actually nests.
+//!
+//! **One instrument stands behind that comparison**, unlike the band further down: the enum-side
+//! design exists only as a superseded commit on the branch that wrote this module, and the second
+//! harness measured this container against a plain `Vec`, never against that.
 //!
 //! # What makes it expressible at all
 //!
@@ -64,16 +70,50 @@
 //! enum itself undroppable-by-move. That recursion wants a representation change rather than this
 //! instrument, and it is not repaired here.
 //!
+//! # What this did to the ceiling, which is not what it looks like
+//!
+//! `Drop` is one of three generated impls that descend one frame per level; the derived `Debug`
+//! and the derived `Clone` still do. **So this module did not lower a ceiling. It removed the only
+//! member of the three that fires without a call being made.** For anyone who formats or clones a
+//! value, the binding ceiling was already the smaller of those two, before any of this: measured on
+//! the same host and the same 2 MiB thread, `Debug` aborts at **2 270** levels and `Clone` at
+//! **1 711**, against the recursive release's **11 968**. Release is not a call anyone makes — it
+//! happens to whoever holds the value, on scope exit, on unwind, in an executor's teardown of its
+//! own map, and it can be neither caught nor refused. That is why it went first, and it is the
+//! whole of what "unavoidable" bought.
+//!
+//! The relocation's own charge, stated rather than left out: putting a container in the cycle adds
+//! a frame to the two recursions that remain. Re-measured after it, `Debug` aborts at **2 231** and
+//! `Clone` at **1 626** — those chosen-call ceilings came down about 2% and 5%. A consumer who
+//! neither formats nor clones had 11 968 and now has none; a consumer who does either is a few
+//! percent worse off on a ceiling it already had. The repair for those two also lands here rather
+//! than on the enums — [`Nested`]'s own `Debug` and `Clone` can walk a subtree iteratively without
+//! any derive noticing — so this is where they get cheaper to fix, not harder.
+//!
 //! # What the worklist costs
 //!
 //! The worklist allocates nothing for a leaf: a leaf is released the moment it is reached rather
 //! than being put on it, so a list of a million scalars never grows `pending` past its initial
-//! `Vec::new`, which does not allocate. Every element still pays a call into
-//! [`Nestable::into_children`] to find that out, though. Measured on `aarch64-apple-darwin`,
-//! release: releasing a leaf this way still costs roughly 3x what the derived glue does, even with
-//! `#[inline]` on all six impls. A tree of *n* container nodes pays that same call plus a worklist
-//! proportional to its widest frontier of containers, bounded by the tree that is already resident
-//! — +12–21 ns per element relative to the derived glue.
+//! `Vec::new`, which does not allocate. **What it costs is a call, not an allocation** — every
+//! element pays one call into [`Nestable::into_children`] to find out that it is a leaf. A tree of
+//! *n* container nodes pays that same call plus a worklist proportional to its widest frontier of
+//! containers, bounded by the tree that is already resident.
+//!
+//! Two independent harnesses priced that call on `aarch64-apple-darwin`, release, with `#[inline]`
+//! on all six impls. **They disagree, and the band they span is the claim** — neither end of it is:
+//!
+//! * a leaf-only container, **+1.4 to +2.0 ns per element, 2.4x–3.6x** the derived glue;
+//! * a container whose elements themselves nest, **+9 to +20 ns per element**.
+//!
+//! Where the disagreement comes from, as far as it can be attributed. One harness compares two
+//! separately compiled binaries — the container as a `Vec` before this branch against [`Nested`]
+//! after — and times the release of a whole parsed document, 1 000 to 200 000 elements. The other
+//! names both containers inside one build and times the container alone, at 1 000 000. At a
+//! million elements of a fat enum the *baseline* is bandwidth-bound: it reads 1.01 ns per element
+//! against the smaller runs' 0.62–0.83, while both instruments put this container itself inside
+//! 2.2–2.8. So most of the spread is in the denominator rather than in the subject, and
+//! the additive figure is the steadier of the two readings. Neither harness is committed, so
+//! neither number is a regression target; the band is.
 //!
 //! It grows through `Vec`'s infallible `push`, deliberately and unlike `smear::json`'s value walk,
 //! which grows through `try_reserve` and reports `Error::Allocation`. A writer can refuse; a `Drop`
@@ -129,9 +169,17 @@ pub trait Nestable: Sized + Sealed {
 
 /// A container whose release is a loop rather than a descent.
 ///
-/// It is a `Vec` in every respect a consumer can observe — it derefs to a slice, collects from an
-/// iterator, compares, clones and prints the same — and the one thing it adds is the [`Drop`] that
-/// keeps a deep value from taking the process with it.
+/// **Every trait it implements answers as `Vec`'s does.** It derefs to a slice, collects from an
+/// iterator, compares, hashes, clones and prints the same, and tokora's `Container` and
+/// `DelimiterHandler` get the same answers `Vec` gives them, `max_capacity` included. The one
+/// thing it adds is the [`Drop`] that keeps a deep value from taking the process with it.
+///
+/// It is not `Vec`'s whole *surface*, and that is the weaker claim to make. There is no
+/// `DerefMut`, no `AsMut`, no `Extend`, no `PartialOrd`, no cross-type `PartialEq`, and no
+/// inherent growth or mutation API beyond [`push`](Self::push). Reaching for one of those is a
+/// compile error at the call site, which is the failure mode worth having: an absent impl cannot
+/// be mistaken for a `Vec` that behaves differently. [`into_vec`](Self::into_vec) hands the real
+/// `Vec` back for the rest.
 ///
 /// # Why the tree's container parameter defaults to this and not to [`Vec`]
 ///
@@ -190,10 +238,10 @@ impl<T: Nestable> Drop for Nested<T> {
   fn drop(&mut self) {
     // Empty until an element with a nesting child is met, and `Vec::new` does not allocate — a
     // container of scalars allocates nothing here. It is not released for free, though: every
-    // element still pays a call into `into_children`. Measured on `aarch64-apple-darwin`, release:
-    // a leaf-only container is still roughly 3x slower to release this way than through the derived
-    // glue, about +2.9 ns per element before `#[inline]` reached these impls, less after. That gap
-    // is what the call costs, not what `Vec::new` costs.
+    // element still pays a call into `into_children` to find out it is a leaf, and that call is
+    // the whole of the cost. Two harnesses priced it on `aarch64-apple-darwin`, release, and they
+    // bracket it rather than agree: +1.4 to +2.0 ns per element on a leaf-only container, 2.4x to
+    // 3.6x the derived glue. The module header says which instrument read which end, and why.
     let mut pending: Vec<T::Node> = Vec::new();
     for element in core::mem::take(&mut self.values) {
       element.into_children(&mut pending);
