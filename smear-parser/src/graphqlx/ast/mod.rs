@@ -231,6 +231,7 @@ impl<S, Span> Sealed for InputValue<S, Span> {}
 impl<S, Span> Nestable for InputValue<S, Span> {
   type Node = Self;
 
+  #[inline]
   fn into_children(self, pending: &mut Vec<Self>) {
     match self {
       Self::Variable(_)
@@ -328,6 +329,7 @@ impl<S, Span> Sealed for ConstInputValue<S, Span> {}
 impl<S, Span> Nestable for ConstInputValue<S, Span> {
   type Node = Self;
 
+  #[inline]
   fn into_children(self, pending: &mut Vec<Self>) {
     match self {
       Self::Boolean(_)

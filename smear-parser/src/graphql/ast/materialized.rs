@@ -157,6 +157,7 @@ impl<S, I> Sealed for InputValue<S, I> {}
 impl<S, I> Nestable for InputValue<S, I> {
   type Node = Self;
 
+  #[inline]
   fn into_children(self, pending: &mut std::vec::Vec<Self>) {
     match self {
       // A leaf owns no value, so it is released here rather than put on the worklist.
@@ -246,6 +247,7 @@ impl<S, I> Sealed for ConstInputValue<S, I> {}
 impl<S, I> Nestable for ConstInputValue<S, I> {
   type Node = Self;
 
+  #[inline]
   fn into_children(self, pending: &mut std::vec::Vec<Self>) {
     match self {
       Self::Boolean(_)
