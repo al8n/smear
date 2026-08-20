@@ -661,16 +661,23 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
       "UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>)",
       "UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>)",
       "EndOfInput",
+      "NestingLimitExceeded",
       "Other(std::borrow::Cow<'static, str>)",
     ],
-    reason: "ONE variant changed: `IntOverflow(S)` became `IntOverflow(IntOverflow<S>)`. \
-       SOURCE-BREAKING, ACCEPTED AND DECLARED — see the section of that name on `ErrorData` for \
-       what breaks, what it buys and why the alternatives are worse. The variant predates the \
-       merge base, so this reshapes an old name rather than adding a new one: an existing match \
-       arm that binds the payload and uses it as `S` stops compiling, as does a call to the \
-       derived `unwrap_int_overflow`, in EVERY configuration including the one with \
-       `materialized-numbers` off. The other 21 lines above are the merge base's, unedited, and \
-       repeating them is the point — this entry approves one reshaping, not the enum.",
+    reason: "TWO changes, and they were reviewed separately. (1) `IntOverflow(S)` became \
+       `IntOverflow(IntOverflow<S>)`. SOURCE-BREAKING, ACCEPTED AND DECLARED — see the section of \
+       that name on `ErrorData` for what breaks, what it buys and why the alternatives are worse. \
+       The variant predates the merge base, so this reshapes an old name rather than adding a new \
+       one: an existing match arm that binds the payload and uses it as `S` stops compiling, as \
+       does a call to the derived `unwrap_int_overflow`, in EVERY configuration including the one \
+       with `materialized-numbers` off. (2) `NestingLimitExceeded` is NEW, added by smear issue \
+       #169's repair. Not source-breaking — the enum is `#[non_exhaustive]`, so every downstream \
+       exhaustive match already carries a wildcard — and it is a UNIT variant, so nothing binds. \
+       It replaces `Other(\"nesting limit exceeded\")` because the PARSER now reads the \
+       discriminator back (the dialect's `MaybeTerminal` arm, read at five document-root catch \
+       sites), and a string comparison there is one rewording away from a permanent `false` with \
+       nothing failing. The other 21 lines above are the merge base's, unedited, and repeating \
+       them is the point — this entry approves two named changes, not the enum.",
   },
   Recorded {
     file: "src/graphql/error.rs",
@@ -862,13 +869,15 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // A scan that stops finding enums has nothing left to check; a scan that finds them and reads
   // no variants out of them is accounted for on the attribute axis and silent on the payload one.
   //
-  // 16 enums = 12 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 139 variants =
-  // 105 + 17 + 17 across the same three files. Update either count only after checking why it
+  // 16 enums = 12 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 140 variants =
+  // 106 + 17 + 17 across the same three files. Update either count only after checking why it
   // moved.
   //
-  // It moved once, and this is the reading: `refactor/materialised-generic` deleted
+  // It has moved twice, and these are the readings. `refactor/materialised-generic` deleted
   // ast/materialized32.rs, whose two enums were ast/materialized.rs's with `IntValue` resolving
-  // to a different width. 18 -> 16 and 156 -> 139 is that file leaving, and nothing else.
+  // to a different width: 18 -> 16 and 156 -> 139 is that file leaving, and nothing else.
+  // `fix/nesting-refusal-amplification` then added `ErrorData::NestingLimitExceeded`: 139 -> 140
+  // is that one variant, the enum count unmoved, and the recorded row below carries why.
   assert_eq!(
     found.len(),
     16,
@@ -879,8 +888,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   );
   let variants_read: usize = found.iter().map(|enum_| enum_.variants.len()).sum();
   assert_eq!(
-    variants_read, 139,
-    "the scan read {variants_read} variant(s) out of 16 enums, expected 139 — an enum gained or \
+    variants_read, 140,
+    "the scan read {variants_read} variant(s) out of 16 enums, expected 140 — an enum gained or \
      lost one, or `read_variants` stopped seeing them",
   );
 

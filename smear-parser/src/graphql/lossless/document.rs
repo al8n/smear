@@ -90,6 +90,8 @@ use super::{
   value::Constness,
 };
 
+use tokora::error::MaybeTerminal as _;
+
 use crate::lossless::lossless_production;
 
 lossless_production! {
@@ -392,12 +394,19 @@ lossless_production! {
   /// [`recover::resync_to_definition`], which guarantees it too. **Deleting either guarantee
   /// hangs the suite rather than failing it.**
   ///
-  /// # Why the caught `Err` is dropped rather than propagated
+  /// # Why the caught `Err` is dropped rather than propagated — except for one of them
   ///
   /// It has already been reported — [`expect`] emits at the point of
   /// failure — so the value carries nothing this loop can add, and propagating it would abandon
   /// every definition after the first mistake. That is the whole difference between a lossless
   /// parser and a recogniser.
+  ///
+  /// **A nesting refusal is the exception, and it is not a syntax error.** It says the parse ran
+  /// out of a *resource*, so resynchronising and carrying on re-reads the abandoned nest at the
+  /// document level and reports every closer of it — smear issue #169, 67 diagnostics for one
+  /// refusal, growing with the document. [`depth::descend`](crate::lossless::depth::descend)'s
+  /// `The refusal ends the document` note carries the reasoning and the measurements; this arm is
+  /// one of the five that read it.
   fn document<'inp, Src, Ctx>(inp) {
     node(
       K::Document.raw(),
@@ -407,7 +416,10 @@ lossless_production! {
         }
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if definition::<Src, Ctx>(inp).is_err() {
+          if let Err(e) = definition::<Src, Ctx>(inp) {
+            if e.is_terminal() {
+              return Err(e);
+            }
             recover::resync_to_definition::<Src, Ctx>(inp)?;
           }
         }
@@ -435,7 +447,11 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_DEFINITION_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if type_system_definition_or_extension::<Src, Ctx>(inp).is_err() {
+          if let Err(e) = type_system_definition_or_extension::<Src, Ctx>(inp) {
+            // The refusal arm [`document`]'s note explains.
+            if e.is_terminal() {
+              return Err(e);
+            }
             recover::resync_to_definition::<Src, Ctx>(inp)?;
           }
         }
@@ -452,10 +468,13 @@ lossless_production! {
   /// the rest of the source uncommitted. Draining here turns that into a reportable parse rather
   /// than a panic in [`parse_document`](super::parse_document) — the defect Task 5 recorded and
   /// could not reach, `document` having been a stub.
+  ///
+  /// The drain is [`depth::drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal)
+  /// rather than a bare `skip_while`, because a refusal must not read the tail: see that
+  /// function's note for the diagnostic count that costs.
   fn document_entry<'inp, Src, Ctx>(inp) {
     let out = document::<Src, Ctx>(inp);
-    inp.skip_while(|_| true)?;
-    out
+    crate::lossless::depth::drain_unless_terminal(inp, out)
   }
 
   /// [`type_system_document`] plus the drain, for the same reason [`document_entry`] carries one.
@@ -467,7 +486,6 @@ lossless_production! {
   /// in materialization instead of a reportable parse.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
     let out = type_system_document::<Src, Ctx>(inp);
-    inp.skip_while(|_| true)?;
-    out
+    crate::lossless::depth::drain_unless_terminal(inp, out)
   }
 }

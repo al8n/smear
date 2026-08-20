@@ -181,7 +181,8 @@ macro_rules! lossless_production {
           + ::core::convert::From<
             ::tokora::error::RecursionLimitReached<usize, $crate::$dm::$dl::Brand>,
           >
-          + $crate::lossless::depth::FromNestingLimit,
+          + $crate::lossless::depth::FromNestingLimit
+          + ::tokora::error::MaybeTerminal,
     $body
   )*};
 }
@@ -358,8 +359,9 @@ macro_rules! lossless_drivers {
                 // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
                 // parameter that matches `L::Source`.
                 let out = super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?);
-                inp.skip_while(|_| true)?;
-                out
+                // Not a bare `skip_while`: a terminal stop must not read the tail. See
+                // `crate::lossless::depth::drain_unless_terminal`.
+                $crate::lossless::depth::drain_unless_terminal(inp, out)
               },
             );
 
@@ -525,14 +527,21 @@ macro_rules! lossless_error_impls {
     /// more than the budget admits, and reported at an empty span on the parse's committed end:
     /// the refused frame has consumed nothing of its own, so there is no lexeme to point at.
     ///
-    /// **The payload is a message, not a variant, and that is the same ruling the lexer's own
-    /// trip already carries.** A depth trip reaches a consumer through
-    /// [`Parse::diagnostics`](crate::lossless::runner::Parse::diagnostics), which keeps the span
-    /// and the severity and drops the typed payload to stay lifetime-free — so a dedicated
-    /// `ErrorData` variant would be observable nowhere the trip is actually read. The residual is
-    /// the one `lossless/runner.rs` already records: a consumer sees a positioned error rather
-    /// than "this document is too deeply nested", and closing that is a change to the *diagnostic
-    /// surface*, not to this conversion.
+    /// **The payload is a dedicated variant, and it did not used to be.** It was
+    /// `Other("nesting limit exceeded")`, on the ruling that a depth trip reaches a consumer
+    /// through [`Parse::diagnostics`](crate::lossless::runner::Parse::diagnostics) — which keeps
+    /// the span and the severity and drops the typed payload to stay lifetime-free — so a variant
+    /// would be observable nowhere the trip is actually read. What that missed is that the
+    /// **parser** reads it: smear issue #169's repair asks
+    /// [`MaybeTerminal::is_terminal`](::tokora::error::MaybeTerminal::is_terminal) at every
+    /// document root that catches, and the dialect's arm for that answers off this variant.
+    /// Against a `Cow` message the arm would be a string comparison that a reworded constructor
+    /// turns into a permanent `false` — with no build failure and no test failure, only the
+    /// amplification back on input that reaches the ceiling.
+    ///
+    /// The residual `lossless/runner.rs` records is untouched: a consumer still sees a positioned
+    /// error rather than "this document is too deeply nested", because the projection still drops
+    /// the payload. Closing that is a change to the *diagnostic surface*, not to this conversion.
     impl<S> $crate::lossless::depth::FromNestingLimit for $errors<S> {
       #[inline]
       fn nesting_limit_exceeded(
@@ -540,11 +549,7 @@ macro_rules! lossless_error_impls {
         _attempted: usize,
         _limit: usize,
       ) -> Self {
-        $value::new(
-          span,
-          $error_data::Other(::std::borrow::Cow::Borrowed("nesting limit exceeded")),
-        )
-        .into()
+        $value::nesting_limit_exceeded(span).into()
       }
     }
 

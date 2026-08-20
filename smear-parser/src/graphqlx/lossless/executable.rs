@@ -98,6 +98,8 @@ pub(crate) fn starts_executable_keyword(keyword: Option<Keyword>) -> bool {
   )
 }
 
+use tokora::error::MaybeTerminal as _;
+
 use crate::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
@@ -351,7 +353,11 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if super::document::import_or_executable_definition::<Src, Ctx>(inp).is_err() {
+          if let Err(e) = super::document::import_or_executable_definition::<Src, Ctx>(inp) {
+            // The refusal arm `document.rs`'s `document` note explains.
+            if e.is_terminal() {
+              return Err(e);
+            }
             recover::resync_to_definition::<Src, Ctx>(inp)?;
           }
         }
@@ -364,11 +370,12 @@ lossless_production! {
   /// [`executable_document`], then a drain — the production [`super::parse_executable_document`]
   /// applies.
   ///
-  /// See `document.rs`'s module docs for why the drain is not optional.
+  /// See `document.rs`'s module docs for why the drain is not optional — and
+  /// [`depth::drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal) for the one
+  /// outcome that must not read the tail.
   fn executable_document_entry<'inp, Src, Ctx>(inp) {
     let out = executable_document::<Src, Ctx>(inp);
-    inp.skip_while(|_| true)?;
-    out
+    crate::lossless::depth::drain_unless_terminal(inp, out)
   }
 }
 
