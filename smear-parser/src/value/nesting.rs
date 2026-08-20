@@ -346,8 +346,17 @@ impl<T: Nestable> tokora::container::Container<T> for Nested<T> {
     self.values.len()
   }
 
+  /// `usize::MAX`, which is what the trait asks of a container with no fixed maximum and what
+  /// tokora's own `Vec` impl answers.
+  ///
+  /// Not `Vec::capacity`. That is what is currently *allocated*, and this container grows past it
+  /// on the next push — so reporting it as a maximum says a fresh [`Nested::empty`] is full, and
+  /// says something different again after every reallocation. tokora reads this in exactly one
+  /// place, to name the bound in a `FullContainer` diagnostic **after** a push was refused, and a
+  /// push here is never refused; but the method is public on a public type, and a wrong answer
+  /// that no caller happens to read is still a wrong answer.
   #[inline]
   fn max_capacity(&self) -> usize {
-    self.values.capacity()
+    usize::MAX
   }
 }
