@@ -1261,7 +1261,7 @@ mod value_depth {
     let mut value = leaf("null");
     let span = *value.as_span();
     for _ in 0..depth {
-      value = ConstInputValue::List(ConstList::new(span, std::vec![value]));
+      value = ConstInputValue::List(ConstList::new(span, std::vec![value].into()));
     }
     value
   }

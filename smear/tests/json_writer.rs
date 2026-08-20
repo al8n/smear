@@ -795,7 +795,7 @@ fn nested(depth: usize) -> ConstInputValue<&'static str> {
   for _ in 0..depth {
     value = ConstInputValue::List(materialized::ConstList::<&'static str, i64>::new(
       span,
-      vec![value],
+      vec![value].into(),
     ));
   }
   value

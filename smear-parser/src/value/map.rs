@@ -54,6 +54,28 @@ impl<Key, Value, Span> IntoSpan<Span> for MapEntry<Key, Value, Span> {
   }
 }
 
+/// An entry nests through **both** halves: in GraphQLx a map's key is an input value too.
+impl<Key, Value, Span> crate::value::Sealed for MapEntry<Key, Value, Span>
+where
+  Key: crate::value::Nestable,
+  Value: crate::value::Nestable<Node = Key::Node>,
+{
+}
+
+impl<Key, Value, Span> crate::value::Nestable for MapEntry<Key, Value, Span>
+where
+  Key: crate::value::Nestable,
+  Value: crate::value::Nestable<Node = Key::Node>,
+{
+  type Node = Key::Node;
+
+  #[inline]
+  fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
+    self.key.into_children(pending);
+    self.value.into_children(pending);
+  }
+}
+
 impl<Key, Value, Span> IntoComponents for MapEntry<Key, Value, Span> {
   type Components = (Span, Key, Value);
 
@@ -101,15 +123,6 @@ impl<Key, Value, Span, Container> Map<Key, Value, Span, Container> {
   #[inline]
   pub fn into_entries(self) -> Container {
     self.entries
-  }
-
-  /// The entries, mutably, so a release that only borrows this map can empty it.
-  ///
-  /// Crate-private for the reasons on [`List::values_mut`](crate::value::List::values_mut); see
-  /// [`nesting`](crate::value::nesting) for what needs it.
-  #[inline]
-  pub(crate) fn entries_mut(&mut self) -> &mut Container {
-    &mut self.entries
   }
 }
 

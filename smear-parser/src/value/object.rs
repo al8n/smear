@@ -55,6 +55,24 @@ impl<Name, Value, Span> IntoSpan<Span> for ObjectField<Name, Value, Span> {
   }
 }
 
+/// A field is not itself a value, so the worklist it feeds is the *value*'s.
+impl<Name, Value: crate::value::Nestable, Span> crate::value::Sealed
+  for ObjectField<Name, Value, Span>
+{
+}
+
+impl<Name, Value: crate::value::Nestable, Span> crate::value::Nestable
+  for ObjectField<Name, Value, Span>
+{
+  type Node = Value::Node;
+
+  #[inline]
+  fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
+    // The name is a leaf and is released here; only the value can nest.
+    self.value.into_children(pending);
+  }
+}
+
 impl<Name, Value, Span> IntoComponents for ObjectField<Name, Value, Span> {
   type Components = (Span, Name, Value);
 
@@ -102,15 +120,6 @@ impl<Name, Value, Span, Container> Object<Name, Value, Span, Container> {
   #[inline]
   pub fn into_fields(self) -> Container {
     self.fields
-  }
-
-  /// The fields, mutably, so a release that only borrows this object can empty it.
-  ///
-  /// Crate-private for the reasons on [`List::values_mut`](crate::value::List::values_mut); see
-  /// [`nesting`](crate::value::nesting) for what needs it.
-  #[inline]
-  pub(crate) fn fields_mut(&mut self) -> &mut Container {
-    &mut self.fields
   }
 }
 

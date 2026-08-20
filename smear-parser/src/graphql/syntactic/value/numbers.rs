@@ -72,9 +72,12 @@ use crate::graphql::ast::materialized::{
 };
 #[cfg(feature = "materialized-numbers")]
 use crate::graphql::error::{IntOverflow, IntWidth};
-use crate::graphql::{
-  ast::{ConstInputValue, DefaultVec, InputValue, Name},
-  error::GraphqlError as DialectGraphqlError,
+use crate::{
+  graphql::{
+    ast::{ConstInputValue, InputValue, Name},
+    error::GraphqlError as DialectGraphqlError,
+  },
+  value::Nested,
 };
 
 /// What an `Int` and a `Float` leaf carry, how a literal's slice becomes one, and which value
@@ -101,9 +104,13 @@ pub(crate) trait Numbers<S> {
   /// How a conversion can fail, carrying whatever the report needs.
   type Error;
   /// The input-value tree this marker assembles.
-  type Value;
+  ///
+  /// `Nestable` because the tree's containers are [`Nested`], whose `Drop` is what keeps a deep
+  /// value from aborting the process. The bound costs nothing outside this crate: `Numbers` is
+  /// `pub(crate)` and its two implementors are here.
+  type Value: crate::value::Nestable<Node = Self::Value>;
   /// The constant input-value tree this marker assembles.
-  type ConstValue;
+  type ConstValue: crate::value::Nestable<Node = Self::ConstValue>;
 
   /// Builds the `Int` payload.
   fn int(slice: S) -> Result<Self::Int, Self::Error>;
@@ -117,7 +124,7 @@ pub(crate) trait Numbers<S> {
 
 /// The list node a marker's value tree holds.
 pub(crate) type ValueList<S, N> =
-  crate::value::List<<N as Numbers<S>>::Value, SimpleSpan, DefaultVec<<N as Numbers<S>>::Value>>;
+  crate::value::List<<N as Numbers<S>>::Value, SimpleSpan, Nested<<N as Numbers<S>>::Value>>;
 
 /// One object field of a marker's value tree.
 pub(crate) type ValueObjectField<S, N> =
@@ -128,14 +135,14 @@ pub(crate) type ValueObject<S, N> = crate::value::Object<
   Name<S>,
   <N as Numbers<S>>::Value,
   SimpleSpan,
-  DefaultVec<ValueObjectField<S, N>>,
+  Nested<ValueObjectField<S, N>>,
 >;
 
 /// The list node a marker's constant value tree holds.
 pub(crate) type ConstValueList<S, N> = crate::value::List<
   <N as Numbers<S>>::ConstValue,
   SimpleSpan,
-  DefaultVec<<N as Numbers<S>>::ConstValue>,
+  Nested<<N as Numbers<S>>::ConstValue>,
 >;
 
 /// One object field of a marker's constant value tree.
@@ -147,7 +154,7 @@ pub(crate) type ConstValueObject<S, N> = crate::value::Object<
   Name<S>,
   <N as Numbers<S>>::ConstValue,
   SimpleSpan,
-  DefaultVec<ConstValueObjectField<S, N>>,
+  Nested<ConstValueObjectField<S, N>>,
 >;
 
 /// The default-value node a marker's constant value tree holds.

@@ -53,3 +53,12 @@ mod value;
 
 /// The default container type used for AST collections (lists, objects).
 pub type DefaultVec<T> = Vec<T>;
+
+/// The container the value carriers hold their children in, and the trait that lets it take one
+/// apart.
+///
+/// Re-exported here because it is the default `Container` argument of every value alias below, so
+/// it reaches a consumer's signatures whether or not they name it. [`Nested`] is a `Vec` in every
+/// respect a consumer can observe; what it adds is the iterative release that keeps a deeply nested
+/// value from aborting the process on the way out. [`Nestable`] is sealed.
+pub use crate::value::{Nestable, Nested};

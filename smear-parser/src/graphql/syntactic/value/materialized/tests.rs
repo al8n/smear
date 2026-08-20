@@ -152,7 +152,7 @@ fn try_int_declines_without_consuming_and_converts_when_it_accepts() {
 fn strings_keep_their_slice() {
   fn at<I: TestInt>() {
     let parsed = drive_str(value::<_, _, I>, r#""a\nb""#).expect("str");
-    match &parsed {
+    match parsed {
       InputValue::String(s) => assert_eq!(*s.source(), r#""a\nb""#),
       other => panic!("expected a string at {}, got {other:?}", I::WIDTH),
     }
@@ -196,7 +196,7 @@ fn const_values_materialize_too() {
   fn at<I: TestInt>() {
     let width = I::WIDTH;
     let parsed = drive_str(const_value::<_, _, I>, "{n: 5, f: 0.5}").expect("str");
-    match &parsed {
+    match parsed {
       ConstInputValue::Object(object) => {
         assert!(
           matches!(object.fields()[0].value(), ConstInputValue::Int(v) if Into::<i64>::into(*v.source()) == 5)

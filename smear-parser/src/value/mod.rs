@@ -30,7 +30,8 @@ pub use set::*;
 pub use string::*;
 pub use variable::*;
 
-pub(crate) use nesting::{Unnest, push_nesting, release};
+pub(crate) use nesting::Sealed;
+pub use nesting::{Nestable, Nested};
 
 mod boolean_value;
 mod default_input_value;

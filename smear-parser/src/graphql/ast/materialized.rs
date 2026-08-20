@@ -25,7 +25,7 @@
 //! `graphql/ast/value.rs` **was byte-identical to the revision before this axis existed**, which
 //! was a stronger compatibility statement than any test. It no longer is, and the edit that ended
 //! it is not this axis reaching across: it is the iterative release in
-//! [`nesting`](crate::value::nesting), applied to both trees at once because the process abort it
+//! [`Nested`], applied to both trees at once because the process abort it
 //! removes belongs to the *shape* — a value holding a container of values — and not to the numeric
 //! payload that tells these two files apart.
 //!
@@ -102,10 +102,10 @@ use tokora::{
 };
 
 use super::{
-  BooleanValue as AstBooleanValue, DefaultVec, EnumValue as AstEnumValue, Name,
-  NullValue as AstNullValue, StringValue as AstStringValue, VariableValue as AstVariableValue,
+  BooleanValue as AstBooleanValue, EnumValue as AstEnumValue, Name, NullValue as AstNullValue,
+  StringValue as AstStringValue, VariableValue as AstVariableValue,
 };
-use crate::value::{Unnest, push_nesting, release};
+use crate::value::{Nestable, Nested, Sealed};
 
 /// A GraphQL integer literal, materialised as `I`.
 pub type IntValue<I, Span = SimpleSpan> = super::IntValue<I, Span>;
@@ -121,68 +121,45 @@ pub type FloatValue<Span = SimpleSpan> = super::FloatValue<f64, Span>;
 /// Variant for variant [`ast::InputValue`](crate::graphql::ast::InputValue), with `Float`
 /// carrying [`f64`] and `Int` carrying `I` — see the module header for the two widths. Every
 /// other leaf is the *same type* the slice tree holds, not a copy of it.
-/// # The by-value `unwrap_*` forms are gone, and a nested value is why
+/// # This enum declares no `Drop`, and that is load-bearing
 ///
-/// `#[unwrap(ref, ref_mut)]` and `#[try_unwrap(ref, ref_mut)]` are repeated on **every variant**
-/// rather than only on the enum, which is how `derive_more` is told to stop generating the owned
-/// `unwrap_list(self) -> …` and `try_unwrap_list(self) -> Result<…, Self>` pairs. Nothing else
-/// changed about the variant set or the shape.
-///
-/// The reason is not taste. This enum has a hand-written [`Drop`] — see
-/// [`nesting`](crate::value::nesting) for the abort it removes — and Rust does not let a payload be
-/// moved out of a type that implements `Drop` (`E0509`). *Some* by-value accessor had to go; what
-/// went is the one whose replacement is a two-character edit, since `unwrap_list_ref` and
-/// `try_unwrap_list_ref` are generated exactly as before and `is_list` with them.
+/// Releasing a deeply nested one used to abort the process, one native frame per level
+/// (al8n/smear#165). The repair is [`Nested`], the container the `List` and
+/// `Object` arms hold their children in — **not** a `Drop` on this enum, which would have cost
+/// every by-value `unwrap_*` and `try_unwrap_*` to `E0509`. Everything `derive_more` generated
+/// before is generated now.
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum InputValue<S, I> {
   /// Variable reference (e.g., `$userId`).
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Variable(AstVariableValue<S>),
   /// Boolean value (`true` or `false`).
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Boolean(AstBooleanValue<S>),
   /// String value (inline or block string).
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   String(AstStringValue<S>),
   /// Floating-point number, materialised.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Float(FloatValue),
   /// Integer number, materialised at `I`.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Int(IntValue<I>),
   /// Enum value name.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Enum(AstEnumValue<S>),
   /// The `null` literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Null(AstNullValue<S>),
   /// List of values.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   List(List<S, I>),
   /// Object value with named fields.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Object(Object<S, I>),
 }
 
-impl<S, I> Unnest for InputValue<S, I> {
-  #[inline]
-  fn nests(&self) -> bool {
-    matches!(self, Self::List(_) | Self::Object(_))
-  }
+impl<S, I> Sealed for InputValue<S, I> {}
 
-  fn unnest(&mut self, pending: &mut std::vec::Vec<Self>) {
+impl<S, I> Nestable for InputValue<S, I> {
+  type Node = Self;
+
+  fn into_children(self, pending: &mut std::vec::Vec<Self>) {
     match self {
+      // A leaf owns no value, so it is released here rather than put on the worklist.
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -190,24 +167,16 @@ impl<S, I> Unnest for InputValue<S, I> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => push_nesting(pending, list.values_mut().drain(..)),
-      Self::Object(object) => push_nesting(
-        pending,
-        // A field is `(span, name, value)` and only the value can nest; the name is a leaf and is
-        // released here. `ObjectField` has no `Drop`, so it can still be taken apart by move.
+      Self::List(list) => pending.extend(list.into_values()),
+      // A field is `(span, name, value)` and only the value can nest; the name is a leaf and is
+      // released here.
+      Self::Object(object) => pending.extend(
         object
-          .fields_mut()
-          .drain(..)
+          .into_fields()
+          .into_iter()
           .map(|field| field.into_components().2),
       ),
     }
-  }
-}
-
-impl<S, I> Drop for InputValue<S, I> {
-  #[inline]
-  fn drop(&mut self) {
-    release(self);
   }
 }
 
@@ -229,14 +198,19 @@ impl<S, I> AsSpan<SimpleSpan> for InputValue<S, I> {
 }
 
 impl<S, I> IntoSpan<SimpleSpan> for InputValue<S, I> {
-  /// The same span the borrowing accessor answers, copied out.
-  ///
-  /// It used to reach the span by matching `self` by value and moving each payload out, which
-  /// `E0509` forbids now that this enum has a [`Drop`]. [`SimpleSpan`] is [`Copy`], so the answer
-  /// is identical and the value is released on the way out exactly as it was before.
   #[inline]
   fn into_span(self) -> SimpleSpan {
-    *self.as_span()
+    match self {
+      Self::Variable(v) => v.into_span(),
+      Self::Boolean(v) => v.into_span(),
+      Self::String(v) => v.into_span(),
+      Self::Float(v) => v.into_span(),
+      Self::Int(v) => v.into_span(),
+      Self::Enum(v) => v.into_span(),
+      Self::Null(v) => v.into_span(),
+      Self::List(v) => v.into_span(),
+      Self::Object(v) => v.into_span(),
+    }
   }
 }
 
@@ -244,53 +218,35 @@ impl<S, I> IntoSpan<SimpleSpan> for InputValue<S, I> {
 ///
 /// Variant for variant [`ast::ConstInputValue`](crate::graphql::ast::ConstInputValue).
 ///
-/// The per-variant `unwrap` attributes and the [`Drop`] below are [`InputValue`]'s, for the reason
-/// stated there.
+/// Like [`InputValue`], it declares no `Drop`; the release is [`Nested`]'s.
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S, I> {
   /// Boolean value (`true` or `false`).
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Boolean(AstBooleanValue<S>),
   /// String value (inline or block string).
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   String(AstStringValue<S>),
   /// Floating-point number, materialised.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Float(FloatValue),
   /// Integer number, materialised at `I`.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Int(IntValue<I>),
   /// Enum value name.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Enum(AstEnumValue<S>),
   /// The `null` literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Null(AstNullValue<S>),
   /// List of constant values.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   List(ConstList<S, I>),
   /// Object value with named fields (all values must be constant).
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Object(ConstObject<S, I>),
 }
 
-impl<S, I> Unnest for ConstInputValue<S, I> {
-  #[inline]
-  fn nests(&self) -> bool {
-    matches!(self, Self::List(_) | Self::Object(_))
-  }
+impl<S, I> Sealed for ConstInputValue<S, I> {}
 
-  fn unnest(&mut self, pending: &mut std::vec::Vec<Self>) {
+impl<S, I> Nestable for ConstInputValue<S, I> {
+  type Node = Self;
+
+  fn into_children(self, pending: &mut std::vec::Vec<Self>) {
     match self {
       Self::Boolean(_)
       | Self::String(_)
@@ -298,22 +254,14 @@ impl<S, I> Unnest for ConstInputValue<S, I> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => push_nesting(pending, list.values_mut().drain(..)),
-      Self::Object(object) => push_nesting(
-        pending,
+      Self::List(list) => pending.extend(list.into_values()),
+      Self::Object(object) => pending.extend(
         object
-          .fields_mut()
-          .drain(..)
+          .into_fields()
+          .into_iter()
           .map(|field| field.into_components().2),
       ),
     }
-  }
-}
-
-impl<S, I> Drop for ConstInputValue<S, I> {
-  #[inline]
-  fn drop(&mut self) {
-    release(self);
   }
 }
 
@@ -334,11 +282,18 @@ impl<S, I> AsSpan<SimpleSpan> for ConstInputValue<S, I> {
 }
 
 impl<S, I> IntoSpan<SimpleSpan> for ConstInputValue<S, I> {
-  /// [`InputValue::into_span`](InputValue#impl-IntoSpan<SimpleSpan>-for-InputValue<S,+I>)'s body,
-  /// for the same reason.
   #[inline]
   fn into_span(self) -> SimpleSpan {
-    *self.as_span()
+    match self {
+      Self::Boolean(v) => v.into_span(),
+      Self::String(v) => v.into_span(),
+      Self::Float(v) => v.into_span(),
+      Self::Int(v) => v.into_span(),
+      Self::Enum(v) => v.into_span(),
+      Self::Null(v) => v.into_span(),
+      Self::List(v) => v.into_span(),
+      Self::Object(v) => v.into_span(),
+    }
   }
 }
 
@@ -346,22 +301,22 @@ impl<S, I> IntoSpan<SimpleSpan> for ConstInputValue<S, I> {
 ///
 /// `Container` stays the **last** argument, as it is on the slice twin, so the two sets differ in
 /// one inserted parameter and not in what an existing argument means.
-pub type List<S, I, Container = DefaultVec<InputValue<S, I>>> =
+pub type List<S, I, Container = Nested<InputValue<S, I>>> =
   crate::value::List<InputValue<S, I>, SimpleSpan, Container>;
 
 /// An object value whose numeric leaves are materialised.
-pub type Object<S, I, Container = DefaultVec<ObjectField<S, I>>> =
+pub type Object<S, I, Container = Nested<ObjectField<S, I>>> =
   crate::value::Object<Name<S>, InputValue<S, I>, SimpleSpan, Container>;
 
 /// An object field whose value's numeric leaves are materialised.
 pub type ObjectField<S, I> = crate::value::ObjectField<Name<S>, InputValue<S, I>>;
 
 /// A constant list value whose numeric leaves are materialised.
-pub type ConstList<S, I, Container = DefaultVec<ConstInputValue<S, I>>> =
+pub type ConstList<S, I, Container = Nested<ConstInputValue<S, I>>> =
   crate::value::List<ConstInputValue<S, I>, SimpleSpan, Container>;
 
 /// A constant object value whose numeric leaves are materialised.
-pub type ConstObject<S, I, Container = DefaultVec<ConstObjectField<S, I>>> =
+pub type ConstObject<S, I, Container = Nested<ConstObjectField<S, I>>> =
   crate::value::Object<Name<S>, ConstInputValue<S, I>, SimpleSpan, Container>;
 
 /// A constant object field whose value's numeric leaves are materialised.

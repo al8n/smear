@@ -10,10 +10,7 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use crate::{
-  graphqlx::GraphQLx,
-  value::{Unnest, push_nesting, release},
-};
+use crate::{graphqlx::GraphQLx, value::Sealed};
 
 /// GraphQLx argument AST aliases.
 pub mod argument;
@@ -43,6 +40,15 @@ pub use type_system::*;
 
 /// The default collection container used by GraphQLx AST collections.
 pub type DefaultVec<T> = Vec<T>;
+
+/// The container the value carriers hold their children in, and the trait that lets it take one
+/// apart.
+///
+/// Re-exported here because it is the default `Container` argument of every value alias below, so
+/// it reaches a consumer's signatures whether or not they name it. [`Nested`] is a `Vec` in every
+/// respect a consumer can observe; what it adds is the iterative release that keeps a deeply nested
+/// value from aborting the process on the way out. [`Nestable`] is sealed.
+pub use crate::value::{Nestable, Nested};
 
 /// A GraphQLx name.
 #[allow(type_alias_bounds)]
@@ -85,11 +91,11 @@ pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<Path<S, Span>
 pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S, Span>, Span>;
 
 /// A GraphQLx list value.
-pub type List<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
+pub type List<S, Span = SimpleSpan, Container = Nested<InputValue<S, Span>>> =
   crate::value::List<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx set value.
-pub type Set<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
+pub type Set<S, Span = SimpleSpan, Container = Nested<InputValue<S, Span>>> =
   crate::value::Set<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx map entry.
@@ -97,7 +103,7 @@ pub type MapEntry<S, Span = SimpleSpan> =
   crate::value::MapEntry<InputValue<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx map value.
-pub type Map<S, Span = SimpleSpan, Container = DefaultVec<MapEntry<S, Span>>> =
+pub type Map<S, Span = SimpleSpan, Container = Nested<MapEntry<S, Span>>> =
   crate::value::Map<InputValue<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx object field.
@@ -105,15 +111,15 @@ pub type ObjectField<S, Span = SimpleSpan> =
   crate::value::ObjectField<Name<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx object value.
-pub type Object<S, Span = SimpleSpan, Container = DefaultVec<ObjectField<S, Span>>> =
+pub type Object<S, Span = SimpleSpan, Container = Nested<ObjectField<S, Span>>> =
   crate::value::Object<Name<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx list value.
-pub type ConstList<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
+pub type ConstList<S, Span = SimpleSpan, Container = Nested<ConstInputValue<S, Span>>> =
   crate::value::List<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx set value.
-pub type ConstSet<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
+pub type ConstSet<S, Span = SimpleSpan, Container = Nested<ConstInputValue<S, Span>>> =
   crate::value::Set<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx map entry.
@@ -121,7 +127,7 @@ pub type ConstMapEntry<S, Span = SimpleSpan> =
   crate::value::MapEntry<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx map value.
-pub type ConstMap<S, Span = SimpleSpan, Container = DefaultVec<ConstMapEntry<S, Span>>> =
+pub type ConstMap<S, Span = SimpleSpan, Container = Nested<ConstMapEntry<S, Span>>> =
   crate::value::Map<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx object field.
@@ -129,7 +135,7 @@ pub type ConstObjectField<S, Span = SimpleSpan> =
   crate::value::ObjectField<Name<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx object value.
-pub type ConstObject<S, Span = SimpleSpan, Container = DefaultVec<ConstObjectField<S, Span>>> =
+pub type ConstObject<S, Span = SimpleSpan, Container = Nested<ConstObjectField<S, Span>>> =
   crate::value::Object<Name<S, Span>, ConstInputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx default input value assignment.
@@ -138,18 +144,15 @@ pub type DefaultInputValue<S, Span = SimpleSpan> =
 
 /// A GraphQLx input value, including variables and extended collections.
 ///
-/// # The by-value `unwrap_*` forms are gone, and a nested value is why
+/// # This enum declares no `Drop`, and that is load-bearing
 ///
-/// `#[unwrap(ref, ref_mut)]` and `#[try_unwrap(ref, ref_mut)]` are repeated on **every variant**
-/// rather than only on the enum, which is how `derive_more` is told to stop generating the owned
-/// `unwrap_list(self) -> …` and `try_unwrap_list(self) -> Result<…, Self>` pairs. The variant set
-/// and the shape are untouched, and `unwrap_list_ref`, `unwrap_list_mut`, `try_unwrap_list_ref`
-/// and `is_list` are generated exactly as before.
+/// Releasing a deeply nested one used to abort the process, one native frame per level. The repair
+/// is [`Nested`], the container the four nesting arms hold their children in
+/// — **not** a `Drop` on this enum, which would have cost every by-value `unwrap_*` and
+/// `try_unwrap_*` to `E0509`.
 ///
-/// This enum has a hand-written [`Drop`] — see [`nesting`](crate::value::nesting) for the process
-/// abort it removes — and Rust does not let a payload be moved out of a type that implements
-/// `Drop` (`E0509`). This dialect has **four** nesting variants rather than GraphQL's two, so it is
-/// the one where the defect had the most ways in.
+/// This dialect has **four** nesting variants rather than GraphQL's two, and a map entry nests
+/// through both halves, so it is the one where the defect had the most ways in.
 #[derive(
   Debug,
   Clone,
@@ -162,48 +165,26 @@ pub type DefaultInputValue<S, Span = SimpleSpan> =
 #[try_unwrap(ref, ref_mut)]
 pub enum InputValue<S, Span = SimpleSpan> {
   /// A variable reference (`$name`).
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Variable(VariableValue<S, Span>),
   /// A boolean literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Boolean(BooleanValue<S, Span>),
   /// A string literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   String(StringValue<S, Span>),
   /// A floating-point literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Float(FloatValue<S, Span>),
   /// An integer literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Int(IntValue<S, Span>),
   /// An enum path.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Enum(EnumValue<S, Span>),
   /// The `null` literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Null(NullValue<S, Span>),
   /// A list literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   List(List<S, Span>),
   /// A `set { ... }` literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Set(Set<S, Span>),
   /// A `map { key => value ... }` literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Map(Map<S, Span>),
   /// An object literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Object(Object<S, Span>),
 }
 
@@ -226,33 +207,31 @@ impl<S, Span> AsSpan<Span> for InputValue<S, Span> {
   }
 }
 
-/// # `Span: Clone`, and it is a narrowing rather than a convenience
-///
-/// This impl used to reach the span by matching `self` by value and moving each payload out, which
-/// `E0509` forbids now that the enum has a [`Drop`]. The only remaining door onto the span is
-/// [`AsSpan`], which lends one, so producing an owned `Span` needs the bound — and no bound can be
-/// added to a trait *method*, so it goes on the impl.
-///
-/// What that costs is an `IntoSpan` for a span type that cannot be duplicated. Every span in this
-/// workspace is [`SimpleSpan`], which is [`Copy`]; `Clone` rather than `Copy` is chosen so the impl
-/// stays available to the widest set of span types that can satisfy it at all.
-impl<S, Span: Clone> IntoSpan<Span> for InputValue<S, Span> {
+impl<S, Span> IntoSpan<Span> for InputValue<S, Span> {
   #[inline]
   fn into_span(self) -> Span {
-    self.as_span().clone()
+    match self {
+      Self::Variable(value) => value.into_span(),
+      Self::Boolean(value) => value.into_span(),
+      Self::String(value) => value.into_span(),
+      Self::Float(value) => value.into_span(),
+      Self::Int(value) => value.into_span(),
+      Self::Enum(value) => value.into_span(),
+      Self::Null(value) => value.into_span(),
+      Self::List(value) => value.into_span(),
+      Self::Set(value) => value.into_span(),
+      Self::Map(value) => value.into_span(),
+      Self::Object(value) => value.into_span(),
+    }
   }
 }
 
-impl<S, Span> Unnest for InputValue<S, Span> {
-  #[inline]
-  fn nests(&self) -> bool {
-    matches!(
-      self,
-      Self::List(_) | Self::Set(_) | Self::Map(_) | Self::Object(_)
-    )
-  }
+impl<S, Span> Sealed for InputValue<S, Span> {}
 
-  fn unnest(&mut self, pending: &mut Vec<Self>) {
+impl<S, Span> Nestable for InputValue<S, Span> {
+  type Node = Self;
+
+  fn into_children(self, pending: &mut Vec<Self>) {
     match self {
       Self::Variable(_)
       | Self::Boolean(_)
@@ -261,82 +240,50 @@ impl<S, Span> Unnest for InputValue<S, Span> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => push_nesting(pending, list.values_mut().drain(..)),
-      Self::Set(set) => push_nesting(pending, set.values_mut().drain(..)),
+      Self::List(list) => pending.extend(list.into_values()),
+      Self::Set(set) => pending.extend(set.into_values()),
       // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
       // place in either dialect where a single child slot yields two subtrees.
-      Self::Map(map) => push_nesting(
-        pending,
-        map.entries_mut().drain(..).flat_map(|entry| {
-          let (_, key, value) = entry.into_components();
-          [key, value]
-        }),
-      ),
-      Self::Object(object) => push_nesting(
-        pending,
+      Self::Map(map) => pending.extend(map.into_entries().into_iter().flat_map(|entry| {
+        let (_, key, value) = entry.into_components();
+        [key, value]
+      })),
+      Self::Object(object) => pending.extend(
         object
-          .fields_mut()
-          .drain(..)
+          .into_fields()
+          .into_iter()
           .map(|field| field.into_components().2),
       ),
     }
   }
 }
 
-impl<S, Span> Drop for InputValue<S, Span> {
-  #[inline]
-  fn drop(&mut self) {
-    release(self);
-  }
-}
-
 /// A GraphQLx constant input value, which cannot contain a variable.
 ///
-/// The per-variant `unwrap` attributes and the [`Drop`] below are [`InputValue`]'s, for the reason
-/// stated there.
+/// Like [`InputValue`], it declares no `Drop`; the release is [`Nested`]'s.
 #[derive(Debug, Clone, derive_more::IsVariant, derive_more::TryUnwrap, derive_more::Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S, Span = SimpleSpan> {
   /// A boolean literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Boolean(BooleanValue<S, Span>),
   /// A string literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   String(StringValue<S, Span>),
   /// A floating-point literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Float(FloatValue<S, Span>),
   /// An integer literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Int(IntValue<S, Span>),
   /// An enum path.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Enum(EnumValue<S, Span>),
   /// The `null` literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Null(NullValue<S, Span>),
   /// A constant list literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   List(ConstList<S, Span>),
   /// A constant set literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Set(ConstSet<S, Span>),
   /// A constant map literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Map(ConstMap<S, Span>),
   /// A constant object literal.
-  #[unwrap(ref, ref_mut)]
-  #[try_unwrap(ref, ref_mut)]
   Object(ConstObject<S, Span>),
 }
 
@@ -358,24 +305,30 @@ impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
   }
 }
 
-/// [`InputValue`]'s body and [`InputValue`]'s bound, for the reasons stated there.
-impl<S, Span: Clone> IntoSpan<Span> for ConstInputValue<S, Span> {
+impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
   #[inline]
   fn into_span(self) -> Span {
-    self.as_span().clone()
+    match self {
+      Self::Boolean(value) => value.into_span(),
+      Self::String(value) => value.into_span(),
+      Self::Float(value) => value.into_span(),
+      Self::Int(value) => value.into_span(),
+      Self::Enum(value) => value.into_span(),
+      Self::Null(value) => value.into_span(),
+      Self::List(value) => value.into_span(),
+      Self::Set(value) => value.into_span(),
+      Self::Map(value) => value.into_span(),
+      Self::Object(value) => value.into_span(),
+    }
   }
 }
 
-impl<S, Span> Unnest for ConstInputValue<S, Span> {
-  #[inline]
-  fn nests(&self) -> bool {
-    matches!(
-      self,
-      Self::List(_) | Self::Set(_) | Self::Map(_) | Self::Object(_)
-    )
-  }
+impl<S, Span> Sealed for ConstInputValue<S, Span> {}
 
-  fn unnest(&mut self, pending: &mut Vec<Self>) {
+impl<S, Span> Nestable for ConstInputValue<S, Span> {
+  type Node = Self;
+
+  fn into_children(self, pending: &mut Vec<Self>) {
     match self {
       Self::Boolean(_)
       | Self::String(_)
@@ -383,30 +336,21 @@ impl<S, Span> Unnest for ConstInputValue<S, Span> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => push_nesting(pending, list.values_mut().drain(..)),
-      Self::Set(set) => push_nesting(pending, set.values_mut().drain(..)),
-      Self::Map(map) => push_nesting(
-        pending,
-        map.entries_mut().drain(..).flat_map(|entry| {
-          let (_, key, value) = entry.into_components();
-          [key, value]
-        }),
-      ),
-      Self::Object(object) => push_nesting(
-        pending,
+      Self::List(list) => pending.extend(list.into_values()),
+      Self::Set(set) => pending.extend(set.into_values()),
+      // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
+      // place in either dialect where a single child slot yields two subtrees.
+      Self::Map(map) => pending.extend(map.into_entries().into_iter().flat_map(|entry| {
+        let (_, key, value) = entry.into_components();
+        [key, value]
+      })),
+      Self::Object(object) => pending.extend(
         object
-          .fields_mut()
-          .drain(..)
+          .into_fields()
+          .into_iter()
           .map(|field| field.into_components().2),
       ),
     }
-  }
-}
-
-impl<S, Span> Drop for ConstInputValue<S, Span> {
-  #[inline]
-  fn drop(&mut self) {
-    release(self);
   }
 }
 

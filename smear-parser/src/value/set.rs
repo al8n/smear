@@ -45,15 +45,6 @@ impl<Value, Span, Container> Set<Value, Span, Container> {
   pub fn into_values(self) -> Container {
     self.values
   }
-
-  /// The members, mutably, so a release that only borrows this set can empty it.
-  ///
-  /// Crate-private for the reasons on [`List::values_mut`](crate::value::List::values_mut); see
-  /// [`nesting`](crate::value::nesting) for what needs it.
-  #[inline]
-  pub(crate) fn values_mut(&mut self) -> &mut Container {
-    &mut self.values
-  }
 }
 
 impl<Value, Span, Container> AsSpan<Span> for Set<Value, Span, Container> {

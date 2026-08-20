@@ -223,14 +223,14 @@ fn name() -> Name<&'static str> {
 #[test]
 fn the_materialised_constant_tree_releases_flat() {
   assert_release_is_flat("materialized::ConstInputValue", |depth| {
-    let mut value = MConstInputValue::<&str, i64>::List(MConstList::new(span(), Vec::new()));
+    let mut value = MConstInputValue::<&str, i64>::List(MConstList::new(span(), Vec::new().into()));
     for level in 0..depth {
       value = if level % 2 == 0 {
-        MConstInputValue::List(MConstList::new(span(), std::vec![value]))
+        MConstInputValue::List(MConstList::new(span(), std::vec![value].into()))
       } else {
         MConstInputValue::Object(MConstObject::new(
           span(),
-          std::vec![MConstObjectField::new(span(), name(), value)],
+          std::vec![MConstObjectField::new(span(), name(), value)].into(),
         ))
       };
     }
@@ -241,14 +241,14 @@ fn the_materialised_constant_tree_releases_flat() {
 #[test]
 fn the_materialised_executable_tree_releases_flat() {
   assert_release_is_flat("materialized::InputValue", |depth| {
-    let mut value = MInputValue::<&str, i64>::List(MList::new(span(), Vec::new()));
+    let mut value = MInputValue::<&str, i64>::List(MList::new(span(), Vec::new().into()));
     for level in 0..depth {
       value = if level % 2 == 0 {
-        MInputValue::List(MList::new(span(), std::vec![value]))
+        MInputValue::List(MList::new(span(), std::vec![value].into()))
       } else {
         MInputValue::Object(MObject::new(
           span(),
-          std::vec![MObjectField::new(span(), name(), value)],
+          std::vec![MObjectField::new(span(), name(), value)].into(),
         ))
       };
     }
@@ -259,14 +259,14 @@ fn the_materialised_executable_tree_releases_flat() {
 #[test]
 fn the_slice_constant_tree_releases_flat() {
   assert_release_is_flat("ast::ConstInputValue", |depth| {
-    let mut value = ConstInputValue::<&str>::List(ConstList::new(span(), Vec::new()));
+    let mut value = ConstInputValue::<&str>::List(ConstList::new(span(), Vec::new().into()));
     for level in 0..depth {
       value = if level % 2 == 0 {
-        ConstInputValue::List(ConstList::new(span(), std::vec![value]))
+        ConstInputValue::List(ConstList::new(span(), std::vec![value].into()))
       } else {
         ConstInputValue::Object(ConstObject::new(
           span(),
-          std::vec![ConstObjectField::new(span(), name(), value)],
+          std::vec![ConstObjectField::new(span(), name(), value)].into(),
         ))
       };
     }
@@ -277,14 +277,14 @@ fn the_slice_constant_tree_releases_flat() {
 #[test]
 fn the_slice_executable_tree_releases_flat() {
   assert_release_is_flat("ast::InputValue", |depth| {
-    let mut value = InputValue::<&str>::List(List::new(span(), Vec::new()));
+    let mut value = InputValue::<&str>::List(List::new(span(), Vec::new().into()));
     for level in 0..depth {
       value = if level % 2 == 0 {
-        InputValue::List(List::new(span(), std::vec![value]))
+        InputValue::List(List::new(span(), std::vec![value].into()))
       } else {
         InputValue::Object(Object::new(
           span(),
-          std::vec![ObjectField::new(span(), name(), value)],
+          std::vec![ObjectField::new(span(), name(), value)].into(),
         ))
       };
     }
@@ -310,14 +310,14 @@ mod graphqlx {
   #[test]
   fn the_extended_constant_tree_releases_flat_through_every_carrier() {
     assert_release_is_flat("graphqlx::ConstInputValue", |depth| {
-      let mut value = ConstInputValue::<&str>::List(ConstList::new(span(), Vec::new()));
+      let mut value = ConstInputValue::<&str>::List(ConstList::new(span(), Vec::new().into()));
       for level in 0..depth {
         value = match level % 4 {
-          0 => ConstInputValue::List(ConstList::new(span(), std::vec![value])),
-          1 => ConstInputValue::Set(ConstSet::new(span(), std::vec![value])),
+          0 => ConstInputValue::List(ConstList::new(span(), std::vec![value].into())),
+          1 => ConstInputValue::Set(ConstSet::new(span(), std::vec![value].into())),
           2 => ConstInputValue::Object(ConstObject::new(
             span(),
-            std::vec![ConstObjectField::new(span(), name(), value)],
+            std::vec![ConstObjectField::new(span(), name(), value)].into(),
           )),
           // The key is the chain and the value is a leaf on this level, so the entry's *key* slot
           // carries the nesting — the one recursion that a `map` arm reading only values misses.
@@ -326,8 +326,9 @@ mod graphqlx {
             std::vec![ConstMapEntry::new(
               span(),
               value,
-              ConstInputValue::List(ConstList::new(span(), Vec::new())),
-            )],
+              ConstInputValue::List(ConstList::new(span(), Vec::new().into())),
+            )]
+            .into(),
           )),
         };
       }
@@ -338,22 +339,23 @@ mod graphqlx {
   #[test]
   fn the_extended_executable_tree_releases_flat_through_every_carrier() {
     assert_release_is_flat("graphqlx::InputValue", |depth| {
-      let mut value = InputValue::<&str>::List(List::new(span(), Vec::new()));
+      let mut value = InputValue::<&str>::List(List::new(span(), Vec::new().into()));
       for level in 0..depth {
         value = match level % 4 {
-          0 => InputValue::List(List::new(span(), std::vec![value])),
-          1 => InputValue::Set(Set::new(span(), std::vec![value])),
+          0 => InputValue::List(List::new(span(), std::vec![value].into())),
+          1 => InputValue::Set(Set::new(span(), std::vec![value].into())),
           2 => InputValue::Object(Object::new(
             span(),
-            std::vec![ObjectField::new(span(), name(), value)],
+            std::vec![ObjectField::new(span(), name(), value)].into(),
           )),
           _ => InputValue::Map(Map::new(
             span(),
             std::vec![MapEntry::new(
               span(),
               value,
-              InputValue::List(List::new(span(), Vec::new())),
-            )],
+              InputValue::List(List::new(span(), Vec::new().into())),
+            )]
+            .into(),
           )),
         };
       }

@@ -46,18 +46,6 @@ impl<Value, Span, Container> List<Value, Span, Container> {
   pub fn into_values(self) -> Container {
     self.values
   }
-
-  /// The elements, mutably, for the one caller that needs to empty a list it does not own.
-  ///
-  /// Crate-private and deliberately not a widening of the public surface. `Drop` reaches a list
-  /// through `&mut` only, so [`into_values`](Self::into_values) cannot serve it; a *public* mutable
-  /// door onto the container would additionally let a consumer resize a list out from under the
-  /// span that already covers it. See [`nesting`](crate::value::nesting) for why releasing a value
-  /// has to be able to do this at all.
-  #[inline]
-  pub(crate) fn values_mut(&mut self) -> &mut Container {
-    &mut self.values
-  }
 }
 
 impl<Value, Span, Container> AsSpan<Span> for List<Value, Span, Container> {
