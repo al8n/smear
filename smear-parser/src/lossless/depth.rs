@@ -58,35 +58,36 @@
 //! # The ceiling arrives as a `usize`, not as a type
 //!
 //! This module may not name `smear-lexer` — the substrate is dialect-generic and
-//! `lossless_isolation.rs` enforces it — so the caller reads
-//! `inp.state().max_nesting_depth()` and passes the number. Each dialect's `lossless/mod.rs` has a
-//! one-line `descend` wrapper that does exactly that, so a production still writes one call.
+//! `lossless_isolation.rs` enforces it — so the number crosses that line as a plain `usize`, once
+//! per parse, through [`lossless_context`]. Each dialect's `lossless/mod.rs` still has a
+//! `descend` wrapper so a production writes one call, but the wrapper carries no number any more.
 //!
-//! # The upstream ceiling above smear's, and why it is not smear's to predict
+//! # There is one ceiling now, and it is the parse's own limiter
 //!
-//! tokora's own parse-side budget is `RecursionLimiter::PARSE_DEFAULT_DEPTH`, installed by
-//! `InputContext::new`, which [`parse_lossless`](tokora::cst::parse_lossless) calls without a
-//! hook: neither `parse_document_with_limits` nor any other smear entry point can raise it. The
-//! effective bound is therefore `min(the caller's ceiling, that default)`, and [`descend`] reads
-//! tokora's `limitation()` at every call rather than a number of its own, so the trip is
-//! **reported by smear** rather than surfacing as an unemitted `RecursionLimitReached` on the
-//! discarded `Result`. A caller who raises past it gets a clean, positioned diagnostic there
-//! rather than the depth they asked for. That is a limitation of the door, recorded here because
-//! it is invisible at the call site.
+//! [`descend`] used to take a `ceiling` argument and refuse at `min(ceiling, limitation())`, and
+//! that second number was tokora's `RecursionLimiter::PARSE_DEFAULT_DEPTH` — installed by
+//! `InputContext::new`, which [`parse_lossless`](tokora::cst::parse_lossless) called with no hook
+//! for a caller to raise. So the effective bound was `min(what the caller asked for, whatever
+//! upstream currently defaults to)`, a number this tree does not choose and upstream moved three
+//! times inside one unreleased window (64, then 16, then 32) with nothing here failing to compile
+//! over any of it.
 //!
-//! **Which of the two numbers is smaller is not a property this tree controls, and the repair for
-//! smear issue #169 is what stopped depending on it.** tokora's default was 64 at the version
-//! this tree pins and is 16 upstream (al8n/tokora#288, re-derived against a consumer grammar);
-//! smear's shipped `MAX_NESTING_DEPTH` is 24. So the ordering has already inverted once, without
-//! a line of smear changing, and it will invert again. Two things follow, and only the second was
-//! ever true by construction:
+//! [`cst::parse_lossless_with_context`](tokora::cst::parse_lossless_with_context) is the hook that
+//! removes it. Each door installs `min(the caller's ceiling, smear's own stack-safety maximum)` as
+//! **the** limiter, so what [`InputRef::descend`](tokora::InputRef::descend) checks against IS the
+//! ceiling and there is no second number to reconcile. What [`descend`] still does is **emit**:
+//! a trip is returned and never emitted, and the lossless doors discard the `Result`, so a refusal
+//! that only rode the `Result` would leave a consumer with a truncated tree and no diagnostic.
+//!
+//! Two things follow, and only the second was ever true by construction:
 //!
 //! - **The lexer's tally and this budget read one number and are not one mechanism.** The lexer's
 //!   trip latches tokora's poison boundary and ends the document; this one reports and returns.
 //!   For a well-formed over-deep document at equal ceilings the lexer runs ahead and trips first,
 //!   which is why one refusal used to look like one diagnostic — an accident of two numbers being
-//!   equal, not an enforced property, and `min(ceiling, limitation())` above is exactly what
-//!   breaks the equality.
+//!   equal, not an enforced property. The clamp above breaks the equality from the other side: a
+//!   caller who raises past the maximum gets a lexer tally at the number they asked for and a
+//!   parse budget at the maximum, so the parse refuses first and the tally never fires.
 //! - **Equal numbers would not have been enough anyway.** The tally is pair-blind, so a closer no
 //!   opener matched discounts a level the parse still holds. Measured on this tree at the
 //!   *shipped* ceiling of 24, with both numbers equal: `{` then 60 repetitions of `) f {` then 61
@@ -98,11 +99,44 @@
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan,
   error::{MaybeTerminal, RecursionLimitReached},
-  input::Descent,
+  input::{Descent, InputContext},
   span::Spanned,
+  state::recursion_tracker::RecursionLimiter,
 };
 
 use crate::combinator::ErrorOf;
+
+/// The [`InputContext`] a lossless door drives its parse under: the caller's emitter and cache,
+/// and `ceiling` as **the** recursion budget.
+///
+/// # Why this is a function and not one line at each door
+///
+/// [`InputContext::new`] seeds
+/// [`RecursionLimiter::PARSE_DEFAULT_DEPTH`](tokora::state::recursion_tracker::RecursionLimiter::PARSE_DEFAULT_DEPTH),
+/// and that seed is a number smear does not choose and upstream has already moved it twice — 64
+/// at the version this workspace shipped against, then 16, then 32, neither move announced by a
+/// compile error. A door that builds its own context and forgets `with_recursion_limiter` is
+/// therefore not a door with no budget; it is a door running under **whatever tokora currently
+/// defaults to**, with the caller's ceiling silently discarded and nothing on any channel saying
+/// so. tokora's own `sink_context` carries the same warning about the same constructor.
+///
+/// So there is one place that turns a ceiling into a context, and every door goes through it. The
+/// argument is a plain `usize` because this module is the dialect-generic substrate and may not
+/// name `smear-lexer`; clamping the caller's request against the stack-safety maximum happens on
+/// the other side of that line, in `LosslessLimits::parse_ceiling`.
+///
+/// # This is the whole ceiling, and it was not before
+///
+/// [`descend`] used to take a `ceiling` argument and refuse at `min(ceiling, limitation())`,
+/// because a lossless parse could not install a limiter at all and tokora's default could sit
+/// below the caller's request. `cst::parse_lossless_with_context` is the hook that removes the
+/// second number: the budget installed here IS what
+/// [`InputRef::descend`](tokora::InputRef::descend) checks against, so a refusal is the
+/// substrate's own trip rather than smear arithmetic that happens to agree with it.
+#[inline]
+pub fn lossless_context<E, C>(inner: E, cache: C, ceiling: usize) -> InputContext<E, C> {
+  InputContext::new(inner, cache).with_recursion_limiter(RecursionLimiter::with_limitation(ceiling))
+}
 
 /// A dialect error container that can name a refused descent.
 ///
@@ -140,7 +174,7 @@ pub trait FromNestingLimit {
 /// reading the tail then costs a full lex of it and, on a tail that does not lex cleanly, **one
 /// lexer diagnostic per malformed lexeme** — tokora emits every lexer error it crosses, and
 /// `skip_while` crosses all of them. Measured through `parse_document_with_limits` at a ceiling
-/// above tokora's own parse-side default, so the *parse* refuses: 300 nested selection sets with a
+/// above the door's own clamp, so the *parse* refuses: 300 nested selection sets with a
 /// tail of `n` invalid lexemes returned `1 + n` diagnostics (1, 2, 5, 17, 65 for n = 0, 1, 4, 16,
 /// 64), in both dialects. The refusal is one diagnostic only if nothing reads the tail.
 ///
@@ -211,9 +245,27 @@ where
 /// because the returned value is the *only* thing that reaches the loops which have to tell a
 /// resource refusal from a syntax error.
 ///
-/// The check runs **before** the descent, so tokora's own budget can never trip unreported: this
-/// refuses at `min(ceiling, tokora's limitation)`, which is at or below where
-/// [`InputRef::descend`](tokora::InputRef::descend) would.
+/// # Why the descent is probed
+///
+/// The refusal is [`InputRef::descend`](tokora::InputRef::descend)'s, not this function's: the
+/// budget the door installed is the only ceiling, tokora's trip arm decides against it, and the
+/// trip is counted on the input's own resource-trip cell before any code here runs. What this
+/// function adds is the **emission**, because tokora returns a trip and never emits one and the
+/// lossless doors discard the `Result`.
+///
+/// Getting both from one call is what the borrow checker refuses. `inp.descend()`'s `Ok` holds a
+/// [`Descent`] borrowing `inp` for this function's own output lifetime, and NLL keeps that borrow
+/// live across every arm of a `match` on it — so the refusal arm cannot reach `inp.emit_error`.
+/// Mapping the guard away (`inp.descend().map(|_| ())`) leaves a `Result<(), _>` that borrows
+/// nothing, which releases `inp` for the emission, and the level is then taken for real on the
+/// accepting path.
+///
+/// So an accepted descent raises and releases the level once before raising it for good. That
+/// costs an increment, a comparison of two `usize`s and a decrement — tokora documents its own
+/// raise as exactly that and its `Descent` destructor as "a load, a subtract and a store" — and
+/// it buys a refusal whose decision, whose arithmetic and whose terminality latch are all the
+/// substrate's. A refused descent is probed once and not re-taken, so the trip is counted exactly
+/// once per refusal.
 ///
 /// # The refusal ends the document — smear issue #169
 ///
@@ -303,7 +355,6 @@ where
 #[inline]
 pub fn descend<'r, 'inp, 'closure, L, Ctx, Lang>(
   inp: &'r mut InputRef<'inp, 'closure, L, Ctx, Lang>,
-  ceiling: usize,
 ) -> Result<Descent<'r, 'inp, 'closure, L, Ctx, Lang>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   Lang: ?Sized,
@@ -311,21 +362,26 @@ where
   Ctx: ParseContext<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<RecursionLimitReached<usize, Lang>> + FromNestingLimit,
 {
-  let live = inp.recursion().depth();
-  // `min`, because the caller's ceiling is not the only one: see the module header's note on
-  // tokora's own budget. Reading it here is what keeps every refusal reported.
-  let limit = ceiling.min(inp.recursion().limitation());
-  if live >= limit {
+  // THE LEVEL IS TAKEN TWICE ON THE ACCEPTING PATH, AND THAT IS FORCED BY THE BORROW CHECKER.
+  // See this function's `Why the descent is probed` note. `.map(|_| ())` is what releases the
+  // borrow: the probe's `Ok` holds a `Descent` that borrows `inp` for this function's OUTPUT
+  // lifetime, and NLL keeps that borrow live across both arms of any `match` on it, so the
+  // refusal arm could not reach `inp.emit_error`. Mapping the guard away leaves a `Result<(), _>`
+  // that borrows nothing, and the borrow ends at the scrutinee.
+  if let Err(refusal) = inp.descend().map(|_| ()) {
+    // The depth is already back down — tokora's trip arm decrements before it latches — so these
+    // two reads describe the frame that was refused rather than a live one.
     let end = inp.span().end();
     let span = SimpleSpan::new(end, end);
-    let refusal = ErrorOf::<'inp, L, Ctx, Lang>::nesting_limit_exceeded(span, live + 1, limit);
+    let attempted = inp.recursion().depth() + 1;
+    let limit = inp.recursion().limitation();
     // DROPPED, NOT `?`. A rejecting emitter may return any same-typed value here rather than the
     // payload, and propagating it returned a non-refusal from a function whose contract names the
     // refusal. See this function's `The emitted `Err` is dropped` note for why that is sound at
     // THIS call and would not be at `emit_lexer_error`.
     let _ = inp.emit_error(Spanned::new(
       span,
-      ErrorOf::<'inp, L, Ctx, Lang>::nesting_limit_exceeded(span, live + 1, limit),
+      ErrorOf::<'inp, L, Ctx, Lang>::nesting_limit_exceeded(span, attempted, limit),
     ));
     // NOTHING BETWEEN THE EMIT AND THE RETURN, AND THAT IS THE REPAIR FOR #169. See this
     // function's `The refusal ends the document` note: the tail is not read, so it cannot add a
@@ -333,6 +389,7 @@ where
     return Err(refusal);
   }
 
-  // Cannot trip: `live < limit <= inp.recursion().limitation()`.
+  // Cannot trip: the probe above raised and released the same level against the same cell, and
+  // nothing between the two calls can change the depth.
   inp.descend()
 }

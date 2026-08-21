@@ -97,7 +97,56 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # entire 0.8 combinator surface (`parens`, `then`, `then_ignore`, `repeated_while`,
 # `Ident::parse`, `Keyword::parse_exact`, ...) — 166 errors when measured. Whether smear wants the
 # umbrella or a narrower set of families is a compile-time-footprint question left open.
-tokora = { version = "0.9", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
+#
+# ── WHY THIS IS A GIT DEPENDENCY AND NOT A CRATES.IO ONE ─────────────────────────────────────
+#
+# `cst::parse_lossless_with_context` — the lossless driver that takes the parse's `InputContext`,
+# and therefore its `RecursionLimiter` — exists only on tokora's `main`. Without it a lossless
+# entry point cannot raise tokora's own parse-side budget at all: `parse_lossless` builds its own
+# context, and `Cst::from_sink` / `Sink::finish` / `Input::into_emitter` are crate-private, so the
+# plumbing cannot be hand-rolled either. `smear-parser/src/lossless/depth.rs`'s "The upstream
+# ceiling above smear's" note is a description of that missing hook.
+#
+# `version` is kept beside `git` deliberately. It is inert for resolution while `main`'s manifest
+# reads 0.9.1, and it becomes a loud resolution failure the moment `main` bumps to 0.10 — the
+# release that carries the breaks below, and exactly the moment this edge should stop being silent.
+#
+# WHAT THIS EDGE GIVES UP: `branch = "main"` resolves to whatever `main` is at the moment of each
+# build, and this workspace commits no `Cargo.lock`, so two builds of the same smear commit — CI
+# included — can compile different tokora. That is a known, unpaid cost of this phase, not an
+# oversight; the fix is a committed lock or a `rev`, and neither is chosen here.
+#
+# AND THE WORKSPACE IS NOT PUBLISHABLE WHILE THIS EDGE STANDS. `version` beside `git` is what lets
+# `cargo publish` PACKAGE — cargo drops the git source and ships the requirement — and packaging is
+# not the half that fails. The verification build resolves `^0.9` from the registry, gets 0.9.1,
+# and 0.9.1 has no `ScanLookahead`, no `Token::SCAN_LOOKAHEAD` and no `Lexer::read_frontier`:
+# measured, all six members package and `smear-lexer` then fails to verify with 36 errors
+# (`E0438`, `E0407`, `E0425`, `E0433`). So `.github/workflows/ci.yml`'s `publish-dry-run` job is
+# RED for as long as tokora's carrying release is unpublished, and no source change here can move
+# it — the trait items it needs do not exist in any published tokora.
+#
+# WHAT MOVED, relative to the published 0.9.1 this replaced. `rowan` did not: both pin
+# `rowan = "0.17"`, so the paragraph above is unaffected. Three of `main`'s breaks reach smear, and
+# only one of them is a `!` commit:
+#
+# * `fix(recursion)!` (tokora#308) — `RecursionLimiter::PARSE_DEFAULT_DEPTH` is 32 where 0.9.1's
+#   was 64, both profile arms priced at the debug frame cost. Nothing in this tree fails to
+#   compile over it, because `lossless::depth::descend` reads `inp.recursion().limitation()` at
+#   every call rather than a number of its own. What it moves is WHERE a refusal fires: at a caller
+#   ceiling above tokora's default the trip landed at depth 32 instead of 64. That window is now
+#   closed from smear's side: the lossless doors install `min(ceiling, HARD_MAX)` through
+#   `cst::parse_lossless_with_context`, so tokora's default no longer reaches a lossless parse at
+#   all and this constant's next move costs this tree nothing.
+# * `Lexer::read_frontier` and `Token::SCAN_LOOKAHEAD` become REQUIRED (tokora#282, landed as
+#   #289/#293 with no `!` in the subject). Both are claims about how far a scan probed, and the
+#   whole cost of this switch in source terms is answering them — eight vocabularies and two
+#   hand-written scanners in `smear-lexer`. Both answer `Unbounded`, and that is measured rather
+#   than chosen: `SpanEnd`/`WithinSpan` would keep 0.9.1's holdback bit for bit and is FALSE here,
+#   falsified by `-.5` at split k=2 in every one of the four lexers. The value only reaches a
+#   `Partial` consumer, and every door this workspace ships is `Complete`.
+# * `fix(container)!` (tokora#283) — `FullContainer`'s rendered text and the `Container` contract.
+#   smear implements neither and asserts on neither, so it costs this tree nothing.
+tokora = { git = "https://github.com/al8n/tokora.git", branch = "main", version = "0.9", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }
