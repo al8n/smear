@@ -239,6 +239,22 @@ where
   type Kind = SyntacticTokenKind;
   type Error = error::LexerErrors<S::Char, RecursionLimitExceeded>;
 
+  /// `Unbounded`, because `WithinSpan` is FALSIFIED for this vocabulary.
+  ///
+  /// Items here are decided by a scanner that probes past the span it emits — the number path
+  /// runs a `logos` DFA, which backtracks to the last accepting prefix after probing past it —
+  /// and this grammar has a gap that backtrack falls into: over `-.5` truncated at `k = 2`, `-`
+  /// is an accepting rule of its own, `-.` is accepted by nothing, and `-.5` is one float, so
+  /// the prefix `-.` commits an item at `0..1` the complete parse does not have.
+  /// `tokora::conformance::Harness::run_partial` reports it as `split k=2: a non-final prefix
+  /// drain yielded 1 items but the complete parse has only 0 ending strictly before the cut`.
+  ///
+  /// This crate's own scanner never reads the const — it is a hand-written `Lexer` and answers
+  /// through [`read_frontier`](tokora::Lexer::read_frontier) — so what this line is for is any
+  /// *other* adapter over this vocabulary. It therefore has to say what `read_frontier` says,
+  /// and it does.
+  const SCAN_LOOKAHEAD: tokora::ScanLookahead = tokora::ScanLookahead::Unbounded;
+
   #[inline(always)]
   fn kind(&self) -> Self::Kind {
     self.kind()
@@ -615,6 +631,25 @@ where
   type Span = SimpleSpan;
 
   type Offset = usize;
+
+  /// `Unbounded`: this scanner cannot bound what deciding an item probed.
+  ///
+  /// The number path delegates to a `LogosLexer` over this module's private `number`
+  /// vocabulary, and `logos` exposes no probe frontier — so the honest answer here is the
+  /// conservative one for the same reason the bundled adapter's is.
+  ///
+  /// `SpanEnd` — which would keep the pre-`read_frontier` holdback bit for bit — was measured and
+  /// is false: over `-.5` truncated at `k = 2`, `-` is an accepting rule of its own, `-.` is
+  /// accepted by nothing, and `-.5` is one float, so the prefix commits an item at `0..1` the
+  /// complete parse does not have. `tokora::conformance::Harness::run_partial` reports it as an
+  /// extra item at `split k=2`, in both dialects.
+  ///
+  /// The cost lands on a `Partial` consumer alone: every item is withheld until the stream is
+  /// sealed. Every door this workspace ships is `Complete`, where there is no holdback.
+  #[inline(always)]
+  fn read_frontier(&self) -> tokora::ReadFrontier<Self::Offset> {
+    tokora::ReadFrontier::Unbounded
+  }
 
   #[inline(always)]
   fn new(src: &'inp Self::Source) -> Self {
