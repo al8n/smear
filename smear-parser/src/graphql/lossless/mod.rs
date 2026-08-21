@@ -122,12 +122,16 @@ pub type Input<'inp, 'input, Src: Source<usize> + ?Sized, Ctx> =
 #[allow(type_alias_bounds)]
 pub type Error<'inp, Src: Source<usize> + ?Sized, Ctx> = GraphqlLosslessError<'inp, Src, Ctx>;
 
-/// Enters one level of parser recursion under this dialect's configured nesting ceiling.
+/// Enters one level of parser recursion under the budget the door installed.
 ///
-/// The whole body is reading the ceiling off the lexer state and handing it to
-/// [`crate::lossless::depth::descend`], which is where the reasoning lives. It exists per dialect
-/// only because the substrate may not name `smear-lexer`, so the number has to be read on this
-/// side of the line.
+/// A pass-through to [`crate::lossless::depth::descend`], which is where the reasoning lives, and
+/// it is deliberately still a per-dialect function after losing its body. It used to read
+/// `inp.state().max_nesting_depth()` and hand the number down, because the substrate may not name
+/// `smear-lexer`; the ceiling now arrives as the parse's own
+/// [`RecursionLimiter`](tokora::state::recursion_tracker::RecursionLimiter), installed once at the
+/// door, so there is no number left to read on this side of the line. What the wrapper still buys
+/// is that every production writes one call against this dialect's concrete input, error and
+/// brand, so a bound that stops holding is reported here rather than at twenty-eight call sites.
 ///
 /// **Bind the guard for the whole frame** — `let mut frame = descend(inp)?; let inp = &mut *frame;`
 /// — because dropping it early releases the level before the recursion it was taken for, which
@@ -156,8 +160,7 @@ where
   GraphqlLosslessError<'inp, Src, Ctx>:
     From<RecursionLimitReached<usize, GraphQL>> + FromNestingLimit,
 {
-  let ceiling = inp.state().max_nesting_depth();
-  crate::lossless::depth::descend(inp, ceiling)
+  crate::lossless::depth::descend(inp)
 }
 
 /// One error value a GraphQL lossless parse can record.

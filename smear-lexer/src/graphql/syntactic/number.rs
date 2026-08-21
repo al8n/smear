@@ -147,6 +147,24 @@ macro_rules! number_token_impl {
         type Kind = SyntacticTokenKind;
         type Error = TokenErrors;
 
+        /// `Unbounded`, because `WithinSpan` is FALSIFIED for this vocabulary.
+        ///
+        /// The claim would be about the generated DFA, not about the callbacks, and `logos`
+        /// backtracks to the last accepting prefix after probing past it. This grammar has a gap
+        /// that backtrack falls into: over `-.5` truncated at `k = 2`, `-` is an accepting rule of
+        /// its own, `-.` is accepted by nothing, and `-.5` is one float — so the prefix `-.`
+        /// commits an item at `0..1` the complete parse does not have.
+        /// `tokora::conformance::Harness::run_partial` reports it as `split k=2: a non-final
+        /// prefix drain yielded 1 items but the complete parse has only 0 ending strictly before
+        /// the cut`, in both dialects and at both doors.
+        ///
+        /// The exact frontier is not reachable either: a `logos` callback runs only at the leaf
+        /// the DFA accepted, and that leaf is `-`, whose rule carries none — so `State::take_probe`
+        /// has nothing to record. The price of `Unbounded` is paid by a `Partial` consumer alone,
+        /// which buffers until the stream is sealed; every door this workspace ships is
+        /// `Complete`, where there is no holdback at all.
+        const SCAN_LOOKAHEAD: tokora::ScanLookahead = tokora::ScanLookahead::Unbounded;
+
         #[inline(always)]
         fn kind(&self) -> Self::Kind {
           self.number.kind()
