@@ -18,7 +18,14 @@
 //!
 //! Both lossless recovery helpers scan through [`tokora::InputRef::sync_balanced`], whose
 //! no-match exit **rewinds the whole scan**. A caller that then advances one token and asks
-//! again pays for the tail once per token, which is the Θ(n²).
+//! again pays for the tail once per token, which was the Θ(n²).
+//!
+//! Since the scan allowance landed these curves read ×1.8 – ×2.4 instead of ×4.0, and the
+//! diagnostic counts are unchanged from the ones taken before it. The shapes are kept because a
+//! ratio is only evidence next to the ratio it replaced: 32 KB of `! ` went from 11 292 ms to
+//! 21.9 ms and 72 KB of `( type ) ` from 19 431 ms to 42.1 ms. The *gate* on that property is
+//! `tests/resync_allowance.rs`, which asserts on produce-events rather than on the clock; this
+//! file stays a measurement.
 //!
 //! - `! ` and `@ ( ) ` reach it through `recover::unexpected`, whose restart set is the wide
 //!   `is_sync_point`. A tail of `! @ : = | &` and `(` contains no member of that set, so every

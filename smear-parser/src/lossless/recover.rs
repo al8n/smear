@@ -48,6 +48,92 @@
 //! **Do not write `node(error_kind, |_| Ok(()))`.** It is a no-op: an empty, zero-width `Error`
 //! node that consumes nothing, which is the rule above violated in the one place it looks like
 //! recovery.
+//!
+//! # The scan allowance — smear issue #168
+//!
+//! `sync_balanced`'s no-match exit **rewinds the whole scan**: the position, the lexer state, the
+//! dedup watermark and every emission come back off, and the drained cache prefix comes back too,
+//! "at the cost of re-lexing those tokens on the next read". Both helpers here then advance by
+//! exactly one token and the enclosing loop asks again. A tail containing no restart point is
+//! therefore walked once per token in it — **Θ(n²)**, measured at ×4.0 per doubling on twelve
+//! shapes across both dialects and all six document roots, 24.6 s for 72 KB.
+//!
+//! A *matching* scan has none of that shape: it commits, so what it crossed is never re-crossed
+//! and the cost is amortised. The defect is exactly the no-match branch repeating, and it repeats
+//! in **both** helpers — [`unexpected`] over a tail of punctuation the wide `is_sync_point` set
+//! does not name, [`resync_to`] over a tail whose definition heads all sit at depth ≥ 1, where the
+//! scan never consults its predicate. `[ type ] ` repeated is the second one alone; `( type ) ` is
+//! both at once.
+//!
+//! ## What is bounded, and why it is not the scan
+//!
+//! Not the scan, because no constant bounds one: a legitimate resync crosses **20 005 tokens in a
+//! single committed hole** on a 28 KB document, and that number grows with the input. Capping a
+//! scan shreds that recovery into one `Error` node per token, which is smear issue #169's
+//! diagnostic amplification returning. (Capping in *bytes* fails for pql#39's reason as well — one
+//! GraphQL block string is a single token spanning the whole document.)
+//!
+//! What is bounded is **total wasted lexing**, because only the failing scans accumulate. The
+//! guard is a rate limiter on the parse's own amplification:
+//!
+//! ```text
+//! spent > SCAN_ALLOWANCE_FACTOR * committed + SCAN_ALLOWANCE_FLOOR   ⇒   do not scan
+//! ```
+//!
+//! and a refused scan takes the `None` arm each helper already has — one token into an `Error`
+//! node — so nothing new reaches the tree, the diagnostics or the caller.
+//!
+//! ## Where the two numbers come from
+//!
+//! `spent` is [`TokenBudgetTally::spent`](tokora::input::TokenBudgetTally::spent): items the
+//! lexer produced for this input, charged at tokora's single lexing chokepoint. It is the one
+//! counter in that crate's cell taxonomy that a rollback does not touch (`input/lineage.rs`'s
+//! table: *"a budget a rollback refunds is not a budget"*), which is what makes it the only
+//! reading here that `sync_balanced`'s own internal rewind cannot refund. It is charged even when
+//! no ceiling is configured, so reading it costs nothing and configures nothing.
+//!
+//! `committed` is `span().end()`, which is what tokora's [`InputRef::cursor`] doc names for
+//! committed progress. It is deliberately **not** `offset()`, whose own doc says *"It is **not** a
+//! progress metric"*: `offset()` reports the end of the newest *cached* token, so a peeked
+//! 30 KB block string would inflate the denominator and make the guard less eager — the wrong
+//! direction for a resource guard. Measured over ~50 000 recovery-helper entries the two differ by
+//! at most one byte and neither ever moves backwards, so choosing the honest one costs nothing.
+//!
+//! ## Why `spent ≤ committed` is the calibration, and what it rests on
+//!
+//! Every produced item covers at least one byte (tokora `debug_assert`s a nonempty span), so a
+//! parse that lexes each byte **once** satisfies `spent ≤ committed` — a ratio of 1.0 items/byte,
+//! and that ceiling is *reached*, by a document of single-byte tokens with no separators.
+//!
+//! `spent` counts produce-events, though, not distinct tokens: **a re-lex is charged again**. So
+//! the ceiling holds only while nothing re-lexes, and that premise has to be named rather than
+//! assumed. In this tree it holds because:
+//!
+//! - smear never calls `InputRef::state_mut`, `set_state`, `restore` or any rollback door — the
+//!   cache-clearing surgeries. (The `state_mut` calls in `smear-lexer` are `Lexer::state_mut`, a
+//!   lexer mutating its own bracket counter, which evicts nothing.)
+//! - the lossless tree's only speculation is four single-token probes — `try_eat(Colon)` in both
+//!   dialects' `field`, `try_eat(Bang)` in `type_ref`, and one always-rolled-back trivia
+//!   lookahead — none of which can enclose a call to either helper. Documents built to maximise
+//!   them measure **0.667 – 1.000** items/byte, i.e. at or below the ceiling.
+//! - the remaining re-lex source is the failed scan itself, which is the quantity this guard
+//!   exists to bound. Charging it is the mechanism, not a leak in it.
+//!
+//! Measured worst honest ratio: **1.000**, over 278 repository fixtures and ten deliberately dense
+//! constructions. Against that, `! ` repeated measures **2 001**, `[ type ] ` **1 334** and
+//! `( type ) ` **2 668** — three orders of magnitude of separation, so the factor is chosen for
+//! margin rather than for discrimination.
+//!
+//! ## What the guard costs when it fires
+//!
+//! On every shape measured, nothing: the tree, the diagnostics and the text are byte-identical,
+//! because those documents already take the `None` arm at every call and refusing a scan that was
+//! going to fail is a no-op on the output. It is **not** identity-preserving in general, and
+//! `tests/resync_allowance.rs` pins the one falsifier — a resync-quadratic prefix that burns the
+//! allowance, followed by a junk run whose only sync point is an `Int` (a sync point that is not a
+//! definition start, so it cannot rescue the earlier resyncs). There the recovery granularity
+//! changes, in the direction this module already prices as the cheap one: *stopping early costs at
+//! most one extra `Error` node; stopping late costs a subtree.*
 
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan, Token,
@@ -226,7 +312,16 @@ where
 {
   report_unexpected(inp, expected)?;
 
-  let hole = inp.sync_balanced(delimiters, |t| is_sync_point(t.data))?;
+  // #168's guard. `None` is safe to substitute *here* — unlike in [`resync_to`], which needs a
+  // peek in its place — because the test below folds `None` and a zero-skip `Some` into the same
+  // arm: this helper's caller has already ruled the token at hand junk, so consuming one is right
+  // either way. Progress, which is this helper's whole contract, is therefore unaffected. See
+  // `scan_allowance_exhausted`.
+  let hole = if scan_allowance_exhausted(inp) {
+    None
+  } else {
+    inp.sync_balanced(delimiters, |t| is_sync_point(t.data))?
+  };
   if hole.is_some_and(|h| h.skipped() > 0) {
     // The sink wrapped the skipped region in the profile's `error_kind` on its own.
     return Ok(());
@@ -238,6 +333,138 @@ where
     inp.cst_finish(error_kind);
   }
   Ok(())
+}
+
+/// Lexer items a parse may produce per committed byte before recovery stops scanning ahead.
+///
+/// An honest parse produces **at most one item per byte** — see the module docs for the ceiling
+/// and for the premise it rests on — so eight is a margin over a measured 1.000, not a
+/// discrimination threshold: the shapes this exists to stop measure 1 334 to 2 668.
+///
+/// Raising it does not make recovery better on any document that is not already quadratic; it
+/// only buys an attacker a longer run before the guard engages. Lowering it below **2** would
+/// start refusing scans on honest input, because 1.0 is reached rather than approached.
+pub(crate) const SCAN_ALLOWANCE_FACTOR: usize = 8;
+
+/// The allowance every parse gets regardless of how little it has committed.
+///
+/// **Deleting this is the way to get the guard wrong that costs the most and shows the least.**
+/// The denominator is committed bytes, and at the first recovery call of a document that is
+/// frequently `0` — `SCAN_ALLOWANCE_FACTOR * 0` refuses the very first scan of every input,
+/// turning the one recovery a truncated document needs into a token-by-token walk. The floor is
+/// also the absolute bound on what a *small* document can waste: nothing can spend more than this
+/// before its committed length starts paying for the scans.
+pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
+
+/// Whether this parse has already produced more lexer items than its committed length pays for.
+///
+/// Both scanning helpers consult this, and **both must**: [`unexpected`] carries 47 of the tree's
+/// 52 recovery call sites and [`resync_to`] the other 5, and each reaches the quadratic on tails
+/// the other's predicate is blind to. Guarding one leaves the other live — which is smear issue
+/// #167 round 2's finding on this very subsystem, restated one helper along.
+///
+/// # The two readings, and why neither is the obvious one
+///
+/// `spent` must be a counter no rewind refunds, and inside this crate there is exactly one:
+/// `L::State` is cloned into `sync_balanced`'s own `ThroughEntry` and restored on the no-match
+/// exit, so a tally kept there would be refunded by the very scan whose cost it records.
+///
+/// `committed` must be a *progress* reading. `offset()` is not one by its own documentation — it
+/// is the end of the newest cached token, so lookahead inflates it and inflating the denominator
+/// makes a resource guard less eager. `span().end()` is the reading tokora names for committed
+/// progress.
+///
+/// # It is a rate limiter, not a latch
+///
+/// The comparison is re-derived per call against a denominator that keeps growing, so a parse that
+/// stops wasting recovers its allowance and scans again. That is why the degradation stays local
+/// to the pathological region instead of poisoning the rest of the document — measured on the
+/// falsifier, where a 3 000-token junk run past a burnt allowance lost 212 holes rather than 3 000.
+///
+/// # If the premise under it ever breaks, it breaks safe
+///
+/// Both readings are monotone at these call sites because no recovery call is inside a speculative
+/// attempt — the lossless tree's only `attempt`/`try_parse_input` bodies are single-token probes.
+/// Should that stop being true, a rollback lowers `committed` and never lowers `spent`, so the
+/// guard engages *earlier*: recovery coarsens, the bound holds, and nothing becomes unsound.
+#[inline]
+fn scan_allowance_exhausted<'inp, L, Ctx, Lang>(inp: &InputRef<'inp, '_, L, Ctx, Lang>) -> bool
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseContext<'inp, L, Lang>,
+{
+  let spent = inp.token_budget().spent();
+  #[cfg(all(feature = "test-support", feature = "std"))]
+  scan_allowance::record_spent(spent);
+  let exhausted = spent
+    > SCAN_ALLOWANCE_FACTOR
+      .saturating_mul(inp.span().end())
+      .saturating_add(SCAN_ALLOWANCE_FLOOR);
+  #[cfg(all(feature = "test-support", feature = "std"))]
+  if exhausted {
+    scan_allowance::record_refusal();
+  }
+  exhausted
+}
+
+/// What `tests/resync_allowance.rs` reads: how often the guard refused, and the numerator it
+/// refused on.
+///
+/// Test-only because the shipped parser has no reason to publish either and a `pub` counter is a
+/// public surface to keep.
+///
+/// # Thread-local, and that is not a detail
+///
+/// The first version of this was a pair of process-wide atomics with "serialize with
+/// `--test-threads=1`" written next to them. libtest runs test *functions* on their own threads by
+/// default, so three assertions in this crate's own suite failed the moment they ran beside
+/// anything else — a gate that only holds under a flag nobody passes in CI is not a gate. A
+/// thread-local pair makes each reading belong to the parse that produced it, and the ordering
+/// constraint disappears rather than being documented.
+///
+/// [`peak_spent`] exists because the property under test is **linearity**, and wall-clock is a bad
+/// witness for it: the machine these were first measured on sat at load average 54 and the same
+/// parse varied 1.6× between runs. `spent` is the produce-event count the guard is denominated in;
+/// it is deterministic, machine-independent, and it is what actually grows quadratically. A gate
+/// on it fails for the reason the defect exists rather than for the reason the box was busy.
+#[cfg(all(feature = "test-support", feature = "std"))]
+pub mod scan_allowance {
+  use core::cell::Cell;
+
+  std::thread_local! {
+    static REFUSALS: Cell<usize> = const { Cell::new(0) };
+    static PEAK_SPENT: Cell<usize> = const { Cell::new(0) };
+  }
+
+  #[inline]
+  pub(super) fn record_refusal() {
+    REFUSALS.with(|c| c.set(c.get().saturating_add(1)));
+  }
+
+  #[inline]
+  pub(super) fn record_spent(spent: usize) {
+    PEAK_SPENT.with(|c| c.set(c.get().max(spent)));
+  }
+
+  /// Zeroes both tallies for the calling thread. Call immediately before the parse under test.
+  pub fn reset() {
+    REFUSALS.with(|c| c.set(0));
+    PEAK_SPENT.with(|c| c.set(0));
+  }
+
+  /// How many scans this thread has refused since its [`reset`].
+  pub fn refusals() -> usize {
+    REFUSALS.with(Cell::get)
+  }
+
+  /// The largest `TokenBudgetTally::spent` this thread saw at a recovery call since [`reset`].
+  ///
+  /// Zero when the parse made no recovery call at all, which is not the same as "spent nothing" —
+  /// a clean document reaches neither helper.
+  pub fn peak_spent() -> usize {
+    PEAK_SPENT.with(Cell::get)
+  }
 }
 
 /// A production returned `Err`: skip its wreckage and stop **before** the next restart point.
@@ -297,10 +524,35 @@ where
     return Ok(());
   }
 
-  if inp
-    .sync_balanced(delimiters, |t| is_restart_point(t.data))?
-    .is_some()
-  {
+  // #168's guard, and this is the site the issue does *not* name. Its witness — `!` repeated —
+  // never reaches this function at all (`unexpected.calls = 4000, resync.calls = 0`); what reaches
+  // it is a definition head parked at depth 1, where the scan never consults the predicate.
+  // `[ type ] ` repeated is that shape with `unexpected` held at a zero-skip, so it isolates this
+  // helper's own Θ(n²).
+  //
+  // A refused scan is **not** a bare `None` here, and that asymmetry with [`unexpected`] is the
+  // whole reason this is four lines rather than one. That function treats `None` and a zero-skip
+  // `Some` identically — both fall through to its one-token fallback — so substituting `None`
+  // there is exactly behaviour-preserving. This one does not: the section above spends its length
+  // on why, and the answer is that a zero-skip `Some` means the restart point is the token *at
+  // hand*, so taking the `None` arm would eat it. That is the `type T { a scalar S }` loses its
+  // `ScalarTypeDefinition` defect, pinned by
+  // `a_resync_that_lands_on_a_definition_head_does_not_eat_it`.
+  //
+  // So a refused scan still answers the zero-skip question — one peek, no scan, no walk. It is
+  // written unconditionally rather than on an argument that the two can never co-occur: burning
+  // the allowance needs a tail with no restart point, and landing on a restart point needs one, so
+  // they look mutually exclusive. Two structural arguments of exactly that shape were already
+  // wrong about this subsystem in this issue's own investigation, and a peek is cheaper than being
+  // right about it.
+  let restart_point_at_hand = if scan_allowance_exhausted(inp) {
+    inp.head_satisfies(is_restart_point)?
+  } else {
+    inp
+      .sync_balanced(delimiters, |t| is_restart_point(t.data))?
+      .is_some()
+  };
+  if restart_point_at_hand {
     return Ok(());
   }
 
