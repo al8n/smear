@@ -30,6 +30,9 @@ pub use set::*;
 pub use string::*;
 pub use variable::*;
 
+pub(crate) use nesting::Sealed;
+pub use nesting::{Nestable, Nested};
+
 mod boolean_value;
 mod default_input_value;
 mod enum_value;
@@ -38,6 +41,7 @@ mod int;
 mod list;
 #[cfg(feature = "graphqlx")]
 mod map;
+mod nesting;
 mod null_value;
 mod object;
 #[cfg(feature = "graphqlx")]

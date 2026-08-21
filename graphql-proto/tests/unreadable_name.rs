@@ -295,7 +295,7 @@ fn nested_in_an_object(spelling: &'static [u8]) -> ExecutableDocument<&'static [
     b"filter",
     InputValue::Object(Object::new(
       span(),
-      std::vec![ObjectField::new(span(), name(b"flag"), variable(spelling))],
+      std::vec![ObjectField::new(span(), name(b"flag"), variable(spelling))].into(),
     )),
   )
 }
@@ -305,7 +305,7 @@ fn nested_in_a_list(spelling: &'static [u8]) -> ExecutableDocument<&'static [u8]
   argument_value(
     b"listed",
     b"flags",
-    InputValue::List(List::new(span(), std::vec![variable(spelling)])),
+    InputValue::List(List::new(span(), std::vec![variable(spelling)].into())),
   )
 }
 

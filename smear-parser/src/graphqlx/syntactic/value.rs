@@ -9,7 +9,6 @@
 //!
 //! See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).
 
-use std::vec::Vec;
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
@@ -489,7 +488,7 @@ value_parser!(
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| value(inp))
     .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
     .delimited_by_brackets()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| List::new(span, data))
@@ -511,7 +510,7 @@ value_parser!(
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_value(inp))
     .repeated_while::<_, U1>(decide_const_value_head::<_, Ctx>)
     .delimited_by_brackets()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstList::new(span, data))
@@ -575,7 +574,7 @@ value_parser!(
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| object_field(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| Object::new(span, data))
@@ -597,7 +596,7 @@ value_parser!(
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_object_field(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstObject::new(span, data))
@@ -668,7 +667,7 @@ where
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| value(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| Set::new(SimpleSpan::new(start, span.end()), data))
@@ -690,7 +689,7 @@ where
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_value(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstSet::new(SimpleSpan::new(start, span.end()), data))
@@ -712,7 +711,7 @@ where
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| map_entry(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| Map::new(SimpleSpan::new(start, span.end()), data))
@@ -734,7 +733,7 @@ where
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_map_entry(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
-    .collect_with(Vec::new())
+    .collect_with(Default::default())
     .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstMap::new(SimpleSpan::new(start, span.end()), data))
