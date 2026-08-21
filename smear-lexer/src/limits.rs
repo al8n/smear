@@ -288,7 +288,38 @@ const _: () = assert!(
 /// `a_refusal_is_one_diagnostic_at_every_cycle` derives its cells from — plus inline fragments and
 /// both recovery-bypass closer families, which is every shape that file already probes.
 ///
-/// The binding cell is **671**, at roughly 3.05 KiB a level, and three shapes reach it.
+/// The binding cell is **671**, at roughly 3.05 KiB a level, and three shapes reach it. Two
+/// independent bisections agree to the level; at 672 the child prints `fatal runtime error: stack
+/// overflow, aborting` and exits 134, at 671 it exits 0; and 2 MiB / 671 = 3.05 KiB a level lands
+/// on the ~3.1 KiB al8n/tokora#297 measured, from outside this tree, for a lossless consumer's
+/// descent.
+///
+/// # A stand-in emitter does not bound this in either direction
+///
+/// An earlier figure of **644** was taken with `Verbose` standing in for the sink and a no-op
+/// `CstEmitter` beside it, because `Sink::new` is crate-private and no door existed that would
+/// install a budget of the caller's. It was recorded as an *upper* bound on the real door, on the
+/// reasoning that the real sink does strictly more work per level. **The real door measures 671 —
+/// above it — so the reasoning was wrong, and wrong about the direction rather than the size.**
+///
+/// The arithmetic is what makes the mechanism legible. Over a 2 MiB thread, 644 levels is 3 256
+/// bytes a level and 671 levels is 3 125, so the whole discrepancy is **131 bytes per level, 4.0%**
+/// — the size of a handful of stack slots, not of anything an emitter does. What the sink does per
+/// level is push an event into a growable buffer, which is **heap** traffic in a callee that has
+/// returned before the production recurses; it is not on the frame that stacks up. A stand-in does
+/// not remove that cost from the recursion, because the recursion never carried it.
+///
+/// What a stand-in *does* change is the **monomorphisation**. `Ctx` is a type parameter of every
+/// production in the nest, and at `opt-level = 0` each MIR local is materialised as its own slot,
+/// so substituting the emitter re-lays-out every frame in the recursion. 131 bytes a level is
+/// exactly that scale. Which way it moves is a codegen fact about slot sizes, ordering and
+/// padding, and **nothing about the emitter's workload predicts its sign** — which is the whole
+/// error: a claim about *work* was read as a bound on *frame size*.
+///
+/// So a stand-in measurement is not a conservative reading of the real one; it is a different one,
+/// and it bounds the real door in neither direction. The lesson is recorded here rather than in a
+/// report because the next person tempted to substitute a type parameter and keep the number will
+/// be reading this table.
 ///
 /// # What the `Bytes` discount does not apply to
 ///
@@ -298,34 +329,44 @@ const _: () = assert!(
 /// columns above are not a sample of a wider space, they are the space. GraphQLx is measured
 /// directly rather than extrapolated, and it is the worse of the two by 0.3%.
 ///
-/// # Why 256, and why not the 353 the bare margin allows
+/// # Why 256 — the interval, then the pick inside it
 ///
-/// The [`MAX_NESTING_DEPTH`] margin is **1.9x**, and the largest value clearing 671 by it is 353
-/// — `353 x 1.9 = 670.7`, where 354 does not fit. The assertion below is that arithmetic in
-/// integers and 256 clears it by 2.62x rather than by 1.90x. Three reasons to spend the
-/// difference, and the first two are measured rather than argued:
+/// Three constraints bound the admissible values, and none of them is a preference:
 ///
-/// - **These exact rows drifted 3-10% downward with nobody re-measuring them.** The table this one
-///   replaces recorded 745 / 702 / 700 at `6f39cb9`; the same three shapes bisect to 722 / 673 /
-///   671 today. No commit set out to move them — a lossless production's frame is grammar code,
-///   and every grammar edit reprices it. Nothing in this repository re-runs the bisection, so the
-///   assertion below is checked against a number that ages. At 353 a further 10% drift breaches
-///   the 1.9x margin silently; at 256 it takes 27%.
-/// - **One architecture was bisected.** [`MAX_NESTING_DEPTH`]'s table has two, and there the other
-///   one came out *better* rather than worse — which is a sample of size one about the direction,
-///   not a rule.
-/// - It is also the ceiling `smear/tests/nesting_depth.rs` already assumes. That file's
-///   `a_refusal_is_one_diagnostic_at_every_cycle` nests **300** levels under a deliberately huge
-///   caller ceiling and asserts the parse refuses, so a wall at or above 300 stops it refusing at
-///   all. 353 breaks it; the two reasons above already rule 353 out, and this is the third
-///   independent thing pointing at the same place.
+/// | bound | from | value |
+/// |---|---|---|
+/// | upper: the 1.9x margin | `floor(671 x 10 / 19)`, asserted below | **353** |
+/// | upper: the suite's own deep cell | see below | **299** |
+/// | lower: the documented raise | `MAX_NESTING_DEPTH * 4`, asserted below | **96** |
 ///
-/// The asymmetry is [`MAX_NESTING_DEPTH`]'s: too low is a clean, positioned, catchable diagnostic,
-/// too high is a process abort that takes every other request on the process with it.
+/// The second row is the one that is not obvious. `a_refusal_is_one_diagnostic_at_every_cycle`
+/// nests **300** levels under a deliberately huge caller ceiling and asserts that the parse
+/// *refuses*; a wall at or above 300 means it never refuses at all, so every cell in that file
+/// becomes a clean parse and the property it pins evaporates without a single assertion firing.
 ///
-/// 256 is also tokora's own `RecursionLimiter::OPTIMIZED_PARSE_DEPTH`, which is a coincidence of
-/// two derivations rather than a shared source — that figure is a *release* number for tokora's
-/// Pratt frames and this one is a debug number for smear's lossless productions.
+/// So the admissible interval is **[96, 299]**, and 353 is refused by the second row before any
+/// judgement is applied. Inside the interval the value is taken at the **top of the power-of-two
+/// ladder**, 256, and the reason to go to the top rather than to 299 is the same asymmetry
+/// [`MAX_NESTING_DEPTH`] is derived under — too low is a clean, positioned, catchable diagnostic,
+/// too high is a process abort that takes every other request on the process with it — while the
+/// reason not to go past 256 to 299 is that the remaining headroom buys a caller almost nothing
+/// (17%) and costs the one thing this constant has no gate for:
+///
+/// **These exact rows drift, and nothing here re-measures them.** The table above replaces figures
+/// of 745 / 702 / 700 recorded at `6f39cb9`; the same three shapes bisect to 722 / 673 / 671
+/// today. No commit set out to move them — a lossless production's frame is grammar code and every
+/// grammar edit reprices it — and the assertion below is checked against a *recorded* number, not
+/// against the machine. At 353 a further 10% of that same drift breaches the 1.9x margin silently;
+/// at 299 it takes 15%; at 256 it takes 27%. One architecture was bisected, too, where
+/// [`MAX_NESTING_DEPTH`]'s two-architecture table found the other one *better* rather than worse —
+/// a sample of size one about the direction, not a rule.
+///
+/// **256 was not chosen to match tokora.** It happens to equal
+/// `RecursionLimiter::OPTIMIZED_PARSE_DEPTH`, and that is a coincidence of two derivations rather
+/// than a shared source: that figure is a *release* number for tokora's own Pratt frames, this one
+/// is a *debug* number for smear's lossless productions, and neither reads the other. Nor is it a
+/// round number for its own sake — the ladder is the tie-break inside an interval the three rows
+/// above had already narrowed to 204 values.
 ///
 /// # What it costs a caller who has the stack
 ///
