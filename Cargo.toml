@@ -133,10 +133,10 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 #   was 64, both profile arms priced at the debug frame cost. Nothing in this tree fails to
 #   compile over it, because `lossless::depth::descend` reads `inp.recursion().limitation()` at
 #   every call rather than a number of its own. What it moves is WHERE a refusal fires: at a caller
-#   ceiling above tokora's default the trip lands at depth 32 instead of 64, so a lossless parse of
-#   a document nesting between 33 and 64 levels is now refused where it used to be accepted. See
-#   that module's `Which of the two numbers is smaller` note; raising the caller's ceiling past
-#   tokora's default is what `parse_lossless_with_context` is being taken for.
+#   ceiling above tokora's default the trip landed at depth 32 instead of 64. That window is now
+#   closed from smear's side: the lossless doors install `min(ceiling, HARD_MAX)` through
+#   `cst::parse_lossless_with_context`, so tokora's default no longer reaches a lossless parse at
+#   all and this constant's next move costs this tree nothing.
 # * `Lexer::read_frontier` and `Token::SCAN_LOOKAHEAD` become REQUIRED (tokora#282, landed as
 #   #289/#293 with no `!` in the subject). Both are claims about how far a scan probed, and the
 #   whole cost of this switch in source terms is answering them — eight vocabularies and two

@@ -344,13 +344,27 @@ macro_rules! lossless_drivers {
           //
           // `Lang` is `parse_lossless`'s SECOND parameter and is used only in bounds, so it is
           // turbofished alongside the lexer or inference settles it on `()`.
-          let (cst, _out) =
-            ::tokora::cst::parse_lossless::<Lx<'inp>, $crate::$dm::$dl::Brand, _, _, _, _>(
+          // The same state the shipped doors seed, and the same ceiling read off it. A driver
+          // that left the context defaulted would run at tokora's `PARSE_DEFAULT_DEPTH` instead
+          // of this dialect's, which is a different budget from the one every shipped entry
+          // point uses and therefore a driver that no longer drives what ships.
+          let state = <$crate::$dm::$dl::LexerState as ::core::default::Default>::default();
+          let (cst, _out) = ::tokora::cst::parse_lossless_with_context::<
+            Lx<'inp>,
+            $crate::$dm::$dl::Brand,
+            _,
+            _,
+            _,
+            _,
+          >(
               src,
-              ::core::default::Default::default(),
-              ::core::default::Default::default(),
+              state,
+              $crate::lossless::depth::lossless_context(
+                ::core::default::Default::default(),
+                ::tokora::cache::DefaultCache::<Lx<'_>>::default(),
+                state.parse_ceiling(),
+              ),
               $crate::$dm::$dl::runner::profile::<str>(),
-              ::tokora::cache::DefaultCache::<Lx<'_>>::default(),
               |inp: &mut TestInput<'inp, '_>| {
                 // Minted before the call, not inside the argument list: `inp` is already borrowed
                 // mutably as the first argument, so a second `inp` method call in the second
@@ -553,14 +567,20 @@ macro_rules! lossless_error_impls {
       }
     }
 
-    /// tokora's own descent trip, landed on the **same variant** smear's own refusal lands on.
+    /// tokora's own descent trip, landed on the **same variant** smear's own refusal lands on —
+    /// and it is now the path **every** lossless refusal takes.
     ///
     /// [`InputRef::descend`](::tokora::InputRef::descend) carries this conversion as a
-    /// where-clause, so it has to exist for a production to descend at all. It is **not** the
-    /// path a trip normally takes: `depth::descend` checks against tokora's `limitation()` too
-    /// and refuses first, precisely so that every refusal is emitted rather than riding a
-    /// `Result` the lossless door discards. This impl is what makes that check spellable, and the
-    /// backstop if tokora ever trips somewhere smear did not look.
+    /// where-clause, so it has to exist for a production to descend at all. It used to be a
+    /// backstop as well: `depth::descend` pre-checked against tokora's `limitation()` and refused
+    /// first, so this impl was reachable only if tokora tripped somewhere smear did not look.
+    /// The pre-check is gone — the doors install the caller's clamped ceiling as *the*
+    /// `RecursionLimiter`, so there is no second number left to check against — and what comes
+    /// back out of a refused descent is built **here**. `depth::descend` still emits the
+    /// diagnostic through [`FromNestingLimit`](crate::lossless::depth::FromNestingLimit) above,
+    /// because a trip is returned and never emitted and the lossless door discards the `Result`;
+    /// the two conversions therefore have to agree, and landing them on one variant is what makes
+    /// that structural instead of remembered.
     ///
     /// # The backstop carried the discriminator #169 deleted, and that is the whole of this note
     ///
@@ -581,6 +601,12 @@ macro_rules! lossless_error_impls {
     /// So it lands on the constructor a real path already uses, and the ask and the construction
     /// stay one enum apart. The offset is tokora's, not smear's: the trip is raised at the
     /// input's committed end, which is the same empty-span position `descend` reports at.
+    ///
+    /// That the two agree is no longer an observation about two paths that rarely both run — it
+    /// is what one refusal now spends: `descend` emits off the span it reads back from the input
+    /// and returns what this impl built off tokora's offset, for the same trip. A dialect that
+    /// moved either one would put a diagnostic and an error value at different positions for a
+    /// single refusal.
     impl<S, Lang: ?Sized>
       ::core::convert::From<::tokora::error::RecursionLimitReached<usize, Lang>> for $errors<S>
     {

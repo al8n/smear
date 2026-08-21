@@ -56,11 +56,12 @@
 //!   The lexer runs ahead of the parser, so on a document whose closers match, the tally reaches
 //!   the ceiling one token before the parser reaches it — which is why the diagnostics for
 //!   ordinary over-deep input are unchanged by the parser-side budget. **Both qualifiers are
-//!   load-bearing and neither is guaranteed**: the parse refuses at `min(this number, tokora's
-//!   own parse-side default)`, which is outside smear's control and has already crossed this one
-//!   upstream; and on input whose closers do *not* match, pair-blindness pins the tally below the
-//!   parse's depth however the two numbers compare. That is smear issue #169, and the parse side
-//!   now ends the document itself rather than relying on either qualifier.
+//!   load-bearing and neither is guaranteed**: the parse refuses at `min(this number,
+//!   [`HARD_MAX`])`, so a caller who raises past the maximum gets a tally at the number they asked
+//!   for and a parse budget below it, and the parse fires first; and on input whose closers do
+//!   *not* match, pair-blindness pins the tally below the parse's depth however the two numbers
+//!   compare. That is smear issue #169, and the parse side now ends the document itself rather
+//!   than relying on either qualifier.
 //! - **It is what latches tokora's poison boundary**, and that latch is what stops a
 //!   machine-generated file from being lexed to the end after it has already proved it goes too
 //!   deep — including stopping the *diagnostics* the rest of the file would otherwise produce,
@@ -128,15 +129,22 @@ use tokora::state::{
 /// | GraphQLx syntactic, inline fragments, `str`, aarch64 | **53** |
 /// | GraphQLx syntactic, generic angle brackets, `str`, aarch64 | **52** |
 /// | GraphQL syntactic, inline fragments, `bytes::Bytes`, aarch64 | **51** |
-/// | GraphQL lossless, inline fragments, `str`, aarch64 | ~745 (13x cheaper per level) |
-/// | GraphQL lossless, **the recovery bypass** `{ ) f {`, `str`, aarch64 | **702** |
-/// | GraphQLx lossless, the same with `)` and with `>` alike, `str`, aarch64 | **700** |
+/// | GraphQL lossless, inline fragments, `str`, aarch64 | 722 (12.7x cheaper per level) |
+/// | GraphQL lossless, **the recovery bypass** `{ ) f {`, `str`, aarch64 | **673** |
+/// | GraphQLx lossless, the same with `)` and with `>` alike, `str`, aarch64 | **671** |
 ///
 /// The last two rows are the shape that walked past the first fix, and they are why the count
 /// moved to the parse. They cost about the same per level as the row above them — a `field` frame
-/// plus a `selection_set` frame — and needed 3.5 KB of input to reach 702, with the lexer's tally
+/// plus a `selection_set` frame — and needed 3.5 KB of input to reach 673, with the lexer's tally
 /// reading **1** the whole way. Under the parse-side budget the same input refuses at 24 and
 /// returns; the mapping did not move, because a level of that shape is a level of any other.
+///
+/// **The three lossless rows are re-measurements and the numbers moved.** They read 745 / 702 /
+/// 700 when they were taken at `6f39cb9`, through a stand-in emitter, because `Sink::new` is
+/// crate-private and no door existed that would install a budget of the caller's. The figures
+/// above are bisected through the shipped `parse_document_with_limits` itself, at
+/// `LosslessLimits::unlimited()`, so the real `cst::Sink` is in the loop — see [`HARD_MAX`], which
+/// is derived from them and carries the full table and the method.
 ///
 /// Five shapes were probed per door — inline fragments, field selections, list values, input
 /// objects and list types, plus GraphQLx's generic angle brackets — and inline fragments are the
@@ -179,14 +187,22 @@ use tokora::state::{
 /// rather than a lowered claim — which also records the ordering, because at the shipped defaults
 /// this ceiling binds long before the validator's does.
 ///
-/// **At the lossless door, raising it past 64 does not reach the parse.** tokora's own
-/// parse-side recursion budget is depth 64 and is installed by `InputContext::new`, which
-/// `tokora::cst::parse_lossless` calls with no hook for a caller to raise — so
-/// a lossless parse refuses at `min(this number, 64)`, cleanly and with a positioned diagnostic
-/// rather than an abort. 64 is 5.8x the deepest document in this repository and 2.7x this
-/// default, so nothing shipped is near it; the *syntactic* door has no such cap, because the
-/// context there is the consumer's and `Parser::with_parser_and_context` takes a
-/// `ParserContext::with_recursion_limiter`.
+/// **At the lossless door, raising it past [`HARD_MAX`] does not reach the parse.** That is
+/// smear's own wall now, derived against the same 2 MiB stack this constant is, and the doors
+/// install `min(what the caller asked for, HARD_MAX)` as *the* recursion budget through
+/// `cst::parse_lossless_with_context`. A request above it is answered with a positioned
+/// diagnostic at [`HARD_MAX`] rather than with the depth that was asked for.
+///
+/// It used to be tokora's `PARSE_DEFAULT_DEPTH` that supplied that wall, by accident: the
+/// lossless drivers built their own context and there was no hook for a caller to raise it, so a
+/// lossless parse refused at `min(this number, whatever tokora defaulted to)`. That number is not
+/// smear's, and upstream moved it twice inside one unreleased window — 64, then 16, then 32
+/// — with nothing in this workspace failing to compile over any of it.
+///
+/// The *syntactic* door has no such cap and needs none, because the context there is the
+/// consumer's: `Parser::with_parser_and_context` takes a `ParserContext::with_recursion_limiter`,
+/// so a caller who raises the ceiling there has said something about their own stack by
+/// construction.
 pub const MAX_NESTING_DEPTH: usize = 24;
 
 /// The worst depth in the table above that still returns: GraphQLx's syntactic door on a 2 MiB
@@ -225,6 +241,127 @@ const _: () = assert!(
   MAX_NESTING_DEPTH >= DEEPEST_DOCUMENT_IN_TREE * 2,
   "MAX_NESTING_DEPTH must keep the documents this repository actually contains clear of the \
    ceiling by at least 2x."
+);
+
+/// The greatest nesting ceiling a **lossless** parse will run under, whatever a caller asks for.
+///
+/// [`MAX_NESTING_DEPTH`] is the default; this is the wall. `LosslessLimits::parse_ceiling` clamps
+/// the caller's request to it, and that number is installed as *the* recursion budget of the parse
+/// through `cst::parse_lossless_with_context`, so a request above this one is answered with a
+/// positioned diagnostic at this depth rather than with the depth that was asked for.
+///
+/// # Why a lossless-only constant, and why a wall at all
+///
+/// The two doors do not have the same shape of escape hatch. The **syntactic** door's context is
+/// the consumer's — `Parser::with_parser_and_context` takes a
+/// [`ParserContext::with_recursion_limiter`](tokora::ParserContext) — so a caller who raises the
+/// ceiling there has, by construction, said something about the stack their own code runs on. The
+/// **lossless** doors are smear's own six functions: they build the context, so a `usize` handed
+/// to one of them is a request smear is obliged to either honour or refuse, and honouring an
+/// arbitrary one is honouring a `SIGABRT`. Before `parse_lossless_with_context` existed the
+/// accident of tokora's own parse-side default supplied the wall; it is a number smear does not
+/// choose and upstream moved it twice inside one unreleased window (64, then 16, then 32), so it
+/// was never a wall this workspace could point at.
+///
+/// # The measurement this is derived from
+///
+/// Bisected on this tree, one parse per process on an explicitly sized **2 MiB** thread, through
+/// the shipped `parse_document_with_limits` at `LosslessLimits::unlimited()` — so the real
+/// `cst::Sink` is in the loop and the native stack is the only wall left. Greatest depth that
+/// returns before the next one aborts with `fatal runtime error: stack overflow`, aarch64, debug:
+///
+/// | shape (2 MiB, debug, `str`) | GraphQL | GraphQLx |
+/// |---|---|---|
+/// | recovery bypass `{ ) f {` | 673 | **671** |
+/// | recovery bypass `{ > f {` | — | **671** |
+/// | selection sets `{ f … }` | 673 | **671** |
+/// | inline fragments | 722 | 720 |
+/// | generic angle brackets `A< … >` | — | 850 |
+/// | collection body `set { … }` | — | 832 |
+/// | input objects `{k: … }` | 886 | 884 |
+/// | list types `[ … ]Int` | 1083 | 1384 |
+/// | list values `[ … ]` | 1303 | 1299 |
+/// | set-or-map type `< … >` | — | 1873 |
+///
+/// **The shape list is the suite's own, not a guess.** It is the strongly-connected components of
+/// each dialect's lossless call graph — the enumeration `smear/tests/nesting_depth.rs`'s
+/// `a_refusal_is_one_diagnostic_at_every_cycle` derives its cells from — plus inline fragments and
+/// both recovery-bypass closer families, which is every shape that file already probes.
+///
+/// The binding cell is **671**, at roughly 3.05 KiB a level, and three shapes reach it.
+///
+/// # What the `Bytes` discount does not apply to
+///
+/// [`MAX_NESTING_DEPTH`]'s table discounts by 0.89x for a `bytes::Bytes` backing. **That discount
+/// is not owed here and cannot be.** Every lossless entry point takes `&str` and pins
+/// `Lexer<'_, str>`; there is no lossless door over any other backing to measure, so the two
+/// columns above are not a sample of a wider space, they are the space. GraphQLx is measured
+/// directly rather than extrapolated, and it is the worse of the two by 0.3%.
+///
+/// # Why 256, and why not the 353 the bare margin allows
+///
+/// The [`MAX_NESTING_DEPTH`] margin is **1.9x**, and the largest value clearing 671 by it is 353
+/// — `353 x 1.9 = 670.7`, where 354 does not fit. The assertion below is that arithmetic in
+/// integers and 256 clears it by 2.62x rather than by 1.90x. Three reasons to spend the
+/// difference, and the first two are measured rather than argued:
+///
+/// - **These exact rows drifted 3-10% downward with nobody re-measuring them.** The table this one
+///   replaces recorded 745 / 702 / 700 at `6f39cb9`; the same three shapes bisect to 722 / 673 /
+///   671 today. No commit set out to move them — a lossless production's frame is grammar code,
+///   and every grammar edit reprices it. Nothing in this repository re-runs the bisection, so the
+///   assertion below is checked against a number that ages. At 353 a further 10% drift breaches
+///   the 1.9x margin silently; at 256 it takes 27%.
+/// - **One architecture was bisected.** [`MAX_NESTING_DEPTH`]'s table has two, and there the other
+///   one came out *better* rather than worse — which is a sample of size one about the direction,
+///   not a rule.
+/// - It is also the ceiling `smear/tests/nesting_depth.rs` already assumes. That file's
+///   `a_refusal_is_one_diagnostic_at_every_cycle` nests **300** levels under a deliberately huge
+///   caller ceiling and asserts the parse refuses, so a wall at or above 300 stops it refusing at
+///   all. 353 breaks it; the two reasons above already rule 353 out, and this is the third
+///   independent thing pointing at the same place.
+///
+/// The asymmetry is [`MAX_NESTING_DEPTH`]'s: too low is a clean, positioned, catchable diagnostic,
+/// too high is a process abort that takes every other request on the process with it.
+///
+/// 256 is also tokora's own `RecursionLimiter::OPTIMIZED_PARSE_DEPTH`, which is a coincidence of
+/// two derivations rather than a shared source — that figure is a *release* number for tokora's
+/// Pratt frames and this one is a debug number for smear's lossless productions.
+///
+/// # What it costs a caller who has the stack
+///
+/// A caller on an 8 MiB thread can afford roughly four times 671 and is still clamped at 256,
+/// which is a real cost and is stated rather than hidden. It is the same trade the default makes:
+/// smear cannot see the stack its caller is on, and the number has to hold on the smallest stack a
+/// parse is realistically handed — 2 MiB, which is what `std::thread::spawn`, a tokio worker and
+/// the libtest harness each give. 256 is 10.7x the default and 23x the deepest document in this
+/// repository, so nothing shipped is anywhere near it.
+pub const HARD_MAX: usize = 256;
+
+/// The worst cell in [`HARD_MAX`]'s table: GraphQLx's lossless door on a 2 MiB debug thread,
+/// reached by the recovery bypass with either closer family and by plain selection sets alike.
+///
+/// A constant rather than only prose so that the assertion below can read it.
+const WORST_LOSSLESS_BOUNDARY: usize = 671;
+
+// The same obligation `MAX_NESTING_DEPTH` carries, for the same reason it is a `const` assertion
+// rather than a test: past the native boundary a nesting test does not go red, it aborts the
+// harness. Raising `HARD_MAX` is a two-line edit and the second line is `WORST_LOSSLESS_BOUNDARY`,
+// which means re-running the bisection behind the table above.
+const _: () = assert!(
+  HARD_MAX * 19 <= WORST_LOSSLESS_BOUNDARY * 10,
+  "HARD_MAX leaves less than the 1.9x margin it was derived at under the worst measured lossless \
+   native-stack boundary. Raising it needs a new measurement, not a new constant."
+);
+
+// The other side of it. A wall at or below the default would make `with_max_nesting_depth` a knob
+// that only ever lowers, and every gate in the tree would still pass because the fixtures are all
+// far shallower than either number. `MAX_NESTING_DEPTH * 4` is the raise this workspace's own
+// suite pins and the one `parse_document_with_limits` promises in prose — "a server on an 8 MiB
+// main thread can afford roughly four times the depth" — so it is the floor that has a reader.
+const _: () = assert!(
+  HARD_MAX >= MAX_NESTING_DEPTH * 4,
+  "HARD_MAX must leave room for the 4x raise the lossless doors document and the suite pins, or \
+   `with_max_nesting_depth` clamps the one use case it exists for."
 );
 
 /// The budget a **syntactic** lex runs under: nesting depth, and nothing else.
@@ -389,10 +526,11 @@ impl LosslessLimits {
   /// A budget whose lexer-side tally never trips on either axis.
   ///
   /// See [`SyntacticLimits::unlimited`] for what removing the nesting ceiling gives up — and note
-  /// the difference at *this* door: a lossless parse still descends through `smear-parser`'s
-  /// `lossless::depth`, whose ceiling this value feeds, so the effective bound here is tokora's
-  /// own parse-side budget of 64 rather than no bound at all. [`MAX_NESTING_DEPTH`] records why
-  /// that cap cannot be raised from a lossless entry point.
+  /// the difference at *this* door: only the **lexer's** tally is unlimited by this value. The
+  /// parse still descends under [`parse_ceiling`](Self::parse_ceiling), which clamps to
+  /// [`HARD_MAX`], so the effective bound here is [`HARD_MAX`] rather than no bound at all. That
+  /// is what makes this value safe to hand a lossless door: it removes the cheap pre-filter and
+  /// leaves the stack-safety wall standing.
   #[inline(always)]
   pub const fn unlimited() -> Self {
     Self(Limiter::with_trackers(
@@ -420,6 +558,30 @@ impl LosslessLimits {
   #[inline(always)]
   pub const fn max_tokens(&self) -> usize {
     self.0.token().limitation()
+  }
+
+  /// The recursion budget a lossless **parse** actually runs under: [`max_nesting_depth`] clamped
+  /// to [`HARD_MAX`].
+  ///
+  /// This is the number each lossless door installs through `InputContext::with_recursion_limiter`
+  /// and therefore the number `InputRef::descend` checks against — one budget, not two. The clamp
+  /// is here, on the type that owns both constants, rather than at six doors, because a door that
+  /// applied it differently would be a door with a different ceiling and nothing would say so.
+  ///
+  /// The lexer's own tally still refuses at [`max_nesting_depth`] unclamped, and that asymmetry is
+  /// deliberate: the tally is a byte count with no native-stack cost behind it, so there is
+  /// nothing for [`HARD_MAX`] to protect there, and clamping it would silently change what a
+  /// caller asking for a very deep *lex* gets.
+  ///
+  /// [`max_nesting_depth`]: Self::max_nesting_depth
+  #[inline(always)]
+  pub const fn parse_ceiling(&self) -> usize {
+    let requested = self.max_nesting_depth();
+    if requested < HARD_MAX {
+      requested
+    } else {
+      HARD_MAX
+    }
   }
 
   /// How many brackets are open right now.

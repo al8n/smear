@@ -189,6 +189,136 @@ fn the_ceiling_is_configurable_in_both_directions() {
   );
 }
 
+/// A raised ceiling is honoured up to [`HARD_MAX`] and **clamped** above it.
+///
+/// # What this pins that [`the_ceiling_is_configurable_in_both_directions`] does not
+///
+/// That test asks only whether raising works at all, at `MAX_NESTING_DEPTH * 4`. It cannot see
+/// the wall, and until `parse_lossless_with_context` existed there was no wall of smear's to see:
+/// a lossless parse ran under tokora's own `PARSE_DEFAULT_DEPTH`, a number this workspace does not
+/// choose and upstream moved twice inside one unreleased window (64, then 16, then 32) with no
+/// compile error anywhere. The effective ceiling was `min(what you asked for, whatever tokora
+/// currently defaults to)`, so "how deep can a caller actually go" had no answer this file could
+/// assert.
+///
+/// It does now: the doors install `min(ceiling, HARD_MAX)` as **the** recursion budget, so the two
+/// halves below are the whole contract. Above the wall the refusal's *position* is the evidence —
+/// `HARD_MAX * 4` bytes in, not the requested ceiling's — because a count alone cannot tell a
+/// clamp from a coincidence.
+///
+/// # Why the deep cells here are safe, and why that is not a judgement call
+///
+/// This file's header says nothing in it is deep, for a reason: past the native boundary a test
+/// does not go red, it aborts the harness. These cells reach `HARD_MAX + 1`, which is deeper than
+/// anything else here — and it is bounded by the same `const` assertion that makes `HARD_MAX`
+/// shippable at all. `HARD_MAX * 1.9 <= 671`, the measured lossless boundary, is checked at
+/// compile time beside the constant, so a `HARD_MAX` raised past what the bisection supports fails
+/// to *build* rather than killing this runner. The depth here cannot outrun the constant, and the
+/// constant cannot outrun the measurement.
+#[cfg(all(feature = "rowan", feature = "graphql", feature = "graphqlx"))]
+#[test]
+fn a_raised_ceiling_is_honoured_to_hard_max_and_clamped_above_it() {
+  use smear::lexer::limits::{HARD_MAX, LosslessLimits};
+
+  /// One nesting delimiter per level, four bytes per level, so a refusal entering level `n + 1`
+  /// reports at byte `n * 4`.
+  fn sel(depth: usize) -> String {
+    format!("{}{}", "{ f ".repeat(depth), " }".repeat(depth))
+  }
+
+  type Door = fn(&str, LosslessLimits) -> (usize, String, Option<core::ops::Range<usize>>);
+
+  fn gql(src: &str, limits: LosslessLimits) -> (usize, String, Option<core::ops::Range<usize>>) {
+    let p = smear::parser::graphql::lossless::parse_document_with_limits(src, limits);
+    (
+      p.diagnostics().len(),
+      p.syntax().text().to_string(),
+      p.diagnostics().first().map(|d| d.span()),
+    )
+  }
+  fn glx(src: &str, limits: LosslessLimits) -> (usize, String, Option<core::ops::Range<usize>>) {
+    let p = smear::parser::graphqlx::lossless::parse_document_with_limits(src, limits);
+    (
+      p.diagnostics().len(),
+      p.syntax().text().to_string(),
+      p.diagnostics().first().map(|d| d.span()),
+    )
+  }
+
+  let mut cells = 0usize;
+  for (dialect, door) in [("graphql", gql as Door), ("graphqlx", glx as Door)] {
+    // ── HONOURED: a raise below the wall buys exactly the depth it asks for ───────────────────
+    //
+    // The ceiling is `MAX_NESTING_DEPTH * 4`, which is the raise this crate's own documentation
+    // promises an 8 MiB caller. Both halves are asserted because a ceiling that only ever accepts
+    // is not a ceiling.
+    let raised = MAX_NESTING_DEPTH * 4;
+    assert!(
+      raised < HARD_MAX,
+      "the honoured cells must sit below the wall"
+    );
+
+    let inside = sel(raised);
+    let (count, text, _) = door(&inside, LosslessLimits::with_max_nesting_depth(raised));
+    assert_eq!(
+      count, 0,
+      "{dialect}: {raised} levels under a ceiling of {raised} must be accepted"
+    );
+    assert_eq!(text, inside, "{dialect}: the lossless guarantee survives");
+    cells += 1;
+
+    let over = sel(raised + 1);
+    let (count, text, _) = door(&over, LosslessLimits::with_max_nesting_depth(raised));
+    assert!(
+      count > 0,
+      "{dialect}: {} levels under a ceiling of {raised} must be refused",
+      raised + 1
+    );
+    assert_eq!(text, over, "{dialect}: the lossless guarantee survives");
+    cells += 1;
+
+    // ── CLAMPED: a raise above the wall buys the wall, and the span says so ───────────────────
+    //
+    // `HARD_MAX * 8` is far above the wall AND far above the depths below, so the lexer's own
+    // tally — which reads the unclamped number and is the cheaper check — cannot fire first. What
+    // refuses here is therefore the parse, at the clamped budget.
+    let asked = HARD_MAX * 8;
+    let limits = LosslessLimits::with_max_nesting_depth(asked);
+
+    let at_wall = sel(HARD_MAX);
+    let (count, text, _) = door(&at_wall, limits);
+    assert_eq!(
+      count, 0,
+      "{dialect}: HARD_MAX ({HARD_MAX}) levels must be accepted when the caller asked for {asked}"
+    );
+    assert_eq!(text, at_wall, "{dialect}: the lossless guarantee survives");
+    cells += 1;
+
+    let past_wall = sel(HARD_MAX + 1);
+    let (count, text, first) = door(&past_wall, limits);
+    assert_eq!(
+      count, 1,
+      "{dialect}: one past HARD_MAX must be one refusal, not {count}"
+    );
+    assert_eq!(
+      text, past_wall,
+      "{dialect}: the lossless guarantee survives"
+    );
+    // THE CLAMP ITSELF. Four bytes a level, so a refusal entering level `HARD_MAX + 1` reports at
+    // `HARD_MAX * 4`. A door that honoured the request instead would not refuse at all here, and
+    // one that refused at some other number is enforcing something that is not HARD_MAX.
+    assert_eq!(
+      first,
+      Some(HARD_MAX * 4..HARD_MAX * 4),
+      "{dialect}: the refusal must land at the clamped ceiling, not at the {asked} asked for"
+    );
+    cells += 1;
+  }
+
+  // A loop whose body never ran exits `ok`, so the cell count is asserted rather than assumed.
+  assert_eq!(cells, 2 * 4, "the cell set collapsed");
+}
+
 /// A document far deeper than any stack could hold **returns**, at both doors.
 ///
 /// This is issue #61 itself: before the fix this input did not return, it aborted the process. It
@@ -578,12 +708,14 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
 ///
 /// The refusal has to come from the **parse's** budget rather than the lexer's tally, because the
 /// lexer's trip latches tokora's poison boundary and ends the document on its own — which is
-/// exactly the accident that hid this. `parse_document_with_limits` at a ceiling above tokora's
-/// own parse-side default puts the parse's ceiling strictly below the lexer's, so the tally cannot
-/// fire and the refusal is the parse's. `RecursionLimiter::PARSE_DEFAULT_DEPTH` is not public at
-/// the pinned version and has already moved upstream, so the ceiling here is a multiple of
-/// `MAX_NESTING_DEPTH` large enough to clear any plausible value of it rather than a number read
-/// off one.
+/// exactly the accident that hid this. `parse_document_with_limits` at a ceiling above the door's
+/// own clamp puts the parse's ceiling strictly below the lexer's, so the tally cannot fire and the
+/// refusal is the parse's. The ceiling here is a multiple of `MAX_NESTING_DEPTH` rather than
+/// `HARD_MAX + 1`, and deliberately so: it was written to clear any plausible value of a number
+/// upstream owned and kept moving, and it now clears smear's own — which is the same statement
+/// with one fewer thing outside this tree's control. `DEPTH` below has to sit **above** the clamp
+/// for a refusal to happen at all, so a `HARD_MAX` raised past 300 reds this file rather than
+/// quietly making every cell a clean parse.
 ///
 /// # The cycles are derived, not listed
 ///
@@ -627,8 +759,8 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
 fn a_refusal_is_one_diagnostic_at_every_cycle() {
   use smear::lexer::limits::LosslessLimits;
 
-  // Above any parse-side default tokora can plausibly install, and above every shape's own depth
-  // below, so the *parse* refuses and the lexer's tally never reaches its own ceiling.
+  // Above the door's clamp and above every shape's own depth below, so the *parse* refuses at
+  // `HARD_MAX` and the lexer's tally — which reads this number unclamped — never fires.
   const CEILING: usize = MAX_NESTING_DEPTH * 64;
   // Deep enough that a per-token tail would be unmistakable, shallow enough to stay under the
   // ceiling. The refusal happens far above this, wherever tokora's default sits.
@@ -877,6 +1009,21 @@ fn a_refusal_ends_every_document_root() {
 /// So the axis is *which* emission is rejected and *what* it substitutes, and the assertion is the
 /// same in every cell: the saved refusal comes back.
 ///
+/// # Which value the refusal IS, and why this cell is where that shows
+///
+/// `Which::Recursion`, and it used to be `Which::Refusal`. `descend` no longer decides the
+/// refusal — it takes the level through
+/// [`InputRef::descend`](tokora::InputRef::descend) and hands back what tokora returns — so the
+/// value that comes out is built by `From<RecursionLimitReached>`, while the value it *emits* is
+/// still built by [`FromNestingLimit`]. Every shipped dialect lands both on the same variant
+/// (smear PR #180), so no other test in this file can see the difference; `Which` maps them apart
+/// on purpose, which is what makes this the cell that says which path is live.
+///
+/// The property is unchanged and still discriminating: `Budget` here would mean the rejecting
+/// emitter's substituted value displaced the refusal, and `LexerError` would mean the entry drain
+/// ran and displaced it. Both were measured before the #169 repair and both are still what a
+/// regression looks like.
+///
 /// # What this still does not cover
 ///
 /// * **A host whose own [`MaybeTerminal`](tokora::error::MaybeTerminal) arm is wrong.** `descend`
@@ -895,15 +1042,19 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
     lossless::depth::{FromNestingLimit, descend, drain_unless_terminal},
   };
   use tokora::{
-    Emitter, Lexer, SimpleSpan, Token,
+    Emitter, Lexer, ParserContext, SimpleSpan, Token,
     cache::DefaultCache,
     error::{MaybeTerminal, RecursionLimitReached},
     prelude::UnexpectedTokenOf,
     span::Spanned,
+    state::recursion_tracker::RecursionLimiter,
   };
 
   type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
-  type Ctx<'inp> = (Rejecting, DefaultCache<'inp, Lx<'inp>>);
+  // A `ParserContext` rather than the `(emitter, cache)` tuple, because the ceiling this cell
+  // needs is now a property of the parse rather than an argument to `descend`: the tuple's
+  // `ParseContext` impl seeds tokora's default budget and has no door to set one.
+  type Ctx<'inp> = ParserContext<'inp, Lx<'inp>, Rejecting, DefaultCache<'inp, Lx<'inp>>, GraphQL>;
 
   /// Which error came back — the whole observation.
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -986,12 +1137,15 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
     fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
   }
 
-  // `ceiling = 0`: the first descent is over budget, so the whole of `src` is the tail a drain
-  // would cross. That is the shape, minus a 64-level nest that would prove nothing extra.
+  // A recursion budget of **0**: the first descent is over budget, so the whole of `src` is the
+  // tail a drain would cross. That is the shape, minus a 64-level nest that would prove nothing
+  // extra. It used to be spelled `descend(inp, 0)`; the ceiling is the parse's own limiter now,
+  // which is the same statement one layer down and is what makes the refusal below tokora's own
+  // trip rather than a smear pre-check that agreed with it.
   fn run<'inp>(src: &'inp str, via_entry: bool, on_error: OnError, reject_lexer: bool) -> Which {
     tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
       |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
-        let out = descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp, 0).map(|_| ());
+        let out = descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp).map(|_| ());
         if via_entry {
           drain_unless_terminal(inp, out)
         } else {
@@ -999,15 +1153,13 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
         }
       },
       src,
-      (
-        Rejecting {
-          on_error,
-          reject_lexer,
-        },
-        DefaultCache::<Lx<'inp>>::default(),
-      ),
+      ParserContext::of(Rejecting {
+        on_error,
+        reject_lexer,
+      })
+      .with_recursion_limiter(RecursionLimiter::with_limitation(0)),
     )
-    .expect_err("a ceiling of 0 refuses the first descent")
+    .expect_err("a budget of 0 refuses the first descent")
   }
 
   let mut cells = 0usize;
@@ -1022,7 +1174,7 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
         for via_entry in [false, true] {
           assert_eq!(
             run(src, via_entry, on_error, reject_lexer),
-            Which::Refusal,
+            Which::Recursion,
             "{src:?} (via_entry={via_entry}, on_error={on_error:?}, \
              reject_lexer={reject_lexer}): the saved refusal was displaced"
           );
