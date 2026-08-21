@@ -86,16 +86,27 @@
 //! allocator refusing is a different thing: it is a fact about the machine at that moment, and
 //! [`Error::Allocation`] is this module's word for it everywhere else.
 //!
-//! # This bounds the writer, and it does not make a deep value safe
+//! # This bounds the writer, and the release is bounded separately
 //!
-//! Stated plainly because the difference is easy to lose: what is repaired here is that **writing**
-//! a value no longer spends a native frame per level. The value itself is still a hazard —
-//! `ConstInputValue`'s derived `Drop` glue recurses, so *releasing* a deeply nested one aborts the
-//! process whether or not this module ever touched it (measured: a value 7 734 lists deep dropped,
-//! 7 773 aborted, with the writer never called). That is a property of the AST type and not of the
-//! writer, and it wants its own change. Until it has one, every gate over this walk has to take
-//! its own fixture apart a level at a time instead of dropping it — `super::tests`'s `dismantle`
-//! and `tests/json_writer.rs`'s `leak_rather_than_drop`, each with the reason attached.
+//! Stated plainly because the difference was easy to lose, and for a while only one half of it
+//! held: what is repaired *here* is that **writing** a value no longer spends a native frame per
+//! level. That left the value itself a hazard — `ConstInputValue`'s **derived** `Drop` glue
+//! recursed, so *releasing* a deeply nested one aborted the process whether or not this module
+//! ever touched it (measured then: 7 734 lists deep dropped, 7 773 aborted, with the writer never
+//! called). It was a property of the AST type and not of the writer, and it got its own change:
+//! `smear_parser::value::nesting`, where the tree carries a hand-written `Drop` that moves its
+//! children onto a heap worklist.
+//!
+//! So the two bounds are independent and both hold over a value nested the way this dialect's
+//! grammar nests one, and the gates say so rather than working around one of them: `super::tests`'s
+//! `dismantle` now simply drops its argument, and `tests/json_writer.rs`'s three deep fixtures
+//! release what they built instead of leaking it.
+//!
+//! The release's bound stops where `smear_parser`'s `Nested` says it does. A caller who
+//! instantiates a value type's source parameter with a type that owns a node builds a recursion
+//! behind an arm the worklist releases as a leaf, and releasing *that* still aborts —
+//! `al8n/smear#176`. It is not a shape any fixture here builds, and it is not something this module
+//! could bound either way; the writer's own bound is unaffected by it.
 
 use core::{fmt, slice};
 

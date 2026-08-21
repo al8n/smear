@@ -795,7 +795,7 @@ fn nested(depth: usize) -> ConstInputValue<&'static str> {
   for _ in 0..depth {
     value = ConstInputValue::List(materialized::ConstList::<&'static str, i64>::new(
       span,
-      vec![value],
+      vec![value].into(),
     ));
   }
   value
@@ -873,8 +873,9 @@ fn a_deeply_nested_leaf_is_written() {
   );
 
   // `response` borrows the executor and has no `Drop`, so its borrow ends at its last use above
-  // and the executor can be moved out from under it.
-  leak_rather_than_drop(executor);
+  // and the executor can be moved out from under it — including into its own release, which is
+  // where this fixture used to kill the process.
+  release_rather_than_leak(executor);
 }
 
 /// The same value as a §7.1.7 `extensions` entry on an execution result.
@@ -932,8 +933,9 @@ fn a_deeply_nested_extension_on_an_execution_result_is_written() {
   );
 
   // `response` borrows the executor and has no `Drop`, so its borrow ends at its last use above
-  // and the executor can be moved out from under it.
-  leak_rather_than_drop(executor);
+  // and the executor can be moved out from under it — including into its own release, which is
+  // where this fixture used to kill the process.
+  release_rather_than_leak(executor);
 }
 
 /// And as a §7.1.3 `extensions` entry on a request error result, where nothing executed at all.
@@ -985,23 +987,31 @@ fn a_deeply_nested_extension_on_a_request_error_result_is_written() {
     "the deep extension is not the last entry of the result"
   );
 
-  leak_rather_than_drop(result);
+  release_rather_than_leak(result);
 }
 
-/// Leaks whatever still owns one of these fixtures instead of dropping it.
+/// Releases whatever still owns one of these fixtures, which is the second half of each gate.
 ///
-/// # This is a defect this change does not fix, recorded where it bites
+/// # It used to `mem::forget`, and that is the finding
 ///
-/// `ConstInputValue`'s derived `Drop` glue **recurses**: releasing a value this deep aborts the
-/// process with `SIGABRT` whether or not anything ever wrote it out — measured on this tree at a
-/// depth of 7 773, with nothing from `smear::json` on the stack. So what the three gates above
-/// establish is that *writing* one of these no longer spends a native frame per level, and not that
-/// a deeply nested value is safe to hold.
+/// `ConstInputValue`'s **derived** `Drop` glue recursed: releasing a value this deep aborted the
+/// process with `SIGABRT` whether or not anything ever wrote it out — measured at a depth of
+/// 7 773, with nothing from `smear::json` on the stack. So the three gates above established that
+/// *writing* one of these no longer spends a native frame per level, and could not establish that
+/// a deeply nested value was safe to hold. A test that let one fall out of scope would have died
+/// on a defect it was not testing, at a signal no assertion can soften, so each one leaked its
+/// fixture instead.
 ///
-/// The fix belongs to the AST type rather than to the writer and wants its own change and its own
-/// review. Until it lands, a test that built one of these fixtures and let it fall out of scope
-/// would fail on a defect it is not testing, at a signal no assertion can soften — so the fixtures
-/// are leaked, deliberately and with this comment attached.
-fn leak_rather_than_drop<T>(owner: T) {
-  core::mem::forget(owner);
+/// That defect is repaired (al8n/smear#165): the tree carries a hand-written `Drop` that moves its
+/// children onto a heap worklist. **Each of the three gates above now releases a 20 000-deep value
+/// as its last act**, so between them they pin both halves — the writer's bound and the release's
+/// — and a regression in either takes the whole file down loudly rather than passing quietly.
+///
+/// The half these fixtures pin is the one the repair covers: a value nested through the grammar's
+/// own list and object carriers, which is what a parse or a resolver produces. A value made deep
+/// through a caller-instantiated source parameter instead recurses behind an arm the worklist
+/// releases as a leaf, and still aborts — `al8n/smear#176`. No fixture in this file has that shape,
+/// so nothing here is measuring it in either direction.
+fn release_rather_than_leak<T>(owner: T) {
+  drop(owner);
 }

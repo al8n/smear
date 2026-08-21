@@ -1016,11 +1016,11 @@ fn nested_selection_document_ending_in(
 fn nested_value_document(depth: usize) -> ExecutableDocument<&'static str> {
   let span = SimpleSpan::const_new(0, 0);
   // `Recursive` has no required fields, so the innermost literal is the empty object.
-  let mut value = InputValue::Object(Object::new(span, vec![]));
+  let mut value = InputValue::Object(Object::new(span, vec![].into()));
   for _ in 0..depth {
     value = InputValue::Object(Object::new(
       span,
-      vec![ObjectField::new(span, Name::new(span, "rec"), value)],
+      vec![ObjectField::new(span, Name::new(span, "rec"), value)].into(),
     ));
   }
   document(SelectionSet::new(

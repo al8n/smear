@@ -1261,30 +1261,29 @@ mod value_depth {
     let mut value = leaf("null");
     let span = *value.as_span();
     for _ in 0..depth {
-      value = ConstInputValue::List(ConstList::new(span, std::vec![value]));
+      value = ConstInputValue::List(ConstList::new(span, std::vec![value].into()));
     }
     value
   }
 
-  /// Takes a value apart one level at a time and drops the pieces.
+  /// Releases a fixture, which is now the ordinary thing to do with one.
   ///
-  /// # This is a workaround for a defect this change does not fix, and it is here on purpose
+  /// # It used to take the value apart a level at a time, and that is the finding
   ///
-  /// `ConstInputValue`'s derived `Drop` glue recurses, so letting one of these fixtures fall out of
-  /// scope aborts the process at a depth well below the ones measured here — **whether or not the
-  /// writer was ever called**. Measured on this tree: a value 7 734 lists deep dropped and 7 773
-  /// aborted, with nothing in `json` on the stack.
+  /// `ConstInputValue`'s **derived** `Drop` glue recursed, so letting one of these fixtures fall
+  /// out of scope aborted the process at a depth well below the ones measured here — whether or
+  /// not the writer was ever called. Every fixture in this module therefore had to dismantle what
+  /// it built, and the comment that said so named the repair it was waiting for.
   ///
-  /// So the repair below bounds the WRITER and does not make a deep value safe to hold. That is a
-  /// property of the AST type rather than of this module, it wants its own change and its own
-  /// review, and until it has one every fixture here has to dismantle what it built.
-  pub(super) fn dismantle(mut value: ConstInputValue<&'static str>) {
-    while let ConstInputValue::List(list) = value {
-      match list.into_values().pop() {
-        Some(inner) => value = inner,
-        None => return,
-      }
-    }
+  /// That repair landed: the tree carries a hand-written `Drop` that moves its children onto a
+  /// heap worklist, so releasing a value nested the way the grammar nests one spends a constant
+  /// native stack at any depth — which is what these fixtures are. (A value nested through a
+  /// caller-instantiated source type is a different shape and still aborts; `al8n/smear#176`, and
+  /// nothing here builds one.) **This function dropping its argument on the floor is the gate**,
+  /// and it is kept rather than inlined at the four call sites because a `dismantle` that went back
+  /// to being needed is the thing to notice.
+  pub(super) fn dismantle(value: ConstInputValue<&'static str>) {
+    drop(value);
   }
 
   /// A sink that records how far down the native stack the writer was when it wrote.

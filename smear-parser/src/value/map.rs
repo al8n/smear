@@ -54,6 +54,30 @@ impl<Key, Value, Span> IntoSpan<Span> for MapEntry<Key, Value, Span> {
   }
 }
 
+/// An entry nests through **both** halves: in GraphQLx a map's key is an input value too.
+impl<Key, Value, Span> crate::value::Sealed for MapEntry<Key, Value, Span>
+where
+  Key: crate::value::Nestable,
+  Value: crate::value::Nestable<Node = Key::Node>,
+{
+}
+
+impl<Key, Value, Span> crate::value::Nestable for MapEntry<Key, Value, Span>
+where
+  Key: crate::value::Nestable,
+  Value: crate::value::Nestable<Node = Key::Node>,
+{
+  type Node = Key::Node;
+
+  #[inline]
+  fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
+    // Both halves are `Nestable`, so both reach the worklist. `Span` carries no bound and is
+    // released here, on the same terms as `ObjectField`'s unbounded slots (al8n/smear#176).
+    self.key.into_children(pending);
+    self.value.into_children(pending);
+  }
+}
+
 impl<Key, Value, Span> IntoComponents for MapEntry<Key, Value, Span> {
   type Components = (Span, Key, Value);
 

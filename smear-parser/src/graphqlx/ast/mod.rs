@@ -7,9 +7,10 @@ use std::{boxed::Box, vec::Vec};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
-use crate::graphqlx::GraphQLx;
+use crate::{graphqlx::GraphQLx, value::Sealed};
 
 /// GraphQLx argument AST aliases.
 pub mod argument;
@@ -39,6 +40,19 @@ pub use type_system::*;
 
 /// The default collection container used by GraphQLx AST collections.
 pub type DefaultVec<T> = Vec<T>;
+
+/// The container the value carriers hold their children in, and the trait that lets it take one
+/// apart.
+///
+/// Re-exported here because it is the default `Container` argument of every value alias below, so
+/// it reaches a consumer's signatures whether or not they name it. [`Nested`] is a `Vec` in every
+/// respect a consumer can observe; what it adds is the iterative release that keeps a value nested
+/// through these carriers from aborting the process on the way out, however deep it is. That
+/// ranges over every recursive position the grammar forms, and not over a node a caller stored in
+/// `S` or in `Span` — see [`Nested`]'s own documentation, which states the difference.
+/// [`Nestable`] is sealed, which fixes who may implement it and says nothing about what a payload
+/// may be.
+pub use crate::value::{Nestable, Nested};
 
 /// A GraphQLx name.
 #[allow(type_alias_bounds)]
@@ -81,11 +95,11 @@ pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<Path<S, Span>
 pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S, Span>, Span>;
 
 /// A GraphQLx list value.
-pub type List<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
+pub type List<S, Span = SimpleSpan, Container = Nested<InputValue<S, Span>>> =
   crate::value::List<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx set value.
-pub type Set<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
+pub type Set<S, Span = SimpleSpan, Container = Nested<InputValue<S, Span>>> =
   crate::value::Set<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx map entry.
@@ -93,7 +107,7 @@ pub type MapEntry<S, Span = SimpleSpan> =
   crate::value::MapEntry<InputValue<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx map value.
-pub type Map<S, Span = SimpleSpan, Container = DefaultVec<MapEntry<S, Span>>> =
+pub type Map<S, Span = SimpleSpan, Container = Nested<MapEntry<S, Span>>> =
   crate::value::Map<InputValue<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx object field.
@@ -101,15 +115,15 @@ pub type ObjectField<S, Span = SimpleSpan> =
   crate::value::ObjectField<Name<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx object value.
-pub type Object<S, Span = SimpleSpan, Container = DefaultVec<ObjectField<S, Span>>> =
+pub type Object<S, Span = SimpleSpan, Container = Nested<ObjectField<S, Span>>> =
   crate::value::Object<Name<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx list value.
-pub type ConstList<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
+pub type ConstList<S, Span = SimpleSpan, Container = Nested<ConstInputValue<S, Span>>> =
   crate::value::List<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx set value.
-pub type ConstSet<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
+pub type ConstSet<S, Span = SimpleSpan, Container = Nested<ConstInputValue<S, Span>>> =
   crate::value::Set<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx map entry.
@@ -117,7 +131,7 @@ pub type ConstMapEntry<S, Span = SimpleSpan> =
   crate::value::MapEntry<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx map value.
-pub type ConstMap<S, Span = SimpleSpan, Container = DefaultVec<ConstMapEntry<S, Span>>> =
+pub type ConstMap<S, Span = SimpleSpan, Container = Nested<ConstMapEntry<S, Span>>> =
   crate::value::Map<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx object field.
@@ -125,7 +139,7 @@ pub type ConstObjectField<S, Span = SimpleSpan> =
   crate::value::ObjectField<Name<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx object value.
-pub type ConstObject<S, Span = SimpleSpan, Container = DefaultVec<ConstObjectField<S, Span>>> =
+pub type ConstObject<S, Span = SimpleSpan, Container = Nested<ConstObjectField<S, Span>>> =
   crate::value::Object<Name<S, Span>, ConstInputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx default input value assignment.
@@ -133,6 +147,21 @@ pub type DefaultInputValue<S, Span = SimpleSpan> =
   crate::value::DefaultInputValue<ConstInputValue<S, Span>, Span>;
 
 /// A GraphQLx input value, including variables and extended collections.
+///
+/// # This enum declares no `Drop`, and that is load-bearing
+///
+/// Releasing a deeply nested one used to abort the process, one native frame per level. The repair
+/// is [`Nested`], the container the four nesting arms hold their children in
+/// — **not** a `Drop` on this enum, which would have cost every by-value `unwrap_*` and
+/// `try_unwrap_*` to `E0509`.
+///
+/// This dialect has **four** nesting variants rather than GraphQL's two, and a map entry nests
+/// through both halves, so it is the one where the defect had the most ways in.
+///
+/// The repair covers every recursive position the *grammar* forms. It does not cover a node a
+/// caller stored in `S` or in `Span` — this pair is the only one that leaves `Span` a parameter,
+/// so it is also the one with the widest exposure. See [`Nested`]'s own documentation and
+/// `al8n/smear#176`.
 #[derive(
   Debug,
   Clone,
@@ -206,7 +235,45 @@ impl<S, Span> IntoSpan<Span> for InputValue<S, Span> {
   }
 }
 
+impl<S, Span> Sealed for InputValue<S, Span> {}
+
+impl<S, Span> Nestable for InputValue<S, Span> {
+  type Node = Self;
+
+  #[inline]
+  fn into_children(self, pending: &mut Vec<Self>) {
+    match self {
+      // These arms hold no value of this enum, so they are released here. They do hold `S` and
+      // `Span`, and at a caller's arguments either can own a node this loop cannot reach
+      // (al8n/smear#176).
+      Self::Variable(_)
+      | Self::Boolean(_)
+      | Self::String(_)
+      | Self::Float(_)
+      | Self::Int(_)
+      | Self::Enum(_)
+      | Self::Null(_) => {}
+      Self::List(list) => pending.extend(list.into_values()),
+      Self::Set(set) => pending.extend(set.into_values()),
+      // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
+      // place in either dialect where a single child slot yields two subtrees.
+      Self::Map(map) => pending.extend(map.into_entries().into_iter().flat_map(|entry| {
+        let (_, key, value) = entry.into_components();
+        [key, value]
+      })),
+      Self::Object(object) => pending.extend(
+        object
+          .into_fields()
+          .into_iter()
+          .map(|field| field.into_components().2),
+      ),
+    }
+  }
+}
+
 /// A GraphQLx constant input value, which cannot contain a variable.
+///
+/// Like [`InputValue`], it declares no `Drop`; the release is [`Nested`]'s.
 #[derive(Debug, Clone, derive_more::IsVariant, derive_more::TryUnwrap, derive_more::Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -265,6 +332,41 @@ impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
       Self::Set(value) => value.into_span(),
       Self::Map(value) => value.into_span(),
       Self::Object(value) => value.into_span(),
+    }
+  }
+}
+
+impl<S, Span> Sealed for ConstInputValue<S, Span> {}
+
+impl<S, Span> Nestable for ConstInputValue<S, Span> {
+  type Node = Self;
+
+  #[inline]
+  fn into_children(self, pending: &mut Vec<Self>) {
+    match self {
+      // These arms hold no value of this enum, so they are released here. They do hold `S` and
+      // `Span`, and at a caller's arguments either can own a node this loop cannot reach
+      // (al8n/smear#176).
+      Self::Boolean(_)
+      | Self::String(_)
+      | Self::Float(_)
+      | Self::Int(_)
+      | Self::Enum(_)
+      | Self::Null(_) => {}
+      Self::List(list) => pending.extend(list.into_values()),
+      Self::Set(set) => pending.extend(set.into_values()),
+      // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
+      // place in either dialect where a single child slot yields two subtrees.
+      Self::Map(map) => pending.extend(map.into_entries().into_iter().flat_map(|entry| {
+        let (_, key, value) = entry.into_components();
+        [key, value]
+      })),
+      Self::Object(object) => pending.extend(
+        object
+          .into_fields()
+          .into_iter()
+          .map(|field| field.into_components().2),
+      ),
     }
   }
 }

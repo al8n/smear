@@ -55,6 +55,27 @@ impl<Name, Value, Span> IntoSpan<Span> for ObjectField<Name, Value, Span> {
   }
 }
 
+/// A field is not itself a value, so the worklist it feeds is the *value*'s.
+impl<Name, Value: crate::value::Nestable, Span> crate::value::Sealed
+  for ObjectField<Name, Value, Span>
+{
+}
+
+impl<Name, Value: crate::value::Nestable, Span> crate::value::Nestable
+  for ObjectField<Name, Value, Span>
+{
+  type Node = Value::Node;
+
+  #[inline]
+  fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
+    // `Value` is the only `Nestable` slot, so it is the only one the worklist can take. `Name` and
+    // `Span` carry no bound and are released here: at the crate's own arguments a name node and a
+    // span, at a caller's whatever the caller chose — including a node no loop can reach from here
+    // (al8n/smear#176).
+    self.value.into_children(pending);
+  }
+}
+
 impl<Name, Value, Span> IntoComponents for ObjectField<Name, Value, Span> {
   type Components = (Span, Name, Value);
 

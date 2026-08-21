@@ -22,8 +22,12 @@
 //! Two nominal enums have none of those problems and one cost — the variant lists are written
 //! twice. `every_value_tree_declares_the_same_variants` pays for that cost with a wildcard-free
 //! census on every tree, rather than with a comment asking the next reader to keep them in step.
-//! `graphql/ast/value.rs` is then **byte-identical to the revision before this axis existed**,
-//! which is a stronger compatibility statement than any test.
+//! `graphql/ast/value.rs` **was byte-identical to the revision before this axis existed**, which
+//! was a stronger compatibility statement than any test. It no longer is, and the edit that ended
+//! it is not this axis reaching across: it is the iterative release in
+//! [`Nested`], applied to both trees at once because the process abort it
+//! removes belongs to the *shape* — a value holding a container of values — and not to the numeric
+//! payload that tells these two files apart.
 //!
 //! # Why the *width* is a parameter here and not a third and fourth enum
 //!
@@ -94,12 +98,14 @@ use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
 use super::{
-  BooleanValue as AstBooleanValue, DefaultVec, EnumValue as AstEnumValue, Name,
-  NullValue as AstNullValue, StringValue as AstStringValue, VariableValue as AstVariableValue,
+  BooleanValue as AstBooleanValue, EnumValue as AstEnumValue, Name, NullValue as AstNullValue,
+  StringValue as AstStringValue, VariableValue as AstVariableValue,
 };
+use crate::value::{Nestable, Nested, Sealed};
 
 /// A GraphQL integer literal, materialised as `I`.
 pub type IntValue<I, Span = SimpleSpan> = super::IntValue<I, Span>;
@@ -115,6 +121,16 @@ pub type FloatValue<Span = SimpleSpan> = super::FloatValue<f64, Span>;
 /// Variant for variant [`ast::InputValue`](crate::graphql::ast::InputValue), with `Float`
 /// carrying [`f64`] and `Int` carrying `I` — see the module header for the two widths. Every
 /// other leaf is the *same type* the slice tree holds, not a copy of it.
+/// # This enum declares no `Drop`, and that is load-bearing
+///
+/// Releasing a deeply nested one used to abort the process, one native frame per level
+/// (al8n/smear#165). The repair is [`Nested`], the container the `List` and
+/// `Object` arms hold their children in — **not** a `Drop` on this enum, which would have cost
+/// every by-value `unwrap_*` and `try_unwrap_*` to `E0509`. Everything `derive_more` generated
+/// before is generated now.
+///
+/// That repair covers every recursive position the *grammar* forms. It does not cover a node a
+/// caller stored in `S` — see [`Nested`]'s own documentation and `al8n/smear#176`.
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -137,6 +153,38 @@ pub enum InputValue<S, I> {
   List(List<S, I>),
   /// Object value with named fields.
   Object(Object<S, I>),
+}
+
+impl<S, I> Sealed for InputValue<S, I> {}
+
+impl<S, I> Nestable for InputValue<S, I> {
+  type Node = Self;
+
+  #[inline]
+  fn into_children(self, pending: &mut std::vec::Vec<Self>) {
+    match self {
+      // These arms hold no `InputValue`, so they are released here rather than put on the
+      // worklist. What they do hold is `S` and `I` — at the crate's own arguments a source slice
+      // and an integer, at a caller's whatever the caller chose, including a node this loop cannot
+      // reach (al8n/smear#176; `I` has no public constructor to reach it through today).
+      Self::Variable(_)
+      | Self::Boolean(_)
+      | Self::String(_)
+      | Self::Float(_)
+      | Self::Int(_)
+      | Self::Enum(_)
+      | Self::Null(_) => {}
+      Self::List(list) => pending.extend(list.into_values()),
+      // A field is `(span, name, value)` and only the value holds an `InputValue`; the name holds
+      // `S` and is released here, on the same terms as the arms above.
+      Self::Object(object) => pending.extend(
+        object
+          .into_fields()
+          .into_iter()
+          .map(|field| field.into_components().2),
+      ),
+    }
+  }
 }
 
 impl<S, I> AsSpan<SimpleSpan> for InputValue<S, I> {
@@ -176,6 +224,8 @@ impl<S, I> IntoSpan<SimpleSpan> for InputValue<S, I> {
 /// A GraphQL constant input value (schema context) whose numeric leaves are materialised.
 ///
 /// Variant for variant [`ast::ConstInputValue`](crate::graphql::ast::ConstInputValue).
+///
+/// Like [`InputValue`], it declares no `Drop`; the release is [`Nested`]'s.
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -196,6 +246,31 @@ pub enum ConstInputValue<S, I> {
   List(ConstList<S, I>),
   /// Object value with named fields (all values must be constant).
   Object(ConstObject<S, I>),
+}
+
+impl<S, I> Sealed for ConstInputValue<S, I> {}
+
+impl<S, I> Nestable for ConstInputValue<S, I> {
+  type Node = Self;
+
+  #[inline]
+  fn into_children(self, pending: &mut std::vec::Vec<Self>) {
+    match self {
+      Self::Boolean(_)
+      | Self::String(_)
+      | Self::Float(_)
+      | Self::Int(_)
+      | Self::Enum(_)
+      | Self::Null(_) => {}
+      Self::List(list) => pending.extend(list.into_values()),
+      Self::Object(object) => pending.extend(
+        object
+          .into_fields()
+          .into_iter()
+          .map(|field| field.into_components().2),
+      ),
+    }
+  }
 }
 
 impl<S, I> AsSpan<SimpleSpan> for ConstInputValue<S, I> {
@@ -234,22 +309,22 @@ impl<S, I> IntoSpan<SimpleSpan> for ConstInputValue<S, I> {
 ///
 /// `Container` stays the **last** argument, as it is on the slice twin, so the two sets differ in
 /// one inserted parameter and not in what an existing argument means.
-pub type List<S, I, Container = DefaultVec<InputValue<S, I>>> =
+pub type List<S, I, Container = Nested<InputValue<S, I>>> =
   crate::value::List<InputValue<S, I>, SimpleSpan, Container>;
 
 /// An object value whose numeric leaves are materialised.
-pub type Object<S, I, Container = DefaultVec<ObjectField<S, I>>> =
+pub type Object<S, I, Container = Nested<ObjectField<S, I>>> =
   crate::value::Object<Name<S>, InputValue<S, I>, SimpleSpan, Container>;
 
 /// An object field whose value's numeric leaves are materialised.
 pub type ObjectField<S, I> = crate::value::ObjectField<Name<S>, InputValue<S, I>>;
 
 /// A constant list value whose numeric leaves are materialised.
-pub type ConstList<S, I, Container = DefaultVec<ConstInputValue<S, I>>> =
+pub type ConstList<S, I, Container = Nested<ConstInputValue<S, I>>> =
   crate::value::List<ConstInputValue<S, I>, SimpleSpan, Container>;
 
 /// A constant object value whose numeric leaves are materialised.
-pub type ConstObject<S, I, Container = DefaultVec<ConstObjectField<S, I>>> =
+pub type ConstObject<S, I, Container = Nested<ConstObjectField<S, I>>> =
   crate::value::Object<Name<S>, ConstInputValue<S, I>, SimpleSpan, Container>;
 
 /// A constant object field whose value's numeric leaves are materialised.

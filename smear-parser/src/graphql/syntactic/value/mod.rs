@@ -16,7 +16,6 @@
 //! consuming a wrong token. Default values commit on `=` and validate the const-value
 //! tail without consuming a wrong token.
 
-use std::vec::Vec;
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
   TryParseInput,
@@ -733,7 +732,7 @@ numeric_value_parser!(
     value_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
-      .collect_with(Vec::new())
+      .collect_with(Default::default())
       .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: values }| ListNode::new(span, values))
@@ -749,7 +748,7 @@ numeric_value_parser!(
     const_value_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
-      .collect_with(Vec::new())
+      .collect_with(Default::default())
       .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: values }| ListNode::new(span, values))
@@ -853,7 +852,7 @@ numeric_value_parser!(
     object_field_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
-      .collect_with(Vec::new())
+      .collect_with(Default::default())
       .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: fields }| ObjectNode::new(span, fields))
@@ -869,7 +868,7 @@ numeric_value_parser!(
     const_object_field_with::<Src, Ctx, N>
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
-      .collect_with(Vec::new())
+      .collect_with(Default::default())
       .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data: fields }| ObjectNode::new(span, fields))

@@ -1996,7 +1996,10 @@ fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>,
         }
       }
       let extent = extent.range(node, "a token")?;
-      (InputValue::List(List::new(to_span(extent), values)), extent)
+      (
+        InputValue::List(List::new(to_span(extent), values.into())),
+        extent,
+      )
     }
     K::ObjectValue => {
       let mut extent = Extent::default();
@@ -2012,7 +2015,7 @@ fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>,
       }
       let extent = extent.range(node, "a token")?;
       (
-        InputValue::Object(Object::new(to_span(extent), fields)),
+        InputValue::Object(Object::new(to_span(extent), fields.into())),
         extent,
       )
     }
@@ -2072,7 +2075,7 @@ fn const_value<'src>(
       }
       let extent = extent.range(node, "a token")?;
       (
-        ConstInputValue::List(ConstList::new(to_span(extent), values)),
+        ConstInputValue::List(ConstList::new(to_span(extent), values.into())),
         extent,
       )
     }
@@ -2090,7 +2093,7 @@ fn const_value<'src>(
       }
       let extent = extent.range(node, "a token")?;
       (
-        ConstInputValue::Object(ConstObject::new(to_span(extent), fields)),
+        ConstInputValue::Object(ConstObject::new(to_span(extent), fields.into())),
         extent,
       )
     }
