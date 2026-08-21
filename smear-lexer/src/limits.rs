@@ -52,13 +52,23 @@
 //!
 //! What this counter keeps is a real job, and two of them:
 //!
-//! - **It is the cheaper check, and it fires first for well-formed input.** The lexer runs ahead
-//!   of the parser, so on a document whose closers match, the tally reaches the ceiling one token
-//!   before the parser reaches it — which is why the diagnostics for ordinary over-deep input are
-//!   unchanged by the parser-side budget.
+//! - **It is the cheaper check, and it fires first for well-formed input at the same ceiling.**
+//!   The lexer runs ahead of the parser, so on a document whose closers match, the tally reaches
+//!   the ceiling one token before the parser reaches it — which is why the diagnostics for
+//!   ordinary over-deep input are unchanged by the parser-side budget. **Both qualifiers are
+//!   load-bearing and neither is guaranteed**: the parse refuses at `min(this number, tokora's
+//!   own parse-side default)`, which is outside smear's control and has already crossed this one
+//!   upstream; and on input whose closers do *not* match, pair-blindness pins the tally below the
+//!   parse's depth however the two numbers compare. That is smear issue #169, and the parse side
+//!   now ends the document itself rather than relying on either qualifier.
 //! - **It is what latches tokora's poison boundary**, and that latch is what stops a
 //!   machine-generated file from being lexed to the end after it has already proved it goes too
-//!   deep. See `smear-parser/src/lossless/runner.rs` for why smear keeps the latch.
+//!   deep — including stopping the *diagnostics* the rest of the file would otherwise produce,
+//!   since tokora reports every lexer error a scan crosses. See
+//!   `smear-parser/src/lossless/runner.rs` for why smear keeps the latch, and
+//!   `smear-parser/src/lossless/depth`'s `The refusal ends the document` for how the parse side
+//!   reaches the same end with no cell at all: the refusal rides out on the error value and the
+//!   document roots stop on it.
 
 use tokora::state::{
   State,

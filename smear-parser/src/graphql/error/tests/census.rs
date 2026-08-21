@@ -35,16 +35,16 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 ///   `smear-lexer`'s `LosslessTokenKind::Boolean` (28 declared, 27 producible).
 ///
 /// **The exhaustive match and the sample set are gated differently, and that is the point.**
-/// `ErrorData` declares the same 22 variants in every configuration, so the `match` below is
-/// wildcard-free over all 22 everywhere and a new variant is `E0004` in a default build. What
+/// `ErrorData` declares the same 23 variants in every configuration, so the `match` below is
+/// wildcard-free over all 23 everywhere and a new variant is `E0004` in a default build. What
 /// `materialized-numbers` gates is the two *producers*, so only their two samples carry a
-/// `#[cfg]`: 22 samples with the feature, 20 without.
+/// `#[cfg]`: 23 samples with the feature, 21 without.
 ///
 /// Putting the `#[cfg]` on the match arm as well — the shape this test had first — would have
 /// made each build check only the enum it compiled, which sounds stricter and is weaker: it lets
 /// a variant be declared-and-unproducible in *every* configuration as long as no single
 /// configuration sees both halves. The all-features run is what rules that out, and it can only
-/// do so because it samples all 22.
+/// do so because it samples all 23.
 ///
 /// A census over the union of configurations — the shape `ci/source_census`'s D1–D4 necessarily
 /// has, since it reads the source as text with `syn` and strips only `#[cfg(test)]` — cannot tell
@@ -183,6 +183,12 @@ fn error_data_variant_census() {
       .into_data(),
 
     EndOfInput => GraphqlError::<&str>::unexpected_end_of_input(span).into_data(),
+
+    // The **generic** constructor, not `lossless::depth`'s `FromNestingLimit` impl: that impl is
+    // pinned to the lossless keying (`LosslessTokenKind`, `LimitExceeded`) and this census is
+    // written over the syntactic one, so the trait cannot reach the variant from here. Both doors
+    // bottom out in this constructor, which is what the sample rule is asking about.
+    NestingLimitExceeded => GraphqlError::<&str>::nesting_limit_exceeded(span).into_data(),
 
     // Not a constructor: the only producers of `Other` are the six `From` conversions in
     // `error.rs`, and this is the cheapest of them to mint.

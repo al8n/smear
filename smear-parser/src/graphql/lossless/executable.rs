@@ -301,10 +301,13 @@ lossless_production! {
   /// `Err` reaching [`parse_executable_document`](super::parse_executable_document) is the
   /// ordinary case rather than the exotic one, and the tail it left uncommitted would be a
   /// `FinishError::UncoveredGap` panic in materialization without this drain.
+  ///
+  /// Which makes this the root where a nesting refusal reaches the drain most directly, and the
+  /// reason the drain is [`depth::drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal):
+  /// a refusal must not read the tail.
   fn executable_document_entry<'inp, Src, Ctx>(inp) {
     let out = executable_document::<Src, Ctx>(inp);
-    inp.skip_while(|_| true)?;
-    out
+    crate::lossless::depth::drain_unless_terminal(inp, out)
   }
 }
 
