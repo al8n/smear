@@ -38,9 +38,10 @@
 //! `IntoSpan` can no longer reach a span by matching itself apart.
 //!
 //! `E0509` fires on **the type that implements `Drop`**, not on a type one of whose *fields*
-//! implements it. So the release lives here, on [`Nested`] — the container the recursive positions
-//! sit behind — and the six value enums declare no `Drop` at all. Their derives, their owned
-//! `unwrap_list(self)`, their `IntoSpan` bodies and their destructuring are exactly what they were.
+//! implements it. So the release lives here, on [`Nested`] — the container the grammar's recursive
+//! positions sit behind — and the six value enums declare no `Drop` at all. Their derives, their
+//! owned `unwrap_list(self)`, their `IntoSpan` bodies and their destructuring are exactly what they
+//! were.
 //!
 //! The relocation is also what makes the loop *simpler* rather than harder: because the enums have
 //! no `Drop`, [`Nestable::into_children`] takes one **by value** and matches it apart, instead of
@@ -60,15 +61,82 @@
 //!
 //! # What makes it expressible at all
 //!
-//! **Every recursive position in these trees sits behind a container** — a list's elements, a set's
-//! members, an object's fields, a map's entries. That is what gives the release a type to hang a
-//! `Drop` on, and a `Vec` it can take by [`core::mem::take`] with nothing to put back.
+//! **Every recursive position the grammar forms sits behind a container** — a list's elements, a
+//! set's members, an object's fields, a map's entries. That is what gives the release a type to
+//! hang a `Drop` on, and a `Vec` it can take by [`core::mem::take`] with nothing to put back. That
+//! sentence has to name the grammar, and the next section is why.
 //!
 //! A recursion through a *single* owned value has no such door. `ty::Type`'s
 //! `List(Box<ListType<Self>>)` is the example in this workspace: there is no container in that
 //! cycle, so there is no type in it whose `Drop` could be written without also making the `Type`
 //! enum itself undroppable-by-move. That recursion wants a representation change rather than this
 //! instrument, and it is not repaired here.
+//!
+//! # What the guarantee ranges over, and where it stops
+//!
+//! Everything above is a statement about the recursive positions **these types form themselves**.
+//! Over that set it is exact: a value that nests through a list, a set, an object or a map is
+//! released in constant native stack at any depth, on all six enums, and the grammar reaches a
+//! recursive position by no other route.
+//!
+//! It is not a statement about what a caller puts in a payload parameter. These types are generic
+//! and most of those parameters carry no bound at all, so a caller may instantiate one with a type
+//! that owns a node. That builds a cycle which never passes through a container: a value enum is
+//! *on* the cycle, but by an arm this loop correctly releases as a leaf, so [`Nested`] is not in it
+//! and cannot see it. Releasing one descends the derived glue of the caller's own type, one native
+//! frame per level, exactly as it did before this module existed. Measured on
+//! `aarch64-apple-darwin`, unoptimised, on chains threaded through a `Name`'s source: through an
+//! object field's name, 1 000 released and 20 000 aborted; through the `Variable` arm, which spends
+//! fewer frames per level, 20 000 released and 100 000 aborted. It is tracked as `al8n/smear#176`,
+//! and it is **not** a regression —
+//! the same chain aborted identically before this branch, and the enum-side `Drop` this module
+//! rejected would not have helped, because the recursion is in the caller's own glue rather than in
+//! anything either design owns.
+//!
+//! **Sealing does not address this and never could.** [`Nestable`] being sealed decides *who may
+//! implement the trait*. That is why `T` in `Nested<T>` can only be one of this crate's own
+//! elements, and over that parameter it is complete. It decides nothing about *what a payload may
+//! be*, and a payload is where a caller's type gets in.
+//!
+//! ## Which parameters, derived from the tree rather than named from one witness
+//!
+//! **Unbounded, owned by value, and reachable through a public constructor.** These are the ways
+//! in:
+//!
+//! * `S`, the source representation, on all six value enums. `Name<S>` owns its `S` and
+//!   `Name::new` is public, so `S` reaches a live tree through an object field's *name* slot on
+//!   every one of the six, and through the `Variable` arm on the three that have one. The `String`,
+//!   `Float`, `Int`, `Enum` and `Null` leaves own an `S` too, but their constructors are
+//!   `pub(crate)`, so they are not additional doors today.
+//! * `Span`, on the GraphQLx pair — the only pair that leaves it a parameter rather than pinning it
+//!   to `SimpleSpan`. Every carrier in that dialect holds a `Span` by value and every one of their
+//!   constructors is public, so this is the widest of the three.
+//! * `Name` and `Span` on `ObjectField`, and `Span` on `MapEntry`: the same parameters seen from
+//!   the carrier instead of from the enum. `ObjectField`'s `Name` is exactly the slot its own
+//!   [`Nestable::into_children`] releases as a leaf.
+//!
+//! **Unbounded and nameable, but not reachable today:**
+//!
+//! * `I`, the integer width on the materialised pair. `IntValue` owns it by value, but
+//!   `IntValue::new` is `pub(crate)` and no public item returns one, so a caller can write
+//!   `InputValue<S, MyInt>` and has no way to build the `Int` arm that would hold a `MyInt`. That
+//!   is a fact about one constructor's visibility rather than about the type, and it stops holding
+//!   the day the constructor is published.
+//!
+//! **Structurally unable to hold a node, so not on the list at all:**
+//!
+//! * `Lang`, the dialect marker on every shared carrier: `?Sized` and held only as `PhantomData`,
+//!   and pinned to `GraphQL` or `GraphQLx` by the aliases besides — two independent reasons.
+//! * `S` in `BooleanValue`, alone among the leaves, which is `PhantomData<S>` with no `S` field.
+//!   That one arm cannot own a node even at a caller-chosen `S`; the other six are why the enum
+//!   still can.
+//! * The element parameters of `List`, `Set`, `Object` and `Map`. Each is `PhantomData`, and what
+//!   those carriers actually own is their `Container`.
+//! * `T` in `Nested<T>`, and the `Nestable`-bounded halves of `ObjectField` and `MapEntry`. These
+//!   are the parameters sealing does reach, and over them it is airtight.
+//!
+//! The `Container` parameter is unbounded and owned and is still not a way in, for a reason that is
+//! about shape rather than about a bound — see [`Nested`]'s own header below.
 //!
 //! # What this did to the ceiling, which is not what it looks like
 //!
@@ -131,8 +199,14 @@ mod sealed {
   /// The trait is `pub` because it is a bound on [`Nested`](super::Nested)'s *definition* and so
   /// reaches the public signature of every value carrier. It is sealed because an outside
   /// implementation would be handed the release's invariant to keep — see
-  /// [`Nestable::into_children`](super::Nestable::into_children) — and a `Drop` that a consumer can
-  /// make recurse is the defect back again with a longer path to it.
+  /// [`Nestable::into_children`](super::Nestable::into_children) — and an `into_children` that
+  /// pushed nothing for a container is the defect back again with a longer path to it.
+  ///
+  /// **What sealing buys is that one thing.** It fixes the set of elements a
+  /// [`Nested`](super::Nested) can hold, so the loop's invariant is kept by code in this crate and
+  /// nowhere else. It does not fix what those elements' *payload parameters* may be, and a caller
+  /// who instantiates one with a type owning a node builds a recursion the loop never sees — the
+  /// module header derives which parameters those are.
   pub trait Sealed {}
 }
 
@@ -141,8 +215,10 @@ pub(crate) use sealed::Sealed;
 /// An element a [`Nested`] container knows how to take apart.
 ///
 /// Implemented on the value enums, and on the field and entry carriers a container holds instead of
-/// values. It is sealed: only this crate can implement it, so the release's invariant cannot be
-/// broken from outside.
+/// values. It is sealed: only this crate can implement it, so no outside impl can break the
+/// release's invariant. Sealing reaches the *implementors*; it does not reach the payload
+/// parameters those implementors are generic over, which is a separate question — see [`Nested`]'s
+/// own documentation.
 pub trait Nestable: Sized + Sealed {
   /// What the worklist holds.
   ///
@@ -162,6 +238,11 @@ pub trait Nestable: Sized + Sealed {
   /// instead of pushed would add a frame per level, which is the recursion back again wearing a
   /// worklist.
   ///
+  /// "Leaf" means **holds no node of this crate's own**. An arm an implementation treats as a leaf
+  /// still releases whatever its payload parameters were instantiated with, and a caller who put a
+  /// value tree in one of those has a recursion here that no implementation can push — see
+  /// [`Nested`] for the scope that follows from it.
+  ///
   /// The implementations match exhaustively and without a wildcard arm, so a variant added to one
   /// of these enums is a compile error here rather than a silent return to recursing.
   fn into_children(self, pending: &mut Vec<Self::Node>);
@@ -172,7 +253,8 @@ pub trait Nestable: Sized + Sealed {
 /// **Every trait it implements answers as `Vec`'s does.** It derefs to a slice, collects from an
 /// iterator, compares, hashes, clones and prints the same, and tokora's `Container` and
 /// `DelimiterHandler` get the same answers `Vec` gives them, `max_capacity` included. The one
-/// thing it adds is the [`Drop`] that keeps a deep value from taking the process with it.
+/// thing it adds is the [`Drop`] that keeps a value nested through this crate's own carriers from
+/// taking the process with it, however deep it is.
 ///
 /// It is not `Vec`'s whole *surface*, and that is the weaker claim to make. There is no
 /// `DerefMut`, no `AsMut`, no `Extend`, no `PartialOrd`, no cross-type `PartialEq`, and no
@@ -193,6 +275,34 @@ pub trait Nestable: Sized + Sealed {
 /// gets the old behaviour for *that one level*; the values inside it still hold this type, so the
 /// release is still bounded below the first level. The default is what the value enums use, and the
 /// value enums are what nests.
+///
+/// That is why the container parameter, unbounded though it is, is not a way to rebuild the defect:
+/// a nesting arm names its alias **with the default**, so a consumer's container appears at the
+/// level they wrote it and can never be re-embedded under one. The parameters that *are* a way in
+/// are the payload ones, below — the container axis is the one this paragraph closes, and it closes
+/// only that one.
+///
+/// # What the release covers, and what it does not
+///
+/// It covers every recursive position the value types form themselves — a list's elements, a set's
+/// members, an object's fields, a map's entries — at any depth, on every value enum in both
+/// dialects. That is the shape a parse or a resolver produces, and over it the bound is exact.
+///
+/// It does not cover a node reached through a **payload parameter**. These types are generic and
+/// most of those parameters carry no bound: instantiate a value enum's source representation `S`,
+/// or GraphQLx's `Span`, with a type that owns a value, and the cycle runs through an arm
+/// [`Nestable::into_children`] correctly releases as a leaf. This container is not on that cycle
+/// and cannot see it, so releasing one descends the caller's own derived glue at one native frame
+/// per level. Measured unoptimised on `aarch64-apple-darwin`, on a chain threaded through an object
+/// field's name: 1 000 released, 20 000 aborted. Tracked as `al8n/smear#176`; it predates this
+/// container and is not something moving the release onto the value enums would have fixed either.
+///
+/// **Sealing [`Nestable`] does not address that.** Sealing decides who may implement the trait,
+/// which is why `T` here is always one of this crate's own elements and why the loop's invariant
+/// is kept in this crate and nowhere else. It decides nothing about what a payload may be.
+/// `value/nesting.rs`'s module header derives the rest: which parameters are a way in, which are
+/// unbounded but have no public constructor to reach them through, and which cannot hold a node at
+/// all.
 pub struct Nested<T: Nestable> {
   values: Vec<T>,
 }
@@ -248,8 +358,10 @@ impl<T: Nestable> Drop for Nested<T> {
     }
     while let Some(node) = pending.pop() {
       node.into_children(&mut pending);
-      // `node` is consumed by the call, and whatever it released instead of pushing was a leaf.
-      // That is the one frame this loop ever spends.
+      // `node` is consumed by the call, and whatever it released instead of pushing held no node of
+      // this crate's own. That is the one frame this loop ever spends on the tree these types form;
+      // what a caller instantiated a payload parameter with is released inside it, and the module
+      // header says why that is a bound this container cannot place.
     }
   }
 }

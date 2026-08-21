@@ -105,9 +105,9 @@ pub(crate) trait Numbers<S> {
   type Error;
   /// The input-value tree this marker assembles.
   ///
-  /// `Nestable` because the tree's containers are [`Nested`], whose `Drop` is what keeps a deep
-  /// value from aborting the process. The bound costs nothing outside this crate: `Numbers` is
-  /// `pub(crate)` and its two implementors are here.
+  /// `Nestable` because the tree's containers are [`Nested`], whose `Drop` is what keeps a value
+  /// nested through the grammar's own carriers from aborting the process. The bound costs nothing
+  /// outside this crate: `Numbers` is `pub(crate)` and its two implementors are here.
   type Value: crate::value::Nestable<Node = Self::Value>;
   /// The constant input-value tree this marker assembles.
   type ConstValue: crate::value::Nestable<Node = Self::ConstValue>;

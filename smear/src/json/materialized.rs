@@ -97,9 +97,16 @@
 //! `smear_parser::value::nesting`, where the tree carries a hand-written `Drop` that moves its
 //! children onto a heap worklist.
 //!
-//! So the two bounds are independent and both hold, and the gates say so rather than working
-//! around one of them: `super::tests`'s `dismantle` now simply drops its argument, and
-//! `tests/json_writer.rs`'s three deep fixtures release what they built instead of leaking it.
+//! So the two bounds are independent and both hold over a value nested the way this dialect's
+//! grammar nests one, and the gates say so rather than working around one of them: `super::tests`'s
+//! `dismantle` now simply drops its argument, and `tests/json_writer.rs`'s three deep fixtures
+//! release what they built instead of leaking it.
+//!
+//! The release's bound stops where `smear_parser`'s `Nested` says it does. A caller who
+//! instantiates a value type's source parameter with a type that owns a node builds a recursion
+//! behind an arm the worklist releases as a leaf, and releasing *that* still aborts —
+//! `al8n/smear#176`. It is not a shape any fixture here builds, and it is not something this module
+//! could bound either way; the writer's own bound is unaffected by it.
 
 use core::{fmt, slice};
 

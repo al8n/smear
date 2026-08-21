@@ -1006,6 +1006,12 @@ fn a_deeply_nested_extension_on_a_request_error_result_is_written() {
 /// children onto a heap worklist. **Each of the three gates above now releases a 20 000-deep value
 /// as its last act**, so between them they pin both halves — the writer's bound and the release's
 /// — and a regression in either takes the whole file down loudly rather than passing quietly.
+///
+/// The half these fixtures pin is the one the repair covers: a value nested through the grammar's
+/// own list and object carriers, which is what a parse or a resolver produces. A value made deep
+/// through a caller-instantiated source parameter instead recurses behind an arm the worklist
+/// releases as a leaf, and still aborts — `al8n/smear#176`. No fixture in this file has that shape,
+/// so nothing here is measuring it in either direction.
 fn release_rather_than_leak<T>(owner: T) {
   drop(owner);
 }

@@ -1276,9 +1276,12 @@ mod value_depth {
   /// it built, and the comment that said so named the repair it was waiting for.
   ///
   /// That repair landed: the tree carries a hand-written `Drop` that moves its children onto a
-  /// heap worklist, so releasing a value of any depth spends one native frame. **This function
-  /// dropping its argument on the floor is the gate**, and it is kept rather than inlined at the
-  /// four call sites because a `dismantle` that went back to being needed is the thing to notice.
+  /// heap worklist, so releasing a value nested the way the grammar nests one spends a constant
+  /// native stack at any depth — which is what these fixtures are. (A value nested through a
+  /// caller-instantiated source type is a different shape and still aborts; `al8n/smear#176`, and
+  /// nothing here builds one.) **This function dropping its argument on the floor is the gate**,
+  /// and it is kept rather than inlined at the four call sites because a `dismantle` that went back
+  /// to being needed is the thing to notice.
   pub(super) fn dismantle(value: ConstInputValue<&'static str>) {
     drop(value);
   }

@@ -68,7 +68,10 @@ impl<Name, Value: crate::value::Nestable, Span> crate::value::Nestable
 
   #[inline]
   fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
-    // The name is a leaf and is released here; only the value can nest.
+    // `Value` is the only `Nestable` slot, so it is the only one the worklist can take. `Name` and
+    // `Span` carry no bound and are released here: at the crate's own arguments a name node and a
+    // span, at a caller's whatever the caller chose — including a node no loop can reach from here
+    // (al8n/smear#176).
     self.value.into_children(pending);
   }
 }

@@ -128,6 +128,9 @@ pub type FloatValue<Span = SimpleSpan> = super::FloatValue<f64, Span>;
 /// `Object` arms hold their children in — **not** a `Drop` on this enum, which would have cost
 /// every by-value `unwrap_*` and `try_unwrap_*` to `E0509`. Everything `derive_more` generated
 /// before is generated now.
+///
+/// That repair covers every recursive position the *grammar* forms. It does not cover a node a
+/// caller stored in `S` — see [`Nested`]'s own documentation and `al8n/smear#176`.
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -160,7 +163,10 @@ impl<S, I> Nestable for InputValue<S, I> {
   #[inline]
   fn into_children(self, pending: &mut std::vec::Vec<Self>) {
     match self {
-      // A leaf owns no value, so it is released here rather than put on the worklist.
+      // These arms hold no `InputValue`, so they are released here rather than put on the
+      // worklist. What they do hold is `S` and `I` — at the crate's own arguments a source slice
+      // and an integer, at a caller's whatever the caller chose, including a node this loop cannot
+      // reach (al8n/smear#176; `I` has no public constructor to reach it through today).
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -169,8 +175,8 @@ impl<S, I> Nestable for InputValue<S, I> {
       | Self::Enum(_)
       | Self::Null(_) => {}
       Self::List(list) => pending.extend(list.into_values()),
-      // A field is `(span, name, value)` and only the value can nest; the name is a leaf and is
-      // released here.
+      // A field is `(span, name, value)` and only the value holds an `InputValue`; the name holds
+      // `S` and is released here, on the same terms as the arms above.
       Self::Object(object) => pending.extend(
         object
           .into_fields()

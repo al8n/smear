@@ -46,8 +46,12 @@ pub type DefaultVec<T> = Vec<T>;
 ///
 /// Re-exported here because it is the default `Container` argument of every value alias below, so
 /// it reaches a consumer's signatures whether or not they name it. [`Nested`] is a `Vec` in every
-/// respect a consumer can observe; what it adds is the iterative release that keeps a deeply nested
-/// value from aborting the process on the way out. [`Nestable`] is sealed.
+/// respect a consumer can observe; what it adds is the iterative release that keeps a value nested
+/// through these carriers from aborting the process on the way out, however deep it is. That
+/// ranges over every recursive position the grammar forms, and not over a node a caller stored in
+/// `S` or in `Span` — see [`Nested`]'s own documentation, which states the difference.
+/// [`Nestable`] is sealed, which fixes who may implement it and says nothing about what a payload
+/// may be.
 pub use crate::value::{Nestable, Nested};
 
 /// A GraphQLx name.
@@ -153,6 +157,11 @@ pub type DefaultInputValue<S, Span = SimpleSpan> =
 ///
 /// This dialect has **four** nesting variants rather than GraphQL's two, and a map entry nests
 /// through both halves, so it is the one where the defect had the most ways in.
+///
+/// The repair covers every recursive position the *grammar* forms. It does not cover a node a
+/// caller stored in `S` or in `Span` — this pair is the only one that leaves `Span` a parameter,
+/// so it is also the one with the widest exposure. See [`Nested`]'s own documentation and
+/// `al8n/smear#176`.
 #[derive(
   Debug,
   Clone,
@@ -234,6 +243,9 @@ impl<S, Span> Nestable for InputValue<S, Span> {
   #[inline]
   fn into_children(self, pending: &mut Vec<Self>) {
     match self {
+      // These arms hold no value of this enum, so they are released here. They do hold `S` and
+      // `Span`, and at a caller's arguments either can own a node this loop cannot reach
+      // (al8n/smear#176).
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -332,6 +344,9 @@ impl<S, Span> Nestable for ConstInputValue<S, Span> {
   #[inline]
   fn into_children(self, pending: &mut Vec<Self>) {
     match self {
+      // These arms hold no value of this enum, so they are released here. They do hold `S` and
+      // `Span`, and at a caller's arguments either can own a node this loop cannot reach
+      // (al8n/smear#176).
       Self::Boolean(_)
       | Self::String(_)
       | Self::Float(_)

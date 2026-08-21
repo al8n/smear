@@ -1,4 +1,12 @@
-//! Releasing a value does not spend a native frame per level of nesting, and does not leak.
+//! Releasing a value nested through the grammar's own carriers does not spend a native frame per
+//! level of nesting, and does not leak.
+//!
+//! Every fixture below is that shape — a chain of lists, sets, objects and map entries, which is
+//! what a parse or a resolver produces. A value made deep some other way is neither covered by
+//! these readings nor by the repair they pin: a caller who instantiates a value type's source or
+//! span parameter with a type that owns a node builds a recursion behind an arm the worklist
+//! releases as a leaf, and releasing that still aborts (`al8n/smear#176`). Nothing here builds one,
+//! deliberately — this file measures the bound that exists.
 //!
 //! # What used to happen, and why a ceiling did not stop it
 //!

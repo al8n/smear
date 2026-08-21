@@ -74,7 +74,9 @@ pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<
 /// children in — **not** a `Drop` on this enum, which would have cost every by-value `unwrap_*` and
 /// `try_unwrap_*` to `E0509`. Everything `derive_more` generated before is generated now.
 ///
-/// [`Nestable`] below is how the release reaches this enum's children.
+/// [`Nestable`] below is how the release reaches this enum's children. It reaches every child the
+/// *grammar* can put in a recursive position; it does not reach a node a caller stored in `S`, for
+/// which see [`Nested`]'s own documentation and `al8n/smear#176`.
 ///
 /// **This tree carries the repair even though the issue that prompted it was raised against the
 /// materialised twin**, and the reason is that the defect is a property of the shape rather than of
@@ -113,7 +115,10 @@ impl<S> Nestable for InputValue<S> {
   #[inline]
   fn into_children(self, pending: &mut std::vec::Vec<Self>) {
     match self {
-      // A leaf owns no value, so it is released here rather than put on the worklist.
+      // These arms hold no `InputValue`, so they are released here rather than put on the
+      // worklist. What they do hold is `S` — at the crate's own `S` that is a source slice, and at
+      // a caller's it is whatever the caller chose, including a node this loop cannot reach
+      // (al8n/smear#176).
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -122,8 +127,8 @@ impl<S> Nestable for InputValue<S> {
       | Self::Enum(_)
       | Self::Null(_) => {}
       Self::List(list) => pending.extend(list.into_values()),
-      // A field is `(span, name, value)` and only the value can nest; the name is a leaf and is
-      // released here.
+      // A field is `(span, name, value)` and only the value holds an `InputValue`; the name holds
+      // `S` and is released here, on the same terms as the arms above.
       Self::Object(object) => pending.extend(
         object
           .into_fields()

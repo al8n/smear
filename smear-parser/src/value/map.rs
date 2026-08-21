@@ -71,6 +71,8 @@ where
 
   #[inline]
   fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
+    // Both halves are `Nestable`, so both reach the worklist. `Span` carries no bound and is
+    // released here, on the same terms as `ObjectField`'s unbounded slots (al8n/smear#176).
     self.key.into_children(pending);
     self.value.into_children(pending);
   }

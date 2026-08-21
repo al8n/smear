@@ -59,6 +59,9 @@ pub type DefaultVec<T> = Vec<T>;
 ///
 /// Re-exported here because it is the default `Container` argument of every value alias below, so
 /// it reaches a consumer's signatures whether or not they name it. [`Nested`] is a `Vec` in every
-/// respect a consumer can observe; what it adds is the iterative release that keeps a deeply nested
-/// value from aborting the process on the way out. [`Nestable`] is sealed.
+/// respect a consumer can observe; what it adds is the iterative release that keeps a value nested
+/// through these carriers from aborting the process on the way out, however deep it is. That
+/// ranges over every recursive position the grammar forms, and not over a node a caller stored in
+/// `S` — see [`Nested`]'s own documentation, which states the difference. [`Nestable`] is sealed,
+/// which fixes who may implement it and says nothing about what a payload may be.
 pub use crate::value::{Nestable, Nested};
