@@ -22,3 +22,5 @@ fn graphqlx_error_is_parse_ctx_over_str_and_slice() {
     FatalContext<'_, SyntacticLexer<'_, [u8]>, GraphqlxErrors<&[u8]>, GraphQLx>,
   >();
 }
+
+mod terminal;

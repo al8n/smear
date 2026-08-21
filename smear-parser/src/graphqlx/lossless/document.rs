@@ -58,6 +58,8 @@ use super::{
   trivia::{peek_as, peek_kind},
 };
 
+use tokora::error::MaybeTerminal as _;
+
 use crate::lossless::lossless_production;
 
 lossless_production! {
@@ -182,6 +184,12 @@ lossless_production! {
   /// The empty form is reported: `syntactic/` rejects an empty input, and gate 1 compares verdicts.
   /// A failed entry is caught and resynchronised past, which is the only place in this suite that
   /// happens — every production below returns `Err` and lets it unwind to here.
+  ///
+  /// **Except a nesting refusal, which is a resource refusal rather than a syntax error and ends
+  /// the document.** Resynchronising past one re-reads the abandoned nest at the document level
+  /// and reports every closer of it — smear issue #169.
+  /// [`depth::descend`](crate::lossless::depth::descend)'s `The refusal ends the document` note
+  /// carries the reasoning and the measurements; this arm is one of the five that read it.
   fn document<'inp, Src, Ctx>(inp) {
     node(
       K::Document.raw(),
@@ -191,7 +199,10 @@ lossless_production! {
         }
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if document_entry_item::<Src, Ctx>(inp).is_err() {
+          if let Err(e) = document_entry_item::<Src, Ctx>(inp) {
+            if e.is_terminal() {
+              return Err(e);
+            }
             recover::resync_to_definition::<Src, Ctx>(inp)?;
           }
         }
@@ -219,7 +230,11 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if import_or_type_system_definition_or_extension::<Src, Ctx>(inp).is_err() {
+          if let Err(e) = import_or_type_system_definition_or_extension::<Src, Ctx>(inp) {
+            // The refusal arm [`document`]'s note explains.
+            if e.is_terminal() {
+              return Err(e);
+            }
             recover::resync_to_definition::<Src, Ctx>(inp)?;
           }
         }
@@ -231,11 +246,12 @@ lossless_production! {
 
   /// [`document`], then a drain — the production [`super::parse_document`] applies.
   ///
-  /// See the module docs for why the drain is not optional.
+  /// See the module docs for why the drain is not optional — and
+  /// [`depth::drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal) for the one
+  /// outcome that must not read the tail.
   fn document_entry<'inp, Src, Ctx>(inp) {
     let out = document::<Src, Ctx>(inp);
-    inp.skip_while(|_| true)?;
-    out
+    crate::lossless::depth::drain_unless_terminal(inp, out)
   }
 
   /// [`type_system_document`], then a drain — the production
@@ -245,7 +261,6 @@ lossless_production! {
   /// resynchronises exactly as the mixed one does, so an `Err` can still escape it.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
     let out = type_system_document::<Src, Ctx>(inp);
-    inp.skip_while(|_| true)?;
-    out
+    crate::lossless::depth::drain_unless_terminal(inp, out)
   }
 }

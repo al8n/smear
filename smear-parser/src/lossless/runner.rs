@@ -169,6 +169,25 @@ impl<L: rowan::Language> Parse<L> {
 /// [`Parse`] lifetime-free — so distinguishing the two would be a change to the diagnostic
 /// surface rather than to the latch, and it is recorded here as the residual it is.
 ///
+/// # The parse-side budget ends the document too, and reaches the same tail the same way
+///
+/// The posture above is the *lexer's* trip. [`crate::lossless::depth::descend`] is the other
+/// mechanism the same ceiling feeds, and until smear issue #169 it did not share the posture: it
+/// reported and returned, the `Err` unwound the nest, and a root loop resynchronised and re-read
+/// the abandoned tail one token at a time — 67 diagnostics for one refusal, growing with the
+/// document. It *looked* correct only because the lexer's cheaper check normally trips first on a
+/// well-formed document, which is an accident of two numbers being equal rather than a property
+/// anything enforces.
+///
+/// **The refusal's tail arrives here as gaps, exactly as the lexer trip's does**, and for a
+/// stronger reason than symmetry: tokora emits a diagnostic for every lexer error a scan crosses,
+/// so any drain over an unparsed tail turns one refusal into one-plus-`n`. The lexer trip is
+/// spared that by the poison boundary, which makes the tail unreachable; the parse-side refusal is
+/// spared it by not reading the tail at all. Both therefore land on the partial door above, and
+/// what it costs — an opaque region rather than committed tokens — is the same cost, recorded once
+/// in `Why the partial door`. `descend`'s `The refusal ends the document` note carries the repair
+/// and where the terminal state lives.
+///
 /// Nothing else is relaxed. Balance underflow, close identity, retro-wrap integrity, kind
 /// hygiene, span discipline and the token-channel wall are enforced identically through both
 /// doors, so the panic below still guards a genuine sink bug — and it now names the

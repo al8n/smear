@@ -557,3 +557,479 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
     assert_eq!(parse.syntax().text().to_string(), deep);
   }
 }
+
+/// A nesting refusal is **one** diagnostic, at every recursive cycle in both dialects — smear
+/// issue #169.
+///
+/// # What this pins that nothing else does
+///
+/// Before the repair the parse-side refusal reported and *carried on*: the `Err` unwound the nest
+/// and landed in a root loop's `if definition(inp).is_err() { resync_to_definition(inp)? }`, which
+/// resynchronised and re-read the abandoned tail at the **document** level, where every closer of
+/// the nest is an unexpected token with an `Error` of its own. `sel(66)` at a ceiling of 66
+/// returned **67** diagnostics — the refusal, then one per remaining significant token — and the
+/// count tracked the document: 201 at 200 levels, 402 at 400, 804 at 800.
+///
+/// Every existing gate in this file stayed green through all of it. They assert `has_errors()`,
+/// the tree's text and the tree's *depth*; none of them counts diagnostics, and the amplified
+/// parse gets all three right.
+///
+/// # Why the ceiling is raised rather than left at the default
+///
+/// The refusal has to come from the **parse's** budget rather than the lexer's tally, because the
+/// lexer's trip latches tokora's poison boundary and ends the document on its own — which is
+/// exactly the accident that hid this. `parse_document_with_limits` at a ceiling above tokora's
+/// own parse-side default puts the parse's ceiling strictly below the lexer's, so the tally cannot
+/// fire and the refusal is the parse's. `RecursionLimiter::PARSE_DEFAULT_DEPTH` is not public at
+/// the pinned version and has already moved upstream, so the ceiling here is a multiple of
+/// `MAX_NESTING_DEPTH` large enough to clear any plausible value of it rather than a number read
+/// off one.
+///
+/// # The cycles are derived, not listed
+///
+/// One shape per recursive cycle in each dialect's productions, enumerated by taking the strongly
+/// connected components of the lossless call graph over the productions that descend: GraphQL has
+/// three (`selection_set`; `list_value` ↔ `object_value`; `list_type`), GraphQLx has the same
+/// three widened (`collection_body` joins the value cycle, `type_generics` and `set_or_map_type`
+/// join the type cycle). The remaining descending productions — every member block, both argument
+/// lists, the variables definition, GraphQLx's `import_list` and `angle_name_list` — are in no
+/// cycle and cannot reach the ceiling on their own.
+///
+/// # The tail is an axis, because the first version of this test had only one value of it
+///
+/// Every cell here used to end in a **well-formed** tail, and the property held over all of them
+/// while being false one character away. The repair as first written drained the remaining tokens
+/// from the refusing frame, and tokora emits a diagnostic for every lexer error a drain crosses —
+/// so `1 + n` for `n` invalid tail lexemes, measured at 1, 2, 5, 17 and 65 through
+/// `parse_document_with_limits` in both dialects, with allocation proportional to the tail. A
+/// suite that only ever measured `n = 0` reported one diagnostic and a clean first span, and both
+/// readings were true of the cells it had.
+///
+/// So the tail carries `n ∈ {0, 1, 4, 64}` invalid lexemes, and the assertion is the same at every
+/// value: **one** diagnostic, and the *same* first diagnostic — span and severity byte-identical
+/// to the `n = 0` cell, which is what says the tail changed nothing rather than merely changed
+/// nothing visible. `~` is the lexeme, because no GraphQL or GraphQLx token starts with it.
+///
+/// # What this still does not cover
+///
+/// * **A malformed tail the *lexer's* tally trips on.** These cells raise the ceiling so the
+///   *parse* refuses; the lexer trip latches a poison boundary and is a different mechanism with
+///   its own posture, covered by `deep_input_returns_rather_than_aborting` and by
+///   `lossless::runner::finish_root`'s note rather than here.
+/// * **Malformed bytes *before* the refusal.** The refusal's position is a function of the prefix,
+///   so a prefix lexer error is an ordinary second diagnostic and not this property.
+/// * **A refusal below a production that catches.** No production in either dialect catches except
+///   the five document roots; a sixth would need its own cell, and
+///   [`descend`](smear::parser::lossless::depth::descend)'s note records that as the residual.
+/// * **Partial (`Sans-I/O`) input.** Both doors here are `Complete`.
+#[cfg(all(feature = "rowan", feature = "graphqlx", feature = "graphql"))]
+#[test]
+fn a_refusal_is_one_diagnostic_at_every_cycle() {
+  use smear::lexer::limits::LosslessLimits;
+
+  // Above any parse-side default tokora can plausibly install, and above every shape's own depth
+  // below, so the *parse* refuses and the lexer's tally never reaches its own ceiling.
+  const CEILING: usize = MAX_NESTING_DEPTH * 64;
+  // Deep enough that a per-token tail would be unmistakable, shallow enough to stay under the
+  // ceiling. The refusal happens far above this, wherever tokora's default sits.
+  const DEPTH: usize = 300;
+  // `0` is the cell the first version of this test had; the rest are the axis it was missing.
+  const TAILS: &[usize] = &[0, 1, 4, 64];
+
+  fn nest(open: &str, close: &str, depth: usize, before: &str, after: &str) -> String {
+    format!(
+      "{before}{}{}{after}",
+      open.repeat(depth),
+      close.repeat(depth)
+    )
+  }
+
+  // Every recursive cycle, one shape each. `before`/`after` carry whatever context puts the cycle
+  // in a reachable position; the repeated pair is the cycle itself.
+  let shapes: &[(&str, String)] = &[
+    ("selection_set", nest("{ f ", " }", DEPTH, "", "")),
+    ("list_value", nest("[", "]", DEPTH, "{ f(a: ", ") }")),
+    ("object_value", nest("{k: ", "}", DEPTH, "{ f(a: ", ") }")),
+    (
+      "list_type",
+      nest("[", "]", DEPTH, "query Q($v: ", ") { f }"),
+    ),
+  ];
+  let graphqlx_only: &[(&str, String)] = &[
+    (
+      "type_generics",
+      nest("A<", ">", DEPTH, "query Q($v: ", ") { f }"),
+    ),
+    (
+      "set_or_map_type",
+      nest("<", ">", DEPTH, "query Q($v: ", ") { f }"),
+    ),
+    (
+      "collection_body",
+      nest("set {", "}", DEPTH, "{ f(a: ", ") }"),
+    ),
+  ];
+
+  let mut cells = 0usize;
+  for (cycle, base) in shapes.iter().chain(graphqlx_only) {
+    for dialect in ["graphql", "graphqlx"] {
+      if dialect == "graphql" && graphqlx_only.iter().any(|(c, _)| c == cycle) {
+        continue;
+      }
+      // The `n = 0` reading, held across the whole tail axis below.
+      let mut clean_first: Option<(core::ops::Range<usize>, _)> = None;
+      for &bad in TAILS {
+        let src = format!("{base} {}", "~ ".repeat(bad));
+        let limits = LosslessLimits::with_max_nesting_depth(CEILING);
+        let (diags, text) = if dialect == "graphql" {
+          let p = smear::parser::graphql::lossless::parse_document_with_limits(&src, limits);
+          (p.diagnostics().to_vec(), p.syntax().text().to_string())
+        } else {
+          let p = smear::parser::graphqlx::lossless::parse_document_with_limits(&src, limits);
+          (p.diagnostics().to_vec(), p.syntax().text().to_string())
+        };
+        let count = diags.len();
+        assert_eq!(
+          count,
+          1,
+          "{dialect} {cycle} tail={bad}: a refusal must be one diagnostic, not {count} over {} \
+           bytes — a drain that reads the tail reports every lexer error in it",
+          src.len()
+        );
+        assert_eq!(
+          text, src,
+          "{dialect} {cycle} tail={bad}: the lossless guarantee survives the refusal"
+        );
+        let first = (diags[0].span(), diags[0].severity());
+        match &clean_first {
+          None => clean_first = Some(first),
+          Some(expected) => assert_eq!(
+            &first, expected,
+            "{dialect} {cycle} tail={bad}: the tail moved the refusal's own diagnostic"
+          ),
+        }
+        cells += 1;
+      }
+    }
+  }
+
+  // A filtered run that selects nothing exits `ok`, and so does a loop whose `continue` swallowed
+  // every cell. 11 dialect-cycle pairs (4 shared x 2 dialects, plus 3 GraphQLx-only) x 4 tails.
+  assert_eq!(cells, 11 * TAILS.len(), "the cell set collapsed");
+}
+
+/// A refusal ends the document at **every** document root, not only the mixed one — smear issue
+/// #169.
+///
+/// # Why this is a second test and not another axis on the one above
+///
+/// [`a_refusal_is_one_diagnostic_at_every_cycle`] drives `parse_document` alone, which is one root
+/// per dialect. The repair has **five** catch sites — the mixed root in each dialect, the SDL-only
+/// root in each, and GraphQLx's executable-only root (GraphQL's executable root propagates instead
+/// of catching, so it never had the defect) — and three of them are unreachable from that entry
+/// point. Reverting them was planted with the cycle test in place and it stayed green: a cell set
+/// derived over *cycles* is blind to an axis of *roots*, however many cycles it has.
+///
+/// So the axis here is the entry point, and the shape is whatever reaches the ceiling from it. The
+/// cycle coverage stays where it is; this asks only that each root stops.
+///
+/// # What this still does not cover
+///
+/// GraphQL's `parse_executable_document` has no catch arm to revert — its loop is
+/// `executable_definition(inp)?` — so the cell below proves its `document_entry` drain and nothing
+/// about a catch site it does not have. If that loop ever grows one, this test passes unchanged
+/// and the amplification is back; the guard against that is
+/// [`descend`](smear::parser::lossless::depth::descend)'s note naming the five, not this file.
+#[cfg(all(feature = "rowan", feature = "graphqlx", feature = "graphql"))]
+#[test]
+fn a_refusal_ends_every_document_root() {
+  use smear::lexer::limits::LosslessLimits;
+
+  const CEILING: usize = MAX_NESTING_DEPTH * 64;
+  const DEPTH: usize = 300;
+
+  // One shape per root, chosen for reachability from it rather than for its cycle: a bare
+  // selection set is an anonymous operation and is refused by both the mixed and the
+  // executable-only roots; a nested list type inside a field definition is the deepest thing the
+  // SDL-only root will accept, and both dialects spell it the same way.
+  let executable = format!("{}{}", "{ f ".repeat(DEPTH), " }".repeat(DEPTH));
+  let sdl = format!(
+    "type T {{ f: {}Int{} }}",
+    "[".repeat(DEPTH),
+    "]".repeat(DEPTH)
+  );
+
+  type Door = fn(&str, LosslessLimits) -> (usize, String, Option<(core::ops::Range<usize>, bool)>);
+
+  fn gql(
+    src: &str,
+    limits: LosslessLimits,
+  ) -> (usize, String, Option<(core::ops::Range<usize>, bool)>) {
+    let p = smear::parser::graphql::lossless::parse_document_with_limits(src, limits);
+    project(p.diagnostics(), p.syntax().text().to_string())
+  }
+  fn gql_sdl(
+    src: &str,
+    limits: LosslessLimits,
+  ) -> (usize, String, Option<(core::ops::Range<usize>, bool)>) {
+    let p = smear::parser::graphql::lossless::parse_type_system_document_with_limits(src, limits);
+    project(p.diagnostics(), p.syntax().text().to_string())
+  }
+  fn gql_exec(
+    src: &str,
+    limits: LosslessLimits,
+  ) -> (usize, String, Option<(core::ops::Range<usize>, bool)>) {
+    let p = smear::parser::graphql::lossless::parse_executable_document_with_limits(src, limits);
+    project(p.diagnostics(), p.syntax().text().to_string())
+  }
+  fn glx(
+    src: &str,
+    limits: LosslessLimits,
+  ) -> (usize, String, Option<(core::ops::Range<usize>, bool)>) {
+    let p = smear::parser::graphqlx::lossless::parse_document_with_limits(src, limits);
+    project(p.diagnostics(), p.syntax().text().to_string())
+  }
+  fn glx_sdl(
+    src: &str,
+    limits: LosslessLimits,
+  ) -> (usize, String, Option<(core::ops::Range<usize>, bool)>) {
+    let p = smear::parser::graphqlx::lossless::parse_type_system_document_with_limits(src, limits);
+    project(p.diagnostics(), p.syntax().text().to_string())
+  }
+  fn glx_exec(
+    src: &str,
+    limits: LosslessLimits,
+  ) -> (usize, String, Option<(core::ops::Range<usize>, bool)>) {
+    let p = smear::parser::graphqlx::lossless::parse_executable_document_with_limits(src, limits);
+    project(p.diagnostics(), p.syntax().text().to_string())
+  }
+  fn project(
+    diags: &[smear::parser::graphql::lossless::runner::Diagnostic],
+    text: String,
+  ) -> (usize, String, Option<(core::ops::Range<usize>, bool)>) {
+    let first = diags
+      .first()
+      .map(|d| (d.span(), d.severity() == tokora::emitter::Severity::Error));
+    (diags.len(), text, first)
+  }
+
+  let roots: &[(&str, Door, &String)] = &[
+    ("graphql mixed", gql, &executable),
+    ("graphql sdl-only", gql_sdl, &sdl),
+    ("graphql executable-only", gql_exec, &executable),
+    ("graphqlx mixed", glx, &executable),
+    ("graphqlx sdl-only", glx_sdl, &sdl),
+    ("graphqlx executable-only", glx_exec, &executable),
+  ];
+
+  let mut cells = 0usize;
+  for (root, door, base) in roots {
+    let mut clean_first = None;
+    for bad in [0usize, 4] {
+      let src = format!("{base} {}", "~ ".repeat(bad));
+      let (count, text, first) = door(&src, LosslessLimits::with_max_nesting_depth(CEILING));
+      assert_eq!(
+        count,
+        1,
+        "{root} tail={bad}: a refusal must be one diagnostic, not {count} over {} bytes",
+        src.len()
+      );
+      assert_eq!(
+        text, src,
+        "{root} tail={bad}: the lossless guarantee survives"
+      );
+      match &clean_first {
+        None => clean_first = Some(first),
+        Some(expected) => assert_eq!(
+          &first, expected,
+          "{root} tail={bad}: the tail moved the refusal's own diagnostic"
+        ),
+      }
+      cells += 1;
+    }
+  }
+  assert_eq!(cells, roots.len() * 2, "the cell set collapsed");
+}
+
+/// A refusal is the error [`descend`](smear::parser::lossless::depth::descend) returns, whichever
+/// emission a rejecting emitter refuses and whatever value it substitutes — smear issue #169.
+///
+/// # Why this needs an emitter no shipped door installs
+///
+/// The lossless doors pin `tokora::emitter::Verbose`, which records everything and returns `Ok`
+/// from every method, so no `Err` can arrive from the emitter and this path is unreachable through
+/// `parse_document`. `descend` is nevertheless a **public generic function** over any
+/// `ParseContext`, so a consumer with a rejecting emitter reaches it.
+///
+/// # Two rejection sites, and the second one was found by review rather than by this test
+///
+/// The first version of this test rejected **`emit_lexer_error`** and accepted `emit_error`, which
+/// covers the drain: the drain sat between the emit and the return and was propagated with `?`, so
+/// `skip_while`'s fatal exit replaced the refusal (`Refusal` for `{ f }`, `LexerError` for
+/// `{ f } ~ ~`). Removing the drain closed that and left the *same defect one call earlier*, on
+/// the emission the test accepted: `emit_error(...)?` propagated whatever the emitter returned.
+/// Tokora permits a rejecting emitter to return **any same-typed value**, not the payload it was
+/// handed, so a host rejecting with an error-budget sentinel got the sentinel — and then, since
+/// the sentinel is not the refusal, the entry drain ran over the tail and *its* rejection replaced
+/// the sentinel in turn. Measured against that version: `Budget` for `{ f }`, and **`LexerError`
+/// for `{ f } ~ ~` via the entry** — a third value, neither the refusal nor the host's.
+///
+/// So the axis is *which* emission is rejected and *what* it substitutes, and the assertion is the
+/// same in every cell: the saved refusal comes back.
+///
+/// # What this still does not cover
+///
+/// * **A host whose own [`MaybeTerminal`](tokora::error::MaybeTerminal) arm is wrong.** `descend`
+///   needs no cooperation — it drops the emit result — but the document roots stop on
+///   `is_terminal()`, so a caller whose error type answers `false` for its own fatal value has
+///   told the emitter *stop* and the recovery machinery *recoverable*. That contradiction is the
+///   caller's, it is the residue tokora's own rule documents, and `Which` below deliberately
+///   answers `false` for `LexerError` so that a cell returning it is visibly the drain having run.
+/// * **The shipped doors.** `Verbose` cannot reject, so none of this is reachable through
+///   `parse_document`; the two tests above are what cover that path.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
+  use smear::parser::{
+    graphql::{GraphQL, lossless::GraphqlLosslessLexer},
+    lossless::depth::{FromNestingLimit, descend, drain_unless_terminal},
+  };
+  use tokora::{
+    Emitter, Lexer, SimpleSpan, Token,
+    cache::DefaultCache,
+    error::{MaybeTerminal, RecursionLimitReached},
+    prelude::UnexpectedTokenOf,
+    span::Spanned,
+  };
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = (Rejecting, DefaultCache<'inp, Lx<'inp>>);
+
+  /// Which error came back — the whole observation.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum Which {
+    Refusal,
+    /// The host's own "I am at my diagnostic limit" value: a fatal stop that is **not** the
+    /// payload it was handed.
+    Budget,
+    LexerError,
+    Unexpected,
+    Recursion,
+  }
+
+  impl FromNestingLimit for Which {
+    fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
+      Which::Refusal
+    }
+  }
+
+  impl MaybeTerminal for Which {
+    fn is_terminal(&self) -> bool {
+      // `LexerError` answers `false` ON PURPOSE. It is the value the drain produces, so leaving it
+      // non-terminal keeps a cell that returns it a visible failure rather than one the predicate
+      // absorbs.
+      matches!(self, Which::Refusal | Which::Budget | Which::Recursion)
+    }
+  }
+
+  impl<Lang: ?Sized> From<RecursionLimitReached<usize, Lang>> for Which {
+    fn from(_: RecursionLimitReached<usize, Lang>) -> Self {
+      Which::Recursion
+    }
+  }
+
+  /// What the emitter does with the refusal's own `emit_error`.
+  #[derive(Clone, Copy, Debug)]
+  enum OnError {
+    /// A collecting host: records it and carries on. `Verbose`'s behaviour.
+    Accept,
+    /// `Fatal`'s behaviour: reject, returning the payload it was handed.
+    RejectWithPayload,
+    /// The case the review found: reject, returning a value of the host's own choosing.
+    RejectWithSentinel,
+  }
+
+  struct Rejecting {
+    on_error: OnError,
+    reject_lexer: bool,
+  }
+
+  impl<'inp, L: Lexer<'inp>> Emitter<'inp, L, GraphQL> for Rejecting {
+    type Error = Which;
+
+    fn emit_lexer_error(
+      &mut self,
+      _err: Spanned<<L::Token as Token<'inp>>::Error, L::Span>,
+    ) -> Result<(), Self::Error> {
+      if self.reject_lexer {
+        Err(Which::LexerError)
+      } else {
+        Ok(())
+      }
+    }
+
+    fn emit_error(&mut self, err: Spanned<Self::Error, L::Span>) -> Result<(), Self::Error> {
+      match self.on_error {
+        OnError::Accept => Ok(()),
+        OnError::RejectWithPayload => Err(*err.data()),
+        OnError::RejectWithSentinel => Err(Which::Budget),
+      }
+    }
+
+    fn emit_unexpected_token(
+      &mut self,
+      _err: UnexpectedTokenOf<'inp, L, GraphQL>,
+    ) -> Result<(), Self::Error> {
+      Err(Which::Unexpected)
+    }
+
+    fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
+  }
+
+  // `ceiling = 0`: the first descent is over budget, so the whole of `src` is the tail a drain
+  // would cross. That is the shape, minus a 64-level nest that would prove nothing extra.
+  fn run<'inp>(src: &'inp str, via_entry: bool, on_error: OnError, reject_lexer: bool) -> Which {
+    tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
+      |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
+        let out = descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp, 0).map(|_| ());
+        if via_entry {
+          drain_unless_terminal(inp, out)
+        } else {
+          out
+        }
+      },
+      src,
+      (
+        Rejecting {
+          on_error,
+          reject_lexer,
+        },
+        DefaultCache::<Lx<'inp>>::default(),
+      ),
+    )
+    .expect_err("a ceiling of 0 refuses the first descent")
+  }
+
+  let mut cells = 0usize;
+  for on_error in [
+    OnError::Accept,
+    OnError::RejectWithPayload,
+    OnError::RejectWithSentinel,
+  ] {
+    for reject_lexer in [false, true] {
+      // A clean tail and one that does not lex, because only the second makes a drain observable.
+      for src in ["{ f }", "{ f } ~ ~", "~ { f }", "~"] {
+        for via_entry in [false, true] {
+          assert_eq!(
+            run(src, via_entry, on_error, reject_lexer),
+            Which::Refusal,
+            "{src:?} (via_entry={via_entry}, on_error={on_error:?}, \
+             reject_lexer={reject_lexer}): the saved refusal was displaced"
+          );
+          cells += 1;
+        }
+      }
+    }
+  }
+  assert_eq!(cells, 3 * 2 * 4 * 2, "the cell set collapsed");
+}

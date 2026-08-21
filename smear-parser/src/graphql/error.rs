@@ -20,7 +20,7 @@
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::{
   graphql::{
-    error::LexerErrors,
+    error::{LexerErrorData, LexerErrors},
     syntactic::{SyntacticToken, SyntacticTokenKind},
   },
   tokora::error::UnexpectedEnd,
@@ -29,7 +29,7 @@ use tokora::{
   Lexer, SimpleSpan as Span,
   emitter::FromUnclosed,
   error::{
-    Unclosed as TokoraUnclosed, UnexpectedEot,
+    MaybeTerminal, Unclosed as TokoraUnclosed, UnexpectedEot,
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken as TokUnexpectedToken},
   },
@@ -812,8 +812,113 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
   /// An end of input was found.
   EndOfInput,
+  /// The parse tried to descend one level past the nesting budget.
+  ///
+  /// **A variant rather than an [`Other`](Self::Other) message, and the reason is that something
+  /// reads it back.** The conversion this lands through
+  /// ([`FromNestingLimit`](crate::lossless::depth::FromNestingLimit)) built
+  /// `Other("nesting limit exceeded")`, argued for on the grounds that a depth trip reaches a
+  /// consumer through `Parse::diagnostics`, which keeps the span and the severity and drops the
+  /// typed payload — so no *consumer* could tell a variant from a message. That was true and was
+  /// never the whole question: smear issue #169's repair makes the **parser itself** ask whether
+  /// an error is this one, at every document root that catches, and a discriminator that is a
+  /// string is one edit away from answering `false` forever with nothing failing.
+  ///
+  /// The reader is this enum's [`MaybeTerminal`] arm, which answers `true` off the variant
+  /// itself — so the ask and the construction are one enum apart rather than one string
+  /// comparison apart.
+  #[from(skip)]
+  NestingLimitExceeded,
   /// Some other error.
   Other(std::borrow::Cow<'static, str>),
+}
+
+/// Which of these errors **end the parse** rather than being something to recover from.
+///
+/// tokora's [`MaybeTerminal`] is the notion, and this is the arm-per-source the trait asks for.
+/// The parse side reads it at every document root: a root loop that resynchronises past a
+/// terminal error re-reads a document the parse has already stopped on, which is smear issue
+/// #169 — and #169's first repair asked a *narrower* question (is this the nesting refusal?) that
+/// three other terminal sources walk straight past.
+///
+/// # The arms, and the rule each one came from
+///
+/// * **Delegated** — the eight [`UnexpectedEnd`] variants. `UnexpectedEnd` answers for itself: its
+///   flag is raised when a *scanner* stop built it and clear for a genuine end of a production, so
+///   the value decides rather than the variant. That is step 1 of the trait's rule.
+/// * **`true`, always** — [`NestingLimitExceeded`](Self::NestingLimitExceeded). A frame budget is
+///   never cleared by more input.
+/// * **`true` when it holds a state refusal** — [`Lexer`](Self::Lexer). This is the arm the trait's
+///   rule warns catches people, and smear is exactly the shape it warns about: the lossless keying
+///   pins `StateError = LimitExceeded`, so `LexerErrorData::State` **is** a tripped
+///   `smear_lexer::limits` budget. It is also where a scanner trip lands when the emitter *rejects*
+///   its diagnostic — tokora constructs no `UnexpectedEnd` on that path, so nothing marks it and
+///   the arm is the only thing that can answer.
+/// * **`false`** — everything else, and each is affirmatively recoverable rather than merely
+///   unclassified: they are built from a construct the **grammar** rejected, not from a limit the
+///   **runtime** refused.
+///
+/// # The one arm that is knowingly wrong, and why it is not repaired here
+///
+/// [`EndOfInput`](Self::EndOfInput) answers `false`, and it can hold a terminal stop.
+/// `From<UnexpectedEot>` lands *every* end of input on it — the genuine kind and the scanner-stop
+/// kind alike — discarding the flag before this trait can read it, so the variant cannot tell them
+/// apart and neither can this arm. Answering `true` would re-raise every ordinary end of input and
+/// take recovery with it; the actual repair is to stop discarding the flag, which means splitting
+/// the variant and is a change to the diagnostic surface rather than to this impl. Recorded rather
+/// than papered over: this is a `false` arm on a stop that can be real, bounded to the one carrier
+/// that erases its own marker.
+impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, StateError> {
+  fn is_terminal(&self) -> bool {
+    // Wildcard-free ON PURPOSE. A variant added without an arm is an `E0004` here, which is the
+    // only thing that makes "every terminal source has an arm" a fact rather than a claim — and
+    // the `false` arms are written out for the same reason the `true` ones are.
+    match self {
+      Self::Lexer(errors) => errors
+        .iter()
+        .any(|e| matches!(e.data(), LexerErrorData::State(_))),
+      Self::NestingLimitExceeded => true,
+      Self::UnexpectedEndOfVariableValue(e) => e.is_terminal(),
+      Self::UnexpectedEndOfObjectFieldValue(e) => e.is_terminal(),
+      Self::UnexpectedEndOfObjectExtension(e) => e.is_terminal(),
+      Self::UnexpectedEndOfInterfaceExtension(e) => e.is_terminal(),
+      Self::UnexpectedEndOfEnumExtension(e) => e.is_terminal(),
+      Self::UnexpectedEndOfInputObjectExtension(e) => e.is_terminal(),
+      Self::UnexpectedEndOfUnionExtension(e) => e.is_terminal(),
+      Self::UnexpectedEndOfSchemaExtension(e) => e.is_terminal(),
+      Self::IntOverflow(_)
+      | Self::FloatOverflow(_)
+      | Self::InvalidEnumValue(_)
+      | Self::InvalidBooleanValue(_)
+      | Self::InvalidNullValue(_)
+      | Self::InvalidFragmentName(_)
+      | Self::Unclosed(_)
+      | Self::UnexpectedToken(_)
+      | Self::UnexpectedKeyword(_)
+      | Self::UnknownDirectiveLocation(_)
+      | Self::UnknownOperationType(_)
+      | Self::EndOfInput
+      | Self::Other(_) => false,
+    }
+  }
+}
+
+/// Delegated to the payload: the span says where, not whether.
+impl<S, T, Char, Exp, StateError> MaybeTerminal for Error<S, T, Char, Exp, StateError> {
+  fn is_terminal(&self) -> bool {
+    self.data.is_terminal()
+  }
+}
+
+/// `any`, because a container ends the parse if anything in it does.
+///
+/// A terminal stop among recoverable failures is still a stop, and the asymmetry the trait's own
+/// rule records applies to the fold as much as to an arm: reading it as `all` would spend a real
+/// stop the moment one ordinary diagnostic was recorded beside it.
+impl<S, T, Char, Exp, StateError> MaybeTerminal for Errors<S, T, Char, Exp, StateError> {
+  fn is_terminal(&self) -> bool {
+    self.0.iter().any(MaybeTerminal::is_terminal)
+  }
 }
 
 /// A parser error.
@@ -1034,6 +1139,21 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
     Self::new(span, ErrorData::EndOfInput)
+  }
+
+  /// Creates a parser-frame nesting refusal.
+  ///
+  /// `span` is empty and sits at the parse's committed end: a refused frame has consumed nothing
+  /// of its own, so there is no lexeme to point at.
+  ///
+  /// The producer [`ErrorData::NestingLimitExceeded`] is reached through — by
+  /// `lossless_error_impls!`'s
+  /// [`FromNestingLimit`](crate::lossless::depth::FromNestingLimit) impl, and by the variant
+  /// census, which may not name a variant directly. It is generic over every parameter of this
+  /// family, unlike that impl, which is pinned to the *lossless* keying.
+  #[inline]
+  pub const fn nesting_limit_exceeded(span: Span) -> Self {
+    Self::new(span, ErrorData::NestingLimitExceeded)
   }
 
   /// Creates an integer-out-of-range error from a payload that has already justified its width.
@@ -1440,4 +1560,5 @@ mod tests {
   mod census;
   #[cfg(feature = "materialized-numbers")]
   mod int_overflow;
+  mod terminal;
 }

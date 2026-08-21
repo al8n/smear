@@ -7,7 +7,7 @@
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::{
   graphqlx::{
-    error::LexerErrors,
+    error::{LexerErrorData, LexerErrors},
     syntactic::{SyntacticToken, SyntacticTokenKind},
   },
   tokora::error::UnexpectedEnd,
@@ -16,7 +16,7 @@ use tokora::{
   Lexer, SimpleSpan as Span,
   emitter::FromUnclosed,
   error::{
-    Unclosed as TokoraUnclosed, UnexpectedEot,
+    MaybeTerminal, Unclosed as TokoraUnclosed, UnexpectedEot,
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken as TokUnexpectedToken},
   },
@@ -192,12 +192,62 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   UnexpectedToken(UnexpectedToken<T, Exp>),
   /// A production reached end of input unexpectedly.
   UnexpectedEnd(UnexpectedEnd<Exp>),
+  /// The parse tried to descend one level past the nesting budget.
+  ///
+  /// A variant rather than an [`Other`](Self::Other) message for the reason GraphQL's twin
+  /// records: smear issue #169's repair makes the **parser itself** ask whether an error is this
+  /// one, at every document root that catches, and a string discriminator is one edit away from
+  /// answering `false` forever with nothing failing. This enum's [`MaybeTerminal`] arm is the
+  /// reader, and it answers off the variant.
+  #[from(skip)]
+  NestingLimitExceeded,
   /// A dialect-specific message not represented by a dedicated variant.
   Other(std::borrow::Cow<'static, str>),
   /// Retains the source type in this generic family even when the current
   /// vertical slice does not need a source-carrying diagnostic.
   #[from(skip)]
   Source(core::marker::PhantomData<S>),
+}
+
+/// Which of these errors **end the parse** rather than being something to recover from.
+///
+/// GraphQL's twin carries the reasoning, the rule each arm came from, and the one arm that is
+/// knowingly wrong. This dialect's variant set is narrower and every arm is the same ruling:
+/// [`UnexpectedEnd`] delegates, [`NestingLimitExceeded`](Self::NestingLimitExceeded) is always
+/// terminal, and [`Lexer`](Self::Lexer) is terminal when it holds a `State` refusal — the arm
+/// tokora's rule warns catches people, and the one a scanner trip lands on unmarked when the
+/// emitter rejects its diagnostic.
+///
+/// GraphQLx has **no `EndOfInput` variant**, deliberately (see
+/// [`Error::unexpected_end_of_input`]), so the residual GraphQL records does not exist here in
+/// that shape: an end of input arrives as `UnexpectedToken` with no found token, which is
+/// affirmatively a grammar rejection.
+impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, StateError> {
+  fn is_terminal(&self) -> bool {
+    // Wildcard-free ON PURPOSE: a variant added without an arm is an `E0004` here.
+    match self {
+      Self::Lexer(errors) => errors
+        .iter()
+        .any(|e| matches!(e.data(), LexerErrorData::State(_))),
+      Self::NestingLimitExceeded => true,
+      Self::UnexpectedEnd(e) => e.is_terminal(),
+      Self::Unclosed(_) | Self::UnexpectedToken(_) | Self::Other(_) | Self::Source(_) => false,
+    }
+  }
+}
+
+/// Delegated to the payload: the span says where, not whether.
+impl<S, T, Char, Exp, StateError> MaybeTerminal for Error<S, T, Char, Exp, StateError> {
+  fn is_terminal(&self) -> bool {
+    self.data.is_terminal()
+  }
+}
+
+/// `any`, because a container ends the parse if anything in it does.
+impl<S, T, Char, Exp, StateError> MaybeTerminal for Errors<S, T, Char, Exp, StateError> {
+  fn is_terminal(&self) -> bool {
+    self.0.iter().any(MaybeTerminal::is_terminal)
+  }
 }
 
 /// A single GraphQLx parser error.
@@ -243,6 +293,19 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
         expected,
       )),
     )
+  }
+
+  /// Creates a parser-frame nesting refusal.
+  ///
+  /// `span` is empty and sits at the parse's committed end: a refused frame has consumed nothing
+  /// of its own, so there is no lexeme to point at. This is the producer
+  /// [`ErrorData::NestingLimitExceeded`] is reached through, generic over every parameter of this
+  /// family — unlike `lossless_error_impls!`'s
+  /// [`FromNestingLimit`](crate::lossless::depth::FromNestingLimit) impl, which is pinned to the
+  /// lossless keying.
+  #[inline]
+  pub const fn nesting_limit_exceeded(span: Span) -> Self {
+    Self::new(span, ErrorData::NestingLimitExceeded)
   }
 
   /// Creates an unclosed-list error.
