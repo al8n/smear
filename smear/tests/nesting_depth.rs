@@ -1033,3 +1033,101 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   }
   assert_eq!(cells, 3 * 2 * 4 * 2, "the cell set collapsed");
 }
+
+/// tokora's **own** descent trip lands terminal in both dialects, and not on a string.
+///
+/// # What this pins, and why it is not covered by anything above
+///
+/// `lossless_error_impls!` generates two conversions onto a dialect's error container that both
+/// mean *the frame budget refused*, and only one of them was repaired by smear issue #169.
+/// `FromNestingLimit` — the one [`descend`](smear::parser::lossless::depth::descend) calls —
+/// moved to `ErrorData::NestingLimitExceeded`, precisely because a `Cow` discriminator is one
+/// reword away from answering `false` forever. `From<RecursionLimitReached>` — the one
+/// [`InputRef::descend`](tokora::InputRef::descend) carries as a where-clause — kept
+/// `Other("nesting limit exceeded")`, and `Other`'s [`MaybeTerminal`](tokora::error::MaybeTerminal)
+/// arm answers **`false`**. A trip arriving through it was therefore classified *recoverable*, and
+/// a root loop resynchronised past it: the pre-#169 amplification, on the one carrier #169's
+/// repair did not reach.
+///
+/// # Why it is a value assertion rather than an end-to-end parse
+///
+/// Nothing shipped reaches this conversion today, and that is measured rather than assumed:
+///
+/// * every one of smear's 28 descending production call sites goes through
+///   [`depth::descend`](smear::parser::lossless::depth::descend), which refuses at
+///   `min(ceiling, inp.recursion().limitation())` **before** calling `inp.descend()` — so
+///   `live < limitation()` holds at the call, tokora's `check()` fails only at
+///   `depth > limitation()`, and the trip cannot fire;
+/// * tokora's own internal descents are the two Pratt engines (`input_ref/pratt.rs`,
+///   `parser/pratt/expr.rs`), and neither dialect uses Pratt at all.
+///
+/// So the impl is live for exactly two populations — a consumer driving the **public** generic
+/// layer with its own composition, and smear itself the moment `depth::descend` stops pre-checking
+/// — and neither has a parse in this tree to observe. A conversion no test can redden is a
+/// conversion that drifts, which is the argument the `MaybeTerminal` censuses in
+/// `smear-parser/src/*/error/tests/terminal.rs` already make about their own arms.
+///
+/// # The plant
+///
+/// Reverting the conversion body to `Other(Cow::Borrowed("nesting limit exceeded"))` reddens all
+/// four cells here: the two `is_terminal()` reads, because `Other`'s arm is `false`, and the two
+/// `is_nesting_limit_exceeded()` reads, because the value is on the wrong variant.
+#[cfg(all(feature = "rowan", feature = "graphql", feature = "graphqlx"))]
+#[test]
+fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
+  use smear::parser::{
+    graphql::lossless::GraphqlLosslessErrors, graphqlx::lossless::GraphqlxLosslessErrors,
+  };
+  use tokora::{
+    error::{MaybeTerminal, RecursionLimitReached},
+    state::recursion_tracker::RecursionLimiter,
+  };
+
+  /// tokora's own payload, built the way tokora builds it: a limiter driven past its own
+  /// limitation, and the report `check()` hands back. Nothing here invents a value.
+  fn trip<Lang: ?Sized>() -> RecursionLimitReached<usize, Lang> {
+    let mut limiter = RecursionLimiter::with_limitation(0);
+    limiter.increase();
+    let exceeded = limiter
+      .check()
+      .expect_err("depth 1 exceeds a limitation of 0");
+    RecursionLimitReached::of(7usize, exceeded)
+  }
+
+  let mut cells = 0usize;
+
+  let graphql: GraphqlLosslessErrors<&str> = trip::<smear::parser::graphql::GraphQL>().into();
+  assert!(
+    graphql.is_terminal(),
+    "GraphQL: tokora's own descent trip must end the document — a frame budget is never cleared \
+     by more input, so the carrier it arrives on cannot decide the answer"
+  );
+  cells += 1;
+
+  let graphqlx: GraphqlxLosslessErrors<&str> = trip::<smear::parser::graphqlx::GraphQLx>().into();
+  assert!(
+    graphqlx.is_terminal(),
+    "GraphQLx: tokora's own descent trip must end the document — a frame budget is never cleared \
+     by more input, so the carrier it arrives on cannot decide the answer"
+  );
+  cells += 1;
+
+  // `is_terminal()` alone would also pass on a *different* terminal carrier, and the point of the
+  // repair is that both conversions name ONE variant. `IsVariant` is what makes that a
+  // compile-checked question rather than a string one — the failure mode the variant replaced.
+  assert!(
+    graphql[0].data().is_nesting_limit_exceeded(),
+    "GraphQL: the backstop must land on the variant `FromNestingLimit` lands on, not on a \
+     second carrier that merely happens to answer the same way"
+  );
+  cells += 1;
+
+  assert!(
+    graphqlx[0].data().is_nesting_limit_exceeded(),
+    "GraphQLx: the backstop must land on the variant `FromNestingLimit` lands on, not on a \
+     second carrier that merely happens to answer the same way"
+  );
+  cells += 1;
+
+  assert_eq!(cells, 4, "the cell set collapsed");
+}

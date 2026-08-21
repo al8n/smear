@@ -553,7 +553,7 @@ macro_rules! lossless_error_impls {
       }
     }
 
-    /// tokora's own descent trip, landed on the same message.
+    /// tokora's own descent trip, landed on the **same variant** smear's own refusal lands on.
     ///
     /// [`InputRef::descend`](::tokora::InputRef::descend) carries this conversion as a
     /// where-clause, so it has to exist for a production to descend at all. It is **not** the
@@ -561,17 +561,33 @@ macro_rules! lossless_error_impls {
     /// and refuses first, precisely so that every refusal is emitted rather than riding a
     /// `Result` the lossless door discards. This impl is what makes that check spellable, and the
     /// backstop if tokora ever trips somewhere smear did not look.
+    ///
+    /// # The backstop carried the discriminator #169 deleted, and that is the whole of this note
+    ///
+    /// It built `Other("nesting limit exceeded")` — the exact spelling the `FromNestingLimit`
+    /// impl above was moved *off*, for the reason recorded there: a `Cow` message is a
+    /// discriminator that a reword turns into a permanent `false` with nothing failing. That
+    /// argument was applied to one of the two conversions and not to the other, and the half it
+    /// missed is the one whose own doc calls it *the backstop if tokora ever trips somewhere
+    /// smear did not look* — i.e. exactly the case where nothing else classifies the trip.
+    ///
+    /// [`MaybeTerminal`](::tokora::error::MaybeTerminal)'s arm for the dialect's `ErrorData::Other`
+    /// answers `false`, so a trip arriving here was classified
+    /// **recoverable** and a document root resynchronised past it: the pre-#169 amplification,
+    /// reachable through the one door #169's repair did not close. tokora's own rule is the other
+    /// half of the argument — a frame budget is never cleared by more input, so `false` is never
+    /// the right answer for this value however it was carried.
+    ///
+    /// So it lands on the constructor a real path already uses, and the ask and the construction
+    /// stay one enum apart. The offset is tokora's, not smear's: the trip is raised at the
+    /// input's committed end, which is the same empty-span position `descend` reports at.
     impl<S, Lang: ?Sized>
       ::core::convert::From<::tokora::error::RecursionLimitReached<usize, Lang>> for $errors<S>
     {
       #[inline]
       fn from(err: ::tokora::error::RecursionLimitReached<usize, Lang>) -> Self {
         let off = err.offset();
-        $value::new(
-          ::tokora::SimpleSpan::new(off, off),
-          $error_data::Other(::std::borrow::Cow::Borrowed("nesting limit exceeded")),
-        )
-        .into()
+        $value::nesting_limit_exceeded(::tokora::SimpleSpan::new(off, off)).into()
       }
     }
   };
