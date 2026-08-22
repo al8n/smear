@@ -40,33 +40,33 @@ use std::time::Instant;
 /// That was wrong — `0000…` coalesces into one number token — and the field is gone because this
 /// test does not need one: junk alone drives refusals in both dialects and reads identically.
 ///
-/// # What the measurement behind that established, and what it did not
+/// # There is no lexer burn to carry any more, in either dialect
 ///
-/// A burn needs `spent` to move while the tally does not. Over **single-character** candidates —
-/// `.`, `..`, `1.`, `"`, `%`, `^`, `~`, `\`, `` ` ``, `?`, `;`, `$`, `00`, `-`, `+`, `*` — every
-/// one keeps the two within two of each other in GraphQLx (80 001 against 80 000), where GraphQL's
-/// `-` opens a gap of exactly the error count (80 001 against 60 000).
+/// A burn needed `spent` to move while the tally did not. That gap was the success-only charge in
+/// `smear-lexer`'s `tt_hook_and_then` family, and smear issue #183 closed it: every lossless rule
+/// is charged when it is **attempted**, so an error lexeme moves both counters and no atom of any
+/// length opens a gap. The survey this paragraph used to record — GraphQL's `-` reading
+/// `spent = 80 001` against `committed = 60 000`, GraphQLx's `-.5` reading 20 040 against 39 — now
+/// reads `spent = committed + 1` for every one of them.
 ///
-/// **That is a statement about single characters and nothing wider.** An earlier revision of this
-/// file generalised it to "GraphQLx has no atom that drives the regime", which is false: `-.5` is
-/// one. The missing-integer-part rule routes through `tt_hook_and_then_into_errors`, whose handler
-/// returns `Err` even when its suffix check passes, so every unit is charged and never committed —
-/// `spent = 20 040` against `committed = 39`, byte-identical to GraphQL's `-`.
-/// `error_density_is_a_bounded_known_cost` uses it, and `recover.rs` was already right to say the
-/// regime is *harder* to reach in that dialect rather than absent.
+/// `an_error_run_no_longer_burns_the_scan_allowance` is the pin on that, and it is where those
+/// atoms still live: running the ones that *used* to burn is what proves they no longer do. The
+/// burn that remains is exception 1, re-lexing, which belongs to `sync_balanced` rather than to a
+/// token grammar and is therefore the same in both dialects.
 type Cell = (
   &'static str,
   fn(&str) -> (usize, usize),
   &'static [&'static str],
 );
 
-/// One dialect's row in `error_density_is_a_bounded_known_cost`: a label, its document root, the
-/// atom whose lexeme is charged to `spent` and never committed, and the junk that then reaches
-/// recovery.
+/// One dialect's row in `an_error_run_no_longer_burns_the_scan_allowance`: a label, its document
+/// root, the atom that used to be charged to `spent` and never committed, and the junk that then
+/// reaches recovery.
 ///
-/// Unlike [`Cell`] this one *does* carry a burn, because that test prices the regime a burn
-/// creates. GraphQL's is `-`; GraphQLx's is `-.5`, which is three characters and therefore outside
-/// the single-character survey [`Cell`] records.
+/// Unlike [`Cell`] this one carries that atom, because the test it feeds is the one that runs the
+/// former burn and measures its absence. GraphQL's is `-`; GraphQLx's is `-.5`, whose
+/// missing-integer-part rule routed through `tt_hook_and_then_into_errors` and returned `Err` even
+/// when its suffix check passed.
 type DensityCell = (
   &'static str,
   fn(&str) -> (usize, usize),
@@ -154,6 +154,62 @@ limited_roots! {
 #[cfg(feature = "graphqlx")]
 limited_roots! {
   gqlx_document_with_limits => smear::parser::graphqlx::lossless::parse_document_with_limits,
+}
+
+/// What `max_tokens_does_not_bound_the_work_the_scan_allowance_does` reads off one parse.
+///
+/// `items` is the token count of the tree the parse produced. Under no ceiling that is the
+/// document's own lexical size — a lossless parse keeps every lexeme it cannot understand, so
+/// nothing is missing from the tree — and under a ceiling it is where the lex stopped. The test
+/// needs both readings of the same document, which is why the door below takes an `Option` rather
+/// than a number.
+struct Budgeted {
+  spent: usize,
+  committed: usize,
+  refusals: usize,
+  items: usize,
+}
+
+/// A root under a **token** ceiling, or under none: `limited_roots`'s twin on the other axis of
+/// `LosslessLimits`.
+///
+/// It reports `Budgeted` rather than `Run` because the quantity under test is the tree's lexeme
+/// count, which no other cell in this file reads, and because the ceiling has to be absent for one
+/// of the two parses it drives.
+macro_rules! budgeted_roots {
+  ($($name:ident => $path:path),+ $(,)?) => {
+    $(
+      fn $name(src: &str, max_tokens: Option<usize>) -> Budgeted {
+        let limits = smear::lexer::limits::LosslessLimits::default();
+        let limits = match max_tokens {
+          Some(max) => limits.with_max_tokens(max),
+          None => limits,
+        };
+        scan_allowance::reset();
+        let parse = $path(src, limits);
+        Budgeted {
+          spent: scan_allowance::peak_spent(),
+          committed: scan_allowance::peak_committed(),
+          refusals: scan_allowance::refusals(),
+          items: parse
+            .syntax()
+            .descendants_with_tokens()
+            .filter(|element| element.as_token().is_some())
+            .count(),
+        }
+      }
+    )+
+  };
+}
+
+#[cfg(feature = "graphql")]
+budgeted_roots! {
+  gql_document_under_token_budget => smear::parser::graphql::lossless::parse_document_with_limits,
+}
+
+#[cfg(feature = "graphqlx")]
+budgeted_roots! {
+  gqlx_document_under_token_budget => smear::parser::graphqlx::lossless::parse_document_with_limits,
 }
 
 /// Every enabled dialect's mixed-document root, labelled.
@@ -428,38 +484,50 @@ fn token_length_does_not_reopen_the_guard() {
   }
 }
 
-/// Error density is the allowance's second exception, and this is its price.
+/// Error density used to be the allowance's second exception. It is not one any more, and this is
+/// the pin that says so.
 ///
-/// tokora charges `spent` for every item the lexer produces, errors included. smear's tally does
-/// not: `tt_hook_and_then` increments through `Result::inspect`, which runs on `Ok` alone, and the
-/// rules routed through it include `-`, `+`, `.` and `..`, which never succeed. So a malformed
-/// document moves the numerator and not the denominator, and the ratio inflates without bound —
-/// measured at **514** for one `!` per 256 `-`.
+/// tokora charges `spent` for every item the lexer produces, errors included. smear's tally did
+/// not: `tt_hook_and_then` and `tt_hook_and_then_into_errors` incremented through
+/// `Result::inspect`, which runs on `Ok` alone, and the rules routed through them include several
+/// that never succeed — GraphQL's `-` and `+`, both dialects' `.` and `..`, and GraphQLx's
+/// missing-integer-part float. A malformed document moved the numerator and not the denominator,
+/// so the ratio inflated without bound — measured at **514** for one `!` per 256 `-`.
 ///
-/// Almost none of that is reachable. A run of bad lexemes never becomes tokens the parser recovers
-/// from, so a document dense in them makes no recovery call at all; and where the ratio does
-/// inflate, the scans it refuses were going to fail anyway. The reachable cost needs an error run
-/// long enough to blow the allowance *followed by* a junk run whose scan would have succeeded.
+/// Both hooks now charge when the rule is **attempted** rather than when it succeeds (smear issue
+/// #183, which is the same repair `max_tokens` needed to bound anything at all over malformed
+/// input). An error run therefore moves both counters by one per lexeme and buys no allowance, and
+/// what this test measures is that absence.
 ///
-/// # The rate is a function of the junk, not a constant
+/// # What it measured before, kept as the contrast
 ///
-/// Refusals continue while `k + c > FACTOR * c + floor`, so they stop at
-/// `c = (k - floor) / (FACTOR - 1)` committed items. A junk run committing `m` items per refusal
-/// therefore takes `(k - floor) / ((FACTOR - 1) * m)` of them — and **`m` is set by the junk**.
+/// Refusals continued while `k + c > FACTOR * c + floor`, so they stopped at
+/// `c = (k - floor) / (FACTOR - 1)` committed items, and a junk run committing `m` items per
+/// refusal took `(k - floor) / ((FACTOR - 1) * m)` of them. `burnt_prediction` below is still that
+/// formula, and it is still printed — as the number this document would produce if the success-only
+/// charge came back. The gate below is `refusals` staying at its `k = 0` reading while that number
+/// climbs past ten thousand, which is a wider separation than the ±10% band the formula was pinned
+/// to and fails for exactly one reason.
 ///
-/// The first version of this test pinned `beyond <= k / 8`, derived from `! `, which commits a
-/// bang and a space per refusal (`m = 2`). A dense `!!!!` suffix commits one, doubles the count,
-/// and **broke that pin at k = 33 000** — precisely where `k/7 - 585 > k/8`. So the shapes below
-/// lead with the dense one, and the assertion is the formula rather than a constant a single
-/// witness happens to satisfy.
+/// The `m` column is kept for the same reason. It is what broke the *previous* pin here — a
+/// constant `beyond <= k / 8` derived from `! `, which commits a bang and a space per refusal
+/// (`m = 2`), against a dense `!!!!` suffix that commits one and doubles the count at k = 33 000.
+/// A future revision that re-derives a burn from one shape would be repeating that.
 #[test]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 #[allow(clippy::vec_init_then_push)]
-fn error_density_is_a_bounded_known_cost() {
+fn an_error_run_no_longer_burns_the_scan_allowance() {
   const JUNK: usize = 120_000;
 
-  /// `(k - floor) / ((FACTOR - 1) * m)`, the refusal count the mechanism predicts.
-  fn predicted(k: usize, m: usize) -> f64 {
+  /// Every cell below reads exactly **one** refusal more than its junk run does alone, at every
+  /// `k` — flat, where the old regime climbed past ten thousand. What is under test is that
+  /// scaling, not the last unit of it, so the gate carries room for a constant handful rather than
+  /// pinning the 1 as a photograph.
+  const REFUSAL_SLACK: usize = 4;
+
+  /// `(k - floor) / ((FACTOR - 1) * m)` — what `k` error lexemes cost while the tally charged only
+  /// on success. Nothing should reach it any more.
+  fn burnt_prediction(k: usize, m: usize) -> f64 {
     k.saturating_sub(4_096) as f64 / (7.0 * m as f64)
   }
 
@@ -476,10 +544,10 @@ fn error_density_is_a_bounded_known_cost() {
   cells.push((
     "gqlx",
     gqlx_document,
-    // Three characters, so outside the single-character survey in `Cell` — and a burn all the
-    // same. `-?(?&frac)(?&exp)?` routes through `tt_hook_and_then_into_errors`, whose handler
-    // returns `Err` even when its suffix check passes, so the unit is charged to `spent` and never
-    // committed. Signature `spent = 20 040` against `committed = 39`, byte-identical to `-`.
+    // The atom that used to burn here, kept because running it is how its absence is measured.
+    // `-?(?&frac)(?&exp)?` routes through `tt_hook_and_then_into_errors`, whose handler returns
+    // `Err` even when its suffix check passes, so it was charged to `spent` and never committed:
+    // `spent = 20 040` against `committed = 39`. Both counters move now.
     "-.5",
     // `:` is absent for the reason it is absent in `Cell`: a run of colons lexes as `::`, which is
     // a sync point here, so it never refuses.
@@ -490,10 +558,10 @@ fn error_density_is_a_bounded_known_cost() {
     "no dialect is enabled, so this test would pass without checking anything"
   );
 
-  println!("\n== error density: the second exception, priced by mechanism ==");
+  println!("\n== error density: the exception that is gone ==");
   println!(
     "  {:<6} {:<8} {:>3} {:>8} {:>9} {:>9} {:>10} {:>8}",
-    "dial", "junk", "m", "k", "refusals", "predicted", "beyond", "drift"
+    "dial", "junk", "m", "k", "refusals", "if burnt", "beyond", "spent-cmt"
   );
   for (dialect, root, burn, alphabet) in cells {
     for (junk, m) in alphabet {
@@ -514,33 +582,36 @@ fn error_density_is_a_bounded_known_cost() {
           "{dialect} {junk:?} k={k}: recovery must be fully intact below the floor"
         );
       }
+      // The junk run alone, which is what the error run is charged against. Reading it here rather
+      // than assuming zero is what keeps the gate below a statement about the *burn* and not about
+      // the junk: a junk alphabet whose own scans start refusing would otherwise read as a burn.
+      let baseline = run(root, &format!("{}1", junk.repeat(JUNK)));
       for k in [20_000usize, 33_000, 80_000] {
         let src = format!("{}{}1", burn.repeat(k), junk.repeat(JUNK));
         let got = run(root, &src);
         assert_eq!(got.covered, src.len(), "{dialect} {junk:?} k={k}");
-        let want = predicted(k, m);
-        let drift = got.refusals as f64 / want;
+        let burnt = burnt_prediction(k, m);
         println!(
-          "  {dialect:<6} {:<8} {m:>3} {k:>8} {:>9} {:>9.0} {:>10} {:>8.3}",
+          "  {dialect:<6} {:<8} {m:>3} {k:>8} {:>9} {:>9.0} {:>10} {:>8}",
           format!("{junk:?}"),
           got.refusals,
-          want,
+          burnt,
           got.diagnostics.saturating_sub(k),
-          drift
+          got.peak_spent as i64 - got.peak_committed as i64
         );
         assert!(
-          (0.9..1.1).contains(&drift),
-          "{dialect} {junk:?} k={k}: {} refusals against the {want:.0} the mechanism predicts \
-           (x{drift:.3}). The rate is `(k - floor) / ((FACTOR - 1) * m)` with m = committed items \
-           per refusal; a drift here means either a constant changed or the junk stopped \
-           committing {m} per refusal. Do not re-derive this from one shape — that is what broke \
-           the last pin.",
-          got.refusals
+          got.refusals <= baseline.refusals + REFUSAL_SLACK,
+          "{dialect} {junk:?} k={k}: {} refusals against {} for the junk run on its own. The \
+           leading run of {k} {burn:?} bought scan allowance, which means a lossless lexer rule is \
+           charging the tally only when it succeeds again — `smear-lexer`'s hooks must charge on \
+           the attempt (smear issue #183). The old regime put this at {burnt:.0}.",
+          got.refusals,
+          baseline.refusals
         );
         assert!(
-          got.refusals < JUNK,
-          "{dialect} {junk:?} k={k}: the whole junk run was shredded rather than a slice of it, so \
-           the guard is not re-closing as committed items accrue."
+          got.diagnostics >= k,
+          "{dialect} {junk:?} k={k}: the error run stopped reporting, so this document is no \
+           longer the error-dense one the gate above is about"
         );
       }
     }
@@ -556,8 +627,9 @@ fn error_density_is_a_bounded_known_cost() {
 /// reach the parser — the scanner absorbs them into diagnostics on the way past.
 ///
 /// The measurement is what says the floor of 1 is reached rather than approached, which is what
-/// makes the worst case in `error_density_is_a_bounded_known_cost` the worst case. It reads the
-/// **minimum gap between consecutive refusals**, not the average over the run: an average of 1.008
+/// makes the worst case in `an_error_run_no_longer_burns_the_scan_allowance` the worst case. It
+/// reads the **minimum gap between consecutive refusals**, not the average over the run: an
+/// average of 1.008
 /// is consistent with one zero-commit refusal among six thousand, and one is all it would take to
 /// freeze the denominator.
 #[test]
@@ -593,8 +665,9 @@ fn every_refusal_commits_at_least_one_item() {
   for (dialect, root, alphabet) in cells {
     for junk in alphabet {
       // Junk alone, with no sync point after it: every scan fails, and once the allowance is gone
-      // every call refuses. No burn prefix, because GraphQLx has no atom that provides one — see
-      // `Cell`. The two dialects then read identically, which is the point.
+      // every call refuses. No prefix of any kind — the failed scans are the whole mechanism, and
+      // they belong to `sync_balanced` rather than to either token grammar. The two dialects then
+      // read identically, which is the point.
       let src = junk.repeat(6_000);
       let got = run(root, &src);
       assert_eq!(got.covered, src.len(), "{dialect} {junk:?}");
@@ -638,11 +711,16 @@ fn every_refusal_commits_at_least_one_item() {
 ///
 /// Because that ratio is not a work bound. The first version of this test asserted `ratio < 12.0`,
 /// from 8.91 measured on four **error-free** constructions plus margin. On an error-dense one — the
-/// axis this same file already carries — the identical metric reads **73 -> 93 -> 109 -> 118**
-/// across four doublings *while `spent` doubles at x1.99, x1.99, x2.00*. The work is exactly linear
-/// and the metric grows 1.6x over the same range, so the gate would have failed with no defect
-/// present: the numerator counts error lexemes the denominator does not, and their ratio drifts
-/// with error density by construction.
+/// axis this same file already carries — the identical metric read **73 -> 93 -> 109 -> 118**
+/// across four doublings *while `spent` doubled at x1.99, x1.99, x2.00*. The work was exactly
+/// linear and the metric grew 1.6x over the same range, so the gate would have failed with no
+/// defect present: the numerator counted error lexemes the denominator did not.
+///
+/// That drift is gone — smear issue #183 made the lexer charge its tally on the attempt, so the
+/// same four doublings read **8.0 / 8.0 / 8.0 / 8.0** now — and the instrument stays as it is. A
+/// ratio parked at `SCAN_ALLOWANCE_FACTOR` restates the guard's own comparison instead of measuring
+/// the work, and a threshold on it would again be a constant belonging to whichever shapes it was
+/// read on.
 ///
 /// Doubling the construction and watching the **numerator** is the mechanism. It is the same
 /// instrument `assert_linear` uses on the census, and it carries no constant belonging to a shape.
@@ -938,6 +1016,351 @@ fn the_with_limits_doors_reach_the_same_guard() {
   }
 }
 
+/// `LosslessLimits::max_tokens` does not bound the work a parse does. This guard does, at eight
+/// times the number the caller configured, and that is the pin.
+///
+/// # Why the ceiling does not hold what it looks like it holds
+///
+/// The tally it refuses past is a field of `LosslessLimits`, and `LosslessLimits` is
+/// `Lexer::State` — the cell `sync_balanced` clones into its `ThroughEntry` and **restores** when
+/// its scan finds no sync point. So a failed scan refunds every charge it made, the ceiling is
+/// reached only by lexemes that survived, and `with_max_tokens(n)` stops the lex one lexeme past
+/// its `n`th survivor while saying nothing about how many attempts produced them. The count a
+/// rollback cannot refund is the input layer's `TokenBudgetTally::spent`, which is what
+/// `scan_allowance::peak_spent` reads.
+///
+/// # What bounds the durable count instead
+///
+/// This guard and nothing else: no scan starts once `spent > FACTOR * committed + floor`, and
+/// `committed` is that same rewindable tally, so a configured ceiling enters the durable bound as
+/// `FACTOR * max_tokens + floor`. The cells below set `max_tokens` to the document's **own**
+/// lexical size — the most generous ceiling that is still a ceiling, and the one under which the
+/// parse completes rather than truncating — and read 99 963 produce-events against a configured
+/// 12 000.
+///
+/// # The assertion is two-sided, and each half pins a different thing
+///
+/// The lower half, `FACTOR * max_tokens < spent`, is the finding: it reds if the durable count
+/// ever comes back inside the configured number, which is what that knob's documentation claimed
+/// before this cell existed. The upper half, `spent <= FACTOR * max_tokens + floor`, is the bound:
+/// it reds if the multiplier grows. Neither is a photograph — both are derived from the two
+/// constants, so a change to either in `smear-parser/src/lossless/recover.rs` reds this with a
+/// message naming it.
+///
+/// # The ratio is the constants', not the document's
+///
+/// `spent / max_tokens` is `FACTOR + floor / max_tokens`, which is a statement about the guard.
+///
+/// **What the cells below run, and the only readings this file witnesses**: two shapes at two
+/// sizes in each enabled dialect — `[ type ] ` at 12 000 and 24 000 lexemes, `! ` at the same two,
+/// reaching both recovery helpers. They read **8.330 / 8.164** and **8.337 / 8.169**, identical in
+/// GraphQL and GraphQLx. The size axis is what moves the number; the shape axis moves it by 0.1%.
+///
+/// **Off-gate, and labelled so because nothing here reproduces it.** Widening the shape axis to
+/// #168's four census shapes at 12 000 lexemes reads 8.330 (`[ type ] `), 8.334 (`( type ) ` and
+/// `@ ( ) `) and 8.337 (`! `); widening the size axis on `[ type ] ` to
+/// 3 000 / 6 000 / 12 000 / 24 000 / 48 000 reads 9.320 / 8.655 / 8.330 / 8.164 / 8.082,
+/// converging on `FACTOR` as the floor amortises. Both series were taken by hand against this
+/// tree, and they are kept rather than deleted because a reader re-deriving the bound wants them —
+/// but no cell here runs them, so they are a campaign measurement and not a witness. An earlier
+/// revision quoted a fourth 12 000-lexeme value, 8.339, which no census shape in either dialect
+/// produces.
+///
+/// Pinning 8.33 would have been a pin on a document of 12 000 lexemes; the two-sided bound is not.
+///
+/// # `peak_spent` is this parse's total, and the cell asserts what makes it one
+///
+/// It is `spent` at the **last recovery call**, so on its own it is blind to whatever is lexed
+/// after that call. `committed + SETTLE >= items` closes the gap: the last recovery call landed
+/// within a handful of lexemes of end of input, so there is nothing left for the reading to miss.
+/// It measures `items - 2` on every cell.
+///
+/// # The control, because one lexeme of headroom is the whole difference
+///
+/// At `max_tokens = items - 2` the parse trips the ceiling, and the durable work stops with it:
+/// the tree comes back carrying `max_tokens + 1` tokens and nothing beyond them. That is what
+/// `control.items == items - 1` asserts, and it is the assertion that witnesses the cliff — a
+/// token cannot be in the tree without having been lexed. Measured on `[ type ] ` x2000: **11 999**
+/// tree tokens and 3 diagnostics under `max_tokens(11_998)`, against 12 000 tokens and 99 963
+/// produce-events one lexeme higher. About 12 000 durable lexemes against 99 963 is a factor of
+/// **8.3**, which is the allowance multiplier rather than anything about this shape.
+///
+/// **`control.spent` is not that number and must not be read as one**, which is the mistake an
+/// earlier revision of this paragraph made: it read the 5 below as the work and concluded that the
+/// control "refuses nothing and the recovery never runs". `peak_spent` samples `spent` at recovery
+/// *decision points* only. The control's first `resync_to` happens at `committed = 4` and records
+/// `spent = 5`; that scan is **permitted**, runs until the tally trips, and tokora's `skip_until`
+/// takes its `Scan::Tripped` exit — which commits the scanned prefix at the durable frontier. No
+/// later recovery call re-samples, so the reading stays at 5 while about 12 000 lexemes were
+/// durably produced. `control.spent != 0` is itself the contradiction: only `record()` inside
+/// `scan_allowance_exhausted` writes it. It is not shape-generic either — the `! ` cells read 1.
+///
+/// What survives from that paragraph is `control.refusals == 0`: a ceiling the parse trips bounds
+/// the work outright, where the cells above measure a parse whose ceiling never trips. Without
+/// that half the cell would read as "this shape is quadratic" rather than as "this ceiling is not
+/// a work bound". `control.spent` is printed beside `control.items` as an instrument reading, and
+/// asserted on by nothing.
+#[test]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[allow(clippy::vec_init_then_push)]
+fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
+  // `SCAN_ALLOWANCE_FACTOR` and `SCAN_ALLOWANCE_FLOOR`, which are `pub(crate)` in
+  // `smear-parser/src/lossless/recover.rs` and cannot be imported from here. Copied rather than
+  // approximated, because `LosslessLimits::max_tokens` now tells a caller to size a defence at
+  // `8n + 4096` and a change to either constant has to red something that quotes it.
+  const FACTOR: usize = 8;
+  const FLOOR: usize = 4_096;
+  // How far short of the document's last lexeme the final recovery call may sit — the slack that
+  // makes `peak_spent` the parse's total rather than a sample of it. Measured at 2 everywhere.
+  const SETTLE: usize = 4;
+
+  #[allow(clippy::type_complexity)]
+  let mut doors: Vec<(&str, fn(&str, Option<usize>) -> Budgeted)> = Vec::new();
+  #[cfg(feature = "graphql")]
+  doors.push(("gql", gql_document_under_token_budget));
+  #[cfg(feature = "graphqlx")]
+  doors.push(("gqlx", gqlx_document_under_token_budget));
+  assert!(
+    !doors.is_empty(),
+    "no dialect is enabled, so this test would pass without checking anything"
+  );
+
+  // `(atom, repetitions, lexemes per repetition)`. The third field is not decoration: it is what
+  // says the tree's token count is the document's own lexical size rather than whatever the parse
+  // happened to materialise, which is the number every ceiling below is derived from.
+  //
+  // `[ type ] ` drives `resync_to` — its `type` is a definition head at depth 1, where the scan
+  // never consults its predicate — and `! ` drives `unexpected`, whose wide sync set does not name
+  // a bang. Two helpers, one guard, and the ratio does not tell them apart.
+  let shapes: [(&str, usize, usize); 4] = [
+    ("[ type ] ", 2_000, 6),
+    ("[ type ] ", 4_000, 6),
+    ("! ", 6_000, 2),
+    ("! ", 12_000, 2),
+  ];
+
+  println!("\n== a token ceiling against the work it does not bound ==");
+  println!(
+    "  {:<6} {:<16} {:>7} {:>9} {:>9} {:>7} {:>9} {:>10} {:>10}",
+    "dial", "shape", "max", "spent", "ceiling", "ratio", "refusals", "ctl-items", "ctl-spent"
+  );
+  for (dialect, door) in doors {
+    for (atom, reps, per_rep) in shapes {
+      let src = atom.repeat(reps);
+      let unlimited = door(&src, None);
+      let items = unlimited.items;
+      assert_eq!(
+        items,
+        reps * per_rep,
+        "{dialect} {atom:?} x{reps}: the unbudgeted tree carries {items} tokens where the document \
+         has {} lexemes, so the ceiling below is not the document's own size and every number \
+         derived from it is about something else",
+        reps * per_rep
+      );
+
+      let got = door(&src, Some(items));
+      assert_eq!(
+        got.items, items,
+        "{dialect} {atom:?} x{reps}: a ceiling equal to the document's own lexeme count truncated \
+         the parse, so this cell is no longer about a budget the parse ran to completion under"
+      );
+      assert!(
+        got.refusals > 0,
+        "{dialect} {atom:?} x{reps}: the guard never engaged, so the readings below belong to a \
+         parse that never re-lexed and the ceiling is not being tested at all"
+      );
+      assert!(
+        got.committed + SETTLE >= items,
+        "{dialect} {atom:?} x{reps}: the last recovery call sat at committed={} against {items} \
+         lexemes, so `peak_spent` is a sample of this parse rather than its total and the bound \
+         below is measured on the wrong quantity",
+        got.committed
+      );
+      assert_eq!(
+        got.spent, unlimited.spent,
+        "{dialect} {atom:?} x{reps}: configuring max_tokens changed the parse's durable work. \
+         That is the right end state and it is smear issue #193 — when it lands, this cell is the \
+         one to re-derive rather than the one to delete"
+      );
+      assert!(
+        FACTOR * items < got.spent,
+        "{dialect} {atom:?} x{reps}: max_tokens({items}) held the durable count to {}, inside \
+         {FACTOR}x its own number. Either the tally stopped being refunded by `sync_balanced`'s \
+         rewind — in which case max_tokens IS a work bound now and its docs owe the new sentence — \
+         or SCAN_ALLOWANCE_FACTOR fell below {FACTOR}.",
+        got.spent
+      );
+      assert!(
+        got.spent <= FACTOR * items + FLOOR,
+        "{dialect} {atom:?} x{reps}: max_tokens({items}) let the durable count reach {}, past the \
+         `FACTOR * committed + floor` this guard promises ({}). `LosslessLimits::max_tokens` tells \
+         a caller to size a defence at 8n + 4096, and that sentence is now wrong.",
+        got.spent,
+        FACTOR * items + FLOOR
+      );
+
+      // One lexeme of headroom, and none of the above happens.
+      let control = door(&src, Some(items - 2));
+      assert_eq!(
+        control.items,
+        items - 1,
+        "{dialect} {atom:?} x{reps}: a ceiling of {} did not stop the lex one lexeme past itself. \
+         This is the control's durable-work reading and the only one it has: a token cannot be in \
+         the tree without having been lexed, so the tree's size under a tripped ceiling IS the \
+         work that survived. `control.spent` is not — it is a sample taken at the single recovery \
+         call this parse makes, long before the tally trips",
+        items - 2
+      );
+      assert_eq!(
+        control.refusals, 0,
+        "{dialect} {atom:?} x{reps}: the control refused scans, so a ceiling the parse trips no \
+         longer bounds the work outright and the cell above is measuring a difference of degree"
+      );
+
+      println!(
+        "  {dialect:<6} {:<16} {items:>7} {:>9} {:>9} {:>7.3} {:>9} {:>10} {:>10}",
+        format!("{atom:?}x{reps}"),
+        got.spent,
+        FACTOR * items + FLOOR,
+        got.spent as f64 / items as f64,
+        got.refusals,
+        control.items,
+        control.spent
+      );
+    }
+  }
+}
+
+/// What a token ceiling *does* bound: the lex stops one lexeme past it, on a rule that can only
+/// fail as readily as on one that succeeds.
+///
+/// This is smear issue #183's acceptance pair. It lives here rather than beside the lexer because
+/// the sentence it licenses is written on `LosslessLimits::max_tokens`, next to the durable bound
+/// the cell above pins — and an unpinned measurement quoted in product documentation is prose.
+///
+/// Before #183 the two hooks wrapping a fallible rule charged through `Result::inspect`, which
+/// runs on `Ok` alone. GraphQL's `-` is a rule that can only fail, so it charged nothing: 4 000 of
+/// them parsed to the end at 4 001 diagnostics under a ceiling of 100, while 4 000 `!` — a rule
+/// that succeeds — truncated at 2. The cheaper document to write was the one the ceiling could not
+/// see.
+///
+/// Both truncate now. `-` stops at **101**, which is `max_tokens + 1`, and the check that stops it
+/// is not this crate's. Every route charges before the rule runs, so lexeme 101 takes the tally to
+/// 101; tokora's logos adapter then runs its **one post-scan `check()`** — placed outside the
+/// `Ok`/`Err` split precisely because a callback may mutate `extras` and the item still arrive as
+/// a lexer error — reads `tokens() > limitation()` and latches its poison flag, which is what
+/// `max_tokens + 1` is counting. `smear-lexer`'s own pre-charge `check()` is belt-and-braces here:
+/// starting from an untripped state it would first refuse at lexeme **102**, and the adapter has
+/// poisoned one lexeme earlier. `!` is unchanged at 2, which is what makes the first number a
+/// change of unit rather than a change of ceiling.
+///
+/// The `]` row is the witness for that sentence rather than an argument for it:
+/// `decrease_recursion_depth_and_increase_token` runs **no check at all**, and it measures the
+/// same 101. A refusal performed by the hook's own check could not be reached down that route.
+///
+/// # The rows are charge routes, not rules, and that distinction is the finding
+///
+/// #183's census enumerated the lossless **rules** and found every one routed through a charging
+/// hook. Two charge sites are not rules, so it could not see them, and this is where they are
+/// pinned:
+///
+/// - `cst_default_error` — the `error(TokenErrors, …)` callback both dialects install for input no
+///   rule matches, four copies across GraphQL and GraphQLx, `str` and `slice`. `%` is the row, and
+///   the measurement that says it is needed: with the charge planted away from all four copies,
+///   `cargo test -p smear --features rowan` runs 506 tests and **this row is the only failure**,
+///   while `cargo test -p smear-lexer` stays green at 128. `%` x4000 under `max_tokens(100)` goes
+///   101 -> 4001 there, which is the fail-open #183 closed for `-`, `+` and `.`.
+/// - `decrease_recursion_depth_and_increase_token` — the closing-bracket handler, `}`, `]`, `)`
+///   and GraphQLx's `>`. `]` is the row. Unlike the callback this route was already covered
+///   incidentally: planting its charge away also reds
+///   `max_tokens_does_not_bound_the_work_the_scan_allowance_does` on `committed + SETTLE >= items`
+///   (committed 9 999 against 12 000 lexemes) and `every_refusal_commits_at_least_one_item` on a
+///   zero gap. Both messages are about where a recovery call sat, and neither names a charge. The
+///   row is here so the route has one reading that does.
+///
+/// The census's first blind spot was durability — a charge a rollback refunds, which is the whole
+/// of `max_tokens_does_not_bound_the_work_the_scan_allowance_does`. This is its second:
+/// **coverage-of-rules is not coverage-of-routes.** A charge reached through an error callback, or
+/// through a `#[token(…)]` attribute's own handler, is not an entry in a census of rules, and the
+/// defence that costs least is a row here for each route.
+#[test]
+#[cfg(feature = "graphql")]
+fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
+  const CEILING: usize = 100;
+
+  println!("\n== the token ceiling's own unit ==");
+  // `(atom, diagnostics under CEILING, diagnostics under no ceiling, what a move here means)`.
+  for (atom, capped, uncapped, meaning) in [
+    (
+      "-",
+      CEILING + 1,
+      4_001,
+      "a lossless rule is charging the tally only when it succeeds again, which is smear issue \
+       #183 — `smear-lexer`'s `tt_hook_and_then` family must charge on the attempt",
+    ),
+    (
+      "!",
+      2,
+      4_000,
+      "the reading #183 did NOT move has moved, so this pair is no longer the contrast between a \
+       rule that can only fail and one that succeeds",
+    ),
+    (
+      "%",
+      CEILING + 1,
+      4_001,
+      "`cst_default_error` has stopped charging the tally. It is the `error(TokenErrors, …)` \
+       callback, not a rule, so #183's rule census never covered it and this row is the only \
+       thing that does — `smear-lexer/src/{graphql,graphqlx}/handlers/{str,slice}.rs`, four \
+       copies, each calling `lexer.extras.increase_token()`",
+    ),
+    (
+      "]",
+      CEILING + 1,
+      4_000,
+      "`decrease_recursion_depth_and_increase_token` has stopped charging the tally. That route \
+       runs no `check()` of its own, which is also why this row reading the same 101 as `-` is \
+       what says the refusal is tokora's post-scan check rather than `smear-lexer`'s pre-charge \
+       one",
+    ),
+  ] {
+    let src = atom.repeat(4_000);
+    let limited = smear::parser::graphql::lossless::parse_document_with_limits(
+      &src,
+      smear::lexer::limits::LosslessLimits::default().with_max_tokens(CEILING),
+    );
+    let free = smear::parser::graphql::lossless::parse_document(&src);
+
+    assert_eq!(
+      limited.syntax().text().to_string().len(),
+      src.len(),
+      "{atom:?}: a ceiling is not licence to drop text — the lossless guarantee holds under one"
+    );
+    assert_eq!(
+      free.syntax().text().to_string().len(),
+      src.len(),
+      "{atom:?}: the lossless text must survive"
+    );
+    assert_eq!(
+      limited.diagnostics().len(),
+      capped,
+      "{atom:?} x4000 under max_tokens({CEILING}) reports {} diagnostics rather than {capped}: \
+       {meaning}.",
+      limited.diagnostics().len()
+    );
+    assert_eq!(
+      free.diagnostics().len(),
+      uncapped,
+      "{atom:?} x4000 with no ceiling reports {} diagnostics rather than {uncapped}, so the \
+       ceiling above is being compared against a document that is not the one it was measured on",
+      free.diagnostics().len()
+    );
+    println!(
+      "  {atom:?} x4000: max_tokens({CEILING}) -> {capped} diagnostics, no ceiling -> {uncapped}"
+    );
+  }
+}
+
 /// The burnt twin of `lossless_document::a_resync_that_lands_on_a_definition_head_does_not_eat_it`.
 ///
 /// `resync_to`'s refusal is four lines rather than one because the `None` arm and a zero-skip
@@ -953,20 +1376,57 @@ fn the_with_limits_doors_reach_the_same_guard() {
 /// to `false` passes the entire suite** — the arm exists only for the burnt regime, and nothing in
 /// the suite composed a burn with junk stopping exactly on a definition head.
 ///
-/// This is that composition: an error run long enough to close the guard, then the pin's own
-/// shape. Planted to confirm it is separately covered rather than incidentally — with the arm
-/// forced to `false`, this cell reds on the missing `ScalarTypeDefinition` while the unburnt pin
-/// stays green, which is the pair that shows the two regimes are distinct.
+/// This is that composition: a burn that closes the guard, then the pin's own shape while it is
+/// still closed. Planted to confirm it is separately covered rather than incidentally — with the
+/// arm forced to `false`, this cell reds on the missing `ScalarTypeDefinition` while the unburnt
+/// pin stays green, which is the pair that shows the two regimes are distinct.
+///
+/// # The burn is re-lexing now, and the shape had to change with it
+///
+/// It used to be `-` repeated: an error lexeme charged to `spent` and never to the tally, which is
+/// the asymmetry `smear-lexer`'s hooks no longer have. Every lexeme is charged when the rule is
+/// **attempted** now (smear issue #183), so an error run moves both counters and buys nothing —
+/// `an_error_run_no_longer_burns_the_scan_allowance` is that property's own pin, and this cell read
+/// **0 refusals** on the old construction the moment the repair landed.
+///
+/// What is left is exception 1, re-lexing, and it does not substitute for the old burn by itself.
+/// The guard is a *rate limiter*: a scan that fails adds its whole length to `spent`, the refusals
+/// that follow each commit an item, and the guard re-opens as soon as `spent <= FACTOR * committed
+/// + floor`. A resync-quadratic prefix therefore sits at that boundary rather than above it —
+/// `[ type ] ` repeated 6 000 times ahead of this pin refuses **11 937** scans and still arrives
+/// here with the guard open, so the arm is not reached and the cell passes with it forced to
+/// `false`. That is measured, and it is why `refusals() > 0` is not this cell's non-vacuity guard.
+///
+/// # What the construction below actually does
+///
+/// It puts one big failed scan immediately before the pin, so `spent` is high while `committed` is
+/// still near zero:
+///
+/// 1. the leading bare `type` starts a definition, fails for want of a name, and calls `resync_to`
+///    with the allowance untouched;
+/// 2. that scan looks for a **depth-0 definition start** and there is none in the document — the
+///    pin's own `type` is inside `[ … ]`, and `!` is not one — so it runs to end of input, finds
+///    nothing, and rewinds. `spent` is now the whole document; `committed` is about two;
+/// 3. that same call's `None` arm — the scan was permitted, it just found nothing — takes the
+///    stray `[` as a one-token `Error`, and the loop parses `type T { a scalar S }` at depth 0 on
+///    its next turn;
+/// 4. `a` fails for want of a `:` and calls `resync_to` again — with `scalar` at hand and the
+///    guard still shut, which is the arm.
+///
+/// The trailing `! ` run is there to make step 2's scan longer than `SCAN_ALLOWANCE_FLOOR`;
+/// 6 000 of them is about 12 000 items against a floor of 4 096. Below the floor nothing refuses
+/// and the cell goes vacuous — at 1 000 it does, measured.
 #[test]
 #[cfg(feature = "graphql")]
 fn a_burnt_resync_that_lands_on_a_definition_head_still_does_not_eat_it() {
   use smear::parser::graphql::kinds::SyntaxKind as K;
 
   let tail = "type T { a scalar S }";
-  let src = format!("{}{tail}", "-".repeat(20_000));
+  let src = format!("type [ {tail} ] {}", "! ".repeat(6_000));
   scan_allowance::reset();
   let parse = smear::parser::graphql::lossless::parse_document(&src);
   let refusals = scan_allowance::refusals();
+  let at_hand = scan_allowance::restart_points_at_hand_under_refusal();
 
   assert_eq!(
     parse.syntax().text().to_string(),
@@ -974,9 +1434,12 @@ fn a_burnt_resync_that_lands_on_a_definition_head_still_does_not_eat_it() {
     "the lossless text must survive"
   );
   assert!(
-    refusals > 0,
-    "the guard never closed, so this ran the same path as the unburnt pin and covers nothing new. \
-     The leading error run has to be long enough to blow SCAN_ALLOWANCE_FLOOR."
+    at_hand > 0,
+    "`resync_to` never took its refused path with a restart point at hand, so this ran the \
+     unburnt pin's path and covers nothing new — {refusals} refusals notwithstanding, which is \
+     the reading that made the previous version of this cell vacuous. Either the leading failed \
+     scan stopped being long enough to blow SCAN_ALLOWANCE_FLOOR, or something in the document \
+     became a depth-0 definition start and let that scan succeed."
   );
   let kinds: Vec<K> = parse.syntax().descendants().map(|n| n.kind()).collect();
   assert!(
@@ -986,32 +1449,31 @@ fn a_burnt_resync_that_lands_on_a_definition_head_still_does_not_eat_it() {
      than falling through to the consume-one `None` arm. Kinds: {kinds:?}"
   );
   println!(
-    "\n== burnt zero-skip arm ==\n  bytes={} refusals={refusals} ScalarTypeDefinition survives",
+    "\n== burnt zero-skip arm ==\n  bytes={} refusals={refusals} at-hand-under-refusal={at_hand} \
+     ScalarTypeDefinition survives",
     src.len()
   );
 }
 
-/// The burnt zero-skip arm, on GraphQLx — the substrate arm is shared, its burn is not.
+/// The burnt zero-skip arm, on GraphQLx — the substrate arm is shared, the kind space is not.
 ///
-/// Same property as the GraphQL twin above and the same construction, with `-.5` for `-` because
-/// that is what burns here (see `DensityCell`). The kind spaces are different enums, which is why
-/// this is a second test rather than a loop over both.
-///
-/// **The space between the burn and the tail is load-bearing.** Flush, the missing-integer-part
-/// rule's suffix check swallows the following `type` into the float error lexeme and the
-/// definition never reaches the parser at all — refusals 1, no `ScalarTypeDefinition`. That is a
-/// lexer artifact rather than a recovery defect, so it is not asserted; the space is there to keep
-/// this test measuring the arm it names.
+/// Same property as the GraphQL twin above, and now the same construction byte for byte. It used
+/// to be `-.5` here against `-` there, because the two dialects burnt on different lexemes; the
+/// burn is a failed scan now (see the twin for what each part of it does), and a failed scan is a
+/// property of `sync_balanced` rather than of a token grammar, so one shape drives both. The kind
+/// spaces are still different enums, which is why this is a second test rather than a loop over
+/// both.
 #[test]
 #[cfg(feature = "graphqlx")]
 fn a_burnt_resync_on_graphqlx_also_does_not_eat_the_definition() {
   use smear::parser::graphqlx::kinds::SyntaxKind as K;
 
   let tail = "type T { a scalar S }";
-  let src = format!("{} {tail}", "-.5".repeat(20_000));
+  let src = format!("type [ {tail} ] {}", "! ".repeat(6_000));
   scan_allowance::reset();
   let parse = smear::parser::graphqlx::lossless::parse_document(&src);
   let refusals = scan_allowance::refusals();
+  let at_hand = scan_allowance::restart_points_at_hand_under_refusal();
 
   assert_eq!(
     parse.syntax().text().to_string(),
@@ -1019,8 +1481,10 @@ fn a_burnt_resync_on_graphqlx_also_does_not_eat_the_definition() {
     "the lossless text must survive"
   );
   assert!(
-    refusals > 0,
-    "the guard never closed, so this ran the same path as an unburnt parse and covers nothing new"
+    at_hand > 0,
+    "`resync_to` never took its refused path with a restart point at hand, so this ran the \
+     unburnt path and covers nothing new — {refusals} refusals notwithstanding. See the GraphQL \
+     twin for what each part of the construction is doing."
   );
   let kinds: Vec<K> = parse.syntax().descendants().map(|n| n.kind()).collect();
   assert!(
@@ -1032,7 +1496,7 @@ fn a_burnt_resync_on_graphqlx_also_does_not_eat_the_definition() {
   );
   println!(
     "\n== burnt zero-skip arm, graphqlx ==\n  bytes={} refusals={refusals} \
-     ScalarTypeDefinition survives",
+     at-hand-under-refusal={at_hand} ScalarTypeDefinition survives",
     src.len()
   );
 }
