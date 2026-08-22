@@ -430,7 +430,10 @@ fn error_density_is_a_bounded_known_cost() {
 /// reach the parser — the scanner absorbs them into diagnostics on the way past.
 ///
 /// The measurement is what says the floor of 1 is reached rather than approached, which is what
-/// makes the worst case in `error_density_is_a_bounded_known_cost` the worst case.
+/// makes the worst case in `error_density_is_a_bounded_known_cost` the worst case. It reads the
+/// **minimum gap between consecutive refusals**, not the average over the run: an average of 1.008
+/// is consistent with one zero-commit refusal among six thousand, and one is all it would take to
+/// freeze the denominator.
 #[test]
 #[cfg(feature = "graphql")]
 fn every_refusal_commits_at_least_one_item() {
@@ -443,95 +446,133 @@ fn every_refusal_commits_at_least_one_item() {
       got.refusals > 0,
       "{junk:?}: no refusal, so this constrains nothing"
     );
-    let m = got.peak_committed as f64 / got.refusals as f64;
+    // The MINIMUM gap between two consecutive refusals, not the average over thousands of them.
+    // An average cannot fail on a single zero-commit refusal, which is the only thing that would
+    // freeze the denominator, so an average asserts almost nothing here.
+    let min_gap = scan_allowance::min_commit_between_refusals().unwrap_or_else(|| {
+      panic!("{junk:?}: fewer than two refusals, so there is no gap to measure")
+    });
     println!(
-      "  {:<10} refusals={:6} committed={:7} m={m:.3}",
+      "  {:<10} refusals={:6} committed={:7} min gap={min_gap} (avg {:.3})",
       format!("{junk:?}"),
       got.refusals,
-      got.peak_committed
+      got.peak_committed,
+      got.peak_committed as f64 / got.refusals as f64
     );
     assert!(
-      m >= 1.0,
-      "{junk:?}: {m:.3} committed items per refusal. Below 1 the denominator stops moving and \
-       the guard latches instead of clearing — the degradation would be permanent rather than \
-       proportional."
+      min_gap >= 1,
+      "{junk:?}: two consecutive refusals with {min_gap} committed items between them. At zero \
+       the denominator stops moving and the guard latches instead of clearing — the degradation \
+       would be permanent rather than proportional to the error run."
     );
   }
 }
 
 /// The guard re-opening cannot be turned back into superlinearity.
 ///
-/// Self-clearing is what keeps the error-density cost proportional, and read from the other side
-/// it is an invitation: alternate cheap commits with expensive failed scans and the allowance
-/// refills on purpose. It cannot win, and the reason is the denominator rather than any property
-/// of the shapes below. Scanning is permitted only while `spent <= FACTOR * committed + floor`,
-/// and `committed` can never exceed the number of items the document contains — so the total
-/// lexing a parse can be made to do is `FACTOR * T + floor` plus the scan in flight, whatever
-/// order the shape puts its progress and its scans in.
+/// Self-clearing is what keeps the error-density cost proportional, and read from the other side it
+/// is an invitation: alternate cheap commits with expensive failed scans and the allowance refills
+/// on purpose. It cannot win, and the reason is the denominator rather than any property of the
+/// shapes below — scanning is permitted only while `spent <= FACTOR * committed + floor`, and
+/// `committed` can never exceed the number of items the document contains.
 ///
-/// The witness is `spent / committed` at the last recovery call, which is that inequality read
-/// directly. A shape that beat the guard would show it climbing with size.
+/// # Why this doubles instead of reading `spent / committed`
+///
+/// Because that ratio is not a work bound. The first version of this test asserted `ratio < 12.0`,
+/// from 8.91 measured on four **error-free** constructions plus margin. On an error-dense one — the
+/// axis this same file already carries — the identical metric reads **73 -> 93 -> 109 -> 118**
+/// across four doublings *while `spent` doubles at x1.99, x1.99, x2.00*. The work is exactly linear
+/// and the metric grows 1.6x over the same range, so the gate would have failed with no defect
+/// present: the numerator counts error lexemes the denominator does not, and their ratio drifts
+/// with error density by construction.
+///
+/// Doubling the construction and watching the **numerator** is the mechanism. It is the same
+/// instrument `assert_linear` uses on the census, and it carries no constant belonging to a shape.
 #[test]
 #[cfg(feature = "graphql")]
 fn the_guard_cannot_be_refilled_into_superlinearity() {
-  println!("\n== alternating progress and scans ==");
-  for k in [200usize, 1_000, 4_000] {
-    for (name, src) in [
-      (
-        "burn then junk",
-        format!("{}{}1", "[ type ] ".repeat(k), "! ".repeat(k)),
+  const BASE: usize = 2_000;
+  const NAMES: [&str; 5] = [
+    "burn then junk",
+    "valid definition alternating with a burn unit",
+    "20 valid definitions per junk burst",
+    "a large commit, then a resync-quadratic tail",
+    "error-dense junk (the axis the ratio form missed)",
+  ];
+
+  fn build(which: usize, k: usize) -> String {
+    match which {
+      0 => format!("{}{}1", "[ type ] ".repeat(k), "! ".repeat(k)),
+      1 => "type T { f: Int } [ type ] ".repeat(k),
+      2 => format!("{}[ type ] ", "type T { f: Int } ".repeat(20)).repeat(k / 20 + 1),
+      3 => format!(
+        "{}{}",
+        "type T { f: Int } ".repeat(k * 4),
+        "[ type ] ".repeat(k)
       ),
-      (
-        "valid definition alternating with a burn unit",
-        "type T { f: Int } [ type ] ".repeat(k),
+      // The error-density axis, which is what broke the ratio form.
+      _ => format!(
+        "{}{}",
+        "! ".repeat(300),
+        format!("{}!", "-".repeat(64)).repeat(k)
       ),
-      (
-        "20 valid definitions per junk burst",
-        format!("{}[ type ] ", "type T { f: Int } ".repeat(20)).repeat(k / 20 + 1),
-      ),
-      (
-        "a large commit, then a resync-quadratic tail",
-        format!(
-          "{}{}",
-          "type T { f: Int } ".repeat(k * 4),
-          "[ type ] ".repeat(k)
-        ),
-      ),
-    ] {
-      let got = run(gql_document, &src);
-      assert_eq!(got.covered, src.len(), "{name} k={k}");
-      let ratio = got.peak_spent as f64 / got.peak_committed.max(1) as f64;
-      println!(
-        "  k={k:5} {name:<46} spent/committed={ratio:5.2} refusals={}",
-        got.refusals
-      );
-      // One scan may be in flight when the guard closes, so the ratio can overshoot the factor by
-      // that scan; it cannot climb with the document.
-      assert!(
-        ratio < 12.0,
-        "{name} k={k}: spent/committed reached {ratio:.2} against a factor of 8 plus one scan's \
-         overshoot. An alternating shape is refilling the allowance faster than it costs, which \
-         would put the total back above FACTOR * T."
-      );
     }
+  }
+
+  println!("\n== alternating progress and scans, by doubling ==");
+  for (which, name) in NAMES.iter().enumerate() {
+    let small_src = build(which, BASE);
+    let large_src = build(which, BASE * 2);
+    let small = run(gql_document, &small_src);
+    let large = run(gql_document, &large_src);
+    assert_eq!(small.covered, small_src.len(), "{name}");
+    assert_eq!(large.covered, large_src.len(), "{name}");
+    assert!(
+      small.peak_spent > 10_000 && large.peak_spent > 10_000,
+      "{name}: peak spend {} / {}, too small for the ratio below to mean anything",
+      small.peak_spent,
+      large.peak_spent
+    );
+    let ratio = large.peak_spent as f64 / small.peak_spent as f64;
+    println!(
+      "  {name:<50} spent {:>9} -> {:>9}  x{ratio:.2}  refusals {} -> {}",
+      small.peak_spent, large.peak_spent, small.refusals, large.refusals
+    );
+    assert!(
+      ratio < 2.6,
+      "{name}: doubling the construction grew the lexing x{ratio:.2} ({} -> {}). An alternating \
+       shape is refilling the allowance faster than it costs, which puts the total back above \
+       FACTOR * T.",
+      small.peak_spent,
+      large.peak_spent
+    );
   }
 }
 
-/// What the guard can do to the output, bounded over the whole census rather than one shape.
+/// What the guard can do to the output, bounded in **both** directions.
 ///
-/// A refusal replaces at most one committed hole with the fallback's single `Error` node and emits
-/// at most the report `unexpected` was already going to emit, so the guard adds **at most one
-/// diagnostic per refusal and removes none**. Where it refuses nothing it changes nothing, which
-/// is the stronger statement an honest corpus needs. The lossless text is invariant either way,
-/// because the fallback commits the token it consumes exactly as the scan would have.
+/// A refusal replaces one committed hole with the fallback's single `Error` node, trading the
+/// hole's skipped-region note for whatever the fallback emits. Which way that nets is a property of
+/// the junk run's *length*, not of the guard:
 ///
-/// The pinned falsifier is one measured instance of this; the assertion here is the bound.
+/// - a **long** run becomes many one-token `Error` nodes, each with its own report, so the count
+///   goes **up**. The pinned falsifier is this case, at `+123`;
+/// - a **one-token** run has its skipped-region note suppressed with no second token for a
+///   replacement report to attach to, so the count goes **down**. `"[ type ] "xk` then `"! 1 "xn`
+///   is this case, at `-242 / -543 / -843`.
+///
+/// The first version of this test asserted `fused >= unfused` and passed, because no census row was
+/// chopped fine. That is the same blindness the numbers in this file were corrected for twice
+/// already — here inside the gate written to bound the previous instance — so the assertion is now
+/// the two-sided bound `|delta| <= refusals`, which is what the mechanism actually gives.
+///
+/// The oracle is **derived per unit**, not read off a neighbouring size: `[ type ] ` reports 2 and
+/// `! 1 ` reports 3. `refusal_free_sizes_calibrate_the_oracle` is what keeps that honest.
 #[test]
 #[cfg(feature = "graphql")]
-fn the_guard_adds_at_most_one_diagnostic_per_refusal() {
-  println!("\n== output preservation, over the census ==");
-  // (source, the diagnostic count an unfused parser reports)
-  let cases: Vec<(String, usize)> = vec![
+fn the_guard_changes_diagnostics_by_at_most_one_per_refusal() {
+  println!("\n== output preservation, two-sided, over the census ==");
+  let mut cases: Vec<(String, usize)> = vec![
     ("! ".repeat(2_000), 2_000),
     ("( ) ".repeat(2_000), 4_000),
     ("@ ( ) ".repeat(2_000), 6_000),
@@ -544,6 +585,14 @@ fn the_guard_adds_at_most_one_diagnostic_per_refusal() {
       12_003,
     ),
   ];
+  // The fine-chopped family, where the sign flips.
+  for kn in [2_000usize, 4_000, 6_000] {
+    cases.push((
+      format!("{}{}", "[ type ] ".repeat(kn), "! 1 ".repeat(kn)),
+      2 * kn + 3 * kn,
+    ));
+  }
+  let mut saw_negative = false;
   for (src, unfused) in &cases {
     let got = run(gql_document, src);
     assert_eq!(
@@ -551,17 +600,14 @@ fn the_guard_adds_at_most_one_diagnostic_per_refusal() {
       src.len(),
       "the lossless text must survive the guard"
     );
+    let delta = got.diagnostics as i64 - *unfused as i64;
+    saw_negative |= delta < 0;
     assert!(
-      got.diagnostics >= *unfused,
-      "the guard removed diagnostics: {} < {unfused}",
-      got.diagnostics
-    );
-    let extra = got.diagnostics - *unfused;
-    assert!(
-      extra <= got.refusals,
-      "the guard added {extra} diagnostics over {} refusals. Each refusal can cost at most one — \
-       one hole becoming one `Error` node — so more than that means it is changing output \
-       somewhere other than the scan it declined.",
+      delta.unsigned_abs() as usize <= got.refusals,
+      "|delta| = {} over {} refusals. Each refusal trades exactly one hole for one fallback node, \
+       so the change cannot exceed the refusal count in either direction; more than that means \
+       the guard is altering output somewhere other than the scan it declined.",
+      delta.unsigned_abs(),
       got.refusals
     );
     if got.refusals == 0 {
@@ -571,10 +617,41 @@ fn the_guard_adds_at_most_one_diagnostic_per_refusal() {
       );
     }
     println!(
-      "  unfused={unfused:<7} fused={:<7} extra={extra:<6} refusals={:<7} bytes={}",
+      "  unfused={unfused:<7} fused={:<7} delta={delta:<6} refusals={:<7} bytes={}",
       got.diagnostics,
       got.refusals,
       src.len()
+    );
+  }
+  assert!(
+    saw_negative,
+    "no case reported FEWER diagnostics than the unfused parser, so the fine-chopped family has \
+     stopped exercising the direction this test exists to cover and the bound is only being \
+     checked on one side again."
+  );
+}
+
+/// The oracle above is derived, so this is what makes it an oracle.
+///
+/// `2k + 3n` has to be exact where the guard does not fire; if it is not, the deltas it produces
+/// where the guard does fire are measuring the arithmetic rather than the guard.
+#[test]
+#[cfg(feature = "graphql")]
+fn refusal_free_sizes_calibrate_the_oracle() {
+  println!("\n== oracle calibration ==");
+  for (k, n) in [(0usize, 50usize), (0, 200), (0, 2_000)] {
+    let src = format!("{}{}", "[ type ] ".repeat(k), "! 1 ".repeat(n));
+    let got = run(gql_document, &src);
+    assert_eq!(got.refusals, 0, "k={k} n={n}: not a refusal-free size");
+    assert_eq!(
+      got.diagnostics,
+      2 * k + 3 * n,
+      "k={k} n={n}: the derived per-unit counts (2 for `[ type ] `, 3 for `! 1 `) no longer match \
+       an unguarded parse, so every delta derived from them is wrong."
+    );
+    println!(
+      "  k={k:5} n={n:5} diagnostics={} = 2k+3n, refusals=0",
+      got.diagnostics
     );
   }
 }
@@ -876,9 +953,12 @@ fn the_falsifier_is_a_known_difference() {
     got.refusals > 0,
     "the falsifier stopped reaching the guard, so it no longer witnesses anything"
   );
-  let extra = got.diagnostics.saturating_sub(UNFUSED_DIAGNOSTICS);
+  // Signed, because the direction is a property of the junk run's length rather than of the guard
+  // — `the_guard_changes_diagnostics_by_at_most_one_per_refusal` carries the family where the same
+  // mechanism nets NEGATIVE. This shape's run is long, so it nets positive.
+  let delta = got.diagnostics as i64 - UNFUSED_DIAGNOSTICS as i64;
   println!(
-    "\n== falsifier ==\n  bytes={} diagnostics={} (unfused {UNFUSED_DIAGNOSTICS}, delta +{extra}) \
+    "\n== falsifier ==\n  bytes={} diagnostics={} (unfused {UNFUSED_DIAGNOSTICS}, delta {delta:+}) \
      refusals={} {:.1}ms",
     src.len(),
     got.diagnostics,
@@ -886,14 +966,18 @@ fn the_falsifier_is_a_known_difference() {
     got.seconds * 1e3
   );
   assert!(
-    got.diagnostics >= UNFUSED_DIAGNOSTICS,
-    "the guard cannot report fewer diagnostics than the unfused parser: {} < {UNFUSED_DIAGNOSTICS}",
-    got.diagnostics
+    delta.unsigned_abs() as usize <= got.refusals,
+    "|delta| = {} over {} refusals, which breaks the one-per-refusal bound the whole census is \
+     held to.",
+    delta.unsigned_abs(),
+    got.refusals
   );
   assert!(
-    extra <= 400,
-    "the guard's divergence from the unfused parser widened to +{extra} diagnostics, against the \
-     +212 recorded when it landed. Something made the allowance blow earlier or stay blown longer \
-     — check whether `scan_allowance_exhausted` is still re-derived per call rather than latched."
+    (0..=400).contains(&delta),
+    "the guard's divergence on this shape moved to {delta:+}, against the +123 recorded when the \
+     event-denominated guard landed. Something made the allowance blow earlier or stay blown \
+     longer — check that `scan_allowance_exhausted` is still re-derived per call rather than \
+     latched. (An unqualified `>= unfused` used to stand here and was wrong in general: see the \
+     two-sided test.)"
   );
 }

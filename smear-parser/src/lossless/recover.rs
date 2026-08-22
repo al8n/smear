@@ -136,8 +136,13 @@
 //! unconditional; those four cover all punctuation, all trivia, identifiers and comments.
 //!
 //! So error density inflates the ratio without bound — measured at **514** over a document of one
-//! `!` per 256 `-` — and unlike re-lexing it is *linear* work being charged, which the guard has
-//! no business rationing.
+//! `!` per 256 **unspaced** `-` — and unlike re-lexing it is *linear* work being charged, which the
+//! guard has no business rationing.
+//!
+//! The spacing is load-bearing and the first version of this sentence omitted it. A space is a
+//! counted commit, so `! - - - …` with the same 256 dashes reads **8.00** rather than 514: it is
+//! the *unbroken* error run that separates the two counters, and any committed token between them
+//! closes the gap again. Sixty-four unspaced dashes read 130; sixty-four spaced read 8.02.
 //!
 //! ## Why exception 2 is a bounded cost rather than a repair
 //!
@@ -178,9 +183,16 @@
 //! no-progress fallback consumes exactly one token through `try_expect`, and a consumed token is
 //! by definition one the lexer produced *and* the tally counted — error lexemes never reach the
 //! parser, because the scanner absorbs them into diagnostics on the way past. So every refusal
-//! moves the denominator by at least one and the guard always re-closes. Measured over every
-//! single-token junk alphabet in both dialects: `m` ranges 1.002 to 2.016, and the floor of 1 is
-//! reached rather than approached.
+//! moves the denominator by at least one. Measured over every single-token junk alphabet in both
+//! dialects, per refusal rather than averaged over the run: the smallest gap between two
+//! consecutive refusals is **1** for dense junk and 2 for spaced, and zero never occurs.
+//!
+//! **That is a floor on `m`, not a promise that the guard re-closes.** Re-closing needs the local
+//! commit rate to outpace the local spend rate, so junk carrying more than `FACTOR - 1` error
+//! lexemes per committed token holds the guard shut for as long as that regime lasts — it re-opens
+//! when the regime ends, not after a bounded number of refusals. The table above prices exactly
+//! that case. What `m >= 1` buys is that the denominator is never *frozen*, which is what makes
+//! the count proportional to `k` rather than unbounded.
 //!
 //! Repairing it belongs in `smear-lexer`, not here — the tally would have to increment before the
 //! rule runs rather than after it succeeds — and that changes what `LosslessLimits::max_tokens`
@@ -202,10 +214,14 @@
 //! purpose. It cannot win, because refilling the allowance costs exactly the committed items that
 //! bound it — a *successful* scan commits everything it crossed, so it adds equally to both sides
 //! and buys back only `FACTOR` times its own cost, out of a total that is already capped at `T`.
-//! Measured over four alternating constructions at three sizes, `spent / committed` peaks at
-//! **8.91** against a factor of 8; the two that interleave whole valid definitions with junk
-//! bursts sit at **1.00 with zero refusals**, the guard never engaging at all.
-//! `the_guard_cannot_be_refilled_into_superlinearity` pins the ratio.
+//! `the_guard_cannot_be_refilled_into_superlinearity` asserts that, and it asserts it by
+//! **doubling** rather than by reading `spent / committed`. That ratio is not a work bound and must
+//! not be pinned as one: on an error-dense construction it climbs 73 → 93 → 109 → 118 across four
+//! doublings *while `spent` doubles at ×1.99, ×1.99, ×2.00* — perfectly linear work, a metric that
+//! grows 1.6× over the same range. The numerator counts error lexemes the denominator does not
+//! (exception 2), so their ratio drifts with error density by construction, and a threshold on it
+//! fails with no defect present. Doubling the construction and watching the numerator is the
+//! mechanism; the ratio was an artifact of the four error-free shapes it was read on.
 //!
 //! ## What the guard costs when it fires
 //!
@@ -219,14 +235,30 @@
 //! most one extra `Error` node; stopping late costs a subtree.*
 //!
 //! The falsifier is one measured instance; the **bound** over all inputs is structural and does
-//! not need one. A refusal replaces at most one committed hole with the fallback's single `Error`
-//! node, and emits at most the one report [`unexpected`] was already going to emit, so the guard
-//! can add **at most one diagnostic per refusal and never removes one**. Refusals are zero on every
-//! document that does not blow the allowance, which is why an honest corpus sees byte-identical
-//! output rather than merely similar output. And the lossless text is invariant in every case —
-//! the fallback commits the token it consumes exactly as the scan would have, so no byte of the
-//! source changes hands. `the_guard_adds_at_most_one_diagnostic_per_refusal` asserts both halves
-//! across the whole census rather than on the one shape.
+//! not need one. A refusal replaces one committed hole with the fallback's single `Error` node, so
+//! it trades the hole's skipped-region note for whatever the fallback emits, and the bound is
+//! **two-sided**: `|Δ diagnostics| <= refusals`.
+//!
+//! **It is not one-sided, and the pinned falsifier is misleading about which way it goes.** That
+//! document nets `+123` because its junk run is long: one refused scan becomes many one-token
+//! `Error` nodes, each with its own report. Chop the same junk fine — `"[ type ] "×k` then
+//! `"! 1 "×n`, where every junk run is a single token ending at an `Int` sync point — and each unit
+//! goes from 3 diagnostics to 2, because the skipped-region note is suppressed and there is no
+//! second token for a replacement report to attach to. Measured **−242 / −543 / −843** at
+//! `k = n = 2 000 / 4 000 / 6 000` against a derived oracle (`2k + 3n`) that is exact on every
+//! refusal-free size. So the guard can report *fewer* diagnostics than the unfused parser, and the
+//! census that bounded it in one direction had no row of this shape — the same blindness the
+//! numbers above were corrected for, inside the gate written to bound the previous instance.
+//!
+//! What survives: `|Δ| <= refusals`; **every consumed token still carries its own report**, so
+//! nothing reaches the tree undiagnosed; refusals are zero on every document that does not blow the
+//! allowance, so an honest corpus is byte-identical rather than merely similar; and the lossless
+//! text is invariant in every case, because the fallback commits the token it consumes exactly as
+//! the scan would have.
+//!
+//! Emitting a note from the fallback to make the count monotone would be the wrong repair — it
+//! would make a refusal observable on documents the guard never refuses on, which is precisely the
+//! unguarded equivalence `the_guard_did_not_change_the_answer` exists to hold.
 
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan, Token,
@@ -501,7 +533,7 @@ pub fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
       .saturating_add(SCAN_ALLOWANCE_FLOOR);
   #[cfg(all(feature = "test-support", feature = "std"))]
   if exhausted {
-    scan_allowance::record_refusal();
+    scan_allowance::record_refusal(committed);
   }
   exhausted
 }
@@ -535,11 +567,24 @@ pub mod scan_allowance {
     static REFUSALS: Cell<usize> = const { Cell::new(0) };
     static PEAK_SPENT: Cell<usize> = const { Cell::new(0) };
     static PEAK_COMMITTED: Cell<usize> = const { Cell::new(0) };
+    static LAST_REFUSAL_COMMITTED: Cell<usize> = const { Cell::new(0) };
+    static MIN_COMMIT_BETWEEN_REFUSALS: Cell<usize> = const { Cell::new(usize::MAX) };
   }
 
   #[inline]
-  pub(super) fn record_refusal() {
-    REFUSALS.with(|c| c.set(c.get().saturating_add(1)));
+  pub(super) fn record_refusal(committed: usize) {
+    let n = REFUSALS.with(|c| {
+      let n = c.get().saturating_add(1);
+      c.set(n);
+      n
+    });
+    // `m` per refusal, not averaged: the gap between this refusal and the previous one. The first
+    // refusal has no predecessor to measure against.
+    if n > 1 {
+      let prev = LAST_REFUSAL_COMMITTED.with(Cell::get);
+      MIN_COMMIT_BETWEEN_REFUSALS.with(|c| c.set(c.get().min(committed.saturating_sub(prev))));
+    }
+    LAST_REFUSAL_COMMITTED.with(|c| c.set(committed));
   }
 
   #[inline]
@@ -553,6 +598,8 @@ pub mod scan_allowance {
     REFUSALS.with(|c| c.set(0));
     PEAK_SPENT.with(|c| c.set(0));
     PEAK_COMMITTED.with(|c| c.set(0));
+    LAST_REFUSAL_COMMITTED.with(|c| c.set(0));
+    MIN_COMMIT_BETWEEN_REFUSALS.with(|c| c.set(usize::MAX));
   }
 
   /// How many scans this thread has refused since its [`reset`].
@@ -573,6 +620,16 @@ pub mod scan_allowance {
   /// whole subject.
   pub fn peak_committed() -> usize {
     PEAK_COMMITTED.with(Cell::get)
+  }
+
+  /// The **smallest** number of committed items between two consecutive refusals — `m` at its
+  /// worst for this parse, not averaged over it.
+  ///
+  /// `None` when fewer than two refusals happened, because a gap needs two ends. An average over
+  /// thousands of refusals cannot see a single zero-commit one; this can.
+  pub fn min_commit_between_refusals() -> Option<usize> {
+    let v = MIN_COMMIT_BETWEEN_REFUSALS.with(Cell::get);
+    (v != usize::MAX).then_some(v)
   }
 }
 
