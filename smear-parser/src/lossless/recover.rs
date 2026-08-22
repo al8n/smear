@@ -148,6 +148,11 @@
 //! `an_error_run_no_longer_burns_the_scan_allowance` is the pin, and it runs the atoms that used to
 //! burn precisely so that their absence is what gets measured.
 //!
+//! What that repair did **not** give `max_tokens` is a durable work bound, and the documentation
+//! that landed beside it claimed one — "lexemes the scanner attempted", of a tally `committed`
+//! above is the other name for, living exactly where a rewind can reach it. The bound on the
+//! durable side is this guard, stated in that knob's own terms two sections down.
+//!
 //! That leaves one exception rather than two, so the identity above is exact for any parse that
 //! never re-lexes.
 //!
@@ -209,6 +214,19 @@
 //! the document actually contains. So the total lexing a parse can be made to do is
 //! `FACTOR * T + floor` plus the one scan in flight when the guard closes — **linear in the
 //! document, whatever order the shape puts its progress and its scans in**.
+//!
+//! `T` is where a configured `LosslessLimits::max_tokens` enters, and it is the only way that knob
+//! reaches the durable count at all: the tally stops the lex one lexeme past its ceiling, so
+//! `committed <= min(T, max_tokens + 1)` and the total becomes `FACTOR * max_tokens + floor`.
+//! **That is the number a caller sizing a defence needs, and it is eight times the one they
+//! configured.** Measured: `[ type ] ` repeated 2 000 times is 12 000 lexical items, and
+//! `with_max_tokens(12_000)` — a ceiling equal to the whole document, so it never trips — records
+//! **99 963** produce-events against `FACTOR * 12 000 + floor = 100 096`. The ratio is
+//! `FACTOR + floor / T` rather than anything about the document: 8.330 / 8.334 / 8.337 / 8.339
+//! over four shapes at 12 000 items, and 9.32 / 8.65 / 8.33 / 8.16 / 8.08 over one shape at
+//! 3 000 / 6 000 / 12 000 / 24 000 / 48 000.
+//! `max_tokens_does_not_bound_the_work_the_scan_allowance_does` is the pin, and `smear-lexer`'s
+//! `LosslessLimits::max_tokens` carries the same statement at the door a caller actually reads.
 //!
 //! That is worth stating because the self-clearing property reads as a liability from the other
 //! side: a shape that alternates cheap commits with expensive failed scans re-opens the guard on
@@ -522,6 +540,24 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// `spent` is every item the lexer produced; `committed` is the subset a rewind did not take back.
 /// **They must be the same unit.** Dividing events by bytes is what the first version of this did,
 /// and the module docs carry the measurement that killed it.
+///
+/// # This is the parse's durable work bound, and `max_tokens` is not
+///
+/// `smear-lexer`'s `LosslessLimits::max_tokens` reads like the total-work knob and is not one:
+/// its tally is `committed` above, which lives in `Lexer::State` and comes back with
+/// `sync_balanced`'s rewind, so a failed scan refunds every charge it made and a lexeme crossed
+/// eight times is charged once. `spent` is the reading no rollback refunds, and this comparison is
+/// the only thing standing between it and the document. Rearranged against the ceiling a caller
+/// configured, with `committed <= max_tokens + 1`:
+///
+/// ```text
+/// produce-events <= SCAN_ALLOWANCE_FACTOR * max_tokens + SCAN_ALLOWANCE_FLOOR
+/// ```
+///
+/// The module header carries the measurement — 99 963 produce-events under a ceiling of 12 000 —
+/// and `max_tokens`'s own docs carry it at the door a caller reads. Installing the durable cell
+/// there instead, tokora's `TokenBudget` through an `InputContext`, is smear issue #193; it is
+/// held behind PR #189's restructuring of that door plumbing rather than declined.
 ///
 /// # Why this takes numbers instead of the handle
 ///
