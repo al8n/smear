@@ -584,7 +584,8 @@ pub(crate) fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
 /// thread-local set makes each reading belong to the parse that produced it, and the ordering
 /// constraint disappears rather than being documented.
 ///
-/// `peak_spent` and `peak_committed` exist because the property under test is **linearity**,
+/// [`scan_allowance::peak_spent`] and [`scan_allowance::peak_committed`] exist because the
+/// property under test is **linearity**,
 /// and wall-clock is a bad witness for it: the machine these were first measured on sat at load
 /// average 54 and the same parse varied 1.6× between runs. These are the produce-event counts the
 /// guard is denominated in — deterministic, machine-independent, and the quantities that actually

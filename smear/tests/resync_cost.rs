@@ -48,12 +48,21 @@
 
 use std::time::Instant;
 
+/// A dialect's document root, labelled: what `long_trivia_tokens_do_not_buy_allowance` iterates.
+type Root = (&'static str, fn(&str) -> (usize, usize));
+
 /// `n` repetitions of `unit`.
 fn rep(unit: &str, n: usize) -> String {
   unit.repeat(n)
 }
 
 /// #167's recovery-bypass document: `{` then `levels` copies of `" ) f {"`.
+///
+/// Gated with its only caller. This is a GraphQL document about a GraphQL finding — #167's bypass,
+/// and the 407 s figure #168 quotes for it — and GraphQLx's own bypass shape lives in
+/// `nesting_depth.rs` with its fourth closer. Without the gate this is dead on the GraphQLx-only
+/// row that `ci.yml`'s `test` job builds, where `-Dwarnings` makes `dead_code` an error.
+#[cfg(feature = "graphql")]
 fn bypass(levels: usize) -> String {
   let mut src = String::with_capacity(levels * 6 + 1);
   src.push('{');
@@ -140,28 +149,42 @@ fn padded(atom: &str, k: usize, pad: usize) -> String {
 
 #[test]
 #[ignore = "a measurement, not a gate"]
-#[cfg(feature = "graphql")]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[allow(clippy::vec_init_then_push)]
 fn long_trivia_tokens_do_not_buy_allowance() {
+  // Both dialects, because the axis is: a comment runs to end of line in either of them, so one
+  // produce-event carries as many bytes as the document likes. Running it on GraphQL alone was
+  // also what left `padded` dead on the GraphQLx-only row.
+  let mut roots: Vec<Root> = Vec::new();
+  #[cfg(feature = "graphql")]
+  roots.push(("gql", graphql));
+  #[cfg(feature = "graphqlx")]
+  roots.push(("gqlx", graphqlx));
+
   println!("\n== one-byte junk atoms alternating with comments of growing length ==");
   println!("  the byte-denominated allowance read `refusals = 0` from pad=1024 upward");
-  for pad in [0usize, 16, 256, 1_024, 4_096] {
-    let src = padded("! ", 4_000, pad);
-    let (secs, diags) = timed(graphql, &src);
-    println!(
-      "  pad={pad:6} {:9}B {:9.1}ms diagnostics={diags}",
-      src.len(),
-      secs * 1e3
-    );
+  for (dialect, root) in &roots {
+    for pad in [0usize, 16, 256, 1_024, 4_096] {
+      let src = padded("! ", 4_000, pad);
+      let (secs, diags) = timed(*root, &src);
+      println!(
+        "  {dialect:<5} pad={pad:6} {:9}B {:9.1}ms diagnostics={diags}",
+        src.len(),
+        secs * 1e3
+      );
+    }
   }
   println!("  -- padding scaled with the document, the worst case for the byte denominator --");
-  for k in [1_000usize, 2_000, 4_000, 8_000] {
-    let src = padded("! ", k, k);
-    let (secs, diags) = timed(graphql, &src);
-    println!(
-      "  k={k:6} pad={k:6} {:10}B {:9.1}ms diagnostics={diags}",
-      src.len(),
-      secs * 1e3
-    );
+  for (dialect, root) in &roots {
+    for k in [1_000usize, 2_000, 4_000, 8_000] {
+      let src = padded("! ", k, k);
+      let (secs, diags) = timed(*root, &src);
+      println!(
+        "  {dialect:<5} k={k:6} pad={k:6} {:10}B {:9.1}ms diagnostics={diags}",
+        src.len(),
+        secs * 1e3
+      );
+    }
   }
 }
 
