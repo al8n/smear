@@ -33,12 +33,20 @@
 use smear::parser::lossless::recover::scan_allowance;
 use std::time::Instant;
 
-/// One dialect's row in `every_refusal_commits_at_least_one_item`: a label, its document root, the
-/// atom that burns the allowance there, and the junk alphabet that then reaches recovery.
+/// One dialect's row in `every_refusal_commits_at_least_one_item`: a label, its document root, and
+/// the junk alphabet that drives recovery there.
+///
+/// It used to carry a fourth field, an "atom that burns the allowance". That was wrong for
+/// GraphQLx and the claim was never checked: **no single-character atom burns in that dialect at
+/// all.** A burn needs `spent` to move while the tally does not, and measured over `.`, `..`, `1.`,
+/// `"`, `%`, `^`, `~`, `\`, `` ` ``, `?`, `;`, `$`, `00`, `-`, `+` and `*`, every one keeps them
+/// within two of each other — 80 001 against 80 000 — where GraphQL's `-` opens a gap of exactly
+/// the error count, 80 001 against 60 000. `00` in particular coalesces: `0000…` is one number
+/// token, not twenty thousand. The field is gone because the junk alone drives refusals in both
+/// dialects, identically, which is what this test needs.
 type Cell = (
   &'static str,
   fn(&str) -> (usize, usize),
-  &'static str,
   &'static [&'static str],
 );
 
@@ -93,6 +101,35 @@ roots! {
   gqlx_document => smear::parser::graphqlx::lossless::parse_document,
   gqlx_type_system => smear::parser::graphqlx::lossless::parse_type_system_document,
   gqlx_executable => smear::parser::graphqlx::lossless::parse_executable_document,
+}
+
+/// The `*_with_limits` twin of a root, taking the ceiling `the_with_limits_doors_reach_the_same_guard`
+/// varies.
+macro_rules! limited_roots {
+  ($($name:ident => $path:path),+ $(,)?) => {
+    $(
+      fn $name(src: &str, depth: usize) -> (usize, usize) {
+        let parse = $path(
+          src,
+          smear::lexer::limits::LosslessLimits::with_max_nesting_depth(depth),
+        );
+        (
+          parse.diagnostics().len(),
+          parse.syntax().text().to_string().len(),
+        )
+      }
+    )+
+  };
+}
+
+#[cfg(feature = "graphql")]
+limited_roots! {
+  gql_document_with_limits => smear::parser::graphql::lossless::parse_document_with_limits,
+}
+
+#[cfg(feature = "graphqlx")]
+limited_roots! {
+  gqlx_document_with_limits => smear::parser::graphqlx::lossless::parse_document_with_limits,
 }
 
 /// One census shape at one root, doubled twice.
@@ -444,19 +481,10 @@ fn error_density_is_a_bounded_known_cost() {
 /// is consistent with one zero-commit refusal among six thousand, and one is all it would take to
 /// freeze the denominator.
 #[test]
-#[cfg(feature = "graphql")]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 #[allow(clippy::vec_init_then_push)]
 fn every_refusal_commits_at_least_one_item() {
   println!("\n== committed items per refusal ==");
-  // Both dialects, because the arithmetic behind exception 2 is shared and GraphQLx carries 46
-  // `tt_hook_and_then` rules of its own. Its burn atom differs: `-` and `+` are real, counted
-  // tokens there, so the leading-zeros number error stands in for them.
-  // Each dialect's cell is pushed under its OWN feature, not under an `all(...)` gate on the test
-  // and not as a fixed array. A fixed array naming `gqlx_document` from a `#[cfg(feature =
-  // "graphql")]` test does not compile on the single-dialect legs CI builds — measured, as
-  // `cannot find value `gqlx_document` in this scope` on
-  // `--no-default-features --features std,parser,rowan,graphql`. Building the list this way keeps
-  // the cell that exists on every leg where it exists.
   // `vec![...]` cannot express this: each element is `#[cfg]`-conditional. The lint sees only two
   // consecutive pushes, hence the allow on the function.
   let mut cells: Vec<Cell> = Vec::new();
@@ -464,14 +492,12 @@ fn every_refusal_commits_at_least_one_item() {
   cells.push((
     "gql",
     gql_document,
-    "-",
     &["!", "! ", "@", ":", "=", "|", "&", "!@:=|&", "()", "( )"],
   ));
   #[cfg(feature = "graphqlx")]
   cells.push((
     "gqlx",
     gqlx_document,
-    "00",
     // `:` is deliberately absent and `*`, `+`, `-`, `=>` deliberately present. A run of colons
     // lexes as `::` in this dialect, which IS a sync point, so it zero-skips through at zero
     // refusals — the non-vacuity guard below caught that, which is how it was found. The four
@@ -484,9 +510,12 @@ fn every_refusal_commits_at_least_one_item() {
     !cells.is_empty(),
     "no dialect is enabled, so this test would pass without checking anything"
   );
-  for (dialect, root, burn, alphabet) in cells {
+  for (dialect, root, alphabet) in cells {
     for junk in alphabet {
-      let src = format!("{}{}", burn.repeat(20_000), junk.repeat(6_000));
+      // Junk alone, with no sync point after it: every scan fails, and once the allowance is gone
+      // every call refuses. No burn prefix, because GraphQLx has no atom that provides one — see
+      // `Cell`. The two dialects then read identically, which is the point.
+      let src = junk.repeat(6_000);
       let got = run(root, &src);
       assert_eq!(got.covered, src.len(), "{dialect} {junk:?}");
       assert!(
@@ -753,53 +782,76 @@ fn the_guard_is_blind_to_encoding() {
 
 /// The `*_with_limits` doors reach the same guard as the default one.
 ///
-/// #181 on this branch was exactly this omission — a census that covered the default doors and
-/// left the `*_with_limits` ones out — so the axis is asserted rather than reasoned about. The
-/// ceiling those doors carry is the recursion budget, which has nothing to do with the allowance;
-/// the point is that "has nothing to do with" is the sentence #181 was written against.
+/// #181 on this branch was exactly this omission — a census that covered the default doors and left
+/// the `*_with_limits` ones out — so the axis is asserted rather than reasoned about. The ceiling
+/// those doors carry is the recursion budget, which has nothing to do with the allowance; the point
+/// is that "has nothing to do with" is the sentence #181 was written against.
+///
+/// # Why this one is dialect-generic where most of this file is not
+///
+/// Because it needs no measured constant. It compares a `*_with_limits` door against the default
+/// door **on the same input**, so the expectation is equality rather than a number taken on
+/// GraphQL — which is what lets it run on either dialect's row alone. Most of this file pins
+/// GraphQL-measured values and cannot follow; `error_density_is_a_bounded_known_cost` additionally
+/// cannot, because GraphQLx has no atom that drives the regime it prices (see `Cell`).
+///
+/// It is also this file's only reader of `Run::diagnostics` that is not GraphQL-shaped, which is
+/// how the field stays live on the GraphQLx-only row. That row compiles under `-Dwarnings` in CI
+/// and `dead_code` is an error there.
 #[test]
-#[cfg(feature = "graphql")]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[allow(clippy::vec_init_then_push)]
 fn the_with_limits_doors_reach_the_same_guard() {
-  use smear::lexer::limits::LosslessLimits;
+  #[allow(clippy::type_complexity)]
+  let mut doors: Vec<(
+    &str,
+    fn(&str) -> (usize, usize),
+    fn(&str, usize) -> (usize, usize),
+  )> = Vec::new();
+  #[cfg(feature = "graphql")]
+  doors.push(("gql", gql_document, gql_document_with_limits));
+  #[cfg(feature = "graphqlx")]
+  doors.push(("gqlx", gqlx_document, gqlx_document_with_limits));
+  assert!(
+    !doors.is_empty(),
+    "no dialect is enabled, so this test would pass without checking anything"
+  );
 
   println!("\n== the `*_with_limits` doors ==");
   let src = "( type ) ".repeat(3_000);
-  let want = {
-    let got = run(gql_document, &src);
-    (
-      got.peak_spent,
-      got.peak_committed,
-      got.refusals,
-      got.diagnostics,
-    )
-  };
-  for depth in [8usize, 64, 256, 1_024] {
-    scan_allowance::reset();
-    let parse = smear::parser::graphql::lossless::parse_document_with_limits(
-      &src,
-      LosslessLimits::with_max_nesting_depth(depth),
+  for (dialect, default_door, limited_door) in doors {
+    let base = run(default_door, &src);
+    assert!(
+      base.refusals > 0,
+      "{dialect}: the default door refused nothing, so the comparison below cannot see the guard"
     );
-    let got = (
-      scan_allowance::peak_spent(),
-      scan_allowance::peak_committed(),
-      scan_allowance::refusals(),
-      parse.diagnostics().len(),
+    let want = (
+      base.peak_spent,
+      base.peak_committed,
+      base.refusals,
+      base.diagnostics,
     );
-    assert_eq!(
-      parse.syntax().text().to_string().len(),
-      src.len(),
-      "max_nesting_depth={depth}"
-    );
-    assert_eq!(
-      got, want,
-      "max_nesting_depth={depth} reached the allowance differently from the default door. The \
-       recursion ceiling and the scan allowance are separate budgets; if raising one moves the \
-       other, one of them is being read through the wrong cell."
-    );
-    println!(
-      "  max_nesting_depth={depth:5} spent={} committed={} refusals={}",
-      got.0, got.1, got.2
-    );
+    for depth in [8usize, 64, 256, 1_024] {
+      scan_allowance::reset();
+      let (diagnostics, covered) = limited_door(&src, depth);
+      let got = (
+        scan_allowance::peak_spent(),
+        scan_allowance::peak_committed(),
+        scan_allowance::refusals(),
+        diagnostics,
+      );
+      assert_eq!(covered, src.len(), "{dialect} max_nesting_depth={depth}");
+      assert_eq!(
+        got, want,
+        "{dialect} max_nesting_depth={depth} reached the allowance differently from the default \
+         door. The recursion ceiling and the scan allowance are separate budgets; if raising one \
+         moves the other, one of them is being read through the wrong cell."
+      );
+      println!(
+        "  {dialect:<5} max_nesting_depth={depth:5} spent={} committed={} refusals={} diags={}",
+        got.0, got.1, got.2, got.3
+      );
+    }
   }
 }
 

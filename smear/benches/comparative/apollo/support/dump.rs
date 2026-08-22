@@ -326,8 +326,14 @@ impl Corpus {
       // "where it refuses nothing it changes nothing" holding on a corpus it was not verified over.
       //
       // What moved in `alias` is extent, not structure: **12 016 nodes and 30 036 tokens before and
-      // after**, same root range, still byte-exact. 926 `Error` nodes shrank to cover their token
+      // after**, same root range, still byte-exact. 925 `Error` nodes shrank to cover their token
       // alone, and the 925 `Space` and 463 `Comma` tokens they used to contain became siblings —
+      //
+      // ERRATUM: #186's message and this comment first said 926, from `diff`, whose LCS
+      // re-alignment invents one pair. The multiset difference — the instrument that does not
+      // re-align — reads 925 `Error` lines on each side, and the surrounding arithmetic already
+      // agreed: 925 `Space` moved, and diagnostics fell by 925. One node, one trailing space, one
+      // suppressed note. `diff` reports 926 changed `Error` lines per side; it is wrong.
       //
       //     Error@19..22            ->    Error@19..20
       //       Comma@20..21 ","            Comma@20..21 ","      (now beside, not inside)
