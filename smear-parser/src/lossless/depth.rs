@@ -125,10 +125,27 @@
 //! closure and this module is publicly reachable, so that is not a hypothetical shape — it is one
 //! a consumer composing the generic layer can write, and no arm of theirs is wrong when it does.
 //!
-//! So the drain no longer asks. [`root_turn`] already decided which of [`RootTurn::Parsed`],
-//! [`RootTurn::EndsTheDocument`] and [`RootTurn::Recoverable`] the entry ended on, and that
-//! classification is **carried** to the drain — through [`RootStop`], the slot a root threads down
-//! to its loop, which only [`root_turn`] writes. The drain reads no counter.
+//! So the drain no longer asks *that* question of the counter. [`root_turn`] already decided which
+//! of [`RootTurn::Parsed`], [`RootTurn::EndsTheDocument`] and [`RootTurn::Recoverable`] the entry
+//! ended on, and that classification is **carried** to the drain — through [`RootStop`], the slot
+//! a root threads down to its loop, which only [`root_turn`] writes.
+//!
+//! # A carried verdict is what a root reports; the drain still owes what a root never judged
+//!
+//! Carrying the verdict fixes the reading whose span was wrong. It does not cover a failure the
+//! root never classified at all, and that population is not the exotic one it looks like: a
+//! consumer's root that calls [`descend`] outside a [`root_turn`], that fails through a
+//! `peek_kind?`, or that composes by returning a **nested** [`drain_unless_stopped`] call reaches
+//! the drain with a fresh slot and a genuine refusal in hand. The inner drain in that last shape
+//! classified correctly and skipped its own drain; the `Err` it hands back carries none of that,
+//! and nothing in it is forged, copied or dropped.
+//!
+//! So the drain reads the witness too, and the slot is what **scopes** that reading: it subtracts
+//! the trips an entry of this root has already judged, and what is left is a trip that reached the
+//! drain unjudged. That is neither the whole-root reading (which cannot subtract, and so ends a
+//! document that was fine) nor no reading at all (which drains a document that ended).
+//! [`drain_unless_stopped`]'s `The witness is read again above the root` note carries the four
+//! cells and the measurements.
 //!
 //! # Carrying the verdict was two thirds of it; the carrier being public data was the rest
 //!
@@ -431,29 +448,57 @@ pub enum RootTurn<T, E> {
 /// let forged = smear_parser::lossless::depth::RootStop::default();
 /// ```
 ///
+/// **Duplication is two properties and therefore two cases** — smear PR #189, round 4. One case
+/// spelling `*stop` pins only `!Copy`: under a `Clone`-without-`Copy` derive it still fails with
+/// the same `E0507`, all four cases stay green, and the invariant is gone — a root clones the
+/// initially-`false` slot, calls and fully matches [`root_turn`], restores the clone over the
+/// written slot and returns the genuine refusal, so the drain reads it as recoverable without ever
+/// touching the private field. Each derive gets its own case, and each names the property it
+/// holds rather than the error code that happens to fall out of it.
+///
+/// *`RootStop` is not `Copy`: a classified slot cannot be read out of the borrow it arrived in and
+/// left behind for a second use.*
+///
 /// ```compile_fail,E0507
-/// // A classified slot cannot be taken out of the borrow it arrived in and paired with a second
-/// // root's result. `.clone()` does not resolve either.
 /// fn keep_a_copy(stop: &mut smear_parser::lossless::depth::RootStop) {
 ///   let _mine = *stop;
 /// }
 /// ```
 ///
-/// # It is assigned, not latched
+/// *`RootStop` is not `Clone`: a slot cannot be duplicated by any other spelling either — which is
+/// the half `*stop` alone does not reach, because a `Clone`-only slot is still un-movable out of a
+/// `&mut` and still restorable over one.*
 ///
-/// Each [`root_turn`] **overwrites** it, so it always describes the most recent entry rather than
-/// any entry. Latching would put PR #189's own defect back one scale in: a root that catches a
-/// refusal and takes another turn would carry the first turn's verdict into the second's ordinary
-/// failure, skip the drain, and leave the valid suffix opaque. The roots in this workspace return
-/// `Err` immediately on [`RootTurn::EndsTheDocument`], so for them the last turn is the only turn
-/// that can be a stop; assignment is what keeps that true for a root that does not.
+/// ```compile_fail,E0599
+/// fn keep_a_clone(stop: &mut smear_parser::lossless::depth::RootStop) {
+///   let _mine = stop.clone();
+/// }
+/// ```
+///
+/// # The verdict is assigned; the judged trip beside it is latched
+///
+/// Each [`root_turn`] **overwrites** the verdict, so it always describes the most recent entry
+/// rather than any entry. Latching it would put PR #189's own defect back one scale in: a root
+/// that catches a refusal and takes another turn would carry the first turn's verdict into the
+/// second's ordinary failure, skip the drain, and leave the valid suffix opaque. The roots in this
+/// workspace return `Err` immediately on [`RootTurn::EndsTheDocument`], so for them the last turn
+/// is the only turn that can be a stop; assignment is what keeps that true for a root that does
+/// not.
+///
+/// The second field is the opposite, and deliberately: *has any entry of this root already judged
+/// a tripped attempt*. That is a fact about the past, so it **latches**, and it is not the verdict
+/// — it is the term [`drain_unless_stopped`] subtracts from its own reading of the witness so that
+/// an already-judged, recovered-from trip is not judged a second time above the root. Assigning it
+/// would put round 1's defect back; assigning the verdict alongside is what keeps round 1's repair.
+/// Neither field is readable, writable or constructible from outside this module.
 #[derive(Debug)]
 pub struct RootStop {
   ends_the_document: bool,
+  a_classified_entry_saw_a_trip: bool,
 }
 
 impl RootStop {
-  /// A fresh slot, recording no stop.
+  /// A fresh slot, recording no stop and no judged trip.
   ///
   /// Private, and that is the round-3 half of smear PR #189: [`drain_unless_stopped`] is the only
   /// frame that mints one, and it mints it for the root it is about to run. See the type's own
@@ -462,13 +507,32 @@ impl RootStop {
   const fn new() -> Self {
     Self {
       ends_the_document: false,
+      a_classified_entry_saw_a_trip: false,
     }
   }
 
-  /// Records what one [`root_turn`] decided. Assignment, not a latch — see the type's own note.
+  /// Records what one [`root_turn`] decided, and whether that entry's own attempt tripped.
+  ///
+  /// The verdict is **assigned** — the type's own note says why latching it puts PR #189's defect
+  /// back one scale in. `tripped` is **latched**, and the asymmetry is the whole of round 4,
+  /// because the two answer different questions. The verdict is *this failure ends the document*,
+  /// which is about the most recent entry and stops being true when a later one recovers.
+  /// `tripped` is *some entry of this root has already judged a trip*, which is a fact about the
+  /// past and cannot stop being true; it is what keeps [`drain_unless_stopped`]'s own reading of
+  /// the witness from mistaking an already-judged, recovered-from trip for a live one.
   #[inline]
-  fn record(&mut self, ends_the_document: bool) {
+  fn record(&mut self, ends_the_document: bool, tripped: bool) {
     self.ends_the_document = ends_the_document;
+    self.a_classified_entry_saw_a_trip |= tripped;
+  }
+
+  /// Whether any [`root_turn`] in this root has already judged a tripped attempt.
+  ///
+  /// Read by [`drain_unless_stopped`] **before** the slot is spent, and only to scope its own
+  /// reading of the witness — see that function's `The witness is read again above the root` note.
+  #[inline]
+  const fn a_classified_entry_saw_a_trip(&self) -> bool {
+    self.a_classified_entry_saw_a_trip
   }
 
   /// Spends the slot: pairs the root's own `Result` with what its last turn decided.
@@ -593,15 +657,18 @@ where
   // session-absolute read, and ends a document that was fine with no test failing.
   let since = inp.trip_snapshot();
   let out = entry(inp);
+  // READ UNCONDITIONALLY, INCLUDING ON `Ok`. The verdict below only needs it on the failing path,
+  // and the slot needs it on every path: an entry that tripped, CAUGHT the refusal and returned
+  // `Ok` has still judged that trip, and recording that is what stops the drain above this root
+  // from judging it a second time — smear PR #189, round 4. It costs a nonce compare and a `u64`
+  // compare per entry, against an entry that has already parsed a whole definition.
+  let tripped = inp.tripped_during_attempt(since);
   // BOTH TERMS. Neither covers the other — the note above enumerates the population each one is
   // alone on.
-  let ends_the_document = out
-    .as_ref()
-    .is_err_and(|e| e.is_terminal() || inp.tripped_during_attempt(since));
-  // ASSIGNED HERE, NOT AT THE ARM. The drain above the root reads this and never the counter,
-  // because the counter's span is the whole root and this question's span is one entry — smear
-  // PR #189.
-  stop.record(ends_the_document);
+  let ends_the_document = out.as_ref().is_err_and(|e| e.is_terminal() || tripped);
+  // ASSIGNED HERE, NOT AT THE ARM — and the trip beside it, LATCHED. See `RootStop::record` for
+  // why one of the two may not be a latch and the other may not be an assignment.
+  stop.record(ends_the_document, tripped);
   match out {
     Ok(parsed) => RootTurn::Parsed { parsed },
     Err(error) if ends_the_document => RootTurn::EndsTheDocument { error },
@@ -660,23 +727,67 @@ where
 /// }
 /// ```
 ///
-/// # What the seal does not cover, and why that residue is the trait's population
+/// # The witness is read again above the root, and the slot is what scopes it — round 4
 ///
-/// A root can fail without any entry having been classified: the shipped loops' `peek_kind(inp)?`,
-/// `report_unexpected` and `resync_to_definition(inp)?` all return `Err` without going through
-/// [`root_turn`]. The slot is then still fresh, the ending is [`RootTurn::Recoverable`], and
-/// `drain_unless_terminal` asks [`MaybeTerminal`] — which is exactly the trait-only door, and the
-/// right one: an `Err` on that path can be terminal only by carrying a **scanner** stop, and the
-/// trait is the only witness that sees one (tokora's scanner-side twin is withdrawn for cause,
-/// al8n/tokora#311). A descent refusal cannot arrive unclassified in a root whose entries go
-/// through [`root_turn`], because that is the call the refusal unwinds into.
+/// The seal above is about who may **mint** a verdict. It says nothing about a failure for which
+/// no verdict was ever minted, and that population is not the exotic one it looks like:
 ///
-/// The other residue is inside one scope: the slot is **assigned**, so it describes the most
-/// recent classified entry, and a root that keeps parsing after a stop and then returns an
-/// *earlier* entry's error pairs this scope's verdict with a stale failure. That is a root
-/// discarding a verdict [`root_turn`] handed it — `#[must_use]` fires if it is dropped rather than
-/// matched — and not a forged one; the assignment is deliberate, and
-/// `a_caught_trip_does_not_silence_a_later_failures_drain` pins the direction that matters.
+/// * the shipped loops' `peek_kind(inp)?`, `report_unexpected` and `resync_to_definition(inp)?`
+///   all return `Err` without going through [`root_turn`];
+/// * a consumer's root may call [`descend`] outside one;
+/// * and a consumer's root may **compose**, by returning a nested `drain_unless_stopped` call.
+///
+/// The third is the one that pays for this section. `Root` returns a plain `Result`, so a root
+/// that delegates to another root's drain hands back an `Err` and never touches the slot it was
+/// lent. The inner drain classified correctly — recorded [`RootTurn::EndsTheDocument`] in *its*
+/// slot, skipped *its* drain — and the `Err` carries none of that. Nothing in the shape is forged,
+/// copied, or dropped, so no seal on the *minting* side reaches it, and the outer slot reading
+/// `false` turns a stop back into a `Recoverable`: `1 + n` diagnostics again. Measured through two
+/// nested drains at a descent budget of `0`, with the consumer's `MaybeTerminal` arm answering
+/// `false` for its own refusal, over a tail of `n` lexemes that do not lex: **n** tail diagnostics
+/// at n = 0, 1, 4, 16, against **0** for the identical refusal through a single drain
+/// (`a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it`).
+///
+/// **A type cannot close that population, and trying is what this round measured first.** The
+/// amplification does not need the inner drain's `Result` at all — the caller owns `E`, so
+/// `Err(anything)` out of a root with an unwritten slot reproduces it in one line. Sealing the
+/// drain's return value so that a nested one cannot become a `Result` pins a *spelling*: it makes
+/// the honest composition unspellable and leaves the amplification exactly where it was.
+///
+/// So this frame asks the witness too, over its own baseline — and the slot **scopes** the
+/// reading. [`RootStop`] latches whether any [`root_turn`] of this root has already judged a
+/// tripped attempt, and the drain stops on `Recoverable` only when a trip happened during the root
+/// that no such turn judged. The four cells:
+///
+/// | this root's failure | trip during the root | already judged by a `root_turn` | drain |
+/// |---|---|---|---|
+/// | ordinary | no | — | **runs** — the tail is committed and its diagnostics emitted |
+/// | ordinary, after an entry that caught a refusal and carried on | yes | yes | **runs** — round 1's cell, and `a_caught_trip_does_not_silence_a_later_failures_drain` is it |
+/// | a refusal an entry classified | yes | yes | **skipped**, by [`RootTurn::EndsTheDocument`] before the reading is reached |
+/// | a refusal no entry classified — `descend` outside a turn, or a nested drain's | yes | no | **skipped** — round 4's cell |
+///
+/// The whole-root reading on its own is round 1: it cannot subtract, so it ends a document that
+/// was fine. No reading at all is round 4: it drains a document that ended. The subtraction is the
+/// difference, and it is only available because [`root_turn`] wrote down what it judged.
+///
+/// [`MaybeTerminal`] still runs on both remaining arms, through `drain_unless_terminal`, and is
+/// still alone on the population the counter cannot see: a **scanner** stop moves no descent
+/// counter, and tokora's scanner-side twin is withdrawn for cause (al8n/tokora#311).
+///
+/// # The residue, stated
+///
+/// * **A judged trip, then an unjudged one, in one root.** The latch says *some* trip was judged,
+///   not *which*, so a root that catches a classified refusal and later takes an unjudged one
+///   drains. It is the direction round 1's repair chose deliberately — a drained tail costs
+///   diagnostics, a false stop costs the document — and closing it needs a moving baseline in the
+///   slot, which is `ResourceTripBaseline<'closure>` and therefore a second lifetime on every
+///   production signature in both dialects.
+/// * **A root that returns `Ok`.** Then it has said it parsed, and the drain takes it at its word;
+///   ending a document on a successful root is the false-stop direction.
+/// * **A stale failure.** The slot is assigned, so a root that keeps parsing after a stop and then
+///   returns an *earlier* entry's error pairs this scope's verdict with a stale failure. That is a
+///   root discarding a verdict [`root_turn`] handed it — `#[must_use]` fires if it is dropped
+///   rather than matched — and not a forged one.
 ///
 /// # Why the drain needs the verdict, and it is not a smaller version of the root loop's point
 ///
@@ -691,24 +802,24 @@ where
 /// identical in both dialects — `1 + n`, the same curve the trait-only drain was written to
 /// prevent, reached through the one term it does not have.
 ///
-/// # Why it does not take its own baseline any more — smear PR #189
+/// # Why its own baseline is not the verdict — smear PR #189
 ///
-/// It used to run the root itself and read `inp.tripped_during_attempt(since)` over the whole of
-/// it, on the reasoning that the attempt being judged here *is* the whole root. The arithmetic
-/// does not follow: tokora's counter is monotone, so that reading answers `true` for a root in
-/// which **any** entry ever tripped, including one that was caught and recovered from. `root` was
-/// a caller-supplied closure and this module is publicly reachable, so a root that catches an
-/// early refusal and later fails ordinarily — a shape a consumer can write, and one no arm of
-/// theirs is wrong for — satisfied both conjuncts, skipped the drain, and left a valid suffix
-/// opaque with its diagnostics unemitted. That is the *false-stop* direction: it truncates a
-/// document that was fine, which is the failure tokora's own note says survives testing and points
-/// at nothing.
+/// It used to read `inp.tripped_during_attempt(since)` over the whole root **as** the verdict, on
+/// the reasoning that the attempt being judged here *is* the whole root. The arithmetic does not
+/// follow: tokora's counter is monotone, so that reading answers `true` for a root in which
+/// **any** entry ever tripped, including one that was caught and recovered from. `root` was a
+/// caller-supplied closure and this module is publicly reachable, so a root that catches an early
+/// refusal and later fails ordinarily — a shape a consumer can write, and one no arm of theirs is
+/// wrong for — satisfied both conjuncts, skipped the drain, and left a valid suffix opaque with
+/// its diagnostics unemitted. That is the *false-stop* direction: it truncates a document that was
+/// fine, which is the failure tokora's own note says survives testing and points at nothing.
 ///
 /// The information was never missing — [`root_turn`] had already decided, per entry, at the only
 /// granularity where the question means anything. It was being discarded at the arm and rebuilt
-/// here out of a counter whose span is the wrong span. So it is carried instead, and this function
-/// reads no counter at all: the fix is that the verdict arrives, not that the re-derivation got a
-/// tighter comment.
+/// here out of a counter whose span is the wrong span. So it is carried instead, and the reading
+/// that remains here is a **residual** rather than the verdict: not *did this root trip*, which is
+/// the question with the wrong span, but *did a trip reach this frame that no turn of this root
+/// judged*, which is the question the slot's latch makes answerable at all.
 #[inline]
 pub fn drain_unless_stopped<'inp, 'closure, L, Ctx, Lang, T, Root>(
   inp: &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
@@ -724,12 +835,20 @@ where
     &mut RootStop,
   ) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
 {
+  // THIS FRAME'S OWN BASELINE, over the whole root, and it is not the verdict — it is the
+  // residue: the trips that happen inside this root that no `root_turn` of this root judges. See
+  // `The witness is read again above the root`.
+  let since = inp.trip_snapshot();
   // MINTED, LENT AND SPENT HERE, AND NOWHERE ELSE. The three lines below are the whole
   // transaction: the slot this frame created, the root this frame ran, and the pairing of the
   // one against the other. None of the three steps is reachable on its own — see this function's
   // `It runs the root` note for what each separately spellable step bought a caller.
   let mut stop = RootStop::new();
   let out = root(inp, &mut stop);
+  // READ BEFORE THE SLOT IS SPENT, because spending consumes it. The conjunction is the scoping:
+  // a trip an entry of this root already judged is subtracted, and what is left is a trip that
+  // reached this frame unjudged.
+  let unjudged_trip = !stop.a_classified_entry_saw_a_trip() && inp.tripped_during_attempt(since);
   match stop.ending(out) {
     // The root said it stopped. Nothing reads the tail, which is what makes the refusal one
     // diagnostic — `drain_unless_terminal`'s own note carries the count.
@@ -738,6 +857,11 @@ where
     // value reaching a drain by a path no `root_turn` classified — a scanner stop, which moves no
     // descent counter — is the population it is alone on.
     RootTurn::Parsed { parsed } => drain_unless_terminal(inp, Ok(parsed)),
+    // A failure carrying a trip this root never judged. It is a stop whatever the error value
+    // says, for the reason `root_turn` reads the witness beside the trait at all — smear PR #189,
+    // round 4. `Parsed` is deliberately not here: a root that returns `Ok` has said it parsed,
+    // and ending a document on that word would be the false-stop direction.
+    RootTurn::Recoverable { error } if unjudged_trip => Err(error),
     RootTurn::Recoverable { error } => drain_unless_terminal(inp, Err(error)),
   }
 }

@@ -1548,8 +1548,13 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
 /// Nothing here needed a new measurement. `root_turn` had already decided, per entry, at the only
 /// granularity where "did this failure end the document" means anything — and the arm threw the
 /// answer away, after which the drain rebuilt it from a counter whose span is the whole root. The
-/// classification is carried now, in `RootStop`, and `drain_unless_stopped` reads no counter at
-/// all. A drain cannot be reached without one of `RootTurn`'s three arms having been named.
+/// classification is carried now, in `RootStop`, and a drain cannot be reached without one of
+/// `RootTurn`'s three arms having been named.
+///
+/// The drain does read the counter again — smear PR #189 round 4, for the failures no `root_turn`
+/// judged — and this test is the cell that says that reading is **scoped**: the slot latches that
+/// an entry here already judged the caught trip, so the frame above subtracts it and drains.
+/// Deleting the subtraction reddens the first cell below and nothing else.
 ///
 /// # The three cells
 ///
@@ -1761,6 +1766,192 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
       "n={n}: a refusal that is NOT caught still ends the document, so nothing reads the tail \
        and the refusal stays one diagnostic — the `1 + n` amplification this branch closes. A \
        repair that deleted the drain's stop condition instead of scoping it reddens here"
+    );
+  }
+}
+
+/// A **nested** drain's stop is not reclassified as recoverable by the drain above it —
+/// smear PR #189, round 4.
+///
+/// # The defect this replays
+///
+/// A root returns `Result` independently of the slot it is handed, so a downstream root can
+/// return a nested `drain_unless_stopped` call and never touch its own slot. On a genuine descent
+/// refusal whose caller-defined [`MaybeTerminal`] arm answers `false`, the inner drain classifies
+/// the entry correctly, records `EndsTheDocument` in *its* slot and skips *its* drain — and the
+/// `Err` it hands back carries none of that. The outer slot is untouched, so the frame above reads
+/// the same failure as `Recoverable` and takes the malformed tail: `1 + n` diagnostics for a tail
+/// of `n` invalid lexemes, which is the amplification smear issue #178 closes, back on the public
+/// generic surface.
+///
+/// Every operation in that shape is legitimate. Nothing is forged, nothing is copied, no
+/// `#[must_use]` value is dropped and no borrow escapes — which is why the round-3 seal, which is
+/// about who may *mint* a verdict, does not reach it. What reaches it is the input's own trip
+/// witness, read at the frame that is about to drain and scoped to what no `root_turn` in that
+/// frame has already judged.
+///
+/// # The three cells
+///
+/// * **Nested, uncaught.** The defect. Before the repair: `n` tail diagnostics at every tail
+///   length. After: `0` — the refusal is one diagnostic, which is what a stop means.
+/// * **A tail with nothing to say.** `n = 0` is carried because it is the cell that stays green
+///   under the defect and therefore says the others are about the tail rather than the shape.
+/// * **The single-level control.** The same refusal through one drain, which was already right,
+///   so a repair that stopped on every failure rather than on a tripped one is visible here as a
+///   changed *error* rather than a changed count.
+///
+/// # Each term of the drain's reading is alone on a population
+///
+/// `drain_unless_stopped`'s stop condition for an unclassified failure is
+/// `!a_classified_entry_saw_a_trip && tripped_during_attempt(since)`, and the two conjuncts are
+/// pinned separately rather than argued for. Deleting the **subtraction** leaves a whole-root
+/// reading, which is round 1: 17 pass and only
+/// `a_caught_trip_does_not_silence_a_later_failures_drain` reddens. Deleting the **whole reading**
+/// leaves round 3: 17 pass and only this test reddens. Neither deletion moves any other cell.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it() {
+  use core::cell::Cell as StdCell;
+
+  use smear::parser::{
+    graphql::{GraphQL, lossless::GraphqlLosslessLexer},
+    lossless::depth::{
+      FromNestingLimit, RootStop, RootTurn, descend, drain_unless_stopped, root_turn,
+    },
+  };
+  use tokora::{
+    Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token,
+    cache::DefaultCache,
+    error::{MaybeTerminal, RecursionLimitReached},
+    prelude::UnexpectedTokenOf,
+    span::Spanned,
+    state::recursion_tracker::RecursionLimiter,
+  };
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = ParserContext<'inp, Lx<'inp>, Counting, DefaultCache<'inp, Lx<'inp>>, GraphQL>;
+
+  thread_local! {
+    /// One per `emit_lexer_error` — what a drain over a tail that does not lex produces.
+    static TAIL_DIAGNOSTICS: StdCell<usize> = const { StdCell::new(0) };
+  }
+
+  /// The consumer's error type, with #178's arm: a refusal answers **`false`** for
+  /// `is_terminal`, so the trait cannot classify it and the witness is the only term left.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum E {
+    Refusal,
+  }
+
+  impl MaybeTerminal for E {
+    fn is_terminal(&self) -> bool {
+      false
+    }
+  }
+
+  impl FromNestingLimit for E {
+    fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
+      E::Refusal
+    }
+  }
+
+  impl<Lang: ?Sized> From<RecursionLimitReached<usize, Lang>> for E {
+    fn from(_: RecursionLimitReached<usize, Lang>) -> Self {
+      E::Refusal
+    }
+  }
+
+  /// Accepts everything and counts the lexer diagnostics, for
+  /// `a_caught_trip_does_not_silence_a_later_failures_drain`'s reason: rejecting would stop the
+  /// drain at the first bad lexeme and make the count answer a different question.
+  struct Counting;
+
+  impl<'inp, L: Lexer<'inp>> Emitter<'inp, L, GraphQL> for Counting {
+    type Error = E;
+
+    fn emit_lexer_error(
+      &mut self,
+      _err: Spanned<<L::Token as Token<'inp>>::Error, L::Span>,
+    ) -> Result<(), Self::Error> {
+      TAIL_DIAGNOSTICS.with(|n| n.set(n.get() + 1));
+      Ok(())
+    }
+
+    fn emit_error(&mut self, _err: Spanned<Self::Error, L::Span>) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn emit_unexpected_token(
+      &mut self,
+      _err: UnexpectedTokenOf<'inp, L, GraphQL>,
+    ) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
+  }
+
+  /// The inner root: one classified entry, and it is a genuine descent refusal. Its own drain is
+  /// correctly skipped — the verdict this cell is about exists and is right.
+  fn inner<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    stop: &mut RootStop,
+  ) -> Result<(), E> {
+    match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
+      descend(inp).map(|_| ())
+    }) {
+      RootTurn::Parsed { .. } => Ok(()),
+      RootTurn::EndsTheDocument { error, .. } | RootTurn::Recoverable { error, .. } => Err(error),
+    }
+  }
+
+  /// The outer root: it returns the nested drain's `Result` and touches its own slot not at all.
+  /// Nothing here is a misuse — a `Root` is a `fn(&mut Input, &mut RootStop) -> Result<…>` and
+  /// this is one.
+  fn outer<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), E> {
+    drain_unless_stopped(inp, inner)
+  }
+
+  /// One drain over `root`, and the tail diagnostics that drain produced. A budget of `0` refuses
+  /// the first descent, so `src` is entirely tail.
+  fn drive<'inp, R>(src: &'inp str, root: R) -> (Result<(), E>, usize)
+  where
+    R:
+      FnOnce(&mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>, &mut RootStop) -> Result<(), E>,
+  {
+    TAIL_DIAGNOSTICS.with(|n| n.set(0));
+    let mut root = Some(root);
+    let out = tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
+      |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
+        drain_unless_stopped(inp, root.take().expect("the production runs once"))
+      },
+      src,
+      ParserContext::of(Counting).with_recursion_limiter(RecursionLimiter::with_limitation(0)),
+    );
+    (out, TAIL_DIAGNOSTICS.with(StdCell::get))
+  }
+
+  // `~` does not lex in either dialect, so one per lexeme is what a drain over this tail reports.
+  for n in [0usize, 1, 4, 16] {
+    let src = "~ ".repeat(n);
+
+    assert_eq!(
+      drive(&src, outer),
+      (Err(E::Refusal), 0),
+      "n={n}: the inner drain classified this refusal as ending the document and skipped its own \
+       drain; the frame above must not read the same failure as recoverable and take the tail. \
+       Before smear PR #189 round 4 this read n at every n — the `1 + n` amplification, through \
+       a composition in which every operation is legitimate"
+    );
+    assert_eq!(
+      drive(&src, inner),
+      (Err(E::Refusal), 0),
+      "n={n}: the single-level control. One drain over the same refusal was already right, so a \
+       repair that stopped on every failure rather than on a tripped one shows up here as a \
+       changed error rather than a changed count"
     );
   }
 }
