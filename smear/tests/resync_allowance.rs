@@ -36,18 +36,42 @@ use std::time::Instant;
 /// One dialect's row in `every_refusal_commits_at_least_one_item`: a label, its document root, and
 /// the junk alphabet that drives recovery there.
 ///
-/// It used to carry a fourth field, an "atom that burns the allowance". That was wrong for
-/// GraphQLx and the claim was never checked: **no single-character atom burns in that dialect at
-/// all.** A burn needs `spent` to move while the tally does not, and measured over `.`, `..`, `1.`,
-/// `"`, `%`, `^`, `~`, `\`, `` ` ``, `?`, `;`, `$`, `00`, `-`, `+` and `*`, every one keeps them
-/// within two of each other — 80 001 against 80 000 — where GraphQL's `-` opens a gap of exactly
-/// the error count, 80 001 against 60 000. `00` in particular coalesces: `0000…` is one number
-/// token, not twenty thousand. The field is gone because the junk alone drives refusals in both
-/// dialects, identically, which is what this test needs.
+/// It used to carry a fourth field, an "atom that burns the allowance", with `00` as GraphQLx's.
+/// That was wrong — `0000…` coalesces into one number token — and the field is gone because this
+/// test does not need one: junk alone drives refusals in both dialects and reads identically.
+///
+/// # What the measurement behind that established, and what it did not
+///
+/// A burn needs `spent` to move while the tally does not. Over **single-character** candidates —
+/// `.`, `..`, `1.`, `"`, `%`, `^`, `~`, `\`, `` ` ``, `?`, `;`, `$`, `00`, `-`, `+`, `*` — every
+/// one keeps the two within two of each other in GraphQLx (80 001 against 80 000), where GraphQL's
+/// `-` opens a gap of exactly the error count (80 001 against 60 000).
+///
+/// **That is a statement about single characters and nothing wider.** An earlier revision of this
+/// file generalised it to "GraphQLx has no atom that drives the regime", which is false: `-.5` is
+/// one. The missing-integer-part rule routes through `tt_hook_and_then_into_errors`, whose handler
+/// returns `Err` even when its suffix check passes, so every unit is charged and never committed —
+/// `spent = 20 040` against `committed = 39`, byte-identical to GraphQL's `-`.
+/// `error_density_is_a_bounded_known_cost` uses it, and `recover.rs` was already right to say the
+/// regime is *harder* to reach in that dialect rather than absent.
 type Cell = (
   &'static str,
   fn(&str) -> (usize, usize),
   &'static [&'static str],
+);
+
+/// One dialect's row in `error_density_is_a_bounded_known_cost`: a label, its document root, the
+/// atom whose lexeme is charged to `spent` and never committed, and the junk that then reaches
+/// recovery.
+///
+/// Unlike [`Cell`] this one *does* carry a burn, because that test prices the regime a burn
+/// creates. GraphQL's is `-`; GraphQLx's is `-.5`, which is three characters and therefore outside
+/// the single-character survey [`Cell`] records.
+type DensityCell = (
+  &'static str,
+  fn(&str) -> (usize, usize),
+  &'static str,
+  &'static [(&'static str, usize)],
 );
 
 /// A parse reduced to the three facts every test here reads.
@@ -131,6 +155,24 @@ limited_roots! {
 limited_roots! {
   gqlx_document_with_limits => smear::parser::graphqlx::lossless::parse_document_with_limits,
 }
+
+/// Every enabled dialect's mixed-document root, labelled.
+///
+/// The list a test uses when its property needs no measured constant and no per-dialect table —
+/// only "run this on whatever dialects are compiled". Empty is impossible in practice and asserted
+/// against by each caller, because a row with no dialect would pass every test below vacuously.
+#[allow(clippy::vec_init_then_push)]
+fn document_roots() -> Vec<Root> {
+  let mut roots: Vec<Root> = Vec::new();
+  #[cfg(feature = "graphql")]
+  roots.push(("gql", gql_document));
+  #[cfg(feature = "graphqlx")]
+  roots.push(("gqlx", gqlx_document));
+  roots
+}
+
+/// A labelled document root: what [`document_roots`] yields.
+type Root = (&'static str, fn(&str) -> (usize, usize));
 
 /// One census shape at one root, doubled twice.
 ///
@@ -293,8 +335,10 @@ fn every_graphqlx_census_shape_stays_linear() {
 /// `pad = 0` and 8 011 993 at `pad = 1024`. Flatness is the property; linearity follows from it
 /// and is checked too.
 #[test]
-#[cfg(feature = "graphql")]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn token_length_does_not_reopen_the_guard() {
+  let roots = document_roots();
+  assert!(!roots.is_empty(), "no dialect enabled");
   /// `k` copies of `atom` each followed by a comment carrying `pad` filler bytes.
   fn padded(atom: &str, k: usize, pad: usize) -> String {
     let comment = format!("#{}\n", "x".repeat(pad));
@@ -307,75 +351,80 @@ fn token_length_does_not_reopen_the_guard() {
   }
 
   println!("\n== token length as an axis ==");
-  for atom in ["! ", "@ ( ) ", "[ type ] "] {
-    const K: usize = 1_500;
-    let mut readings = Vec::new();
-    for pad in [0usize, 16, 256, 2_048] {
-      let src = padded(atom, K, pad);
-      let got = run(gql_document, &src);
-      assert_eq!(got.covered, src.len(), "{atom:?}/pad={pad}");
-      assert!(
-        got.refusals > 0,
-        "{atom:?}/pad={pad}: the guard never engaged on a shape built to be quadratic. This is \
+  for (dialect, root) in &roots {
+    for atom in ["! ", "@ ( ) ", "[ type ] "] {
+      const K: usize = 1_500;
+      let mut readings = Vec::new();
+      for pad in [0usize, 16, 256, 2_048] {
+        let src = padded(atom, K, pad);
+        let got = run(*root, &src);
+        assert_eq!(got.covered, src.len(), "{dialect} {atom:?}/pad={pad}");
+        assert!(
+          got.refusals > 0,
+          "{atom:?}/pad={pad}: the guard never engaged on a shape built to be quadratic. This is \
          the byte-denominated defect exactly: {} bytes committed against {} items, so a \
          denominator counting bytes would have paid for every scan.",
-        src.len(),
-        got.peak_committed
-      );
-      println!(
-        "  {:<12} pad={pad:5} bytes={:9} spent={:8} committed={:7} refusals={:6} {:7.1}ms",
-        format!("{atom:?}"),
-        src.len(),
-        got.peak_spent,
-        got.peak_committed,
-        got.refusals,
-        got.seconds * 1e3
-      );
-      readings.push((pad, src.len(), got.peak_spent));
-    }
+          src.len(),
+          got.peak_committed
+        );
+        println!(
+          "  {dialect:<5} {:<12} pad={pad:5} bytes={:9} spent={:8} committed={:7} refusals={:6} {:7.1}ms",
+          format!("{atom:?}"),
+          src.len(),
+          got.peak_spent,
+          got.peak_committed,
+          got.refusals,
+          got.seconds * 1e3
+        );
+        readings.push((pad, src.len(), got.peak_spent));
+      }
 
-    // Flatness. The committed item count at fixed `k` is the same whatever the padding — one
-    // comment and one newline per copy, however long the comment is — so the meter must be too.
-    let (_, _, base) = readings[0];
-    for &(pad, bytes, spent) in &readings {
-      let drift = spent as f64 / base as f64;
-      assert!(
-        (0.5..2.0).contains(&drift),
-        "{atom:?}: padding the comments to {pad} bytes moved the meter x{drift:.2} \
+      // Flatness. The committed item count at fixed `k` is the same whatever the padding — one
+      // comment and one newline per copy, however long the comment is — so the meter must be too.
+      let (_, _, base) = readings[0];
+      for &(pad, bytes, spent) in &readings {
+        let drift = spent as f64 / base as f64;
+        assert!(
+          (0.5..2.0).contains(&drift),
+          "{atom:?}: padding the comments to {pad} bytes moved the meter x{drift:.2} \
          ({base} -> {spent}) while the committed item count did not move. The guard is being fed \
          a length-sensitive denominator again — it must count produce-events, not bytes. \
          (document was {bytes} bytes)"
-      );
+        );
+      }
     }
   }
 
   // And the shape the byte denominator made worst: padding scaled with the document, which is
   // where the two arms of `min(trips, factor * bytes_per_event)` cross.
   println!("  -- padding scaled with the document --");
-  let mut prev: Option<(usize, usize)> = None;
-  for k in [500usize, 1_000, 2_000] {
-    let src = padded("! ", k, k);
-    let got = run(gql_document, &src);
-    assert_eq!(got.covered, src.len());
-    if let Some((pk, ps)) = prev {
-      let ratio = got.peak_spent as f64 / ps as f64;
-      assert!(
-        ratio < 2.6,
-        "padding scaled with the document: the meter grew x{ratio:.2} for a x{} document \
-         ({ps} -> {}). This is the axis the one-byte census could not see.",
-        k / pk,
-        got.peak_spent
+  for (dialect, root) in &roots {
+    let mut prev: Option<(usize, usize)> = None;
+    for k in [500usize, 1_000, 2_000] {
+      let src = padded("! ", k, k);
+      let got = run(*root, &src);
+      assert_eq!(got.covered, src.len(), "{dialect} k={k}");
+      if let Some((pk, ps)) = prev {
+        let ratio = got.peak_spent as f64 / ps as f64;
+        assert!(
+          ratio < 2.6,
+          "{dialect}: padding scaled with the document grew the meter x{ratio:.2} for a x{} \
+         document ({ps} -> {}). This is the axis the one-byte census could not see.",
+          k / pk,
+          got.peak_spent
+        );
+      }
+      println!(
+        "    {dialect:<5} k={k:5} pad={k:5} bytes={:9} spent={:8} committed={:7} refusals={:6} \
+       {:7.1}ms",
+        src.len(),
+        got.peak_spent,
+        got.peak_committed,
+        got.refusals,
+        got.seconds * 1e3
       );
+      prev = Some((k, got.peak_spent));
     }
-    println!(
-      "    k={k:5} pad={k:5} bytes={:9} spent={:8} committed={:7} refusals={:6} {:7.1}ms",
-      src.len(),
-      got.peak_spent,
-      got.peak_committed,
-      got.refusals,
-      got.seconds * 1e3
-    );
-    prev = Some((k, got.peak_spent));
   }
 }
 
@@ -404,7 +453,8 @@ fn token_length_does_not_reopen_the_guard() {
 /// lead with the dense one, and the assertion is the formula rather than a constant a single
 /// witness happens to satisfy.
 #[test]
-#[cfg(feature = "graphql")]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[allow(clippy::vec_init_then_push)]
 fn error_density_is_a_bounded_known_cost() {
   const JUNK: usize = 120_000;
 
@@ -413,56 +463,86 @@ fn error_density_is_a_bounded_known_cost() {
     k.saturating_sub(4_096) as f64 / (7.0 * m as f64)
   }
 
+  // `m` is committed items per refusal: dense junk commits one, spaced junk commits two.
+  let mut cells: Vec<DensityCell> = Vec::new();
+  #[cfg(feature = "graphql")]
+  cells.push((
+    "gql",
+    gql_document,
+    "-",
+    &[("!", 1), ("@", 1), (":", 1), ("! ", 2), ("@ ", 2)],
+  ));
+  #[cfg(feature = "graphqlx")]
+  cells.push((
+    "gqlx",
+    gqlx_document,
+    // Three characters, so outside the single-character survey in `Cell` — and a burn all the
+    // same. `-?(?&frac)(?&exp)?` routes through `tt_hook_and_then_into_errors`, whose handler
+    // returns `Err` even when its suffix check passes, so the unit is charged to `spent` and never
+    // committed. Signature `spent = 20 040` against `committed = 39`, byte-identical to `-`.
+    "-.5",
+    // `:` is absent for the reason it is absent in `Cell`: a run of colons lexes as `::`, which is
+    // a sync point here, so it never refuses.
+    &[("!", 1), ("@", 1), ("=", 1), ("! ", 2), ("@ ", 2)],
+  ));
+  assert!(
+    !cells.is_empty(),
+    "no dialect is enabled, so this test would pass without checking anything"
+  );
+
   println!("\n== error density: the second exception, priced by mechanism ==");
   println!(
-    "  {:<8} {:>3} {:>8} {:>9} {:>9} {:>10} {:>8}",
-    "junk", "m", "k", "refusals", "predicted", "beyond", "drift"
+    "  {:<6} {:<8} {:>3} {:>8} {:>9} {:>9} {:>10} {:>8}",
+    "dial", "junk", "m", "k", "refusals", "predicted", "beyond", "drift"
   );
-  // `m` is committed items per refusal: dense junk commits one, spaced junk commits two.
-  for (junk, m) in [("!", 1usize), ("@", 1), (":", 1), ("! ", 2), ("@ ", 2)] {
-    for k in [0usize, 1_000, 4_000] {
-      // Below the floor the guard must not engage at all. This is the guarantee that matters for
-      // a merely-malformed document, and it is an equality rather than a bound.
-      let src = format!("{}{}1", "-".repeat(k), junk.repeat(3_000));
-      let got = run(gql_document, &src);
-      assert_eq!(got.covered, src.len());
-      assert_eq!(
-        got.refusals, 0,
-        "{junk:?} k={k}: the guard engaged under SCAN_ALLOWANCE_FLOOR"
-      );
-      assert_eq!(
-        got.diagnostics.saturating_sub(k),
-        3,
-        "{junk:?} k={k}: recovery must be fully intact below the floor"
-      );
-    }
-    for k in [20_000usize, 33_000, 80_000] {
-      let src = format!("{}{}1", "-".repeat(k), junk.repeat(JUNK));
-      let got = run(gql_document, &src);
-      assert_eq!(got.covered, src.len(), "{junk:?} k={k}");
-      let want = predicted(k, m);
-      let drift = got.refusals as f64 / want;
-      println!(
-        "  {:<8} {m:>3} {k:>8} {:>9} {:>9.0} {:>10} {:>8.3}",
-        format!("{junk:?}"),
-        got.refusals,
-        want,
-        got.diagnostics.saturating_sub(k),
-        drift
-      );
-      assert!(
-        (0.9..1.1).contains(&drift),
-        "{junk:?} k={k}: {} refusals against the {want:.0} the mechanism predicts (x{drift:.3}). \
-         The rate is `(k - floor) / ((FACTOR - 1) * m)` with m = committed items per refusal; a \
-         drift here means either a constant changed or the junk stopped committing {m} per \
-         refusal. Do not re-derive this from one shape — that is what broke the last pin.",
-        got.refusals
-      );
-      assert!(
-        got.refusals < JUNK,
-        "{junk:?} k={k}: the whole junk run was shredded rather than a slice of it, so the guard \
-         is not re-closing as committed items accrue."
-      );
+  for (dialect, root, burn, alphabet) in cells {
+    for (junk, m) in alphabet {
+      let (junk, m) = (*junk, *m);
+      for k in [0usize, 1_000, 4_000] {
+        // Below the floor the guard must not engage at all. This is the guarantee that matters for
+        // a merely-malformed document, and it is an equality rather than a bound.
+        let src = format!("{}{}1", burn.repeat(k), junk.repeat(3_000));
+        let got = run(root, &src);
+        assert_eq!(got.covered, src.len(), "{dialect} {junk:?} k={k}");
+        assert_eq!(
+          got.refusals, 0,
+          "{dialect} {junk:?} k={k}: the guard engaged under SCAN_ALLOWANCE_FLOOR"
+        );
+        assert_eq!(
+          got.diagnostics.saturating_sub(k),
+          3,
+          "{dialect} {junk:?} k={k}: recovery must be fully intact below the floor"
+        );
+      }
+      for k in [20_000usize, 33_000, 80_000] {
+        let src = format!("{}{}1", burn.repeat(k), junk.repeat(JUNK));
+        let got = run(root, &src);
+        assert_eq!(got.covered, src.len(), "{dialect} {junk:?} k={k}");
+        let want = predicted(k, m);
+        let drift = got.refusals as f64 / want;
+        println!(
+          "  {dialect:<6} {:<8} {m:>3} {k:>8} {:>9} {:>9.0} {:>10} {:>8.3}",
+          format!("{junk:?}"),
+          got.refusals,
+          want,
+          got.diagnostics.saturating_sub(k),
+          drift
+        );
+        assert!(
+          (0.9..1.1).contains(&drift),
+          "{dialect} {junk:?} k={k}: {} refusals against the {want:.0} the mechanism predicts \
+           (x{drift:.3}). The rate is `(k - floor) / ((FACTOR - 1) * m)` with m = committed items \
+           per refusal; a drift here means either a constant changed or the junk stopped \
+           committing {m} per refusal. Do not re-derive this from one shape — that is what broke \
+           the last pin.",
+          got.refusals
+        );
+        assert!(
+          got.refusals < JUNK,
+          "{dialect} {junk:?} k={k}: the whole junk run was shredded rather than a slice of it, so \
+           the guard is not re-closing as committed items accrue."
+        );
+      }
     }
   }
 }
@@ -744,38 +824,42 @@ fn refusal_free_sizes_calibrate_the_oracle() {
 /// The assertion is equality, not a bound: the guard counts events, so changing only the encoding
 /// must move **nothing**.
 #[test]
-#[cfg(feature = "graphql")]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn the_guard_is_blind_to_encoding() {
   const K: usize = 2_000;
+  let roots = document_roots();
+  assert!(!roots.is_empty(), "no dialect enabled");
   println!("\n== encoding ==");
-  let mut baseline: Option<(usize, usize, usize)> = None;
-  // Twelve comment CHARACTERS in each, so the event counts are identical by construction and the
-  // byte counts differ 16 / 40 / 52. Making the *bytes* equal instead would vary the character set
-  // without varying the lever, and would pass against a byte denominator too.
-  for (name, unit) in [
-    ("ascii", format!("! #{}\n", "x".repeat(12))),
-    ("3-byte chars", format!("! #{}\n", "\u{4E2D}".repeat(12))),
-    ("4-byte chars", format!("! #{}\n", "\u{1F600}".repeat(12))),
-  ] {
-    let src = unit.repeat(K);
-    let got = run(gql_document, &src);
-    assert_eq!(got.covered, src.len(), "{name}");
-    let reading = (got.peak_spent, got.peak_committed, got.refusals);
-    println!(
-      "  {name:<14} bytes={:8} spent={:8} committed={:8} refusals={}",
-      src.len(),
-      reading.0,
-      reading.1,
-      reading.2
-    );
-    match baseline {
-      None => baseline = Some(reading),
-      Some(want) => assert_eq!(
-        reading, want,
-        "{name}: changing only the character set moved the guard's readings. It counts \
-         produce-events, so it must be blind to how many bytes each one spans — a reading that \
-         moves here is a byte-denominated denominator returning."
-      ),
+  for (dialect, root) in &roots {
+    let mut baseline: Option<(usize, usize, usize)> = None;
+    // Twelve comment CHARACTERS in each, so the event counts are identical by construction and the
+    // byte counts differ 16 / 40 / 52. Making the *bytes* equal instead would vary the character
+    // set without varying the lever, and would pass against a byte denominator too.
+    for (name, unit) in [
+      ("ascii", format!("! #{}\n", "x".repeat(12))),
+      ("3-byte chars", format!("! #{}\n", "\u{4E2D}".repeat(12))),
+      ("4-byte chars", format!("! #{}\n", "\u{1F600}".repeat(12))),
+    ] {
+      let src = unit.repeat(K);
+      let got = run(*root, &src);
+      assert_eq!(got.covered, src.len(), "{dialect} {name}");
+      let reading = (got.peak_spent, got.peak_committed, got.refusals);
+      println!(
+        "  {dialect:<5} {name:<14} bytes={:8} spent={:8} committed={:8} refusals={}",
+        src.len(),
+        reading.0,
+        reading.1,
+        reading.2
+      );
+      match baseline {
+        None => baseline = Some(reading),
+        Some(want) => assert_eq!(
+          reading, want,
+          "{dialect} {name}: changing only the character set moved the guard's readings. It counts \
+           produce-events, so it must be blind to how many bytes each one spans — a reading that \
+           moves here is a byte-denominated denominator returning."
+        ),
+      }
     }
   }
 }
@@ -792,8 +876,7 @@ fn the_guard_is_blind_to_encoding() {
 /// Because it needs no measured constant. It compares a `*_with_limits` door against the default
 /// door **on the same input**, so the expectation is equality rather than a number taken on
 /// GraphQL — which is what lets it run on either dialect's row alone. Most of this file pins
-/// GraphQL-measured values and cannot follow; `error_density_is_a_bounded_known_cost` additionally
-/// cannot, because GraphQLx has no atom that drives the regime it prices (see `Cell`).
+/// GraphQL-measured values and cannot follow.
 ///
 /// It is also this file's only reader of `Run::diagnostics` that is not GraphQL-shaped, which is
 /// how the field stays live on the GraphQLx-only row. That row compiles under `-Dwarnings` in CI
@@ -904,6 +987,52 @@ fn a_burnt_resync_that_lands_on_a_definition_head_still_does_not_eat_it() {
   );
   println!(
     "\n== burnt zero-skip arm ==\n  bytes={} refusals={refusals} ScalarTypeDefinition survives",
+    src.len()
+  );
+}
+
+/// The burnt zero-skip arm, on GraphQLx — the substrate arm is shared, its burn is not.
+///
+/// Same property as the GraphQL twin above and the same construction, with `-.5` for `-` because
+/// that is what burns here (see `DensityCell`). The kind spaces are different enums, which is why
+/// this is a second test rather than a loop over both.
+///
+/// **The space between the burn and the tail is load-bearing.** Flush, the missing-integer-part
+/// rule's suffix check swallows the following `type` into the float error lexeme and the
+/// definition never reaches the parser at all — refusals 1, no `ScalarTypeDefinition`. That is a
+/// lexer artifact rather than a recovery defect, so it is not asserted; the space is there to keep
+/// this test measuring the arm it names.
+#[test]
+#[cfg(feature = "graphqlx")]
+fn a_burnt_resync_on_graphqlx_also_does_not_eat_the_definition() {
+  use smear::parser::graphqlx::kinds::SyntaxKind as K;
+
+  let tail = "type T { a scalar S }";
+  let src = format!("{} {tail}", "-.5".repeat(20_000));
+  scan_allowance::reset();
+  let parse = smear::parser::graphqlx::lossless::parse_document(&src);
+  let refusals = scan_allowance::refusals();
+
+  assert_eq!(
+    parse.syntax().text().to_string(),
+    src,
+    "the lossless text must survive"
+  );
+  assert!(
+    refusals > 0,
+    "the guard never closed, so this ran the same path as an unburnt parse and covers nothing new"
+  );
+  let kinds: Vec<K> = parse.syntax().descendants().map(|n| n.kind()).collect();
+  assert!(
+    kinds.contains(&K::ScalarTypeDefinition),
+    "the definition the resync stopped at was eaten under a closed guard on GraphQLx. \
+     `resync_to`'s refusal arm must still answer the zero-skip question — \
+     `head_satisfies(is_restart_point)` — rather than falling through to the consume-one `None` \
+     arm. Kinds: {kinds:?}"
+  );
+  println!(
+    "\n== burnt zero-skip arm, graphqlx ==\n  bytes={} refusals={refusals} \
+     ScalarTypeDefinition survives",
     src.len()
   );
 }
