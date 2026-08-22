@@ -18,7 +18,7 @@
 
 use std::borrow::Cow;
 
-use super::{LitBlockStr, LitInlineStr, LitStr};
+use super::{LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr};
 
 /// Cooks a literal the way a consumer would: lex it, then convert.
 fn cook(literal: &str) -> Cow<'_, str> {
@@ -227,6 +227,68 @@ fn required_capacity_covers_the_cooked_value() {
       cooked.len() <= capacity,
       "`{literal}` cooked to {} bytes against a capacity of {capacity}",
       cooked.len()
+    );
+  }
+}
+
+/// Reaches `Cow::from`'s `Complex` arm directly, bypassing the lexer entirely.
+///
+/// The real lexer never hands this conversion an escape draft §2.9.1 does not name — the test
+/// below this one checks exactly that — which is why an external caller could never observe
+/// [`normalize_str_to_string`](super::normalize_str_to_string)'s copy-through claim failing to
+/// hold. [`LitComplexInlineStr::new`] is `pub(crate)`, so a test in this crate can still ask the
+/// conversion the question the lexer never gets to ask: what does it do with a sequence only
+/// `u32::from_str_radix` — not the grammar — accepts.
+fn force_complex_cook(source: &str) -> Cow<'_, str> {
+  LitInlineStr::Complex(LitComplexInlineStr::new(source, source.len())).into()
+}
+
+/// `u32::from_str_radix` takes a leading `+` and, for the braced form, does not bound the digit
+/// count — draft §2.9.1 names neither. `hex4` and the braced arm of `read_unicode_escape` used to
+/// trust the parse to fail on everything the grammar excludes; it does not, so each sequence below
+/// used to decode instead of taking the copy-through path its doc comment promises.
+#[test]
+fn an_escape_only_from_str_radix_accepts_is_copied_through_not_decoded() {
+  // Fixed-width `\uXXXX`: a leading `+` ate one of the four hex slots and still parsed — `+123`
+  // read as the 3-digit `123`, decoding U+0123 instead of being rejected.
+  assert_eq!(force_complex_cook(r#""\u+123""#), r#"\u+123"#);
+
+  // Braced `\u{X…}`: the same leading-`+` leniency, decoding U+0041 (`A`).
+  assert_eq!(force_complex_cook(r#""\u{+41}""#), r#"\u{+41}"#);
+
+  // Braced `\u{X…}`: `from_str_radix` has no digit-count limit, so an eleven-digit zero-padded
+  // run past draft §2.9.1's maximum of six still parsed, decoding U+1F600 (an emoji).
+  assert_eq!(
+    force_complex_cook(r#""\u{0000001F600}""#),
+    r#"\u{0000001F600}"#
+  );
+
+  // The same length leniency isolated from any particular value: seven digits is one past the
+  // grammar's maximum even though `0x41` is a perfectly ordinary codepoint.
+  assert_eq!(force_complex_cook(r#""\u{0000041}""#), r#"\u{0000041}"#);
+
+  // Both leniencies at once.
+  assert_eq!(
+    force_complex_cook(r#""\u{+0000001F600}""#),
+    r#"\u{+0000001F600}"#
+  );
+}
+
+/// The premise behind reaching for `force_complex_cook` at all: every source above is a lex
+/// error, not a `Complex` literal, so no caller outside this crate could ever have exercised the
+/// bug the previous test pins.
+#[test]
+fn the_lexer_already_rejects_what_only_from_str_radix_would_accept() {
+  for literal in [
+    r#""\u+123""#,
+    r#""\u{+41}""#,
+    r#""\u{0000001F600}""#,
+    r#""\u{0000041}""#,
+    r#""\u{+0000001F600}""#,
+  ] {
+    assert!(
+      LitStr::try_from(literal).is_err(),
+      "`{literal}` was expected to be a lex error, not a literal this lexer accepts"
     );
   }
 }

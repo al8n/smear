@@ -311,7 +311,14 @@ fn read_escape(after: &str) -> Option<(char, usize)> {
 fn read_unicode_escape(after: &str) -> Option<(char, usize)> {
   if let Some(rest) = after.strip_prefix('{') {
     let close = rest.find('}')?;
-    let scalar = u32::from_str_radix(rest.get(..close)?, 16).ok()?;
+    let digits = rest.get(..close)?;
+    // draft §2.9.1 names one to six hex digits. `u32::from_str_radix` bounds neither that count
+    // nor the character class — it takes a leading `+`, and has no digit-count limit at all — so
+    // both are checked here rather than trusted to the parse.
+    if !(1..=6).contains(&digits.len()) || !is_hex_digits(digits) {
+      return None;
+    }
+    let scalar = u32::from_str_radix(digits, 16).ok()?;
     // `+ 2` for the braces the offset above does not span.
     return char::from_u32(scalar).map(|ch| (ch, close + 2));
   }
@@ -338,7 +345,22 @@ fn read_unicode_escape(after: &str) -> Option<(char, usize)> {
 /// whose fourth byte is inside a character, which is what lets the caller index at `4` afterwards.
 #[inline]
 fn hex4(digits: &str) -> Option<u32> {
-  u32::from_str_radix(digits.get(..4)?, 16).ok()
+  let digits = digits.get(..4)?;
+  // `from_str_radix` accepts a leading `+` that draft §2.9.1's four hex digits does not.
+  if !is_hex_digits(digits) {
+    return None;
+  }
+  u32::from_str_radix(digits, 16).ok()
+}
+
+/// Whether every byte is one of draft §2.9.1's hex digits, `0-9`, `A-F`, or `a-f`.
+///
+/// `u32::from_str_radix` accepts strictly more than this — a leading `+` sign, at least — which is
+/// why both unicode-escape readers check the character class themselves rather than trusting the
+/// parse to fail on whatever the grammar does not name.
+#[inline]
+fn is_hex_digits(s: &str) -> bool {
+  s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[inline(always)]
