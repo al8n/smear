@@ -114,7 +114,10 @@
 //!
 //! The trait is still read, and beside rather than under: a **scanner** stop moves no descent
 //! counter, and tokora's scanner-side witness is withdrawn for cause (al8n/tokora#311). Each term
-//! is alone on a population, and `depth/tests.rs` reddens separately for each deletion.
+//! is alone on a population, and `smear-parser/src/graphql/lossless/tests.rs` reddens separately
+//! for each deletion. That path is the dialect's and not this directory's, for the reason the
+//! comment at the end of this file records; `lossless/depth/tests.rs` does not exist and creating
+//! it reddens gate 6.
 //!
 //! # The drain does not re-derive the verdict, and cannot be handed a forged one — smear PR #189
 //!
@@ -318,6 +321,18 @@ pub trait FromNestingLimit {
   /// `Error: MaybeTerminal` clause. tokora's own rule says the same thing from the other side: a
   /// frame budget is never cleared by more input, so `false` here is the arm its table calls spent
   /// silently — and the witness is what stops that spending from costing the document.
+  ///
+  /// # It stays public and unsealed while its only consumers are crate-private, deliberately
+  ///
+  /// The rest of this module's cluster was withdrawn on one test — *a door whose guarantee the
+  /// crate's public API can no longer deliver is not a door a caller should be offered* — and that
+  /// test does not reach this trait: what `descend` promised was **the refusal ends the document**,
+  /// which needs readers this crate no longer publishes, whereas what this trait asks for is a
+  /// property of the **value** a dialect container mints, and every public door still delivers it.
+  /// That nothing publicly reachable consumes an out-of-crate impl today — `descend` and the
+  /// production bundle are both `pub(crate)`, and every shipped door pins smear's own containers —
+  /// is consistency residue rather than a promise the API cannot keep, and narrowing it would be a
+  /// further public-API removal on no finding at all.
   fn nesting_limit_exceeded(span: SimpleSpan, attempted: usize, limit: usize) -> Self;
 }
 
@@ -394,6 +409,23 @@ pub trait FromNestingLimit {
 /// for a *lexer* error that `Err` **is** the delivery — the input layer advances its dedup
 /// watermark before calling, so the diagnostic is offered exactly once and dropping the `Err`
 /// would drop it. That is the case [`descend`] is careful to distinguish from its own.
+///
+/// # What pins the early return, and the round it spent unpinned
+///
+/// `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone`, in
+/// `smear-parser/src/graphql/lossless/tests.rs`. It hands this function a terminal, **untripped**
+/// `Err` — directly, and again through [`drain_unless_stopped`]'s `Recoverable` arm — and reads
+/// the tail diagnostics: `0`, against `n` for the same unclassified failure on a non-terminal
+/// value.
+///
+/// It was written because for one round the population had no cell at all.
+/// `a_refusal_is_the_error_returned_even_under_a_rejecting_emitter` used to call this function
+/// directly and was the pin; round 5 rewrote it to go through [`drain_unless_stopped`], whose root
+/// descends outside every [`root_turn`], so its residual reading answers first and this function
+/// is never reached on those cells. Measured with the terminality check deleted and before the new
+/// cell existed: 363/363 `smear-parser --lib`, 14/14 `nesting_depth`, 16/16 `resync_allowance` and
+/// 5/5 `lossless_isolation` — the whole claimed guard population green over a `1 + n`
+/// amplification that had been reopened.
 #[inline]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn drain_unless_terminal<'inp, L, Ctx, Lang, T>(
@@ -660,10 +692,11 @@ impl RootStop {
 ///   the caller tokora's rule tells to write the arm.
 ///
 /// So the disjunction is not belt-and-braces, and each term is pinned separately rather than
-/// argued for: `each_term_of_a_roots_stop_is_alone_on_a_population` in `depth/tests.rs` drives
-/// this function with a rejected scanner stop and with a real descent trip on an arm that answers
-/// `false`, and deleting either term turns exactly one of those cells from `EndsTheDocument` into
-/// `Recoverable` while the ordinary-error control stays put under both.
+/// argued for: `each_term_of_a_roots_stop_is_alone_on_a_population`, in
+/// `smear-parser/src/graphql/lossless/tests.rs`, drives this function with a rejected scanner stop
+/// and with a real descent trip on an arm that answers `false`, and deleting either term turns
+/// exactly one of those cells from `EndsTheDocument` into `Recoverable` while the ordinary-error
+/// control stays put under both.
 ///
 /// # The baseline is taken here, per entry, and that is the whole verdict
 ///
@@ -819,9 +852,12 @@ where
 /// difference between them, and it is only available because [`root_turn`] wrote down what it
 /// judged — but it subtracts a *count*, and the last row is what a count cannot answer.
 ///
-/// [`MaybeTerminal`] still runs on both remaining arms, through `drain_unless_terminal`, and is
+/// [`MaybeTerminal`] still runs on both remaining arms, through [`drain_unless_terminal`], and is
 /// still alone on the population the counter cannot see: a **scanner** stop moves no descent
 /// counter, and tokora's scanner-side twin is withdrawn for cause (al8n/tokora#311).
+/// `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone` is the cell that
+/// says so, and it exists because for one round nothing did — see
+/// [`drain_unless_terminal`]'s own note.
 ///
 /// # The residue, stated
 ///
@@ -1134,15 +1170,25 @@ where
   inp.descend()
 }
 
-// THE FOUR CELLS THAT DRIVE THIS MODULE DIRECTLY LIVE IN THE GRAPHQL ASSEMBLY'S `tests.rs`, AND
-// NOT HERE — smear PR #189, round 5. They had to come in-crate: they call `root_turn`, `RootStop`
-// and `drain_unless_stopped`, which `smear/tests/nesting_depth.rs` cannot reach any more because
-// an integration test is a separate crate and sees `pub` and nothing else. In-crate is not the
-// same as in *this* module, though, and putting them here was wrong on the rule this directory
-// exists to keep: every one of them pins one dialect's lexer, its `Lang` marker and the lexer
-// crate's limits, so as a `mod tests` under `lossless/` they put four dialect imports and
-// thirty-odd dialect-typed signatures inside the dialect-generic substrate. Gate 6,
+// THE CELLS THAT DRIVE THIS MODULE DIRECTLY LIVE IN `smear-parser/src/graphql/lossless/tests.rs`,
+// AND NOT HERE — smear PR #189, round 5. Four of them had to come in-crate: they call `root_turn`,
+// `RootStop` and `drain_unless_stopped`, which `smear/tests/nesting_depth.rs` cannot reach any more
+// because an integration test is a separate crate and sees `pub` and nothing else. A fifth was
+// written in crate in round 6, for the population `drain_unless_terminal`'s own note describes.
+// In-crate is not the same as in *this* module, though, and putting them here was wrong on the rule
+// this directory exists to keep: every one of them pins one dialect's lexer, its `Lang` marker and
+// the lexer crate's limits, so as a `mod tests` under `lossless/` they put a dialect import each
+// and thirty-odd dialect-typed signatures inside the dialect-generic substrate. Gate 6,
 // `lossless_isolation.rs`, reddens on exactly that and did. A dialect assembly driving the
 // substrate is what the Lego rule is *for*; the substrate hosting a dialect-naming test is what it
-// forbids — and note that gate scans EVERY line, prose included, so this comment may not spell the
-// path either.
+// forbids.
+//
+// SPELLING THE PATH HERE IS ALLOWED, and an earlier version of this comment said it was not. Gate
+// 6 classifies every line of this directory that names a dialect: a comment is prose and passes,
+// and only a line that is neither a comment nor the one feature gate is an offender. What it
+// forbids over every line, prose included, is the *spellings* its `SUBSTRATE_FORBIDDEN` table
+// lists — a `crate::`-rooted dialect module path, either dialect's `Lang` marker, the lexer
+// crate's own path prefix — and a source-tree path is none of those. Do not write one of them out
+// here, not even as an example: this paragraph reddened the gate on its first draft, which is the
+// gate working. Declining to name the file at all is what left three pointers aimed at
+// `lossless/depth/tests.rs`, which does not exist and which reddens gate 6 if anyone recreates it.

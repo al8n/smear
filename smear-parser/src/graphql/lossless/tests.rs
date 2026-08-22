@@ -1,12 +1,13 @@
-//! The four nesting-depth cells that drive the **crate-private** verdict machinery.
+//! The five nesting-depth cells that drive the **crate-private** verdict machinery.
 //!
-//! # Why these four are here and the other fourteen are not
+//! # Why these are here and the other fourteen are not
 //!
 //! `smear/tests/nesting_depth.rs` is where the nesting ceiling is pinned, and it is an integration
-//! test — a separate crate, which sees `pub` and nothing else. These four drive
-//! [`root_turn`](crate::lossless::depth::root_turn), [`RootStop`](crate::lossless::depth::RootStop) and
-//! [`drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) *directly*, because what they ask cannot
-//! be asked through a shipped door:
+//! test — a separate crate, which sees `pub` and nothing else. These cells drive
+//! [`root_turn`](crate::lossless::depth::root_turn), [`RootStop`](crate::lossless::depth::RootStop),
+//! [`drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) and
+//! [`drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal) *directly*, because
+//! what they ask cannot be asked through a shipped door:
 //!
 //! * which **term** of a root's stop is alone on which population, which needs an error type whose
 //!   [`MaybeTerminal`](tokora::error::MaybeTerminal) arm is deliberately wrong and an emitter that
@@ -14,30 +15,40 @@
 //! * and what the drain does with a failure **no turn classified**, which needs a root written by
 //!   hand.
 //!
-//! Round 5 of smear PR #189 narrowed that machinery to `pub(crate)`, which put these four out of
-//! reach from `tests/`. Moving them is the alternative to losing them, and
+//! Round 5 of smear PR #189 narrowed that machinery to `pub(crate)`, which put four of them out of
+//! reach from `tests/`. Moving those four is the alternative to losing them, and
 //! [`crate::lossless::depth`]'s module header carries why the narrowing happened. The other
 //! fourteen cells reach the ceiling through the shipped doors — `parse_document`,
 //! `parse_type_system_document`, `parse_executable_document` and the syntactic ones — which are
 //! still public, name nothing that moved, and so stay where they are. `descend` went `pub(crate)`
-//! in the same round, but no cell over there calls it; the four here are the only ones that did.
+//! in the same round, but no cell over there calls it; the four that moved are the only ones that
+//! did.
+//!
+//! The fifth, `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone`, was
+//! **born here** in round 6 rather than moved. Round 5's rewrite of
+//! `a_refusal_is_the_error_returned_even_under_a_rejecting_emitter` sent its entry cells through
+//! `drain_unless_stopped`, whose residual reading of the trip witness answers first — so those
+//! cells moved onto the opposite term from the one their note names and
+//! [`MaybeTerminal`](tokora::error::MaybeTerminal)'s own population was left with no cell in the
+//! workspace. That cell's note carries the measurement.
 //!
 //! # Why this is in the dialect and not beside the code it drives
 //!
 //! `lossless/depth/tests.rs` is where they landed first, and gate 6 —
 //! `smear/tests/lossless_isolation.rs` — reddened on it. Every cell below pins **GraphQL's**
 //! lexer, its `Lang` marker and `smear_lexer::limits`, so as a `mod tests` under `lossless/` they
-//! put four `use crate::graphql::…` lines and some thirty dialect-typed signatures inside the
+//! put a `use crate::graphql::…` line each and some thirty dialect-typed signatures inside the
 //! dialect-generic substrate. That is precisely what the Lego rule forbids, and the direction it
-//! permits is this one: a dialect assembly may reach down into the substrate, so the four cells
-//! sit in `graphql/` and call up. Nothing about what they measure changed with the address.
+//! permits is this one: a dialect assembly may reach down into the substrate, so the cells sit in
+//! `graphql/` and call up. The address is not what changed any of them: what changed the first
+//! cell was round 5's rewrite of the door it calls, and its own note says so.
 //!
 //! # The two suites are one population
 //!
-//! Every plant recorded in either file is stated over all eighteen cells. A plant that reddens
-//! here and nowhere else, or there and nowhere else, is what makes each cell about its own term;
-//! splitting the file did not split the population and no count below was re-derived from the
-//! smaller half.
+//! Every plant recorded in either file is stated over all nineteen cells — the fourteen there and
+//! these five. A plant that reddens here and nowhere else, or there and nowhere else, is what
+//! makes each cell about its own term; splitting the file did not split the population and no
+//! count below was re-derived from the smaller half.
 
 /// A refusal is the error [`descend`](crate::lossless::depth::descend) returns, whichever
 /// emission a rejecting emitter refuses and whatever value it substitutes — smear issue #169.
@@ -206,16 +217,29 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   // which is the same statement one layer down and is what makes the refusal below tokora's own
   // trip rather than a smear pre-check that agreed with it.
   /// The root the entry drain runs, and it classifies **nothing**: no `root_turn` call, so the
-  /// slot `drain_unless_stopped` mints for it stays fresh, the ending is `Recoverable`, and
-  /// `MaybeTerminal` is the only term left that can stop the tail from being read. That is the
-  /// trait half this cell measures — the witness half has
-  /// `each_term_of_a_roots_stop_is_alone_on_a_population` — and it is exactly the population
-  /// `drain_unless_stopped`'s own note assigns to the trait: a failure that reached the drain by
-  /// a path no `root_turn` classified.
+  /// slot `drain_unless_stopped` mints for it stays fresh and the ending is `Recoverable`. It is
+  /// the population `drain_unless_stopped`'s own note assigns to that arm: a failure that reached
+  /// the drain by a path no `root_turn` classified.
+  ///
+  /// **Which term stops it is the witness, and that changed in round 5.** This root *descends*,
+  /// inside the drain's own baseline window and outside every `root_turn`, so `unjudged_trip` is
+  /// true and `drain_unless_stopped` returns on its residual arm before `drain_unless_terminal` is
+  /// consulted at all. Round 4's version of this function was handed to `drain_unless_terminal`
+  /// directly, where `Which::Recursion.is_terminal()` was the only thing standing between the
+  /// refusal and a tail drain — so what this cell pins is one term further out than it was, and
+  /// the trait half is now
+  /// `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone`. The witness half
+  /// at the root's own scale is `each_term_of_a_roots_stop_is_alone_on_a_population`.
+  ///
+  /// What this cell measures is the same either way, and it is the assertion below rather than the
+  /// term: whichever term stops the tail from being read, the value that comes back is the saved
+  /// refusal.
   ///
   /// It used to be a hand-written `RootTurn::Recoverable(..)` handed straight to the drain. That
-  /// spelling is gone — the variants do not build out of crate — and this is the same cell
-  /// through the door that remains.
+  /// spelling is gone, and the operative reason is round 3's **signature** rather than round 5's
+  /// visibility: `drain_unless_stopped` takes the root, not a verdict about one, so there is no
+  /// argument position a written-out variant could occupy. In crate — which this file now is —
+  /// the variants build perfectly well.
   fn refuse_without_classifying<'inp>(
     inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
     _stop: &mut RootStop,
@@ -640,10 +664,13 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
     entries: &[Entry],
   ) -> Result<(), E> {
     for entry in entries {
-      // The `..` in every pattern is `#[non_exhaustive]` on the variants: out of crate a verdict
-      // still matches and still gets exhaustiveness checking, and no longer BUILDS — smear
-      // PR #189, round 3. The variants are braced for the same reason: on a TUPLE variant the
-      // attribute privates the constructor, and a tuple pattern out of crate resolves through it.
+      // The `..` in every pattern below is round 3's shape outliving its reason. Then these
+      // variants were `#[non_exhaustive]` and this cell was out of crate, so the attribute left
+      // the pattern working and removed the constructor. Round 5 deleted the attribute — on a
+      // `pub(crate)` enum it is inert, which `depth.rs` records as deliberate — and moved the cell
+      // in crate, so neither half is load-bearing here any more and the `..` is habit. What still
+      // is load-bearing is the BRACES: six match sites read these arms and a named field costs one
+      // word at each.
       match *entry {
         Entry::CaughtRefusal => {
           match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
@@ -773,11 +800,12 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
 /// `drain_unless_stopped`'s stop condition for an unclassified failure is
 /// `!a_classified_entry_saw_a_trip && tripped_during_attempt(since)`, and the two conjuncts are
 /// pinned separately rather than argued for. Deleting the **subtraction** leaves a whole-root
-/// reading, which is round 1: 17 pass and only
+/// reading, which is round 1: 18 pass and only
 /// [`a_caught_trip_does_not_silence_a_later_failures_drain`] reddens. Deleting the **whole
-/// reading** leaves round 3: 17 pass and only this test reddens. Neither deletion moves any other
-/// cell. The eighteen are the fourteen in `smear/tests/nesting_depth.rs` and these four; the split
-/// is smear PR #189's round 5 and the counts are unchanged by it.
+/// reading** leaves round 3: 18 pass and only this test reddens. Neither deletion moves any other
+/// cell. The nineteen are the fourteen in `smear/tests/nesting_depth.rs` and the five here; the
+/// split is smear PR #189's round 5, the fifth cell is round 6, and both deletions were re-run
+/// over the larger population rather than carried forward.
 #[test]
 fn a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it() {
   use core::cell::Cell as StdCell;
@@ -922,5 +950,185 @@ fn a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it() {
        repair that stopped on every failure rather than on a tripped one shows up here as a \
        changed error rather than a changed count"
     );
+  }
+}
+
+/// A **terminal** failure no `root_turn` classified still stops the drain, and the trait is the
+/// only term that can do it — smear PR #189, round 6.
+///
+/// # Why this cell exists, and what was measured before it did
+///
+/// `a_refusal_is_the_error_returned_even_under_a_rejecting_emitter`'s entry cells used to hand
+/// `drain_unless_terminal` a `Result` directly, so `MaybeTerminal` was the only term standing
+/// between a refusal and a tail drain and those cells were the trait's pin. They go through
+/// `drain_unless_stopped` now — the door that remains — and the root they hand it **descends**,
+/// inside that frame's own baseline window and outside every `root_turn`. So `unjudged_trip` is
+/// true there and `drain_unless_stopped`'s residual arm returns before `drain_unless_terminal` is
+/// consulted at all: those cells moved onto the *witness* term, which is the opposite term from
+/// the one they were written for, and the trait's own population was left with no cell anywhere.
+///
+/// Measured before this cell existed, with `drain_unless_terminal`'s `is_terminal` early return
+/// deleted: 363/363 `smear-parser --lib`, 14/14 `nesting_depth`, 16/16 `resync_allowance`, 5/5
+/// `lossless_isolation` — the whole claimed guard population green, and
+/// `drain_unless_stopped`'s "`MaybeTerminal` still runs on both remaining arms" note enforced by
+/// nothing. A refactor dropping that early return would have shipped green and reopened the
+/// `1 + n` amplification for exactly the failure the trait is alone on.
+///
+/// # The population, and why no other cell reaches it
+///
+/// Unclassified, **untripped**, terminal. A trip is what the witness sees, so a failure the
+/// witness can see is not this cell's; what is left is a stop that moved no descent counter and
+/// that no turn judged — a **scanner** stop the emitter rejected, reaching an entry drain from a
+/// place no `root_turn` wraps. `drain_unless_stopped` lists those places itself: the shipped
+/// loops' `peek_kind(inp)?`, `report_unexpected` and `resync_to_definition(inp)?` all return `Err`
+/// without going through a turn. The root below is that shape reduced to its one fact — it returns
+/// the failure and classifies nothing — and nothing in it descends, so the witness answers `false`
+/// by construction and the trait is what is left.
+///
+/// # The two vias, and the control
+///
+/// * **`Via::Terminality`** hands the primitive a terminal `Err` directly. That is
+///   `drain_unless_terminal`'s own contract, one frame below the door.
+/// * **`Via::Entry`** reaches it through `drain_unless_stopped`, which is the claim at issue: the
+///   trait runs on the `Recoverable` arm, after the residual reading has declined to stop.
+/// * **`E::Ordinary`** is the control in both vias. It is not terminal, so the drain runs and the
+///   tail costs one lexer diagnostic per malformed lexeme — `n` at every `n`, with the plant and
+///   without it. Without that reading a terminal cell at `0` would be equally satisfied by a drain
+///   that never runs at all.
+///
+/// `n = 0` is carried for this file's usual reason: it is the cell that stays green under the
+/// plant, which is what makes the others about the tail rather than about the shape.
+///
+/// # The plant
+///
+/// Deleting the `is_terminal` early return turns both `E::Scanner` readings from `0` tail
+/// diagnostics into `n` at n = 1, 4 and 16, in both vias, and moves no other cell in either file.
+#[test]
+fn a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone() {
+  use core::cell::Cell as StdCell;
+
+  use crate::{
+    graphql::{GraphQL, lossless::GraphqlLosslessLexer},
+    lossless::depth::{RootStop, drain_unless_stopped, drain_unless_terminal},
+  };
+  use tokora::{
+    Emitter, InputRef, Lexer, ParserContext, Token, cache::DefaultCache, error::MaybeTerminal,
+    prelude::UnexpectedTokenOf, span::Spanned,
+  };
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = ParserContext<'inp, Lx<'inp>, Counting, DefaultCache<'inp, Lx<'inp>>, GraphQL>;
+
+  thread_local! {
+    /// One per `emit_lexer_error` — what a drain over a tail that does not lex produces.
+    static TAIL_DIAGNOSTICS: StdCell<usize> = const { StdCell::new(0) };
+  }
+
+  /// The consumer's error type. `Scanner` is terminal and `Ordinary` is not, and that one bit is
+  /// the whole observation.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum E {
+    /// A scanner stop the emitter rejected onto the parser's channel. Nothing descended to produce
+    /// it, so tokora's resource-trip counter cannot have moved.
+    Scanner,
+    /// An ordinary syntax error, already reported at the point of failure.
+    Ordinary,
+  }
+
+  impl MaybeTerminal for E {
+    fn is_terminal(&self) -> bool {
+      matches!(self, E::Scanner)
+    }
+  }
+
+  /// Accepts everything and counts the lexer diagnostics, for the reason
+  /// `a_caught_trip_does_not_silence_a_later_failures_drain` records: rejecting would stop the
+  /// drain at the first bad lexeme and make the count answer a different question.
+  struct Counting;
+
+  impl<'inp, L: Lexer<'inp>> Emitter<'inp, L, GraphQL> for Counting {
+    type Error = E;
+
+    fn emit_lexer_error(
+      &mut self,
+      _err: Spanned<<L::Token as Token<'inp>>::Error, L::Span>,
+    ) -> Result<(), Self::Error> {
+      TAIL_DIAGNOSTICS.with(|n| n.set(n.get() + 1));
+      Ok(())
+    }
+
+    fn emit_error(&mut self, _err: Spanned<Self::Error, L::Span>) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn emit_unexpected_token(
+      &mut self,
+      _err: UnexpectedTokenOf<'inp, L, GraphQL>,
+    ) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
+  }
+
+  /// Which frame the failure is handed to.
+  #[derive(Debug, Clone, Copy)]
+  enum Via {
+    /// The primitive, directly — its own contract, with no door above it.
+    Terminality,
+    /// The door an `*_entry` production writes, whose `Recoverable` arm is where the claim under
+    /// test lives.
+    Entry,
+  }
+
+  /// One drain over a root that fails with `failure` and classifies nothing, and the tail
+  /// diagnostics that drain produced.
+  ///
+  /// The `'inp` is NAMED, threaded from `src`, for the reason
+  /// `each_term_of_a_roots_stop_is_alone_on_a_population` records: elided, it varies independently
+  /// of the error type and the closure `E0521`s.
+  fn drive<'inp>(src: &'inp str, via: Via, failure: E) -> (Result<(), E>, usize) {
+    TAIL_DIAGNOSTICS.with(|n| n.set(0));
+    let out = tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
+      |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| match via {
+        Via::Terminality => drain_unless_terminal(inp, Err(failure)),
+        // NO `root_turn` AND NO DESCENT. The slot the drain mints for this root stays fresh, so
+        // the ending is `Recoverable`; nothing moved the counter, so the residual reading is
+        // `false` and the arm below it is where this lands.
+        Via::Entry => drain_unless_stopped(
+          inp,
+          |_inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>, _stop: &mut RootStop| {
+            Err(failure)
+          },
+        ),
+      },
+      src,
+      // No `with_recursion_limiter`: nothing here descends, and a budget would be a number this
+      // cell does not read.
+      ParserContext::of(Counting),
+    );
+    (out, TAIL_DIAGNOSTICS.with(StdCell::get))
+  }
+
+  // `~` does not lex in either dialect, so one per lexeme is what a drain over this tail reports.
+  for n in [0usize, 1, 4, 16] {
+    let src = "~ ".repeat(n);
+
+    for via in [Via::Terminality, Via::Entry] {
+      assert_eq!(
+        drive(&src, via, E::Scanner),
+        (Err(E::Scanner), 0),
+        "n={n}, via={via:?}: a terminal failure no turn classified must not have its tail read — \
+         the witness answers `false` here by construction, so `MaybeTerminal` is the only term \
+         left and deleting `drain_unless_terminal`'s early return reads `n` instead"
+      );
+      assert_eq!(
+        drive(&src, via, E::Ordinary),
+        (Err(E::Ordinary), n),
+        "n={n}, via={via:?}: the control — the same unclassified, untripped failure on a \
+         NON-terminal value must still be drained. If this ever agrees with the cell above, the \
+         reading there is about the drain being off and not about the term"
+      );
+    }
   }
 }

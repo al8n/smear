@@ -148,11 +148,34 @@ pub trait KindSpace: Copy + Eq + core::fmt::Debug + 'static {
 ///
 /// [`KindSpace`] is a public, unsealed trait, and it is the substrate's extension point: the
 /// module header's whole claim is that these pieces are usable without naming a dialect, and a
-/// third dialect — in this crate or outside it — becomes one by implementing it. Its invariants
-/// are stated in prose four paragraphs up and enforced nowhere else, which is precisely the shape
-/// that a downstream implementor gets wrong and finds out about as a panic inside the sink's kind
-/// validator. So the check ships, as something a consumer may opt into, rather than being hidden
-/// from the docs of the trait it belongs to.
+/// third dialect becomes one by implementing it. Its invariants are stated in prose four
+/// paragraphs up and enforced nowhere else, which is precisely the shape that a downstream
+/// implementor gets wrong and finds out about as a panic inside the sink's kind validator. So the
+/// check ships, as something a consumer may opt into, rather than being hidden from the docs of
+/// the trait it belongs to.
+///
+/// # What "outside this crate" buys, since smear PR #189
+///
+/// This sentence used to read *"in this crate or outside it"* without qualification, and the
+/// withdrawal in [`depth`] made half of it false. The two halves are worth separating.
+///
+/// **Intact out of crate:** the kind-space contract itself and everything derived from it — the
+/// sink profile, the kind validator, the coverage tally's width, `rowan::Language` — plus the
+/// trivia atoms, the `Parse`/`Diagnostic` surface, `runner::finish_root`, `recover`'s scan and
+/// resync helpers, the typed-wrapper substrate, and `depth`'s two surviving public items,
+/// `lossless_context` and `FromNestingLimit`.
+///
+/// **Gone out of crate:** the descent and the verdict. `descend`, `root_turn`, `RootStop`,
+/// `RootTurn`, `drain_unless_stopped` and `drain_unless_terminal` are all `pub(crate)`, and the
+/// `lossless_production!` / `lossless_drivers!` bundles that write a production and its roots are
+/// `pub(crate) use` above. So an out-of-crate implementor takes its levels from
+/// [`InputRef::descend`](tokora::InputRef::descend) directly and writes its own document-root stop
+/// — which means owning smear issue #169's `1 + n` amplification rather than inheriting the
+/// answer to it. [`depth`]'s header is the statement of why this crate declines to hand that
+/// answer out: shipping it means shipping an obligation on the caller that nothing enforces.
+///
+/// A **third dialect inside this crate** has all of it, which is the case the two shipped
+/// assemblies are, and the case `assert_kind_space_is_well_formed` below is written for first.
 ///
 /// Everything under a *dialect's* `lossless` module named `test_support` is the opposite case —
 /// drivers over one concrete grammar, several of which build deliberately corrupt trees — and

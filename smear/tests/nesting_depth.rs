@@ -1083,17 +1083,29 @@ fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
   assert_eq!(cells, 4, "the cell set collapsed");
 }
 
-// FOUR CELLS OF THIS SUITE LIVE IN `smear-parser/src/lossless/depth/tests.rs` — smear PR #189,
+// FOUR CELLS OF THIS SUITE LIVE IN `smear-parser/src/graphql/lossless/tests.rs` — smear PR #189,
 // round 5. They drove `root_turn`, `RootStop` and `drain_unless_stopped`, which that round
 // narrowed to `pub(crate)`: this file is an integration test, so it is a separate crate and sees
-// `pub` and nothing else. Moving them was the alternative to losing them, and nothing about them
-// changed in the move.
+// `pub` and nothing else. Moving them was the alternative to losing them.
+//
+// THE ADDRESS IS THE DIALECT'S AND NOT THE SUBSTRATE'S. `smear-parser/src/lossless/depth/tests.rs`
+// is where they landed first and gate 6 — `smear/tests/lossless_isolation.rs` — reddened on it:
+// every one of those cells pins GraphQL's lexer and its `Lang` marker, which under `lossless/`
+// puts a dialect inside the dialect-generic substrate. Recreating that file reddens gate 6 again.
 //
 // They are `a_refusal_is_the_error_returned_even_under_a_rejecting_emitter`,
 // `each_term_of_a_roots_stop_is_alone_on_a_population`,
 // `a_caught_trip_does_not_silence_a_later_failures_drain` and
-// `a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it`. Every plant recorded in either
-// file is stated over all eighteen cells, because splitting the file did not split the population:
-// `NestingLimitExceeded => false` in both dialects still leaves 17 passing with
-// `tokoras_own_descent_trip_lands_terminal_in_both_dialects` the one that reddens, and that cell is
-// here.
+// `a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it`. THE FIRST OF THEM DID NOT COME
+// THROUGH THE MOVE UNCHANGED, and an earlier version of this comment said all four did. Round 5
+// rewrote its entry cells to reach the drain through `drain_unless_stopped`, whose residual
+// reading of the trip witness answers before `drain_unless_terminal` is consulted — so that cell
+// measures the witness now and no longer the trait. The trait's own population is carried over
+// there by a fifth cell,
+// `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone`, which was written
+// for it in round 6 rather than moved.
+//
+// Every plant recorded in either file is stated over all nineteen cells, because splitting the
+// file did not split the population: `NestingLimitExceeded => false` in both dialects still leaves
+// 18 passing with `tokoras_own_descent_trip_lands_terminal_in_both_dialects` the one that reddens,
+// and that cell is here.
