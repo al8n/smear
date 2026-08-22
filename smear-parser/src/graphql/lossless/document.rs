@@ -90,7 +90,7 @@ use super::{
   value::Constness,
 };
 
-use tokora::error::MaybeTerminal as _;
+use crate::lossless::depth::{self, RootTurn};
 
 use crate::lossless::lossless_production;
 
@@ -405,8 +405,13 @@ lossless_production! {
   /// out of a *resource*, so resynchronising and carrying on re-reads the abandoned nest at the
   /// document level and reports every closer of it — smear issue #169, 67 diagnostics for one
   /// refusal, growing with the document. [`depth::descend`](crate::lossless::depth::descend)'s
-  /// `The refusal ends the document` note carries the reasoning and the measurements; this arm is
-  /// one of the five that read it.
+  /// `The refusal ends the document` note carries the reasoning and the measurements.
+  ///
+  /// The exception is not written out here, and that is smear issue #178: this loop calls
+  /// [`depth::root_turn`](crate::lossless::depth::root_turn) and matches its verdict, so what a
+  /// sixth root copies is a **call** rather than a predicate — and the baseline the verdict needs
+  /// is taken inside that call, where it cannot be hoisted, re-taken, or placed after the attempt
+  /// it judges.
   fn document<'inp, Src, Ctx>(inp) {
     node(
       K::Document.raw(),
@@ -416,11 +421,10 @@ lossless_production! {
         }
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if let Err(e) = definition::<Src, Ctx>(inp) {
-            if e.is_terminal() {
-              return Err(e);
-            }
-            recover::resync_to_definition::<Src, Ctx>(inp)?;
+          match depth::root_turn(inp, definition::<Src, Ctx>) {
+            RootTurn::Parsed(()) => {}
+            RootTurn::EndsTheDocument(e) => return Err(e),
+            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -447,12 +451,11 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_DEFINITION_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if let Err(e) = type_system_definition_or_extension::<Src, Ctx>(inp) {
-            // The refusal arm [`document`]'s note explains.
-            if e.is_terminal() {
-              return Err(e);
-            }
-            recover::resync_to_definition::<Src, Ctx>(inp)?;
+          // The refusal arm [`document`]'s note explains, through the same call.
+          match depth::root_turn(inp, type_system_definition_or_extension::<Src, Ctx>) {
+            RootTurn::Parsed(()) => {}
+            RootTurn::EndsTheDocument(e) => return Err(e),
+            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -469,12 +472,14 @@ lossless_production! {
   /// than a panic in [`parse_document`](super::parse_document) — the defect Task 5 recorded and
   /// could not reach, `document` having been a stub.
   ///
-  /// The drain is [`depth::drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal)
+  /// The drain is [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped)
   /// rather than a bare `skip_while`, because a refusal must not read the tail: see that
-  /// function's note for the diagnostic count that costs.
+  /// function's note for the diagnostic count that costs. It **runs** [`document`] rather than
+  /// taking its `Result`, and that is not a style choice — the input's trip witness needs a
+  /// baseline taken before the production, so the only place it can be taken and be right is
+  /// inside the function that runs it.
   fn document_entry<'inp, Src, Ctx>(inp) {
-    let out = document::<Src, Ctx>(inp);
-    crate::lossless::depth::drain_unless_terminal(inp, out)
+    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
   }
 
   /// [`type_system_document`] plus the drain, for the same reason [`document_entry`] carries one.
@@ -485,7 +490,6 @@ lossless_production! {
   /// parser's result, so without the drain that tail would be a `FinishError::UncoveredGap` panic
   /// in materialization instead of a reportable parse.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    let out = type_system_document::<Src, Ctx>(inp);
-    crate::lossless::depth::drain_unless_terminal(inp, out)
+    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
   }
 }

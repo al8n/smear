@@ -1027,11 +1027,13 @@ fn a_refusal_ends_every_document_root() {
 /// # What this still does not cover
 ///
 /// * **A host whose own [`MaybeTerminal`](tokora::error::MaybeTerminal) arm is wrong.** `descend`
-///   needs no cooperation — it drops the emit result — but the document roots stop on
-///   `is_terminal()`, so a caller whose error type answers `false` for its own fatal value has
-///   told the emitter *stop* and the recovery machinery *recoverable*. That contradiction is the
-///   caller's, it is the residue tokora's own rule documents, and `Which` below deliberately
-///   answers `false` for `LexerError` so that a cell returning it is visibly the drain having run.
+///   needs no cooperation — it drops the emit result — and since smear issue #178 the document
+///   roots do not either: `root_turn` reads the input's resource-trip witness beside
+///   `is_terminal()`, so a caller whose error type answers `false` for its own refusal still ends
+///   the document. `each_term_of_a_roots_stop_is_alone_on_a_population` is the cell for that;
+///   what is still uncovered here is a wrong arm on a **scanner** stop, which no published witness
+///   sees. `Which` below deliberately answers `false` for `LexerError` so that a cell returning it
+///   is visibly the drain having run.
 /// * **The shipped doors.** `Verbose` cannot reject, so none of this is reachable through
 ///   `parse_document`; the two tests above are what cover that path.
 #[cfg(all(feature = "rowan", feature = "graphql"))]
@@ -1282,4 +1284,200 @@ fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
   cells += 1;
 
   assert_eq!(cells, 4, "the cell set collapsed");
+}
+
+/// The two terms of a root's stop, each pinned on the population the other one misses.
+///
+/// # Why this cell set exists, and why nothing above it could ask this
+///
+/// A document root stops on `e.is_terminal() || inp.tripped_during_attempt(since)`, and smear
+/// issue #178 is the second half: the first term is a **caller-implemented** answer, so a consumer
+/// composing the public generic layer with its own error type could answer `false` for its own
+/// refusal and get the pre-#169 amplification back. The witness is the repair, and the plant that
+/// proves it is end-to-end — flip a dialect's `NestingLimitExceeded` arm to `false` and the three
+/// refusal cells above stay green.
+///
+/// The **converse** plant is the one no cell above can see. Deleting `e.is_terminal()` from
+/// [`root_turn`](smear::parser::lossless::depth::root_turn) left every other test in this file
+/// green — measured, with this cell removed — and the reason is the one
+/// `smear-parser/src/graphql/error/tests/terminal.rs` already records about the `Lexer` arm: with
+/// an **accepting** emitter a lexer state trip latches tokora's poison boundary, the root loop's
+/// next peek answers `None`, and the loop exits with no error to classify — so through the shipped
+/// doors, which pin `Verbose`, no scanner stop ever reaches a catch arm as an `Err` at all. It
+/// reaches one only for a consumer whose emitter **rejects**, which is the caller tokora's rule
+/// tells to write a `MaybeTerminal` arm and the caller no in-tree parse is.
+///
+/// So the cells drive [`root_turn`](smear::parser::lossless::depth::root_turn) directly, which is
+/// public and is now the one place the five roots' arm lives.
+///
+/// # The three cells, and what each one is alone on
+///
+/// * **Scanner.** A real `smear-lexer` state trip, whose diagnostic the emitter rejects, arriving
+///   on the parser's channel as an `Err`. `descend` is never called, so tokora's resource-trip
+///   counter cannot have moved and the witness answers `false` by construction — the trait is the
+///   only term that can see it. This is the population the withdrawn scanner witness would have
+///   covered; it is withdrawn for cause (al8n/tokora#311: a document fully recovered through the
+///   documented `set_state` path still reads as truncated), so "beside, not instead of" is not a
+///   posture here but the only available answer.
+/// * **Refusal.** A real descent trip under a budget of `0`, on an error type whose
+///   [`MaybeTerminal`] arm answers **`false`** for it. That is #178's consumer, written out: the
+///   witness is the only term that can see it.
+/// * **Ordinary.** A plain syntax error, no trip, arm `false`. Neither term fires and the root
+///   resynchronises — without it a `root_turn` that answered `EndsTheDocument` unconditionally
+///   would pass the other two.
+///
+/// # The plants
+///
+/// Deleting `e.is_terminal()` turns the scanner cell from `Ends` into `Recoverable`; deleting
+/// `inp.tripped_during_attempt(since)` turns the refusal cell from `Ends` into `Recoverable`; the
+/// ordinary cell is `Recoverable` under both, which is what makes the other two readings about the
+/// term and not about the function. All three were run.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn each_term_of_a_roots_stop_is_alone_on_a_population() {
+  use smear::parser::{
+    graphql::{GraphQL, lossless::GraphqlLosslessLexer},
+    lossless::depth::{FromNestingLimit, RootTurn, descend, root_turn},
+  };
+  use tokora::{
+    Emitter, Lexer, ParserContext, SimpleSpan, Token,
+    cache::DefaultCache,
+    error::{MaybeTerminal, RecursionLimitReached},
+    prelude::UnexpectedTokenOf,
+    span::Spanned,
+    state::recursion_tracker::RecursionLimiter,
+  };
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = ParserContext<'inp, Lx<'inp>, Rejecting, DefaultCache<'inp, Lx<'inp>>, GraphQL>;
+
+  /// The consumer's error type — and the whole point is that **only `Scanner` is terminal**.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum E {
+    /// A scanner stop the emitter rejected onto the parser's channel.
+    Scanner,
+    /// An ordinary syntax error.
+    Ordinary,
+    /// A descent refusal, on an arm that answers **`false`** for it. This is the wrong answer a
+    /// consumer is free to write, and #178 is the statement that a root must stop anyway.
+    Refusal,
+  }
+
+  impl MaybeTerminal for E {
+    fn is_terminal(&self) -> bool {
+      matches!(self, E::Scanner)
+    }
+  }
+
+  impl FromNestingLimit for E {
+    fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
+      E::Refusal
+    }
+  }
+
+  impl<Lang: ?Sized> From<RecursionLimitReached<usize, Lang>> for E {
+    fn from(_: RecursionLimitReached<usize, Lang>) -> Self {
+      E::Refusal
+    }
+  }
+
+  /// Rejects every lexer diagnostic, which is the only shape that puts a scanner stop on the
+  /// parser's channel. `emit_error` accepts, so the refusal cell below measures the witness rather
+  /// than a rejection.
+  struct Rejecting;
+
+  impl<'inp, L: Lexer<'inp>> Emitter<'inp, L, GraphQL> for Rejecting {
+    type Error = E;
+
+    fn emit_lexer_error(
+      &mut self,
+      _err: Spanned<<L::Token as Token<'inp>>::Error, L::Span>,
+    ) -> Result<(), Self::Error> {
+      Err(E::Scanner)
+    }
+
+    fn emit_error(&mut self, _err: Spanned<Self::Error, L::Span>) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn emit_unexpected_token(
+      &mut self,
+      _err: UnexpectedTokenOf<'inp, L, GraphQL>,
+    ) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
+  }
+
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum Cell {
+    Scanner,
+    Ordinary,
+    Refusal,
+  }
+
+  /// [`RootTurn`] flattened to something comparable — it carries a parse's error type and is not
+  /// asked to be `Debug` or `PartialEq` for the sake of one test.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum Verdict {
+    Parsed,
+    Ends(E),
+    Recoverable(E),
+  }
+
+  // The `'inp` is NAMED, threaded from `src`: elided, it varies independently of the error type
+  // and the closure `E0521`s — the same reason the driver macro names it.
+  fn drive<'inp>(src: &'inp str, limit: usize, cell: Cell) -> Verdict {
+    tokora::parse_with::<Lx<'inp>, str, _, Verdict, Ctx<'inp>, GraphQL>(
+      |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
+        let turn = root_turn(
+          inp,
+          |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| match cell {
+            // A real scan. The lexer's own nesting tally trips on `src`, the emitter rejects the
+            // diagnostic, and the rejection is what leaves this entry as an `Err`. Nothing here
+            // descends, so tokora's resource-trip counter cannot have moved.
+            Cell::Scanner => {
+              inp.skip_while(|_| true)?;
+              Ok(())
+            }
+            Cell::Ordinary => Err(E::Ordinary),
+            // A real descent trip: the budget below is `0`, so the first descent is over it.
+            Cell::Refusal => descend(inp).map(|_| ()),
+          },
+        );
+        Ok(match turn {
+          RootTurn::Parsed(()) => Verdict::Parsed,
+          RootTurn::EndsTheDocument(e) => Verdict::Ends(e),
+          RootTurn::Recoverable(e) => Verdict::Recoverable(e),
+        })
+      },
+      src,
+      ParserContext::of(Rejecting).with_recursion_limiter(RecursionLimiter::with_limitation(limit)),
+    )
+    .expect("the turn is mapped to a value rather than propagated")
+  }
+
+  // Past `MAX_NESTING_DEPTH`, which is what the lexer's tally is seeded with by default, so the
+  // scan below trips a real `smear_lexer::limits` budget rather than a manufactured one.
+  let deep = "{".repeat(MAX_NESTING_DEPTH * 2);
+
+  assert_eq!(
+    drive(&deep, MAX_NESTING_DEPTH, Cell::Scanner),
+    Verdict::Ends(E::Scanner),
+    "a scanner stop ends the document, and `is_terminal()` is the only term that can see it — no \
+     descent ran, so the trip witness answers `false` by construction"
+  );
+  assert_eq!(
+    drive("{ f }", 0, Cell::Refusal),
+    Verdict::Ends(E::Refusal),
+    "a descent trip ends the document even though the caller's `MaybeTerminal` arm answers \
+     `false` for it — smear issue #178"
+  );
+  assert_eq!(
+    drive("{ f }", MAX_NESTING_DEPTH, Cell::Ordinary),
+    Verdict::Recoverable(E::Ordinary),
+    "an ordinary syntax error must still resynchronise, or the two readings above are about a \
+     function that stops on everything"
+  );
 }

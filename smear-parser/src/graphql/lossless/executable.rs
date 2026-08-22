@@ -315,11 +315,12 @@ lossless_production! {
   /// `FinishError::UncoveredGap` panic in materialization without this drain.
   ///
   /// Which makes this the root where a nesting refusal reaches the drain most directly, and the
-  /// reason the drain is [`depth::drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal):
-  /// a refusal must not read the tail.
+  /// reason the drain is
+  /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped): a refusal must
+  /// not read the tail, and a refusal the caller's `MaybeTerminal` arm answers `false` for is
+  /// still a refusal — which is the half the input's trip witness answers.
   fn executable_document_entry<'inp, Src, Ctx>(inp) {
-    let out = executable_document::<Src, Ctx>(inp);
-    crate::lossless::depth::drain_unless_terminal(inp, out)
+    crate::lossless::depth::drain_unless_stopped(inp, executable_document::<Src, Ctx>)
   }
 }
 
