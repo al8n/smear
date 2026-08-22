@@ -337,7 +337,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "tokora"
 version = "0.9.1"
-source = "git+https://github.com/al8n/tokora.git?branch=main#2b71dec4c65414acdedb2d89f66371fdf45ce22e"
+source = "git+https://github.com/al8n/tokora.git?branch=main#b0639644d41657ad73ac467879ba344043605499"
 dependencies = [
  "ascii",
  "deranged",
