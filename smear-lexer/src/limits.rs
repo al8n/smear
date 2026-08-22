@@ -612,12 +612,15 @@ impl LosslessLimits {
   ///
   /// # What it bounds: the lexemes that survive, plus the attempt in flight
   ///
-  /// Every lossless rule charges this tally before it runs, so the unit is the lexeme the scanner
-  /// *tried* rather than the token it managed to produce. But the tally is a field of this type,
-  /// this type is [`Lexer::State`](tokora::Lexer::State), and lossless recovery scans ahead through
-  /// tokora's `InputRef::sync_balanced`, whose no-match exit **restores the lexer state** along
-  /// with the position, the dedup watermark and the emissions. Every charge that scan made comes
-  /// back with it, so a lexeme crossed by eight failed scans is charged once.
+  /// Every lossless lexeme charges this tally before its rule runs, so the unit is the lexeme the
+  /// scanner *tried* rather than the token it managed to produce. Rules reach the charge through
+  /// the five hooks in `smear-lexer`'s `handlers` module; input **no** rule matches reaches it
+  /// through `cst_default_error`, the logos `error(…)` callback, which is a charge route and not a
+  /// rule. But the tally is a field of this type, this type is
+  /// [`Lexer::State`](tokora::Lexer::State), and lossless recovery scans ahead through tokora's
+  /// `InputRef::sync_balanced`, whose no-match exit **restores the lexer state** along with the
+  /// position, the dedup watermark and the emissions. Every charge that scan made comes back with
+  /// it, so a lexeme crossed by eight failed scans is charged once.
   ///
   /// What this ceiling refuses past is therefore *surviving lexemes plus the attempt in flight*,
   /// and what `with_max_tokens(n)` buys is a lex that stops one lexeme after its `n`th survivor —
@@ -645,12 +648,19 @@ impl LosslessLimits {
   /// times is 12 000 lexical items; `with_max_tokens(12_000)` **completes** — the tally is refunded
   /// by every failed scan, so it never gets past the 12 000 lexemes the document actually contains
   /// and nothing is ever refused on its account — and the parse records **99 963** produce-events.
-  /// That ratio belongs to the two constants and not to that document. It is
-  /// `SCAN_ALLOWANCE_FACTOR + SCAN_ALLOWANCE_FLOOR / n`: read at 8.330, 8.334, 8.337 and 8.339
-  /// over four shapes of 12 000 items in both dialects, and at 9.32 / 8.65 / 8.33 / 8.16 / 8.08
-  /// over one shape at 3 000 / 6 000 / 12 000 / 24 000 / 48 000 items as the floor amortises.
+  /// That ratio belongs to the two constants and not to that document: it is
+  /// `SCAN_ALLOWANCE_FACTOR + SCAN_ALLOWANCE_FLOOR / n`.
   /// `max_tokens_does_not_bound_the_work_the_scan_allowance_does`, in
-  /// `smear/tests/resync_allowance.rs`, is the pin on both sides of that ceiling.
+  /// `smear/tests/resync_allowance.rs`, is the pin on both sides of that ceiling, and what it runs
+  /// is two shapes at two sizes in each dialect: **8.330 / 8.164** for `[ type ] ` at 12 000 and
+  /// 24 000 items, **8.337 / 8.169** for `! ` at the same two. Those four are the readings
+  /// something in this tree reproduces.
+  ///
+  /// Wider than that gate, and marked so because nothing reproduces it: 8.330 / 8.334 / 8.337 over
+  /// #168's four census shapes at 12 000 items in both dialects, and
+  /// 9.320 / 8.655 / 8.330 / 8.164 / 8.082 over `[ type ] ` at
+  /// 3 000 / 6 000 / 12 000 / 24 000 / 48 000 items as the floor amortises. That is a campaign
+  /// measurement, kept because re-deriving the bound wants it.
   ///
   /// The durable cell is reachable — it is tokora's own `TokenBudget`, configured through an
   /// `InputContext` — and no lossless door installs one. Doing so is smear issue #193 rather than
@@ -659,10 +669,11 @@ impl LosslessLimits {
   ///
   /// # The unit changed, and the direction it changed in
   ///
-  /// Every lossless rule charges this tally before it runs. Until smear issue #183 the two hooks
-  /// that wrap a fallible rule — `tt_hook_and_then` and `tt_hook_and_then_into_errors` — charged
-  /// through `Result::inspect`, which runs on `Ok` alone, so a rule that failed cost nothing and
-  /// four rules that can only fail (`.` and `..`, GraphQL's `-` and `+`) could never charge at all.
+  /// Every lossless lexeme charges this tally before its rule runs. Until smear issue #183 the
+  /// two hooks that wrap a fallible rule — `tt_hook_and_then` and `tt_hook_and_then_into_errors` —
+  /// charged through `Result::inspect`, which runs on `Ok` alone, so a rule that failed cost
+  /// nothing and four rules that can only fail (`.` and `..`, GraphQL's `-` and `+`) could never
+  /// charge at all.
   ///
   /// A ceiling whose whole job is to bound what an untrusted document can cost therefore bounded
   /// **nothing** over malformed input, and it failed open on the cheaper document to write:

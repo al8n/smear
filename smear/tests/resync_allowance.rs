@@ -1050,11 +1050,23 @@ fn the_with_limits_doors_reach_the_same_guard() {
 /// # The ratio is the constants', not the document's
 ///
 /// `spent / max_tokens` is `FACTOR + floor / max_tokens`, which is a statement about the guard.
-/// Over four shapes at 12 000 lexemes — two bracket kinds and two junk densities, reaching both
-/// recovery helpers, in both dialects — it reads 8.330 / 8.334 / 8.337 / 8.339, a spread of 0.1%.
-/// Over one shape at 3 000 / 6 000 / 12 000 / 24 000 / 48 000 lexemes it reads
-/// 9.32 / 8.65 / 8.33 / 8.16 / 8.08, converging on `FACTOR` as the floor amortises. Pinning 8.33
-/// would have been a pin on a document of 12 000 lexemes; the two-sided bound is not.
+///
+/// **What the cells below run, and the only readings this file witnesses**: two shapes at two
+/// sizes in each enabled dialect — `[ type ] ` at 12 000 and 24 000 lexemes, `! ` at the same two,
+/// reaching both recovery helpers. They read **8.330 / 8.164** and **8.337 / 8.169**, identical in
+/// GraphQL and GraphQLx. The size axis is what moves the number; the shape axis moves it by 0.1%.
+///
+/// **Off-gate, and labelled so because nothing here reproduces it.** Widening the shape axis to
+/// #168's four census shapes at 12 000 lexemes reads 8.330 (`[ type ] `), 8.334 (`( type ) ` and
+/// `@ ( ) `) and 8.337 (`! `); widening the size axis on `[ type ] ` to
+/// 3 000 / 6 000 / 12 000 / 24 000 / 48 000 reads 9.320 / 8.655 / 8.330 / 8.164 / 8.082,
+/// converging on `FACTOR` as the floor amortises. Both series were taken by hand against this
+/// tree, and they are kept rather than deleted because a reader re-deriving the bound wants them —
+/// but no cell here runs them, so they are a campaign measurement and not a witness. An earlier
+/// revision quoted a fourth 12 000-lexeme value, 8.339, which no census shape in either dialect
+/// produces.
+///
+/// Pinning 8.33 would have been a pin on a document of 12 000 lexemes; the two-sided bound is not.
 ///
 /// # `peak_spent` is this parse's total, and the cell asserts what makes it one
 ///
@@ -1065,10 +1077,29 @@ fn the_with_limits_doors_reach_the_same_guard() {
 ///
 /// # The control, because one lexeme of headroom is the whole difference
 ///
-/// At `max_tokens = items - 2` the same document refuses **nothing** and the recovery never runs.
-/// A ceiling the parse trips does bound the work; what it cannot do is bound the work of a parse
-/// it never trips. Without that half the cell would read as "this shape is quadratic" rather than
-/// as "this ceiling is not a work bound".
+/// At `max_tokens = items - 2` the parse trips the ceiling, and the durable work stops with it:
+/// the tree comes back carrying `max_tokens + 1` tokens and nothing beyond them. That is what
+/// `control.items == items - 1` asserts, and it is the assertion that witnesses the cliff — a
+/// token cannot be in the tree without having been lexed. Measured on `[ type ] ` x2000: **11 999**
+/// tree tokens and 3 diagnostics under `max_tokens(11_998)`, against 12 000 tokens and 99 963
+/// produce-events one lexeme higher. About 12 000 durable lexemes against 99 963 is a factor of
+/// **8.3**, which is the allowance multiplier rather than anything about this shape.
+///
+/// **`control.spent` is not that number and must not be read as one**, which is the mistake an
+/// earlier revision of this paragraph made: it read the 5 below as the work and concluded that the
+/// control "refuses nothing and the recovery never runs". `peak_spent` samples `spent` at recovery
+/// *decision points* only. The control's first `resync_to` happens at `committed = 4` and records
+/// `spent = 5`; that scan is **permitted**, runs until the tally trips, and tokora's `skip_until`
+/// takes its `Scan::Tripped` exit — which commits the scanned prefix at the durable frontier. No
+/// later recovery call re-samples, so the reading stays at 5 while about 12 000 lexemes were
+/// durably produced. `control.spent != 0` is itself the contradiction: only `record()` inside
+/// `scan_allowance_exhausted` writes it. It is not shape-generic either — the `! ` cells read 1.
+///
+/// What survives from that paragraph is `control.refusals == 0`: a ceiling the parse trips bounds
+/// the work outright, where the cells above measure a parse whose ceiling never trips. Without
+/// that half the cell would read as "this shape is quadratic" rather than as "this ceiling is not
+/// a work bound". `control.spent` is printed beside `control.items` as an instrument reading, and
+/// asserted on by nothing.
 #[test]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 #[allow(clippy::vec_init_then_push)]
@@ -1110,8 +1141,8 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
 
   println!("\n== a token ceiling against the work it does not bound ==");
   println!(
-    "  {:<6} {:<16} {:>7} {:>9} {:>9} {:>7} {:>9} {:>8}",
-    "dial", "shape", "max", "spent", "ceiling", "ratio", "refusals", "control"
+    "  {:<6} {:<16} {:>7} {:>9} {:>9} {:>7} {:>9} {:>10} {:>10}",
+    "dial", "shape", "max", "spent", "ceiling", "ratio", "refusals", "ctl-items", "ctl-spent"
   );
   for (dialect, door) in doors {
     for (atom, reps, per_rep) in shapes {
@@ -1173,8 +1204,11 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
       assert_eq!(
         control.items,
         items - 1,
-        "{dialect} {atom:?} x{reps}: a ceiling of {} did not stop the lex one lexeme past itself, \
-         so the contrast this cell rests on is not the one being measured",
+        "{dialect} {atom:?} x{reps}: a ceiling of {} did not stop the lex one lexeme past itself. \
+         This is the control's durable-work reading and the only one it has: a token cannot be in \
+         the tree without having been lexed, so the tree's size under a tripped ceiling IS the \
+         work that survived. `control.spent` is not — it is a sample taken at the single recovery \
+         call this parse makes, long before the tally trips",
         items - 2
       );
       assert_eq!(
@@ -1184,12 +1218,13 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
       );
 
       println!(
-        "  {dialect:<6} {:<16} {items:>7} {:>9} {:>9} {:>7.3} {:>9} {:>8}",
+        "  {dialect:<6} {:<16} {items:>7} {:>9} {:>9} {:>7.3} {:>9} {:>10} {:>10}",
         format!("{atom:?}x{reps}"),
         got.spent,
         FACTOR * items + FLOOR,
         got.spent as f64 / items as f64,
         got.refusals,
+        control.items,
         control.spent
       );
     }
@@ -1209,9 +1244,45 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
 /// that succeeds — truncated at 2. The cheaper document to write was the one the ceiling could not
 /// see.
 ///
-/// Both truncate now. `-` stops at **101**, which is `max_tokens + 1` because the tally is checked
-/// before the charge and refuses at strictly greater; `!` is unchanged at 2, which is what makes
-/// the first number a change of unit rather than a change of ceiling.
+/// Both truncate now. `-` stops at **101**, which is `max_tokens + 1`, and the check that stops it
+/// is not this crate's. Every route charges before the rule runs, so lexeme 101 takes the tally to
+/// 101; tokora's logos adapter then runs its **one post-scan `check()`** — placed outside the
+/// `Ok`/`Err` split precisely because a callback may mutate `extras` and the item still arrive as
+/// a lexer error — reads `tokens() > limitation()` and latches its poison flag, which is what
+/// `max_tokens + 1` is counting. `smear-lexer`'s own pre-charge `check()` is belt-and-braces here:
+/// starting from an untripped state it would first refuse at lexeme **102**, and the adapter has
+/// poisoned one lexeme earlier. `!` is unchanged at 2, which is what makes the first number a
+/// change of unit rather than a change of ceiling.
+///
+/// The `]` row is the witness for that sentence rather than an argument for it:
+/// `decrease_recursion_depth_and_increase_token` runs **no check at all**, and it measures the
+/// same 101. A refusal performed by the hook's own check could not be reached down that route.
+///
+/// # The rows are charge routes, not rules, and that distinction is the finding
+///
+/// #183's census enumerated the lossless **rules** and found every one routed through a charging
+/// hook. Two charge sites are not rules, so it could not see them, and this is where they are
+/// pinned:
+///
+/// - `cst_default_error` — the `error(TokenErrors, …)` callback both dialects install for input no
+///   rule matches, four copies across GraphQL and GraphQLx, `str` and `slice`. `%` is the row, and
+///   the measurement that says it is needed: with the charge planted away from all four copies,
+///   `cargo test -p smear --features rowan` runs 506 tests and **this row is the only failure**,
+///   while `cargo test -p smear-lexer` stays green at 128. `%` x4000 under `max_tokens(100)` goes
+///   101 -> 4001 there, which is the fail-open #183 closed for `-`, `+` and `.`.
+/// - `decrease_recursion_depth_and_increase_token` — the closing-bracket handler, `}`, `]`, `)`
+///   and GraphQLx's `>`. `]` is the row. Unlike the callback this route was already covered
+///   incidentally: planting its charge away also reds
+///   `max_tokens_does_not_bound_the_work_the_scan_allowance_does` on `committed + SETTLE >= items`
+///   (committed 9 999 against 12 000 lexemes) and `every_refusal_commits_at_least_one_item` on a
+///   zero gap. Both messages are about where a recovery call sat, and neither names a charge. The
+///   row is here so the route has one reading that does.
+///
+/// The census's first blind spot was durability — a charge a rollback refunds, which is the whole
+/// of `max_tokens_does_not_bound_the_work_the_scan_allowance_does`. This is its second:
+/// **coverage-of-rules is not coverage-of-routes.** A charge reached through an error callback, or
+/// through a `#[token(…)]` attribute's own handler, is not an entry in a census of rules, and the
+/// defence that costs least is a row here for each route.
 #[test]
 #[cfg(feature = "graphql")]
 fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
@@ -1233,6 +1304,24 @@ fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
       4_000,
       "the reading #183 did NOT move has moved, so this pair is no longer the contrast between a \
        rule that can only fail and one that succeeds",
+    ),
+    (
+      "%",
+      CEILING + 1,
+      4_001,
+      "`cst_default_error` has stopped charging the tally. It is the `error(TokenErrors, …)` \
+       callback, not a rule, so #183's rule census never covered it and this row is the only \
+       thing that does — `smear-lexer/src/{graphql,graphqlx}/handlers/{str,slice}.rs`, four \
+       copies, each calling `lexer.extras.increase_token()`",
+    ),
+    (
+      "]",
+      CEILING + 1,
+      4_000,
+      "`decrease_recursion_depth_and_increase_token` has stopped charging the tally. That route \
+       runs no `check()` of its own, which is also why this row reading the same 101 as `-` is \
+       what says the refusal is tokora's post-scan check rather than `smear-lexer`'s pre-charge \
+       one",
     ),
   ] {
     let src = atom.repeat(4_000);
