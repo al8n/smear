@@ -251,6 +251,21 @@ pub mod trivia;
 pub mod ty;
 pub mod value;
 
+// THE SUBSTRATE'S VERDICT MACHINERY IS DRIVEN FROM HERE — smear PR #189, round 5. Four cells call
+// `lossless::depth`'s `root_turn`, `RootStop` and `drain_unless_stopped` directly, which is the
+// only way to ask which term of a root's stop is alone on which population and what the drain does
+// with a failure no turn judged. They lived in `smear/tests/nesting_depth.rs` until that machinery
+// went `pub(crate)` — an integration test is a separate crate and sees `pub` and nothing else — so
+// they had to come in-crate, and this dialect is where they belong rather than beside the code
+// they drive: every cell pins GraphQL's lexer, its `Lang` marker and `smear_lexer::limits`, and a
+// `mod tests` under `lossless/` would have put all of that inside the dialect-generic substrate.
+// Gate 6 (`smear/tests/lossless_isolation.rs`) is the instrument that says so, and it reddened on
+// exactly that. A dialect assembly driving the substrate is what the Lego rule is *for*; the
+// substrate naming a dialect is what it forbids. No `feature = "graphql"` on the gate — this file
+// is only compiled when that feature is on.
+#[cfg(test)]
+mod tests;
+
 // The three document roots this suite parses, all at the same module level and all
 // `fn(&str) -> Parse`: the mixed one (`parse_document`), the SDL-only one and the executable-only
 // one. A consumer picks a root here, once, rather than parsing the mixed form and filtering the

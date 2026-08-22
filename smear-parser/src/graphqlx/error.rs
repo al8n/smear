@@ -198,9 +198,9 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// records: smear issue #169's repair makes the **parser itself** ask whether an error is this
   /// one, at every document root that catches, and a string discriminator is one edit away from
   /// answering `false` forever with nothing failing. This enum's [`MaybeTerminal`] arm is the
-  /// reader, and it answers off the variant — beside tokora's resource-trip counter, which
-  /// [`root_turn`](crate::lossless::depth::root_turn) reads and no error value can discard
-  /// (smear issue #178).
+  /// reader, and it answers off the variant — beside tokora's resource-trip counter, which the
+  /// substrate's crate-private `root_turn` reads and no error value can discard (smear issue
+  /// #178).
   #[from(skip)]
   NestingLimitExceeded,
   /// A dialect-specific message not represented by a dedicated variant.
