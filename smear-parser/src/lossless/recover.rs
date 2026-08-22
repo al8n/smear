@@ -186,6 +186,10 @@
 //! moves the denominator by at least one. Measured over every single-token junk alphabet in both
 //! dialects, per refusal rather than averaged over the run: the smallest gap between two
 //! consecutive refusals is **1** for dense junk and 2 for spaced, and zero never occurs.
+//! `every_refusal_commits_at_least_one_item` runs both dialects, and it has to — GraphQLx
+//! carries 46 `tt_hook_and_then` rules of its own, so the arithmetic behind exception 2 is its
+//! arithmetic too, even though its richer token set commits most ASCII junk and makes the regime
+//! harder to reach there.
 //!
 //! **That is a floor on `m`, not a promise that the guard re-closes.** Re-closing needs the local
 //! commit rate to outpace the local spend rate, so junk carrying more than `FACTOR - 1` error
@@ -222,6 +226,19 @@
 //! (exception 2), so their ratio drifts with error density by construction, and a threshold on it
 //! fails with no defect present. Doubling the construction and watching the numerator is the
 //! mechanism; the ratio was an artifact of the four error-free shapes it was read on.
+//!
+//! **What that gate cannot see, stated here so it is not rediscovered.** One doubling at one
+//! size is blind to superlinearity milder than about `n^1.38` — the gap between the 2.6
+//! threshold and the 2.0 a linear shape reads — and blind to a defect whose onset lies past the
+//! sizes it runs. Neither is a hole in the bound, because the bound is structural
+//! (`spent <= FACTOR * committed + floor`, with `committed <= T`) and the gate is a tripwire on
+//! it rather than its proof. Covering the milder band means a third size, not a tighter
+//! threshold.
+//!
+//! Its five constructions are also not five witnesses of the same thing: **two run at zero
+//! refusals at both sizes**, so they pin alternation with *successful* scans and say nothing
+//! about refill. Three carry the refill property. Counting the cases overcounts the evidence by
+//! two.
 //!
 //! ## What the guard costs when it fires
 //!
@@ -524,7 +541,7 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// Should that stop being true, a rollback lowers `committed` and never lowers `spent`, so the
 /// guard engages *earlier*: recovery coarsens, the bound holds, and nothing becomes unsound.
 #[inline]
-pub fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
+pub(crate) fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
   #[cfg(all(feature = "test-support", feature = "std"))]
   scan_allowance::record(spent, committed);
   let exhausted = spent

@@ -33,6 +33,15 @@
 use smear::parser::lossless::recover::scan_allowance;
 use std::time::Instant;
 
+/// One dialect's row in `every_refusal_commits_at_least_one_item`: a label, its document root, the
+/// atom that burns the allowance there, and the junk alphabet that then reaches recovery.
+type Cell = (
+  &'static str,
+  fn(&str) -> (usize, usize),
+  &'static str,
+  &'static [&'static str],
+);
+
 /// A parse reduced to the three facts every test here reads.
 struct Run {
   diagnostics: usize,
@@ -438,33 +447,59 @@ fn error_density_is_a_bounded_known_cost() {
 #[cfg(feature = "graphql")]
 fn every_refusal_commits_at_least_one_item() {
   println!("\n== committed items per refusal ==");
-  for junk in ["!", "! ", "@", ":", "=", "|", "&", "!@:=|&", "()", "( )"] {
-    let src = format!("{}{}", "-".repeat(20_000), junk.repeat(6_000));
-    let got = run(gql_document, &src);
-    assert_eq!(got.covered, src.len(), "{junk:?}");
-    assert!(
-      got.refusals > 0,
-      "{junk:?}: no refusal, so this constrains nothing"
-    );
-    // The MINIMUM gap between two consecutive refusals, not the average over thousands of them.
-    // An average cannot fail on a single zero-commit refusal, which is the only thing that would
-    // freeze the denominator, so an average asserts almost nothing here.
-    let min_gap = scan_allowance::min_commit_between_refusals().unwrap_or_else(|| {
-      panic!("{junk:?}: fewer than two refusals, so there is no gap to measure")
-    });
-    println!(
-      "  {:<10} refusals={:6} committed={:7} min gap={min_gap} (avg {:.3})",
-      format!("{junk:?}"),
-      got.refusals,
-      got.peak_committed,
-      got.peak_committed as f64 / got.refusals as f64
-    );
-    assert!(
-      min_gap >= 1,
-      "{junk:?}: two consecutive refusals with {min_gap} committed items between them. At zero \
-       the denominator stops moving and the guard latches instead of clearing — the degradation \
-       would be permanent rather than proportional to the error run."
-    );
+  // Both dialects, because the arithmetic behind exception 2 is shared and GraphQLx carries 46
+  // `tt_hook_and_then` rules of its own. Its burn atom differs: `-` and `+` are real, counted
+  // tokens there, so the leading-zeros number error stands in for them.
+  let cells: [Cell; 2] = [
+    (
+      "gql",
+      gql_document,
+      "-",
+      &["!", "! ", "@", ":", "=", "|", "&", "!@:=|&", "()", "( )"],
+    ),
+    (
+      "gqlx",
+      gqlx_document,
+      "00",
+      // `:` is deliberately absent and `*`, `+`, `-`, `=>` deliberately present. A run of colons
+      // lexes as `::` in this dialect, which IS a sync point, so it zero-skips through at zero
+      // refusals — the non-vacuity guard below caught that, which is how it was found. The four
+      // that replace it are junk here and are tokens GraphQL does not have.
+      &[
+        "!", "! ", "@", "=", "|", "&", "*", "+", "-", "=>", "!@:=|&", "()", "( )",
+      ],
+    ),
+  ];
+  for (dialect, root, burn, alphabet) in cells {
+    for junk in alphabet {
+      let src = format!("{}{}", burn.repeat(20_000), junk.repeat(6_000));
+      let got = run(root, &src);
+      assert_eq!(got.covered, src.len(), "{dialect} {junk:?}");
+      assert!(
+        got.refusals > 1,
+        "{dialect} {junk:?}: {} refusals, so there is no gap to measure and this cell constrains \
+         nothing",
+        got.refusals
+      );
+      // The MINIMUM gap between two consecutive refusals, not the average over thousands of them.
+      // An average cannot fail on a single zero-commit refusal, which is the only thing that would
+      // freeze the denominator, so an average asserts almost nothing here.
+      let min_gap = scan_allowance::min_commit_between_refusals()
+        .expect("more than one refusal, so a gap exists");
+      println!(
+        "  {dialect:<5} {:<10} refusals={:6} committed={:7} min gap={min_gap} (avg {:.3})",
+        format!("{junk:?}"),
+        got.refusals,
+        got.peak_committed,
+        got.peak_committed as f64 / got.refusals as f64
+      );
+      assert!(
+        min_gap >= 1,
+        "{dialect} {junk:?}: two consecutive refusals with {min_gap} committed items between \
+         them. At zero the denominator stops moving and the guard latches instead of clearing — \
+         the degradation would be permanent rather than proportional to the error run."
+      );
+    }
   }
 }
 
@@ -752,6 +787,59 @@ fn the_with_limits_doors_reach_the_same_guard() {
       got.0, got.1, got.2
     );
   }
+}
+
+/// The burnt twin of `lossless_document::a_resync_that_lands_on_a_definition_head_does_not_eat_it`.
+///
+/// `resync_to`'s refusal is four lines rather than one because the `None` arm and a zero-skip
+/// `Some` mean different things there: a zero-skip sync says the restart point is the token **at
+/// hand**, and taking the `None` arm eats it — `type T { a scalar S }` loses its
+/// `ScalarTypeDefinition` that way. So a refused scan still answers the zero-skip question, with
+/// `head_satisfies` instead of a walk.
+///
+/// # Why the unburnt pin does not cover this
+///
+/// It parses `type T { a scalar S }` on its own, where the allowance is wide open, so it takes the
+/// `sync_balanced` path and never reaches `head_satisfies` at all. **A regression flipping that arm
+/// to `false` passes the entire suite** — the arm exists only for the burnt regime, and nothing in
+/// the suite composed a burn with junk stopping exactly on a definition head.
+///
+/// This is that composition: an error run long enough to close the guard, then the pin's own
+/// shape. Planted to confirm it is separately covered rather than incidentally — with the arm
+/// forced to `false`, this cell reds on the missing `ScalarTypeDefinition` while the unburnt pin
+/// stays green, which is the pair that shows the two regimes are distinct.
+#[test]
+#[cfg(feature = "graphql")]
+fn a_burnt_resync_that_lands_on_a_definition_head_still_does_not_eat_it() {
+  use smear::parser::graphql::kinds::SyntaxKind as K;
+
+  let tail = "type T { a scalar S }";
+  let src = format!("{}{tail}", "-".repeat(20_000));
+  scan_allowance::reset();
+  let parse = smear::parser::graphql::lossless::parse_document(&src);
+  let refusals = scan_allowance::refusals();
+
+  assert_eq!(
+    parse.syntax().text().to_string(),
+    src,
+    "the lossless text must survive"
+  );
+  assert!(
+    refusals > 0,
+    "the guard never closed, so this ran the same path as the unburnt pin and covers nothing new. \
+     The leading error run has to be long enough to blow SCAN_ALLOWANCE_FLOOR."
+  );
+  let kinds: Vec<K> = parse.syntax().descendants().map(|n| n.kind()).collect();
+  assert!(
+    kinds.contains(&K::ScalarTypeDefinition),
+    "the definition the resync stopped at was eaten under a closed guard. `resync_to`'s refusal \
+     arm must still answer the zero-skip question — `head_satisfies(is_restart_point)` — rather \
+     than falling through to the consume-one `None` arm. Kinds: {kinds:?}"
+  );
+  println!(
+    "\n== burnt zero-skip arm ==\n  bytes={} refusals={refusals} ScalarTypeDefinition survives",
+    src.len()
+  );
 }
 
 /// The guard changed nothing on the shapes it governs.
