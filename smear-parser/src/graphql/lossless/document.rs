@@ -430,9 +430,9 @@ lossless_production! {
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
           match depth::root_turn(inp, stop, definition::<Src, Ctx>) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) => return Err(e),
-            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -462,9 +462,9 @@ lossless_production! {
           // The refusal arm [`document`]'s note explains, through the same call — and the same
           // slot, for the reason its `stop` note gives.
           match depth::root_turn(inp, stop, type_system_definition_or_extension::<Src, Ctx>) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) => return Err(e),
-            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -483,15 +483,14 @@ lossless_production! {
   ///
   /// The drain is [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped)
   /// rather than a bare `skip_while`, because a refusal must not read the tail: see that
-  /// function's note for the diagnostic count that costs. It takes the **classified** ending
-  /// rather than [`document`]'s bare `Result`, and that is not a style choice — the verdict is
+  /// function's note for the diagnostic count that costs. It is handed [`document`] **itself**,
+  /// and that is not a style choice — the verdict is
   /// [`depth::root_turn`](crate::lossless::depth::root_turn)'s, decided per entry, and any
   /// re-derivation out here is a reading over the whole root, which is the wrong span for the
-  /// question (smear PR #189).
+  /// question (smear PR #189). The slot that carries it is minted, lent and spent inside that one
+  /// call, so this production has no step of the pairing it could get wrong.
   fn document_entry<'inp, Src, Ctx>(inp) {
-    let mut stop = depth::RootStop::new();
-    let out = document::<Src, Ctx>(inp, &mut stop);
-    depth::drain_unless_stopped(inp, stop.ending(out))
+    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
   }
 
   /// [`type_system_document`] plus the drain, for the same reason [`document_entry`] carries one.
@@ -502,8 +501,6 @@ lossless_production! {
   /// parser's result, so without the drain that tail would be a `FinishError::UncoveredGap` panic
   /// in materialization instead of a reportable parse.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    let mut stop = depth::RootStop::new();
-    let out = type_system_document::<Src, Ctx>(inp, &mut stop);
-    depth::drain_unless_stopped(inp, stop.ending(out))
+    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
   }
 }

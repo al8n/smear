@@ -115,7 +115,7 @@
 //! counter, and tokora's scanner-side witness is withdrawn for cause (al8n/tokora#311). Each term
 //! is alone on a population, and `nesting_depth.rs` reddens separately for each deletion.
 //!
-//! # The drain does not re-derive the verdict, it is handed one — smear PR #189
+//! # The drain does not re-derive the verdict, and cannot be handed a forged one — smear PR #189
 //!
 //! [`drain_unless_stopped`] used to take the counter's baseline itself, around the **whole root**,
 //! and that placement is wrong for the same reason hoisting one out of a root loop is: the counter
@@ -127,10 +127,26 @@
 //!
 //! So the drain no longer asks. [`root_turn`] already decided which of [`RootTurn::Parsed`],
 //! [`RootTurn::EndsTheDocument`] and [`RootTurn::Recoverable`] the entry ended on, and that
-//! classification is now **carried** to the drain — through [`RootStop`], the slot a root threads
-//! down to its loop, which only [`root_turn`] writes and which [`RootStop::ending`] spends to
-//! build the [`RootTurn`] [`drain_unless_stopped`] takes by value. The drain reads no counter, and
-//! there is no way to reach it without having said which of the three endings the root had.
+//! classification is **carried** to the drain — through [`RootStop`], the slot a root threads down
+//! to its loop, which only [`root_turn`] writes. The drain reads no counter.
+//!
+//! # Carrying the verdict was two thirds of it; the carrier being public data was the rest
+//!
+//! Two adversarial rounds each found one way to hand the drain a verdict that describes nothing,
+//! and they are one defect: **the invariant — *the verdict handed to the drain describes the
+//! failure being drained* — was not expressible in this module's types.** Round 1 re-derived the
+//! verdict from a counter whose span is the whole root; round 2 did not need to derive it at all,
+//! because a `Default` slot minted the "no stop" verdict, a `Copy` slot could be paired with a
+//! *different* root's result, and a [`RootTurn`] variant could simply be written out. Each repair
+//! moved the unexpressible part rather than removing it.
+//!
+//! What removes it is that the four steps are **one call**. [`drain_unless_stopped`] runs the root
+//! itself: it mints the slot, lends it to that root for the duration of that call, spends it
+//! against that root's own `Result`, and drains or does not. Every step it does not take is out of
+//! reach — [`RootStop`] has no `Default`, no `Copy`, a private field, a private constructor and a
+//! private spend; [`RootTurn`]'s variants are `#[non_exhaustive]`, so out of crate they match but
+//! do not build. The claim and the subject are joined by the frame that owns both, and a caller
+//! cannot obtain either half on its own.
 
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan,
@@ -305,12 +321,41 @@ where
 ///
 /// # One type at two scales, because it is one question
 ///
-/// [`drain_unless_stopped`] takes this too, built by [`RootStop::ending`] out of what the root's
-/// **last** turn decided and the `Result` the root returned. The scales differ — the loop asks
-/// about one entry, the drain about the whole root — and the question does not: *did this failure
-/// end the document, or is there a tail still worth committing?* A second three-arm type spelled
-/// the same way would be two places for one answer to drift, and drift between exactly these two
-/// readers is smear PR #189.
+/// [`drain_unless_stopped`] builds one of these too, out of what the root's **last** turn decided
+/// and the `Result` that root returned. The scales differ — the loop asks about one entry, the
+/// drain about the whole root — and the question does not: *did this failure end the document, or
+/// is there a tail still worth committing?* A second three-arm type spelled the same way would be
+/// two places for one answer to drift, and drift between exactly these two readers is smear
+/// PR #189.
+///
+/// # The variants match and do not build — smear PR #189, round 3
+///
+/// Each carries `#[non_exhaustive]`. Out of crate that removes the variant's constructor and
+/// leaves the pattern: a consumer's root loop still writes
+/// `RootTurn::EndsTheDocument { error, .. }`, still gets exhaustiveness checking over all three,
+/// and cannot write the same words as an **expression**. Before it, a caller who found
+/// [`root_turn`] inconvenient could write out the arm they preferred and hand it to the drain —
+/// which is [`root_turn`]'s whole job re-implemented by the party the input's trip witness exists
+/// to be independent of, and in both directions: a fabricated `Recoverable` runs the tail drain
+/// over a genuine refusal (`1 + n` diagnostics, the amplification smear issue #178 closes), and a
+/// fabricated `EndsTheDocument` suppresses the drain and leaves a valid suffix opaque.
+///
+/// ```compile_fail,E0639
+/// use smear_parser::lossless::depth::RootTurn;
+///
+/// // Round 2's finding in one line: the drain's input type was public data.
+/// let forged: RootTurn<(), ()> = RootTurn::Recoverable { error: () };
+/// ```
+///
+/// **The variants are braced rather than tupled, and that is forced by the attribute.** On a
+/// *tuple* variant `#[non_exhaustive]` privates the constructor, and a tuple pattern out of crate
+/// resolves through that same constructor — so `RootTurn::Recoverable(e, ..)` is `E0603` and a
+/// consumer is left spelling `RootTurn::Recoverable { 0: e, .. }` to read a verdict. A named field
+/// costs one word at each arm and keeps the read side ordinary.
+///
+/// **On the variants and deliberately not on the enum.** On the enum it would force a wildcard arm
+/// at every root loop, and a wildcard arm is exactly what would silently absorb a fourth ending if
+/// one were ever added. The six loops need the opposite: to stop compiling.
 ///
 /// `#[must_use]`, and that is the last hand-copied step this could still lose: a root that calls
 /// [`root_turn`] and drops the verdict compiles, parses, and resynchronises past every refusal —
@@ -320,17 +365,29 @@ where
               refusal, which is smear issue #169"]
 pub enum RootTurn<T, E> {
   /// The entry parsed. The loop takes another turn.
-  Parsed(T),
+  #[non_exhaustive]
+  Parsed {
+    /// What the entry produced — `()` for every production in this workspace.
+    parsed: T,
+  },
   /// The entry failed, and the failure **ends the document**: return it, resynchronise past
   /// nothing, and read no more input.
   ///
   /// Two independent things can put a failure here — the error value's own
   /// [`MaybeTerminal::is_terminal`] arm, and the input's resource-trip witness — and
   /// [`root_turn`] documents why neither covers the other.
-  EndsTheDocument(E),
+  #[non_exhaustive]
+  EndsTheDocument {
+    /// The failure, already reported at the point of failure.
+    error: E,
+  },
   /// The entry failed with an ordinary syntax error, already reported at the point of failure.
   /// The root drops it and resynchronises.
-  Recoverable(E),
+  #[non_exhaustive]
+  Recoverable {
+    /// The syntax error, already reported at the point of failure.
+    error: E,
+  },
 }
 
 /// Carries what [`root_turn`] decided out of the loop that asked it and up to the drain above the
@@ -347,11 +404,40 @@ pub enum RootTurn<T, E> {
 /// defect PR #189 repairs, because that counter's span is the whole root and the question's span
 /// is one entry.
 ///
-/// So a root takes one of these as a parameter, threads it into the closure, and hands it back to
-/// its `*_entry` production, which spends it with [`ending`](Self::ending). Nothing else can write
-/// it: the field is private and [`root_turn`] is the only writer in the module, so a root loop
-/// cannot mark a stop by hand, and a drain cannot be reached without one of the three arms
-/// [`ending`](Self::ending) produces.
+/// So a root takes one of these as a parameter and threads it into the closure. Nothing else can
+/// write it: the field is private and [`root_turn`] is the only writer in the module, so a root
+/// loop cannot mark a stop by hand.
+///
+/// # Nothing outside this module can mint one, copy one, or spend one — smear PR #189, round 3
+///
+/// Making the field private closed the *marking* path and left the *minting* one open, and a fresh
+/// slot already carries the dangerous verdict. `Default` and a public constructor meant a caller
+/// could produce a slot that says "no stop" and pair it with any `Result` at all — a full tail
+/// drain over a genuine refusal, reached without asking [`root_turn`] anything, which is smear
+/// issue #178's amplification through the front door. `Copy` meant a classified slot could be
+/// duplicated and one copy paired with a *different* root's result, so "spent exactly once, by the
+/// frame that owns both" described a guarantee the type did not have.
+///
+/// It has no `Default`, no `Clone`, no `Copy`, a private field, a private constructor and a
+/// private spend. The only handle a caller can hold is the `&mut` [`drain_unless_stopped`] lends
+/// to the root it is about to judge, for that one call. That borrow is higher-ranked — the `Root`
+/// bound elides its lifetime, so it is `for<'s> &'s mut RootStop` — which is what stops it being
+/// stashed anywhere that outlives the call, and what keeps two nested drains from reaching each
+/// other's slot.
+///
+/// ```compile_fail,E0599
+/// // A fresh slot is not a neutral value. Minting one is minting the verdict "this root did not
+/// // stop", which is the one that runs the drain.
+/// let forged = smear_parser::lossless::depth::RootStop::default();
+/// ```
+///
+/// ```compile_fail,E0507
+/// // A classified slot cannot be taken out of the borrow it arrived in and paired with a second
+/// // root's result. `.clone()` does not resolve either.
+/// fn keep_a_copy(stop: &mut smear_parser::lossless::depth::RootStop) {
+///   let _mine = *stop;
+/// }
+/// ```
 ///
 /// # It is assigned, not latched
 ///
@@ -361,7 +447,7 @@ pub enum RootTurn<T, E> {
 /// failure, skip the drain, and leave the valid suffix opaque. The roots in this workspace return
 /// `Err` immediately on [`RootTurn::EndsTheDocument`], so for them the last turn is the only turn
 /// that can be a stop; assignment is what keeps that true for a root that does not.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct RootStop {
   ends_the_document: bool,
 }
@@ -369,11 +455,11 @@ pub struct RootStop {
 impl RootStop {
   /// A fresh slot, recording no stop.
   ///
-  /// A root's `*_entry` production mints one, hands `&mut` it to the root, and spends it with
-  /// [`ending`](Self::ending).
+  /// Private, and that is the round-3 half of smear PR #189: [`drain_unless_stopped`] is the only
+  /// frame that mints one, and it mints it for the root it is about to run. See the type's own
+  /// note for what a public one bought a caller.
   #[inline]
-  #[must_use]
-  pub const fn new() -> Self {
+  const fn new() -> Self {
     Self {
       ends_the_document: false,
     }
@@ -387,18 +473,19 @@ impl RootStop {
 
   /// Spends the slot: pairs the root's own `Result` with what its last turn decided.
   ///
-  /// This is the only constructor of the value [`drain_unless_stopped`] takes, and it consumes
-  /// `self`, so the classification and the outcome are joined exactly once, by the frame that
-  /// owns both.
+  /// Private, and consuming `self`, so the classification and the outcome are joined exactly once
+  /// and only by [`drain_unless_stopped`] — which holds both because it minted the one and ran the
+  /// root that produced the other. A public spend is a `fn(verdict, any Result) -> verdict about
+  /// that Result`, which is the forgery this module's two earlier rounds each relocated.
   ///
   /// No `#[must_use]` here: [`RootTurn`] already carries one, with the message that says what
   /// dropping it costs, and a second bare one is `clippy::double_must_use`.
   #[inline]
-  pub fn ending<T, E>(self, out: Result<T, E>) -> RootTurn<T, E> {
+  fn ending<T, E>(self, out: Result<T, E>) -> RootTurn<T, E> {
     match out {
-      Ok(parsed) => RootTurn::Parsed(parsed),
-      Err(e) if self.ends_the_document => RootTurn::EndsTheDocument(e),
-      Err(e) => RootTurn::Recoverable(e),
+      Ok(parsed) => RootTurn::Parsed { parsed },
+      Err(error) if self.ends_the_document => RootTurn::EndsTheDocument { error },
+      Err(error) => RootTurn::Recoverable { error },
     }
   }
 }
@@ -409,9 +496,9 @@ impl RootStop {
 ///
 /// ```text
 /// match depth::root_turn(inp, stop, one_entry::<Src, Ctx>) {
-///   RootTurn::Parsed(()) => {}
-///   RootTurn::EndsTheDocument(e) => return Err(e),
-///   RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
+///   RootTurn::Parsed { .. } => {}
+///   RootTurn::EndsTheDocument { error } => return Err(error),
+///   RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
 /// }
 /// ```
 ///
@@ -516,25 +603,80 @@ where
   // PR #189.
   stop.record(ends_the_document);
   match out {
-    Ok(parsed) => RootTurn::Parsed(parsed),
-    Err(e) if ends_the_document => RootTurn::EndsTheDocument(e),
-    Err(e) => RootTurn::Recoverable(e),
+    Ok(parsed) => RootTurn::Parsed { parsed },
+    Err(error) if ends_the_document => RootTurn::EndsTheDocument { error },
+    Err(error) => RootTurn::Recoverable { error },
   }
 }
 
-/// Drains whatever a root left uncommitted — unless the root said its failure stopped the parse.
+/// Runs a document root, then drains whatever it left uncommitted — unless the root said its
+/// failure stopped the parse.
 ///
 /// `drain_unless_terminal` over an ending that has already been classified, rather than over a
-/// bare `Result`. The classification is [`root_turn`]'s, spent into a [`RootTurn`] by
-/// [`RootStop::ending`]; an `*_entry` production writes
+/// bare `Result`. The classification is [`root_turn`]'s. An `*_entry` production writes
 ///
 /// ```text
-/// let mut stop = depth::RootStop::new();
-/// let out = the_root::<Src, Ctx>(inp, &mut stop);
-/// depth::drain_unless_stopped(inp, stop.ending(out))
+/// depth::drain_unless_stopped(inp, the_root::<Src, Ctx>)
 /// ```
 ///
 /// and nothing else.
+///
+/// # It runs the root, and that is the whole of smear PR #189's round 3
+///
+/// It used to take the finished [`RootTurn`], leaving four separately spellable steps: mint a
+/// slot, run a root with it, spend the slot against a `Result`, drain. Three of the four were
+/// public, so the pairing they exist to make was a pairing a caller could make differently — a
+/// `Default` slot spent against a genuine refusal, a `Copy` of one root's classified slot spent
+/// against another root's result, or a [`RootTurn`] variant written out with no root behind it at
+/// all. Each is a verdict that describes nothing, and the drain has no way to tell.
+///
+/// **The invariant is *the verdict handed to the drain describes the failure being drained*, and
+/// four steps cannot state it.** One call can: this function mints the slot, lends it to `root`
+/// for exactly that call, spends *that* slot against *that* root's `Result`, and drains on the
+/// answer. Nothing else can mint, copy or spend a slot, and out of crate nothing can build a
+/// [`RootTurn`] — so there is no second way to reach the drain and no way to reach it with a
+/// verdict about anything but the root it just ran.
+///
+/// ```compile_fail,E0277
+/// use smear_parser::{
+///   combinator::ErrorOf,
+///   lossless::depth::{RootTurn, drain_unless_stopped},
+/// };
+/// use tokora::{InputRef, Lexer, ParseContext, SimpleSpan, error::MaybeTerminal};
+///
+/// // A verdict about one root, handed to the drain over another's result. There is no argument
+/// // position for a verdict any more: the drain takes the root, not a classification of it.
+/// fn pair_a_verdict_with_someone_elses_result<'inp, L, Ctx, Lang, T>(
+///   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+///   verdict: RootTurn<T, ErrorOf<'inp, L, Ctx, Lang>>,
+/// ) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
+/// where
+///   Lang: ?Sized,
+///   L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+///   Ctx: ParseContext<'inp, L, Lang>,
+///   ErrorOf<'inp, L, Ctx, Lang>: MaybeTerminal,
+/// {
+///   drain_unless_stopped(inp, verdict)
+/// }
+/// ```
+///
+/// # What the seal does not cover, and why that residue is the trait's population
+///
+/// A root can fail without any entry having been classified: the shipped loops' `peek_kind(inp)?`,
+/// `report_unexpected` and `resync_to_definition(inp)?` all return `Err` without going through
+/// [`root_turn`]. The slot is then still fresh, the ending is [`RootTurn::Recoverable`], and
+/// `drain_unless_terminal` asks [`MaybeTerminal`] — which is exactly the trait-only door, and the
+/// right one: an `Err` on that path can be terminal only by carrying a **scanner** stop, and the
+/// trait is the only witness that sees one (tokora's scanner-side twin is withdrawn for cause,
+/// al8n/tokora#311). A descent refusal cannot arrive unclassified in a root whose entries go
+/// through [`root_turn`], because that is the call the refusal unwinds into.
+///
+/// The other residue is inside one scope: the slot is **assigned**, so it describes the most
+/// recent classified entry, and a root that keeps parsing after a stop and then returns an
+/// *earlier* entry's error pairs this scope's verdict with a stale failure. That is a root
+/// discarding a verdict [`root_turn`] handed it — `#[must_use]` fires if it is dropped rather than
+/// matched — and not a forged one; the assignment is deliberate, and
+/// `a_caught_trip_does_not_silence_a_later_failures_drain` pins the direction that matters.
 ///
 /// # Why the drain needs the verdict, and it is not a smaller version of the root loop's point
 ///
@@ -568,25 +710,35 @@ where
 /// reads no counter at all: the fix is that the verdict arrives, not that the re-derivation got a
 /// tighter comment.
 #[inline]
-pub fn drain_unless_stopped<'inp, L, Ctx, Lang, T>(
-  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  ending: RootTurn<T, ErrorOf<'inp, L, Ctx, Lang>>,
+pub fn drain_unless_stopped<'inp, 'closure, L, Ctx, Lang, T, Root>(
+  inp: &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
+  root: Root,
 ) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
 where
   Lang: ?Sized,
   L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseContext<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: MaybeTerminal,
+  Root: FnOnce(
+    &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
+    &mut RootStop,
+  ) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
 {
-  match ending {
+  // MINTED, LENT AND SPENT HERE, AND NOWHERE ELSE. The three lines below are the whole
+  // transaction: the slot this frame created, the root this frame ran, and the pairing of the
+  // one against the other. None of the three steps is reachable on its own — see this function's
+  // `It runs the root` note for what each separately spellable step bought a caller.
+  let mut stop = RootStop::new();
+  let out = root(inp, &mut stop);
+  match stop.ending(out) {
     // The root said it stopped. Nothing reads the tail, which is what makes the refusal one
     // diagnostic — `drain_unless_terminal`'s own note carries the count.
-    RootTurn::EndsTheDocument(e) => Err(e),
+    RootTurn::EndsTheDocument { error } => Err(error),
     // The trait is still asked, on both remaining arms, by `drain_unless_terminal`: a terminal
     // value reaching a drain by a path no `root_turn` classified — a scanner stop, which moves no
     // descent counter — is the population it is alone on.
-    RootTurn::Parsed(parsed) => drain_unless_terminal(inp, Ok(parsed)),
-    RootTurn::Recoverable(e) => drain_unless_terminal(inp, Err(e)),
+    RootTurn::Parsed { parsed } => drain_unless_terminal(inp, Ok(parsed)),
+    RootTurn::Recoverable { error } => drain_unless_terminal(inp, Err(error)),
   }
 }
 

@@ -360,9 +360,9 @@ lossless_production! {
             stop,
             super::document::import_or_executable_definition::<Src, Ctx>,
           ) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) => return Err(e),
-            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -378,9 +378,7 @@ lossless_production! {
   /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) for the one
   /// outcome that must not read the tail.
   fn executable_document_entry<'inp, Src, Ctx>(inp) {
-    let mut stop = depth::RootStop::new();
-    let out = executable_document::<Src, Ctx>(inp, &mut stop);
-    depth::drain_unless_stopped(inp, stop.ending(out))
+    depth::drain_unless_stopped(inp, executable_document::<Src, Ctx>)
   }
 }
 

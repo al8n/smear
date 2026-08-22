@@ -207,9 +207,9 @@ lossless_production! {
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
           match depth::root_turn(inp, stop, document_entry_item::<Src, Ctx>) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) => return Err(e),
-            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -242,9 +242,9 @@ lossless_production! {
             stop,
             import_or_type_system_definition_or_extension::<Src, Ctx>,
           ) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) => return Err(e),
-            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -257,12 +257,10 @@ lossless_production! {
   ///
   /// See the module docs for why the drain is not optional — and
   /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) for the one
-  /// outcome that must not read the tail, and for why it takes [`document`]'s **classified**
-  /// ending rather than its bare `Result`.
+  /// outcome that must not read the tail, and for why it is handed [`document`] itself rather than
+  /// a classification of what [`document`] returned.
   fn document_entry<'inp, Src, Ctx>(inp) {
-    let mut stop = depth::RootStop::new();
-    let out = document::<Src, Ctx>(inp, &mut stop);
-    depth::drain_unless_stopped(inp, stop.ending(out))
+    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
   }
 
   /// [`type_system_document`], then a drain — the production
@@ -271,8 +269,6 @@ lossless_production! {
   /// See the module docs for why the drain is not optional; the SDL-only loop catches and
   /// resynchronises exactly as the mixed one does, so an `Err` can still escape it.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    let mut stop = depth::RootStop::new();
-    let out = type_system_document::<Src, Ctx>(inp, &mut stop);
-    depth::drain_unless_stopped(inp, stop.ending(out))
+    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
   }
 }

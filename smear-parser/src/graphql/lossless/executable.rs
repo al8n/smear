@@ -317,8 +317,10 @@ lossless_production! {
           // `resync_to_definition` call site, see the note above — and not a shortcut past the
           // verdict, which is written to `stop` for the drain either way.
           match depth::root_turn(inp, stop, executable_definition::<Src, Ctx>) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) | RootTurn::Recoverable(e) => return Err(e),
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } | RootTurn::Recoverable { error } => {
+              return Err(error);
+            }
           }
         }
         Ok(())
@@ -341,9 +343,7 @@ lossless_production! {
   /// not read the tail, and a refusal the caller's `MaybeTerminal` arm answers `false` for is
   /// still a refusal — which is the half the input's trip witness answers, carried here in `stop`.
   fn executable_document_entry<'inp, Src, Ctx>(inp) {
-    let mut stop = depth::RootStop::new();
-    let out = executable_document::<Src, Ctx>(inp, &mut stop);
-    depth::drain_unless_stopped(inp, stop.ending(out))
+    depth::drain_unless_stopped(inp, executable_document::<Src, Ctx>)
   }
 }
 
