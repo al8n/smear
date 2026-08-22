@@ -1,0 +1,87 @@
+[package]
+name = "smear-schema"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "The built-once GraphQL schema: interned names, flat tables and packed type references, with the draft §3 builder behind a feature."
+keywords = ["graphql", "schema", "no-std", "zero-copy"]
+categories = ["parsing", "web-programming", "no-std"]
+readme = "README.md"
+
+# ── WHY THE BUILDER IS A FEATURE AND NOT ANOTHER CRATE ──────────────────────────────────────
+#
+# The design's first draft made this crate `repr/` alone, so that `graphql-proto` — which reads a
+# schema at execution time — would not get the parser in its graph. That confused a FEATURE
+# boundary with a CRATE boundary, and the crate boundary then hit a rule the draft never priced:
+# `Schema::build` and `Schema::from_introspection` are INHERENT `impl Schema` blocks, and an
+# inherent impl cannot cross a crate boundary. Moving `repr/` out without them is not a pure move
+# at all; the first attempt bridged it with one extension trait per body, at a `use` line in about
+# a hundred call sites and `Schema`'s fifteen fields going `#[doc(hidden)] pub`.
+#
+# So the builder stays inherent and `build` gates it. `graphql-proto` depends on this crate with
+# `default-features = false` and still does not pull the parser, which is the only thing the old
+# shape protected.
+
+[features]
+# `std` alone. Both dialects, the parser and the builder are things a CONSUMER asks for: a schema
+# reader wants none of them, and making them default would put `smear-parser` in every graph that
+# names this crate.
+default = ["std"]
+
+# Flips the crate attribute and nothing else at this tier: the representation is `core` + `alloc`
+# in both configurations, which `cargo check -p smear-schema --no-default-features` in CI is what
+# says.
+std = ["tokora/std", "smear-parser?/std"]
+
+# Draft §3 "Type Validation" and the SDL door: `Schema::build`, `SchemaBuilder`, `SchemaError` and
+# the literal-shape table. This is the edge that pulls `smear-parser`, because the builder consumes
+# a parsed `TypeSystemDocument`.
+#
+# `error.rs` IS BEHIND THIS, which the design's §2 did not say and which is the one place this
+# manifest reads differently from it. `SchemaError` is what the build refuses with; ungated, this
+# crate would publish an error type no configuration it was compiled in could produce — the
+# unreachable-variant shape §8 files as a defect twice over — and `error.rs`'s own two doc links
+# point at `Schema::build`, so they would be unresolvable under `-D warnings` in exactly the
+# configuration that kept them. It costs the reader tier 1173 lines of compile it has no use for.
+build = ["dep:smear-parser", "smear-parser/graphql"]
+
+# The second construction door: building a `Schema` out of a draft §4 introspection response
+# instead of out of SDL. It renders the response as SDL and hands it to the same builder, so draft
+# §3 runs there too and the two doors cannot drift apart — which is why it implies `build` rather
+# than duplicating it. It no longer costs a dependency of its own; what it still gates that `build`
+# does not is the `introspection` module and the `IntrospectionError` it re-exports.
+#
+# ── WHY THIS LINE NO LONGER NAMES `std`, `dep:serde` OR `dep:serde_json` ─────────────────────
+#
+# `std` was here because `serde_json` is a `std`-only crate and the reader was
+# `serde_json::from_str`, and because the refusals went through `std::error::Error`. Neither is
+# true: the reader is `introspection/json.rs` and `introspection/decode.rs`, which are `core` +
+# `alloc` throughout, and the error types implement `core::error::Error`. That left `std` held only
+# by `serde`/`serde_json` themselves — both declared `features = [..., "std"]` — and those were
+# held by nothing: no `use serde` survived in this crate. "The dependency is unused" and "the
+# dependency is gone" are different claims, and only the second is checkable by `cargo tree`; the
+# two `dep:` entries are gone from `[dependencies]` below, and `cargo tree -p smear-schema
+# --no-default-features --features introspection` lists neither package. Re-measured on this tree,
+# not trusted from the older record: `cargo check` with the same flags still succeeds with this
+# line reading `["build"]`.
+introspection = ["build"]
+
+[dependencies]
+# NOT an empty table, and the design's §2 says it should be. `diagnostic/` moved down with this
+# crate — `error.rs` and `introspection/error.rs` implement `Diagnose`, so the vocabulary has to
+# sit at or below here — and it needs `tokora::SimpleSpan`. The claim `smear-noatomic` actually
+# holds is about `repr/`, which it `#[path]`-includes and builds for `thumbv6m-none-eabi` with an
+# empty table of its own; that claim is untouched.
+tokora.workspace = true
+
+smear-parser = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

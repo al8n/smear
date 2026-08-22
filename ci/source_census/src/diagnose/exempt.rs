@@ -19,9 +19,11 @@
 //! its own; the value that pairs the two can, and this record names it.
 //!
 //! [`Kind::Tracked`] is a family that has not joined the contract and is expected to. Every one of
-//! them today is al8n/smear#126's phase E — the parser and lexer families, sequenced after the
-//! validator ones deliberately — and it must name its issue, so it is debt with a home rather than
-//! debt with an excuse.
+//! them today is al8n/smear#126's, and each must name its issue, so it is debt with a home rather
+//! than debt with an excuse. Two of that issue's phases are represented: **phase E**, the parser
+//! and lexer families, sequenced after the validator ones deliberately; and **phase D**, the §7
+//! writer and proto's adoption of the contract, which the issue sequences *strictly after*
+//! `feat/proto-execute-query` merges. Neither ordering is this table's — it records them.
 //!
 //! [`Kind::NotDiagnostic`] is the name pattern misfiring: a type whose name ends in `Error` and
 //! which is not an error a consumer is ever handed. It is counted separately in the run's own
@@ -81,16 +83,27 @@ const PARSER_FAMILY: &str = "A draft §2 syntactic refusal. Phase E of al8n/smea
 
 /// Every type the D1 inventory finds that does not answer the contract, each with its argument.
 ///
-/// It is long, and its length is the finding rather than a defect in the table: thirty-two of the
-/// thirty-six are the lexer and parser families that phase E owns, and this is the first artifact
-/// in the repository that states how many there are. The three rows it does *not* cover are the
-/// three Phase A implemented, and D2 proves those with the compiler.
+/// It is long, and its length is the finding rather than a defect in the table: almost all of it is
+/// the lexer and parser families phase E owns. The rows it does *not* cover are the ones phase A
+/// implemented, and D2 proves those with the compiler.
+///
+/// The counts are deliberately not written out here. The run's own summary line is the first place
+/// in the repository that states how many there are, and it recomputes them; a pair copied into a
+/// comment goes stale on the next public type anybody adds, as the pair that used to be here had —
+/// it read thirty-two where the run printed thirty. `crate::exempt`'s misfire group records the
+/// same lesson about the same kind of sentence.
+// SPELL A PATH AT THE CRATE THAT DECLARES THE TYPE, not at a re-export of it. `syn` cannot follow
+// `pub use smear_schema as schema;` from the umbrella into another package, so since the split the
+// canonical path a mounted root produces is the DECLARING member's — `smear::validator::schema::
+// SchemaErrors`, not the `smear::validator::SchemaErrors` that `validator/mod.rs` also publishes.
+// Both are real paths for a consumer; only one is the one this table matches on. The split moved
+// two entries this way and the table said so on the same run, which is what it is for.
 pub const EXEMPTIONS: &[Exemption] = &[
   // ── Aggregates: the elements answer ──────────────────────────────────────────────────────────
   Exemption {
-    path: "smear::validator::SchemaErrors",
+    path: "smear::validator::schema::SchemaErrors",
     kind: Kind::Aggregate,
-    element: Some("smear::validator::SchemaError"),
+    element: Some("smear::validator::schema::SchemaError"),
     issue: None,
     reason: "The `Vec<SchemaError>` a refused build hands back, with the interning arena those \
              errors' symbols index. A collection is not a diagnostic — it has no code, no primary \
@@ -122,6 +135,64 @@ pub const EXEMPTIONS: &[Exemption] = &[
              code to answer and no span to point at — asking it for a primary location would mean \
              inventing one for a counter.",
   },
+  // ── §7.1.7 `extensions`: two refusals that hand the caller's value back ──────────────────────
+  Exemption {
+    path: "smear::proto::SetExtensionsError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `Executor::set_extensions` refused an `extensions` map, and the map itself, \
+             returned through `into_extensions` so a refusal cannot close a handle the driver still \
+             owns. It is not a diagnostic about the *document*: all three refusals are properties of \
+             the call — no operation is running, the response has already been delivered, or the map \
+             is over this executor's ceilings — so there is no source position to point at and no \
+             response path to carry. Unlike `proto::StartError` it is not even a draft §6.1 request \
+             error; nothing about it ever reaches a §7 response, because the whole point of the \
+             refusal is that nothing will.",
+  },
+  Exemption {
+    path: "smear::proto::Full",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Which of the two §7.1.7 extension ceilings refused an insert, and the driver's value \
+             handed back unconsumed. The same argument as `SetExtensionsError` and one step \
+             smaller: a ceiling refusing is an outcome about a container the service is filling, \
+             with no document behind it to have a span in. `Ceiling::field` names the `Limits` field \
+             that refused, which is the machine-readable part a code would otherwise have carried.",
+  },
+  Exemption {
+    path: "smear::proto::SourceEventError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `Executor::handle_source_event` refused a draft §6.2.3.2 source event, and the \
+             event itself, returned through `into_value` so a refusal cannot close a handle the \
+             driver still owns. The same argument as `SetExtensionsError`, whose two lifecycle \
+             variants these two are the subscription's: no response stream is open, or the \
+             previous event's execution result has not been taken. Both are properties of the \
+             *call* — of where the machine is, not of anything in the document — so there is no \
+             source position to point at and no response path to carry, and neither ever reaches a \
+             §7 response, because the point of the refusal is that the event does not. \
+             `Executor::response_stream` names the state that refused, which is the \
+             machine-readable part a code would otherwise have carried, and the remedy: drain the \
+             result, or stop pushing.",
+  },
+  Exemption {
+    path: "smear::proto::TooLarge",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Which of the two §7.1.7 extension ceilings refused a whole map on its way into a \
+             draft §7.1.3 request error result, and the map handed back so a refusal cannot close \
+             a handle the driver still owns. Same argument as `Full`, one level up: `Full` is an \
+             insert refused and this is an attach refused, and neither has a document behind it to \
+             have a span in — the map is the *service's* own, built after execution was declined. \
+             The value it is refused by happens to be a §7 response, and that changes nothing: \
+             this refusal never reaches one, because the whole point is that the map does not. \
+             `Ceiling::field` names the `Limits` field that refused, which is the machine-readable \
+             part a code would otherwise have carried.",
+  },
   Exemption {
     path: "smear::validator::LosslessInvalid",
     kind: Kind::Verdict,
@@ -144,7 +215,7 @@ pub const EXEMPTIONS: &[Exemption] = &[
              claiming a direct element would be claiming something untrue.",
   },
   Exemption {
-    path: "smear::validator::IntrospectionError",
+    path: "smear::validator::schema::IntrospectionError",
     kind: Kind::Verdict,
     element: None,
     issue: None,
@@ -154,6 +225,72 @@ pub const EXEMPTIONS: &[Exemption] = &[
              their own payloads — one a contract row, the other an aggregate of one. A `Diagnose` \
              on the sum would have to invent a primary location for a variant holding a hundred of \
              them.",
+  },
+  // ── §6 execution — al8n/smear#126 phase D ────────────────────────────────────────────────────
+  //
+  // The two are recorded separately and for different reasons, because they are different animals:
+  // one is a draft §7.1.2 *field* error, which is the shape the contract's response-path axis was
+  // added for, and the other is a §6.1 refusal that never reaches a response at all.
+  Exemption {
+    path: "smear::proto::Error",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "One entry of a draft §7.1.2 `errors` array, and the only type in this crate that has \
+             a response path to answer with — `path_segments` exists on the contract because of \
+             this shape, so the axis has exactly one candidate implementor and it is this. \
+             al8n/smear#126 sequences it into phase D, the §7 writer together with proto's \
+             adoption, *strictly after* `feat/proto-execute-query` merges, and the ordering is \
+             load-bearing rather than administrative: phase D decides whether the path is \
+             published through `Diagnose::path_segment` — which would make `proto::Segment` and \
+             `diagnostic::PathSegment` one type instead of two spellings of the same two \
+             variants — or stays behind `Error::path()`. Assigning codes and an accessor shape \
+             before that decision would be the guess the phase exists to stop making. Everything \
+             else it needs is already here: `Display` renders the specified message, `locations()` \
+             is non-empty for every error a driver can observe, and `Path::get` is already an \
+             indexed accessor. Recorded, not accepted.",
+  },
+  Exemption {
+    path: "smear::proto::StartError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "How `Executor::start` refuses: draft §6.1's `GetOperation` failures — no operation, \
+             no operation of that name, more than one and none named — plus a schema missing one \
+             of the three root types, and draft §6.2.3.1 `CreateSourceEventStream`'s three request \
+             errors, which are request errors in the specification's own words because they are \
+             raised before any execution exists. Phase D of al8n/smear#126 owns it \
+             with `proto::Error`, and it carries a question of its own that phase has to answer \
+             first: unlike every other row here it is a *request* error, refused before execution \
+             begins, so it has no response path, and it is refused on a property of the whole \
+             document or of the schema rather than at a position in the text, so it has no span \
+             either. Its `primary()` would therefore be the second user of `Location::entire`, \
+             and `only_the_introspection_door_answers_entire` in \
+             `smear/tests/diagnostic_codes.rs` pins that there is exactly one — so joining the \
+             contract here means changing a gate deliberately, which is the reviewed decision \
+             al8n/smear#126's own first correction asks for. Recorded, not accepted.",
+  },
+  Exemption {
+    path: "smear::json::Error",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "How the draft §7.2.1 writer refuses: a sink that would not take the bytes, a `Float` \
+             that is not finite, a `\\u` escape naming a surrogate, a malformed escape, and an \
+             allocator that would not give a §7.1.2 response path room. Phase D \
+             of al8n/smear#126 is *the §7 writer together with proto's adoption*, so this is that \
+             phase's third row rather than a new debt beside it — and it has to be decided with \
+             the other two instead of before them, because the phase's open question is where a \
+             draft §7 position gets published, and giving this type codes and an accessor shape \
+             first would settle half of that by accident. It also carries the sharper version of \
+             `StartError`'s own problem: a serialisation refusal has no position in ANY input — \
+             not a span, not a whole document, not a response path — because it is raised while \
+             rendering a response that has already been decided, so its `primary()` would be a \
+             *third* user of `Location::entire` against a gate that pins the count at one, and \
+             `Location`'s own documentation calls that spelling an exception with a named holder \
+             rather than a default. The allocation variant sharpens that again rather than \
+             softening it: it is the one refusal with no position even in the RESPONSE, since it \
+             is raised because the path could not be assembled. Recorded, not accepted.",
   },
   // ── The lexer families — al8n/smear#126 phase E ──────────────────────────────────────────────
   Exemption {

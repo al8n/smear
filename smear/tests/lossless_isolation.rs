@@ -48,13 +48,18 @@ use std::{
   path::{Path, PathBuf},
 };
 
+// All three are relative to THIS package and reach into the sibling one, because the source this
+// gate scans became the `smear-parser` crate in the split while the gate stayed here. The paths
+// are the only thing that moved: the same three directories are read, and `rust_files` still
+// panics on a path that is not a directory, which is what stops a mistyped path from reporting
+// isolation over nothing.
 /// The dialect-generic substrate: the kind-space contract, the trivia atoms, the `Parse` surface,
 /// the coverage shims and the typed-wrapper macro.
-const SUBSTRATE: &str = "src/parser/lossless";
+const SUBSTRATE: &str = "../smear-parser/src/lossless";
 /// The GraphQL dialect's lossless layer.
-const GRAPHQL: &str = "src/parser/graphql/lossless";
+const GRAPHQL: &str = "../smear-parser/src/graphql/lossless";
 /// The GraphQLx dialect's lossless layer.
-const GRAPHQLX: &str = "src/parser/graphqlx/lossless";
+const GRAPHQLX: &str = "../smear-parser/src/graphqlx/lossless";
 
 /// Every `.rs` file under `dir`, recursively, as `(path relative to the crate root, contents)`.
 ///
@@ -145,11 +150,11 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 ///
 /// The third column is what turns each zero into evidence.
 const FORBIDDEN: &[(&str, &str, &str)] = &[
-  ("crate::parser::graphql::", GRAPHQLX, GRAPHQL),
+  ("crate::graphql::", GRAPHQLX, GRAPHQL),
   ("graphql::kinds", GRAPHQLX, GRAPHQL),
   ("graphql::lossless", GRAPHQLX, GRAPHQL),
   ("GraphQLLang", GRAPHQLX, GRAPHQL),
-  ("crate::parser::graphqlx::", GRAPHQL, GRAPHQLX),
+  ("crate::graphqlx::", GRAPHQL, GRAPHQLX),
   ("graphqlx::kinds", GRAPHQL, GRAPHQLX),
   ("graphqlx::lossless", GRAPHQL, GRAPHQLX),
   ("GraphQLxLang", GRAPHQL, GRAPHQLX),
@@ -192,18 +197,20 @@ fn the_two_lossless_layers_do_not_reference_each_other() {
 /// [`ast_node!`](smear::ast_node) — a `#[macro_export]`ed macro whose expansion names `$crate` and
 /// which every wrapper file therefore spells as `crate::ast_node` — and the lexer.
 ///
-/// `crate::lexer` is the entry the crate merge (#83) added, and it is a rename rather than a new
-/// permission: the dialect trees have always named their own lexer dialect, and they spelled it
-/// `smear_lexer::…` when that was a separate crate. An external crate name is invisible to a
-/// census that reads `crate::` roots, so the root was never pinned; now it is. What the merge
-/// does NOT do is let a dialect reach the *other* dialect's lexer through it —
-/// [`FORBIDDEN`]'s `graphql::kinds` / `graphql::lossless` spellings are substring patterns and
-/// match `crate::lexer::graphql::lossless::…` exactly as they matched `smear_lexer::graphql::…`.
+/// The lexer entry is `smear_lexer::<dialect>`, and the SPELLING is the load-bearing part. #83
+/// merged the crates and it became `crate::lexer`; the split makes it an external crate again and
+/// `crate::lexer` stops occurring. An external crate name is invisible to a census that reads
+/// `crate::` roots — so had this list simply dropped the entry, the lexer edge would have gone
+/// unpinned and this gate would have quietly stopped watching the one boundary it was extended to
+/// cover. [`crate_roots`] reads `smear_lexer::` as a root for exactly that reason. What neither
+/// spelling does is let a dialect reach the *other* dialect's lexer: [`FORBIDDEN`]'s
+/// `graphql::kinds` / `graphql::lossless` entries are substring patterns and match
+/// `smear_lexer::graphql::lossless::…` exactly as they matched `crate::lexer::graphql::…`.
 ///
-/// `crate::parser::type_system` is #58's entry, and it is on the GraphQL side only because that
-/// is the only dialect with a projection so far. The projection's **target** is the AST, and the
-/// AST's carriers are shared and dialect-free in exactly the way `crate::parser::lossless` is —
-/// this census is about a dialect reaching the *other dialect*, which a shared carrier is not.
+/// `crate::type_system` is #58's entry, and it is on the GraphQL side only because that is the
+/// only dialect with a projection so far. The projection's **target** is the AST, and the AST's
+/// carriers are shared and dialect-free in exactly the way `crate::lossless` is — this census is
+/// about a dialect reaching the *other dialect*, which a shared carrier is not.
 /// The narrow reason it is needed at all: three `Described<…>` aliases and six `…Data` extension
 /// enums have no spelling under `graphql::ast`, and a projection has to construct all nine. Every
 /// other AST type it builds is reached through the dialect's own `ast` module, which is why this
@@ -213,47 +220,48 @@ const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
     GRAPHQL,
     &[
       "crate::ast_node",
-      "crate::lexer",
-      "crate::parser::graphql",
-      "crate::parser::lossless",
-      "crate::parser::type_system",
+      "crate::graphql",
+      "crate::lossless",
+      "crate::type_system",
+      "smear_lexer::graphql",
+      "smear_lexer::limits",
     ],
   ),
   (
     GRAPHQLX,
     &[
       "crate::ast_node",
-      "crate::lexer",
-      "crate::parser::graphqlx",
-      "crate::parser::lossless",
+      "crate::graphqlx",
+      "crate::lossless",
+      "smear_lexer::graphqlx",
+      "smear_lexer::limits",
     ],
   ),
 ];
 
-/// Every `crate::<segment>` prefix that occurs under `dir`.
+/// Every `<root>::<segment>` prefix that occurs under `dir`, for each root this census reads.
+///
+/// TWO ROOTS, and the second is not decoration. The parser is its own crate again, so the lexer it
+/// stands on is an EXTERNAL crate and no `crate::` path names it. A census that read `crate::`
+/// alone would have gone from pinning the lexer edge to not seeing it, with every assertion still
+/// green — the same shape as the crate merge folding `smear_lexer::` into `crate::lexer` and the
+/// root going unpinned until #83 noticed. Reading both spellings is what makes this census survive
+/// the boundary moving in either direction.
+const ROOT_PREFIXES: &[&str] = &["crate::", "smear_lexer::"];
+
 fn crate_roots(dir: &str) -> BTreeSet<String> {
   let mut out = BTreeSet::new();
   for (_, text) in rust_files(dir) {
-    let mut rest = text.as_str();
-    while let Some(at) = rest.find("crate::") {
-      rest = &rest[at + "crate::".len()..];
-      // The parser is one module below the crate root since the crates merged, so `crate::parser::`
-      // is the prefix every in-tree path carries and the segment AFTER it is the root this census
-      // is about. The hop is stripped rather than assumed: `crate::ast_node` — the
-      // `#[macro_export]`ed macro — is still rooted at the crate itself, and folding both spellings
-      // to a single `crate::parser` would collapse the census to one entry and pin nothing.
-      let prefix = match rest.strip_prefix("parser::") {
-        Some(tail) => {
-          rest = tail;
-          "crate::parser::"
+    for prefix in ROOT_PREFIXES {
+      let mut rest = text.as_str();
+      while let Some(at) = rest.find(prefix) {
+        rest = &rest[at + prefix.len()..];
+        let end = rest
+          .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+          .unwrap_or(rest.len());
+        if end > 0 {
+          out.insert(format!("{prefix}{}", &rest[..end]));
         }
-        None => "crate::",
-      };
-      let end = rest
-        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .unwrap_or(rest.len());
-      if end > 0 {
-        out.insert(format!("{prefix}{}", &rest[..end]));
       }
     }
   }
@@ -294,12 +302,17 @@ fn a_dialects_lossless_tree_names_only_itself_the_substrate_and_the_shared_macro
 /// kind enum, keyword enum or error type. `crate::lexer` is on the list because the substrate is
 /// generic over the lexer: the moment it names the concrete lexer module it has picked a token
 /// space, and a token space is a dialect.
+///
+/// The lexer entry is spelled `smear_lexer::` again, which is what it was before #83 merged the
+/// crates and is what the split restores. That spelling is the ONLY thing this row can key on now:
+/// an external crate is invisible to a census reading `crate::` roots, which is the trap
+/// [`ALLOWED_CRATE_ROOTS`] records from the other direction.
 const SUBSTRATE_FORBIDDEN: &[(&str, &str)] = &[
-  ("crate::parser::graphql", GRAPHQL),
-  ("crate::parser::graphqlx", GRAPHQLX),
+  ("crate::graphql", GRAPHQL),
+  ("crate::graphqlx", GRAPHQLX),
   ("GraphQLLang", GRAPHQL),
   ("GraphQLxLang", GRAPHQLX),
-  ("crate::lexer", GRAPHQLX),
+  ("smear_lexer::", GRAPHQLX),
 ];
 
 #[test]
@@ -324,13 +337,26 @@ fn the_substrate_names_no_dialect() {
 
 /// The one `#[cfg]` the substrate writes about dialects, and how many times.
 ///
-/// Two, both identical, and they are the substrate declining to compile its macros when **no**
-/// dialect is on rather than reaching for one — `any(…)` and not `graphql`. A gate that only
-/// forbade dialect *types* would let a `#[cfg(feature = "graphql")]` fork appear here, which is
-/// exactly how a generic layer starts having a favourite.
+/// Every one of them is identical and reads `any(…)` rather than `graphql`: the substrate declining
+/// to compile something when **no** dialect is on, never reaching for a particular one. A gate that
+/// only forbade dialect *types* would let a `#[cfg(feature = "graphql")]` fork appear here, which
+/// is exactly how a generic layer starts having a favourite. The count is pinned so that adding one
+/// is a decision rather than a drift.
+///
+/// Seven, in two families:
+///
+/// - **two in `lossless/mod.rs`** — `mod macros` and its `pub(crate) use`. The substrate's macros
+///   have no invoker without a dialect assembly, and three uninvoked macros are three
+///   `unused_macros` denials.
+/// - **five in `lossless/recover.rs`**, all added for smear#168's scan allowance and all the same
+///   shape: `SCAN_ALLOWANCE_FACTOR`, `SCAN_ALLOWANCE_FLOOR`, `scan_allowance_exhausted`, and the
+///   two `pub(super)` recorders in its test-support telemetry. Their only callers are the four
+///   wrappers in the two dialects' own `recover.rs`, so with no dialect in the crate they are dead
+///   and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that — rustc counts a
+///   reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed it.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 2;
+const SUBSTRATE_FEATURE_GATES: usize = 7;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {
@@ -400,7 +426,8 @@ fn the_scanned_directories_are_real() {
   // untested, and an untested guard is the one that turns out to have been `if false`.
   let hook = std::panic::take_hook();
   std::panic::set_hook(Box::new(|_| {}));
-  let missing = std::panic::catch_unwind(|| rust_files("src/parser/lossless_that_does_not_exist"));
+  let missing =
+    std::panic::catch_unwind(|| rust_files("../smear-parser/src/lossless_that_does_not_exist"));
   std::panic::set_hook(hook);
   assert!(
     missing.is_err(),

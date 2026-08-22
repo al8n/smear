@@ -46,9 +46,14 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec"]
 # dialects, and the parser, which a `smear` dependency compiled unconditionally. A default build
 # compiles the same code before and after the merge.
 
-std = ["tokora/std", "thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
+# `thiserror/default` is gone from this list and is NOT a lost forward. The only
+# `#[derive(thiserror::Error)]` in the tree is `smear-lexer`'s `LengthError`, so the crate that
+# derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
+# on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
+# edge, so a dropped forward is a compile error in a member rather than a silent tier change.
+std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-compiler?/std", "graphql-proto?/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
-graphql = []
+graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
 # stabilises. This comment is the successor to the deleted `unstable` marker feature, which gated
 # no code anywhere in the workspace and was auto-enabled by this one — cargo features are
@@ -56,10 +61,11 @@ graphql = []
 # GraphQLx. `alloc` went the same way and for the same reason: nothing read
 # `cfg(feature = "alloc")`, both layers unconditionally `extern crate alloc as std` when `std` is
 # off, and there is no core-only tier for it to select.
-graphqlx = []
+graphqlx = ["smear-lexer/graphqlx", "smear-parser?/graphqlx"]
 
-# The parser tower (`smear::parser`). Off, this crate is the lexer alone — the configuration that
-# used to be the `smear-lexer` crate, for the consumers it existed to serve: syntax highlighters,
+# The parser tower (`smear::parser`). Off, `smear-parser` is not in the graph at all and this crate
+# is the lexer alone — which is the `smear-lexer` crate again, for the consumers it exists to serve:
+# syntax highlighters,
 # formatter front-ends, token-level tooling. Measured on a fresh crate-only compile over warm
 # deps: lexer 3.4s, parser +12.7s at default features and +19.6s with `rowan`, so the gate saves
 # a lexer-only consumer a 4-6x compile multiplier for code it never names.
@@ -67,7 +73,7 @@ graphqlx = []
 # There is deliberately NO `lexer` feature to pair with it. The lexer is the irreducible base —
 # the parser cannot exist without it and a build with both off is an empty crate — and a gate that
 # can only ever be on is not a gate.
-parser = []
+parser = ["dep:smear-parser"]
 
 # GraphQL document validation (`smear::validator`), including the built-once `Schema` and the
 # draft §3 "Type Validation" pass that runs inside its build.
@@ -77,10 +83,32 @@ parser = []
 # because the specification it implements is standard GraphQL's — GraphQLx deliberately has no
 # validator.
 #
-# It adds NO dependency. The schema representation is `core` + `alloc` and nothing else, which the
+# It adds no THIRD-PARTY dependency — it adds `smear-compiler` and turns on `smear-schema/build`,
+# which is where the §3 pass lives. The schema representation itself is `core` + `alloc`, which the
 # `smear-noatomic` workspace member holds to by compiling those very files for
-# `thumbv6m-none-eabi` with an empty `[dependencies]` table.
-validator = ["parser", "graphql"]
+# `thumbv6m-none-eabi` with an empty `[dependencies]` table of its own.
+validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build"]
+
+# Draft §6 execution (`smear::proto`): the Sans-I/O query executor.
+#
+# It implies `validator`, and not the other way round, because execution is entered with a document
+# the §5 rules have already accepted against a schema `Schema::build` has already accepted — draft
+# §7.1.2's whole *request*-error phase is over before an `Executor` exists, which is why no method
+# on one returns a validation failure.
+#
+# `graphql-proto` itself adds no THIRD-PARTY dependency and defines no value type of its own: the
+# driver's representation reaches it through the `proto::Values` trait, so it is `core` + `alloc`
+# for the same reason the schema representation is, and it takes `smear-schema` with default
+# features off so reading a schema does not pull the front end.
+#
+# TWO THIRD-PARTY CRATES ARRIVE HERE ANYWAY, and they are this crate's rather than that one's:
+# `smear::json` — the draft §7.2.1 writer, which is a module of THIS package because it needs both
+# the response and the values — renders numbers with `itoa` and `zmij`. The `[dependencies]` block
+# has why those two and why neither undoes the point of the module. They hang off `proto` rather
+# than off a `json` feature of their own so that the module is exactly as reachable as the
+# response it writes, and so that `ci/hack.sh` gains no cell for a gate that could only ever be on
+# where `proto` already is.
+proto = ["validator", "dep:graphql-proto", "dep:itoa", "dep:zmij"]
 
 # The second construction door: building a `Schema` out of a draft §4 introspection response
 # instead of out of SDL (`Schema::from_introspection`).
@@ -88,7 +116,7 @@ validator = ["parser", "graphql"]
 # THIS IS NOT WHAT PUTS INTROSPECTION IN A SCHEMA. The `__`-prefixed meta-schema is injected by
 # every build, feature or no feature, because an introspection *query* is an executable document
 # that draft 5.3.1 asks about like any other. This feature is only about where a schema comes
-# *from*, and `smear/src/validator/schema/builtin.rs` carries that distinction at the other end.
+# *from*, and `smear-schema/src/builtin.rs` carries that distinction at the other end.
 #
 # It is the one validator feature that costs a dependency, which is exactly why it is a feature.
 # `serde` and `serde_json` are the workspace's first — nothing else in the tree names either — so
@@ -98,13 +126,31 @@ validator = ["parser", "graphql"]
 # `std` is not decoration. `serde_json`'s `alloc`-only mode exists, but the door parses a
 # `&str` from a network response and reports through `std::error::Error`, and the whole point of
 # the no-atomic tier is the *representation*, which this feature does not touch.
-introspection = ["validator", "std", "dep:serde", "dep:serde_json"]
+introspection = ["validator", "std", "smear-compiler/introspection", "smear-schema/introspection"]
 
-smallvec = ["dep:smallvec"]
-bytes = ["dep:bytes", "tokora/bytes_1"]
-bstr = ["dep:bstr", "tokora/bstr_1"]
-hipstr = ["dep:hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
+# The five source backings. Each forwards to `smear-lexer`, which is where the `Source`
+# implementations live; the `dep:` half survives only for the three this package's own test
+# targets still name by type, and the `tokora/<backing>` half is kept beside it rather than left
+# to `smear-lexer` to supply, because `smear-smoke`'s header records that losing that half is
+# silent — cargo falls back to the implicit feature an optional dependency creates and resolution
+# still succeeds.
+smallvec = ["smear-lexer/smallvec", "smear-parser?/smallvec"]
+bytes = ["dep:bytes", "smear-lexer/bytes", "smear-parser?/bytes", "tokora/bytes_1"]
+bstr = ["dep:bstr", "smear-lexer/bstr", "smear-parser?/bstr", "tokora/bstr_1"]
+hipstr = ["dep:hipstr", "smear-lexer/hipstr", "smear-parser?/hipstr", "tokora/hipstr_0_8"]
+smol-bytes = ["smear-lexer/smol-bytes", "smear-parser?/smol-bytes", "tokora/smol_bytes_0_1"]
+
+# The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
+# productions carrying `i64` and `f64` where the slice parser carries a source slice.
+#
+# It names the member STRONGLY and pulls `parser` and `graphql` in, where the five backings above
+# forward weakly. The difference is that those features mean something to `smear-lexer` with no
+# parser in the graph, and this one means nothing at all: every item it compiles is inside
+# `smear-parser`'s `graphql` modules. A weak forward would let `smear/materialized-numbers`
+# resolve with `smear-parser` absent and enable nothing anywhere, and — because the member
+# feature implies `graphql` — would trip the feature fence below the moment the parser DID
+# arrive through some other edge.
+materialized-numbers = ["parser", "graphql", "smear-parser/materialized-numbers"]
 
 # The lossless CST tower. Reachable through the crate named `smear` for the first time here (#81).
 # `parser` because the tower lives in that module; `std` because the runner needs it.
@@ -118,9 +164,9 @@ smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
 # `ci/miri_scope.py` will fail the Miri matrix if this feature ever resolves ON inside it, so
 # turning it on there is not something that can happen by accident again.
 #
-# This says nothing against the feature — it is a headline capability and its 33 integration
+# This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
-rowan = ["dep:rowan", "tokora/rowan", "std", "parser"]
+rowan = ["smear-parser/rowan", "smear-compiler?/rowan", "tokora/rowan", "std", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting
@@ -128,7 +174,7 @@ rowan = ["dep:rowan", "tokora/rowan", "std", "parser"]
 # separate lanes keyed by `KindSpace::NAME`, so one gate's reset cannot clear the other's
 # measurement. Test-only: it changes no behaviour, and without it the instrumentation is not
 # compiled at all.
-lossless-coverage = ["rowan"]
+lossless-coverage = ["rowan", "smear-parser/lossless-coverage"]
 
 # Compiles the lossless suites' `test_support` scaffolding: the substrate's kind-space
 # conformance assertion, the two dialects' sink and trivia probes, and the per-production
@@ -148,32 +194,166 @@ lossless-coverage = ["rowan"]
 # parser-internal, so the feature being on is inert for them — as it is for any target with
 # `rowan` off. The suites' own tests get it from that dev-dependency, not from a
 # `required-features` entry; see that block for why.
-test-support = []
+test-support = ["smear-parser?/test-support"]
 
+# ── AN UMBRELLA'S DEPENDENCY TABLE ──────────────────────────────────────────────────────────
+#
+# `smear/src` is one file now — `lib.rs`, and nothing in it but re-exports — so nothing here is for
+# this package's own code. `tokora` stays because `__private` re-exports it and because the dev
+# targets name it; the three source backings stay because `tests/` constructs a source of each
+# type. `derive_more`, `paste`, `rowan`, `serde` and `serde_json` left with the modules that used
+# them: the first two are `smear-parser`'s and `smear-lexer`'s, `rowan` is `smear-parser`'s and is
+# separately a dev-dependency here, and the serde pair is `smear-schema`'s `introspection`.
 [dependencies]
-derive_more.workspace = true
-paste = "1"
-thiserror.workspace = true
 tokora.workspace = true
 
-memspan = { version = "0.1", default-features = false, features = ["std"] }
+# The lexer, unconditional and with no feature of its own to gate it: it is the base of the stack
+# and a `smear` with it switched off would be an empty crate. `smear-lexer` also carries the four
+# dependencies this manifest used to hold for it and no longer does — `thiserror`, `memspan`,
+# `smallvec` and `smol-bytes` — each removed because nothing outside `smear-lexer/src` names it.
+smear-lexer.workspace = true
 
+# The parser tower, optional because `smear`'s `parser` feature is the gate a lexer-only consumer
+# switches off. It brings `smear-lexer` with it; the edge above is separate because the lexer is
+# unconditional.
+smear-parser = { workspace = true, optional = true }
+
+# UNCONDITIONAL, and that is a decision rather than an oversight. `smear::diagnostic` is an ungated
+# public module today and the vocabulary behind it moved into `smear-schema`, so an optional edge
+# would make that path appear and disappear with a feature — an API change this split is not
+# allowed. What it costs a `--no-default-features` build is this crate's ungated half: the
+# representation, `builtin`, and `diagnostic`. The builder and the introspection door are behind
+# `smear-schema/build`, which `validator` above turns on.
+smear-schema.workspace = true
+
+# The protocol machine, behind `proto`. It brings `smear-schema` with DEFAULT FEATURES OFF of its
+# own accord; the unconditional edge above is what keeps `smear::diagnostic` ungated, and the two
+# requests unify the way cargo unifies any two.
+graphql-proto = { workspace = true, optional = true }
+
+# Draft §5 validation, behind `validator`. It takes `smear-schema` WITH `build`, which is the whole
+# difference between it and the protocol machine above: this crate produces a `Schema`, that one
+# reads one.
+smear-compiler = { workspace = true, optional = true }
+
+# ── THE TWO NUMBER FORMATTERS, BEHIND `proto` WITH THE MODULE THAT USES THEM ─────────────────
+#
+# `smear::json` renders an integer with `itoa` and a double with `zmij`. Turning a number into text
+# is the one part of a JSON writer that is genuinely hard to beat and is already solved twice over,
+# and these two are checkable facts rather than reputation:
+#
+#   * `itoa` is ALREADY IN THIS WORKSPACE'S GRAPH — `serde_json` pulls it for
+#     `smear-schema/introspection` — so it is a new edge and not a new crate in the tree.
+#   * `zmij` is the same author's Schubfach + yy double-to-string, and is the only new crate.
+#
+# Both are `#![no_std]` with ZERO dependencies, which is what makes them coherent with the point of
+# the module they arrived for. That module exists so this workspace can stop depending on serde,
+# whose two crates are `std`-only in a stack carrying a no-std tier; replacing them with anything
+# heavier would undo the reason for doing it.
+#
+# `ryu` IS THE STALE ANSWER, recorded so the next reader does not "correct" this. serde_json
+# 1.0.151's own dependency list is `itoa, memchr, serde, serde_core, zmij` — no `ryu` — and `ryu`
+# is not in this workspace's lock file at all. `zmij` is its successor and ships a
+# `ryu_comparison` benchmark of its own.
+itoa = { version = "1", default-features = false, optional = true }
+zmij = { version = "1", default-features = false, optional = true }
+
+# `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
+# package's own `tests/` name those types directly to build a source of each backing.
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
-smol-bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
-smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
-rowan = { version = "0.17", optional = true }
 
-# The `introspection` feature's two, and the only two dependencies in this manifest that are not
-# either a source backing or part of the parser tower. `derive` because the draft §4 shape is a
-# dozen plain records and hand-written visitors would be a dozen ways to get "missing field"
-# wrong; `default-features = false` plus `std` on both because that is what the feature declares
-# and an implicit default is how a no_std claim rots.
-serde = { version = "1", default-features = false, features = ["std", "derive"], optional = true }
-serde_json = { version = "1", default-features = false, features = ["std"], optional = true }
-
+# ── THE BENCHMARK HARNESS, AND WHAT IT COSTS THE INNER LOOP ─────────────────────────────────
+#
+# Everything from here to the end of this block is reached from `benches/` and from nowhere
+# else: no file under `src/`, `tests/` or `examples/` names one. Until this commit they were the
+# dependencies of two separate members — `smear-benches` and `smear-apollo-bench` — whose whole
+# reason for existing was to keep them OUT of this manifest. The benches were consolidated back
+# here so that a bare `cargo bench` builds all six, and this block is what that costs.
+#
+# CARGO RESOLVES DEV-DEPENDENCIES PER PACKAGE, NOT PER TARGET, and that is the cost. Every entry
+# below is built for every test target of this package, including `cargo test -p smear --lib` —
+# the inner loop — even though no test names any of them. Measured on this tree with an isolated
+# `CARGO_TARGET_DIR`, macOS/aarch64, load average ~5 (two other builds running, so these are
+# upper bounds rather than a quiet-machine figure):
+#
+#   cold, empty target directory            210.9s -> 227.6s   (+16.7s, +8%)
+#   warm, nothing changed                     0.2s ->   0.3s
+#   warm, `touch src/lib.rs` then rebuild   201.3s -> 200.7s   (unchanged)
+#
+# So the honest shape of the cost is: one-off, and not actually in the edit-rebuild loop. `smear`
+# itself is ~200 of those 227 seconds, and by the time anyone edits a source file every crate
+# below is already built. What DOES pay it every time is a cold CI cache — and the Miri cells,
+# which build this whole graph for a cross-compiled target on every run. Measured the same way,
+# `cargo tree -p smear -e normal,dev,build` goes from 42 resolved packages to 143 (113 on a
+# 32-bit target, which does not resolve the oracle; see the conditional table at the end).
+#
+# `[lib] bench = false` stays, and now matters for a second reason: this package declares six
+# `[[bench]]` targets again, and without this setting cargo would additionally build a libtest
+# bench harness for `src/lib.rs` and run it as a seventh.
 [dev-dependencies]
+# The harness. `criterion 0.8.2` depends on `alloca 0.4.0`, whose build script is a `cc::Build`
+# compiling `alloca.c`, and THAT is the one edge in this block with a CI consequence. Cross
+# compiling to an apple target from a Linux host hands the host `cc` an `-arch arm64` and an
+# `-mmacosx-version-min=...`, which a Linux `cc` rejects; the failure looks like a compiler error
+# in C and has nothing to do with the tool that provoked it. So the two `aarch64-apple-darwin`
+# cells in `.github/workflows/miri.yml` run on `macos-latest`, where the compile is native and
+# fine. That file's header carries the measurement and the decision.
+#
+# The Miri host selection is therefore the report on the shape of this block that the previous
+# revision of this comment said did not exist. Adding another `cc`-build-script dependency here
+# costs nothing new; REMOVING criterion again would make those two cells schedulable on Linux
+# and is a change to `miri.yml`, not only to this file.
+criterion = "0.8"
+
+# The four like-for-like comparison parsers the `comparative` benches measure against. Reached
+# from `benches/comparative/**` only.
+#
+# `apollo-parser` used to be the load-bearing one to keep out, because with this package's own
+# `rowan` feature off it was the ONLY edge putting `rowan` — the crate whose undefined behaviour
+# is #77 — into the graph at all. That has not been true since #58's projection gate named
+# `rowan` directly below: the rule was never "no rowan", it was "no rowan nobody asked for", and
+# both entries are now asked for with a reason beside them. What the edge still does is build a
+# SECOND rowan — `apollo-parser` 0.8.6 requires `^0.16.0` and has no 0.17-compatible release —
+# and the harness is written so nothing type-checks across that seam; see
+# `benches/comparative/apollo/support/mod.rs` for what it costs the comparison.
+apollo-parser = "0.8.6"
+graphql-parser = "0.4.1"
+async-graphql-parser = "7.2.1"
+cynic-parser = "=0.11.2"
+
+# The byte-identity gate (`benches/comparative/apollo/byte_identity.rs`) recomputes the four
+# corpus hashes in-process and compares them against the constants in `support/dump.rs`. Hashing
+# in Rust rather than piping to `shasum` is what lets the gate run as an ordinary `cargo test` on
+# any runner, and what lets the 1.4 GB `prefixes` dump be hashed in bounded memory rather than
+# materialised.
+sha2 = { version = "0.10", default-features = false }
+
+# ── THE JSON WRITER'S ORACLE, AND WHY IT HAS TO BE THIS CRATE ────────────────────────────────
+#
+# `tests/json_writer.rs` parses what `smear::json` emits and compares the resulting VALUE against
+# one built by hand. The point is independence: a writer checked against expectations produced by
+# the same writer proves nothing, so the reader on the other side of the round trip must not share
+# a line of code with it — and `serde_json` is a reader this workspace already carries, written by
+# someone else, that has never seen this module.
+#
+# A DEV-DEPENDENCY IS NOT THE DEPENDENCY THE SERDE WORK IS REMOVING. That one is
+# `smear-schema`'s `introspection` feature naming `serde` and `serde_json` in `[dependencies]`,
+# where it reaches a consumer's graph and pins two `std`-only crates into a stack with a no-std
+# tier. Cargo drops dev-dependencies when packaging and keeps them out of `cargo tree -p smear`,
+# so this edge changes neither of those facts. When the removal commit lands, `cargo tree` is what
+# says whether the claim is true, and this entry is not in what it reads.
+#
+# `float_roundtrip` IS LOAD-BEARING AND WAS ADDED AFTER A FAILURE, not by precaution. serde_json's
+# default float parsing is best-effort by design — its own feature list says the exact path "comes
+# at an approximately 2x performance cost" — and measured on this tree it reads `123456789.12345679`
+# back as `419d6f34547e6b76` where Rust's own `str::parse::<f64>` and Python both give
+# `419d6f34547e6b75`. An oracle one ULP away from correct cannot settle whether `zmij` round-trips,
+# and the failure looked exactly like a defect in the writer. The feature makes the reader exact,
+# and this comment is why nobody should drop it to save a build second.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
 # The crate depending on itself, so `test-support` is on for every dev target — tests, benches,
 # examples, doctests — and off for every consumer.
 #
@@ -202,51 +382,65 @@ serde_json = { version = "1", default-features = false, features = ["std"], opti
 # claim the compiler can refute.
 #
 # A plain `cargo test` is unaffected: the library's own defaults still apply, and this edge asks
-# only for the one feature it exists to turn on.
+# only for the one feature it exists to turn on. It is also what puts `test-support` back on for
+# the bench targets, which it was not while they lived in another member. Inert for the four that
+# build at default features, because everything that feature compiles is inside the `rowan`-gated
+# tower; for the two that enable `rowan` it compiles the lossless scaffolding into the binary,
+# which is compile time and dead code rather than anything a criterion loop enters.
 smear = { path = ".", default-features = false, features = ["test-support"] }
 
 # The projection gate builds a synthetic green tree by hand — a tree whose *text* re-parses to a
 # different structure — so that a "projection" which secretly re-parsed the source could not pass
 # it. That needs rowan's builder, which the library re-exports no door to.
 #
-# Named DIRECTLY, which is the difference from the transitive edge #87 retired below: this one is
+# Named DIRECTLY, which is the difference from the transitive edge #87 retired: this one is
 # chosen, visible in this manifest, and carries the same version requirement as the optional
-# dependency above, so the two cannot resolve to different rowans. It is still the crate whose
-# undefined behaviour is #77 — which is survivable here only because `ci/miri_sb.sh` and
-# `ci/miri_tb.sh` run `-p smear --lib`, and no lib unit test reaches this dependency.
+# dependency above, so the two cannot resolve to different rowans. `support/dump.rs` is the
+# second caller — it spells `WalkEvent` and `NodeOrToken`, the two types
+# `SyntaxNode::preorder_with_tokens` yields — and it must track whatever the library resolves,
+# which this entry is what guarantees. It is still the crate whose undefined behaviour is #77 —
+# which is survivable here only because `ci/miri_sb.sh` and `ci/miri_tb.sh` run `-p smear --lib`,
+# and no lib unit test reaches this dependency.
 rowan = "0.17"
 # `tokora::conformance` is the lexer-contract test kit; it is test-only, so the
 # feature is pulled in here rather than in the normal dependency.
 tokora = { workspace = true, features = ["conformance"] }
 
-# ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────────────────────
+# THE ONE DEPENDENCY IN THIS MANIFEST THAT CANNOT BE BUILT FOR EVERY TARGET, which is why it is
+# the one in a conditional table rather than in the block above.
 #
-# `criterion`, and with it `apollo-parser`, `graphql-parser`, `async-graphql-parser` and
-# `cynic-parser`. All five were dev-dependencies of this package and all five were reached from
-# `benches/` and from nowhere else — no test, example or source file named one. They moved to
-# the `smear-benches` member along with the four `[[bench]]` sections that used them; that
-# manifest's header carries the reasoning in full.
+# `apollo-compiler 1.32.0`'s lib carries `const _: () = { assert!(size_of::<Name>() == 24) }`.
+# `Name` is a tagged pointer plus a `u32` and a `u64` file id, so its size follows
+# `align_of::<u64>()`: 8 on every 64-bit target and on wasm32, but 4 under the 32-bit x86 System V
+# ABI, where the struct is 20 bytes and the assertion fires during COMPILATION. Reproduced on this
+# tree: `cargo check --target i686-unknown-linux-gnu` over a package depending on it exits with
+# `error[E0080]: evaluation panicked: assertion failed: size_of::<Name>() == 24`. The same defect
+# reddened `cross (i686-linux-android)` on `main` while the oracle lived in its own member and
+# that member was in a workspace-wide selection.
 #
-# The short version, because putting any of them back has a cost that is not local. Cargo
-# resolves dev-dependencies per PACKAGE, not per target, so every entry in this block is built
-# for every test target of this package:
+# Unconditional, this entry would break `cargo miri test -p smear --lib` on
+# `i686-unknown-linux-gnu` — two cells of `.github/workflows/miri.yml`, and the only two in the
+# file that model a 32-bit pointer width — because a `--lib` TEST build links every
+# dev-dependency whether or not a test names one. `cfg(target_pointer_width = "64")` is evaluated
+# by cargo against the target spec, unlike a `cfg(miri)` that appears nowhere in
+# `rustc --print cfg`, so the edge simply is not in the graph for those two cells.
 #
-#   * `criterion` pulls `alloca`, whose build script compiles C through cc-rs. A Linux `cc`
-#     rejects the `-arch arm64` / `-mmacosx-version-min` that cc-rs hands it for an apple
-#     target, so this one edge is what forced four Miri cells onto a `macos-latest` runner —
-#     for a reason that has nothing to do with Miri.
-#   * `apollo-parser` pulls `rowan`, and with this package's own `rowan` feature off that edge
-#     used to be the ONLY thing putting rowan in the graph at all. rowan is the crate whose
-#     undefined behaviour is #77. That sentence held until #58's projection gate, which names
-#     `rowan` directly above — the point of the rule was never "no rowan", it was "no rowan
-#     nobody asked for", and a direct entry with a reason beside it is the asked-for kind.
+# It over-excludes wasm32, where the assertion would in fact hold. That is deliberate: nothing
+# cross-compiles this package's dev targets to wasm, the predicate states the axis the assertion's
+# own upstream comment reasons about, and the two targets that name this crate
+# (`validator_comparison`, `validator_oracle`) are additionally gated on `required-features`, so
+# on a 32-bit target they are not selected and the missing extern is unreachable rather than a
+# broken build.
 #
-# A dev-dependency added here that drags either one back re-creates both conditions, and does it
-# silently — nothing in CI reports on the shape of this block.
-#
-# `[lib] bench = false` stays. This package declares no `[[bench]]` target any more, so nothing
-# here goes through criterion — but the setting is about the LIB, and without it cargo still
-# builds a libtest bench harness for `src/lib.rs`.
+# Pinned with `=` rather than a caret range because the whitelist in
+# `benches/comparative/apollo/support/oracle/whitelist.rs` records four places where this exact
+# release is *less* strict than the specification, and an oracle whose gaps move underneath a
+# whitelist silently blesses whatever moved into them. A bump is a deliberate act that re-runs the
+# re-verification the whitelist's own tests perform. It resolves `apollo-parser` to 0.8.6 — the
+# same version named above — so the oracle adds no second copy of the parser and no third rowan.
+[target.'cfg(target_pointer_width = "64")'.dev-dependencies]
+apollo-compiler = "=1.32.0"
+
 [lib]
 bench = false
 
@@ -261,6 +455,162 @@ required-features = ["std", "graphql"]
 name = "token_mix"
 path = "examples/token_mix.rs"
 required-features = ["std", "graphql"]
+
+# ── THE BENCHMARKS ──────────────────────────────────────────────────────────────────────────
+#
+# All six, in one package, so that `cargo bench` is the whole suite in one place. They were split
+# across two members: `smear-benches`, and `smear-apollo-bench` in a directory called
+# `benchmarks/`. What that cost, in the order it is worth fixing — a bench suite that did not live
+# in the crate it measures; a package name that did not match its directory; and four of the six
+# reaching the fixtures they `include_str!` across a member boundary as
+# `../../smear/tests/fixtures/...`, so a fixture rename broke targets in a package that only one
+# job named. All three are gone: the fixtures are now this package's own, two directories up from
+# every bench that reads them.
+#
+# EVERY TARGET IS SPELLED OUT, `name` and `path` both, because cargo auto-discovers only
+# `benches/*.rs` and `benches/*/main.rs` — and this tree is neither. A directory of benches
+# organised by category is invisible to auto-discovery, so an entry omitted here is a bench
+# nothing builds and nothing reports on, which is the same silence #73 is about. `harness = false`
+# on all six: every one of them goes through criterion.
+#
+# ── THE CATEGORIES ──────────────────────────────────────────────────────────────────────────
+#
+# The axis is how many implementations are inside the timed region, because that is what decides
+# how a number may be read.
+#
+#   `benches/solo/`         one implementation — smear against itself over a corpus. The number
+#                           means "is smear faster than smear was", and it is only comparable to
+#                           an earlier run on the same machine. `graphqlx` is here because no
+#                           other Rust parser accepts the dialect, so there is nothing to compare
+#                           it to; `lex_baseline` is here because both of its sides
+#                           (`SyntacticLexer`, `LosslessLexer`) are smear's.
+#   `benches/comparative/`  two or more, like for like, in one process on one input. The number
+#                           is a RATIO and survives being read on a different machine.
+#
+# It is deliberately NOT lex / parse / compare. `lex_baseline` would be the only member of a
+# `lex` directory; `apollo_comparison`'s tier 0 lexes, so it belongs in that directory too; and
+# `executables` and `type_system` are five-way comparisons, so `parse` and `compare` would take
+# two of the four comparisons each and the split would say nothing about how to read a number.
+#
+# `benches/comparative/apollo/` is a sub-grouping and not a third category: it is the four
+# targets that share one harness plus the harness itself. See `support/mod.rs` for why the two
+# `[[test]]` and three `[[example]]` targets below have a `path` into it.
+
+[[bench]]
+name = "lex_baseline"
+path = "benches/solo/lex_baseline.rs"
+harness = false
+
+[[bench]]
+name = "graphqlx"
+path = "benches/solo/graphqlx.rs"
+harness = false
+
+[[bench]]
+name = "executables"
+path = "benches/comparative/executables.rs"
+harness = false
+
+[[bench]]
+name = "type_system"
+path = "benches/comparative/type_system.rs"
+harness = false
+
+# ── THE TWO GATED TARGET FAMILIES, AND THE HOLE `required-features` OPENS ───────────────────
+#
+# The four benches above measure this crate's DEFAULT feature set — `std`, `graphql`, `graphqlx`,
+# `parser`, `smallvec` — which is the configuration `cargo add smear` gives a consumer, and they
+# get it for free now that they are targets of the package they measure. Nothing below is
+# reachable in that configuration: the apollo family drives the lossless CST tower and the draft
+# §5 rule engine, so `rowan` and `validator` have to be on, and cargo's only per-target lever is
+# `required-features`.
+#
+# `required-features` GATES, IT DOES NOT ENABLE, and an unmet entry makes cargo skip the target
+# in silence — no output, exit code 0. Measured on this tree: `cargo bench --no-run -p smear`
+# builds FOUR of these six and exits 0 with nothing said about the other two.
+#
+# A bare workspace-wide `cargo bench --no-run` does build all six — but not because anything here
+# asked it to. `smear-smoke` names every one of this crate's features, cargo unifies features
+# across the SELECTED packages, and `rowan` and `validator` arrive by that arithmetic. It is the
+# same unchosen widening the root `Cargo.toml` records as #70's and #84's, working in the helpful
+# direction for once, and it would stop the day that member narrowed — silently, with two benches
+# dropping out of the run and exit 0.
+#
+# So the coverage is pinned where it can be pinned, in `.github/workflows/ci.yml`'s `build` job,
+# which NAMES `--bench apollo_comparison --bench validator_comparison` with the features on.
+# WHERE THE SILENCE IS AND IS NOT, all four measured on cargo 1.97.1 against this tree:
+#
+#   `cargo bench --no-run -p smear`                  4 of 6 built, exit 0, nothing printed
+#   `cargo build -p <pkg> --benches`, none declared  exit 0, nothing printed
+#   `--bench apollo_comparison` after a rename       exit 101, and it lists the real names
+#   `--test byte_identity` without the features      exit 101, "requires the features: ..."
+#
+# The last row is the one worth knowing: naming a target is loud even when the reason it cannot
+# be built is an unmet `required-features`, not only when the target is gone. That is what makes
+# the `byte-identity` and `validator-oracle` jobs safe against someone dropping `--features` from
+# their command line, and it is why every gated target in this manifest is reached by name
+# somewhere in CI rather than by a selection that could go quiet.
+#
+# The features could not instead be forced on for every dev target, the way `test-support` is by
+# the self dev-dependency above. `rowan` resolving on inside a Miri cell is exactly what
+# `ci/miri_scope.py` fails the run for (#77), and turning `validator` on would put nine more
+# integration targets into every `cargo test` for the benefit of two benches.
+#
+# WHAT THE MOVE CHANGED ABOUT WHAT THESE TWO MEASURE, recorded because a benchmark whose subject
+# moves quietly is worse than one that is absent. In `smear-apollo-bench` they resolved exactly
+# `std, graphql, rowan, validator`. Here they resolve `default` plus those two, which adds
+# `graphqlx` — inert, a second dialect neither bench enters — and `smallvec`, which is NOT inert:
+# it changes the collection backing on the syntactic AST that `validator_comparison`'s smear side
+# projects and validates. The direction is towards the consumer's configuration rather than away
+# from it, which is the same argument the four benches above are written on, so it is taken
+# deliberately; a `validator_comparison` number is not comparable across this commit.
+
+[[bench]]
+name = "apollo_comparison"
+path = "benches/comparative/apollo/apollo_comparison.rs"
+harness = false
+required-features = ["rowan", "validator"]
+
+[[bench]]
+name = "validator_comparison"
+path = "benches/comparative/apollo/validator_comparison.rs"
+harness = false
+required-features = ["rowan", "validator"]
+
+# The two gates over the apollo harness. They are `[[test]]` targets living in `benches/` because
+# they share `support/` with the two benches above and cargo resolves `mod support;` against the
+# directory of the file that writes it — a target in `tests/` could reach the same source only
+# through `#[path]` or a second copy. `.github/workflows/ci.yml` runs each by name, which is what
+# makes a rename or a deletion loud.
+
+[[test]]
+name = "byte_identity"
+path = "benches/comparative/apollo/byte_identity.rs"
+required-features = ["rowan", "validator"]
+
+[[test]]
+name = "validator_oracle"
+path = "benches/comparative/apollo/validator_oracle.rs"
+required-features = ["rowan", "validator"]
+
+# The three tools built on the same harness, for the same reason. `gate` prints the correctness
+# table the bench refuses to time without, `perfloop` is a profiler-friendly loop with no
+# criterion around it, and `treedump` is what produces the dumps `byte_identity` hashes.
+
+[[example]]
+name = "gate"
+path = "benches/comparative/apollo/gate.rs"
+required-features = ["rowan", "validator"]
+
+[[example]]
+name = "perfloop"
+path = "benches/comparative/apollo/perfloop.rs"
+required-features = ["rowan", "validator"]
+
+[[example]]
+name = "treedump"
+path = "benches/comparative/apollo/treedump.rs"
+required-features = ["rowan", "validator"]
 
 [lints]
 workspace = true
