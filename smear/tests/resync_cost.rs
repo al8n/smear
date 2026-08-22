@@ -20,12 +20,19 @@
 //! no-match exit **rewinds the whole scan**. A caller that then advances one token and asks
 //! again pays for the tail once per token, which was the Θ(n²).
 //!
-//! Since the scan allowance landed these curves read ×1.8 – ×2.4 instead of ×4.0, and the
+//! Since the scan allowance landed these curves read ×1.5 – ×2.2 instead of ×4.0, and the
 //! diagnostic counts are unchanged from the ones taken before it. The shapes are kept because a
 //! ratio is only evidence next to the ratio it replaced: 32 KB of `! ` went from 11 292 ms to
-//! 21.9 ms and 72 KB of `( type ) ` from 19 431 ms to 42.1 ms. The *gate* on that property is
+//! 24.4 ms and 72 KB of `( type ) ` from 19 431 ms to 28.9 ms. The *gate* on that property is
 //! `tests/resync_allowance.rs`, which asserts on produce-events rather than on the clock; this
 //! file stays a measurement.
+//!
+//! `padded` is the axis every other shape here is blind to. All of them are one-byte atoms, so
+//! bytes and produce-events move together and a guard dividing one by the other looks sound over
+//! the whole set. A comment runs to end of line, so one event can carry any number of bytes: the
+//! allowance's first form refilled in bytes and this shape held it fully open — **64 MB in
+//! 106 189 ms with zero refusals**, growing ×7.1 in time per ×4 in bytes. Metering events against
+//! events puts the same document at **158.6 ms**.
 //!
 //! - `! ` and `@ ( ) ` reach it through `recover::unexpected`, whose restart set is the wide
 //!   `is_sync_point`. A tail of `! @ : = | &` and `(` contains no member of that set, so every
@@ -116,6 +123,46 @@ fn graphql_recovery_cost() {
   curve("gql", graphql, "@ ( ) ", &[2_000, 4_000, 8_000]);
   curve("gql", graphql, "[ type ] ", &[2_000, 4_000, 8_000]);
   curve("gql", graphql, "( type ) ", &[2_000, 4_000, 8_000]);
+}
+
+/// `k` copies of a one-byte junk atom, each followed by a `pad`-byte comment.
+///
+/// Bytes grow with `pad` while produce-events do not, which is the whole point.
+fn padded(atom: &str, k: usize, pad: usize) -> String {
+  let comment = format!("#{}\n", "x".repeat(pad));
+  let mut src = String::with_capacity(k * (atom.len() + comment.len()));
+  for _ in 0..k {
+    src.push_str(atom);
+    src.push_str(&comment);
+  }
+  src
+}
+
+#[test]
+#[ignore = "a measurement, not a gate"]
+#[cfg(feature = "graphql")]
+fn long_trivia_tokens_do_not_buy_allowance() {
+  println!("\n== one-byte junk atoms alternating with comments of growing length ==");
+  println!("  the byte-denominated allowance read `refusals = 0` from pad=1024 upward");
+  for pad in [0usize, 16, 256, 1_024, 4_096] {
+    let src = padded("! ", 4_000, pad);
+    let (secs, diags) = timed(graphql, &src);
+    println!(
+      "  pad={pad:6} {:9}B {:9.1}ms diagnostics={diags}",
+      src.len(),
+      secs * 1e3
+    );
+  }
+  println!("  -- padding scaled with the document, the worst case for the byte denominator --");
+  for k in [1_000usize, 2_000, 4_000, 8_000] {
+    let src = padded("! ", k, k);
+    let (secs, diags) = timed(graphql, &src);
+    println!(
+      "  k={k:6} pad={k:6} {:10}B {:9.1}ms diagnostics={diags}",
+      src.len(),
+      secs * 1e3
+    );
+  }
 }
 
 #[test]

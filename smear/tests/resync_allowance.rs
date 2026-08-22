@@ -38,6 +38,7 @@ struct Run {
   diagnostics: usize,
   covered: usize,
   peak_spent: usize,
+  peak_committed: usize,
   refusals: usize,
   seconds: f64,
 }
@@ -51,6 +52,7 @@ fn run(root: fn(&str) -> (usize, usize), src: &str) -> Run {
     diagnostics,
     covered,
     peak_spent: scan_allowance::peak_spent(),
+    peak_committed: scan_allowance::peak_committed(),
     refusals: scan_allowance::refusals(),
     seconds,
   }
@@ -228,6 +230,109 @@ fn every_graphqlx_census_shape_stays_linear() {
   }
 }
 
+/// Token **length** is an axis, and the first census had one value of it.
+///
+/// Every shape above is built from one-byte atoms, so all of them hold the parse's bytes and its
+/// produce-events in near-lockstep — and a guard that divided one by the other looked sound over
+/// the whole census. It was not. A GraphQL comment runs to end of line, so one produce-event can
+/// carry as many bytes as the document likes: alternating a one-byte junk atom with an `L`-byte
+/// comment grew committed bytes ~`L` per trip while the meter grew ~1, and the allowance outran it
+/// by a factor of `L`. Measured on the byte-denominated guard, at `L = 1024`, `k = 4000`: **zero**
+/// refusals, and the sqrt-scaled variant ran 64 MB in 106 189 ms, growing ×7.1 in time for every
+/// ×4 in bytes.
+///
+/// So the assertion is not "still linear" — it is that **the meter does not move when only token
+/// length moves**. At fixed `k` the parse commits the same number of items whatever the padding,
+/// so `peak_spent` must be flat across `pad`; under the byte denominator it read 35 981 at
+/// `pad = 0` and 8 011 993 at `pad = 1024`. Flatness is the property; linearity follows from it
+/// and is checked too.
+#[test]
+#[cfg(feature = "graphql")]
+fn token_length_does_not_reopen_the_guard() {
+  /// `k` copies of `atom` each followed by a comment carrying `pad` filler bytes.
+  fn padded(atom: &str, k: usize, pad: usize) -> String {
+    let comment = format!("#{}\n", "x".repeat(pad));
+    let mut src = String::with_capacity(k * (atom.len() + comment.len()));
+    for _ in 0..k {
+      src.push_str(atom);
+      src.push_str(&comment);
+    }
+    src
+  }
+
+  println!("\n== token length as an axis ==");
+  for atom in ["! ", "@ ( ) ", "[ type ] "] {
+    const K: usize = 1_500;
+    let mut readings = Vec::new();
+    for pad in [0usize, 16, 256, 2_048] {
+      let src = padded(atom, K, pad);
+      let got = run(gql_document, &src);
+      assert_eq!(got.covered, src.len(), "{atom:?}/pad={pad}");
+      assert!(
+        got.refusals > 0,
+        "{atom:?}/pad={pad}: the guard never engaged on a shape built to be quadratic. This is \
+         the byte-denominated defect exactly: {} bytes committed against {} items, so a \
+         denominator counting bytes would have paid for every scan.",
+        src.len(),
+        got.peak_committed
+      );
+      println!(
+        "  {:<12} pad={pad:5} bytes={:9} spent={:8} committed={:7} refusals={:6} {:7.1}ms",
+        format!("{atom:?}"),
+        src.len(),
+        got.peak_spent,
+        got.peak_committed,
+        got.refusals,
+        got.seconds * 1e3
+      );
+      readings.push((pad, src.len(), got.peak_spent));
+    }
+
+    // Flatness. The committed item count at fixed `k` is the same whatever the padding — one
+    // comment and one newline per copy, however long the comment is — so the meter must be too.
+    let (_, _, base) = readings[0];
+    for &(pad, bytes, spent) in &readings {
+      let drift = spent as f64 / base as f64;
+      assert!(
+        (0.5..2.0).contains(&drift),
+        "{atom:?}: padding the comments to {pad} bytes moved the meter x{drift:.2} \
+         ({base} -> {spent}) while the committed item count did not move. The guard is being fed \
+         a length-sensitive denominator again — it must count produce-events, not bytes. \
+         (document was {bytes} bytes)"
+      );
+    }
+  }
+
+  // And the shape the byte denominator made worst: padding scaled with the document, which is
+  // where the two arms of `min(trips, factor * bytes_per_event)` cross.
+  println!("  -- padding scaled with the document --");
+  let mut prev: Option<(usize, usize)> = None;
+  for k in [500usize, 1_000, 2_000] {
+    let src = padded("! ", k, k);
+    let got = run(gql_document, &src);
+    assert_eq!(got.covered, src.len());
+    if let Some((pk, ps)) = prev {
+      let ratio = got.peak_spent as f64 / ps as f64;
+      assert!(
+        ratio < 2.6,
+        "padding scaled with the document: the meter grew x{ratio:.2} for a x{} document \
+         ({ps} -> {}). This is the axis the one-byte census could not see.",
+        k / pk,
+        got.peak_spent
+      );
+    }
+    println!(
+      "    k={k:5} pad={k:5} bytes={:9} spent={:8} committed={:7} refusals={:6} {:7.1}ms",
+      src.len(),
+      got.peak_spent,
+      got.peak_committed,
+      got.refusals,
+      got.seconds * 1e3
+    );
+    prev = Some((k, got.peak_spent));
+  }
+}
+
 /// The guard changed nothing on the shapes it governs.
 ///
 /// Each count was measured on the unfused parser while #168 was being investigated, so it is an
@@ -342,6 +447,37 @@ fn an_honest_corpus_never_reaches_the_guard() {
       "a long junk run before a real definition",
       format!("{} type U {{ f: Int }}", "! ".repeat(5_000)),
     ),
+    // The denominator counts produce-events, so a document that is mostly *one* very long token
+    // has very few of them. These are the shapes that would fire a guard whose denominator was
+    // too small, the mirror of the byte-denominated defect.
+    // Both of these end in a junk atom so that recovery actually runs: without it the document
+    // parses clean, `peak_spent` reads 0 and the assertion below passes without testing anything.
+    (
+      "one 1 MB comment, then junk",
+      format!("#{}\n{{ a }} !", "x".repeat(1_000_000)),
+    ),
+    (
+      "one 1 MB block string, then junk",
+      format!("{{ f(a: \"\"\"{}\"\"\") }} !", "x".repeat(1_000_000)),
+    ),
+    (
+      "100 KB comments between definitions, then junk",
+      format!(
+        "{} !",
+        format!("#{}\ntype T {{ f: Int }}\n", "x".repeat(100_000)).repeat(10)
+      ),
+    ),
+    (
+      "long comments between real definitions",
+      "#cccccccccccccccccccccccccccccccccccccc\ntype T { f: Int }\n".repeat(2_000),
+    ),
+    (
+      "a long comment run then a truncated definition",
+      format!(
+        "{} type T {{ f: ",
+        "#cccccccccccccccccccccccccccccccccccccc\n".repeat(2_000)
+      ),
+    ),
   ] {
     let got = run(gql_document, &src);
     assert_eq!(got.covered, src.len(), "{name}");
@@ -351,9 +487,15 @@ fn an_honest_corpus_never_reaches_the_guard() {
       got.refusals
     );
     println!(
-      "  {name:<42} bytes={:<7} peak_spent={:<8} refusals=0",
+      "  {name:<46} bytes={:<8} spent={:<8} committed={:<8} refusals=0{}",
       src.len(),
-      got.peak_spent
+      got.peak_spent,
+      got.peak_committed,
+      if got.peak_spent == 0 {
+        "   (parsed clean — reached no recovery call, so it constrains nothing)"
+      } else {
+        ""
+      }
     );
   }
   println!("  {checked} fixtures, none reached the guard");

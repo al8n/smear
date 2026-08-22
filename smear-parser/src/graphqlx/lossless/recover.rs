@@ -437,12 +437,23 @@ lossless_production! {
   /// [`crate::lossless::recover::unexpected`] with this dialect's four pairs and its restart
   /// predicate.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
+    // #168's scan allowance. Read here rather than inside the substrate helper because the
+    // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name
+    // that crate — `lossless_isolation.rs` enforces it. **Both numbers are produce-events**, and
+    // the byte count that reads so naturally in this position is the unsound version: one comment
+    // token carries arbitrarily many bytes, so bytes grow without the meter growing and the guard
+    // stays open. See `scan_allowance_exhausted`.
+    let exhausted = crate::lossless::recover::scan_allowance_exhausted(
+      inp.token_budget().spent(),
+      inp.state().token().tokens(),
+    );
     crate::lossless::recover::unexpected(
       inp,
       expected,
       delimiters,
       |t| is_sync_point(kind_of(t)),
       K::Error.raw(),
+      exhausted,
     )
   }
 
@@ -452,11 +463,22 @@ lossless_production! {
   /// `expect` already emitted at the position the failure happened, and a second diagnostic here
   /// would point at whatever the resync happens to start on.
   fn resync_to_definition<'inp, Src, Ctx>(inp) {
+    // #168's scan allowance. Read here rather than inside the substrate helper because the
+    // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name
+    // that crate — `lossless_isolation.rs` enforces it. **Both numbers are produce-events**, and
+    // the byte count that reads so naturally in this position is the unsound version: one comment
+    // token carries arbitrarily many bytes, so bytes grow without the meter growing and the guard
+    // stays open. See `scan_allowance_exhausted`.
+    let exhausted = crate::lossless::recover::scan_allowance_exhausted(
+      inp.token_budget().spent(),
+      inp.state().token().tokens(),
+    );
     crate::lossless::recover::resync_to(
       inp,
       delimiters,
       |t| is_definition_start(kind_of(t), keyword_of(t)),
       K::Error.raw(),
+      exhausted,
     )
   }
 }
