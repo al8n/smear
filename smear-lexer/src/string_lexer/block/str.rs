@@ -158,7 +158,7 @@ where
           lexer.slice(),
           escaped_triple_count,
           lines.extras.has_cr_terminators,
-          lines.extras.leading_blank_lines,
+          plan.leading_blank_lines,
           plan.effective_trailing,
           plan.common_indent,
           plan.total_lines,

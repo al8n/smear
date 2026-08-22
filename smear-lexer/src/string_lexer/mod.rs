@@ -205,6 +205,9 @@ macro_rules! impl_common_traits {
 mod block;
 mod inline;
 
+#[cfg(test)]
+mod tests;
+
 variant_type!(
   /// A plain string without any escapes.
   #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
