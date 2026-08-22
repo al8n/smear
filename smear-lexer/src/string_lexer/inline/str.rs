@@ -12,7 +12,7 @@ use crate::{
   hints::LineTerminatorHint,
 };
 
-use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainStr};
+use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
 
 #[derive(Logos, Debug)]
 #[logos(crate = tokora::logos, extras = usize, error(StringError))]
@@ -360,7 +360,7 @@ where
 
         let src = lexer.slice();
         return Ok(match (num_escapes != 0, num_unicodes != 0) {
-          (false, false) => LitPlainStr::new(src).into(),
+          (false, false) => LitPlainInlineStr::new(src).into(),
           _ => LitComplexInlineStr::new(src, string_lexer.extras).into(),
         });
       }

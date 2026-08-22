@@ -4,7 +4,7 @@ use tokora::utils::{
   sdl_display::{DisplayCompact, DisplayPretty},
 };
 
-use super::LitPlainStr;
+use super::LitPlainInlineStr;
 use std::{borrow::Cow, string::String};
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
@@ -61,7 +61,7 @@ where
 #[try_unwrap(ref, ref_mut)]
 pub enum LitInlineStr<S> {
   /// A clean string without any escaped characters or escaped unicode.
-  Plain(LitPlainStr<S>),
+  Plain(LitPlainInlineStr<S>),
   /// A complex string containing escaped characters.
   ///
   /// This includes escapes like:
@@ -133,25 +133,33 @@ impl<'a> TryFrom<LitInlineStr<&'a [u8]>> for LitInlineStr<&'a str> {
 /// literal `""` was the two-character string `""`, while `Complex` returned a cooked value with
 /// the delimiters already off.
 ///
-/// # The reslice is a claim, so nothing may replace the source under it
+/// # The reslice is a claim about *these* bytes read as *this* grammar
 ///
-/// Answering `Plain` by borrowing asserts that the literal's cooked value *is* its source, which
-/// holds only while a `Plain` carrier's source is the one the lexer put there. That is why this
-/// type has no source-replacing conversion. It had one — a `map` taking `FnOnce(S) -> O` — and
-/// the discriminant rode across it: a `Plain` `"x"` remapped to the spelling `"\n"` stayed
-/// `Plain`, so this conversion handed back the two characters `\` and `n` where the value is one
-/// line feed. The only representation change left is
-/// [`into_equivalent`](LitInlineStr::into_equivalent), whose sealed bound keeps the bytes:
+/// Answering `Plain` by borrowing asserts that the literal's cooked value is its source with the
+/// `"` delimiters taken off. That is two things at once — a source, and the grammar it was read
+/// under — and the assertion holds only while a caller can change neither.
 ///
-/// ```compile_fail,E0599
-/// use smear_lexer::LitStr;
+/// **The source.** This type has no source-replacing conversion. It had one, a `map` taking
+/// `FnOnce(S) -> O`, and the discriminant rode across it: a `Plain` `"x"` remapped to the spelling
+/// `"\n"` stayed `Plain`, so this conversion handed back the two characters `\` and `n` where the
+/// value is one line feed. The only representation change left is
+/// [`into_equivalent`](LitInlineStr::into_equivalent), whose sealed bound keeps the bytes.
 ///
-/// let lit = match LitStr::try_from("\"x\"").unwrap() {
-///   LitStr::Inline(lit) => lit,
-///   LitStr::Block(_) => unreachable!(),
+/// **The grammar.** Removing `map` did not close that half, because the carrier is not what names
+/// the grammar — the variant is, and one kind-agnostic carrier fitted both. A block literal's
+/// carrier wrapped as inline is an honest source under the wrong reading, and `inline_body` then
+/// takes one quote off each end of a `"""` delimiter. [`LitPlainStr`](super::LitPlainStr) carries
+/// its kind in its type now, so the pairing has no spelling:
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
+///
+/// let LitStr::Block(block) = LitStr::try_from("\"\"\"block\"\"\"").unwrap() else {
+///   unreachable!()
 /// };
-/// // `\n` spelled as an escape is a Complex literal, and this would call it Plain.
-/// let forged = lit.map(|_| "\"\\n\"");
+/// let LitBlockStr::Plain(carrier) = block else { unreachable!() };
+/// // This used to typecheck, and `Cow::from` of it answered `""block""`.
+/// let forged = LitInlineStr::Plain(carrier);
 /// ```
 ///
 /// Per this repository's convention the error code above is checked only under a nightly

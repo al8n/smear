@@ -16,10 +16,29 @@ pub use block::{LitBlockStr, LitComplexBlockStr};
 pub(crate) use inline::skip_inline_str_simd;
 pub use inline::{LitComplexInlineStr, LitInlineStr};
 
+/// Generates one literal carrier: a private `source`, the line facts the lexer measured on *that*
+/// source, a `pub(crate)` constructor, and read-only doors over the rest.
+///
+/// # The optional `<Kind>` parameter, and why one of the three carriers has it
+///
+/// [`LitComplexInlineStr`] and [`LitComplexBlockStr`] say which literal they came out of in their
+/// names, so the enum variant that holds one cannot be handed the other kind's carrier: the types
+/// differ. The plain carrier had no such distinction — one `LitPlainStr<S>` served both
+/// [`LitInlineStr::Plain`] and [`LitBlockStr::Plain`] — so a caller could take the carrier out of a
+/// legitimately lexed `"x"` and spell `LitBlockStr::Plain(that_carrier)`. Nothing about the source
+/// was forged; what was forged is *which grammar it was lexed under*, because the carrier is
+/// kind-agnostic and the variant supplies the kind. Both value doors then read that kind and
+/// answered with it: the block conversion returned the inline literal's quoted spelling `"x"`
+/// where its value is `x`, and wrapping `"""block"""` as inline returned `""block""`.
+///
+/// Naming the parameter puts the kind *in the type* — `$name<S, Kind>`, with [`InlineKind`] and
+/// [`BlockKind`] as the two markers — and every generated door carries `Kind` through unchanged, so
+/// there is no conversion from one to the other to reach for. It is a `PhantomData`, so it costs no
+/// bytes; `Debug` is written by hand beside the type rather than derived, for the same reason.
 macro_rules! variant_type {
   (
     $(#[$meta:meta])*
-    $vis:vis struct $name:ident {
+    $vis:vis struct $name:ident $(<$kind:ident>)? {
       $(
         $(#[$field_meta:meta])*
         $field:ident: $ty:ty $(,)?
@@ -27,16 +46,17 @@ macro_rules! variant_type {
     }
   ) => {
     $(#[$meta])*
-    $vis struct $name<S> {
+    $vis struct $name<S $(, $kind)?> {
       source: S,
-      $($field: $ty),*
+      $($field: $ty,)*
+      $(_kind: core::marker::PhantomData<$kind>,)?
     }
 
-    impl<'a> TryFrom<$name<&'a [u8]>> for $name<&'a str> {
+    impl<'a $(, $kind)?> TryFrom<$name<&'a [u8] $(, $kind)?>> for $name<&'a str $(, $kind)?> {
       type Error = core::str::Utf8Error;
 
       #[inline]
-      fn try_from(value: $name<&'a [u8]>) -> Result<Self, Self::Error> {
+      fn try_from(value: $name<&'a [u8] $(, $kind)?>) -> Result<Self, Self::Error> {
         core::str::from_utf8(value.source())
           .map(|s| {
             Self::new(s, $(value.$field),*)
@@ -44,24 +64,27 @@ macro_rules! variant_type {
       }
     }
 
-    impl<S> $name<Option<S>> {
-      /// transpose
-      pub fn transpose(self) -> Option<$name<S>> {
+    impl<S $(, $kind)?> $name<Option<S> $(, $kind)?> {
+      /// Moves the `Option` out of the source position, leaving every claim the carrier makes —
+      /// the lexer's variant, the line facts beside it, and the kind it was lexed under — attached
+      /// to the same bytes it was attached to before.
+      pub fn transpose(self) -> Option<$name<S $(, $kind)?>> {
         match self.source {
-          Some(source) => Some($name {
-            source,
-            $($field: self.$field),*
-          }),
+          Some(source) => Some($name::new(source, $(self.$field),*)),
           None => None,
         }
       }
     }
 
-    impl<S> $name<S> {
+    impl<S $(, $kind)?> $name<S $(, $kind)?> {
       #[inline(always)]
       #[allow(clippy::too_many_arguments)]
       pub(crate) const fn new(source: S, $($field: $ty),*) -> Self {
-        Self { source, $($field),* }
+        Self {
+          source,
+          $($field,)*
+          $(_kind: core::marker::PhantomData::<$kind>,)?
+        }
       }
 
       $(
@@ -89,13 +112,13 @@ macro_rules! variant_type {
       /// The bound is what makes this the only representation change a literal has.
       /// [`ToEquivalent`](tokora::utils::ToEquivalent) is sealed, so `T` ranges over
       /// byte-equivalent spellings of the same source and over nothing else — and a literal's
-      /// carrier is not free-form data. The lexer's variant, the line facts beside it and, for a
-      /// `Plain` one, the claim that its cooked value *is* its source are all statements about
-      /// these exact bytes. A conversion that could hand the source to an arbitrary `FnOnce`
-      /// would leave every one of them attached to a spelling that never justified it, which is
-      /// why there is no `map` here.
+      /// carrier is not free-form data. The lexer's variant, the line facts beside it, the kind it
+      /// was lexed under and, for a plain one, the claim that its cooked value *is* its source are
+      /// all statements about these exact bytes. A conversion that could hand the source to an
+      /// arbitrary `FnOnce` would leave every one of them attached to a spelling that never
+      /// justified it, which is why there is no `map` here.
       #[inline(always)]
-      pub fn to_equivalent<T>(&self) -> $name<T>
+      pub fn to_equivalent<T>(&self) -> $name<T $(, $kind)?>
       where
         S: tokora::utils::ToEquivalent<T>,
       {
@@ -104,7 +127,7 @@ macro_rules! variant_type {
 
       /// Converts this to an equivalent type.
       #[inline(always)]
-      pub fn into_equivalent<T>(self) -> $name<T>
+      pub fn into_equivalent<T>(self) -> $name<T $(, $kind)?>
       where
         S: tokora::utils::IntoEquivalent<T>,
       {
@@ -112,14 +135,16 @@ macro_rules! variant_type {
       }
     }
 
-    impl<S: tokora::utils::human_display::DisplayHuman> core::fmt::Display for $name<S> {
+    impl<S: tokora::utils::human_display::DisplayHuman $(, $kind)?> core::fmt::Display
+      for $name<S $(, $kind)?>
+    {
       #[inline]
       fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         tokora::utils::human_display::DisplayHuman::fmt(&self.source, f)
       }
     }
 
-    impl<'a> $name<&'a str> {
+    impl<'a $(, $kind)?> $name<&'a str $(, $kind)?> {
       /// Returns the str representation.
       #[inline(always)]
       pub const fn as_str(&self) -> &'a str {
@@ -127,7 +152,7 @@ macro_rules! variant_type {
       }
     }
 
-    impl<'a> $name<&'a [u8]> {
+    impl<'a $(, $kind)?> $name<&'a [u8] $(, $kind)?> {
       /// Returns the byte slice representation.
       #[inline(always)]
       pub const fn as_bytes(&self) -> &'a [u8] {
@@ -205,14 +230,114 @@ mod inline;
 #[cfg(test)]
 mod tests;
 
+/// The kind marker of a plain carrier the lexer read as an **inline** `"…"` literal.
+///
+/// A type-level tag and nothing else: see [`LitPlainStr`] for what it is tagging and why.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct InlineKind;
+
+/// The kind marker of a plain carrier the lexer read as a **block** `"""…"""` literal.
+///
+/// A type-level tag and nothing else: see [`LitPlainStr`] for what it is tagging and why.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct BlockKind;
+
+/// The carrier of [`LitInlineStr::Plain`] — a `"…"` literal the lexer found no escape in.
+pub type LitPlainInlineStr<S> = LitPlainStr<S, InlineKind>;
+
+/// The carrier of [`LitBlockStr::Plain`] — a `"""…"""` literal §2.9.4's algorithm leaves alone.
+pub type LitPlainBlockStr<S> = LitPlainStr<S, BlockKind>;
+
 variant_type!(
-  /// A plain string without any escapes.
-  #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+  /// A plain string without any escapes, tagged with the literal it was lexed out of.
+  ///
+  /// The two spellings have names: [`LitPlainInlineStr<S>`] and [`LitPlainBlockStr<S>`].
+  ///
+  /// # The tag is the point
+  ///
+  /// A plain carrier holds a source and one claim about it — *the value of this literal is this
+  /// source, delimiters off* — and that claim is only readable against a grammar. Which delimiters
+  /// come off, and what "no normalization to do" even means, are different questions for `"…"` and
+  /// for `"""…"""`. While the carrier was kind-agnostic the enum variant supplied the kind, so a
+  /// caller could take the carrier out of a real inline literal and re-label it:
+  ///
+  /// ```compile_fail,E0308
+  /// use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
+  ///
+  /// let LitStr::Inline(inline) = LitStr::try_from("\"x\"").unwrap() else { unreachable!() };
+  /// let LitInlineStr::Plain(carrier) = inline else { unreachable!() };
+  /// // The carrier is an inline literal's. Calling it a block literal's used to typecheck, and
+  /// // `Cow::from` then answered the quoted spelling `"x"` where the block value is `x`.
+  /// let forged = LitBlockStr::Plain(carrier);
+  /// ```
+  ///
+  /// and the other way round just as easily:
+  ///
+  /// ```compile_fail,E0308
+  /// use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
+  ///
+  /// let LitStr::Block(block) = LitStr::try_from("\"\"\"block\"\"\"").unwrap() else { unreachable!() };
+  /// let LitBlockStr::Plain(carrier) = block else { unreachable!() };
+  /// // Wrapping a block literal as inline used to answer `""block""` — the outer `"""` losing one
+  /// // quote each side to the inline delimiter strip.
+  /// let forged = LitInlineStr::Plain(carrier);
+  /// ```
+  ///
+  /// # Nothing outside this crate mints one
+  ///
+  /// Re-labelling is the door a caller can reach *given* a carrier. The other half of the
+  /// invariant is that a carrier can only come from a lex in the first place — `new` is
+  /// `pub(crate)`:
+  ///
+  /// ```compile_fail,E0624
+  /// use smear_lexer::LitPlainInlineStr;
+  ///
+  /// // `new` is `pub(crate)` to `smear-lexer`: the lexer is the only constructor.
+  /// let forged = LitPlainInlineStr::new("\"x\"");
+  /// ```
+  ///
+  /// and `source` is private, which is what closes the struct literal and any later write to the
+  /// field a caller holds:
+  ///
+  /// ```compile_fail,E0616
+  /// use smear_lexer::{LitInlineStr, LitStr};
+  ///
+  /// let LitStr::Inline(inline) = LitStr::try_from("\"x\"").unwrap() else { unreachable!() };
+  /// let LitInlineStr::Plain(carrier) = inline else { unreachable!() };
+  /// let raw = carrier.source;
+  /// ```
+  ///
+  /// (`LitPlainBlockStr { source: … }` is refused too, by that same privacy; rustc gives that
+  /// diagnostic no error code, so this snippet pins the fact rather than the phrasing.)
+  ///
+  /// Together those are the whole of the invariant: a plain literal's kind and its source are
+  /// established in the same place, by the lexer, and no caller can pair one with the other.
+  ///
+  /// Per this repository's convention the error codes above are checked only under a nightly
+  /// `cargo test --doc`; on stable the assertion is that the snippets do not compile at all.
+  #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
   #[repr(transparent)]
-  pub struct LitPlainStr {}
+  pub struct LitPlainStr<Kind> {}
 );
 
-impl<S> DisplayCompact for LitPlainStr<S>
+/// Byte-for-byte what `#[derive(Debug)]` printed before the kind parameter existed.
+///
+/// Written by hand only because the derive would render the `PhantomData` beside `source`, and a
+/// type-level tag is not data — the enclosing `LitInlineStr(Plain(…))` / `LitBlockStr(Plain(…))`
+/// already names the kind. Frozen lexer fixtures read this output, so it is deliberately stable.
+impl<S, Kind> core::fmt::Debug for LitPlainStr<S, Kind>
+where
+  S: core::fmt::Debug,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("LitPlainStr")
+      .field("source", self.source_ref())
+      .finish()
+  }
+}
+
+impl<S, Kind> DisplayCompact for LitPlainStr<S, Kind>
 where
   S: DisplayHuman,
 {
@@ -224,7 +349,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for LitPlainStr<S>
+impl<S, Kind> DisplayPretty for LitPlainStr<S, Kind>
 where
   S: DisplayHuman,
 {

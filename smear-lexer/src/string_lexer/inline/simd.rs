@@ -29,7 +29,7 @@ use tokora::{
 
 use crate::error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError};
 
-use super::{LitComplexInlineStr, LitInlineStr, LitPlainStr, utf8_len_for_scalar};
+use super::{LitComplexInlineStr, LitInlineStr, LitPlainInlineStr, utf8_len_for_scalar};
 
 type Span = SimpleSpan;
 
@@ -283,7 +283,7 @@ pub(crate) fn skip_inline_str_simd(
         return Ok(if has_escapes {
           LitComplexInlineStr::new(pos, capacity).into()
         } else {
-          LitPlainStr::new(pos).into()
+          LitPlainInlineStr::new(pos).into()
         });
       }
       b'\\' => {

@@ -13,7 +13,7 @@ use tokora::{
 };
 
 use crate::{
-  LitComplexBlockStr, LitComplexInlineStr, LitPlainStr,
+  LitComplexBlockStr, LitComplexInlineStr, LitPlainBlockStr, LitPlainInlineStr,
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
   skip_block_str_from_bytes, skip_inline_str_simd,
@@ -917,7 +917,7 @@ where
               self.last_span = SimpleSpan::new(token_start, self.cursor);
               let slice = self.src.slice(&token_start..&self.cursor).unwrap();
               let block = match lit {
-                LitBlockStr::Plain(_) => LitBlockStr::Plain(LitPlainStr::new(slice)),
+                LitBlockStr::Plain(_) => LitBlockStr::Plain(LitPlainBlockStr::new(slice)),
                 LitBlockStr::Complex(c) => LitBlockStr::Complex(LitComplexBlockStr::new(
                   slice,
                   c.num_escaped_triple_quotes(),
@@ -943,7 +943,7 @@ where
               let slice = self.src.slice(&token_start..&self.cursor).unwrap();
               return Some(finish!(
                 self,
-                SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new(slice)))
+                SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new(slice)))
               ));
             }
             None => {
@@ -960,7 +960,7 @@ where
                 self.last_span = SimpleSpan::new(token_start, self.cursor);
                 let slice = self.src.slice(&token_start..&self.cursor).unwrap();
                 let inline = match lit {
-                  LitInlineStr::Plain(_) => LitInlineStr::Plain(LitPlainStr::new(slice)),
+                  LitInlineStr::Plain(_) => LitInlineStr::Plain(LitPlainInlineStr::new(slice)),
                   LitInlineStr::Complex(c) => {
                     LitInlineStr::Complex(LitComplexInlineStr::new(slice, c.required_capacity()))
                   }

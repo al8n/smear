@@ -13,7 +13,7 @@ pub(crate) use self::{
 mod str;
 mod u8_slice;
 
-use super::LitPlainStr;
+use super::LitPlainBlockStr;
 
 variant_type!(
   /// A block string representation in GraphQL containing one or more escaped triple quotes,
@@ -49,7 +49,7 @@ variant_type!(
 pub enum LitBlockStr<S> {
   /// A clean block string, no escaped triple quotes, no CR/CRLF,
   /// no leading/trailing blank lines, and no common indent.
-  Plain(LitPlainStr<S>),
+  Plain(LitPlainBlockStr<S>),
 
   /// A block string required some processing to unescape or normalize.
   /// This includes handling escaped triple quotes, line endings, and indentation.
@@ -215,23 +215,30 @@ fn block_body(raw: &str) -> &str {
 /// line is joined by a single line feed whatever terminator the source spelled (step 8), and
 /// `\"""` — §2.9.5's only escape — becomes `"""` on the way past.
 ///
-/// # `Plain` means the lexer looked, so nothing may replace the source under it
+/// # `Plain` means the lexer looked, and looked at *this* grammar
 ///
-/// The identity case is a claim about *these* bytes: the lexer's `is_clean` says the algorithm has
-/// nothing to do to them. A source-replacing conversion falsified it, which is why this type has
-/// no `map` — a `Plain` `"""block"""` remapped to `"""a\n"""` stayed `Plain`, and this conversion
+/// The identity case is a claim about *these* bytes read under *this* algorithm — §2.9.4's, whose
+/// `is_clean` says it has nothing to do to them. Both halves have to be the lexer's.
+///
+/// **The bytes.** A source-replacing conversion falsified that half, which is why this type has no
+/// `map` — a `Plain` `"""block"""` remapped to `"""a\n"""` stayed `Plain`, and this conversion
 /// returned the trailing line feed that step 5 removes. [`into_equivalent`] is the only
-/// representation change left, and its sealed bound keeps the bytes:
+/// representation change left, and its sealed bound keeps the bytes.
 ///
-/// ```compile_fail,E0599
-/// use smear_lexer::LitStr;
+/// **The algorithm.** Removing `map` did not close the other half, because the carrier does not
+/// name a grammar — the variant does, and one kind-agnostic carrier fitted both. An inline
+/// literal's carrier re-labelled as a block one is an honest source under an algorithm that never
+/// ran on it, and `block_body` finds no `"""` to strip, so the inline quotes stay in the value.
+/// [`LitPlainStr`](super::LitPlainStr) carries its kind in its type now:
 ///
-/// let lit = match LitStr::try_from("\"\"\"block\"\"\"").unwrap() {
-///   LitStr::Block(lit) => lit,
-///   LitStr::Inline(_) => unreachable!(),
-/// };
-/// // A body with a trailing blank line is a Complex literal, and this would call it Plain.
-/// let forged = lit.map(|_| "\"\"\"a\n\"\"\"");
+/// ```compile_fail,E0308
+/// use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
+///
+/// let LitStr::Inline(inline) = LitStr::try_from("\"x\"").unwrap() else { unreachable!() };
+/// let LitInlineStr::Plain(carrier) = inline else { unreachable!() };
+/// // This used to typecheck, and `Cow::from` of it answered the spelling `"x"` — quotes included
+/// // — where the value of the literal the carrier came from is `x`.
+/// let forged = LitBlockStr::Plain(carrier);
 /// ```
 ///
 /// Per this repository's convention the error code above is checked only under a nightly
