@@ -156,7 +156,7 @@
 //! The reachable cost needs a third thing: an error run of `k` lexemes, long enough to blow the
 //! allowance, followed by a junk run whose scan would have **succeeded**.
 //!
-//! Below [`SCAN_ALLOWANCE_FLOOR`] nothing happens at all. Above it the guard refuses until the
+//! Below `SCAN_ALLOWANCE_FLOOR` nothing happens at all. Above it the guard refuses until the
 //! denominator catches up, and the rate it catches up at is **not a constant** — it is set by how
 //! many items the junk commits per refusal. Refusals continue while `k + c > FACTOR * c + floor`,
 //! so they stop at `c = (k - floor) / (FACTOR - 1)` committed items; a junk run committing `m`
@@ -479,6 +479,17 @@ where
   Ok(())
 }
 
+/// Gated on there being a dialect to consume it, exactly as `lossless/mod.rs` gates `mod macros`
+/// and for the same reason: `rowan` alone — which is what `cargo hack --each-feature` builds — puts
+/// this substrate in the crate with no dialect beside it, and the four call sites live in the two
+/// dialects' `recover.rs` wrappers. Without the gate all three items are dead there, and
+/// `-Dwarnings` makes `dead_code` an error.
+///
+/// **It was `pub`, and narrowing it to `pub(crate)` is what armed the lint** — rustc treats a
+/// reachable `pub` item as used, so the wider visibility was silently satisfying `dead_code` on
+/// exactly the configurations where the callers vanish. Widening it back would work and is the
+/// wrong repair: it would put parser-internal machinery on the public API to quiet a lint.
+///
 /// Lexer items a parse may produce per **surviving** item before recovery stops scanning ahead.
 ///
 /// Both sides count produce-events, so a parse whose items all survive *and* all increment the
@@ -490,6 +501,7 @@ where
 /// buys an attacker a longer run before the guard engages. Lowering it to **1** would start
 /// refusing scans on honest input, because 1.0 is the identity rather than a bound approached from
 /// below.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) const SCAN_ALLOWANCE_FACTOR: usize = 8;
 
 /// The allowance every parse gets regardless of how few items have survived.
@@ -500,6 +512,7 @@ pub(crate) const SCAN_ALLOWANCE_FACTOR: usize = 8;
 /// recovery a truncated document needs into a token-by-token walk. The floor is also the absolute
 /// bound on what a *small* document can waste: nothing can spend more than this before its own
 /// surviving items start paying for the scans.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 
 /// Whether this parse has produced more lexer items than the ones it kept can pay for.
@@ -541,6 +554,7 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// Should that stop being true, a rollback lowers `committed` and never lowers `spent`, so the
 /// guard engages *earlier*: recovery coarsens, the bound holds, and nothing becomes unsound.
 #[inline]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
   #[cfg(all(feature = "test-support", feature = "std"))]
   scan_allowance::record(spent, committed);
@@ -570,7 +584,7 @@ pub(crate) fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
 /// thread-local set makes each reading belong to the parse that produced it, and the ordering
 /// constraint disappears rather than being documented.
 ///
-/// [`peak_spent`] and [`peak_committed`] exist because the property under test is **linearity**,
+/// `peak_spent` and `peak_committed` exist because the property under test is **linearity**,
 /// and wall-clock is a bad witness for it: the machine these were first measured on sat at load
 /// average 54 and the same parse varied 1.6× between runs. These are the produce-event counts the
 /// guard is denominated in — deterministic, machine-independent, and the quantities that actually
@@ -588,6 +602,12 @@ pub mod scan_allowance {
     static MIN_COMMIT_BETWEEN_REFUSALS: Cell<usize> = const { Cell::new(usize::MAX) };
   }
 
+  // The write half is gated where its caller is. `scan_allowance_exhausted` is the only thing
+  // that calls either, and it does not exist without a dialect, so without this the `dead_code`
+  // denial simply moves one level down — measured on `--features rowan,test-support`, a cell
+  // `cargo hack --each-feature` cannot build because it takes features one at a time. The read
+  // half below is `pub` and needs no gate: a reachable `pub` item is never dead.
+  #[cfg(any(feature = "graphql", feature = "graphqlx"))]
   #[inline]
   pub(super) fn record_refusal(committed: usize) {
     let n = REFUSALS.with(|c| {
@@ -604,6 +624,7 @@ pub mod scan_allowance {
     LAST_REFUSAL_COMMITTED.with(|c| c.set(committed));
   }
 
+  #[cfg(any(feature = "graphql", feature = "graphqlx"))]
   #[inline]
   pub(super) fn record(spent: usize, committed: usize) {
     PEAK_SPENT.with(|c| c.set(c.get().max(spent)));
