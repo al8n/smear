@@ -370,12 +370,37 @@ macro_rules! lossless_drivers {
                 // mutably as the first argument, so a second `inp` method call in the second
                 // would be a second mutable borrow of the same value.
                 $(let $mark = inp.cst_mark();)?
+                // Not a bare `skip_while`: a stop must not read the tail, and the input's trip
+                // witness is what sees a stop whose error value does not say so.
+                //
+                // `root_turn` is what asks — a driver's ONE production is the whole attempt, and
+                // nothing below a root catches, so the baseline it takes immediately before that
+                // production is the correctly scoped one. The verdict then travels to the drain in
+                // the slot rather than being re-derived there, which is the shape every shipped
+                // root now has (smear PR #189).
+                //
+                // A DRIVER IS A ROOT OF ONE ENTRY, and it is written as one: the drain runs it,
+                // mints the slot for it, and spends that slot against what it returns. The verdict
+                // never exists as a value this expansion could pair with anything else — see
+                // `drain_unless_stopped`'s `It runs the root` note.
+                //
                 // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
                 // parameter that matches `L::Source`.
-                let out = super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?);
-                // Not a bare `skip_while`: a terminal stop must not read the tail. See
-                // `crate::lossless::depth::drain_unless_terminal`.
-                $crate::lossless::depth::drain_unless_terminal(inp, out)
+                $crate::lossless::depth::drain_unless_stopped(
+                  inp,
+                  |inp: &mut TestInput<'inp, '_>,
+                   stop: &mut $crate::lossless::depth::RootStop| {
+                    use $crate::lossless::depth::{RootTurn, root_turn};
+
+                    match root_turn(inp, stop, |inp: &mut TestInput<'inp, '_>| {
+                      super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?)
+                    }) {
+                      RootTurn::Parsed { parsed } => Ok(parsed),
+                      RootTurn::EndsTheDocument { error }
+                      | RootTurn::Recoverable { error } => Err(error),
+                    }
+                  },
+                )
               },
             );
 
@@ -537,7 +562,7 @@ macro_rules! lossless_error_impls {
 
     /// The **parser-frame** nesting refusal, landed in the dialect container.
     ///
-    /// Raised by [`crate::lossless::depth::descend`] when a production tries to enter one level
+    /// Raised by `crate::lossless::depth::descend` when a production tries to enter one level
     /// more than the budget admits, and reported at an empty span on the parse's committed end:
     /// the refused frame has consumed nothing of its own, so there is no lexeme to point at.
     ///
@@ -552,6 +577,17 @@ macro_rules! lossless_error_impls {
     /// Against a `Cow` message the arm would be a string comparison that a reworded constructor
     /// turns into a permanent `false` — with no build failure and no test failure, only the
     /// amplification back on input that reaches the ceiling.
+    ///
+    /// **The amplification is no longer what a wrong arm costs, and the variant is still right.**
+    /// smear issue #178 put the input's own trip witness beside the arm, in the substrate's
+    /// crate-private `root_turn`, so a refusal ends the document whatever this arm answers:
+    /// flipping both dialects' arms to `false` now leaves every end-to-end refusal cell in
+    /// `nesting_depth.rs` green — three of them were red before — and reddens only the cells that
+    /// read the arm at a value, which are the two `terminal.rs` censuses per dialect and
+    /// `tokoras_own_descent_trip_lands_terminal_in_both_dialects`. What the variant still buys
+    /// is the arm's *own* correctness, which those cells can then assert at the value — and a
+    /// **scanner** stop, which rides `MaybeTerminal` alone because tokora's scanner witness is
+    /// withdrawn for cause (al8n/tokora#311).
     ///
     /// The residual `lossless/runner.rs` records is untouched: a consumer still sees a positioned
     /// error rather than "this document is too deeply nested", because the projection still drops

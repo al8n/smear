@@ -58,7 +58,7 @@ use super::{
   trivia::{peek_as, peek_kind},
 };
 
-use tokora::error::MaybeTerminal as _;
+use crate::lossless::depth::{self, RootTurn};
 
 use crate::lossless::lossless_production;
 
@@ -189,8 +189,15 @@ lossless_production! {
   /// the document.** Resynchronising past one re-reads the abandoned nest at the document level
   /// and reports every closer of it — smear issue #169.
   /// [`depth::descend`](crate::lossless::depth::descend)'s `The refusal ends the document` note
-  /// carries the reasoning and the measurements; this arm is one of the five that read it.
-  fn document<'inp, Src, Ctx>(inp) {
+  /// carries the reasoning and the measurements.
+  ///
+  /// The exception is a **call**, not a predicate written out here — smear issue #178. See
+  /// GraphQL's `document` and [`depth::root_turn`](crate::lossless::depth::root_turn).
+  ///
+  /// `stop` carries that same per-entry verdict out to [`document_entry`]'s drain, which must not
+  /// re-derive it from a counter whose span is the whole root — smear PR #189, and GraphQL's
+  /// `document` carries the mechanism.
+  fn document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::Document.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -199,11 +206,10 @@ lossless_production! {
         }
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if let Err(e) = document_entry_item::<Src, Ctx>(inp) {
-            if e.is_terminal() {
-              return Err(e);
-            }
-            recover::resync_to_definition::<Src, Ctx>(inp)?;
+          match depth::root_turn(inp, stop, document_entry_item::<Src, Ctx>) {
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -222,7 +228,7 @@ lossless_production! {
   /// [`super::parse_type_system_document`] is its shipped entry point — the one a schema-only
   /// consumer calls so that an executable definition is rejected by the parser, at the parser's
   /// own position, rather than by hand afterwards.
-  fn type_system_document<'inp, Src, Ctx>(inp) {
+  fn type_system_document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::TypeSystemDocument.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -230,12 +236,15 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          if let Err(e) = import_or_type_system_definition_or_extension::<Src, Ctx>(inp) {
-            // The refusal arm [`document`]'s note explains.
-            if e.is_terminal() {
-              return Err(e);
-            }
-            recover::resync_to_definition::<Src, Ctx>(inp)?;
+          // The refusal arm [`document`]'s note explains, through the same call and the same slot.
+          match depth::root_turn(
+            inp,
+            stop,
+            import_or_type_system_definition_or_extension::<Src, Ctx>,
+          ) {
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -247,11 +256,11 @@ lossless_production! {
   /// [`document`], then a drain — the production [`super::parse_document`] applies.
   ///
   /// See the module docs for why the drain is not optional — and
-  /// [`depth::drain_unless_terminal`](crate::lossless::depth::drain_unless_terminal) for the one
-  /// outcome that must not read the tail.
+  /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) for the one
+  /// outcome that must not read the tail, and for why it is handed [`document`] itself rather than
+  /// a classification of what [`document`] returned.
   fn document_entry<'inp, Src, Ctx>(inp) {
-    let out = document::<Src, Ctx>(inp);
-    crate::lossless::depth::drain_unless_terminal(inp, out)
+    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
   }
 
   /// [`type_system_document`], then a drain — the production
@@ -260,7 +269,6 @@ lossless_production! {
   /// See the module docs for why the drain is not optional; the SDL-only loop catches and
   /// resynchronises exactly as the mixed one does, so an `Err` can still escape it.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    let out = type_system_document::<Src, Ctx>(inp);
-    crate::lossless::depth::drain_unless_terminal(inp, out)
+    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
   }
 }
