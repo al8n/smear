@@ -562,7 +562,7 @@ macro_rules! lossless_error_impls {
 
     /// The **parser-frame** nesting refusal, landed in the dialect container.
     ///
-    /// Raised by [`crate::lossless::depth::descend`] when a production tries to enter one level
+    /// Raised by `crate::lossless::depth::descend` when a production tries to enter one level
     /// more than the budget admits, and reported at an empty span on the parse's committed end:
     /// the refused frame has consumed nothing of its own, so there is no lexeme to point at.
     ///
@@ -579,12 +579,12 @@ macro_rules! lossless_error_impls {
     /// amplification back on input that reaches the ceiling.
     ///
     /// **The amplification is no longer what a wrong arm costs, and the variant is still right.**
-    /// smear issue #178 put the input's own trip witness beside the arm in
-    /// [`root_turn`](crate::lossless::depth::root_turn), so a refusal ends the document whatever
-    /// this arm answers: flipping both dialects' arms to `false` now leaves every end-to-end
-    /// refusal cell in `nesting_depth.rs` green — three of them were red before — and reddens only
-    /// the cells that read the arm at a value, which are the two `terminal.rs` censuses per dialect
-    /// and `tokoras_own_descent_trip_lands_terminal_in_both_dialects`. What the variant still buys
+    /// smear issue #178 put the input's own trip witness beside the arm, in the substrate's
+    /// crate-private `root_turn`, so a refusal ends the document whatever this arm answers:
+    /// flipping both dialects' arms to `false` now leaves every end-to-end refusal cell in
+    /// `nesting_depth.rs` green — three of them were red before — and reddens only the cells that
+    /// read the arm at a value, which are the two `terminal.rs` censuses per dialect and
+    /// `tokoras_own_descent_trip_lands_terminal_in_both_dialects`. What the variant still buys
     /// is the arm's *own* correctness, which those cells can then assert at the value — and a
     /// **scanner** stop, which rides `MaybeTerminal` alone because tokora's scanner witness is
     /// withdrawn for cause (al8n/tokora#311).

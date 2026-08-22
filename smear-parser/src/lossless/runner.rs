@@ -171,7 +171,7 @@ impl<L: rowan::Language> Parse<L> {
 ///
 /// # The parse-side budget ends the document too, and reaches the same tail the same way
 ///
-/// The posture above is the *lexer's* trip. [`crate::lossless::depth::descend`] is the other
+/// The posture above is the *lexer's* trip. `crate::lossless::depth::descend` is the other
 /// mechanism the same ceiling feeds, and until smear issue #169 it did not share the posture: it
 /// reported and returned, the `Err` unwound the nest, and a root loop resynchronised and re-read
 /// the abandoned tail one token at a time — 67 diagnostics for one refusal, growing with the
