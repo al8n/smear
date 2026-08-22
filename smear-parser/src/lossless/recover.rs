@@ -222,11 +222,18 @@
 //! configured.** Measured: `[ type ] ` repeated 2 000 times is 12 000 lexical items, and
 //! `with_max_tokens(12_000)` — a ceiling equal to the whole document, so it never trips — records
 //! **99 963** produce-events against `FACTOR * 12 000 + floor = 100 096`. The ratio is
-//! `FACTOR + floor / T` rather than anything about the document: 8.330 / 8.334 / 8.337 / 8.339
-//! over four shapes at 12 000 items, and 9.32 / 8.65 / 8.33 / 8.16 / 8.08 over one shape at
-//! 3 000 / 6 000 / 12 000 / 24 000 / 48 000.
+//! `FACTOR + floor / T` rather than anything about the document.
+//!
 //! `max_tokens_does_not_bound_the_work_the_scan_allowance_does` is the pin, and `smear-lexer`'s
 //! `LosslessLimits::max_tokens` carries the same statement at the door a caller actually reads.
+//! What that gate runs is two shapes at two sizes in each dialect, and its four readings —
+//! 8.330 / 8.164 for `[ type ] ` at 12 000 and 24 000 items, 8.337 / 8.169 for `! ` at the same
+//! two — are the only ones anything here reproduces. Wider than the gate, taken by hand:
+//! 8.330 / 8.334 / 8.337 over the four census shapes at 12 000 items in both dialects, and
+//! 9.320 / 8.655 / 8.330 / 8.164 / 8.082 over `[ type ] ` at
+//! 3 000 / 6 000 / 12 000 / 24 000 / 48 000 as the floor amortises. Those are a campaign
+//! measurement rather than a witness, and they are labelled so rather than dropped because a
+//! reader re-deriving the bound wants them.
 //!
 //! That is worth stating because the self-clearing property reads as a liability from the other
 //! side: a shape that alternates cheap commits with expensive failed scans re-opens the guard on
