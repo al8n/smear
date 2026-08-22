@@ -445,31 +445,45 @@ fn error_density_is_a_bounded_known_cost() {
 /// freeze the denominator.
 #[test]
 #[cfg(feature = "graphql")]
+#[allow(clippy::vec_init_then_push)]
 fn every_refusal_commits_at_least_one_item() {
   println!("\n== committed items per refusal ==");
   // Both dialects, because the arithmetic behind exception 2 is shared and GraphQLx carries 46
   // `tt_hook_and_then` rules of its own. Its burn atom differs: `-` and `+` are real, counted
   // tokens there, so the leading-zeros number error stands in for them.
-  let cells: [Cell; 2] = [
-    (
-      "gql",
-      gql_document,
-      "-",
-      &["!", "! ", "@", ":", "=", "|", "&", "!@:=|&", "()", "( )"],
-    ),
-    (
-      "gqlx",
-      gqlx_document,
-      "00",
-      // `:` is deliberately absent and `*`, `+`, `-`, `=>` deliberately present. A run of colons
-      // lexes as `::` in this dialect, which IS a sync point, so it zero-skips through at zero
-      // refusals — the non-vacuity guard below caught that, which is how it was found. The four
-      // that replace it are junk here and are tokens GraphQL does not have.
-      &[
-        "!", "! ", "@", "=", "|", "&", "*", "+", "-", "=>", "!@:=|&", "()", "( )",
-      ],
-    ),
-  ];
+  // Each dialect's cell is pushed under its OWN feature, not under an `all(...)` gate on the test
+  // and not as a fixed array. A fixed array naming `gqlx_document` from a `#[cfg(feature =
+  // "graphql")]` test does not compile on the single-dialect legs CI builds — measured, as
+  // `cannot find value `gqlx_document` in this scope` on
+  // `--no-default-features --features std,parser,rowan,graphql`. Building the list this way keeps
+  // the cell that exists on every leg where it exists.
+  // `vec![...]` cannot express this: each element is `#[cfg]`-conditional. The lint sees only two
+  // consecutive pushes, hence the allow on the function.
+  let mut cells: Vec<Cell> = Vec::new();
+  #[cfg(feature = "graphql")]
+  cells.push((
+    "gql",
+    gql_document,
+    "-",
+    &["!", "! ", "@", ":", "=", "|", "&", "!@:=|&", "()", "( )"],
+  ));
+  #[cfg(feature = "graphqlx")]
+  cells.push((
+    "gqlx",
+    gqlx_document,
+    "00",
+    // `:` is deliberately absent and `*`, `+`, `-`, `=>` deliberately present. A run of colons
+    // lexes as `::` in this dialect, which IS a sync point, so it zero-skips through at zero
+    // refusals — the non-vacuity guard below caught that, which is how it was found. The four
+    // that replace it are junk here and are tokens GraphQL does not have.
+    &[
+      "!", "! ", "@", "=", "|", "&", "*", "+", "-", "=>", "!@:=|&", "()", "( )",
+    ],
+  ));
+  assert!(
+    !cells.is_empty(),
+    "no dialect is enabled, so this test would pass without checking anything"
+  );
   for (dialect, root, burn, alphabet) in cells {
     for junk in alphabet {
       let src = format!("{}{}", burn.repeat(20_000), junk.repeat(6_000));

@@ -42,6 +42,26 @@ pub mod depth;
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod macros;
 
+// ── `pub` IS LOAD-BEARING IN THIS MODULE, AND NOT FOR THE REASON IT LOOKS LIKE ────────────────
+//
+// Almost nothing in this substrate has an in-crate caller that survives the cell above. `expect`,
+// `peek_kind`, `try_eat`, `unexpected`, `resync_to`, `report_unexpected`, `unclosed`, `descend`,
+// `drain_unless_terminal`, `finish_root`, `lossless_context`, `kind_of`, `keyword_of` and roughly
+// twenty more are reached only from the two dialect assemblies, which `rowan`-alone does not
+// compile. rustc treats a reachable `pub` item as used, so `dead_code` never fires on any of them
+// — and that is the ONLY thing keeping this module green in that cell.
+//
+// So narrowing any item here to `pub(crate)` is not the local tidy-up it looks like: it arms
+// `dead_code`, on one feature cell, which `-Dwarnings` turns into a build error. Measured by
+// planting exactly that — narrowing every `pub` in this directory at once puts THIRTY items on the
+// error list under `--no-default-features --features rowan`.
+//
+// It has already happened once, on `recover.rs`'s scan allowance (#168): a review called the `pub`
+// cosmetic, `pub(crate)` was correct in isolation, and the cell went red. The repair there was the
+// cfg above rather than restoring `pub`, because those three items genuinely have no meaning
+// without a dialect. Anything else narrowed here needs the same cfg or the same reasoning — and
+// `ci/hack.sh` is the gate that answers, because a plain local build does not export `-Dwarnings`.
+
 pub mod project;
 
 pub mod recover;
