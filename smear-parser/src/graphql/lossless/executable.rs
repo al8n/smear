@@ -277,6 +277,18 @@ lossless_production! {
   ///
   /// The executable-only root, off [`parse_document`](super::parse_document)'s mixed-form path.
   /// [`parse_executable_document`](super::parse_executable_document) is its shipped entry point.
+  ///
+  /// # This loop does **not** resynchronise, and that is not an oversight — smear issue #168
+  ///
+  /// It writes `executable_definition(inp)?` and propagates, where the other five document roots
+  /// in this workspace catch and call `recover::resync_to_definition`. It is therefore the one
+  /// root with no `resync_to` call site, and #168's census measured it **linear** (×1.8 – ×2.0)
+  /// on `[ fragment ] ` and `[ query ] ` repeated — the shapes that put the other dialect's
+  /// executable root, which does catch and resynchronise, at ×4.1.
+  ///
+  /// So "make the two dialects symmetrical" is a change that *adds* a quadratic here. The
+  /// asymmetry is a divergence to keep, and `tests/resync_allowance.rs` gates this root beside
+  /// the five that do resynchronise so a symmetrising edit is measured rather than reasoned about.
   fn executable_document<'inp, Src, Ctx>(inp) {
     node(
       K::ExecutableDocument.raw(),
