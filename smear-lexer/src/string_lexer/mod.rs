@@ -84,19 +84,16 @@ macro_rules! variant_type {
         self.source
       }
 
-      /// Map
-      #[inline(always)]
-      pub fn map<O, F>(self, f: F) -> $name<O>
-      where
-        F: FnOnce(S) -> O,
-      {
-        $name {
-          source: f(self.source),
-          $($field: self.$field),*
-        }
-      }
-
       /// Converts this to an equivalent type.
+      ///
+      /// The bound is what makes this the only representation change a literal has.
+      /// [`ToEquivalent`](tokora::utils::ToEquivalent) is sealed, so `T` ranges over
+      /// byte-equivalent spellings of the same source and over nothing else — and a literal's
+      /// carrier is not free-form data. The lexer's variant, the line facts beside it and, for a
+      /// `Plain` one, the claim that its cooked value *is* its source are all statements about
+      /// these exact bytes. A conversion that could hand the source to an arbitrary `FnOnce`
+      /// would leave every one of them attached to a spelling that never justified it, which is
+      /// why there is no `map` here.
       #[inline(always)]
       pub fn to_equivalent<T>(&self) -> $name<T>
       where

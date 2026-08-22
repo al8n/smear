@@ -132,6 +132,30 @@ impl<'a> TryFrom<LitInlineStr<&'a [u8]>> for LitInlineStr<&'a str> {
 /// they used to disagree. `Plain` returned the source *with* its quotes, so `Cow::from` of the
 /// literal `""` was the two-character string `""`, while `Complex` returned a cooked value with
 /// the delimiters already off.
+///
+/// # The reslice is a claim, so nothing may replace the source under it
+///
+/// Answering `Plain` by borrowing asserts that the literal's cooked value *is* its source, which
+/// holds only while a `Plain` carrier's source is the one the lexer put there. That is why this
+/// type has no source-replacing conversion. It had one — a `map` taking `FnOnce(S) -> O` — and
+/// the discriminant rode across it: a `Plain` `"x"` remapped to the spelling `"\n"` stayed
+/// `Plain`, so this conversion handed back the two characters `\` and `n` where the value is one
+/// line feed. The only representation change left is
+/// [`into_equivalent`](LitInlineStr::into_equivalent), whose sealed bound keeps the bytes:
+///
+/// ```compile_fail,E0599
+/// use smear_lexer::LitStr;
+///
+/// let lit = match LitStr::try_from("\"x\"").unwrap() {
+///   LitStr::Inline(lit) => lit,
+///   LitStr::Block(_) => unreachable!(),
+/// };
+/// // `\n` spelled as an escape is a Complex literal, and this would call it Plain.
+/// let forged = lit.map(|_| "\"\\n\"");
+/// ```
+///
+/// Per this repository's convention the error code above is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
 impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
   #[inline]
   fn from(value: LitInlineStr<&'a str>) -> Self {
@@ -181,18 +205,6 @@ impl<S> LitInlineStr<S> {
     match self {
       Self::Plain(s) => s.source(),
       Self::Complex(s) => s.source(),
-    }
-  }
-
-  /// Map
-  #[inline(always)]
-  pub fn map<O, F>(self, f: F) -> LitInlineStr<O>
-  where
-    F: FnOnce(S) -> O,
-  {
-    match self {
-      Self::Plain(s) => LitInlineStr::Plain(s.map(f)),
-      Self::Complex(s) => LitInlineStr::Complex(s.map(f)),
     }
   }
 

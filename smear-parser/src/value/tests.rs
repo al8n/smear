@@ -210,26 +210,37 @@ fn literal_sources_borrow_non_copy_carriers() {
   let source: &String = null.source();
   assert_eq!(source, "null");
 
-  let inline_lit = match LitStr::try_from("\"inline\"").unwrap() {
-    LitStr::Inline(lit) => lit.map(String::from),
-    LitStr::Block(_) => panic!("inline spelling produced a block literal"),
-  };
-  let string = StringValue::<_, CustomSpan, dyn CustomLang>::new(
-    CustomSpan(5),
-    LitStr::Inline(inline_lit.clone()),
-  );
-  let source: &String = string.source();
-  assert_eq!(source, "\"inline\"");
+  // The literal carriers ride `into_equivalent`, which is the only conversion a literal has that
+  // may change its representation. It is bounded by `tokora`'s sealed `IntoEquivalent`, so the
+  // bytes survive the change — and that is what a literal needs, because a `Plain` one asserts
+  // that its cooked value IS its borrowed source and a conversion free to rewrite the bytes would
+  // forge that. `String` is not one of the representations tokora seals in, so `Bytes` is the
+  // non-`Copy` carrier these three ride.
+  #[cfg(feature = "bytes")]
+  {
+    use ::bytes::Bytes;
 
-  let inline = InlineStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(6), inline_lit);
-  let source: &String = inline.source();
-  assert_eq!(source, "\"inline\"");
+    let inline_lit = match LitStr::try_from(b"\"inline\"".as_slice()).unwrap() {
+      LitStr::Inline(lit) => lit.into_equivalent::<Bytes>(),
+      LitStr::Block(_) => panic!("inline spelling produced a block literal"),
+    };
+    let string = StringValue::<_, CustomSpan, dyn CustomLang>::new(
+      CustomSpan(5),
+      LitStr::Inline(inline_lit.clone()),
+    );
+    let source: &Bytes = string.source();
+    assert_eq!(source, "\"inline\"");
 
-  let block_lit = match LitStr::try_from("\"\"\"block\"\"\"").unwrap() {
-    LitStr::Block(lit) => lit.map(String::from),
-    LitStr::Inline(_) => panic!("block spelling produced an inline literal"),
-  };
-  let block = BlockStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(7), block_lit);
-  let source: &String = block.source();
-  assert_eq!(source, "\"\"\"block\"\"\"");
+    let inline = InlineStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(6), inline_lit);
+    let source: &Bytes = inline.source();
+    assert_eq!(source, "\"inline\"");
+
+    let block_lit = match LitStr::try_from(b"\"\"\"block\"\"\"".as_slice()).unwrap() {
+      LitStr::Block(lit) => lit.into_equivalent::<Bytes>(),
+      LitStr::Inline(_) => panic!("block spelling produced an inline literal"),
+    };
+    let block = BlockStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(7), block_lit);
+    let source: &Bytes = block.source();
+    assert_eq!(source, "\"\"\"block\"\"\"");
+  }
 }

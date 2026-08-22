@@ -121,18 +121,6 @@ impl<S> LitBlockStr<S> {
     }
   }
 
-  /// Map
-  #[inline(always)]
-  pub fn map<O, F>(self, f: F) -> LitBlockStr<O>
-  where
-    F: FnOnce(S) -> O,
-  {
-    match self {
-      Self::Plain(s) => LitBlockStr::Plain(s.map(f)),
-      Self::Complex(s) => LitBlockStr::Complex(s.map(f)),
-    }
-  }
-
   /// Converts this to an equivalent type.
   #[inline(always)]
   pub fn to_equivalent<T>(&self) -> LitBlockStr<T>
@@ -226,6 +214,30 @@ fn block_body(raw: &str) -> &str {
 /// survive steps 5 and 6), leading and trailing blank lines go (steps 5 and 6), each surviving
 /// line is joined by a single line feed whatever terminator the source spelled (step 8), and
 /// `\"""` — §2.9.5's only escape — becomes `"""` on the way past.
+///
+/// # `Plain` means the lexer looked, so nothing may replace the source under it
+///
+/// The identity case is a claim about *these* bytes: the lexer's `is_clean` says the algorithm has
+/// nothing to do to them. A source-replacing conversion falsified it, which is why this type has
+/// no `map` — a `Plain` `"""block"""` remapped to `"""a\n"""` stayed `Plain`, and this conversion
+/// returned the trailing line feed that step 5 removes. [`into_equivalent`] is the only
+/// representation change left, and its sealed bound keeps the bytes:
+///
+/// ```compile_fail,E0599
+/// use smear_lexer::LitStr;
+///
+/// let lit = match LitStr::try_from("\"\"\"block\"\"\"").unwrap() {
+///   LitStr::Block(lit) => lit,
+///   LitStr::Inline(_) => unreachable!(),
+/// };
+/// // A body with a trailing blank line is a Complex literal, and this would call it Plain.
+/// let forged = lit.map(|_| "\"\"\"a\n\"\"\"");
+/// ```
+///
+/// Per this repository's convention the error code above is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
+///
+/// [`into_equivalent`]: LitBlockStr::into_equivalent
 impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
   #[inline]
   fn from(value: LitBlockStr<&'a str>) -> Self {
