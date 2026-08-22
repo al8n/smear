@@ -4,7 +4,7 @@ use tokora::utils::{
   sdl_display::{DisplayCompact, DisplayPretty},
 };
 
-use super::LitPlainStr;
+use super::LitPlainInlineStr;
 use std::{borrow::Cow, string::String};
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
@@ -61,7 +61,7 @@ where
 #[try_unwrap(ref, ref_mut)]
 pub enum LitInlineStr<S> {
   /// A clean string without any escaped characters or escaped unicode.
-  Plain(LitPlainStr<S>),
+  Plain(LitPlainInlineStr<S>),
   /// A complex string containing escaped characters.
   ///
   /// This includes escapes like:
@@ -115,19 +115,81 @@ impl<'a> TryFrom<LitInlineStr<&'a [u8]>> for LitInlineStr<&'a str> {
   }
 }
 
+/// Answers the literal's **value** — draft §2.9.1's `StringValue`, delimiters gone and every
+/// escape applied — borrowing it whenever the spelling already *is* the value.
+///
+/// # Value, not spelling
+///
+/// This type has a second `&str` door that answers the other question, and the two are not
+/// interchangeable: [`as_str`](LitInlineStr::as_str), [`Deref`](core::ops::Deref),
+/// [`AsRef`], [`Borrow`](core::borrow::Borrow) and `From<LitInlineStr<&str>> for &str` all
+/// hand back the **source spelling**, `"` delimiters and backslashes included, because keeping the
+/// source is what makes lexing allocate nothing. This conversion is the cooked reading, and
+/// [`Cow`] is its return type precisely so that the [`Plain`](LitInlineStr::Plain) half — a
+/// literal with no escape in it — still costs nothing but a reslice.
+///
+/// The two variants therefore answer the same question, which is what makes this door meaningful:
+/// they used to disagree. `Plain` returned the source *with* its quotes, so `Cow::from` of the
+/// literal `""` was the two-character string `""`, while `Complex` returned a cooked value with
+/// the delimiters already off.
+///
+/// # The reslice is a claim about *these* bytes read as *this* grammar
+///
+/// Answering `Plain` by borrowing asserts that the literal's cooked value is its source with the
+/// `"` delimiters taken off. That is two things at once — a source, and the grammar it was read
+/// under — and the assertion holds only while a caller can change neither.
+///
+/// **The source.** This type has no source-replacing conversion. It had one, a `map` taking
+/// `FnOnce(S) -> O`, and the discriminant rode across it: a `Plain` `"x"` remapped to the spelling
+/// `"\n"` stayed `Plain`, so this conversion handed back the two characters `\` and `n` where the
+/// value is one line feed. The only representation change left is
+/// [`into_equivalent`](LitInlineStr::into_equivalent), whose sealed bound keeps the bytes.
+///
+/// **The grammar.** Removing `map` did not close that half, because the carrier is not what names
+/// the grammar — the variant is, and one kind-agnostic carrier fitted both. A block literal's
+/// carrier wrapped as inline is an honest source under the wrong reading, and `inline_body` then
+/// takes one quote off each end of a `"""` delimiter. [`LitPlainStr`](super::LitPlainStr) carries
+/// its kind in its type now, so the pairing has no spelling:
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
+///
+/// let LitStr::Block(block) = LitStr::try_from("\"\"\"block\"\"\"").unwrap() else {
+///   unreachable!()
+/// };
+/// let LitBlockStr::Plain(carrier) = block else { unreachable!() };
+/// // This used to typecheck, and `Cow::from` of it answered `""block""`.
+/// let forged = LitInlineStr::Plain(carrier);
+/// ```
+///
+/// Per this repository's convention the error code above is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
 impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
   #[inline]
   fn from(value: LitInlineStr<&'a str>) -> Self {
     match value {
-      LitInlineStr::Plain(s) => Cow::Borrowed(s.as_str()),
+      LitInlineStr::Plain(s) => Cow::Borrowed(inline_body(s.as_str())),
       LitInlineStr::Complex(s) => {
         let mut builder = String::with_capacity(s.required_capacity());
-        let raw = s.as_str();
-        normalize_str_to_string(&raw[1..raw.len() - 1], &mut builder);
+        normalize_str_to_string(inline_body(s.as_str()), &mut builder);
         Cow::Owned(builder)
       }
     }
   }
+}
+
+/// Strips an inline literal's `"` delimiters.
+///
+/// Total on a slice that does not carry them. Both carriers are `pub(crate)`-constructed and every
+/// construction in this crate spans a whole `"…"` token, so the delimiters are the lexer's
+/// guarantee — and a conversion on an already-lexed literal is not the place to re-check it with a
+/// panicking index.
+#[inline]
+fn inline_body(raw: &str) -> &str {
+  raw
+    .strip_prefix('"')
+    .and_then(|rest| rest.strip_suffix('"'))
+    .unwrap_or(raw)
 }
 
 impl<S> LitInlineStr<Option<S>> {
@@ -151,18 +213,6 @@ impl<S> LitInlineStr<S> {
     match self {
       Self::Plain(s) => s.source(),
       Self::Complex(s) => s.source(),
-    }
-  }
-
-  /// Map
-  #[inline(always)]
-  pub fn map<O, F>(self, f: F) -> LitInlineStr<O>
-  where
-    F: FnOnce(S) -> O,
-  {
-    match self {
-      Self::Plain(s) => LitInlineStr::Plain(s.map(f)),
-      Self::Complex(s) => LitInlineStr::Complex(s.map(f)),
     }
   }
 
@@ -205,69 +255,112 @@ impl_common_traits!(LitInlineStr::<&'a [u8]>::as_bytes);
 impl_common_traits!(LitComplexInlineStr::<&'a str>::as_str);
 impl_common_traits!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
 
+/// Applies draft §2.9.1's escapes to an inline literal's body.
+///
+/// # Every escape the lexer accepts, and no panic for the ones it does not
+///
+/// `\"` `\\` `\/` `\b` `\f` `\n` `\r` `\t`, the fixed-width `\uXXXX` — including a surrogate
+/// **pair**, which is two escapes spelling one character — and the braced `\u{X…}` of one to six
+/// digits. The braced form is the one this used to be missing: `read_hex4` read the `{` as a hex
+/// digit and panicked on it, so `Cow::from` of `"\u{1F600}"` aborted on a literal
+/// `handle_braced_escape_unicode` in this very module accepts. A conversion on an
+/// already-lexed literal is not allowed to be a panic site, so nothing here can panic: a sequence
+/// the escape grammar does not cover is copied through as it was spelled, for the same reason
+/// `inline_body` hands back a slice that carries no delimiters rather than panicking on one.
 #[inline]
 fn normalize_str_to_string(src: &str, output: &mut String) {
-  #[inline]
-  fn read_hex4(it: &mut core::str::Chars<'_>) -> u32 {
-    (0..4)
-      .map(|_| {
-        it.next()
-          .expect("\\u escape truncated")
-          .to_digit(16)
-          .expect("invalid hex digit in \\u escape")
-      })
-      .fold(0u32, |acc, d| (acc << 4) | d)
-  }
-
-  let mut chars = src.chars();
-
-  while let Some(c) = chars.next() {
-    match c {
-      '\\' => {
-        let esc = chars.next().expect("backslash at end");
-        match esc {
-          '"' | '\\' | '/' => output.push(esc),
-          'b' => output.push('\x08'),
-          'f' => output.push('\x0C'),
-          'n' => output.push('\n'),
-          'r' => output.push('\r'),
-          't' => output.push('\t'),
-          'u' => {
-            let u = read_hex4(&mut chars);
-
-            // If high surrogate, require a following \uXXXX low surrogate.
-            if (0xD800..=0xDBFF).contains(&u) {
-              let slash = chars
-                .next()
-                .expect("high surrogate not followed by low surrogate (missing \\)");
-              let u_ch = chars
-                .next()
-                .expect("high surrogate not followed by low surrogate (missing u)");
-              if slash != '\\' || u_ch != 'u' {
-                panic!("high surrogate not followed by \\u");
-              }
-              let lo = read_hex4(&mut chars);
-              if !(0xDC00..=0xDFFF).contains(&lo) {
-                panic!("invalid low surrogate");
-              }
-
-              let combined = 0x10000 + (((u - 0xD800) << 10) | (lo - 0xDC00));
-              let ch = core::char::from_u32(combined).expect("invalid combined code point");
-              output.push(ch);
-            } else if (0xDC00..=0xDFFF).contains(&u) {
-              // Lone low surrogate is invalid in JSON.
-              panic!("lone low surrogate");
-            } else {
-              let ch = core::char::from_u32(u).expect("invalid code point");
-              output.push(ch);
-            }
-          }
-          _ => unreachable!(),
-        }
+  let mut rest = src;
+  while let Some(at) = rest.find('\\') {
+    output.push_str(&rest[..at]);
+    let after = &rest[at + 1..];
+    match read_escape(after) {
+      Some((ch, consumed)) => {
+        output.push(ch);
+        rest = &after[consumed..];
       }
-      other => output.push(other),
+      None => {
+        output.push('\\');
+        rest = after;
+      }
     }
   }
+  output.push_str(rest);
+}
+
+/// Reads one escape body — everything after the backslash — as its character and byte span.
+#[inline]
+fn read_escape(after: &str) -> Option<(char, usize)> {
+  let ch = after.chars().next()?;
+  let simple = match ch {
+    '"' => '"',
+    '\\' => '\\',
+    '/' => '/',
+    'b' => '\u{8}',
+    'f' => '\u{c}',
+    'n' => '\n',
+    'r' => '\r',
+    't' => '\t',
+    'u' => return read_unicode_escape(&after[1..]).map(|(ch, span)| (ch, span + 1)),
+    _ => return None,
+  };
+  Some((simple, ch.len_utf8()))
+}
+
+/// Reads a `\u` escape body — everything after the `u` — in either of draft §2.9.1's spellings.
+#[inline]
+fn read_unicode_escape(after: &str) -> Option<(char, usize)> {
+  if let Some(rest) = after.strip_prefix('{') {
+    let close = rest.find('}')?;
+    let digits = rest.get(..close)?;
+    // draft §2.9.1 names one to six hex digits. `u32::from_str_radix` bounds neither that count
+    // nor the character class — it takes a leading `+`, and has no digit-count limit at all — so
+    // both are checked here rather than trusted to the parse.
+    if !(1..=6).contains(&digits.len()) || !is_hex_digits(digits) {
+      return None;
+    }
+    let scalar = u32::from_str_radix(digits, 16).ok()?;
+    // `+ 2` for the braces the offset above does not span.
+    return char::from_u32(scalar).map(|ch| (ch, close + 2));
+  }
+
+  let leading = hex4(after)?;
+  // A leading surrogate is a character only with its trailing half, which the grammar spells as a
+  // second `\u` escape immediately after this one. Anything else is not a character at all.
+  if (0xD800..0xDC00).contains(&leading) {
+    let tail = after.get(4..)?.strip_prefix("\\u")?;
+    let trailing = hex4(tail)?;
+    if !(0xDC00..0xE000).contains(&trailing) {
+      return None;
+    }
+    let combined = 0x1_0000 + ((leading - 0xD800) << 10) + (trailing - 0xDC00);
+    return char::from_u32(combined).map(|ch| (ch, 10));
+  }
+
+  char::from_u32(leading).map(|ch| (ch, 4))
+}
+
+/// Reads exactly four hex digits.
+///
+/// `get` rather than an index: it answers `None` on a slice shorter than four bytes *and* on one
+/// whose fourth byte is inside a character, which is what lets the caller index at `4` afterwards.
+#[inline]
+fn hex4(digits: &str) -> Option<u32> {
+  let digits = digits.get(..4)?;
+  // `from_str_radix` accepts a leading `+` that draft §2.9.1's four hex digits does not.
+  if !is_hex_digits(digits) {
+    return None;
+  }
+  u32::from_str_radix(digits, 16).ok()
+}
+
+/// Whether every byte is one of draft §2.9.1's hex digits, `0-9`, `A-F`, or `a-f`.
+///
+/// `u32::from_str_radix` accepts strictly more than this — a leading `+` sign, at least — which is
+/// why both unicode-escape readers check the character class themselves rather than trusting the
+/// parse to fail on whatever the grammar does not name.
+#[inline]
+fn is_hex_digits(s: &str) -> bool {
+  s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[inline(always)]

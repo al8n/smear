@@ -320,7 +320,7 @@ impl core::fmt::Display for LosslessTokenKind {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::LitPlainStr;
+  use crate::{LitPlainBlockStr, LitPlainInlineStr};
 
   /// Census: every declared [`LosslessTokenKind`] variant must be producible by some
   /// [`LosslessToken`], i.e. by some arm of [`LosslessToken::kind`].
@@ -391,8 +391,8 @@ mod tests {
       Identifier => LosslessToken::Identifier("x"),
       Float => LosslessToken::LitFloat(LitFloat::Decimal("1.0")),
       Int => LosslessToken::LitInt(LitInt::Decimal("1")),
-      InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
-      BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+      InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new("\"s\""))),
+      BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainBlockStr::new("\"\"\"b\"\"\""))),
     }
   }
 }
