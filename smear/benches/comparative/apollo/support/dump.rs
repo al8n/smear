@@ -320,7 +320,27 @@ impl Corpus {
   pub const fn expected(self) -> &'static str {
     match self {
       Self::Clean => "00f2b8b2bce48001aff45f8049141a13ca740fc6fe8eb4d9e287d1ccd4a46fc9",
-      Self::Perturbed => "a42a39d41d4b8495f1ab5420292f9c76d194fd89697867fae1e2546ca64486b9",
+      // Re-blessed for smear#168's scan allowance, with the diff read. Of the three entries only
+      // `alias` moved, and it is the only one that takes refusals: 2 311 of them, against 0 for
+      // `supergraph` and `example_query`, whose dumps are byte-identical — which is the branch's
+      // "where it refuses nothing it changes nothing" holding on a corpus it was not verified over.
+      //
+      // What moved in `alias` is extent, not structure: **12 016 nodes and 30 036 tokens before and
+      // after**, same root range, still byte-exact. 926 `Error` nodes shrank to cover their token
+      // alone, and the 925 `Space` and 463 `Comma` tokens they used to contain became siblings —
+      //
+      //     Error@19..22            ->    Error@19..20
+      //       Comma@20..21 ","            Comma@20..21 ","      (now beside, not inside)
+      //       Space@21..22 " "            Space@21..22 " "
+      //
+      // because a `sync_balanced` hole counts trivia into the skipped region and the allowance's
+      // one-token fallback commits only the token. No node changed kind, nothing was re-parented
+      // into a different production, and no definition was lost.
+      //
+      // Diagnostics fell 7 004 -> 6 079, the suppressed skipped-region note for a one-token hole.
+      // That is the NEGATIVE direction of `|delta| <= refusals`, and it holds here: 925 <= 2 311.
+      // `prefixes` — 9 300 truncations, the largest recovery population — did not move at all.
+      Self::Perturbed => "7b5bd604e35cc8b3f93ebff09e07602773931cfc1358f1550c6fd732735bbe54",
       Self::Malformed => "2b5f293717f54346007f48459a2f0bd8cde76ea9344a56fb4010599296dab1c7",
       Self::Prefixes => "ab57d222a70151c1473072cb5b0d949719cc5c9958e0bd03fb1db96e9db30858",
     }

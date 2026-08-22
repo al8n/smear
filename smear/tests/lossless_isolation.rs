@@ -337,13 +337,26 @@ fn the_substrate_names_no_dialect() {
 
 /// The one `#[cfg]` the substrate writes about dialects, and how many times.
 ///
-/// Two, both identical, and they are the substrate declining to compile its macros when **no**
-/// dialect is on rather than reaching for one — `any(…)` and not `graphql`. A gate that only
-/// forbade dialect *types* would let a `#[cfg(feature = "graphql")]` fork appear here, which is
-/// exactly how a generic layer starts having a favourite.
+/// Every one of them is identical and reads `any(…)` rather than `graphql`: the substrate declining
+/// to compile something when **no** dialect is on, never reaching for a particular one. A gate that
+/// only forbade dialect *types* would let a `#[cfg(feature = "graphql")]` fork appear here, which
+/// is exactly how a generic layer starts having a favourite. The count is pinned so that adding one
+/// is a decision rather than a drift.
+///
+/// Seven, in two families:
+///
+/// - **two in `lossless/mod.rs`** — `mod macros` and its `pub(crate) use`. The substrate's macros
+///   have no invoker without a dialect assembly, and three uninvoked macros are three
+///   `unused_macros` denials.
+/// - **five in `lossless/recover.rs`**, all added for smear#168's scan allowance and all the same
+///   shape: `SCAN_ALLOWANCE_FACTOR`, `SCAN_ALLOWANCE_FLOOR`, `scan_allowance_exhausted`, and the
+///   two `pub(super)` recorders in its test-support telemetry. Their only callers are the four
+///   wrappers in the two dialects' own `recover.rs`, so with no dialect in the crate they are dead
+///   and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that — rustc counts a
+///   reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed it.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 2;
+const SUBSTRATE_FEATURE_GATES: usize = 7;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {
