@@ -333,6 +333,167 @@ fn token_length_does_not_reopen_the_guard() {
   }
 }
 
+/// Error density is the allowance's second exception, and this is its price.
+///
+/// tokora charges `spent` for every item the lexer produces, errors included. smear's tally does
+/// not: `tt_hook_and_then` increments through `Result::inspect`, which runs on `Ok` alone, and the
+/// rules routed through it include `-`, `+`, `.` and `..`, which never succeed. So a malformed
+/// document moves the numerator and not the denominator, and the ratio inflates without bound —
+/// measured at **514** for one `!` per 256 `-`.
+///
+/// Almost none of that is reachable. A run of bad lexemes never becomes tokens the parser recovers
+/// from, so a document dense in them makes no recovery call at all; and where the ratio does
+/// inflate, the scans it refuses were going to fail anyway. The reachable cost needs an error run
+/// long enough to blow the allowance *followed by* a junk run whose scan would have succeeded,
+/// which is what this builds.
+///
+/// The property is that the damage stays proportional to the excess error count and **clears** —
+/// each committed token pushes the denominator back up, so the guard re-closes. A latch would show
+/// here as the whole 3 000-token junk run being shredded instead of a slice of it.
+#[test]
+#[cfg(feature = "graphql")]
+fn error_density_is_a_bounded_known_cost() {
+  const JUNK: usize = 3_000;
+  println!("\n== error density: the second exception, priced ==");
+  // Below the floor, nothing happens: this is the guarantee that matters for a merely-malformed
+  // document, and it is an equality rather than a bound.
+  for k in [0usize, 1_000, 4_000] {
+    let src = format!("{}{}1", "-".repeat(k), "! ".repeat(JUNK));
+    let got = run(gql_document, &src);
+    assert_eq!(got.covered, src.len());
+    let beyond = got.diagnostics.saturating_sub(k);
+    assert_eq!(
+      beyond, 3,
+      "{k} leading error lexemes cost {beyond} parser diagnostics against the 3 an intact \
+       recovery reports. Under `SCAN_ALLOWANCE_FLOOR` the guard must not engage at all."
+    );
+    assert_eq!(got.refusals, 0, "k={k}");
+    println!("  k={k:6} refusals=0 parser diagnostics beyond the lexer's own: {beyond}  (intact)");
+  }
+  // Above it, proportional to the excess and far short of shredding the run.
+  for k in [6_000usize, 20_000] {
+    let src = format!("{}{}1", "-".repeat(k), "! ".repeat(JUNK));
+    let got = run(gql_document, &src);
+    assert_eq!(got.covered, src.len());
+    let beyond = got.diagnostics.saturating_sub(k);
+    println!(
+      "  k={k:6} refusals={:6} parser diagnostics beyond the lexer's own: {beyond}",
+      got.refusals
+    );
+    assert!(
+      beyond <= k / 8,
+      "k={k}: the cost of error density grew to {beyond} diagnostics, past the k/8 = {} this was \
+       measured and pinned at (140 at k=6000, 1140 at k=20000). Either the guard stopped clearing \
+       — check that it is still re-derived per call rather than latched — or the tally stopped \
+       counting something it used to.",
+      k / 8
+    );
+    assert!(
+      beyond < JUNK,
+      "k={k}: {beyond} diagnostics means the whole junk run was shredded rather than a slice of \
+       it. The guard is not re-closing as committed tokens accrue."
+    );
+  }
+}
+
+/// Encoding is an axis too, and the byte-denominated guard would have failed on it.
+///
+/// Every other shape in this file is pure ASCII, where one token is one byte and the two
+/// denominators are indistinguishable. A comment full of 4-byte characters carries four times the
+/// bytes for the same number of events — the same lever as the comment-length axis, reached
+/// through the character set instead of through the length.
+///
+/// The assertion is equality, not a bound: the guard counts events, so changing only the encoding
+/// must move **nothing**.
+#[test]
+#[cfg(feature = "graphql")]
+fn the_guard_is_blind_to_encoding() {
+  const K: usize = 2_000;
+  println!("\n== encoding ==");
+  let mut baseline: Option<(usize, usize, usize)> = None;
+  // Twelve comment CHARACTERS in each, so the event counts are identical by construction and the
+  // byte counts differ 16 / 40 / 52. Making the *bytes* equal instead would vary the character set
+  // without varying the lever, and would pass against a byte denominator too.
+  for (name, unit) in [
+    ("ascii", format!("! #{}\n", "x".repeat(12))),
+    ("3-byte chars", format!("! #{}\n", "\u{4E2D}".repeat(12))),
+    ("4-byte chars", format!("! #{}\n", "\u{1F600}".repeat(12))),
+  ] {
+    let src = unit.repeat(K);
+    let got = run(gql_document, &src);
+    assert_eq!(got.covered, src.len(), "{name}");
+    let reading = (got.peak_spent, got.peak_committed, got.refusals);
+    println!(
+      "  {name:<14} bytes={:8} spent={:8} committed={:8} refusals={}",
+      src.len(),
+      reading.0,
+      reading.1,
+      reading.2
+    );
+    match baseline {
+      None => baseline = Some(reading),
+      Some(want) => assert_eq!(
+        reading, want,
+        "{name}: changing only the character set moved the guard's readings. It counts \
+         produce-events, so it must be blind to how many bytes each one spans — a reading that \
+         moves here is a byte-denominated denominator returning."
+      ),
+    }
+  }
+}
+
+/// The `*_with_limits` doors reach the same guard as the default one.
+///
+/// #181 on this branch was exactly this omission — a census that covered the default doors and
+/// left the `*_with_limits` ones out — so the axis is asserted rather than reasoned about. The
+/// ceiling those doors carry is the recursion budget, which has nothing to do with the allowance;
+/// the point is that "has nothing to do with" is the sentence #181 was written against.
+#[test]
+#[cfg(feature = "graphql")]
+fn the_with_limits_doors_reach_the_same_guard() {
+  use smear::lexer::limits::LosslessLimits;
+
+  println!("\n== the `*_with_limits` doors ==");
+  let src = "( type ) ".repeat(3_000);
+  let want = {
+    let got = run(gql_document, &src);
+    (
+      got.peak_spent,
+      got.peak_committed,
+      got.refusals,
+      got.diagnostics,
+    )
+  };
+  for depth in [8usize, 64, 256, 1_024] {
+    scan_allowance::reset();
+    let parse = smear::parser::graphql::lossless::parse_document_with_limits(
+      &src,
+      LosslessLimits::with_max_nesting_depth(depth),
+    );
+    let got = (
+      scan_allowance::peak_spent(),
+      scan_allowance::peak_committed(),
+      scan_allowance::refusals(),
+      parse.diagnostics().len(),
+    );
+    assert_eq!(
+      parse.syntax().text().to_string().len(),
+      src.len(),
+      "max_nesting_depth={depth}"
+    );
+    assert_eq!(
+      got, want,
+      "max_nesting_depth={depth} reached the allowance differently from the default door. The \
+       recursion ceiling and the scan allowance are separate budgets; if raising one moves the \
+       other, one of them is being read through the wrong cell."
+    );
+    println!(
+      "  max_nesting_depth={depth:5} spent={} committed={} refusals={}",
+      got.0, got.1, got.2
+    );
+  }
+}
+
 /// The guard changed nothing on the shapes it governs.
 ///
 /// Each count was measured on the unfused parser while #168 was being investigated, so it is an

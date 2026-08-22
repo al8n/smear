@@ -111,16 +111,62 @@
 //! shape ran 64 MB in 106 s with **zero** refusals, growing ×7.1 in time for every ×4 in bytes.
 //! `tests/resync_allowance.rs` carries that axis now; a census of one-byte atoms cannot see it.
 //!
-//! ## Why the factor is a margin over an identity
+//! ## What the factor is a margin over, stated exactly
 //!
-//! Because the two sides count the same events, an honest parse — one where nothing re-lexes —
-//! satisfies `spent == committed`, and the ratio is **1.0 exactly** rather than a measured
-//! ceiling. Re-lexing is what moves it, and in this tree the sources are enumerable: smear calls
-//! no cache-clearing door (`InputRef::state_mut`, `set_state`, `restore`, `rollback_*` appear
-//! nowhere; the `state_mut` calls in `smear-lexer` are `Lexer::state_mut`, a lexer touching its own
-//! bracket counter), the lossless tree's only speculation is four single-token probes, and the
-//! remainder is the failed scan this guard exists to bound. Eight is therefore eight times an
-//! identity, and `an_honest_corpus_never_reaches_the_guard` is what keeps the enumeration honest.
+//! `spent == committed` holds for a parse in which **every produced item both survives and
+//! increments the tally**. That is narrower than "an honest parse", and the wording here has been
+//! wrong twice already — first as `spent <= source bytes`, then as an unqualified identity — so
+//! the two exceptions are named rather than left to be discovered a third time.
+//!
+//! **Exception 1 — re-lexing.** An item lexed twice is charged twice to `spent` and once to the
+//! tally, because the tally lives in `L::State` and comes back with the rewind. In this tree the
+//! sources are enumerable: smear calls no cache-clearing door (`InputRef::state_mut`, `set_state`,
+//! `restore`, `rollback_*` appear nowhere; the `state_mut` calls in `smear-lexer` are
+//! `Lexer::state_mut`, a lexer touching its own bracket counter), the lossless tree's only
+//! speculation is four single-token probes, and the remainder is the failed scan this guard exists
+//! to bound. This exception is the mechanism, not a leak in it.
+//!
+//! **Exception 2 — lexer errors.** tokora charges `spent` for *every* item the lexer hands back,
+//! errors included ("a lexer error is charged. This is the shape the budget exists for"). smear's
+//! tally does not: `smear-lexer`'s `tt_hook_and_then` and `tt_hook_and_then_into_errors` increment
+//! through `Result::inspect`, which runs on `Ok` alone, and the rules routed through them include
+//! several that **never** succeed — `.` and `..` (unterminated spread), `-` and `+` (unexpected
+//! character) — plus every malformed number and unterminated string. `tt_hook`, `tt_hook_map`,
+//! `increase_recursion_depth_and_token` and `decrease_recursion_depth_and_increase_token` are
+//! unconditional; those four cover all punctuation, all trivia, identifiers and comments.
+//!
+//! So error density inflates the ratio without bound — measured at **514** over a document of one
+//! `!` per 256 `-` — and unlike re-lexing it is *linear* work being charged, which the guard has
+//! no business rationing.
+//!
+//! ## Why exception 2 is a bounded cost rather than a repair
+//!
+//! Because it is nearly unreachable, and where it is reachable it is small and self-clearing.
+//! A run of error lexemes does not become tokens the parser recovers from — the scanner emits a
+//! diagnostic per bad lexeme and keeps looking — so a document dense in them reaches **no recovery
+//! call at all**: `- + 00 1.` repeated 4 000 times each measure `spent = 0`, `committed = 0`,
+//! `refusals = 0`. Interleaving them with junk that *does* reach recovery inflates the ratio to
+//! 514, and refusing there costs nothing, because those scans were going to fail anyway.
+//!
+//! The reachable cost needs a third thing: an error run long enough to blow the allowance,
+//! followed by a junk run whose scan would have **succeeded**. Measured, with `k` leading `-`
+//! before `! `×3000 and a trailing `1`:
+//!
+//! | `k` | refusals | parser diagnostics beyond the lexer's own |
+//! |---|---|---|
+//! | 1 000 | 0 | 3 — recovery fully intact |
+//! | 6 000 | 137 | 140 |
+//! | 20 000 | 1 137 | 1 140 |
+//!
+//! Below [`SCAN_ALLOWANCE_FLOOR`] nothing happens at all, and above it the damage is
+//! `≈ (k - floor) / 16` holes and **self-clearing**: every committed token pushes the denominator
+//! back up, so the guard re-closes. `error_density_is_a_bounded_known_cost` pins that table.
+//!
+//! Repairing it belongs in `smear-lexer`, not here — the tally would have to increment before the
+//! rule runs rather than after it succeeds — and that changes what `LosslessLimits::max_tokens`
+//! counts, which is a public knob with its own contract. It is worth doing on its own terms: that
+//! same asymmetry means `max_tokens` bounds **nothing** over malformed input today, and a budget
+//! of 100 truncates 4 000 `!` at 2 diagnostics while letting 4 000 `-` through at 4 001.
 //!
 //! ## What the guard costs when it fires
 //!
@@ -337,9 +383,10 @@ where
 
 /// Lexer items a parse may produce per **surviving** item before recovery stops scanning ahead.
 ///
-/// Both sides of the comparison count produce-events, so an honest parse sits at exactly 1 and
-/// this is a margin over an identity rather than over a sample — see the module docs. The shapes
-/// it exists to stop measure 40 to 1 002.
+/// Both sides count produce-events, so a parse whose items all survive *and* all increment the
+/// tally sits at exactly 1. The module docs state that condition precisely and name its two
+/// exceptions — re-lexing, which is what this bounds, and lexer errors, which inflate the ratio
+/// without bound and are pinned as a known cost. The shapes it exists to stop measure 40 to 1 002.
 ///
 /// Raising it does not make recovery better on any document that is not already quadratic; it only
 /// buys an attacker a longer run before the guard engages. Lowering it to **1** would start
