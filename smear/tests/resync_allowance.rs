@@ -156,6 +156,62 @@ limited_roots! {
   gqlx_document_with_limits => smear::parser::graphqlx::lossless::parse_document_with_limits,
 }
 
+/// What `max_tokens_does_not_bound_the_work_the_scan_allowance_does` reads off one parse.
+///
+/// `items` is the token count of the tree the parse produced. Under no ceiling that is the
+/// document's own lexical size — a lossless parse keeps every lexeme it cannot understand, so
+/// nothing is missing from the tree — and under a ceiling it is where the lex stopped. The test
+/// needs both readings of the same document, which is why the door below takes an `Option` rather
+/// than a number.
+struct Budgeted {
+  spent: usize,
+  committed: usize,
+  refusals: usize,
+  items: usize,
+}
+
+/// A root under a **token** ceiling, or under none: `limited_roots`'s twin on the other axis of
+/// `LosslessLimits`.
+///
+/// It reports `Budgeted` rather than `Run` because the quantity under test is the tree's lexeme
+/// count, which no other cell in this file reads, and because the ceiling has to be absent for one
+/// of the two parses it drives.
+macro_rules! budgeted_roots {
+  ($($name:ident => $path:path),+ $(,)?) => {
+    $(
+      fn $name(src: &str, max_tokens: Option<usize>) -> Budgeted {
+        let limits = smear::lexer::limits::LosslessLimits::default();
+        let limits = match max_tokens {
+          Some(max) => limits.with_max_tokens(max),
+          None => limits,
+        };
+        scan_allowance::reset();
+        let parse = $path(src, limits);
+        Budgeted {
+          spent: scan_allowance::peak_spent(),
+          committed: scan_allowance::peak_committed(),
+          refusals: scan_allowance::refusals(),
+          items: parse
+            .syntax()
+            .descendants_with_tokens()
+            .filter(|element| element.as_token().is_some())
+            .count(),
+        }
+      }
+    )+
+  };
+}
+
+#[cfg(feature = "graphql")]
+budgeted_roots! {
+  gql_document_under_token_budget => smear::parser::graphql::lossless::parse_document_with_limits,
+}
+
+#[cfg(feature = "graphqlx")]
+budgeted_roots! {
+  gqlx_document_under_token_budget => smear::parser::graphqlx::lossless::parse_document_with_limits,
+}
+
 /// Every enabled dialect's mixed-document root, labelled.
 ///
 /// The list a test uses when its property needs no measured constant and no per-dialect table —
@@ -957,6 +1013,262 @@ fn the_with_limits_doors_reach_the_same_guard() {
         got.0, got.1, got.2, got.3
       );
     }
+  }
+}
+
+/// `LosslessLimits::max_tokens` does not bound the work a parse does. This guard does, at eight
+/// times the number the caller configured, and that is the pin.
+///
+/// # Why the ceiling does not hold what it looks like it holds
+///
+/// The tally it refuses past is a field of `LosslessLimits`, and `LosslessLimits` is
+/// `Lexer::State` — the cell `sync_balanced` clones into its `ThroughEntry` and **restores** when
+/// its scan finds no sync point. So a failed scan refunds every charge it made, the ceiling is
+/// reached only by lexemes that survived, and `with_max_tokens(n)` stops the lex one lexeme past
+/// its `n`th survivor while saying nothing about how many attempts produced them. The count a
+/// rollback cannot refund is the input layer's `TokenBudgetTally::spent`, which is what
+/// `scan_allowance::peak_spent` reads.
+///
+/// # What bounds the durable count instead
+///
+/// This guard and nothing else: no scan starts once `spent > FACTOR * committed + floor`, and
+/// `committed` is that same rewindable tally, so a configured ceiling enters the durable bound as
+/// `FACTOR * max_tokens + floor`. The cells below set `max_tokens` to the document's **own**
+/// lexical size — the most generous ceiling that is still a ceiling, and the one under which the
+/// parse completes rather than truncating — and read 99 963 produce-events against a configured
+/// 12 000.
+///
+/// # The assertion is two-sided, and each half pins a different thing
+///
+/// The lower half, `FACTOR * max_tokens < spent`, is the finding: it reds if the durable count
+/// ever comes back inside the configured number, which is what that knob's documentation claimed
+/// before this cell existed. The upper half, `spent <= FACTOR * max_tokens + floor`, is the bound:
+/// it reds if the multiplier grows. Neither is a photograph — both are derived from the two
+/// constants, so a change to either in `smear-parser/src/lossless/recover.rs` reds this with a
+/// message naming it.
+///
+/// # The ratio is the constants', not the document's
+///
+/// `spent / max_tokens` is `FACTOR + floor / max_tokens`, which is a statement about the guard.
+/// Over four shapes at 12 000 lexemes — two bracket kinds and two junk densities, reaching both
+/// recovery helpers, in both dialects — it reads 8.330 / 8.334 / 8.337 / 8.339, a spread of 0.1%.
+/// Over one shape at 3 000 / 6 000 / 12 000 / 24 000 / 48 000 lexemes it reads
+/// 9.32 / 8.65 / 8.33 / 8.16 / 8.08, converging on `FACTOR` as the floor amortises. Pinning 8.33
+/// would have been a pin on a document of 12 000 lexemes; the two-sided bound is not.
+///
+/// # `peak_spent` is this parse's total, and the cell asserts what makes it one
+///
+/// It is `spent` at the **last recovery call**, so on its own it is blind to whatever is lexed
+/// after that call. `committed + SETTLE >= items` closes the gap: the last recovery call landed
+/// within a handful of lexemes of end of input, so there is nothing left for the reading to miss.
+/// It measures `items - 2` on every cell.
+///
+/// # The control, because one lexeme of headroom is the whole difference
+///
+/// At `max_tokens = items - 2` the same document refuses **nothing** and the recovery never runs.
+/// A ceiling the parse trips does bound the work; what it cannot do is bound the work of a parse
+/// it never trips. Without that half the cell would read as "this shape is quadratic" rather than
+/// as "this ceiling is not a work bound".
+#[test]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[allow(clippy::vec_init_then_push)]
+fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
+  // `SCAN_ALLOWANCE_FACTOR` and `SCAN_ALLOWANCE_FLOOR`, which are `pub(crate)` in
+  // `smear-parser/src/lossless/recover.rs` and cannot be imported from here. Copied rather than
+  // approximated, because `LosslessLimits::max_tokens` now tells a caller to size a defence at
+  // `8n + 4096` and a change to either constant has to red something that quotes it.
+  const FACTOR: usize = 8;
+  const FLOOR: usize = 4_096;
+  // How far short of the document's last lexeme the final recovery call may sit — the slack that
+  // makes `peak_spent` the parse's total rather than a sample of it. Measured at 2 everywhere.
+  const SETTLE: usize = 4;
+
+  #[allow(clippy::type_complexity)]
+  let mut doors: Vec<(&str, fn(&str, Option<usize>) -> Budgeted)> = Vec::new();
+  #[cfg(feature = "graphql")]
+  doors.push(("gql", gql_document_under_token_budget));
+  #[cfg(feature = "graphqlx")]
+  doors.push(("gqlx", gqlx_document_under_token_budget));
+  assert!(
+    !doors.is_empty(),
+    "no dialect is enabled, so this test would pass without checking anything"
+  );
+
+  // `(atom, repetitions, lexemes per repetition)`. The third field is not decoration: it is what
+  // says the tree's token count is the document's own lexical size rather than whatever the parse
+  // happened to materialise, which is the number every ceiling below is derived from.
+  //
+  // `[ type ] ` drives `resync_to` — its `type` is a definition head at depth 1, where the scan
+  // never consults its predicate — and `! ` drives `unexpected`, whose wide sync set does not name
+  // a bang. Two helpers, one guard, and the ratio does not tell them apart.
+  let shapes: [(&str, usize, usize); 4] = [
+    ("[ type ] ", 2_000, 6),
+    ("[ type ] ", 4_000, 6),
+    ("! ", 6_000, 2),
+    ("! ", 12_000, 2),
+  ];
+
+  println!("\n== a token ceiling against the work it does not bound ==");
+  println!(
+    "  {:<6} {:<16} {:>7} {:>9} {:>9} {:>7} {:>9} {:>8}",
+    "dial", "shape", "max", "spent", "ceiling", "ratio", "refusals", "control"
+  );
+  for (dialect, door) in doors {
+    for (atom, reps, per_rep) in shapes {
+      let src = atom.repeat(reps);
+      let unlimited = door(&src, None);
+      let items = unlimited.items;
+      assert_eq!(
+        items,
+        reps * per_rep,
+        "{dialect} {atom:?} x{reps}: the unbudgeted tree carries {items} tokens where the document \
+         has {} lexemes, so the ceiling below is not the document's own size and every number \
+         derived from it is about something else",
+        reps * per_rep
+      );
+
+      let got = door(&src, Some(items));
+      assert_eq!(
+        got.items, items,
+        "{dialect} {atom:?} x{reps}: a ceiling equal to the document's own lexeme count truncated \
+         the parse, so this cell is no longer about a budget the parse ran to completion under"
+      );
+      assert!(
+        got.refusals > 0,
+        "{dialect} {atom:?} x{reps}: the guard never engaged, so the readings below belong to a \
+         parse that never re-lexed and the ceiling is not being tested at all"
+      );
+      assert!(
+        got.committed + SETTLE >= items,
+        "{dialect} {atom:?} x{reps}: the last recovery call sat at committed={} against {items} \
+         lexemes, so `peak_spent` is a sample of this parse rather than its total and the bound \
+         below is measured on the wrong quantity",
+        got.committed
+      );
+      assert_eq!(
+        got.spent, unlimited.spent,
+        "{dialect} {atom:?} x{reps}: configuring max_tokens changed the parse's durable work. \
+         That is the right end state and it is smear issue #193 — when it lands, this cell is the \
+         one to re-derive rather than the one to delete"
+      );
+      assert!(
+        FACTOR * items < got.spent,
+        "{dialect} {atom:?} x{reps}: max_tokens({items}) held the durable count to {}, inside \
+         {FACTOR}x its own number. Either the tally stopped being refunded by `sync_balanced`'s \
+         rewind — in which case max_tokens IS a work bound now and its docs owe the new sentence — \
+         or SCAN_ALLOWANCE_FACTOR fell below {FACTOR}.",
+        got.spent
+      );
+      assert!(
+        got.spent <= FACTOR * items + FLOOR,
+        "{dialect} {atom:?} x{reps}: max_tokens({items}) let the durable count reach {}, past the \
+         `FACTOR * committed + floor` this guard promises ({}). `LosslessLimits::max_tokens` tells \
+         a caller to size a defence at 8n + 4096, and that sentence is now wrong.",
+        got.spent,
+        FACTOR * items + FLOOR
+      );
+
+      // One lexeme of headroom, and none of the above happens.
+      let control = door(&src, Some(items - 2));
+      assert_eq!(
+        control.items,
+        items - 1,
+        "{dialect} {atom:?} x{reps}: a ceiling of {} did not stop the lex one lexeme past itself, \
+         so the contrast this cell rests on is not the one being measured",
+        items - 2
+      );
+      assert_eq!(
+        control.refusals, 0,
+        "{dialect} {atom:?} x{reps}: the control refused scans, so a ceiling the parse trips no \
+         longer bounds the work outright and the cell above is measuring a difference of degree"
+      );
+
+      println!(
+        "  {dialect:<6} {:<16} {items:>7} {:>9} {:>9} {:>7.3} {:>9} {:>8}",
+        format!("{atom:?}x{reps}"),
+        got.spent,
+        FACTOR * items + FLOOR,
+        got.spent as f64 / items as f64,
+        got.refusals,
+        control.spent
+      );
+    }
+  }
+}
+
+/// What a token ceiling *does* bound: the lex stops one lexeme past it, on a rule that can only
+/// fail as readily as on one that succeeds.
+///
+/// This is smear issue #183's acceptance pair. It lives here rather than beside the lexer because
+/// the sentence it licenses is written on `LosslessLimits::max_tokens`, next to the durable bound
+/// the cell above pins — and an unpinned measurement quoted in product documentation is prose.
+///
+/// Before #183 the two hooks wrapping a fallible rule charged through `Result::inspect`, which
+/// runs on `Ok` alone. GraphQL's `-` is a rule that can only fail, so it charged nothing: 4 000 of
+/// them parsed to the end at 4 001 diagnostics under a ceiling of 100, while 4 000 `!` — a rule
+/// that succeeds — truncated at 2. The cheaper document to write was the one the ceiling could not
+/// see.
+///
+/// Both truncate now. `-` stops at **101**, which is `max_tokens + 1` because the tally is checked
+/// before the charge and refuses at strictly greater; `!` is unchanged at 2, which is what makes
+/// the first number a change of unit rather than a change of ceiling.
+#[test]
+#[cfg(feature = "graphql")]
+fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
+  const CEILING: usize = 100;
+
+  println!("\n== the token ceiling's own unit ==");
+  // `(atom, diagnostics under CEILING, diagnostics under no ceiling, what a move here means)`.
+  for (atom, capped, uncapped, meaning) in [
+    (
+      "-",
+      CEILING + 1,
+      4_001,
+      "a lossless rule is charging the tally only when it succeeds again, which is smear issue \
+       #183 — `smear-lexer`'s `tt_hook_and_then` family must charge on the attempt",
+    ),
+    (
+      "!",
+      2,
+      4_000,
+      "the reading #183 did NOT move has moved, so this pair is no longer the contrast between a \
+       rule that can only fail and one that succeeds",
+    ),
+  ] {
+    let src = atom.repeat(4_000);
+    let limited = smear::parser::graphql::lossless::parse_document_with_limits(
+      &src,
+      smear::lexer::limits::LosslessLimits::default().with_max_tokens(CEILING),
+    );
+    let free = smear::parser::graphql::lossless::parse_document(&src);
+
+    assert_eq!(
+      limited.syntax().text().to_string().len(),
+      src.len(),
+      "{atom:?}: a ceiling is not licence to drop text — the lossless guarantee holds under one"
+    );
+    assert_eq!(
+      free.syntax().text().to_string().len(),
+      src.len(),
+      "{atom:?}: the lossless text must survive"
+    );
+    assert_eq!(
+      limited.diagnostics().len(),
+      capped,
+      "{atom:?} x4000 under max_tokens({CEILING}) reports {} diagnostics rather than {capped}: \
+       {meaning}.",
+      limited.diagnostics().len()
+    );
+    assert_eq!(
+      free.diagnostics().len(),
+      uncapped,
+      "{atom:?} x4000 with no ceiling reports {} diagnostics rather than {uncapped}, so the \
+       ceiling above is being compared against a document that is not the one it was measured on",
+      free.diagnostics().len()
+    );
+    println!(
+      "  {atom:?} x4000: max_tokens({CEILING}) -> {capped} diagnostics, no ceiling -> {uncapped}"
+    );
   }
 }
 
