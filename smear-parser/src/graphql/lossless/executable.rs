@@ -71,7 +71,10 @@ use super::{
   value::{Constness, default_value, variable},
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::lossless::{
+  depth::{self, RootTurn},
+  lossless_drivers, lossless_production,
+};
 
 lossless_production! {
   dialect = graphql::lossless;
@@ -280,16 +283,28 @@ lossless_production! {
   ///
   /// # This loop does **not** resynchronise, and that is not an oversight — smear issue #168
   ///
-  /// It writes `executable_definition(inp)?` and propagates, where the other five document roots
-  /// in this workspace catch and call `recover::resync_to_definition`. It is therefore the one
-  /// root with no `resync_to` call site, and #168's census measured it **linear** (×1.8 – ×2.0)
+  /// It propagates **both** of its verdict's failure arms, where the other five document roots in
+  /// this workspace catch the recoverable one and call `recover::resync_to_definition`. It is
+  /// therefore the one root with no `resync_to` call site, and #168's census measured it
+  /// **linear** (×1.8 – ×2.0)
   /// on `[ fragment ] ` and `[ query ] ` repeated — the shapes that put the other dialect's
   /// executable root, which does catch and resynchronise, at ×4.1.
   ///
   /// So "make the two dialects symmetrical" is a change that *adds* a quadratic here. The
   /// asymmetry is a divergence to keep, and `tests/resync_allowance.rs` gates this root beside
   /// the five that do resynchronise so a symmetrising edit is measured rather than reasoned about.
-  fn executable_document<'inp, Src, Ctx>(inp) {
+  ///
+  /// # It classifies anyway, and until smear PR #189 it did not have to
+  ///
+  /// Not resynchronising is not the same as not needing the verdict. Both failure arms propagate
+  /// here, so the `match` below decides nothing the bare `?` did not; what it decides is decided
+  /// for [`executable_document_entry`]'s drain, and travels there in `stop`. That drain used to
+  /// re-derive the same fact from tokora's session counter — the only reason a root that never
+  /// called [`depth::root_turn`](crate::lossless::depth::root_turn) was protected at all, and the
+  /// same re-derivation that mistakes a *caught* early trip for a live one. The call adds a
+  /// counter read per entry and no scan, so #168's linearity is untouched and
+  /// `the_graphql_executable_root_does_not_resynchronise` still measures the same shape.
+  fn executable_document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::ExecutableDocument.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -298,7 +313,13 @@ lossless_production! {
         }
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          executable_definition::<Src, Ctx>(inp)?;
+          // BOTH FAILURE ARMS PROPAGATE. That is this root's own divergence — no
+          // `resync_to_definition` call site, see the note above — and not a shortcut past the
+          // verdict, which is written to `stop` for the drain either way.
+          match depth::root_turn(inp, stop, executable_definition::<Src, Ctx>) {
+            RootTurn::Parsed(()) => {}
+            RootTurn::EndsTheDocument(e) | RootTurn::Recoverable(e) => return Err(e),
+          }
         }
         Ok(())
       },
@@ -309,18 +330,20 @@ lossless_production! {
   /// [`executable_document`] plus the drain, for the reason `document.rs`'s `document_entry`
   /// carries one.
   ///
-  /// This loop does not even catch — `executable_definition::<Src, Ctx>(inp)?` propagates — so an
-  /// `Err` reaching [`parse_executable_document`](super::parse_executable_document) is the
-  /// ordinary case rather than the exotic one, and the tail it left uncommitted would be a
+  /// This loop does not resynchronise — both failure arms propagate — so an `Err` reaching
+  /// [`parse_executable_document`](super::parse_executable_document) is the ordinary case rather
+  /// than the exotic one, and the tail it left uncommitted would be a
   /// `FinishError::UncoveredGap` panic in materialization without this drain.
   ///
   /// Which makes this the root where a nesting refusal reaches the drain most directly, and the
   /// reason the drain is
   /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped): a refusal must
   /// not read the tail, and a refusal the caller's `MaybeTerminal` arm answers `false` for is
-  /// still a refusal — which is the half the input's trip witness answers.
+  /// still a refusal — which is the half the input's trip witness answers, carried here in `stop`.
   fn executable_document_entry<'inp, Src, Ctx>(inp) {
-    crate::lossless::depth::drain_unless_stopped(inp, executable_document::<Src, Ctx>)
+    let mut stop = depth::RootStop::new();
+    let out = executable_document::<Src, Ctx>(inp, &mut stop);
+    depth::drain_unless_stopped(inp, stop.ending(out))
   }
 }
 

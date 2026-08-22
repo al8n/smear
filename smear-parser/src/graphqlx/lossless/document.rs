@@ -193,7 +193,11 @@ lossless_production! {
   ///
   /// The exception is a **call**, not a predicate written out here — smear issue #178. See
   /// GraphQL's `document` and [`depth::root_turn`](crate::lossless::depth::root_turn).
-  fn document<'inp, Src, Ctx>(inp) {
+  ///
+  /// `stop` carries that same per-entry verdict out to [`document_entry`]'s drain, which must not
+  /// re-derive it from a counter whose span is the whole root — smear PR #189, and GraphQL's
+  /// `document` carries the mechanism.
+  fn document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::Document.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -202,7 +206,7 @@ lossless_production! {
         }
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          match depth::root_turn(inp, document_entry_item::<Src, Ctx>) {
+          match depth::root_turn(inp, stop, document_entry_item::<Src, Ctx>) {
             RootTurn::Parsed(()) => {}
             RootTurn::EndsTheDocument(e) => return Err(e),
             RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
@@ -224,7 +228,7 @@ lossless_production! {
   /// [`super::parse_type_system_document`] is its shipped entry point — the one a schema-only
   /// consumer calls so that an executable definition is rejected by the parser, at the parser's
   /// own position, rather than by hand afterwards.
-  fn type_system_document<'inp, Src, Ctx>(inp) {
+  fn type_system_document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::TypeSystemDocument.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -232,8 +236,12 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          // The refusal arm [`document`]'s note explains, through the same call.
-          match depth::root_turn(inp, import_or_type_system_definition_or_extension::<Src, Ctx>) {
+          // The refusal arm [`document`]'s note explains, through the same call and the same slot.
+          match depth::root_turn(
+            inp,
+            stop,
+            import_or_type_system_definition_or_extension::<Src, Ctx>,
+          ) {
             RootTurn::Parsed(()) => {}
             RootTurn::EndsTheDocument(e) => return Err(e),
             RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
@@ -249,10 +257,12 @@ lossless_production! {
   ///
   /// See the module docs for why the drain is not optional — and
   /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) for the one
-  /// outcome that must not read the tail, and for why it runs [`document`] rather than taking its
-  /// `Result`.
+  /// outcome that must not read the tail, and for why it takes [`document`]'s **classified**
+  /// ending rather than its bare `Result`.
   fn document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
+    let mut stop = depth::RootStop::new();
+    let out = document::<Src, Ctx>(inp, &mut stop);
+    depth::drain_unless_stopped(inp, stop.ending(out))
   }
 
   /// [`type_system_document`], then a drain — the production
@@ -261,6 +271,8 @@ lossless_production! {
   /// See the module docs for why the drain is not optional; the SDL-only loop catches and
   /// resynchronises exactly as the mixed one does, so an `Err` can still escape it.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
+    let mut stop = depth::RootStop::new();
+    let out = type_system_document::<Src, Ctx>(inp, &mut stop);
+    depth::drain_unless_stopped(inp, stop.ending(out))
   }
 }

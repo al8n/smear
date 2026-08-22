@@ -46,7 +46,7 @@ mod macros;
 //
 // Almost nothing in this substrate has an in-crate caller that survives the cell above. `expect`,
 // `peek_kind`, `try_eat`, `unexpected`, `resync_to`, `report_unexpected`, `unclosed`, `descend`,
-// `drain_unless_terminal`, `finish_root`, `lossless_context`, `kind_of`, `keyword_of` and roughly
+// `drain_unless_stopped`, `finish_root`, `lossless_context`, `kind_of`, `keyword_of` and roughly
 // twenty more are reached only from the two dialect assemblies, which `rowan`-alone does not
 // compile. rustc treats a reachable `pub` item as used, so `dead_code` never fires on any of them
 // — and that is the ONLY thing keeping this module green in that cell.
@@ -55,6 +55,14 @@ mod macros;
 // `dead_code`, on one feature cell, which `-Dwarnings` turns into a build error. Measured by
 // planting exactly that — narrowing every `pub` in this directory at once puts THIRTY items on the
 // error list under `--no-default-features --features rowan`.
+//
+// `depth::drain_unless_terminal` used to head that list and is now `pub(crate)` (smear PR #189):
+// its signature takes an already-evaluated `Result`, so it structurally cannot ask the input's
+// trip witness, and a caller reaching for it got the amplification back with nothing on any
+// channel saying so. Narrowing it survives the cell above for one reason and one only —
+// `drain_unless_stopped` is `pub`, is compiled with no dialect present, and calls it, so the lint
+// has a live caller to see. An item narrowed here WITHOUT such a caller does not, which is the
+// whole of the paragraph above.
 //
 // It has already happened once, on `recover.rs`'s scan allowance (#168): a review called the `pub`
 // cosmetic, `pub(crate)` was correct in isolation, and the cell went red. The repair there was the

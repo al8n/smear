@@ -1041,7 +1041,7 @@ fn a_refusal_ends_every_document_root() {
 fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   use smear::parser::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
-    lossless::depth::{FromNestingLimit, descend, drain_unless_terminal},
+    lossless::depth::{FromNestingLimit, RootTurn, descend, drain_unless_stopped},
   };
   use tokora::{
     Emitter, Lexer, ParserContext, SimpleSpan, Token,
@@ -1149,7 +1149,19 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
       |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
         let out = descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp).map(|_| ());
         if via_entry {
-          drain_unless_terminal(inp, out)
+          // The entry's drain, and the ending it is handed is deliberately **`Recoverable`**.
+          // `drain_unless_stopped`'s own `EndsTheDocument` arm would refuse the drain before the
+          // trait was consulted, and the trait half is exactly what this cell measures — the
+          // witness half has `each_term_of_a_roots_stop_is_alone_on_a_population`. Saying
+          // "recoverable" here is what leaves `MaybeTerminal` as the only thing that can stop the
+          // tail from being read, which is the pre-#189 shape of this call site unchanged.
+          drain_unless_stopped(
+            inp,
+            match out {
+              Ok(()) => RootTurn::Parsed(()),
+              Err(e) => RootTurn::Recoverable(e),
+            },
+          )
         } else {
           out
         }
@@ -1337,7 +1349,7 @@ fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
 fn each_term_of_a_roots_stop_is_alone_on_a_population() {
   use smear::parser::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
-    lossless::depth::{FromNestingLimit, RootTurn, descend, root_turn},
+    lossless::depth::{FromNestingLimit, RootStop, RootTurn, descend, root_turn},
   };
   use tokora::{
     Emitter, Lexer, ParserContext, SimpleSpan, Token,
@@ -1431,8 +1443,13 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
   fn drive<'inp>(src: &'inp str, limit: usize, cell: Cell) -> Verdict {
     tokora::parse_with::<Lx<'inp>, str, _, Verdict, Ctx<'inp>, GraphQL>(
       |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
+        // The slot a root threads to its drain. This cell reads the returned verdict rather than
+        // the slot — they are the same decision, written twice because the roots' loops sit
+        // inside a `node` bracket their `Err` cannot carry it across.
+        let mut stop = RootStop::new();
         let turn = root_turn(
           inp,
+          &mut stop,
           |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| match cell {
             // A real scan. The lexer's own nesting tally trips on `src`, the emitter rejects the
             // diagnostic, and the rejection is what leaves this entry as an `Err`. Nothing here
@@ -1480,4 +1497,228 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
     "an ordinary syntax error must still resynchronise, or the two readings above are about a \
      function that stops on everything"
   );
+}
+
+/// A trip **caught** in one entry does not silence the drain a *later* entry's ordinary failure
+/// needs — smear PR #189.
+///
+/// # The defect this replays
+///
+/// `drain_unless_stopped` used to run the root itself and read
+/// `inp.tripped_during_attempt(since)` with `since` taken **before the whole root**. tokora's
+/// resource-trip counter is a monotone session fact, so that reading answers `true` for a root in
+/// which *any* entry ever tripped — including one that tripped, was caught, and was recovered
+/// from. Pair it with an ordinary failure later in the same root and both conjuncts hold: the
+/// drain is skipped, the valid tail is left uncommitted, and every diagnostic that reading it
+/// would have produced is never emitted.
+///
+/// That is the **false-stop** direction. It does not add diagnostics, it removes them, and it
+/// truncates a document that was fine — the failure tokora's own note says survives testing and
+/// points at nothing. `root` was a caller-supplied closure on a publicly reachable module, so the
+/// root below is not a contrivance: it is a consumer that reports a too-deep entry and carries on,
+/// which is what `RootTurn::EndsTheDocument` being a *value* rather than a `panic!` invites.
+///
+/// # Why the repair is structural
+///
+/// Nothing here needed a new measurement. `root_turn` had already decided, per entry, at the only
+/// granularity where "did this failure end the document" means anything — and the arm threw the
+/// answer away, after which the drain rebuilt it from a counter whose span is the whole root. The
+/// classification is carried now, in `RootStop`, and `drain_unless_stopped` reads no counter at
+/// all. A drain cannot be reached without one of `RootTurn`'s three arms having been named.
+///
+/// # The three cells
+///
+/// * **Caught, then ordinary.** The defect. Before the repair: `0` tail diagnostics at every tail
+///   length, the error `Ordinary` with its tail unread. After: `n`, one per malformed lexeme.
+/// * **Ordinary alone.** The control that says the assertion is about the *caught trip* and not
+///   about the drain having been disabled outright.
+/// * **A refusal that is not caught.** The property the whole branch exists for, asserted from the
+///   other side: the last turn ends the document, so the tail is never read and the refusal stays
+///   one diagnostic. A repair that simply deleted the drain's stop condition would redden here.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn a_caught_trip_does_not_silence_a_later_failures_drain() {
+  use core::cell::Cell as StdCell;
+
+  use smear::parser::{
+    graphql::{GraphQL, lossless::GraphqlLosslessLexer},
+    lossless::depth::{
+      FromNestingLimit, RootStop, RootTurn, descend, drain_unless_stopped, root_turn,
+    },
+  };
+  use tokora::{
+    Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token,
+    cache::DefaultCache,
+    error::{MaybeTerminal, RecursionLimitReached},
+    prelude::UnexpectedTokenOf,
+    span::Spanned,
+    state::recursion_tracker::RecursionLimiter,
+  };
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = ParserContext<'inp, Lx<'inp>, Counting, DefaultCache<'inp, Lx<'inp>>, GraphQL>;
+
+  thread_local! {
+    /// One per `emit_lexer_error`, which is what a drain over a tail that does not lex produces.
+    /// Thread-local rather than a borrow in the emitter because `ParserContext::of` takes the
+    /// emitter by value and the harness runs each `#[test]` on its own thread.
+    static TAIL_DIAGNOSTICS: StdCell<usize> = const { StdCell::new(0) };
+  }
+
+  /// The consumer's error type, with the arm #178's consumer gets wrong: a refusal answers
+  /// **`false`** for `is_terminal`, so the witness is the only term that can classify it and the
+  /// cells below measure the carried verdict rather than the trait.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum E {
+    Refusal,
+    Ordinary,
+  }
+
+  impl MaybeTerminal for E {
+    fn is_terminal(&self) -> bool {
+      false
+    }
+  }
+
+  impl FromNestingLimit for E {
+    fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
+      E::Refusal
+    }
+  }
+
+  impl<Lang: ?Sized> From<RecursionLimitReached<usize, Lang>> for E {
+    fn from(_: RecursionLimitReached<usize, Lang>) -> Self {
+      E::Refusal
+    }
+  }
+
+  /// Accepts everything — a collecting host, `Verbose`'s posture — and counts the lexer
+  /// diagnostics. Rejecting would stop the drain at the first bad lexeme and make the count
+  /// answer a different question.
+  struct Counting;
+
+  impl<'inp, L: Lexer<'inp>> Emitter<'inp, L, GraphQL> for Counting {
+    type Error = E;
+
+    fn emit_lexer_error(
+      &mut self,
+      _err: Spanned<<L::Token as Token<'inp>>::Error, L::Span>,
+    ) -> Result<(), Self::Error> {
+      TAIL_DIAGNOSTICS.with(|n| n.set(n.get() + 1));
+      Ok(())
+    }
+
+    fn emit_error(&mut self, _err: Spanned<Self::Error, L::Span>) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn emit_unexpected_token(
+      &mut self,
+      _err: UnexpectedTokenOf<'inp, L, GraphQL>,
+    ) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
+  }
+
+  /// One turn of the root loop below.
+  #[derive(Debug, Clone, Copy)]
+  enum Entry {
+    /// A real descent trip the root **catches** and carries on from. The plausible consumer:
+    /// "this definition is too deep, it is already reported, parse the next one".
+    CaughtRefusal,
+    /// A real descent trip the root propagates, the way every shipped root does.
+    Refusal,
+    /// An ordinary syntax error, already reported at the point of failure.
+    Ordinary,
+  }
+
+  /// A document root a consumer could plausibly write: one `root_turn` per entry, matching its
+  /// verdict, threading the slot its drain will read.
+  fn root<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    stop: &mut RootStop,
+    entries: &[Entry],
+  ) -> Result<(), E> {
+    for entry in entries {
+      match *entry {
+        Entry::CaughtRefusal => {
+          match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
+            descend(inp).map(|_| ())
+          }) {
+            RootTurn::Parsed(()) => {}
+            // CAUGHT AND CARRIED ON. Nothing in either shipped dialect does this; the public
+            // generic layer lets a consumer, and `RootTurn::EndsTheDocument` is a value rather
+            // than a stop the type system forces.
+            RootTurn::EndsTheDocument(_) | RootTurn::Recoverable(_) => {}
+          }
+        }
+        Entry::Refusal => {
+          match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
+            descend(inp).map(|_| ())
+          }) {
+            RootTurn::Parsed(()) => {}
+            RootTurn::EndsTheDocument(e) | RootTurn::Recoverable(e) => return Err(e),
+          }
+        }
+        Entry::Ordinary => {
+          match root_turn(inp, stop, |_inp: &mut InputRef<'inp, '_, _, _, _>| {
+            Err(E::Ordinary)
+          }) {
+            RootTurn::Parsed(()) => {}
+            RootTurn::EndsTheDocument(e) | RootTurn::Recoverable(e) => return Err(e),
+          }
+        }
+      }
+    }
+    Ok(())
+  }
+
+  /// The root plus its drain, exactly as an `*_entry` production writes it — and the tail
+  /// diagnostics that drain produced.
+  ///
+  /// A budget of `0` refuses the first descent, so `src` is entirely tail: no entry consumes
+  /// anything, and what the drain crosses is the whole document.
+  fn drive<'inp>(src: &'inp str, entries: &[Entry]) -> (Result<(), E>, usize) {
+    TAIL_DIAGNOSTICS.with(|n| n.set(0));
+    let out = tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
+      |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
+        let mut stop = RootStop::new();
+        let out = root(inp, &mut stop, entries);
+        drain_unless_stopped(inp, stop.ending(out))
+      },
+      src,
+      ParserContext::of(Counting).with_recursion_limiter(RecursionLimiter::with_limitation(0)),
+    );
+    (out, TAIL_DIAGNOSTICS.with(StdCell::get))
+  }
+
+  // `~` does not lex in either dialect, so one per lexeme is what a drain over this tail reports.
+  // `n = 0` is carried because it is the cell that would stay green under the defect and says so.
+  for n in [0usize, 1, 4, 16] {
+    let src = "~ ".repeat(n);
+
+    assert_eq!(
+      drive(&src, &[Entry::CaughtRefusal, Entry::Ordinary]),
+      (Err(E::Ordinary), n),
+      "n={n}: an entry that caught a refusal and carried on must not cost the NEXT entry's \
+       ordinary failure its drain — before smear PR #189 this read 0 at every n, with the tail \
+       left uncommitted and its diagnostics unemitted"
+    );
+    assert_eq!(
+      drive(&src, &[Entry::Ordinary]),
+      (Err(E::Ordinary), n),
+      "n={n}: the control — the same ordinary failure with no earlier trip. If this ever \
+       disagrees with the cell above, the reading there is about the drain and not about the \
+       caught trip"
+    );
+    assert_eq!(
+      drive(&src, &[Entry::Refusal]),
+      (Err(E::Refusal), 0),
+      "n={n}: a refusal that is NOT caught still ends the document, so nothing reads the tail \
+       and the refusal stays one diagnostic — the `1 + n` amplification this branch closes. A \
+       repair that deleted the drain's stop condition instead of scoping it reddens here"
+    );
+  }
 }

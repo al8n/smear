@@ -412,7 +412,15 @@ lossless_production! {
   /// sixth root copies is a **call** rather than a predicate — and the baseline the verdict needs
   /// is taken inside that call, where it cannot be hoisted, re-taken, or placed after the attempt
   /// it judges.
-  fn document<'inp, Src, Ctx>(inp) {
+  ///
+  /// # `stop` is the same verdict, on its way to the drain — smear PR #189
+  ///
+  /// [`document_entry`] drains what this leaves uncommitted, and that drain must not run on a
+  /// refusal. It used to re-derive "did this root stop" from tokora's session counter, which
+  /// answers for the whole root and therefore mistakes a *caught* early trip for a live one. The
+  /// slot carries [`depth::root_turn`](crate::lossless::depth::root_turn)'s own per-entry verdict
+  /// across the [`node`](tokora::parser::node) bracket instead; nothing here writes it.
+  fn document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::Document.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -421,7 +429,7 @@ lossless_production! {
         }
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          match depth::root_turn(inp, definition::<Src, Ctx>) {
+          match depth::root_turn(inp, stop, definition::<Src, Ctx>) {
             RootTurn::Parsed(()) => {}
             RootTurn::EndsTheDocument(e) => return Err(e),
             RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
@@ -443,7 +451,7 @@ lossless_production! {
   /// [`parse_type_system_document`](super::parse_type_system_document) is its shipped entry
   /// point — the one a schema-only consumer calls so that an executable definition is rejected
   /// by the parser, at the parser's own position, rather than by hand afterwards.
-  fn type_system_document<'inp, Src, Ctx>(inp) {
+  fn type_system_document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::TypeSystemDocument.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -451,8 +459,9 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_DEFINITION_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          // The refusal arm [`document`]'s note explains, through the same call.
-          match depth::root_turn(inp, type_system_definition_or_extension::<Src, Ctx>) {
+          // The refusal arm [`document`]'s note explains, through the same call — and the same
+          // slot, for the reason its `stop` note gives.
+          match depth::root_turn(inp, stop, type_system_definition_or_extension::<Src, Ctx>) {
             RootTurn::Parsed(()) => {}
             RootTurn::EndsTheDocument(e) => return Err(e),
             RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
@@ -474,12 +483,15 @@ lossless_production! {
   ///
   /// The drain is [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped)
   /// rather than a bare `skip_while`, because a refusal must not read the tail: see that
-  /// function's note for the diagnostic count that costs. It **runs** [`document`] rather than
-  /// taking its `Result`, and that is not a style choice — the input's trip witness needs a
-  /// baseline taken before the production, so the only place it can be taken and be right is
-  /// inside the function that runs it.
+  /// function's note for the diagnostic count that costs. It takes the **classified** ending
+  /// rather than [`document`]'s bare `Result`, and that is not a style choice — the verdict is
+  /// [`depth::root_turn`](crate::lossless::depth::root_turn)'s, decided per entry, and any
+  /// re-derivation out here is a reading over the whole root, which is the wrong span for the
+  /// question (smear PR #189).
   fn document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
+    let mut stop = depth::RootStop::new();
+    let out = document::<Src, Ctx>(inp, &mut stop);
+    depth::drain_unless_stopped(inp, stop.ending(out))
   }
 
   /// [`type_system_document`] plus the drain, for the same reason [`document_entry`] carries one.
@@ -490,6 +502,8 @@ lossless_production! {
   /// parser's result, so without the drain that tail would be a `FinishError::UncoveredGap` panic
   /// in materialization instead of a reportable parse.
   fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
+    let mut stop = depth::RootStop::new();
+    let out = type_system_document::<Src, Ctx>(inp, &mut stop);
+    depth::drain_unless_stopped(inp, stop.ending(out))
   }
 }

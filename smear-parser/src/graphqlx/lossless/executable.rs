@@ -345,7 +345,7 @@ lossless_production! {
   ///
   /// The executable-only root, off [`super::parse_document`]'s mixed-form path.
   /// [`super::parse_executable_document`] is its shipped entry point.
-  fn executable_document<'inp, Src, Ctx>(inp) {
+  fn executable_document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::ExecutableDocument.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -353,9 +353,11 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          // The refusal arm `document.rs`'s `document` note explains, through the same call.
+          // The refusal arm `document.rs`'s `document` note explains, through the same call and
+          // the same slot.
           match depth::root_turn(
             inp,
+            stop,
             super::document::import_or_executable_definition::<Src, Ctx>,
           ) {
             RootTurn::Parsed(()) => {}
@@ -376,7 +378,9 @@ lossless_production! {
   /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) for the one
   /// outcome that must not read the tail.
   fn executable_document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, executable_document::<Src, Ctx>)
+    let mut stop = depth::RootStop::new();
+    let out = executable_document::<Src, Ctx>(inp, &mut stop);
+    depth::drain_unless_stopped(inp, stop.ending(out))
   }
 }
 

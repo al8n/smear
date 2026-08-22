@@ -370,20 +370,26 @@ macro_rules! lossless_drivers {
                 // mutably as the first argument, so a second `inp` method call in the second
                 // would be a second mutable borrow of the same value.
                 $(let $mark = inp.cst_mark();)?
-                // Not a bare `skip_while`, and not `drain_unless_terminal` either: a stop must not
-                // read the tail, and the input's trip witness is what sees a stop whose error
-                // value does not say so. `drain_unless_stopped` runs the production so that it can
-                // take the witness's baseline before it — which is the only placement that is
-                // right, and the reason it is not a parameter.
+                // Not a bare `skip_while`: a stop must not read the tail, and the input's trip
+                // witness is what sees a stop whose error value does not say so.
+                //
+                // `root_turn` is what asks — a driver's ONE production is the whole attempt, and
+                // nothing below a root catches, so the baseline it takes immediately before that
+                // production is the correctly scoped one. The verdict is then carried to the
+                // drain rather than re-derived there, which is the shape every shipped root now
+                // has (smear PR #189).
                 //
                 // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
                 // parameter that matches `L::Source`.
-                $crate::lossless::depth::drain_unless_stopped(
+                let mut stop = $crate::lossless::depth::RootStop::new();
+                let ending = $crate::lossless::depth::root_turn(
                   inp,
+                  &mut stop,
                   |inp: &mut TestInput<'inp, '_>| {
                     super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?)
                   },
-                )
+                );
+                $crate::lossless::depth::drain_unless_stopped(inp, ending)
               },
             );
 
