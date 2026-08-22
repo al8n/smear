@@ -528,6 +528,8 @@ impl State for SyntacticLimits {
 /// decision: a token count is bounded by the input length, so unlike nesting depth it cannot
 /// exhaust the native stack. It is carried here because the lossless lexer's `Extras` is the
 /// combined tracker, and it is settable so that a caller who wants a total-work bound has one.
+/// What it counts is [`max_tokens`](Self::max_tokens)'s subject, and smear issue #183 changed it:
+/// lexemes **attempted**, not tokens produced.
 ///
 /// ```
 /// use smear_lexer::limits::{LosslessLimits, MAX_NESTING_DEPTH};
@@ -581,6 +583,9 @@ impl LosslessLimits {
   }
 
   /// The same budget with `max` as its token ceiling.
+  ///
+  /// See [`max_tokens`](Self::max_tokens) for what the number counts: lexemes attempted, which is
+  /// the same as tokens produced for a document that lexes clean and larger for one that does not.
   #[inline(always)]
   pub const fn with_max_tokens(self, max: usize) -> Self {
     Self(Limiter::with_trackers(
@@ -595,7 +600,27 @@ impl LosslessLimits {
     self.0.recursion().limitation()
   }
 
-  /// The token ceiling this budget refuses past.
+  /// The token ceiling this budget refuses past — counted in lexemes the scanner **attempted**,
+  /// not in tokens the document produced.
+  ///
+  /// # The unit changed, and the direction it changed in
+  ///
+  /// Every lossless rule charges this tally before it runs. Until smear issue #183 the two hooks
+  /// that wrap a fallible rule — `tt_hook_and_then` and `tt_hook_and_then_into_errors` — charged
+  /// through `Result::inspect`, which runs on `Ok` alone, so a rule that failed cost nothing and
+  /// four rules that can only fail (`.` and `..`, GraphQL's `-` and `+`) could never charge at all.
+  ///
+  /// A ceiling whose whole job is to bound what an untrusted document can cost therefore bounded
+  /// **nothing** over malformed input, and it failed open on the cheaper document to write:
+  /// measured at `with_max_tokens(100)`, 4 000 `!` truncated at 2 diagnostics while 4 000 `-`
+  /// parsed to the end at 4 001. Both truncate now, at 2 and 101.
+  ///
+  /// For well-formed input the two units are identical, because a rule that succeeds was also a
+  /// rule that was attempted. For malformed input the attempted count is the larger of the two, so
+  /// an existing budget became **stricter** rather than looser — the safe direction for a defence,
+  /// and the reason this is a documented change of meaning rather than a silent one. A caller
+  /// parsing input that is expected to carry lexer errors and who sized a budget against the old
+  /// unit should raise it by the number of bad lexemes it must tolerate.
   #[inline(always)]
   pub const fn max_tokens(&self) -> usize {
     self.0.token().limitation()

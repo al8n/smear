@@ -52,9 +52,8 @@ where
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
     .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
+      increase_token(lexer);
+      f(lexer)
     })
 }
 
@@ -74,9 +73,8 @@ where
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
     .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
+      increase_token(lexer);
+      f(lexer)
     })
 }
 
