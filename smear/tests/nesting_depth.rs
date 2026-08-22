@@ -1041,7 +1041,7 @@ fn a_refusal_ends_every_document_root() {
 fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   use smear::parser::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
-    lossless::depth::{FromNestingLimit, RootTurn, descend, drain_unless_stopped},
+    lossless::depth::{FromNestingLimit, RootStop, descend, drain_unless_stopped},
   };
   use tokora::{
     Emitter, Lexer, ParserContext, SimpleSpan, Token,
@@ -1144,26 +1144,31 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   // extra. It used to be spelled `descend(inp, 0)`; the ceiling is the parse's own limiter now,
   // which is the same statement one layer down and is what makes the refusal below tokora's own
   // trip rather than a smear pre-check that agreed with it.
+  /// The root the entry drain runs, and it classifies **nothing**: no `root_turn` call, so the
+  /// slot `drain_unless_stopped` mints for it stays fresh, the ending is `Recoverable`, and
+  /// `MaybeTerminal` is the only term left that can stop the tail from being read. That is the
+  /// trait half this cell measures — the witness half has
+  /// `each_term_of_a_roots_stop_is_alone_on_a_population` — and it is exactly the population
+  /// `drain_unless_stopped`'s own note assigns to the trait: a failure that reached the drain by
+  /// a path no `root_turn` classified.
+  ///
+  /// It used to be a hand-written `RootTurn::Recoverable(..)` handed straight to the drain. That
+  /// spelling is gone — the variants do not build out of crate — and this is the same cell
+  /// through the door that remains.
+  fn refuse_without_classifying<'inp>(
+    inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Which> {
+    descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp).map(|_| ())
+  }
+
   fn run<'inp>(src: &'inp str, via_entry: bool, on_error: OnError, reject_lexer: bool) -> Which {
     tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
       |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
-        let out = descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp).map(|_| ());
         if via_entry {
-          // The entry's drain, and the ending it is handed is deliberately **`Recoverable`**.
-          // `drain_unless_stopped`'s own `EndsTheDocument` arm would refuse the drain before the
-          // trait was consulted, and the trait half is exactly what this cell measures — the
-          // witness half has `each_term_of_a_roots_stop_is_alone_on_a_population`. Saying
-          // "recoverable" here is what leaves `MaybeTerminal` as the only thing that can stop the
-          // tail from being read, which is the pre-#189 shape of this call site unchanged.
-          drain_unless_stopped(
-            inp,
-            match out {
-              Ok(()) => RootTurn::Parsed(()),
-              Err(e) => RootTurn::Recoverable(e),
-            },
-          )
+          drain_unless_stopped(inp, refuse_without_classifying)
         } else {
-          out
+          descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp).map(|_| ())
         }
       },
       src,
@@ -1347,9 +1352,13 @@ fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
 #[cfg(all(feature = "rowan", feature = "graphql"))]
 #[test]
 fn each_term_of_a_roots_stop_is_alone_on_a_population() {
+  use core::cell::Cell as StdCell;
+
   use smear::parser::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
-    lossless::depth::{FromNestingLimit, RootStop, RootTurn, descend, root_turn},
+    lossless::depth::{
+      FromNestingLimit, RootStop, RootTurn, descend, drain_unless_stopped, root_turn,
+    },
   };
   use tokora::{
     Emitter, Lexer, ParserContext, SimpleSpan, Token,
@@ -1441,38 +1450,54 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
   // The `'inp` is NAMED, threaded from `src`: elided, it varies independently of the error type
   // and the closure `E0521`s — the same reason the driver macro names it.
   fn drive<'inp>(src: &'inp str, limit: usize, cell: Cell) -> Verdict {
-    tokora::parse_with::<Lx<'inp>, str, _, Verdict, Ctx<'inp>, GraphQL>(
+    // The verdict leaves through a `Cell` rather than through the parse's own `Result`, because
+    // the two failure arms both return `Err` and the whole question is *which* of them it was.
+    let observed: StdCell<Option<Verdict>> = StdCell::new(None);
+
+    let _ = tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
       |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
-        // The slot a root threads to its drain. This cell reads the returned verdict rather than
-        // the slot — they are the same decision, written twice because the roots' loops sit
-        // inside a `node` bracket their `Err` cannot carry it across.
-        let mut stop = RootStop::new();
-        let turn = root_turn(
+        // THE SLOT IS THE DRAIN'S, LENT FOR THIS ONE CALL. A cell that wants to read
+        // `root_turn`'s verdict has to sit inside a `drain_unless_stopped`, because that is the
+        // only frame that mints a `RootStop` — which is the shape the seal forces on every
+        // consumer, this test included. Before smear PR #189's round 3 the slot was `RootStop::new()`
+        // here, which is the minting door round 2 found.
+        drain_unless_stopped(
           inp,
-          &mut stop,
-          |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| match cell {
-            // A real scan. The lexer's own nesting tally trips on `src`, the emitter rejects the
-            // diagnostic, and the rejection is what leaves this entry as an `Err`. Nothing here
-            // descends, so tokora's resource-trip counter cannot have moved.
-            Cell::Scanner => {
-              inp.skip_while(|_| true)?;
-              Ok(())
-            }
-            Cell::Ordinary => Err(E::Ordinary),
-            // A real descent trip: the budget below is `0`, so the first descent is over it.
-            Cell::Refusal => descend(inp).map(|_| ()),
+          |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+           stop: &mut RootStop| {
+            let turn = root_turn(
+              inp,
+              stop,
+              |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| match cell {
+                // A real scan. The lexer's own nesting tally trips on `src`, the emitter rejects
+                // the diagnostic, and the rejection is what leaves this entry as an `Err`.
+                // Nothing here descends, so tokora's resource-trip counter cannot have moved.
+                Cell::Scanner => {
+                  inp.skip_while(|_| true)?;
+                  Ok(())
+                }
+                Cell::Ordinary => Err(E::Ordinary),
+                // A real descent trip: the budget below is `0`, so the first descent is over it.
+                Cell::Refusal => descend(inp).map(|_| ()),
+              },
+            );
+            // The verdict and what the root returns are the same decision, and the root returns
+            // its failure the way every shipped root does.
+            let (verdict, out) = match turn {
+              RootTurn::Parsed { .. } => (Verdict::Parsed, Ok(())),
+              RootTurn::EndsTheDocument { error, .. } => (Verdict::Ends(error), Err(error)),
+              RootTurn::Recoverable { error, .. } => (Verdict::Recoverable(error), Err(error)),
+            };
+            observed.set(Some(verdict));
+            out
           },
-        );
-        Ok(match turn {
-          RootTurn::Parsed(()) => Verdict::Parsed,
-          RootTurn::EndsTheDocument(e) => Verdict::Ends(e),
-          RootTurn::Recoverable(e) => Verdict::Recoverable(e),
-        })
+        )
       },
       src,
       ParserContext::of(Rejecting).with_recursion_limiter(RecursionLimiter::with_limitation(limit)),
-    )
-    .expect("the turn is mapped to a value rather than propagated")
+    );
+
+    observed.get().expect("the root ran")
   }
 
   // Past `MAX_NESTING_DEPTH`, which is what the lexer's tally is seeded with by default, so the
@@ -1642,32 +1667,42 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
     entries: &[Entry],
   ) -> Result<(), E> {
     for entry in entries {
+      // The `..` in every pattern is `#[non_exhaustive]` on the variants: out of crate a verdict
+      // still matches and still gets exhaustiveness checking, and no longer BUILDS — smear
+      // PR #189, round 3. The variants are braced for the same reason: on a TUPLE variant the
+      // attribute privates the constructor, and a tuple pattern out of crate resolves through it.
       match *entry {
         Entry::CaughtRefusal => {
           match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
             descend(inp).map(|_| ())
           }) {
-            RootTurn::Parsed(()) => {}
+            RootTurn::Parsed { .. } => {}
             // CAUGHT AND CARRIED ON. Nothing in either shipped dialect does this; the public
             // generic layer lets a consumer, and `RootTurn::EndsTheDocument` is a value rather
             // than a stop the type system forces.
-            RootTurn::EndsTheDocument(_) | RootTurn::Recoverable(_) => {}
+            RootTurn::EndsTheDocument { .. } | RootTurn::Recoverable { .. } => {}
           }
         }
         Entry::Refusal => {
           match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
             descend(inp).map(|_| ())
           }) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) | RootTurn::Recoverable(e) => return Err(e),
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error, .. } | RootTurn::Recoverable { error, .. } => {
+              return Err(error);
+            }
           }
         }
         Entry::Ordinary => {
+          // `Err::<(), E>`: the `Parsed` arm below binds nothing now that the variants are
+          // braced, so nothing else in this call fixes the entry's `T`.
           match root_turn(inp, stop, |_inp: &mut InputRef<'inp, '_, _, _, _>| {
-            Err(E::Ordinary)
+            Err::<(), E>(E::Ordinary)
           }) {
-            RootTurn::Parsed(()) => {}
-            RootTurn::EndsTheDocument(e) | RootTurn::Recoverable(e) => return Err(e),
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error, .. } | RootTurn::Recoverable { error, .. } => {
+              return Err(error);
+            }
           }
         }
       }
@@ -1684,9 +1719,16 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
     TAIL_DIAGNOSTICS.with(|n| n.set(0));
     let out = tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
       |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
-        let mut stop = RootStop::new();
-        let out = root(inp, &mut stop, entries);
-        drain_unless_stopped(inp, stop.ending(out))
+        // Exactly what an `*_entry` production writes: the drain runs the root, mints the slot
+        // for it, and spends that slot against what that root returned. The three-step form this
+        // used to spell — `RootStop::new()`, run, `stop.ending(out)` — is gone, and with it every
+        // way to reach this drain with a verdict about some other root.
+        drain_unless_stopped(
+          inp,
+          |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>, stop: &mut RootStop| {
+            root(inp, stop, entries)
+          },
+        )
       },
       src,
       ParserContext::of(Counting).with_recursion_limiter(RecursionLimiter::with_limitation(0)),

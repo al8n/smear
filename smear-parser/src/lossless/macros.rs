@@ -375,21 +375,32 @@ macro_rules! lossless_drivers {
                 //
                 // `root_turn` is what asks — a driver's ONE production is the whole attempt, and
                 // nothing below a root catches, so the baseline it takes immediately before that
-                // production is the correctly scoped one. The verdict is then carried to the
-                // drain rather than re-derived there, which is the shape every shipped root now
-                // has (smear PR #189).
+                // production is the correctly scoped one. The verdict then travels to the drain in
+                // the slot rather than being re-derived there, which is the shape every shipped
+                // root now has (smear PR #189).
+                //
+                // A DRIVER IS A ROOT OF ONE ENTRY, and it is written as one: the drain runs it,
+                // mints the slot for it, and spends that slot against what it returns. The verdict
+                // never exists as a value this expansion could pair with anything else — see
+                // `drain_unless_stopped`'s `It runs the root` note.
                 //
                 // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
                 // parameter that matches `L::Source`.
-                let mut stop = $crate::lossless::depth::RootStop::new();
-                let ending = $crate::lossless::depth::root_turn(
+                $crate::lossless::depth::drain_unless_stopped(
                   inp,
-                  &mut stop,
-                  |inp: &mut TestInput<'inp, '_>| {
-                    super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?)
+                  |inp: &mut TestInput<'inp, '_>,
+                   stop: &mut $crate::lossless::depth::RootStop| {
+                    use $crate::lossless::depth::{RootTurn, root_turn};
+
+                    match root_turn(inp, stop, |inp: &mut TestInput<'inp, '_>| {
+                      super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?)
+                    }) {
+                      RootTurn::Parsed { parsed } => Ok(parsed),
+                      RootTurn::EndsTheDocument { error }
+                      | RootTurn::Recoverable { error } => Err(error),
+                    }
                   },
-                );
-                $crate::lossless::depth::drain_unless_stopped(inp, ending)
+                )
               },
             );
 
