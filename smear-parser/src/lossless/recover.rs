@@ -148,25 +148,64 @@
 //! `refusals = 0`. Interleaving them with junk that *does* reach recovery inflates the ratio to
 //! 514, and refusing there costs nothing, because those scans were going to fail anyway.
 //!
-//! The reachable cost needs a third thing: an error run long enough to blow the allowance,
-//! followed by a junk run whose scan would have **succeeded**. Measured, with `k` leading `-`
-//! before `! `×3000 and a trailing `1`:
+//! The reachable cost needs a third thing: an error run of `k` lexemes, long enough to blow the
+//! allowance, followed by a junk run whose scan would have **succeeded**.
 //!
-//! | `k` | refusals | parser diagnostics beyond the lexer's own |
-//! |---|---|---|
-//! | 1 000 | 0 | 3 — recovery fully intact |
-//! | 6 000 | 137 | 140 |
-//! | 20 000 | 1 137 | 1 140 |
+//! Below [`SCAN_ALLOWANCE_FLOOR`] nothing happens at all. Above it the guard refuses until the
+//! denominator catches up, and the rate it catches up at is **not a constant** — it is set by how
+//! many items the junk commits per refusal. Refusals continue while `k + c > FACTOR * c + floor`,
+//! so they stop at `c = (k - floor) / (FACTOR - 1)` committed items; a junk run committing `m`
+//! items per refusal therefore takes
 //!
-//! Below [`SCAN_ALLOWANCE_FLOOR`] nothing happens at all, and above it the damage is
-//! `≈ (k - floor) / 16` holes and **self-clearing**: every committed token pushes the denominator
-//! back up, so the guard re-closes. `error_density_is_a_bounded_known_cost` pins that table.
+//! ```text
+//! refusals ≈ (k - SCAN_ALLOWANCE_FLOOR) / ((SCAN_ALLOWANCE_FACTOR - 1) * m)
+//! ```
+//!
+//! | junk | `m` | `k` = 20 000 | 33 000 | 80 000 |
+//! |---|---|---|---|---|
+//! | `! ` (bang + space) | 2 | 1 137 | 2 065 | 5 422 |
+//! | `!` (dense) | 1 | 2 273 | 4 130 | 10 844 |
+//! | formula | | 2 272 / 1 136 | 4 129 / 2 064 | 10 843 / 5 421 |
+//!
+//! **`m` is why the first version of this note was wrong.** It read `(k - floor) / 16`, which is
+//! `m = 2` — a property of the `! ` witness it was measured on, not of the guard. A dense `!!!!`
+//! suffix commits one item per refusal instead of two and doubles the count, and the pin written
+//! beside it (`beyond <= k / 8`) held for `! ` at every size and **broke for the dense shape at
+//! k = 33 000**, exactly where `k/7 - 585 > k/8` predicts. The pin now asserts the formula and the
+//! gate runs the dense shape, which is the one that stresses it.
+//!
+//! **`m` cannot be zero, which is what makes this self-clearing at all.** [`unexpected`]'s
+//! no-progress fallback consumes exactly one token through `try_expect`, and a consumed token is
+//! by definition one the lexer produced *and* the tally counted — error lexemes never reach the
+//! parser, because the scanner absorbs them into diagnostics on the way past. So every refusal
+//! moves the denominator by at least one and the guard always re-closes. Measured over every
+//! single-token junk alphabet in both dialects: `m` ranges 1.002 to 2.016, and the floor of 1 is
+//! reached rather than approached.
 //!
 //! Repairing it belongs in `smear-lexer`, not here — the tally would have to increment before the
 //! rule runs rather than after it succeeds — and that changes what `LosslessLimits::max_tokens`
 //! counts, which is a public knob with its own contract. It is worth doing on its own terms: that
 //! same asymmetry means `max_tokens` bounds **nothing** over malformed input today, and a budget
 //! of 100 truncates 4 000 `!` at 2 diagnostics while letting 4 000 `-` through at 4 001.
+//!
+//! ## The bound is on the whole parse, and it does not depend on the shape
+//!
+//! Everything above prices one *episode*. The bound that matters is the total, and it falls out of
+//! the denominator rather than out of any shape: the guard permits scanning only while
+//! `spent <= FACTOR * committed + floor`, and `committed` can never exceed `T`, the number of items
+//! the document actually contains. So the total lexing a parse can be made to do is
+//! `FACTOR * T + floor` plus the one scan in flight when the guard closes — **linear in the
+//! document, whatever order the shape puts its progress and its scans in**.
+//!
+//! That is worth stating because the self-clearing property reads as a liability from the other
+//! side: a shape that alternates cheap commits with expensive failed scans re-opens the guard on
+//! purpose. It cannot win, because refilling the allowance costs exactly the committed items that
+//! bound it — a *successful* scan commits everything it crossed, so it adds equally to both sides
+//! and buys back only `FACTOR` times its own cost, out of a total that is already capped at `T`.
+//! Measured over four alternating constructions at three sizes, `spent / committed` peaks at
+//! **8.91** against a factor of 8; the two that interleave whole valid definitions with junk
+//! bursts sit at **1.00 with zero refusals**, the guard never engaging at all.
+//! `the_guard_cannot_be_refilled_into_superlinearity` pins the ratio.
 //!
 //! ## What the guard costs when it fires
 //!
@@ -178,6 +217,16 @@
 //! definition start, so it cannot rescue the earlier resyncs). There the recovery granularity
 //! changes, in the direction this module already prices as the cheap one: *stopping early costs at
 //! most one extra `Error` node; stopping late costs a subtree.*
+//!
+//! The falsifier is one measured instance; the **bound** over all inputs is structural and does
+//! not need one. A refusal replaces at most one committed hole with the fallback's single `Error`
+//! node, and emits at most the one report [`unexpected`] was already going to emit, so the guard
+//! can add **at most one diagnostic per refusal and never removes one**. Refusals are zero on every
+//! document that does not blow the allowance, which is why an honest corpus sees byte-identical
+//! output rather than merely similar output. And the lossless text is invariant in every case —
+//! the fallback commits the token it consumes exactly as the scan would have, so no byte of the
+//! source changes hands. `the_guard_adds_at_most_one_diagnostic_per_refusal` asserts both halves
+//! across the whole census rather than on the one shape.
 
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan, Token,

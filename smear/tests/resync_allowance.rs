@@ -344,54 +344,237 @@ fn token_length_does_not_reopen_the_guard() {
 /// Almost none of that is reachable. A run of bad lexemes never becomes tokens the parser recovers
 /// from, so a document dense in them makes no recovery call at all; and where the ratio does
 /// inflate, the scans it refuses were going to fail anyway. The reachable cost needs an error run
-/// long enough to blow the allowance *followed by* a junk run whose scan would have succeeded,
-/// which is what this builds.
+/// long enough to blow the allowance *followed by* a junk run whose scan would have succeeded.
 ///
-/// The property is that the damage stays proportional to the excess error count and **clears** —
-/// each committed token pushes the denominator back up, so the guard re-closes. A latch would show
-/// here as the whole 3 000-token junk run being shredded instead of a slice of it.
+/// # The rate is a function of the junk, not a constant
+///
+/// Refusals continue while `k + c > FACTOR * c + floor`, so they stop at
+/// `c = (k - floor) / (FACTOR - 1)` committed items. A junk run committing `m` items per refusal
+/// therefore takes `(k - floor) / ((FACTOR - 1) * m)` of them — and **`m` is set by the junk**.
+///
+/// The first version of this test pinned `beyond <= k / 8`, derived from `! `, which commits a
+/// bang and a space per refusal (`m = 2`). A dense `!!!!` suffix commits one, doubles the count,
+/// and **broke that pin at k = 33 000** — precisely where `k/7 - 585 > k/8`. So the shapes below
+/// lead with the dense one, and the assertion is the formula rather than a constant a single
+/// witness happens to satisfy.
 #[test]
 #[cfg(feature = "graphql")]
 fn error_density_is_a_bounded_known_cost() {
-  const JUNK: usize = 3_000;
-  println!("\n== error density: the second exception, priced ==");
-  // Below the floor, nothing happens: this is the guarantee that matters for a merely-malformed
-  // document, and it is an equality rather than a bound.
-  for k in [0usize, 1_000, 4_000] {
-    let src = format!("{}{}1", "-".repeat(k), "! ".repeat(JUNK));
-    let got = run(gql_document, &src);
-    assert_eq!(got.covered, src.len());
-    let beyond = got.diagnostics.saturating_sub(k);
-    assert_eq!(
-      beyond, 3,
-      "{k} leading error lexemes cost {beyond} parser diagnostics against the 3 an intact \
-       recovery reports. Under `SCAN_ALLOWANCE_FLOOR` the guard must not engage at all."
-    );
-    assert_eq!(got.refusals, 0, "k={k}");
-    println!("  k={k:6} refusals=0 parser diagnostics beyond the lexer's own: {beyond}  (intact)");
+  const JUNK: usize = 120_000;
+
+  /// `(k - floor) / ((FACTOR - 1) * m)`, the refusal count the mechanism predicts.
+  fn predicted(k: usize, m: usize) -> f64 {
+    k.saturating_sub(4_096) as f64 / (7.0 * m as f64)
   }
-  // Above it, proportional to the excess and far short of shredding the run.
-  for k in [6_000usize, 20_000] {
-    let src = format!("{}{}1", "-".repeat(k), "! ".repeat(JUNK));
+
+  println!("\n== error density: the second exception, priced by mechanism ==");
+  println!(
+    "  {:<8} {:>3} {:>8} {:>9} {:>9} {:>10} {:>8}",
+    "junk", "m", "k", "refusals", "predicted", "beyond", "drift"
+  );
+  // `m` is committed items per refusal: dense junk commits one, spaced junk commits two.
+  for (junk, m) in [("!", 1usize), ("@", 1), (":", 1), ("! ", 2), ("@ ", 2)] {
+    for k in [0usize, 1_000, 4_000] {
+      // Below the floor the guard must not engage at all. This is the guarantee that matters for
+      // a merely-malformed document, and it is an equality rather than a bound.
+      let src = format!("{}{}1", "-".repeat(k), junk.repeat(3_000));
+      let got = run(gql_document, &src);
+      assert_eq!(got.covered, src.len());
+      assert_eq!(
+        got.refusals, 0,
+        "{junk:?} k={k}: the guard engaged under SCAN_ALLOWANCE_FLOOR"
+      );
+      assert_eq!(
+        got.diagnostics.saturating_sub(k),
+        3,
+        "{junk:?} k={k}: recovery must be fully intact below the floor"
+      );
+    }
+    for k in [20_000usize, 33_000, 80_000] {
+      let src = format!("{}{}1", "-".repeat(k), junk.repeat(JUNK));
+      let got = run(gql_document, &src);
+      assert_eq!(got.covered, src.len(), "{junk:?} k={k}");
+      let want = predicted(k, m);
+      let drift = got.refusals as f64 / want;
+      println!(
+        "  {:<8} {m:>3} {k:>8} {:>9} {:>9.0} {:>10} {:>8.3}",
+        format!("{junk:?}"),
+        got.refusals,
+        want,
+        got.diagnostics.saturating_sub(k),
+        drift
+      );
+      assert!(
+        (0.9..1.1).contains(&drift),
+        "{junk:?} k={k}: {} refusals against the {want:.0} the mechanism predicts (x{drift:.3}). \
+         The rate is `(k - floor) / ((FACTOR - 1) * m)` with m = committed items per refusal; a \
+         drift here means either a constant changed or the junk stopped committing {m} per \
+         refusal. Do not re-derive this from one shape — that is what broke the last pin.",
+        got.refusals
+      );
+      assert!(
+        got.refusals < JUNK,
+        "{junk:?} k={k}: the whole junk run was shredded rather than a slice of it, so the guard \
+         is not re-closing as committed items accrue."
+      );
+    }
+  }
+}
+
+/// `m` — committed items per refusal — is at least one, so the guard always re-closes.
+///
+/// If a refusal could commit nothing the denominator would never move and the guard would latch,
+/// which is the difference between a bounded degradation and a permanent one. It cannot:
+/// `unexpected`'s no-progress fallback consumes exactly one token through `try_expect`, and a
+/// consumed token is one the lexer produced *and* the tally counted, because error lexemes never
+/// reach the parser — the scanner absorbs them into diagnostics on the way past.
+///
+/// The measurement is what says the floor of 1 is reached rather than approached, which is what
+/// makes the worst case in `error_density_is_a_bounded_known_cost` the worst case.
+#[test]
+#[cfg(feature = "graphql")]
+fn every_refusal_commits_at_least_one_item() {
+  println!("\n== committed items per refusal ==");
+  for junk in ["!", "! ", "@", ":", "=", "|", "&", "!@:=|&", "()", "( )"] {
+    let src = format!("{}{}", "-".repeat(20_000), junk.repeat(6_000));
     let got = run(gql_document, &src);
-    assert_eq!(got.covered, src.len());
-    let beyond = got.diagnostics.saturating_sub(k);
+    assert_eq!(got.covered, src.len(), "{junk:?}");
+    assert!(
+      got.refusals > 0,
+      "{junk:?}: no refusal, so this constrains nothing"
+    );
+    let m = got.peak_committed as f64 / got.refusals as f64;
     println!(
-      "  k={k:6} refusals={:6} parser diagnostics beyond the lexer's own: {beyond}",
+      "  {:<10} refusals={:6} committed={:7} m={m:.3}",
+      format!("{junk:?}"),
+      got.refusals,
+      got.peak_committed
+    );
+    assert!(
+      m >= 1.0,
+      "{junk:?}: {m:.3} committed items per refusal. Below 1 the denominator stops moving and \
+       the guard latches instead of clearing — the degradation would be permanent rather than \
+       proportional."
+    );
+  }
+}
+
+/// The guard re-opening cannot be turned back into superlinearity.
+///
+/// Self-clearing is what keeps the error-density cost proportional, and read from the other side
+/// it is an invitation: alternate cheap commits with expensive failed scans and the allowance
+/// refills on purpose. It cannot win, and the reason is the denominator rather than any property
+/// of the shapes below. Scanning is permitted only while `spent <= FACTOR * committed + floor`,
+/// and `committed` can never exceed the number of items the document contains — so the total
+/// lexing a parse can be made to do is `FACTOR * T + floor` plus the scan in flight, whatever
+/// order the shape puts its progress and its scans in.
+///
+/// The witness is `spent / committed` at the last recovery call, which is that inequality read
+/// directly. A shape that beat the guard would show it climbing with size.
+#[test]
+#[cfg(feature = "graphql")]
+fn the_guard_cannot_be_refilled_into_superlinearity() {
+  println!("\n== alternating progress and scans ==");
+  for k in [200usize, 1_000, 4_000] {
+    for (name, src) in [
+      (
+        "burn then junk",
+        format!("{}{}1", "[ type ] ".repeat(k), "! ".repeat(k)),
+      ),
+      (
+        "valid definition alternating with a burn unit",
+        "type T { f: Int } [ type ] ".repeat(k),
+      ),
+      (
+        "20 valid definitions per junk burst",
+        format!("{}[ type ] ", "type T { f: Int } ".repeat(20)).repeat(k / 20 + 1),
+      ),
+      (
+        "a large commit, then a resync-quadratic tail",
+        format!(
+          "{}{}",
+          "type T { f: Int } ".repeat(k * 4),
+          "[ type ] ".repeat(k)
+        ),
+      ),
+    ] {
+      let got = run(gql_document, &src);
+      assert_eq!(got.covered, src.len(), "{name} k={k}");
+      let ratio = got.peak_spent as f64 / got.peak_committed.max(1) as f64;
+      println!(
+        "  k={k:5} {name:<46} spent/committed={ratio:5.2} refusals={}",
+        got.refusals
+      );
+      // One scan may be in flight when the guard closes, so the ratio can overshoot the factor by
+      // that scan; it cannot climb with the document.
+      assert!(
+        ratio < 12.0,
+        "{name} k={k}: spent/committed reached {ratio:.2} against a factor of 8 plus one scan's \
+         overshoot. An alternating shape is refilling the allowance faster than it costs, which \
+         would put the total back above FACTOR * T."
+      );
+    }
+  }
+}
+
+/// What the guard can do to the output, bounded over the whole census rather than one shape.
+///
+/// A refusal replaces at most one committed hole with the fallback's single `Error` node and emits
+/// at most the report `unexpected` was already going to emit, so the guard adds **at most one
+/// diagnostic per refusal and removes none**. Where it refuses nothing it changes nothing, which
+/// is the stronger statement an honest corpus needs. The lossless text is invariant either way,
+/// because the fallback commits the token it consumes exactly as the scan would have.
+///
+/// The pinned falsifier is one measured instance of this; the assertion here is the bound.
+#[test]
+#[cfg(feature = "graphql")]
+fn the_guard_adds_at_most_one_diagnostic_per_refusal() {
+  println!("\n== output preservation, over the census ==");
+  // (source, the diagnostic count an unfused parser reports)
+  let cases: Vec<(String, usize)> = vec![
+    ("! ".repeat(2_000), 2_000),
+    ("( ) ".repeat(2_000), 4_000),
+    ("@ ( ) ".repeat(2_000), 6_000),
+    ("[ type ] ".repeat(2_000), 4_000),
+    ("( type ) ".repeat(2_000), 4_000),
+    ("type T { f: Int } ".repeat(2_000), 0),
+    (format!("{} type U {{ f: Int }}", "! ".repeat(3_000)), 2),
+    (
+      format!("{}{}1", "[ type ] ".repeat(6_000), "! ".repeat(3_000)),
+      12_003,
+    ),
+  ];
+  for (src, unfused) in &cases {
+    let got = run(gql_document, src);
+    assert_eq!(
+      got.covered,
+      src.len(),
+      "the lossless text must survive the guard"
+    );
+    assert!(
+      got.diagnostics >= *unfused,
+      "the guard removed diagnostics: {} < {unfused}",
+      got.diagnostics
+    );
+    let extra = got.diagnostics - *unfused;
+    assert!(
+      extra <= got.refusals,
+      "the guard added {extra} diagnostics over {} refusals. Each refusal can cost at most one — \
+       one hole becoming one `Error` node — so more than that means it is changing output \
+       somewhere other than the scan it declined.",
       got.refusals
     );
-    assert!(
-      beyond <= k / 8,
-      "k={k}: the cost of error density grew to {beyond} diagnostics, past the k/8 = {} this was \
-       measured and pinned at (140 at k=6000, 1140 at k=20000). Either the guard stopped clearing \
-       — check that it is still re-derived per call rather than latched — or the tally stopped \
-       counting something it used to.",
-      k / 8
-    );
-    assert!(
-      beyond < JUNK,
-      "k={k}: {beyond} diagnostics means the whole junk run was shredded rather than a slice of \
-       it. The guard is not re-closing as committed tokens accrue."
+    if got.refusals == 0 {
+      assert_eq!(
+        got.diagnostics, *unfused,
+        "the guard refused nothing and still changed the answer"
+      );
+    }
+    println!(
+      "  unfused={unfused:<7} fused={:<7} extra={extra:<6} refusals={:<7} bytes={}",
+      got.diagnostics,
+      got.refusals,
+      src.len()
     );
   }
 }
