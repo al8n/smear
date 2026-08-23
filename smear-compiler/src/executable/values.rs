@@ -339,6 +339,13 @@ where
   where
     V: ValueLike<S>,
   {
+    if !self.walks_values {
+      // Nothing downstream of here is enabled. The walk exists for draft 5.6's literal rules and
+      // for collecting the usages 5.8.3, 5.8.4 and 5.8.5 read, and with none of those on it would
+      // descend an attacker-chosen literal to produce nothing — and charge for the descent while
+      // doing it. See `Validator::walks_values`.
+      return ControlFlow::Continue(());
+    }
     let base = self.scratch.values.len();
     if let Some(frame) = self.visit_value(root, expected, location, check)? {
       self.scratch.values.push(frame);
@@ -495,11 +502,17 @@ where
 
     let base = expected.base_id();
     let definition = *self.schema.type_def(base);
-    // Charged before the two arms below read the literal's own spelling. `has_enum_value` hashes
-    // an enum name the client wrote, and `scalar_accepts` hands `fits_i32` and `is_finite` the
-    // digits — a literal has no length ceiling, so `1` followed by a million zeroes is a legal
-    // `IntValue` and used to be parsed for free.
-    self.spend(literal_units::<S, V>(value), value.value_span())?;
+    // Draft 5.6.1 is the only rule the three leaf arms below serve, so it is asked **first** —
+    // before the literal is read and before the literal is charged.
+    //
+    // It used to be asked last, in a `!scalar_accepts(..) && check && self.on(..)` whose
+    // short-circuit runs the coercion before the guard, and in an enum arm that hashed the
+    // spelling into a `member` binding the guard then discarded. With the rule off that is a
+    // client-chosen name hashed and a client-chosen digit string parsed for a verdict nobody
+    // wanted — and once the read is charged, it is a refusal nobody asked for either. `RuleSet`'s
+    // own contract says a consumer that wants only the fragment rules does not pay for value
+    // coercion; this is where that sentence was false. al8n/smear#198.
+    let coerces = check && self.on(Rule::ValuesOfCorrectType);
     match definition.kind() {
       TypeKind::InputObject => {
         let Some(fields) = value.as_object() else {
@@ -524,21 +537,24 @@ where
         )))
       }
       TypeKind::Enum => {
-        let member = value
-          .as_enum()
-          .and_then(|literal| self.schema.sym(literal.source().as_ref()))
-          .is_some_and(|sym| self.schema.has_enum_value(base, sym));
-        if !member && check && self.on(Rule::ValuesOfCorrectType) {
-          self.report_value(value, Context::Expected(expected))?;
+        if coerces {
+          self.spend(literal_units::<S, V>(value), value.value_span())?;
+          let member = value
+            .as_enum()
+            .and_then(|literal| self.schema.sym(literal.source().as_ref()))
+            .is_some_and(|sym| self.schema.has_enum_value(base, sym));
+          if !member {
+            self.report_value(value, Context::Expected(expected))?;
+          }
         }
         ControlFlow::Continue(None)
       }
       TypeKind::Scalar => {
-        if !self.scalar_accepts(value, definition.name())
-          && check
-          && self.on(Rule::ValuesOfCorrectType)
-        {
-          self.report_value(value, Context::Expected(expected))?;
+        if coerces {
+          self.spend(literal_units::<S, V>(value), value.value_span())?;
+          if !self.scalar_accepts(value, definition.name()) {
+            self.report_value(value, Context::Expected(expected))?;
+          }
         }
         ControlFlow::Continue(None)
       }
@@ -546,7 +562,7 @@ where
       // or input field declared that way, so this is unreachable from a built schema; refusing
       // rather than accepting keeps it that way if the schema ever gains another door.
       TypeKind::Object | TypeKind::Interface | TypeKind::Union => {
-        if check && self.on(Rule::ValuesOfCorrectType) {
+        if coerces {
           self.report_value(value, Context::Expected(expected))?;
         }
         ControlFlow::Continue(None)
@@ -565,13 +581,14 @@ where
   where
     V: ValueLike<S>,
   {
-    // Prepaid ahead of the sort below, and ahead of 5.6.4's rescan further down, for the reason
-    // `check_directives` states. The per-field charge in `walk_value` prices the *schema lookup*
-    // one level down and arrives far too late to bound either of those.
-    self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
-
     // 5.6.3 — one value per field name.
     if self.on(Rule::InputObjectFieldUniqueness) {
+      // Prepaid ahead of the sort, for the reason `check_directives` states, and **inside** the
+      // guard because the sort is the only thing it pays for: `walk_value` charges each field name
+      // one level down for the schema lookup, and 5.6.4's rescan below charges its own. Outside
+      // the guard this was a second charge for a sort that was not going to run — which cannot
+      // under-bound anything, but can refuse a document over work nobody did.
+      self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
       let base = self.scratch.keys.len();
       for index in 0..fields.len() {
         self.scratch.keys.push(index as u32);

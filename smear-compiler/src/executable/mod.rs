@@ -24,6 +24,30 @@
 //!    every cheap structural refusal — undefined spreads, fragment cycles — is already established
 //!    before it expands anything, and what it may spend is the caller's [`Budget`].
 //!
+//! # Every repair here was swept for siblings, and three of the sweeps found one
+//!
+//! al8n/smear#198 landed a work ledger over these passes and then spent two review rounds on
+//! repairs that were true of the site they were written for and false of its twin. The pattern is
+//! worth naming because it is not carelessness: each repair was correct, and each was written by
+//! looking at the site the review named.
+//!
+//! - **A charge must sit in front of the work it prices.** The table on
+//!   [`Validator::spend`] is that question asked of every pass — and it replaced an earlier table
+//!   that asked "does this pass charge?", which every one of them did.
+//! - **A coordinate resolver costs the depth it descends.** `values::walk_value` was repaired;
+//!   `selections::resolve` — the same shape, three call sites, named in the same review sentence —
+//!   was not, and stayed quadratic for a round.
+//! - **A ledger's "off" must be a state.** [`Ledger::Off`] is closed under [`Ledger::take`]
+//!   because `u32::MAX` as a large number is a budget the first charge shrinks. That defect has
+//!   now been written four times in this repository under four different names.
+//! - **A rule that is off must not read caller-sized data.** Draft 5.6.1's leaf arms hashed an
+//!   enum spelling and parsed a digit string before asking whether 5.6.1 was on. Sweeping the
+//!   class found four more: the value walk itself, the fragment-declaration pass, 5.6.3's
+//!   prepayment, and the variable index — and it found that the *reachability* pass could not join
+//!   them, because draft 5.3.2's engine reads the bitset it fills. That last one is the reason the
+//!   sweep is worth running even where it finds nothing to repair: it is what stops a repair from
+//!   becoming the next defect.
+//!
 //! # Nothing recurses on document shape
 //!
 //! Selection sets and value literals are both walked with explicit stacks living in the caller's
@@ -148,17 +172,18 @@ impl Invalid {
 /// selection `cargo clippy --no-default-features -D warnings` builds.
 #[cfg(feature = "rowan")]
 impl Invalid {
-  /// The verdict of a run a resource bound abandoned, with `emitted` diagnostics behind it.
+  /// The verdict of a run a resource bound abandoned, with `emitted` diagnostics behind it and
+  /// `stopped` saying whether the sink asked to stop on one of them.
   ///
   /// `pub(crate)` and used by exactly one caller: the lossless door refuses **before** it projects,
   /// so there is no [`Validator`] in existence to carry the flag out. The shape is the same one
   /// `validate_charged` produces — `Err`, `budget_tripped`, and an `emitted` that may be zero —
   /// because a second spelling of "gave up" is how a caller ends up reading one of them as
   /// "finished".
-  pub(crate) const fn refused(emitted: u32) -> Self {
+  pub(crate) const fn refused(emitted: u32, stopped: bool) -> Self {
     Self {
       emitted,
-      stopped: false,
+      stopped,
       budget: true,
     }
   }
@@ -303,12 +328,11 @@ where
     budget,
     rules,
     sink,
-    budget.validation_work(),
+    Ledger::open(budget),
   )
 }
 
-/// [`validate_executable_with`] with the validation ledger opened at `left` rather than at
-/// [`Budget::validation_work`](super::Budget::validation_work).
+/// [`validate_executable_with`] continuing an already-opened [`Ledger`] rather than opening one.
 ///
 /// The lossless door needs this. Its projection builds the whole AST **before** any rule exists to
 /// charge, so the ledger has to be opened before the [`Validator`] is and carried into it; a
@@ -321,7 +345,7 @@ pub(crate) fn validate_charged<S, K>(
   budget: &Budget,
   rules: RuleSet,
   sink: &mut K,
-  left: u32,
+  left: Ledger,
 ) -> Result<(), Invalid>
 where
   S: AsRef<[u8]> + Clone,
@@ -336,6 +360,7 @@ where
     rules,
     budget: *budget,
     scalars: Scalars::resolve(schema),
+    walks_values: walks_values(rules),
     variables: &[],
     in_operation: false,
     variable_base: 0,
@@ -361,6 +386,51 @@ where
       stopped,
       budget,
     })
+  }
+}
+
+/// What is left of [`Budget::validation_work`](super::Budget::validation_work), or the explicit
+/// absence of a bound.
+///
+/// # Disabled is a state, not a large number
+///
+/// [`u32::MAX`] is the *spelling* a caller uses to turn the bound off, and it stops being a number
+/// here rather than staying one and being trusted to stay large. A counter that encodes "off" as
+/// its maximum is a counter the first charge converts into a very large *finite* budget — and this
+/// program has now written that same defect four times: `Work::take`'s saturation, `Visits::take`,
+/// tokora's regime generation, and this. Repairing it as arithmetic repairs one of them.
+///
+/// [`Ledger::Off`] is closed under [`Ledger::take`]: no sequence of charges, and no prepayment the
+/// lossless door subtracts before the validator exists, can turn it into [`Ledger::Left`]. That is
+/// the property, and it is a property of the type rather than of every call site that spends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ledger {
+  /// No bound. Every charge succeeds and changes nothing.
+  Off,
+  /// This many units remain.
+  Left(u32),
+}
+
+impl Ledger {
+  /// The ledger a [`Budget`] opens.
+  #[inline]
+  pub(crate) const fn open(budget: &Budget) -> Self {
+    match budget.validation_work() {
+      u32::MAX => Self::Off,
+      left => Self::Left(left),
+    }
+  }
+
+  /// Spends `units`, or answers `None` when there was not room for them.
+  #[inline]
+  pub(crate) const fn take(self, units: u32) -> Option<Self> {
+    match self {
+      Self::Off => Some(Self::Off),
+      Self::Left(left) => match left.checked_sub(units) {
+        Some(left) => Some(Self::Left(left)),
+        None => None,
+      },
+    }
   }
 }
 
@@ -403,6 +473,22 @@ pub(crate) const fn units(len: usize) -> u32 {
   }
 }
 
+/// Whether any rule the value walk carries is enabled.
+///
+/// The value walk exists for exactly two reasons: draft 5.6's literal rules, and collecting the
+/// variable usages 5.8.3, 5.8.4 and 5.8.5 read. With none of those on it descends a literal whose
+/// nesting and breadth the document chose, produces nothing, and — since al8n/smear#198 — charges
+/// a ledger for the descent. Resolved once per run rather than asked per literal.
+const fn walks_values(rules: RuleSet) -> bool {
+  rules.contains(Rule::ValuesOfCorrectType)
+    || rules.contains(Rule::InputObjectFieldNames)
+    || rules.contains(Rule::InputObjectFieldUniqueness)
+    || rules.contains(Rule::InputObjectRequiredFields)
+    || rules.contains(Rule::AllVariableUsesDefined)
+    || rules.contains(Rule::AllVariablesUsed)
+    || rules.contains(Rule::AllVariableUsagesAreAllowed)
+}
+
 /// The five built-in scalar names, resolved against this schema once per run.
 ///
 /// Coercion is decided by *name*, not by the built-in flag: a document may spell `scalar String`
@@ -439,6 +525,8 @@ struct Validator<'a, 'd, S, K> {
   rules: RuleSet,
   budget: Budget,
   scalars: Scalars,
+  /// [`walks_values`] for this run's [`RuleSet`], resolved once.
+  walks_values: bool,
   /// The variable definitions of the operation being walked; empty outside one.
   variables: &'d [DescribedVariableDefinition<S>],
   /// Whether a variable scope is in effect. Distinguishes "an operation with no variables" from
@@ -457,10 +545,10 @@ struct Validator<'a, 'd, S, K> {
   /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent, and the ceiling it is
   /// spending against.
   work: Work,
-  /// What is left of [`Budget::validation_work`](super::Budget::validation_work). Charged by
-  /// every pass that is not draft 5.3.2's engine, and pre-spent by the lossless door's projection
-  /// before this struct exists.
-  left: u32,
+  /// What is left of [`Budget::validation_work`](super::Budget::validation_work), or
+  /// [`Ledger::Off`]. Charged by every pass that is not draft 5.3.2's engine, and pre-spent by the
+  /// lossless door's projection before this struct exists.
+  left: Ledger,
   /// Whether the ceiling refused the document.
   ///
   /// Separate from [`Validator::tripped`], which is the merge engine's; the verdict reads both.
@@ -549,7 +637,7 @@ where
   /// the schema is the server's, so its group sizes are not an input.
   #[inline]
   pub(super) fn spend(&mut self, units: u32, blame: SimpleSpan) -> ControlFlow<()> {
-    match self.left.checked_sub(units) {
+    match self.left.take(units) {
       Some(left) => {
         self.left = left;
         ControlFlow::Continue(())
@@ -570,7 +658,8 @@ where
   /// does not stop the unwinding, and one refusal per remaining unit of work is noise.
   #[cold]
   fn refuse(&mut self, blame: SimpleSpan) -> ControlFlow<()> {
-    self.left = 0;
+    // `Left(0)` and not `Off`: this is an exhausted bound, which is the opposite of an absent one.
+    self.left = Ledger::Left(0);
     if !self.refused {
       self.refused = true;
       if self.on(Rule::ValidationWorkBudget) {
@@ -844,7 +933,11 @@ where
     self.scratch.frames.clear();
     self.scratch.frames.push(Frame::root(index, NONE, 0));
     let mut current = root_selection_set(document, index);
+    let blame = current.map_or(SimpleSpan::const_new(0, 0), |set| *set.span());
     while let Some(frame) = self.scratch.frames.last().copied() {
+      // `selections::resolve` costs the frame depth and runs after every pop. See
+      // `selections::walk_selections` for the whole argument.
+      self.spend(self.scratch.frames.len() as u32, blame)?;
       let Some(set) = current else {
         self.scratch.frames.pop();
         current = selections::resolve(document, &self.scratch.frames);
@@ -877,7 +970,6 @@ where
           });
         }
         _ => {
-          self.spend(1, *selection.as_span())?;
           if let Some(child) = child_selection_set(selection) {
             self
               .scratch
@@ -980,6 +1072,13 @@ where
   // -- 3. fragment declaration rules ------------------------------------------------------------
 
   fn check_fragment_declarations(&mut self) -> ControlFlow<()> {
+    // Both of this pass's rules, asked before the condition names are read. `check_type_condition`
+    // resolves each one through `Schema::sym`, and here — unlike at an inline fragment — the
+    // resolved type is discarded, so with both rules off the pass hashes a document-chosen name per
+    // fragment for nothing.
+    if !self.on(Rule::FragmentSpreadTypeExistence) && !self.on(Rule::FragmentsOnCompositeTypes) {
+      return ControlFlow::Continue(());
+    }
     let document = self.document;
     for ordinal in 0..self.scratch.fragments.len() {
       let row = self.scratch.fragments[ordinal];
@@ -1080,6 +1179,15 @@ where
   /// Reachability propagates across every definition sharing a name, so one duplicated fragment
   /// name reports 5.5.1.1 and nothing else — the copy is not also "unused".
   fn check_fragments_used(&mut self) -> ControlFlow<()> {
+    // Two rules, not one, and that is the trap. The `reachable` bitset reads like 5.5.1.4's
+    // private working set and is not: draft 5.3.2's engine reads it too, to skip the fragments an
+    // operation's own merge already covered. Guarding this pass on 5.5.1.4 alone would leave the
+    // merge engine reading an unwritten bitset — every bit false, every fragment merged again —
+    // so the guard names both readers. Found by asking which *other* passes the rule-guard repair
+    // applies to, which is also what stopped it from becoming a defect.
+    if !self.on(Rule::FragmentsMustBeUsed) && !self.on(Rule::FieldSelectionMerging) {
+      return ControlFlow::Continue(());
+    }
     let count = self.scratch.fragments.len();
     reset_bits(&mut self.scratch.reachable, count);
     self.scratch.graph.clear();
@@ -1184,8 +1292,11 @@ where
     let mut first_response: Option<&'d Name<S>> = None;
     let mut first_field: Option<&'d Name<S>> = None;
     let mut multiple = false;
+    let blame = current.map_or(SimpleSpan::const_new(0, 0), |set| *set.span());
 
     while let Some(frame) = self.scratch.roots.last().copied() {
+      // `selections::resolve` again, over the other stack. Same cost, same placement.
+      self.spend(self.scratch.roots.len() as u32, blame)?;
       let Some(set) = current else {
         self.scratch.roots.pop();
         current = selections::resolve(document, &self.scratch.roots);
@@ -1199,10 +1310,6 @@ where
       if let Some(top) = self.scratch.roots.last_mut() {
         top.cursor += 1;
       }
-      // The same shape as the per-operation walk, one rule narrower: this collection restarts for
-      // every subscription operation, so `O` subscriptions over one shared fragment of `S`
-      // selections is `O · S` from `O + S` of syntax.
-      self.spend(1, *selection.as_span())?;
 
       // "{selection} must not provide the `@skip`/`@include` directive" — the whole reason this
       // collection exists is that it has no runtime variables to evaluate them with.
@@ -1438,20 +1545,28 @@ where
     // included.
     let base = self.scratch.keys.len();
     self.variable_base = base as u32;
-    for (index, described) in definitions.iter().enumerate() {
-      let variable = described.node().variable();
-      self.spend(units(name_bytes(variable.name()).len()), *variable.span())?;
-      self.scratch.keys.push(index as u32);
+    // 5.8.1 reads the index directly and 5.8.3/5.8.5 read it through the value walk. Nothing else
+    // looks at it, so with none of them on it is a sort over document-chosen names, charged, for
+    // nobody. Not an early return: 5.8.2 and the default-value and directive walks below are a
+    // different question and answer it themselves.
+    let indexed = self.walks_values || self.on(Rule::VariableUniqueness);
+    if indexed {
+      for (index, described) in definitions.iter().enumerate() {
+        let variable = described.node().variable();
+        self.spend(units(name_bytes(variable.name()).len()), *variable.span())?;
+        self.scratch.keys.push(index as u32);
+      }
+      let end = self.scratch.keys.len();
+      self.scratch.keys[base..end].sort_unstable_by(|a, b| {
+        let left = name_bytes(definitions[*a as usize].node().variable().name());
+        let right = name_bytes(definitions[*b as usize].node().variable().name());
+        left.cmp(right).then(a.cmp(b))
+      });
     }
     let end = self.scratch.keys.len();
-    self.scratch.keys[base..end].sort_unstable_by(|a, b| {
-      let left = name_bytes(definitions[*a as usize].node().variable().name());
-      let right = name_bytes(definitions[*b as usize].node().variable().name());
-      left.cmp(right).then(a.cmp(b))
-    });
 
     // 5.8.1 — one type per variable name, per operation, off the adjacent pairs of that index.
-    if self.on(Rule::VariableUniqueness) {
+    if indexed && self.on(Rule::VariableUniqueness) {
       let mut slot = base + 1;
       while slot < end {
         let earlier = self.scratch.keys[slot - 1].min(self.scratch.keys[slot]);
@@ -1590,4 +1705,58 @@ where
     .get(ordinal as usize)
     .and_then(|row| fragment(document, row.definition))
     .map_or(&[][..], |fragment| name_bytes(fragment.name()))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::{Ledger, units};
+  use crate::Budget;
+
+  /// An absent bound is closed under spending.
+  ///
+  /// The property the four previous versions of this defect did not have. `u32::MAX` was the
+  /// documented spelling of "never refuse" and was also just a number, so the first charge turned
+  /// it into a very large *finite* budget and the lossless door's prepayment turned it into a
+  /// smaller one again. Reachable at about 65,000 operations over a 65,000-selection fragment,
+  /// which is a document this suite is not going to build — so the property is asserted where it
+  /// lives, over the type, rather than inferred from one document that happens to be big enough.
+  #[test]
+  fn an_absent_bound_is_closed_under_spending() {
+    let off = Ledger::open(&Budget::default().with_validation_work(u32::MAX));
+    assert_eq!(off, Ledger::Off);
+
+    // Every charge shape that exists: a single unit, a whole default ceiling, the largest charge
+    // `units` can produce, and the prepayment the lossless door takes before a validator exists.
+    let mut ledger = off;
+    for charge in [
+      1,
+      Budget::DEFAULT_VALIDATION_WORK,
+      units(usize::MAX),
+      u32::MAX,
+      0,
+    ] {
+      ledger = ledger
+        .take(charge)
+        .expect("an absent bound has room for anything");
+      assert_eq!(
+        ledger,
+        Ledger::Off,
+        "a charge of {charge} turned an absent bound into a number"
+      );
+    }
+
+    // And a bound that IS set is not confused with one that is not, at the value next to it.
+    let bounded = Ledger::open(&Budget::default().with_validation_work(u32::MAX - 1));
+    assert_eq!(bounded, Ledger::Left(u32::MAX - 1));
+    assert_eq!(
+      bounded.take(u32::MAX),
+      None,
+      "an exhausted bound must refuse"
+    );
+    assert_eq!(bounded.take(u32::MAX - 1), Some(Ledger::Left(0)));
+
+    // `Left(0)` is an exhausted bound, which is the opposite of an absent one and must not spend.
+    assert_eq!(Ledger::Left(0).take(1), None);
+    assert_eq!(Ledger::Left(0).take(0), Some(Ledger::Left(0)));
+  }
 }

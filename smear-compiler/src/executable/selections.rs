@@ -11,7 +11,7 @@
 
 use core::ops::ControlFlow;
 
-use tokora::span::AsSpan;
+use tokora::{SimpleSpan, span::AsSpan};
 
 use smear_parser::graphql::ast::{
   ExecutableDocument, Field, FragmentSpread, InlineFragment, Selection, SelectionSet,
@@ -57,8 +57,22 @@ where
     self.scratch.frames.clear();
     self.scratch.frames.push(root);
     let mut current = root_selection_set(document, root.definition);
+    // The definition's own selection set, as the span a refusal in this walk points at. The same
+    // choice `walk_value` makes for the same reason: the descent charged below is a property of
+    // the walk rather than of any one selection in it.
+    let blame = current.map_or(SimpleSpan::const_new(0, 0), |set| *set.span());
 
     while let Some(frame) = self.scratch.frames.last().copied() {
+      // Charged in front of `resolve`, which scans the frame stack for the definition root and
+      // then descends it again — so it costs the current depth, on **every** iteration, including
+      // the ones that only pop. One unit per selection priced `O(1)` of that, so a definition
+      // nested `D` deep did `Θ(D²)` frame and selection lookups on `Θ(D)` of units.
+      //
+      // This is the repair `values::walk_value` got in round one of al8n/smear#198 and this
+      // resolver did not, though the review named it. The two stacks are the same shape and the
+      // same argument applies to both; the sweep that would have caught it is the one this branch
+      // now runs over every repair.
+      self.spend(self.scratch.frames.len() as u32, blame)?;
       let Some(set) = current else {
         self.scratch.frames.pop();
         current = resolve(document, &self.scratch.frames);
@@ -72,16 +86,6 @@ where
       if let Some(top) = self.scratch.frames.last_mut() {
         top.cursor += 1;
       }
-      // One per selection examined.
-      //
-      // This is the walk that restarts for every operation, and `Frame::CHECK` does not make the
-      // repeats free: it suppresses a definition's repeated *diagnostics*, not its traversal, its
-      // field resolution, its argument and directive processing or the value walk under them. `O`
-      // operations spreading one fragment of `S` selections therefore do `O · S` of work off
-      // `O + S` of syntax, and until this charge existed nothing counted it — the merge engine's
-      // budget is the only other one, and it runs *after* this walk has already finished spending.
-      self.spend(1, *selection.as_span())?;
-
       match selection {
         Selection::Field(field) => {
           let scope = self.check_field(field, frame)?;

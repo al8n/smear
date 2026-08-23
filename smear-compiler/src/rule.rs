@@ -636,11 +636,18 @@ impl RuleSet {
   /// with no diagnostic to emit still stops and still fails the document. al8n/smear#198.
   ///
   /// A caller who wants a validator that genuinely cannot refuse sets the **budget**, not the
-  /// rules: [`Budget::with_validation_work`](super::Budget::with_validation_work),
-  /// [`with_merge_work`](super::Budget::with_merge_work) and
-  /// [`with_merge_depth`](super::Budget::with_merge_depth) at [`u32::MAX`] is the supported
-  /// spelling of "never refuse for this resource", and with all three set that way an `EMPTY` rule
-  /// set is `Ok` on every document that fits in memory.
+  /// rules: [`Budget::with_validation_work`](super::Budget::with_validation_work) at [`u32::MAX`]
+  /// is the supported spelling of "never refuse for this resource". Draft 5.3.2's engine does not
+  /// run under an empty set at all — [`Rule::FieldSelectionMerging`] is what starts it — so with
+  /// that one knob turned off, an `EMPTY` rule set is `Ok` on every document that fits in memory.
+  ///
+  /// # And it evaluates no rule, which is a claim about work and not only about output
+  ///
+  /// A pass that reads a document-chosen name, hashes it, parses a literal or sorts a list on
+  /// behalf of a rule that is off is this contract being false, whether or not it emits anything —
+  /// and, since these passes are charged, it is also a refusal a caller did not ask for.
+  /// `validator_work.rs` pins it as a resource claim: an `EMPTY` set over an adversarial document
+  /// spends a bounded handful of units.
   pub const EMPTY: Self = Self(0);
 
   /// Every rule.

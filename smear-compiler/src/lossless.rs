@@ -95,7 +95,7 @@ use tokora::SimpleSpan;
 use super::{
   Budget, Diagnostic, Invalid, Rule, RuleSet, Schema, SchemaErrors, Scratch, Sink,
   diagnostic::Context,
-  executable::{units, validate_charged},
+  executable::{Ledger, units, validate_charged},
 };
 
 /// The verdict of a failed lossless validation.
@@ -107,6 +107,7 @@ use super::{
 pub struct LosslessInvalid {
   invalid: Invalid,
   recovery: Recovery,
+  projection_ran: bool,
 }
 
 impl LosslessInvalid {
@@ -121,9 +122,30 @@ impl LosslessInvalid {
   /// [`Recovery::is_complete`] false means at least one of these diagnostics may be an artifact
   /// of a definition that was dropped rather than of one the author wrote — see
   /// [`validate_executable_lossless`].
+  ///
+  /// **Read [`projection_ran`](Self::projection_ran) first.** When it is false this is not a
+  /// measurement of anything: nothing was projected and nothing counted what was not.
   #[inline]
   pub const fn recovery(&self) -> Recovery {
     self.recovery
+  }
+
+  /// Whether the projection ran at all.
+  ///
+  /// False on exactly one path: [`Budget::validation_work`](super::Budget::validation_work) could
+  /// not pay for the projection, so the door refused before building any AST. On that path
+  /// [`recovery`](Self::recovery) reports `0` projected and `1` skipped, and **that `1` is a floor
+  /// rather than [`Recovery::skipped`]'s usual ceiling** — every top-level element was dropped and
+  /// counting them is precisely the walk the refusal declined to make.
+  ///
+  /// It is an accessor and not a sentence in a doc comment because the two readings of `skipped`
+  /// are opposite: the ordinary one over-counts and this one under-counts, and a caller comparing
+  /// it against anything needs to know which it holds. The first version of this path shipped the
+  /// `1` with the disclosure in prose, which is the same defect one level up — a wrong number is
+  /// not made right by being documented.
+  #[inline]
+  pub const fn projection_ran(&self) -> bool {
+    self.projection_ran
   }
 }
 
@@ -271,13 +293,29 @@ where
 /// is one ledger and not two: the projection allocates an entire AST before a rule exists to
 /// refuse anything, and a bound that starts after it has already lost.
 ///
-/// The charge is [`units`] of `source.len()`, taken in one prepayment rather than incrementally.
-/// Incrementally would be better and is not available: `project_executable_document_recovered`
-/// lives in `smear-parser`, and threading a validation ledger into it would put a compiler concept
-/// in the parser. What makes the prepayment sound instead of merely convenient is that it is an
-/// **upper bound** obtainable in constant time — the projection builds at most one AST node per
-/// CST token and a token is at least one byte, so `source.len()` bounds the work with a constant
-/// factor, and `units` is what turns that into the same unit every rule spends.
+/// The charge is `units` of the prepayment size below, taken in one payment rather than
+/// incrementally. Incrementally would be better and is not available:
+/// `project_executable_document_recovered` lives in `smear-parser`, and threading a validation
+/// ledger into it would put a compiler concept in the parser. What makes the prepayment sound
+/// instead of merely convenient is that it is an **upper bound** obtainable in constant time — the
+/// projection builds at most one AST node per CST token and a token is at least one byte — and
+/// `units` is what turns that into the same unit every rule spends.
+///
+/// # It is priced over **both** inputs, because they are two parameters and nothing pairs them
+///
+/// `parse` and `source` are separate arguments and no type says they describe the same bytes. The
+/// prepayment was `source.len()` alone, and the projector walks the **`Parse`**: a tree of `N`
+/// top-level definitions handed in beside an *empty* source paid one unit, and the recovering
+/// projector then visited all `N` CST children, rejected each on a source mismatch, and returned
+/// `Ok` with an empty AST and an incomplete [`Recovery`]. The bound was priced from one input and
+/// spent on the other.
+///
+/// So it is priced from `max(source.len(), parse.green().text_len())` — still constant time, both
+/// a green length and a slice length being `O(1)` — which upper-bounds the traversal whichever
+/// input is the larger and whether or not the two agree. Rejecting a mismatch outright was the
+/// alternative and is worse: the projection already answers a mismatch with [`Recovery`] rather
+/// than with a refusal, and turning that into an error would be a new way to fail for callers who
+/// are not doing anything wrong.
 ///
 /// It was the pass al8n/smear#198's table could not place, and "bounded by the document" was the
 /// wrong answer: the parser's own limits bound the CST's *shape* and not its *size*, and the size
@@ -298,10 +336,16 @@ where
 /// The same thing every other refusal looks like: `Err`, with
 /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set, and
 /// [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget) in the sink when the rule set
-/// contains it. The [`Recovery`] reports `0` projected — which is exact — and `1` skipped, which on
-/// this one path is a **floor** rather than the usual ceiling, because counting the elements that
-/// were dropped is precisely the walk the refusal declined to make.
-/// [`Recovery::is_complete`] is false, which is the half a caller must not get wrong.
+/// contains it. [`LosslessInvalid::projection_ran`] is **false**, and that is the load-bearing
+/// half: on this path [`Recovery`] is not a measurement. It reports `0` projected, which is exact,
+/// and `1` skipped, which is a floor rather than [`Recovery::skipped`]'s usual ceiling.
+///
+/// The `1` shipped once as a floor disclosed in prose, and prose is the wrong place for it: the two
+/// readings of `skipped` are opposite — the ordinary one over-counts, this one under-counts — so a
+/// caller needs the difference in the type. Counting the elements exactly is the walk the refusal
+/// declined to make, and doing it here from the green root's children would put a second copy of
+/// `recovered_top_level`'s idea of where the top level is into this crate, where it could drift.
+/// [`Recovery::is_complete`] is false either way, which is the half nothing may get wrong.
 pub fn validate_executable_lossless_with<'src, K>(
   schema: &Schema,
   parse: &Parse,
@@ -314,43 +358,58 @@ pub fn validate_executable_lossless_with<'src, K>(
 where
   K: Sink<&'src str>,
 {
-  let Some(left) = budget.validation_work().checked_sub(units(source.len())) else {
+  let size = source.len().max(usize::from(parse.green().text_len()));
+  let Some(left) = Ledger::open(budget).take(units(size)) else {
+    let (emitted, stopped) = refuse_projection(source, budget, rules, sink);
     return Err(LosslessInvalid {
-      invalid: Invalid::refused(refuse_projection(source, budget, rules, sink)),
-      // Nothing was projected, and nothing counted what was not. See this function's header.
+      invalid: Invalid::refused(emitted, stopped),
+      // Nothing was projected, and the count of what was not is the green root's child list:
+      // exact or over, never under, and `O(1)`. See this function's header.
+      // A floor, not a ceiling, and `projection_ran` is what says so.
       recovery: Recovery::new(0, 1),
+      projection_ran: false,
     });
   };
   let (document, recovery) = project_executable_document_recovered(parse, source);
   match validate_charged(schema, &document, scratch, budget, rules, sink, left) {
     Ok(()) => Ok(recovery),
-    Err(invalid) => Err(LosslessInvalid { invalid, recovery }),
+    Err(invalid) => Err(LosslessInvalid {
+      invalid,
+      recovery,
+      projection_ran: true,
+    }),
   }
 }
 
-/// Reports a projection the budget would not pay for, and returns how many diagnostics that was.
+/// Reports a projection the budget would not pay for.
 ///
-/// Zero when the rule is filtered out, which is the case the verdict has to survive: switching a
-/// bound's rule off switches off its *diagnostic*, never the refusal.
+/// Returns how many diagnostics that was and whether the sink asked to stop. Zero and `false` when
+/// the rule is filtered out, which is the case the verdict has to survive: switching a bound's rule
+/// off switches off its *diagnostic*, never the refusal.
+///
+/// The sink's answer is **returned rather than discarded**. A [`First`](super::First) sink breaks
+/// on the diagnostic it keeps, and dropping that made a verdict which had told a sink to stop
+/// report [`Invalid::stopped`](super::Invalid::stopped) as false — the same "gave up, said
+/// finished" shape one axis over.
 fn refuse_projection<'src, K>(
   source: &'src str,
   budget: &Budget,
   rules: RuleSet,
   sink: &mut K,
-) -> u32
+) -> (u32, bool)
 where
   K: Sink<&'src str>,
 {
   if !rules.contains(Rule::ValidationWorkBudget) {
-    return 0;
+    return (0, false);
   }
   // The whole input, because the whole input is what could not be afforded. There is no narrower
   // node to point at: the nodes are what the projection would have built.
   let span = SimpleSpan::new(0, source.len());
   let diagnostic = Diagnostic::new(Rule::ValidationWorkBudget, span)
     .context(Context::Count(budget.validation_work()));
-  let _ = sink.diagnostic(diagnostic);
-  1
+  let stopped = sink.diagnostic(diagnostic).is_break();
+  (1, stopped)
 }
 
 // ---------------------------------------------------------------------------------------------

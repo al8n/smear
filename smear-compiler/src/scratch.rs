@@ -70,12 +70,22 @@ use super::schema::{PackedType, Range32, TypeId};
 /// fragment spent 189 ms in the selection walk with the merge rules fully enabled, and tripped
 /// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) afterwards, on work already done.
 ///
-/// # Turning a bound off
+/// # Turning the validation bound off
 ///
-/// Set the knob to [`u32::MAX`]. That is the supported spelling of "never refuse for this
-/// resource", and it is the only one: an empty [`RuleSet`](super::RuleSet) switches off the
-/// bound's *diagnostic*, not the bound. A caller who wants a validator that cannot refuse — an
-/// offline linter over trusted input, a test harness — sets the knobs, not the rules.
+/// Set [`validation_work`](Budget::validation_work) to [`u32::MAX`]. That is the supported
+/// spelling of "never refuse for this resource", and it is the only one: an empty
+/// [`RuleSet`](super::RuleSet) switches off the bound's *diagnostic*, not the bound. A caller who
+/// wants a validator that cannot refuse — an offline linter over trusted input, a test harness —
+/// sets the knob, not the rules.
+///
+/// It is a **state** and not a large number. The validator turns it into one the moment the budget
+/// is read, so no charge, and no prepayment the lossless door subtracts before validation starts,
+/// can wear it down into a merely-large finite budget. That is the fourth counter in this
+/// repository to need saying: a maximum is not an absence.
+///
+/// The same sentence is **not** made here about [`merge_depth`](Budget::merge_depth) and
+/// [`merge_work`](Budget::merge_work). Their engine reads them itself, and what a maximum means
+/// there is that engine's to say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Budget {
   merge_depth: u32,

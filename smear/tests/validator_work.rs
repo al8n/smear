@@ -999,3 +999,245 @@ fn the_projection_is_charged_before_it_runs() {
   .expect("the document is valid once the budget admits it");
   assert!(recovery.is_complete());
 }
+
+// ---------------------------------------------------------------------------------------------
+// 7. the siblings: the same reasoning, one site over
+// ---------------------------------------------------------------------------------------------
+
+/// The **selection** coordinate resolver pays for its descent, exactly as the value one does.
+///
+/// `selections::resolve` scans the frame stack for the definition root and then descends it again,
+/// and `walk_selections`, `collect_definition_edges` and the subscription collection all call it
+/// after **every** pop. One unit per selection priced `O(1)` of a walk that costs the depth, so a
+/// definition nested `D` deep did `Θ(D²)` frame and selection lookups on `Θ(D)` of units.
+///
+/// Round one of al8n/smear#198 named this resolver in the same sentence as the value one and only
+/// the value one was repaired. It is the reason this branch now sweeps siblings rather than sites.
+#[test]
+fn the_selection_resolver_pays_for_its_descent() {
+  on_a_deep_stack(|| {
+    let schema = build(SCHEMA);
+    let rules = without_merge();
+
+    // `Nest` is self-referential, so the only thing that changes between the two is the depth.
+    let document = |depth: usize| {
+      let mut source = String::from("{");
+      for _ in 0..depth {
+        source.push_str(" nest {");
+      }
+      source.push_str(" leaf ");
+      for _ in 0..depth {
+        source.push_str("} ");
+      }
+      source.push('}');
+      source
+    };
+
+    let shallow = min_budget_of(&schema, &parse_deep(&document(1)), rules);
+    let deep = min_budget_of(&schema, &parse_deep(&document(200)), rules);
+    println!("selection coordinates: depth 1 {shallow} units, depth 200 {deep} units");
+
+    // Triangular in the depth over the pushes and again over the pops. A quarter of one triangle
+    // is a floor a per-selection charge cannot reach: 200 levels is 200 selections.
+    let floor = 200 * 200 / 4;
+    assert!(
+      deep - shallow >= floor,
+      "200 levels of selection nesting cost {} units; `resolve` walks the whole path and is not \
+       charged for it",
+      deep - shallow
+    );
+  });
+}
+
+/// `RuleSet::EMPTY` spends a bounded handful of units on a document built to be expensive.
+///
+/// The class-level plant, not a site-level one. Every pass that reads caller-sized data before
+/// asking whether its rule is enabled is the same defect, and the contract this branch rewrote —
+/// *a rule that is off is not evaluated* — is exactly the claim that no such pass exists. Since the
+/// passes are now charged, a violation is also a **refusal a caller did not ask for**, which is
+/// what makes this measurable rather than a matter of taste.
+///
+/// The document carries one of each: a megabyte-long integer literal, a long enum spelling, a deep
+/// value literal, a wide argument list, a fragment nobody spreads, and a variable list to sort.
+#[test]
+fn an_empty_rule_set_pays_for_nothing() {
+  let schema = build(SCHEMA);
+  let digits = "9".repeat(1_000_000);
+  let arguments = (0..2_000)
+    .map(|i| std::format!("a{i}: 1 "))
+    .collect::<String>();
+  let variables = (0..2_000)
+    .map(|i| std::format!("$v{i}: Boolean, "))
+    .collect::<String>();
+  let source = std::format!(
+    "query q({variables}$last: Boolean) {{ dog {{ ...F counted(times: {digits}) \
+     isHouseTrained({arguments}) }} }} \
+     fragment F on Dog {{ name }} fragment Unused on Dog {{ nickname }}"
+  );
+
+  let spent = min_budget(&schema, &source, RuleSet::EMPTY);
+  println!("empty rule set: {} bytes, {spent} units", source.len());
+
+  // What an empty set may still pay for is the structure it cannot know is unwanted: the prep
+  // sweep and the selection walk, both linear in the document. What it may not pay for is a
+  // literal parsed, an enum hashed, a name list sorted or a value descended on behalf of a rule
+  // that is off — and the megabyte of digits alone is 125,001 units of exactly that.
+  assert!(
+    spent < 100_000,
+    "an empty rule set spent {spent} units; something is working for a rule that is off"
+  );
+
+  // And it is still `Ok`, which is the other half of the contract.
+  let budget = Budget::default();
+  let outcome = run(&schema, &source, &budget, RuleSet::EMPTY);
+  assert!(!outcome.refused);
+  assert_eq!(outcome.emitted, 0);
+}
+
+/// A rule that is off does not read the literal, at the one site the review named.
+///
+/// Narrower than the sweep above and pinned separately because it is the site: draft 5.6.1's two
+/// leaf arms ran `has_enum_value` and `scalar_accepts` **before** asking whether 5.6.1 was on, so a
+/// consumer that wanted only the fragment rules hashed enum spellings and parsed arbitrarily long
+/// digit strings — and, once the read was charged, could be refused for it.
+#[test]
+fn a_disabled_coercion_rule_does_not_read_the_literal() {
+  let schema = build(SCHEMA);
+  let digits = "9".repeat(1_000_000);
+  let source = std::format!("{{ dog {{ counted(times: {digits}) }} }}");
+
+  let without = min_budget(
+    &schema,
+    &source,
+    without_merge().without(Rule::ValuesOfCorrectType),
+  );
+  let with = min_budget(&schema, &source, without_merge());
+  println!("literal: 5.6.1 off {without} units, 5.6.1 on {with} units");
+
+  // A megabyte of digits is 125,001 units. With the rule on they are read and charged; with it off
+  // neither happens, and the difference is the whole literal.
+  assert!(
+    with - without >= 125_000,
+    "the literal cost {} units more with 5.6.1 on; with it off it is still being read",
+    with - without
+  );
+  assert!(
+    without < 1_000,
+    "5.6.1 off still spent {without} units on a one-megabyte literal"
+  );
+}
+
+/// The projection prepayment is priced over **both** inputs, because they are two parameters.
+///
+/// `parse` and `source` are separate arguments and nothing pairs them. Pricing from `source.len()`
+/// alone meant a tree of `N` top-level definitions handed in beside an empty source paid **one
+/// unit** — and the recovering projector then visited all `N` CST children, rejected each on a
+/// source mismatch, and returned `Ok`. The bound was priced from one input and spent on the other.
+#[cfg(feature = "rowan")]
+#[test]
+fn the_projection_is_priced_over_both_inputs() {
+  use smear::{
+    parser::graphql::lossless::parse_executable_document,
+    validator::validate_executable_lossless_with,
+  };
+
+  let schema = build(SCHEMA);
+  let parsed = fragment_bomb(4_000, 4_000);
+  let parse = parse_executable_document(&parsed);
+
+  // The mismatch: a large parse, an empty source. `units(0)` is one.
+  let budget = Budget::default().with_validation_work(16);
+  let mut scratch = Scratch::new();
+  let mut collected = Vec::new();
+  let mut sink = Collect::new(&mut collected);
+  let verdict = validate_executable_lossless_with(
+    &schema,
+    &parse,
+    "",
+    &mut scratch,
+    &budget,
+    RuleSet::ALL,
+    &mut sink,
+  );
+
+  let invalid = verdict.expect_err("a 160 KB parse beside an empty source came back Ok");
+  assert!(invalid.invalid().budget_tripped());
+  assert_eq!(invalid.recovery().projected(), 0);
+  assert_eq!(
+    collected.iter().map(Diagnostic::rule).collect::<Vec<_>>(),
+    [Rule::ValidationWorkBudget]
+  );
+}
+
+/// A refused projection reports a count of what it did not look at, and the sink's answer.
+///
+/// Two disclosures that were wrong rather than approximate. `Recovery::skipped` is documented as
+/// evidence that something was dropped **and a bound on how much**, so reporting `1` for a parse
+/// with hundreds of top-level elements is not a floor, it is an under-count wearing one. And the
+/// sink's `ControlFlow::Break` was discarded while the verdict hardcoded `stopped: false`, so a
+/// `First` sink could be told to stop by a verdict that then said it had not been.
+#[cfg(feature = "rowan")]
+#[test]
+fn a_refused_projection_reports_what_it_did_not_look_at() {
+  use smear::{
+    parser::graphql::lossless::parse_executable_document,
+    validator::{First, validate_executable_lossless_with},
+  };
+
+  let schema = build(SCHEMA);
+  // Five hundred top-level definitions, so a `skipped` of `1` is off by more than a rounding.
+  let source = fragment_bomb(500, 4);
+  let parse = parse_executable_document(&source);
+  let budget = Budget::default().with_validation_work(16);
+
+  let mut scratch = Scratch::new();
+  let mut sink = First::new();
+  let invalid = validate_executable_lossless_with(
+    &schema,
+    &parse,
+    &source,
+    &mut scratch,
+    &budget,
+    RuleSet::ALL,
+    &mut sink,
+  )
+  .expect_err("the projection was not paid for and the door said Ok");
+
+  let recovery = invalid.recovery();
+  println!("refused projection: 501 definitions, recovery {recovery}");
+  // The count is unknown, and the type says so rather than a doc comment saying so. `skipped` is a
+  // floor here and a ceiling everywhere else, and those are opposite readings — a caller comparing
+  // it against anything has to know which one it holds.
+  assert!(
+    !invalid.projection_ran(),
+    "a refusal taken before the projection reports that the projection ran"
+  );
+  assert_eq!(recovery.projected(), 0);
+  assert!(!recovery.is_complete());
+
+  // And the ordinary refusal — inside the walk, after a projection that did run — says so too, so
+  // the flag separates the two rather than being always false on an error.
+  let generous = Budget::default().with_validation_work(4_000);
+  let mut scratch = Scratch::new();
+  let mut quiet = smear::validator::Ignore;
+  let inside = validate_executable_lossless_with(
+    &schema,
+    &parse,
+    &source,
+    &mut scratch,
+    &generous,
+    RuleSet::ALL,
+    &mut quiet,
+  )
+  .expect_err("a budget of four thousand does not validate this document");
+  assert!(inside.projection_ran());
+  assert!(inside.invalid().budget_tripped());
+
+  // `First` keeps one diagnostic and breaks. The verdict has to say so.
+  assert_eq!(invalid.invalid().emitted(), 1);
+  assert!(
+    invalid.invalid().stopped(),
+    "the sink asked to stop and the verdict reports that it did not"
+  );
+  assert!(sink.get().is_some());
+}
