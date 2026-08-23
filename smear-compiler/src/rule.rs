@@ -141,9 +141,11 @@ pub enum Rule {
   /// path may not be. A document that reaches this is **refused** — never passed unvalidated —
   /// and the verdict carries [`Invalid::budget_tripped`](super::Invalid::budget_tripped).
   ///
-  /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *refusal*, not the bound: the
-  /// engine still stops, but with no diagnostic to emit the document is reported on whatever was
-  /// examined before it stopped. A caller who wants the protection wants this rule on.
+  /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *diagnostic*, not the refusal:
+  /// the engine still stops, and the document is still refused, but the verdict carries the
+  /// refusal alone — `Err` with [`Invalid::emitted`](super::Invalid::emitted) at zero and
+  /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) true. A caller who wants to be
+  /// *told which bound* wants this rule on. al8n/smear#196.
   ///
   /// The alternative, letting the working set's capacity be the bound, was rejected in design: an
   /// allocation failure has no rule identity and no span, and cannot distinguish "this document is
@@ -550,13 +552,41 @@ impl core::fmt::Display for Rule {
 /// A set of [`Rule`]s, as a bitmask.
 ///
 /// The default is [`RuleSet::ALL`] — validation checks everything unless a caller narrows it.
-/// Narrowing does not merely filter diagnostics: a rule that is off is not evaluated, so a
-/// consumer that only wants, say, the fragment rules does not pay for value coercion.
+/// Narrowing does not merely filter diagnostics: a draft §5 rule that is off is not evaluated, so
+/// a consumer that only wants, say, the fragment rules does not pay for value coercion.
+///
+/// **The resource bounds are not rules in that sense**, and reading the sentence above as though
+/// they were is the one way to be wrong about this type. [`Rule::MergeDepthBudget`] and
+/// [`Rule::MergeWorkBudget`] are each a rule *and* a bound, and a set reaches only the rule:
+/// narrowing removes a bound's diagnostic, never the bound. A validator asked for
+/// [`Rule::FieldSelectionMerging`] alone still stops when the merge engine reaches
+/// [`Budget::merge_work`](super::Budget::merge_work), and still answers `Err` — with
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set and
+/// [`Invalid::emitted`](super::Invalid::emitted) zero, because a validator that abandoned a pass
+/// and then answered `Ok` would be spelling giving up the same way it spells finishing.
+///
+/// What narrowing *can* do is leave a bound with nothing to bound. Both of these are spent by
+/// draft 5.3.2's engine, and [`Rule::FieldSelectionMerging`] is what starts it: with all three
+/// absent the engine does not run, so a [`Budget::merge_work`](super::Budget::merge_work) of zero
+/// refuses nothing — and refuses it *vacuously*, because no expensive thing was let through, only
+/// none happened. A bound whose passes run regardless of the set would refuse there and be right
+/// to; these two do not run.
+///
+/// The knob is what switches a bound off: see [`Budget`](super::Budget). And neither instrument is
+/// an admission policy — a set chooses what is checked, a budget chooses what is afforded.
+/// al8n/smear#196.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RuleSet(u64);
 
 impl RuleSet {
-  /// The empty set. Validation with it emits nothing and is always `Ok`.
+  /// The empty set. Validation with it evaluates no rule and emits no diagnostic.
+  ///
+  /// **Not "always `Ok`" as a contract**, which is what this said. That was a promise about
+  /// resources a rule set is in no position to make: a set reaches a bound's diagnostic and never
+  /// the bound. It *is* `Ok` on this crate's two bounds, and for a reason narrower than the old
+  /// sentence claimed — draft 5.3.2's engine does not run under an empty set at all,
+  /// [`Rule::FieldSelectionMerging`] is what starts it, so neither knob has any work to refuse. A
+  /// bound whose passes ran regardless would refuse here and would be right to. al8n/smear#196.
   pub const EMPTY: Self = Self(0);
 
   /// Every rule.

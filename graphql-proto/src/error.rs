@@ -146,6 +146,34 @@ pub(super) enum Raw {
   /// No field is named, because collection is what *discovers* the fields — this is raised inside
   /// the walk, before the position that would have been blamed exists.
   CollectionBudget { limit: u32 },
+  /// Not a specification failure: looking up this position's runtime type name would have taken
+  /// the operation past [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
+  ///
+  /// Its own variant, and deliberately not [`AbstractNotPossible`](Raw::AbstractNotPossible) with
+  /// a shortened message. That one says the driver named a type this position cannot hold; this
+  /// one says nothing about the type at all, because the lookup that would have decided never ran.
+  /// Folding them would tell an operator their schema is missing a type when what happened is that
+  /// the executor stopped looking — a fact about a ceiling, reported as a fact about their schema,
+  /// and the one thing a caller acting on it cannot recover from.
+  ///
+  /// # The name here is the *driver's*
+  ///
+  /// [`Values::type_name`](super::Values::type_name) returns whatever the backend says, so its
+  /// length is the resolver's choice and not the request's. That changes who has to misbehave for
+  /// the work to be large; it does not change whether the work is metered. `Schema::sym` hashes
+  /// the whole string before it compares anything, and an abstract position inside a list asks it
+  /// once per element — so one constant-size query over a driver returning the same long
+  /// discriminator for every element performs `positions × length` byte work off a ceiling
+  /// (`max_response_slots`) that counts positions and never looked at the string. Worse, that
+  /// lookup used to run *after* the interner had already exhausted the visit budget: the ledger
+  /// was refusing and the expensive path ran anyway, once more for every remaining element.
+  /// al8n/smear#196.
+  RuntimeTypeBudget {
+    abstract_ty: TypeId,
+    parent: TypeId,
+    field: Sym,
+    limit: u32,
+  },
   /// Not a specification failure: a name would have taken the interner past
   /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
   ///
@@ -306,7 +334,8 @@ impl Raw {
       | Self::SelectionBudget { .. }
       | Self::CollectionBudget { .. }
       | Self::MetadataBudget { .. }
-      | Self::NameStorage { .. } => Kind::ResponseBudget,
+      | Self::NameStorage { .. }
+      | Self::RuntimeTypeBudget { .. } => Kind::ResponseBudget,
       Self::ResponseKeyUnreadable => Kind::ResponseKeyUnreadable,
       Self::ResolverUnstorable { .. } => Kind::Resolver,
     }
@@ -593,6 +622,26 @@ impl<V> fmt::Display for Error<'_, V> {
         "Collecting this operation's fields would exceed the executor's limit of {limit} \
          selection visits."
       ),
+      Raw::RuntimeTypeBudget {
+        abstract_ty,
+        parent,
+        field,
+        limit,
+      } => {
+        // It names the *lookup*, not the type: the executor never learned what the driver's
+        // spelling resolves to, so a message saying anything about that type would be inventing
+        // the fact this variant exists to withhold.
+        write!(
+          f,
+          "Resolving the runtime Object type of abstract type \"{}\" for field \"",
+          schema.name(schema.type_def(abstract_ty).name())
+        )?;
+        owner(f, parent, field)?;
+        write!(
+          f,
+          "\" would exceed the executor's limit of {limit} selection visits."
+        )
+      }
       Raw::NameStorage { limit } => write!(
         f,
         "A name in this response would exceed the executor's limit of {limit} interned bytes."

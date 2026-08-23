@@ -583,11 +583,32 @@ pub struct Limits {
   /// field error, because §7.1.2 has no response for a failure raised before execution begins.
   ///
   /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
-  /// text the *document* chose, and the shared multiply-fold is unkeyed and invertible, so a client
-  /// can put every one of its names in one bucket deliberately. Charging each comparison first
-  /// means it spends this ceiling doing so, and the guarantee does not rest on the hash behaving.
-  /// In the ordinary case a lookup compares about one entry, so a document spends roughly twice
-  /// what it used to — against a default of sixteen million.
+  /// text the *document* chose, and the shared hash is unkeyed with every round invertible in the
+  /// word it folds, so a client can put every one of its names in one bucket deliberately. Charging
+  /// each comparison first means it spends this ceiling doing so, and the guarantee does not rest
+  /// on the hash behaving.
+  ///
+  /// **What a lookup costs an honest document is the hash's business, and it was asserted before it
+  /// was measured (al8n/smear#172).** "About one entry, so roughly twice what it used to be" was
+  /// true of `k0…k4095` — 1.89 units per key — and false of every other ordinary spelling: 4,096
+  /// **distinct** keys spelled `user0000Name…` charged 15.83 each, `field0…` charged 41.45 and
+  /// `h00000000…` charged 64.60, growing quadratically, with no collision search anywhere. That was
+  /// [`hash_bytes`](smear_schema::hash_bytes)'s fold leaving a name's late bytes out of the bucket
+  /// index.
+  ///
+  /// **Then the replacement claim was asserted over the same five fixtures (al8n/smear#196).** An
+  /// avalanche step at the end of the fold closed the half of it that short names showed, and left
+  /// open the half that names *longer than eight bytes* have: differences in two consecutive fold
+  /// inputs cancelled, so 4,096 aliases spelled `x` plus an eight-digit base-36 counter charged
+  /// **11,943** units here and base-63 charged **18,401** — again with no collision search, again
+  /// growing with the count. Mixing between the rounds is what closed that. Thirty-three families
+  /// crossing four radices against seven counter widths now measure 7,081 to 7,265 units for 4,096
+  /// keys — 1.73 to 1.77 each, every one within 3% of the others — so the sentence is finally true
+  /// of a population and not of a list.
+  ///
+  /// None of that was ever the *bound* — a constructed pile-up spends this ceiling either way, and
+  /// the hash is still unkeyed. What it decides is whether the default below is a ceiling on abuse
+  /// or a lottery on how a client spells its aliases.
   ///
   /// **It is not "collection work" in the narrow sense, and the widening was a defect repair.**
   /// Every name the executor interns charges this, including the ones only a *diagnostic* wants: a
@@ -642,12 +663,12 @@ pub struct Limits {
   /// response key is the position — so that one refuses the position.
   ///
   /// **It bounds bytes, and the memory is a multiple of them.** Every entry carries bookkeeping the
-  /// arena's length does not count — its span, its hash-chain link, its share of the bucket table
-  /// and its slot in collection's key-to-group scratch — and a GraphQL name is at least one byte,
-  /// so `B` bytes of ceiling can be `B` entries costing about `25 · B`. That is a constant multiple
-  /// and not a second factor, which is the difference between a cost to know about and the product
-  /// shape this module refuses; it is stated because a caller choosing this number is choosing
-  /// twenty-five times it.
+  /// arena's length does not count — its span, its stored hash, its hash-chain link, its share of
+  /// the bucket table and its slot in collection's key-to-group scratch — and a GraphQL name is at
+  /// least one byte, so `B` bytes of ceiling can be `B` entries costing about `33 · B`. That is a
+  /// constant multiple and not a second factor, which is the difference between a cost to know
+  /// about and the product shape this module refuses; it is stated because a caller choosing this
+  /// number is choosing thirty-three times it.
   pub max_interned_bytes: NonZeroU32,
 
   /// How many entries a draft §7.1.7 [`Extensions`] map may hold.
@@ -717,9 +738,49 @@ const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20
 /// positions first.
 const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
 
-/// Sixteen million selections examined, which no honest query approaches and no dishonest one
-/// passes: a document large enough to spend it has to *be* large, and the parser and the network
-/// have opinions about that long before this does.
+/// Sixteen million units of draft §6.3 collection work.
+///
+/// # The unit is not a selection any more, and this number was chosen when it was
+///
+/// al8n/smear#113 set `2^24` against a budget of one unit per selection *examined*, and against
+/// that unit the old sentence here — "a document large enough to spend it has to *be* large, and
+/// the parser and the network have opinions about that long before this does" — was arithmetic:
+/// selections cost bytes, so the ceiling was a ceiling on document size and the network reached it
+/// first. al8n/smear#143 widened the unit to charge every entry a name lookup compares, and left
+/// both the constant and that sentence alone. A comparison count is not linear in document size, so
+/// the argument stopped describing the thing it was attached to — which is the failure mode worth
+/// naming: **the unit moved and the rationale did not.**
+///
+/// # What the number means now, measured rather than argued (al8n/smear#172, al8n/smear#196)
+///
+/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step and its fold between
+/// rounds, 4,096 distinct response keys cost 1.73–1.77 units each — one selection plus about three
+/// quarters of a comparison, summed over every table size the interner grows through — across
+/// thirty-three families that cross the radix a counter is written in against the width it is
+/// padded to, which is what decides where a spelling's varying bytes sit relative to a chunk
+/// boundary. "Every ordinary naming scheme tried" is what the previous sentence said, and it was
+/// true of the five that were tried and false of the ones that were not; the axis is here so that
+/// the claim is about a population. They scale at ×1.99 to ×2.02 per doubling out to 65,536 keys,
+/// where `field{i}` measures 114,764 units and `h{i:0>8}` 114,496. So this ceiling admits something
+/// over nine million response keys, and no honest document reaches it:
+/// [`max_response_slots`](Limits::max_response_slots) refuses at 2^20 positions first. Measured
+/// against `Limits::default()`, `k{i}`, `field{i}`, `h{i:0>8}` and
+/// `user{i:0>4}Name` documents are all served to 1,048,575 keys and all refused at 1,048,576 —
+/// which is the slot ceiling, not this one.
+///
+/// **Before the finalizer that boundary was a lottery on how a client spelled its aliases.** The
+/// same four schemes were served to 1,048,575, 968,252, 880,714 and 976,545 keys respectively: this
+/// ceiling bit first for three of the four, at a point set by which bytes of a name happened to
+/// distinguish it. Uniformity is what the finalizer bought here; the *bound* was never at stake,
+/// since a constructed pile-up spends this budget either way.
+///
+/// # Tightening it is a separate decision, and deliberately not taken here
+///
+/// A ceiling eight million keys past what any other ceiling admits is not doing much work, and
+/// lowering it is only safe now: with the fold unfinished, `2^19` refused an honestly named
+/// `h{i:0>8}` document at 5,777 keys — 75 kilobytes — which is a false refusal of legitimate input.
+/// But *what* it should be is a question about the population the default is derived over, and no
+/// measurement here answers it.
 const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
 
 /// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a
@@ -2957,9 +3018,38 @@ where
         );
         return;
       };
+      // `Schema::sym` hashes the whole key before it compares anything, and the key is the
+      // **driver's**: `Values::type_name` returns whatever the backend says, so its length is the
+      // resolver's choice rather than the request's. Charged before the hash, in the ledger that
+      // already prices every other read of a name this executor did not write — the abstract
+      // position inside a list asks once per element, so a constant-size query over a driver
+      // returning one long discriminator per element performed `positions × length` byte work
+      // against a ceiling that counts positions. And it ran *after* exhaustion too: past the
+      // interner's refusal below, every remaining element still paid this hash before degrading
+      // its own error text.
+      //
+      // A refusal here is its own error. The success arm resolves a type and the failure arm below
+      // says the driver named an impossible one; a budget that stopped the lookup has established
+      // neither, so it says so rather than borrowing a sentence about the caller's schema.
+      // al8n/smear#196.
+      let name_bytes = name.as_bytes();
+      if !self.visits.take_bytes(name_bytes.len()) {
+        let (parent, field) = self.owner(slot);
+        let limit = self.visits.limit();
+        self.fail(
+          slot,
+          Raw::RuntimeTypeBudget {
+            abstract_ty: base,
+            parent,
+            field,
+            limit,
+          },
+        );
+        return;
+      }
       let resolved = self
         .schema
-        .sym(name.as_bytes())
+        .sym(name_bytes)
         .and_then(|sym| self.schema.type_of_sym(sym))
         .filter(|&id| self.schema.type_def(id).kind() == TypeKind::Object)
         .filter(|&id| self.schema.is_possible_object(base, id));
@@ -3147,6 +3237,21 @@ where
     for group in scratch.groups() {
       let selections = &scratch.fields[group.start as usize..(group.start + group.len) as usize];
       let first = selections[0].1;
+      // The probe hashes the field's *document* spelling, and this runs once per object position.
+      // The response key collection interned is the **alias** when there is one, so `{ a: <a
+      // megabyte of name> }` charges a byte or two at collection and hashes a megabyte here, per
+      // position — a factor the query never pays for. Charged before the pass, in the budget that
+      // already prices every other read of a document-chosen name; a refusal is the collection
+      // budget's, which is exactly what `Exhausted::Unstored` renders.
+      if !self.visits.take_bytes(name_bytes(first).len()) {
+        exhausted = Some((
+          Exhausted::Unstored(Unstored::Budget {
+            limit: self.visits.limit(),
+          }),
+          group.first,
+        ));
+        break;
+      }
       let Some(sym) = self.schema.sym(name_bytes(first)) else {
         // Draft 5.3.1 makes a field the type does not define a validation failure, so a validated
         // document cannot reach this. Omitting the key is the only response that cannot invent one.
@@ -3768,6 +3873,17 @@ where
   #[cfg(test)]
   fn fragment_definitions_walked(&self) -> u64 {
     self.fragments.walked()
+  }
+
+  /// Fragment-name bytes the index pass has hashed, counted independently of what it charged.
+  ///
+  /// The charge in front of a pass and the pass itself agree by construction, so a ledger that
+  /// priced this one in *definitions* read as consistent with itself while `Table::fill` hashed
+  /// whatever the document wrote. Only this count separates "the pass was refused" from "the pass
+  /// ran and the refusal came afterwards". See `collect::table`.
+  #[cfg(test)]
+  fn fragment_name_bytes_hashed(&self) -> u64 {
+    self.fragments.hashed()
   }
 
   /// Entries the name lookups have compared, counted independently of what they charged.

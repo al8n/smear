@@ -50,13 +50,14 @@
 //!
 //! Absolute, never proportional to the input. Depth bounds the recursion; work bounds expanded
 //! rows, comparisons, partition rows and tree-resolution steps as one running total for the call.
-//! Reaching either one emits its own rule and abandons the engine — the document is refused, and
-//! [`Invalid::budget_tripped`](super::Invalid::budget_tripped) says why. It never passes the
-//! document unvalidated and it never panics.
+//! Reaching either one abandons the engine and refuses the document, and
+//! [`Invalid::budget_tripped`](super::Invalid::budget_tripped) says so — with the bound's own rule
+//! in the [`RuleSet`](crate::RuleSet) it also emits that rule, and without it the refusal is
+//! carried by the verdict alone. It never passes the document unvalidated and it never panics.
 
 use core::ops::ControlFlow;
 
-use smear_parser::graphql::ast::{Argument, Field, InputValue, Selection, SelectionSet};
+use smear_parser::graphql::ast::{Field, InputValue, Selection, SelectionSet};
 
 use super::{
   Diagnostic, Rule, Validator,
@@ -67,7 +68,10 @@ use super::{
 use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
-  scratch::{MergeField, MergeFrame, MergeKid, MergeMemo, MergeSet, NONE, get_bit, hash_u32},
+  scratch::{
+    MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units, get_bit,
+    hash_bytes, hash_u32,
+  },
 };
 
 /// One of the two independent traversals of a merged field set.
@@ -90,7 +94,58 @@ impl Pass {
   }
 }
 
-/// The smallest probe table the memo builds.
+/// What [`claim`](Validator::claim) says about the row range it hands back.
+///
+/// Three states and not two. A budget refusal used to come back as the memo's `done` — the same
+/// value a set that has already been through this pass comes back as — so "the engine gave up" and
+/// "there is nothing left to do here" were spelled identically, and the only thing keeping the
+/// difference visible was that every caller happened to re-read `tripped` afterwards.
+/// al8n/smear#196.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Claim {
+  /// The set is this pass's to run, and the caller must run it.
+  Fresh,
+  /// The set has already been through this pass. Running it again would derive the same answer.
+  Done,
+  /// The budget refused before the claim was settled. Nothing about this set has been examined,
+  /// and the engine is abandoned: a caller that reads this as work already done is reporting a
+  /// result for a check that never ran.
+  Refused,
+}
+
+/// What a charged scan for a name found.
+///
+/// Three states and not an `Option`, because a scan the budget stopped has not established that
+/// the name is absent — reading it that way reports a merge conflict for a comparison that never
+/// finished. al8n/smear#196.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Match {
+  /// The list holds the name, at this index into the list.
+  At(usize),
+  /// The list does not hold the name.
+  Absent,
+  /// The budget refused before the scan finished, and the engine is abandoned.
+  Refused,
+}
+
+/// Where one merge lookup index lives on [`Scratch::merge_hashes`] and [`Scratch::merge_buckets`].
+///
+/// Both stacks, so an index is a *segment* rather than a table: an argument list's two sides sit
+/// at the bottom and every object literal reached through them sits above, leaving with the frame
+/// that built it.
+#[derive(Debug, Clone, Copy)]
+struct Index {
+  /// Where the index's names start in [`Scratch::merge_hashes`].
+  entries: usize,
+  /// How many names it holds.
+  len: usize,
+  /// Where its bucket heads start in [`Scratch::merge_buckets`].
+  buckets: usize,
+  /// How many bucket heads, always a power of two, and zero exactly when `len` is.
+  width: usize,
+}
+
+/// The smallest bucket table the memo builds.
 const MIN_MEMO_SLOTS: usize = 64;
 
 impl<'d, S, K> Validator<'_, 'd, S, K>
@@ -159,15 +214,15 @@ where
     // A freshly expanded range that duplicates a known one is released, so the range this call
     // produced may no longer be the one holding the rows — reusing it for the second pass would
     // read whatever the next expansion put there.
-    let (rows, done) = self.claim(rows, Pass::Shape);
-    if !done {
+    let (rows, claim) = self.claim(rows, Pass::Shape)?;
+    if claim == Claim::Fresh {
       self.run_pass(rows, Pass::Shape)?;
     }
     if self.tripped {
       return ControlFlow::Continue(());
     }
-    let (rows, done) = self.claim(rows, Pass::Parents);
-    if !done {
+    let (rows, claim) = self.claim(rows, Pass::Parents)?;
+    if claim == Claim::Fresh {
       self.run_pass(rows, Pass::Parents)?;
     }
     ControlFlow::Continue(())
@@ -176,10 +231,13 @@ where
   // -- the budget --------------------------------------------------------------------------------
 
   /// Charges `units` of work, returning whether the engine may continue.
+  ///
+  /// The ledger itself lives in [`Work`], because the tables in [`crate::scratch`] have loops the
+  /// *document* decides the length of and those loops must not be reachable without one — see
+  /// [`Names::intern`](crate::scratch::Names::intern).
   #[inline]
   fn charge(&mut self, units: u32) -> bool {
-    self.work = self.work.saturating_add(units);
-    self.work <= self.budget.merge_work()
+    self.work.take(units)
   }
 
   /// Refuses the document for exceeding a budget, and abandons the engine.
@@ -193,14 +251,16 @@ where
     }
     self.tripped = true;
     if !self.on(rule) {
-      // The caller switched this bound's own diagnostic off. The engine still stops — one that
-      // kept going would be the denial of service — but with nothing to emit there is nothing to
-      // make the document invalid either, so a document the bound refuses is reported on what was
-      // examined before it. Switching a bound's rule off is switching off the *refusal*, not the
-      // resource protection.
+      // The caller switched this bound's own diagnostic off, so there is nothing to emit and the
+      // document collects no finding here. It does not follow that the document is clean. The
+      // engine has abandoned draft 5.3.2 partway through, and every subtree it had not reached is
+      // unexamined — so the refusal is recorded whether or not anything was emitted, and the
+      // verdict is `Err` with a zero diagnostic count rather than an `Ok` that would report a
+      // clean result for a check that never ran. Switching a bound's rule off switches off the
+      // *diagnostic*; it switches off neither the resource protection nor the refusal.
+      // al8n/smear#196.
       return ControlFlow::Continue(());
     }
-    self.budget_tripped = true;
     let diagnostic = Diagnostic::new(rule, self.blame).context(Context::Count(limit));
     self.emit(diagnostic)
   }
@@ -334,9 +394,20 @@ where
       match selection {
         Selection::Field(field) => {
           let name = field.name();
-          let name_id = self.scratch.names.intern(name_bytes(name));
+          // The interner charges per compared entry and refuses rather than walking a chain a
+          // client built; `selections().len()` above counts the names and not the comparisons
+          // finding one costs, which is the whole of al8n/smear#196.
+          let Some(name_id) = self.scratch.names.intern(name_bytes(name), &mut self.work) else {
+            return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+          };
           let response = match field.alias() {
-            Some(alias) => self.scratch.names.intern(name_bytes(alias.name())),
+            Some(alias) => {
+              let alias = name_bytes(alias.name());
+              let Some(id) = self.scratch.names.intern(alias, &mut self.work) else {
+                return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+              };
+              id
+            }
             None => name_id,
           };
           let ty = parent
@@ -478,11 +549,34 @@ where
 
   /// Claims a merged set for `pass`.
   ///
-  /// Returns the **canonical** row range for this exact set of field occurrences, together with
-  /// whether it has already been through this pass. A freshly expanded range that turns out to
-  /// duplicate a known one is released rather than kept, so the arena holds one copy of each — and
-  /// the caller must use the range that comes back, not the one it handed in.
-  fn claim(&mut self, rows: Range32, pass: Pass) -> (Range32, bool) {
+  /// Returns the **canonical** row range for this exact set of field occurrences, together with a
+  /// [`Claim`] saying whether the caller is to run it, whether it has already been through this
+  /// pass, or whether the budget refused before either could be established. A freshly expanded
+  /// range that turns out to duplicate a known one is released rather than kept, so the arena
+  /// holds one copy of each — and the caller must use the range that comes back, not the one it
+  /// handed in.
+  ///
+  /// # It charges, for the same reason [`Names::intern`](crate::scratch::Names::intern) does
+  ///
+  /// [`hash_u32`] is the same unkeyed multiply-fold, read on its low half, and the key it folds is
+  /// a row-id sequence the *document*'s structure decides. That is a weaker handle than a name —
+  /// the ids are ordinals this walk assigns, not bytes a client writes — and it measures like an
+  /// ideal hash on every ordinary shape. Over 4,096 sets in 8,192 buckets, adjacent pairs and runs
+  /// of four and eight occupy 3,361, 3,260 and 3,223 against the `8192 · (1 − e^(−1/2)) ≈ 3,224` an
+  /// ideal hash occupies, and single-row sets occupy 4,096 — every one distinct, because one small
+  /// value times an odd constant is a bijection on exactly the low bits a mask reads.
+  /// `the_memo_hash_spreads_ordinary_row_sequences` is the canary.
+  /// **There is no honest defect here and none is claimed.**
+  ///
+  /// What there was is an *uncharged loop whose length a document decides*, which is the same
+  /// defect the interner had whether or not anybody can currently steer it. So the walk charges one
+  /// unit per entry it looks at, the contents comparison charges its own length, the relink is
+  /// charged from a count taken before it runs, and a refusal is a value the caller has to handle.
+  /// al8n/smear#196.
+  ///
+  /// The hash fold itself is not charged again: it walks exactly the rows [`expand`](Self::expand)
+  /// charged for one at a time as it pushed them, in the call that produced this range.
+  fn claim(&mut self, rows: Range32, pass: Pass) -> ControlFlow<(), (Range32, Claim)> {
     let hash = {
       let mut state = 0xcbf2_9ce4_8422_2325u64 ^ u64::from(rows.len());
       for row in rows.slice(&self.scratch.merge_rows) {
@@ -491,55 +585,87 @@ where
       state
     };
 
-    if (self.scratch.merge_memo.len() + 1) * 4 >= self.scratch.merge_slots.len() * 3 {
-      self.grow_memo();
-    }
-    let mask = self.scratch.merge_slots.len() - 1;
-    let mut slot = (hash as usize) & mask;
-    loop {
-      let entry = self.scratch.merge_slots[slot];
-      if entry == NONE {
-        self.scratch.merge_slots[slot] = self.scratch.merge_memo.len() as u32;
-        self.scratch.merge_memo.push(MergeMemo {
-          hash,
-          rows,
-          flags: pass.bit(),
-        });
-        return (rows, false);
-      }
-      let known = self.scratch.merge_memo[entry as usize];
-      if known.hash == hash
-        && known.rows.len() == rows.len()
-        && known.rows.slice(&self.scratch.merge_rows) == rows.slice(&self.scratch.merge_rows)
-      {
-        if rows.end() as usize == self.scratch.merge_rows.len()
-          && known.rows.start() != rows.start()
-        {
-          self.scratch.merge_rows.truncate(rows.start() as usize);
+    if !self.scratch.merge_slots.is_empty() {
+      let mut entry = self.scratch.merge_slots[self.memo_bucket(hash)];
+      while entry != NONE {
+        if !self.charge(1) {
+          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+          return ControlFlow::Continue((rows, Claim::Refused));
         }
-        if known.flags & pass.bit() != 0 {
-          return (known.rows, true);
+        let known = self.scratch.merge_memo[entry as usize];
+        if known.hash == hash && known.rows.len() == rows.len() {
+          if !self.charge(rows.len()) {
+            self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+            return ControlFlow::Continue((rows, Claim::Refused));
+          }
+          if known.rows.slice(&self.scratch.merge_rows) == rows.slice(&self.scratch.merge_rows) {
+            if rows.end() as usize == self.scratch.merge_rows.len()
+              && known.rows.start() != rows.start()
+            {
+              self.scratch.merge_rows.truncate(rows.start() as usize);
+            }
+            if known.flags & pass.bit() != 0 {
+              return ControlFlow::Continue((known.rows, Claim::Done));
+            }
+            self.scratch.merge_memo[entry as usize].flags |= pass.bit();
+            return ControlFlow::Continue((known.rows, Claim::Fresh));
+          }
         }
-        self.scratch.merge_memo[entry as usize].flags |= pass.bit();
-        return (known.rows, false);
+        entry = known.next;
       }
-      slot = (slot + 1) & mask;
     }
+
+    // A miss appends, and an append past the load factor relinks every entry: one step each and no
+    // probe run, so the cost is known before it is paid.
+    let relink = if self.scratch.merge_memo.len() + 1 > self.scratch.merge_slots.len() {
+      self.scratch.merge_memo.len() as u32 + 1
+    } else {
+      0
+    };
+    if !self.charge(relink) {
+      self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+      return ControlFlow::Continue((rows, Claim::Refused));
+    }
+
+    // Nothing above this line mutated the memo, so a refusal leaves it exactly as it was.
+    let index = self.scratch.merge_memo.len() as u32;
+    self.scratch.merge_memo.push(MergeMemo {
+      hash,
+      rows,
+      next: NONE,
+      flags: pass.bit(),
+    });
+    if self.scratch.merge_memo.len() > self.scratch.merge_slots.len() {
+      self.relink_memo();
+    } else {
+      let bucket = self.memo_bucket(hash);
+      self.scratch.merge_memo[index as usize].next = self.scratch.merge_slots[bucket];
+      self.scratch.merge_slots[bucket] = index;
+    }
+    ControlFlow::Continue((rows, Claim::Fresh))
   }
 
-  /// Doubles the memo's probe table and reinserts every entry.
-  fn grow_memo(&mut self) {
-    let next = (self.scratch.merge_slots.len() * 2).max(MIN_MEMO_SLOTS);
+  /// The bucket `hash` lands in. Never called with `merge_slots` empty.
+  #[inline]
+  fn memo_bucket(&self, hash: u64) -> usize {
+    (hash as usize) & (self.scratch.merge_slots.len() - 1)
+  }
+
+  /// Doubles the memo's bucket table and relinks every entry, one step each.
+  fn relink_memo(&mut self) {
+    let next = self
+      .scratch
+      .merge_slots
+      .len()
+      .max(MIN_MEMO_SLOTS)
+      .max(self.scratch.merge_memo.len().next_power_of_two());
     self.scratch.merge_slots.clear();
     self.scratch.merge_slots.resize(next, NONE);
     let mask = next - 1;
-    for index in 0..self.scratch.merge_memo.len() as u32 {
-      let hash = self.scratch.merge_memo[index as usize].hash;
-      let mut slot = (hash as usize) & mask;
-      while self.scratch.merge_slots[slot] != NONE {
-        slot = (slot + 1) & mask;
-      }
-      self.scratch.merge_slots[slot] = index;
+    for index in 0..self.scratch.merge_memo.len() {
+      let bucket = (self.scratch.merge_memo[index].hash as usize) & mask;
+      self.scratch.merge_memo[index].next = self.scratch.merge_slots[bucket];
+      self.scratch.merge_slots[bucket] = index as u32;
     }
   }
 
@@ -817,8 +943,8 @@ where
     let Some(rows) = expanded else {
       return ControlFlow::Continue(());
     };
-    let (rows, done) = self.claim(rows, pass);
-    if !done {
+    let (rows, claim) = self.claim(rows, pass)?;
+    if claim == Claim::Fresh {
       self.push_merge_frame(rows);
     }
     ControlFlow::Continue(())
@@ -854,6 +980,137 @@ where
     left.is_composite() && right.is_composite()
   }
 
+  /// Builds a lookup index over `count` names and returns where it landed on the two stacks.
+  ///
+  /// [`None`] means the budget refused and the engine is abandoned — **not** an empty index. A
+  /// caller that reads it as one goes on to answer a comparison the ledger stopped, which is the
+  /// same mistake [`Match::Refused`] exists to prevent one step further in.
+  ///
+  /// # What is charged, and in front of what
+  ///
+  /// The bucket run is filled with [`NONE`] before anything is hashed, so its own `O(width)` sweep
+  /// is charged before it happens rather than being the one pass nobody paid for. Then each name
+  /// costs [`byte_units`] for the single read its hash makes over it, plus one unit for the link
+  /// step that files it in a bucket. The link pass itself runs afterwards and reads only the
+  /// stored hashes, which is what makes "one step a name" true of the *work* and not merely of the
+  /// loop.
+  ///
+  /// # Ascending chains
+  ///
+  /// The links are laid down back to front, so a bucket's chain runs in ascending order and
+  /// [`Validator::find`] answers with the *first* name of that spelling. Two arguments may share a
+  /// name — draft 5.4.2 refuses that, draft 5.3.2 does not — and the scan this replaced answered
+  /// with the first, so a descending chain would pair a different argument and could settle the
+  /// comparison differently. al8n/smear#196.
+  fn index(
+    &mut self,
+    count: usize,
+    name: impl Fn(usize) -> &'d [u8],
+  ) -> ControlFlow<(), Option<Index>> {
+    let entries = self.scratch.merge_hashes.len();
+    let buckets = self.scratch.merge_buckets.len();
+    let width = buckets_for(count);
+    // Checked rather than argued from the ceiling, for the reason `Names`'s arena range gives:
+    // "the budget cannot admit that many" is exactly the claim that stops being true when somebody
+    // sets a different budget, and a count at or past `NONE` would give a name the sentinel's own
+    // index and terminate its chain on itself.
+    if count >= NONE as usize || !self.charge(u32::try_from(width).unwrap_or(u32::MAX)) {
+      self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+      return ControlFlow::Continue(None);
+    }
+    self.scratch.merge_buckets.resize(buckets + width, NONE);
+    for slot in 0..count {
+      let name = name(slot);
+      if !self.charge(byte_units(name.len()).saturating_add(1)) {
+        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+        return ControlFlow::Continue(None);
+      }
+      self.scratch.merge_hashes.push(MergeName {
+        hash: hash_bytes(name),
+        len: name.len(),
+        next: NONE,
+      });
+    }
+    for slot in (0..count).rev() {
+      let bucket =
+        buckets + (self.scratch.merge_hashes[entries + slot].hash as usize & (width - 1));
+      self.scratch.merge_hashes[entries + slot].next = self.scratch.merge_buckets[bucket];
+      self.scratch.merge_buckets[bucket] = slot as u32;
+    }
+    ControlFlow::Continue(Some(Index {
+      entries,
+      len: count,
+      buckets,
+      width,
+    }))
+  }
+
+  /// The index a `count`-name build most recently left at the top of the two stacks.
+  ///
+  /// The value walk needs no base in its frames because of this: a frame's index is the tail while
+  /// that frame is the top one, and a child's index is pushed above it and truncated away again
+  /// before the parent looks at its own.
+  fn tail_index(&self, count: usize) -> Index {
+    let width = buckets_for(count);
+    Index {
+      entries: self.scratch.merge_hashes.len() - count,
+      len: count,
+      buckets: self.scratch.merge_buckets.len() - width,
+      width,
+    }
+  }
+
+  /// Finds `name` in the list `index` was built over, charging every probe in front of what it
+  /// does.
+  ///
+  /// A probe is one unit, and one unit buys two integers: a candidate whose stored hash or stored
+  /// length disagrees is rejected without a byte of it being read. Only a candidate that agrees on
+  /// both reaches a `memcmp`, and that `memcmp`'s bytes are charged before it runs.
+  ///
+  /// That pairing is what lets one charge satisfy both directions at once. Recorded units cannot
+  /// understate the bytes read, because every pass over bytes is charged in front of itself; and
+  /// they do not wildly overstate them either, because a candidate that differs at its first byte
+  /// costs one unit rather than a whole name. A product taken before a scan gets the first and
+  /// refuses valid documents for the second.
+  ///
+  /// And the probes reach one bucket rather than the whole list, which is what stops the *count*
+  /// of them being quadratic in a width the client chose. A colliding run is still walked and
+  /// still charged a unit a step, so an adversary who constructs one spends their own budget on
+  /// it exactly as they do in `Names::intern`. al8n/smear#196.
+  ///
+  /// `candidate` is indexed relative to the list's start, which is also what [`Match::At`] carries.
+  fn find(
+    &mut self,
+    index: Index,
+    wanted: u64,
+    name: &[u8],
+    candidate: impl Fn(usize) -> &'d [u8],
+  ) -> ControlFlow<(), Match> {
+    if index.len == 0 {
+      return ControlFlow::Continue(Match::Absent);
+    }
+    let mut slot =
+      self.scratch.merge_buckets[index.buckets + (wanted as usize & (index.width - 1))];
+    while slot != NONE {
+      if !self.charge(1) {
+        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+        return ControlFlow::Continue(Match::Refused);
+      }
+      let entry = self.scratch.merge_hashes[index.entries + slot as usize];
+      if entry.hash == wanted && entry.len == name.len() {
+        if !self.charge(byte_units(entry.len)) {
+          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+          return ControlFlow::Continue(Match::Refused);
+        }
+        if candidate(slot as usize) == name {
+          return ControlFlow::Continue(Match::At(slot as usize));
+        }
+      }
+      slot = entry.next;
+    }
+    ControlFlow::Continue(Match::Absent)
+  }
+
   /// Whether two field selections were written with identical sets of arguments.
   fn same_arguments(&mut self, a: u32, b: u32) -> ControlFlow<(), bool> {
     let left = self.scratch.merge_fields[a as usize];
@@ -879,27 +1136,101 @@ where
     // Matching by name is a scan, so each scan is charged for its own length rather than the pair
     // being charged once: a field written with a thousand arguments is a quadratic comparison, and
     // an uncharged quadratic inside a budgeted engine is the hole the budget exists to close.
-    for argument in left {
-      if !self.charge(right.len() as u32) {
-        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-        return ControlFlow::Continue(true);
+    //
+    // And each *step* of that scan reads a length the client also wrote, which is the half
+    // `right.len()` could not see. Counting entries while running bytes is the same defect
+    // `Names::intern` had one dimension over: `n` arguments in reverse order recorded `Θ(n²)` and
+    // ran `Θ(n² · L)`, so a few hundred four-kilobyte argument names turned a two megabyte
+    // document into more than a hundred megabytes of comparison before the default budget said
+    // anything — reachable with `FieldSelectionMerging` alone, since this scan runs before any
+    // rule about whether the schema knows those names.
+    //
+    // The repair is not that product taken in front of the scan. It bounds the bytes and comes no
+    // nearer them: a lookup returns at its first hit and a byte-slice comparison settles at its
+    // first difference, so thirty-two arguments of five hundred and twelve valid bytes with
+    // distinct *first* bytes read about a kilobyte between them and were charged
+    // `2 · 32 · 32 · 65 = 133,120` units against a default budget of 65,536. A ledger that
+    // overcharges is not a safer ledger; it is the same denial of service, aimed at the documents
+    // the server means to serve.
+    //
+    // So both sides are indexed once, here, each name charged for the single pass its hash makes
+    // over it. A candidate is then two integers for one unit, reading no byte of it, and the
+    // `memcmp` — charged in front of itself — is reached only where the hash and the length
+    // already agree. An upper bound on the work that stays near it, which is the pair
+    // `Names::intern` takes.
+    //
+    // And the index is a *bucket table* and not a flat run, which is the other half. Hashing
+    // alone left the lookup walking every candidate from the front: two lists of `n` distinct
+    // names in the same order cost `1 + 2 + … + n` steps a direction, so a pair cost `n(n + 1)`
+    // and five identical selections of a hundred and twenty-eight short arguments spent
+    // `4 · 128 · 129 = 66,048` of a 65,536 budget before a byte was hashed or a value compared.
+    // A few kilobytes of perfectly ordinary generated document, deterministically refused. Cheap
+    // names do not make a quadratic affordable; they only move which factor is big.
+    //
+    // The left side is the same selection for every comparison a part makes — draft 5.3.2's
+    // common-parent pass checks every member against the first — so its index is built once for
+    // the part and kept, and `Scratch::merge_indexed` is which row it belongs to.
+    // al8n/smear#196.
+    let reuse = self.scratch.merge_indexed == a;
+    let left_index = if reuse {
+      let width = buckets_for(left.len());
+      self.scratch.merge_hashes.truncate(left.len());
+      self.scratch.merge_buckets.truncate(width);
+      Index {
+        entries: 0,
+        len: left.len(),
+        buckets: 0,
+        width,
       }
-      let Some(other) = by_name(right, argument) else {
-        return ControlFlow::Continue(false);
+    } else {
+      // Cleared *before* the build and claimed only after it, so a refusal partway through leaves
+      // no row pointing at a segment that was never finished.
+      self.scratch.merge_indexed = NONE;
+      self.scratch.merge_hashes.clear();
+      self.scratch.merge_buckets.clear();
+      let Some(index) = self.index(left.len(), |slot| name_bytes(left[slot].name()))? else {
+        return ControlFlow::Continue(true);
       };
+      self.scratch.merge_indexed = a;
+      index
+    };
+    let Some(right_index) = self.index(right.len(), |slot| name_bytes(right[slot].name()))? else {
+      return ControlFlow::Continue(true);
+    };
+    let top = (
+      right_index.entries + right_index.len,
+      right_index.buckets + right_index.width,
+    );
+
+    for (slot, argument) in left.iter().enumerate() {
+      let name = name_bytes(argument.name());
+      let wanted = self.scratch.merge_hashes[slot].hash;
+      let other = match self.find(right_index, wanted, name, |index| {
+        name_bytes(right[index].name())
+      })? {
+        Match::At(index) => &right[index],
+        Match::Absent => return ControlFlow::Continue(false),
+        Match::Refused => return ControlFlow::Continue(true),
+      };
+      // The literal comparison indexes above these two and leaves behind whatever an early refusal
+      // left it, so their own top is restored before it runs again.
+      self.scratch.merge_hashes.truncate(top.0);
+      self.scratch.merge_buckets.truncate(top.1);
       if !self.same_value(argument.value(), other.value())? {
         return ControlFlow::Continue(false);
       }
     }
     // The counts already agree, but a set with a repeated argument name — draft 5.4.2's business,
     // not this rule's — could still hide a name the other side does not have.
-    for argument in right {
-      if !self.charge(left.len() as u32) {
-        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-        return ControlFlow::Continue(true);
-      }
-      if by_name(left, argument).is_none() {
-        return ControlFlow::Continue(false);
+    for (slot, argument) in right.iter().enumerate() {
+      let name = name_bytes(argument.name());
+      let wanted = self.scratch.merge_hashes[right_index.entries + slot].hash;
+      match self.find(left_index, wanted, name, |index| {
+        name_bytes(left[index].name())
+      })? {
+        Match::At(_) => {}
+        Match::Absent => return ControlFlow::Continue(false),
+        Match::Refused => return ControlFlow::Continue(true),
       }
     }
     ControlFlow::Continue(true)
@@ -937,8 +1268,36 @@ where
         // shallow check below has already refused.
         return ControlFlow::Continue(false);
       };
-      if cursor == 0 && !shallow_equal(a, b) {
-        return ControlFlow::Continue(false);
+      if cursor == 0 {
+        // Four of `shallow_equal`'s arms compare *source spellings* and a fifth compares a
+        // variable's name, and draft §2.1 puts no more of a ceiling on an `Int`'s digits or a
+        // `String`'s characters than draft §2.1.9 does on a field name. Charging `depth` prices
+        // the descent and says nothing about the `memcmp` at the bottom of it, so the bytes are
+        // charged before they are read — for the length the comparison can actually reach, which
+        // is the shorter of the two. Every other arm settles on a tag, a boolean or a length and
+        // costs nothing here. al8n/smear#196.
+        if !self.charge(shallow_units(a, b)) {
+          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+          return ControlFlow::Continue(true);
+        }
+        if !shallow_equal(a, b) {
+          return ControlFlow::Continue(false);
+        }
+        // Pairing this literal's fields by name is one lookup per field, so they are indexed once
+        // for the node rather than re-read once for every step of every scan — the same quadratic
+        // `same_arguments` carried, on the width of an object literal instead of an argument list,
+        // and reachable from the same handful of kilobytes.
+        //
+        // The index is the tail of both stacks for exactly as long as this frame is the top one: a
+        // child pushes its own above it and takes it away again on the way out, so there is no
+        // base to carry in the frame. al8n/smear#196.
+        if let Some(others) = b.as_object()
+          && self
+            .index(others.len(), |slot| name_bytes(others[slot].name()))?
+            .is_none()
+        {
+          return ControlFlow::Continue(true);
+        }
       }
 
       let children = match (a.as_list(), a.as_object()) {
@@ -947,6 +1306,18 @@ where
         _ => 0,
       };
       if cursor >= children {
+        // The index this frame built leaves with it. Every path that skips the build above leaves
+        // the walk rather than reaching this pop, so the frame's own segment is the tail of both
+        // stacks and the subtractions are exact.
+        let fields = b.as_object().map_or(0, <[_]>::len);
+        let entries = self.scratch.merge_hashes.len().saturating_sub(fields);
+        let buckets = self
+          .scratch
+          .merge_buckets
+          .len()
+          .saturating_sub(buckets_for(fields));
+        self.scratch.merge_hashes.truncate(entries);
+        self.scratch.merge_buckets.truncate(buckets);
         self.scratch.merge_compare.pop();
         continue;
       }
@@ -956,19 +1327,23 @@ where
 
       let mate = match (a.as_object(), b.as_object()) {
         (Some(fields), Some(others)) => {
-          // Charged for the scan, not for the field: pairing an object literal's fields by name is
-          // quadratic in its width, and the budget has to see that.
-          if !self.charge(others.len() as u32) {
+          // Charged for the lookup, not for the field. Every reason `same_arguments` gives applies
+          // here unchanged: the width and the spelling are two factors and a count sees one of
+          // them; the bytes are charged for what the comparison reads and not for what it could
+          // read, because a candidate is rejected on two integers; and the candidates are reached
+          // through a bucket rather than from the front of the list, because `w` lookups over `w`
+          // fields was the same quadratic in a width the client writes.
+          let name = name_bytes(fields[cursor as usize].name());
+          if !self.charge(byte_units(name.len())) {
             self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
             return ControlFlow::Continue(true);
           }
-          let name = name_bytes(fields[cursor as usize].name());
-          match others
-            .iter()
-            .position(|other| name_bytes(other.name()) == name)
-          {
-            Some(index) => index as u32,
-            None => return ControlFlow::Continue(false),
+          let wanted = hash_bytes(name);
+          let index = self.tail_index(others.len());
+          match self.find(index, wanted, name, |slot| name_bytes(others[slot].name()))? {
+            Match::At(slot) => slot as u32,
+            Match::Absent => return ControlFlow::Continue(false),
+            Match::Refused => return ControlFlow::Continue(true),
           }
         }
         // A list pairs positionally; `shallow_equal` has already established equal lengths.
@@ -1033,15 +1408,69 @@ where
 // free helpers
 // ---------------------------------------------------------------------------------------------
 
-/// Finds the argument of the same name.
-fn by_name<'a, S>(arguments: &'a [Argument<S>], wanted: &Argument<S>) -> Option<&'a Argument<S>>
+/// How many buckets an index over `count` names gets: the next power of two, and none at all for
+/// an empty list.
+///
+/// One bucket a name, so a list of distinct names averages a chain of one and the pairing that
+/// used to be `n(n + 1)` steps a pair is `n` of them. A client who piles names into one bucket
+/// gets the chain they built and is charged a unit for every step of it, which is the same bargain
+/// `Names` offers and the same reason neither table needs a load factor below one.
+/// al8n/smear#196.
+fn buckets_for(count: usize) -> usize {
+  if count == 0 {
+    return 0;
+  }
+  count.checked_next_power_of_two().unwrap_or(count)
+}
+
+/// What comparing two values at their own level costs in bytes.
+///
+/// Zero for every arm [`shallow_equal`] settles on a tag, a boolean or a length — a `memcmp` is
+/// only reached by the four that compare source spellings and by the variable, which compares a
+/// name.
+///
+/// # And zero again whenever the two lengths differ
+///
+/// This charged `byte_units` of the *shorter* of the two, on the reasoning that a slice comparison
+/// cannot read past it. True, and it prices a comparison this code does not make: `[u8] == [u8]`
+/// settles unequal lengths **before** it reads a byte of either side. So two string spellings of
+/// 524,288 and 524,289 bytes cost one integer compare and were charged 65,537 units — the whole
+/// default `merge_work` and more, for an `O(1)` decision.
+///
+/// What that bought was not safety. The document has a real draft 5.3.2 conflict — the two
+/// literals differ — and the over-charge replaced that diagnostic with a resource refusal, so the
+/// caller is told the wrong thing about their own document; with `MergeWorkBudget` outside the
+/// rule set it becomes an `Err` carrying nothing at all. A ledger that overcharges is not a safer
+/// ledger, one dimension over from where al8n/smear#196 first said so. al8n/smear#196.
+fn shallow_units<S>(left: &InputValue<S>, right: &InputValue<S>) -> u32
 where
   S: AsRef<[u8]>,
 {
-  let name = name_bytes(wanted.name());
-  arguments
-    .iter()
-    .find(|argument| name_bytes(argument.name()) == name)
+  /// What comparing two source spellings costs: nothing unless they are the same length, and then
+  /// one pass over that length.
+  fn spelling(left: &[u8], right: &[u8]) -> u32 {
+    if left.len() != right.len() {
+      return 0;
+    }
+    byte_units(left.len())
+  }
+
+  match (left, right) {
+    (InputValue::Int(a), InputValue::Int(b)) => spelling(a.source().as_ref(), b.source().as_ref()),
+    (InputValue::Float(a), InputValue::Float(b)) => {
+      spelling(a.source().as_ref(), b.source().as_ref())
+    }
+    (InputValue::String(a), InputValue::String(b)) => {
+      spelling(a.source().as_ref(), b.source().as_ref())
+    }
+    (InputValue::Enum(a), InputValue::Enum(b)) => {
+      spelling(a.source().as_ref(), b.source().as_ref())
+    }
+    (InputValue::Variable(a), InputValue::Variable(b)) => {
+      spelling(name_bytes(a.name()), name_bytes(b.name()))
+    }
+    _ => 0,
+  }
 }
 
 /// Follows a comparison stack's child-index chain into one of the two value trees.
