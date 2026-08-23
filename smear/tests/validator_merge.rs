@@ -842,42 +842,159 @@ fn the_all_pairs_fragment_bomb_dies_at_5_5_2_2() {
   assert!(ms < 2_000.0, "{ms} ms");
 }
 
-/// Pairing two wide object literals by field name is quadratic, and the budget sees it.
+/// Pairing two wide object literals by field name is linear in their width, and the width is still
+/// charged.
 ///
-/// Matching arguments and object fields by name is a scan, so a field written with a thousand of
-/// either is a quadratic comparison. Charging the pair once rather than each scan would leave that
-/// quadratic running inside a budgeted engine, which is precisely the hole the budget exists to
-/// close — so each scan is charged for its own length, and a hostile literal trips.
+/// # What this fixture used to say, and why it stopped saying it
+///
+/// It pinned the pairing as *quadratic and charged*: four hundred fields a side cost
+/// `400 · 401 / 2` scan steps, and the fixture's whole assertion was that the default budget
+/// tripped on those steps. Charging a quadratic is not the same as being entitled to run one. The
+/// steps are work whose count the client chooses, four hundred fields is a seven-kilobyte literal,
+/// and a budget spent on the *shape* of the comparison is a budget an honest document cannot spend
+/// on its own size. al8n/smear#196 indexes the right-hand side once for the node, so the pairing is
+/// `w` lookups of about one probe apiece and the same literal merges.
+///
+/// So the property moved with the code, and what is pinned now is the **class**. Doubling the
+/// width roughly doubles the cost where the old pairing quadrupled it, and a literal wide enough is
+/// still refused — the bound did not go away, it stopped being quadratic. A gate whose subject a
+/// repair dissolves has to say so out loud; leaving the old assertion to be deleted quietly is how
+/// a suite ends up green over a property nobody is testing any more.
 #[test]
-fn a_wide_literal_comparison_is_charged_for_its_scans() {
-  let schema = build();
-  const WIDTH: usize = 400;
-
-  let mut payload = String::from("{");
-  for index in 0..WIDTH {
-    payload.push_str(&std::format!(" f{index}: {index}"));
+fn a_wide_literal_comparison_is_linear_in_its_width() {
+  /// Two identical object literals of `width` distinct fields behind one response name, so the two
+  /// have to be paired.
+  fn document(width: usize) -> String {
+    let mut payload = String::from("{");
+    for index in 0..width {
+      payload.push_str(&std::format!(" f{index}: {index}"));
+    }
+    payload.push_str(" }");
+    std::format!("{{ x: note(payload: {payload}) x: note(payload: {payload}) }}")
   }
-  payload.push_str(" }");
-  // The same field twice behind one response name, so the two literals have to be compared.
-  let source = std::format!("{{ x: note(payload: {payload}) x: note(payload: {payload}) }}");
 
-  let (tripped, rules, ms) = timed(&schema, &source, &Budget::default());
+  let schema = build();
+  let rules = RuleSet::EMPTY
+    .with(Rule::FieldSelectionMerging)
+    .with(Rule::MergeWorkBudget)
+    .with(Rule::MergeDepthBudget);
+
+  // The old fixture's own subject, which now merges.
+  let source = document(400);
+  let (tripped, fired, ms) = timed(&schema, &source, &Budget::default());
   println!(
-    "wide literal: {} bytes, {WIDTH} fields each side, {ms:.3} ms",
+    "wide literal: {} bytes, 400 fields each side, {ms:.3} ms, tripped = {tripped}",
     source.len()
   );
-  assert!(tripped, "the quadratic ran uncharged");
-  assert_eq!(rules, [Rule::MergeWorkBudget], "{rules:?}");
+  assert!(
+    !tripped,
+    "a seven-kilobyte literal of four hundred distinct fields is refused: {fired:?}"
+  );
+  assert_eq!(fired, [], "{fired:?}");
   assert!(ms < 500.0, "{ms} ms");
 
-  // Narrow enough to stay inside the bound, the same shape merges.
-  let mut payload = String::from("{");
-  for index in 0..8 {
-    payload.push_str(&std::format!(" f{index}: {index}"));
+  // Doubling the width. A quadratic pairing would take about four times the units; an indexed one
+  // takes about two, and the separator is three because the fixture also carries a fixed cost that
+  // does not double.
+  let narrow = least_work_that_clears(&schema, &document(64), None, rules);
+  let wide = least_work_that_clears(&schema, &document(128), None, rules);
+  println!("object literal: {narrow} units at 64 fields a side, {wide} at 128");
+  assert!(
+    wide > narrow,
+    "the width is not charged at all: {narrow} against {wide}"
+  );
+  assert!(
+    wide < narrow * 3,
+    "doubling the width cost {narrow} units then {wide}, which is the quadratic this fixture used \
+     to pin rather than the linear pairing that replaced it"
+  );
+
+  // And the bound is still a bound: linear in the width is not free in it.
+  let source = document(20_000);
+  let (tripped, fired, ms) = timed(&schema, &source, &Budget::default());
+  println!(
+    "very wide literal: {} bytes, 20000 fields each side, {ms:.3} ms",
+    source.len()
+  );
+  assert!(tripped, "{fired:?}");
+  assert_eq!(fired, [Rule::MergeWorkBudget], "{fired:?}");
+  assert!(ms < 500.0, "{ms} ms");
+}
+
+/// A part of identical selections is linear in how many arguments they carry, not quadratic.
+///
+/// # Hashing the names was half the repair, and the half that is invisible on long ones
+///
+/// Round three of al8n/smear#196 stopped a lookup being charged for bytes no candidate reads. It
+/// left the lookup **walking every candidate from the front**, so two lists of `n` distinct names
+/// in the same order cost `1 + 2 + … + n` steps a direction and a pair cost `n(n + 1)`. On the
+/// thirty-two five-hundred-byte names that round measured, the byte term dominated and the step
+/// term was invisible; on many *short* names it is the only term there is.
+///
+/// Five identical selections of a hundred and twenty-eight short arguments is
+/// `4 · 128 · 129 = 66,048` steps against a default budget of 65,536 — spent before a byte is
+/// hashed or a value compared, on a few kilobytes of the sort of document a query generator emits
+/// without thinking about it. Two rounds, two shapes, one lesson: a repair written against the
+/// last defect's proportions is a repair against one point of a surface.
+///
+/// **The plants.** Give `Validator::index` one bucket for any width — `buckets_for(count).min(1)`
+/// — and every name lands in the same chain, so the lookups walk the list from the front again and
+/// the hundred-and-twenty-eight-argument row is refused. Drop `Scratch::merge_indexed` and the
+/// left side is rebuilt for every pair instead of once for the part, which is three more builds
+/// here: the boundary below rises from 5,684 units to 6,836.
+#[test]
+fn a_part_of_identical_selections_is_not_quadratic_in_its_arguments() {
+  /// Arguments a selection, and the reviewer's own number.
+  const WIDTH: usize = 128;
+
+  /// `members` identical selections behind one response name, each with `width` short arguments.
+  fn document(members: usize, width: usize) -> String {
+    let mut args = String::new();
+    for index in 0..width {
+      args.push_str(&std::format!(" a{index}: 1"));
+    }
+    let mut body = String::new();
+    for _ in 0..members {
+      body.push_str(&std::format!(" x: name({args} )"));
+    }
+    std::format!("{{ dog {{{body} }} }}")
   }
-  payload.push_str(" }");
-  let source = std::format!("{{ x: note(payload: {payload}) x: note(payload: {payload}) }}");
-  assert_eq!(fired(&schema, &source), []);
+
+  on_a_deep_stack(|| {
+    let schema = build();
+    let rules = RuleSet::EMPTY
+      .with(Rule::FieldSelectionMerging)
+      .with(Rule::MergeWorkBudget)
+      .with(Rule::MergeDepthBudget);
+    let default = Budget::default().merge_work();
+
+    let source = document(5, WIDTH);
+    let charged = least_work_that_clears(&schema, &source, None, rules);
+    println!(
+      "five identical selections: {} bytes, {WIDTH} arguments each, {charged} units against a \
+       default of {default}",
+      source.len()
+    );
+    assert!(
+      charged <= default,
+      "a valid {}-byte document costs {charged} units against a default merge_work of {default}: \
+       four pairings of two identical {WIDTH}-argument lists is {} lookup steps when each lookup \
+       starts at the front of the list",
+      source.len(),
+      4 * WIDTH * (WIDTH + 1)
+    );
+
+    // Doubling the arguments doubles the cost, rather than quadrupling it.
+    let narrow = least_work_that_clears(&schema, &document(5, 64), None, rules);
+    let wide = least_work_that_clears(&schema, &document(5, 128), None, rules);
+    println!("arguments a side: {narrow} units at 64, {wide} at 128");
+    assert!(wide > narrow, "the width is not charged at all: {narrow}");
+    assert!(
+      wide < narrow * 3,
+      "doubling the argument count cost {narrow} units then {wide}, which is a scan from the front \
+       of the list rather than a lookup into it"
+    );
+  });
 }
 
 /// Every comparison draft 5.3.2 makes over a **spelling** is charged for that spelling's length.
@@ -910,11 +1027,12 @@ fn a_wide_literal_comparison_is_charged_for_its_scans() {
 /// here is that caller.
 ///
 /// **The plants.** Replace `shallow_units` with the entry count it replaced and the scalar row's
-/// two boundaries become equal. Delete *both* of the `byte_units` charges a scanned name passes
-/// through — the one in front of the hash `same_arguments` and `same_value` take of it, and the
-/// one `Validator::find` takes in front of the `memcmp` a step that agrees on hash and length goes
-/// on to make — and the other two rows' do. Both, because either alone still leaves a term in `L`:
-/// the two charges are one repair and the second is what makes the first affordable.
+/// two boundaries become equal. Delete *both* of the `byte_units` charges a looked-up name passes
+/// through — the one `Validator::index` takes in front of hashing it, and the one
+/// `Validator::find` takes in front of the `memcmp` a probe that agrees on hash and length goes on
+/// to make — and the other two rows stop doubling, at 269 units against 277 and 221 against 225.
+/// Both charges, because either alone still leaves a term in `L`: the two are one repair, and the
+/// second is what makes the first affordable.
 #[test]
 fn a_comparison_over_a_spelling_is_charged_for_its_length() {
   /// Selections per side. Small enough that the padded documents still clear the **default**
@@ -1011,11 +1129,17 @@ fn a_comparison_over_a_spelling_is_charged_for_its_length() {
         1 + 4,
         PAD + 1 + 4
       );
+      // Twice, and not merely more. `PAD` adds twenty-five `byte_units` to every name, so a
+      // ledger that reads the spellings moves by thousands of units here — while a bucket table
+      // hands two different name sets slightly different collision counts, so "more" can be eight
+      // units of probe noise with no term in `L` at all. Asking for a doubling is asking whether
+      // the bytes are in the total, rather than whether anything is.
       assert!(
-        least_long > least_short,
+        least_long >= least_short * 2,
         "{label}: the same {WIDTH} comparisons cost {least_short} units over short spellings and \
-         {least_long} over spellings {PAD} bytes longer. Equal totals mean the ledger counts the \
-         comparisons and the machine reads the bytes"
+         {least_long} over spellings {PAD} bytes longer. A total that does not even double has no \
+         term in the spelling: what separates the two is how the names happened to land in their \
+         buckets, not the bytes the comparisons read"
       );
     }
   });
@@ -1043,10 +1167,11 @@ fn a_comparison_over_a_spelling_is_charged_for_its_length() {
 /// hash beside a length makes a non-matching candidate a two-integer rejection that reads no
 /// bytes, so the byte charge is reached only where the bytes are about to be. al8n/smear#196.
 ///
-/// **The plants.** Charge either of `same_arguments`' scans `entries × wanted` in front of itself
-/// — the product this replaced — and the honest half is refused. Delete both of the `byte_units`
-/// charges a scanned name passes through, the one in front of its hash and the one
-/// `Validator::find` takes in front of a matching step's `memcmp`, and the hostile half is served.
+/// **The plants.** Charge either of `same_arguments`' lookups `entries × wanted` in front of
+/// itself — the product this replaced — and the honest half is refused. Delete both of the
+/// `byte_units` charges a looked-up name passes through, the one `Validator::index` takes in front
+/// of hashing it and the one `Validator::find` takes in front of a matching probe's `memcmp`, and
+/// the hostile half is served.
 #[test]
 fn a_scan_is_not_charged_for_bytes_no_candidate_reads() {
   /// Arguments a side in the honest half.

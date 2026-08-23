@@ -69,8 +69,8 @@ use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{
-    MergeField, MergeFrame, MergeKid, MergeMemo, MergeSet, NONE, byte_units, get_bit, hash_bytes,
-    hash_u32,
+    MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units, get_bit,
+    hash_bytes, hash_u32,
   },
 };
 
@@ -126,6 +126,23 @@ enum Match {
   Absent,
   /// The budget refused before the scan finished, and the engine is abandoned.
   Refused,
+}
+
+/// Where one merge lookup index lives on [`Scratch::merge_hashes`] and [`Scratch::merge_buckets`].
+///
+/// Both stacks, so an index is a *segment* rather than a table: an argument list's two sides sit
+/// at the bottom and every object literal reached through them sits above, leaving with the frame
+/// that built it.
+#[derive(Debug, Clone, Copy)]
+struct Index {
+  /// Where the index's names start in [`Scratch::merge_hashes`].
+  entries: usize,
+  /// How many names it holds.
+  len: usize,
+  /// Where its bucket heads start in [`Scratch::merge_buckets`].
+  buckets: usize,
+  /// How many bucket heads, always a power of two, and zero exactly when `len` is.
+  width: usize,
 }
 
 /// The smallest bucket table the memo builds.
@@ -963,45 +980,133 @@ where
     left.is_composite() && right.is_composite()
   }
 
-  /// Finds `name` in a list whose `(hash, length)` rows are `table` in `Scratch::merge_hashes`,
-  /// charging every step in front of the work that step does.
+  /// Builds a lookup index over `count` names and returns where it landed on the two stacks.
   ///
-  /// A step is one unit, and one unit buys two integers: a candidate whose stored hash or stored
+  /// [`None`] means the budget refused and the engine is abandoned — **not** an empty index. A
+  /// caller that reads it as one goes on to answer a comparison the ledger stopped, which is the
+  /// same mistake [`Match::Refused`] exists to prevent one step further in.
+  ///
+  /// # What is charged, and in front of what
+  ///
+  /// The bucket run is filled with [`NONE`] before anything is hashed, so its own `O(width)` sweep
+  /// is charged before it happens rather than being the one pass nobody paid for. Then each name
+  /// costs [`byte_units`] for the single read its hash makes over it, plus one unit for the link
+  /// step that files it in a bucket. The link pass itself runs afterwards and reads only the
+  /// stored hashes, which is what makes "one step a name" true of the *work* and not merely of the
+  /// loop.
+  ///
+  /// # Ascending chains
+  ///
+  /// The links are laid down back to front, so a bucket's chain runs in ascending order and
+  /// [`Validator::find`] answers with the *first* name of that spelling. Two arguments may share a
+  /// name — draft 5.4.2 refuses that, draft 5.3.2 does not — and the scan this replaced answered
+  /// with the first, so a descending chain would pair a different argument and could settle the
+  /// comparison differently. al8n/smear#196.
+  fn index(
+    &mut self,
+    count: usize,
+    name: impl Fn(usize) -> &'d [u8],
+  ) -> ControlFlow<(), Option<Index>> {
+    let entries = self.scratch.merge_hashes.len();
+    let buckets = self.scratch.merge_buckets.len();
+    let width = buckets_for(count);
+    // Checked rather than argued from the ceiling, for the reason `Names`'s arena range gives:
+    // "the budget cannot admit that many" is exactly the claim that stops being true when somebody
+    // sets a different budget, and a count at or past `NONE` would give a name the sentinel's own
+    // index and terminate its chain on itself.
+    if count >= NONE as usize || !self.charge(u32::try_from(width).unwrap_or(u32::MAX)) {
+      self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+      return ControlFlow::Continue(None);
+    }
+    self.scratch.merge_buckets.resize(buckets + width, NONE);
+    for slot in 0..count {
+      let name = name(slot);
+      if !self.charge(byte_units(name.len()).saturating_add(1)) {
+        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+        return ControlFlow::Continue(None);
+      }
+      self.scratch.merge_hashes.push(MergeName {
+        hash: hash_bytes(name),
+        len: name.len(),
+        next: NONE,
+      });
+    }
+    for slot in (0..count).rev() {
+      let bucket =
+        buckets + (self.scratch.merge_hashes[entries + slot].hash as usize & (width - 1));
+      self.scratch.merge_hashes[entries + slot].next = self.scratch.merge_buckets[bucket];
+      self.scratch.merge_buckets[bucket] = slot as u32;
+    }
+    ControlFlow::Continue(Some(Index {
+      entries,
+      len: count,
+      buckets,
+      width,
+    }))
+  }
+
+  /// The index a `count`-name build most recently left at the top of the two stacks.
+  ///
+  /// The value walk needs no base in its frames because of this: a frame's index is the tail while
+  /// that frame is the top one, and a child's index is pushed above it and truncated away again
+  /// before the parent looks at its own.
+  fn tail_index(&self, count: usize) -> Index {
+    let width = buckets_for(count);
+    Index {
+      entries: self.scratch.merge_hashes.len() - count,
+      len: count,
+      buckets: self.scratch.merge_buckets.len() - width,
+      width,
+    }
+  }
+
+  /// Finds `name` in the list `index` was built over, charging every probe in front of what it
+  /// does.
+  ///
+  /// A probe is one unit, and one unit buys two integers: a candidate whose stored hash or stored
   /// length disagrees is rejected without a byte of it being read. Only a candidate that agrees on
   /// both reaches a `memcmp`, and that `memcmp`'s bytes are charged before it runs.
   ///
   /// That pairing is what lets one charge satisfy both directions at once. Recorded units cannot
   /// understate the bytes read, because every pass over bytes is charged in front of itself; and
-  /// they do not wildly overstate them either, because a scan over a hundred names that differ at
-  /// their first byte costs a hundred units rather than a hundred whole names. A product taken
-  /// before the scan gets the first and refuses valid documents for the second. al8n/smear#196.
+  /// they do not wildly overstate them either, because a candidate that differs at its first byte
+  /// costs one unit rather than a whole name. A product taken before a scan gets the first and
+  /// refuses valid documents for the second.
   ///
-  /// `candidate` is indexed relative to `table`'s start, which is also what [`Match::At`] carries.
+  /// And the probes reach one bucket rather than the whole list, which is what stops the *count*
+  /// of them being quadratic in a width the client chose. A colliding run is still walked and
+  /// still charged a unit a step, so an adversary who constructs one spends their own budget on
+  /// it exactly as they do in `Names::intern`. al8n/smear#196.
+  ///
+  /// `candidate` is indexed relative to the list's start, which is also what [`Match::At`] carries.
   fn find(
     &mut self,
-    table: core::ops::Range<usize>,
+    index: Index,
     wanted: u64,
     name: &[u8],
     candidate: impl Fn(usize) -> &'d [u8],
   ) -> ControlFlow<(), Match> {
-    let base = table.start;
-    for slot in table {
+    if index.len == 0 {
+      return ControlFlow::Continue(Match::Absent);
+    }
+    let mut slot =
+      self.scratch.merge_buckets[index.buckets + (wanted as usize & (index.width - 1))];
+    while slot != NONE {
       if !self.charge(1) {
         self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
         return ControlFlow::Continue(Match::Refused);
       }
-      let (hash, len) = self.scratch.merge_hashes[slot];
-      if hash != wanted || len != name.len() {
-        continue;
+      let entry = self.scratch.merge_hashes[index.entries + slot as usize];
+      if entry.hash == wanted && entry.len == name.len() {
+        if !self.charge(byte_units(entry.len)) {
+          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+          return ControlFlow::Continue(Match::Refused);
+        }
+        if candidate(slot as usize) == name {
+          return ControlFlow::Continue(Match::At(slot as usize));
+        }
       }
-      if !self.charge(byte_units(len)) {
-        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-        return ControlFlow::Continue(Match::Refused);
-      }
-      let index = slot - base;
-      if candidate(index) == name {
-        return ControlFlow::Continue(Match::At(index));
-      }
+      slot = entry.next;
     }
     ControlFlow::Continue(Match::Absent)
   }
@@ -1048,39 +1153,69 @@ where
     // overcharges is not a safer ledger; it is the same denial of service, aimed at the documents
     // the server means to serve.
     //
-    // So both sides are hashed once, here, each name charged for the single pass its hash makes
-    // over it. A step of the scan is then two integers out of `Scratch::merge_hashes` for one
-    // unit, reading no byte of the candidate — and the `memcmp`, charged in front of itself, is
-    // reached only where the hash and the length already agree. An upper bound on the work that
-    // stays near it, which is the pair `Names::intern` takes. al8n/smear#196.
-    self.scratch.merge_hashes.clear();
-    for argument in left.iter().chain(right) {
-      let name = name_bytes(argument.name());
-      if !self.charge(byte_units(name.len())) {
-        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-        return ControlFlow::Continue(true);
+    // So both sides are indexed once, here, each name charged for the single pass its hash makes
+    // over it. A candidate is then two integers for one unit, reading no byte of it, and the
+    // `memcmp` — charged in front of itself — is reached only where the hash and the length
+    // already agree. An upper bound on the work that stays near it, which is the pair
+    // `Names::intern` takes.
+    //
+    // And the index is a *bucket table* and not a flat run, which is the other half. Hashing
+    // alone left the lookup walking every candidate from the front: two lists of `n` distinct
+    // names in the same order cost `1 + 2 + … + n` steps a direction, so a pair cost `n(n + 1)`
+    // and five identical selections of a hundred and twenty-eight short arguments spent
+    // `4 · 128 · 129 = 66,048` of a 65,536 budget before a byte was hashed or a value compared.
+    // A few kilobytes of perfectly ordinary generated document, deterministically refused. Cheap
+    // names do not make a quadratic affordable; they only move which factor is big.
+    //
+    // The left side is the same selection for every comparison a part makes — draft 5.3.2's
+    // common-parent pass checks every member against the first — so its index is built once for
+    // the part and kept, and `Scratch::merge_indexed` is which row it belongs to.
+    // al8n/smear#196.
+    let reuse = self.scratch.merge_indexed == a;
+    let left_index = if reuse {
+      let width = buckets_for(left.len());
+      self.scratch.merge_hashes.truncate(left.len());
+      self.scratch.merge_buckets.truncate(width);
+      Index {
+        entries: 0,
+        len: left.len(),
+        buckets: 0,
+        width,
       }
-      self
-        .scratch
-        .merge_hashes
-        .push((hash_bytes(name), name.len()));
-    }
-    let split = left.len();
-    let tables = split + right.len();
+    } else {
+      // Cleared *before* the build and claimed only after it, so a refusal partway through leaves
+      // no row pointing at a segment that was never finished.
+      self.scratch.merge_indexed = NONE;
+      self.scratch.merge_hashes.clear();
+      self.scratch.merge_buckets.clear();
+      let Some(index) = self.index(left.len(), |slot| name_bytes(left[slot].name()))? else {
+        return ControlFlow::Continue(true);
+      };
+      self.scratch.merge_indexed = a;
+      index
+    };
+    let Some(right_index) = self.index(right.len(), |slot| name_bytes(right[slot].name()))? else {
+      return ControlFlow::Continue(true);
+    };
+    let top = (
+      right_index.entries + right_index.len,
+      right_index.buckets + right_index.width,
+    );
 
     for (slot, argument) in left.iter().enumerate() {
       let name = name_bytes(argument.name());
-      let wanted = self.scratch.merge_hashes[slot].0;
-      let other = match self.find(split..tables, wanted, name, |index| {
+      let wanted = self.scratch.merge_hashes[slot].hash;
+      let other = match self.find(right_index, wanted, name, |index| {
         name_bytes(right[index].name())
       })? {
         Match::At(index) => &right[index],
         Match::Absent => return ControlFlow::Continue(false),
         Match::Refused => return ControlFlow::Continue(true),
       };
-      // The literal comparison hashes above these two tables and leaves behind whatever an early
-      // refusal left it, so the tables' own top is restored before it runs again.
-      self.scratch.merge_hashes.truncate(tables);
+      // The literal comparison indexes above these two and leaves behind whatever an early refusal
+      // left it, so their own top is restored before it runs again.
+      self.scratch.merge_hashes.truncate(top.0);
+      self.scratch.merge_buckets.truncate(top.1);
       if !self.same_value(argument.value(), other.value())? {
         return ControlFlow::Continue(false);
       }
@@ -1089,8 +1224,8 @@ where
     // not this rule's — could still hide a name the other side does not have.
     for (slot, argument) in right.iter().enumerate() {
       let name = name_bytes(argument.name());
-      let wanted = self.scratch.merge_hashes[split + slot].0;
-      match self.find(0..split, wanted, name, |index| {
+      let wanted = self.scratch.merge_hashes[right_index.entries + slot].hash;
+      match self.find(left_index, wanted, name, |index| {
         name_bytes(left[index].name())
       })? {
         Match::At(_) => {}
@@ -1148,25 +1283,20 @@ where
         if !shallow_equal(a, b) {
           return ControlFlow::Continue(false);
         }
-        // Pairing this literal's fields by name is one scan per field, so the names those scans
-        // reject candidates on are hashed once for the node rather than re-read once for every
-        // step of every scan. Charged per name, in front of the pass the hash makes over it.
+        // Pairing this literal's fields by name is one lookup per field, so they are indexed once
+        // for the node rather than re-read once for every step of every scan — the same quadratic
+        // `same_arguments` carried, on the width of an object literal instead of an argument list,
+        // and reachable from the same handful of kilobytes.
         //
-        // The table is the tail of `Scratch::merge_hashes` for exactly as long as this frame is
-        // the top one: a child pushes its own above it and takes it away again on the way out, so
-        // there is no base to carry in the frame. al8n/smear#196.
-        if let Some(others) = b.as_object() {
-          for field in others {
-            let name = name_bytes(field.name());
-            if !self.charge(byte_units(name.len())) {
-              self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-              return ControlFlow::Continue(true);
-            }
-            self
-              .scratch
-              .merge_hashes
-              .push((hash_bytes(name), name.len()));
-          }
+        // The index is the tail of both stacks for exactly as long as this frame is the top one: a
+        // child pushes its own above it and takes it away again on the way out, so there is no
+        // base to carry in the frame. al8n/smear#196.
+        if let Some(others) = b.as_object()
+          && self
+            .index(others.len(), |slot| name_bytes(others[slot].name()))?
+            .is_none()
+        {
+          return ControlFlow::Continue(true);
         }
       }
 
@@ -1176,12 +1306,18 @@ where
         _ => 0,
       };
       if cursor >= children {
-        // The names this frame hashed leave with it. Every path that skips the table build above
-        // leaves the walk rather than reaching this pop, so the frame's own segment is the tail
-        // and the subtraction is exact.
-        let width = b.as_object().map_or(0, <[_]>::len);
-        let keep = self.scratch.merge_hashes.len().saturating_sub(width);
-        self.scratch.merge_hashes.truncate(keep);
+        // The index this frame built leaves with it. Every path that skips the build above leaves
+        // the walk rather than reaching this pop, so the frame's own segment is the tail of both
+        // stacks and the subtractions are exact.
+        let fields = b.as_object().map_or(0, <[_]>::len);
+        let entries = self.scratch.merge_hashes.len().saturating_sub(fields);
+        let buckets = self
+          .scratch
+          .merge_buckets
+          .len()
+          .saturating_sub(buckets_for(fields));
+        self.scratch.merge_hashes.truncate(entries);
+        self.scratch.merge_buckets.truncate(buckets);
         self.scratch.merge_compare.pop();
         continue;
       }
@@ -1191,23 +1327,21 @@ where
 
       let mate = match (a.as_object(), b.as_object()) {
         (Some(fields), Some(others)) => {
-          // Charged for the scan, not for the field: pairing an object literal's fields by name is
-          // quadratic in its width, and the budget has to see that. Charged in *bytes* and not in
-          // entries, for the reason `same_arguments` gives: the width and the spelling are two
-          // factors and a count sees one of them. And charged for the bytes the scan reads rather
-          // than for the bytes it could read, for the other reason `same_arguments` gives: this
-          // one hashes the field it is looking for and then rejects a candidate on two integers.
+          // Charged for the lookup, not for the field. Every reason `same_arguments` gives applies
+          // here unchanged: the width and the spelling are two factors and a count sees one of
+          // them; the bytes are charged for what the comparison reads and not for what it could
+          // read, because a candidate is rejected on two integers; and the candidates are reached
+          // through a bucket rather than from the front of the list, because `w` lookups over `w`
+          // fields was the same quadratic in a width the client writes.
           let name = name_bytes(fields[cursor as usize].name());
           if !self.charge(byte_units(name.len())) {
             self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
             return ControlFlow::Continue(true);
           }
           let wanted = hash_bytes(name);
-          let end = self.scratch.merge_hashes.len();
-          match self.find(end - others.len()..end, wanted, name, |index| {
-            name_bytes(others[index].name())
-          })? {
-            Match::At(index) => index as u32,
+          let index = self.tail_index(others.len());
+          match self.find(index, wanted, name, |slot| name_bytes(others[slot].name()))? {
+            Match::At(slot) => slot as u32,
             Match::Absent => return ControlFlow::Continue(false),
             Match::Refused => return ControlFlow::Continue(true),
           }
@@ -1273,6 +1407,21 @@ where
 // ---------------------------------------------------------------------------------------------
 // free helpers
 // ---------------------------------------------------------------------------------------------
+
+/// How many buckets an index over `count` names gets: the next power of two, and none at all for
+/// an empty list.
+///
+/// One bucket a name, so a list of distinct names averages a chain of one and the pairing that
+/// used to be `n(n + 1)` steps a pair is `n` of them. A client who piles names into one bucket
+/// gets the chain they built and is charged a unit for every step of it, which is the same bargain
+/// `Names` offers and the same reason neither table needs a load factor below one.
+/// al8n/smear#196.
+fn buckets_for(count: usize) -> usize {
+  if count == 0 {
+    return 0;
+  }
+  count.checked_next_power_of_two().unwrap_or(count)
+}
 
 /// What comparing two values at their own level costs in bytes.
 ///

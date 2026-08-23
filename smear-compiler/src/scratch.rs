@@ -799,6 +799,26 @@ pub(crate) fn hash_u32(state: u64, value: u32) -> u64 {
   (state.rotate_left(5) ^ u64::from(value)).wrapping_mul(K)
 }
 
+/// One name in a merge comparison's lookup index.
+///
+/// The whole hash is stored, not a bucket's worth of it, so a colliding candidate is rejected on
+/// two integers and reads no bytes — the same trade [`Names`] makes, and the reason the byte charge
+/// beside it is reached only where the bytes are about to be compared.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MergeName {
+  /// The name's bytes, hashed whole.
+  pub(crate) hash: u64,
+  /// How many bytes the name is.
+  pub(crate) len: usize,
+  /// The next name in this one's bucket, relative to the index's own base, or [`NONE`].
+  ///
+  /// Linked so that a bucket's chain runs in *ascending* order. Two arguments may share a name —
+  /// draft 5.4.2's business and not draft 5.3.2's — and a scan answered with the first of them,
+  /// so a chain that walked them backwards would pair a different one and could settle the
+  /// comparison differently.
+  pub(crate) next: u32,
+}
+
 /// The caller-held working set.
 ///
 /// Create one, hand it to every call, and reuse it. It grows to the high-water mark of the
@@ -895,20 +915,41 @@ pub struct Scratch {
   pub(crate) merge_slots: Vec<u32>,
   /// The value comparison's frame stack: `(index in the left value, index in the right, cursor)`.
   pub(crate) merge_compare: Vec<(u32, u32, u32)>,
-  /// The `(hash, length)` of every name a merge comparison is about to scan against, as a stack.
+  /// Every name a merge comparison is about to look one of its own up against, as a stack.
   ///
-  /// One segment per scan: an argument list's two sides, and one object literal's fields for each
+  /// One segment per index: an argument list's two sides, and one object literal's fields for each
   /// live frame of [`Scratch::merge_compare`], so a literal nested inside an argument sits above
-  /// the tables it was reached through and leaves with the frame that hashed it.
+  /// the lists it was reached through and leaves with the frame that hashed it.
   ///
-  /// It is here for the reason [`Names`] stores a hash beside each entry. A scan that rejects a
-  /// candidate by comparing its bytes has to be charged for those bytes *before* it runs, which
-  /// means charging every candidate the whole of the longest thing it could read; a scan that
-  /// rejects on two integers is charged one unit for the rejection and the bytes only where the
-  /// bytes are about to be read. The first is an upper bound on the work and nothing else — it
-  /// refused thirty-two kilobytes of valid document — and the second is an upper bound that stays
-  /// near it. al8n/smear#196.
-  pub(crate) merge_hashes: Vec<(u64, usize)>,
+  /// It is here for the reason [`Names`] stores a hash beside each entry, and then for the reason
+  /// [`Names`] buckets them. A lookup that rejects a candidate by comparing its bytes has to be
+  /// charged for those bytes *before* it runs, which means charging every candidate the whole of
+  /// the longest thing it could read; a lookup that rejects on two integers is charged one unit
+  /// and reads the bytes only where they are about to matter. And a lookup that reaches the
+  /// candidates through [`Scratch::merge_buckets`] does not visit them all: pairing two lists of
+  /// `n` distinct names by scanning cost `n(n + 1)` steps a pair, which is quadratic in a width
+  /// the client writes, and five identical selections of a hundred and twenty-eight short
+  /// arguments spent 66,048 of a 65,536 budget on the steps alone. al8n/smear#196.
+  pub(crate) merge_hashes: Vec<MergeName>,
+  /// Bucket heads over [`Scratch::merge_hashes`], one power-of-two run per live index.
+  ///
+  /// Chained rather than probed, for the reason [`Names::heads`] is: a chain step is one unit
+  /// whose cost is known before it is taken, and a colliding run can be abandoned in the middle of
+  /// itself. The heads index a segment of [`Scratch::merge_hashes`] *relative to that segment's
+  /// own base*, so a run built for one argument list means the same thing wherever the stack
+  /// happens to have put it.
+  pub(crate) merge_buckets: Vec<u32>,
+  /// The [`Scratch::merge_fields`] row whose argument index currently sits at the bottom of
+  /// [`Scratch::merge_hashes`] and [`Scratch::merge_buckets`], or [`NONE`].
+  ///
+  /// Draft 5.3.2's common-parent pass compares every member of a part against the *first* member,
+  /// so one selection's arguments are the left side of every comparison the part makes. Indexing
+  /// them once per part rather than once per pair is what keeps that side's cost proportional to
+  /// the document rather than to the document times the part's width.
+  ///
+  /// It is set only after a complete build, so a refusal partway through one leaves this at
+  /// [`NONE`] and the next call rebuilds rather than reading a segment that was never finished.
+  pub(crate) merge_indexed: u32,
   /// The document's own names, interned to integers.
   pub(crate) names: Names,
 }
@@ -953,6 +994,8 @@ impl Scratch {
       merge_slots: Vec::new(),
       merge_compare: Vec::new(),
       merge_hashes: Vec::new(),
+      merge_buckets: Vec::new(),
+      merge_indexed: NONE,
       names: Names::new(),
     }
   }
@@ -1002,6 +1045,8 @@ impl Scratch {
     self.merge_slots.clear();
     self.merge_compare.clear();
     self.merge_hashes.clear();
+    self.merge_buckets.clear();
+    self.merge_indexed = NONE;
     self.names.reset();
   }
 
@@ -1042,6 +1087,7 @@ impl Scratch {
       + self.merge_slots.capacity()
       + self.merge_compare.capacity()
       + self.merge_hashes.capacity()
+      + self.merge_buckets.capacity()
       + self.names.capacity()
   }
 }
