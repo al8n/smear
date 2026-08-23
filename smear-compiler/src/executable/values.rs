@@ -664,15 +664,16 @@ where
   where
     V: ValueLike<S>,
   {
-    // Prepaid once, ahead of **both** readers of this field list, and gated on either of them.
+    // Prepaid for 5.6.3's **sort**, and for nothing else any more.
     //
-    // It sat inside 5.6.3's guard, which was right about one consumer and wrong about the other:
-    // 5.6.4 below walks the same list to size its per-scan charge and then rescans it once per
-    // required field, and with only 5.6.4 enabled none of that was paid for. The fold that
-    // computes `written` is itself `O(fields)` and ran *before* the `spend` it feeds, so an
-    // arbitrarily wide literal was walked in full before a nearly empty budget could refuse it —
-    // and with no required fields in the schema, walked and never charged at all.
-    if self.checks_input_objects {
+    // It was widened to 5.6.4 as well, because that rule walked this same list to size a per-scan
+    // charge and none of that walk was paid for. That fold is gone: 5.6.4's scan now charges each
+    // spelling as it resolves it, so the head prepayment's only remaining reader is the sort — the
+    // "prepayment whose reader has moved" shape, created by the repair that moved it.
+    //
+    // And a sort of one field compares nothing, as the duplicate scan that reads its output starts
+    // at `base + 1`. al8n/smear#198.
+    if self.on(Rule::InputObjectFieldUniqueness) && fields.len() > 1 {
       self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
     }
 

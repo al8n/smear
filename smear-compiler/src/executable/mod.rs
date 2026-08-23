@@ -270,14 +270,34 @@ impl Invalid {
       budget: true,
     }
   }
+
+  /// The verdict of a run whose inputs did not describe one document.
+  ///
+  /// The lossless door's other refusal, and the reason [`Invalid::budget_tripped`] is what
+  /// separates them: a `parse` and a `source` that disagree are not a resource problem, so this
+  /// reports `false` there and zero emitted. Nothing was validated either way, and a caller who
+  /// reads only the `Result` learns that from the `Err` alone.
+  pub(crate) const fn unexamined() -> Self {
+    Self {
+      emitted: 0,
+      stopped: false,
+      budget: false,
+    }
+  }
 }
 
 impl core::fmt::Display for Invalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     if self.emitted == 0 {
-      // A bound refused with its own rule filtered out. "0 validation errors" would read as the
-      // opposite of what happened.
-      return f.write_str("resource budget exceeded before the document was fully examined");
+      // Two ways to be `Err` with nothing emitted, and "0 validation errors" would read as the
+      // opposite of what happened for either. `budget` separates them: a bound that refused with
+      // its own rule filtered out, or a lossless `(parse, source)` pair that does not describe one
+      // document.
+      return f.write_str(if self.budget {
+        "resource budget exceeded before the document was fully examined"
+      } else {
+        "the parse and the source are not the same document, so nothing was validated"
+      });
     }
     let plural = if self.emitted == 1 { "" } else { "s" };
     write!(f, "{} validation error{plural}", self.emitted)?;
@@ -445,7 +465,6 @@ where
     scalars: Scalars::resolve(schema),
     checks_directives: checks_directives(rules),
     checks_arguments: checks_arguments(rules),
-    checks_input_objects: checks_input_objects(rules),
     checks_values: checks_values(rules),
     collects_usages: collects_usages(rules),
     resolves_variable_types: rules.contains(Rule::VariablesAreInputTypes),
@@ -630,16 +649,6 @@ const fn checks_arguments(rules: RuleSet) -> bool {
     || rules.contains(Rule::RequiredArguments)
 }
 
-/// Whether either rule that reads an input object literal's **field list** is enabled.
-///
-/// Two consumers, one prepayment: 5.6.3 sorts the list and 5.6.4 rescans it once per required
-/// field. Gating the prepayment on the first alone left the second's own scan of the same list
-/// unpaid — the charge existed, and the rule that switched it on was not the rule that needed it.
-const fn checks_input_objects(rules: RuleSet) -> bool {
-  rules.contains(Rule::InputObjectFieldUniqueness)
-    || rules.contains(Rule::InputObjectRequiredFields)
-}
-
 /// Whether draft 5.6's literal rules are enabled.
 ///
 /// **A property of a definition**, which is why it is not enough on its own to start a value walk:
@@ -704,8 +713,6 @@ struct Validator<'a, 'd, S, K> {
   checks_directives: bool,
   /// [`checks_arguments`] for this run's [`RuleSet`], resolved once.
   checks_arguments: bool,
-  /// [`checks_input_objects`] for this run's [`RuleSet`], resolved once.
-  checks_input_objects: bool,
   /// [`checks_values`] for this run's [`RuleSet`], resolved once.
   checks_values: bool,
   /// Whether draft 5.8.2 is enabled, which is one of the two readers of a variable's packed type.
@@ -815,7 +822,7 @@ where
   /// | prep, per fragment | before the row is pushed | bytes, for `index_fragments`' sort | none — same |
   /// | `collect_definition_edges` | loop top, before `resolve` | depth | none — it is the traversal |
   /// | ” spread name | before `find_fragment` | bytes | none |
-  /// | 5.2.2.1 / 5.2.1.1 operation names | before the sort **and** before 5.2.1.1's subject clone | bytes | `OperationNameUniqueness` \|\| `OperationTypeExistence` |
+  /// | 5.2.2.1 operation names | before the sort | bytes | `OperationNameUniqueness` && **> 1 named operation** |
   /// | 5.5.1.2/5.5.1.3 | before `check_type_condition` | bytes | [`reports_type_conditions`] |
   /// | 5.5.2.2 cycles | before the edge is read | one edge | `FragmentSpreadsMustNotFormCycles` |
   /// | ” cycle subject | before the clone | bytes | ” — the population is edges, not fragments |
@@ -823,18 +830,19 @@ where
   /// | 5.2.4.1 collection | loop top, before `resolve` | depth | `SingleRootField` |
   /// | ” directive scan | before `conditional_directive` reads them | bytes | ” |
   /// | ” **response name** | before the alias comparison | **bytes** | ” |
-  /// | ” condition / spread name | before `type_of` / `find_fragment` | bytes | ” |
+  /// | ” condition / spread name | before `type_of` / `find_fragment` | bytes | ” && **a non-empty fragment table** |
   /// | selection walk | loop top, before `resolve` | depth | none — it is the traversal |
-  /// | ” field / spread / inline condition | before each resolution | bytes | none |
+  /// | ” field / inline condition | before each resolution | bytes | none |
+  /// | ” spread name | before `find_fragment` | bytes | **a non-empty fragment table** |
   /// | 5.7.x directives | head of `check_directives` | bytes | [`Validator::reaches_directives`] |
   /// | 5.4.x arguments | head of `check_arguments` | bytes | [`Validator::reaches_arguments`] |
-  /// | 5.4.3 presence half | before each declared argument's rescan | bytes × entries | `check` && `RequiredArguments`; its sizing fold is paid by the row above |
-  /// | 5.6.3/5.6.4 field list | head of `check_input_object` | bytes | [`checks_input_objects`] |
-  /// | 5.6.4 presence half | before each required field's rescan | bytes × entries | `InputObjectRequiredFields`; its sizing fold is paid by the row above |
+  /// | 5.4.3 presence half | before **each written argument** the scan resolves | bytes | `check` && `RequiredArguments`; the scan stops where it matches |
+  /// | 5.6.3 field list | head of `check_input_object` | bytes | `InputObjectFieldUniqueness` && **> 1 field** |
+  /// | 5.6.4 presence half | before **each written field** the scan resolves | bytes | `InputObjectRequiredFields`; the scan stops where it matches |
   /// | value walk | loop top, before `resolve` | depth | [`Validator::walks_values`], and the family's `HAS_VARIABLES` |
   /// | ” object field name | before the schema lookup | bytes | ” |
   /// | scalar / enum literal | before the coercion reads it | bytes | `check` && `ValuesOfCorrectType` |
-  /// | 5.8.1 index build | in the collection loop, before the sort | bytes | `collects_usages` \|\| `VariableUniqueness` |
+  /// | 5.8.1 index build | in the collection loop, before the sort | bytes | (`collects_usages` \|\| `VariableUniqueness`) && **> 1 declaration** |
   /// | variable declared type | before `pack_type` | bytes | `VariablesAreInputTypes` \|\| (`checks_values` && this definition has a default) |
   /// | 5.8.3/5.8.5 usage | before the index search | bytes | [`collects_usages`] |
   /// | ” duplicate run | before the marking | entries | `AllVariablesUsed` — the bitset's only reader |
@@ -843,6 +851,17 @@ where
   /// | 5.8.4 | — | reads bits | charged when the index was built |
   /// | 5.2.1.1, 5.2.3.1 | — | `O(1)` per operation | charged at prep |
   /// | 5.3.2 merge engine | its own ledger | [`Budget::merge_work`](super::Budget::merge_work) | [`merges`] |
+  /// | 5.3.2 conflict subject | before the clone | bytes | `FieldSelectionMerging` |
+  /// | 5.5.2.3 possible objects | before **each word** the intersection reads | words | `FragmentSpreadIsPossible` && the types differ |
+  /// | projection + whole-root check (lossless) | before both | bytes of `max(source, parse text)` | none — it is the door |
+  ///
+  /// # And three populations every row answers for separately
+  ///
+  /// **n = 0**, **n = 1**, and **the shortest-circuiting path**. They are three questions and not
+  /// one: an empty population is a comparator never invoked, a singleton is a sort that compares
+  /// nothing while the *search* over it still reads a name, and a short circuit is a scan that
+  /// stops. Answering only one of the three is how a charge for a sort survived onto a list with
+  /// one element in it, and how a charge for a binary search survived onto an index with none.
   ///
   /// # Four standing arguments the rows lean on
   ///
@@ -1276,8 +1295,12 @@ where
         Selection::FragmentSpread(spread) => {
           let name = spread.name();
           // `find_fragment` binary-searches the name index, so this reads the spelling about
-          // `log F` times. Same constant multiple as the sort that built the index.
-          self.spend_name(name)?;
+          // `log F` times — **when there is an index**. With no fragment declared the search
+          // invokes its comparator zero times and reads nothing, and the report below charges its
+          // own copy through `Validator::subject`. al8n/smear#198.
+          if !self.scratch.fragments.is_empty() {
+            self.spend_name(name)?;
+          }
           let to = self.find_fragment(name_bytes(name));
           if to.is_none() && self.on(Rule::FragmentSpreadTargetDefined) {
             let subject = self.subject(name)?;
@@ -1321,7 +1344,16 @@ where
     // The shape is worth naming: **centralising a charge can make an older prepayment redundant**,
     // and a repair that removes a reader leaves every prepayment that named it over-charging. See
     // this module's header for the sweep that question implies.
-    if self.on(Rule::OperationNameUniqueness) {
+    // Same shape one rule over, and found by crossing the audit's sub-shapes rather than named by
+    // review: this prepays 5.2.2.1's **sort**, and a sort of one named operation compares nothing,
+    // as the group scan that reads it walks `start + 1..end` over an empty range.
+    let named = self
+      .scratch
+      .operations
+      .iter()
+      .filter(|row| row.named)
+      .count();
+    if self.on(Rule::OperationNameUniqueness) && named > 1 {
       for index in 0..self.scratch.operations.len() {
         if !self.scratch.operations[index].named {
           continue;
@@ -1713,8 +1745,11 @@ where
         }
         Selection::FragmentSpread(spread) => {
           // `find_fragment` binary-searches the name index and `condition_applies` below hashes
-          // the target's condition; both read bytes the document chose.
-          self.spend_name(spread.name())?;
+          // the target's condition; both read bytes the document chose — and neither happens with
+          // no fragment declared, where the search compares nothing and there is no target.
+          if !self.scratch.fragments.is_empty() {
+            self.spend_name(spread.name())?;
+          }
           let Some(ordinal) = self.find_fragment(name_bytes(spread.name())) else {
             continue;
           };
@@ -1964,10 +1999,17 @@ where
     // 5.8.1 reads the index directly; 5.8.3 and 5.8.5 read it through the value walk. Nothing
     // else looks at it.
     let indexed = self.collects_usages || self.on(Rule::VariableUniqueness);
+    // The charge below is for the **sort**, and a one-element sort performs no comparison — as the
+    // duplicate scan that reads its output starts at `base + 1` and performs none either. The
+    // search side is charged separately, at the usage, where a singleton index does invoke its
+    // predicate once. al8n/smear#198.
+    let sorted = indexed && definitions.len() > 1;
     if indexed {
       for (index, described) in definitions.iter().enumerate() {
-        let variable = described.node().variable();
-        self.spend(units(name_bytes(variable.name()).len()), *variable.span())?;
+        if sorted {
+          let variable = described.node().variable();
+          self.spend(units(name_bytes(variable.name()).len()), *variable.span())?;
+        }
         self.scratch.keys.push(index as u32);
       }
       let end = self.scratch.keys.len();

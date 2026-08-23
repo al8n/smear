@@ -239,7 +239,11 @@ where
     let check = frame.flags & Frame::CHECK != 0;
     let document = self.document;
     let name = spread.name();
-    self.spend_name(name)?;
+    // Nothing here reads the spelling when no fragment is declared: `find_fragment` returns on an
+    // empty index without a comparison, and the arms below it never run.
+    if !self.scratch.fragments.is_empty() {
+      self.spend_name(name)?;
+    }
 
     if let Some(directives) = spread.directives() {
       self.check_directives(

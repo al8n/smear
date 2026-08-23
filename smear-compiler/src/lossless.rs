@@ -332,6 +332,22 @@ where
 /// two are diagnostic-for-diagnostic identical, which is what `tests/validator_lossless.rs`
 /// compares.
 ///
+/// # A mismatched pair is an error, not a weakened answer
+///
+/// `parse` and `source` are two arguments and nothing pairs them, so a caller can hand over a parse
+/// of different bytes. When they do, this returns `Err` with
+/// [`LosslessInvalid::recovery`] `None` and
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) **false** — the one verdict that
+/// means "these inputs do not describe a document", distinct from the budget refusal below, which
+/// sets that flag.
+///
+/// The alternative was an incomplete [`Recovery`], and it is worse here for two reasons. It needs a
+/// `skipped` count, and counting what was not projected is exactly the walk this declined to make —
+/// the same wall al8n/smear#198's eighth round hit, where inventing the number was worse than not
+/// having one. And it would be `Ok`: a caller who does not read the recovery sees a clean verdict,
+/// which is the failure this check exists to remove, one indirection later. This crate has already
+/// ruled on "nothing was examined" once, for the budget refusal, and ruled `Err`.
+///
 /// # What a refusal here looks like
 ///
 /// The same thing every other refusal looks like: `Err`, with
@@ -359,12 +375,33 @@ where
     let (emitted, stopped) = refuse_projection(source, budget, rules, sink);
     return Err(LosslessInvalid {
       invalid: Invalid::refused(emitted, stopped),
-      // Nothing was projected, and the count of what was not is the green root's child list:
-      // exact or over, never under, and `O(1)`. See this function's header.
       // Nothing looked at anything, so there is nothing to report.
       recovery: None,
     });
   };
+  // The pair is verified as a **whole root**, byte for byte, before anything is projected.
+  //
+  // The projector verifies each *definition* it projects against the source at that definition's
+  // own range, and al8n/smear#198's third round took that to mean a mismatched pair answers itself
+  // — a bad definition is refused and counted into [`Recovery`], so the caller is told. That is
+  // true of every mismatch the projector **sees**. It is not true of a `source` that begins with
+  // the parse's text and then adds to it: every projected definition matches, nothing is skipped,
+  // [`Recovery::is_complete`] reports `true`, and the operations the caller appended are never
+  // looked at. A clean verdict on a document nobody validated, which is worse than either answer
+  // this could give instead.
+  //
+  // `SyntaxText`'s comparison walks the green tokens against the source and allocates nothing, so
+  // this is `O(tokens)` — bounded by, and already paid for by, the prepayment above, which prices
+  // `max(source.len(), parse.green().text_len())`. It sits *after* that charge and *before* the
+  // projection, which is the only placement that neither validates a stale AST nor does unpriced
+  // work to avoid it.
+  if parse.syntax().text() != source {
+    return Err(LosslessInvalid {
+      invalid: Invalid::unexamined(),
+      recovery: None,
+    });
+  }
+
   let (document, recovery) = project_executable_document_recovered(parse, source);
   match validate_charged(schema, &document, scratch, budget, rules, sink, left) {
     Ok(()) => Ok(recovery),

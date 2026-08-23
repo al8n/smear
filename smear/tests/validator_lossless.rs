@@ -779,30 +779,72 @@ fn a_dropped_fragment_can_invent_a_finding() {
   assert!(clean.is_empty(), "{clean:#?}");
 }
 
-/// The `(parse, source)` pair is verified, not trusted.
+/// The `(parse, source)` pair is verified as a **whole root**, not definition by definition.
+///
+/// Two mismatches, and only one of them was ever caught. A source of the same length with different
+/// bytes fails every definition's own verification, so nothing projects and the recovery says so —
+/// which is what this test used to assert, and what made the check look sufficient.
+///
+/// A source that **begins with the parse's text and adds to it** fails nothing. Every projected
+/// definition matches at its own range, none is skipped, `Recovery::is_complete()` reports `true`,
+/// and the operations the caller appended are never looked at: a clean verdict on a document nobody
+/// validated. al8n/smear#198.
+///
+/// Both are now one answer — `Err`, no recovery, and `budget_tripped()` false to separate it from
+/// the budget refusal, which is the other way to be `Err` with nothing emitted.
 #[test]
-fn a_mismatched_source_projects_nothing() {
+fn a_mismatched_pair_validates_nothing_and_says_so() {
   let schema = build(SCHEMA);
   let budget = Budget::default();
 
-  let source = "{ dog { meowVolume } }";
-  let other = "{ dog { barkVolume } }";
-  let parse = parse_executable_document(source);
-  assert!(!parse.has_errors());
+  let check = |parsed: &str, given: &str| {
+    let parse = parse_executable_document(parsed);
+    assert!(!parse.has_errors());
+    let mut scratch = Scratch::new();
+    let mut collected = Vec::new();
+    let mut sink = Collect::new(&mut collected);
+    let verdict =
+      validate_executable_lossless(&schema, &parse, given, &mut scratch, &budget, &mut sink);
+    let refused = verdict.err().unwrap_or_else(|| {
+      panic!("a parse of {parsed:?} against a source of {given:?} came back Ok")
+    });
+    assert_eq!(refused.recovery(), None, "{refused}");
+    assert_eq!(refused.invalid().emitted(), 0);
+    assert!(
+      !refused.invalid().budget_tripped(),
+      "a mismatch is not a resource problem"
+    );
+    // The composite: the verdict's own sentence, then the recovery state. Both halves say nothing
+    // was looked at, and they say it for different reasons — the pair, and the absent projection.
+    assert_eq!(
+      refused.to_string(),
+      "the parse and the source are not the same document, so nothing was validated \
+       (nothing was projected)"
+    );
+    assert!(collected.is_empty());
+  };
 
-  let mut scratch = Scratch::new();
-  let mut collected = Vec::new();
-  let mut sink = Collect::new(&mut collected);
-  let recovery =
-    validate_executable_lossless(&schema, &parse, other, &mut scratch, &budget, &mut sink)
-      .expect("a document with no projected definitions fires no rule");
+  // Same length, different bytes: every definition fails its own verification.
+  check("{ dog { meowVolume } }", "{ dog { barkVolume } }");
 
-  assert_eq!(
-    recovery.projected(),
-    0,
-    "the tree was projected against text it was not parsed from"
+  // **The prefix.** Every definition of the parse matches the source at its own range, so the
+  // per-definition check sees nothing wrong — and `query later` is never validated. Before the
+  // whole-root check this returned `Ok` with a complete recovery.
+  check(
+    "{ dog { name } }",
+    "{ dog { name } } query later { dog { nickname } }",
   );
-  assert!(collected.is_empty());
+
+  // And the pair that does match still validates, so the check has not simply refused everything.
+  let source = "{ dog { name } }";
+  let parse = parse_executable_document(source);
+  let mut scratch = Scratch::new();
+  let mut kept = Vec::new();
+  let mut sink = Collect::new(&mut kept);
+  let recovery =
+    validate_executable_lossless(&schema, &parse, source, &mut scratch, &budget, &mut sink)
+      .expect("a matching pair validates");
+  assert!(recovery.is_complete());
 }
 
 /// The lossless door reuses one `Scratch` across both doors, and does not poison it.

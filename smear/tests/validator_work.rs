@@ -78,6 +78,7 @@ type Dog {
   withOpts(opts: Opts): Boolean
   withLoose(opts: Loose): Boolean
   withJson(payload: Json): Boolean
+  withNeedy(opts: Needy): Boolean
 }
 
 scalar Json
@@ -87,6 +88,7 @@ type Message { body: String }
 
 input Opts { need: Int! a: Int }
 input Loose { a: Int b: Int }
+input Needy { need: Int! a: Int }
 
 directive @onField repeatable on FIELD
 directive @onFragDef(if: Boolean) on FRAGMENT_DEFINITION
@@ -1492,36 +1494,57 @@ fn the_subscription_pass_charges_the_names_it_compares() {
   );
 }
 
-/// The input object's field list is prepaid for **both** of its readers.
+/// Each reader of an input object's field list pays for its own walk of it.
 ///
-/// 5.6.3 sorts the list and 5.6.4 walks it to size its per-scan charge and then rescans it once per
-/// required field. The prepayment sat inside 5.6.3's guard, so with only 5.6.4 enabled the sizing
-/// fold ran over an arbitrarily wide literal before the `spend` it feeds — and the rescan's charge
-/// was the only one taken.
+/// Round five of al8n/smear#198 widened one head prepayment to cover both 5.6.3's sort and 5.6.4's
+/// sizing fold, because that fold walked the list unpaid. Round eleven deleted the fold — 5.6.4's
+/// scan now charges each spelling as it resolves it — which left the prepayment covering a reader
+/// that no longer needed it. So the gate narrowed back to 5.6.3, and this pins **both** halves
+/// separately: neither rule pays for the other's walk, and each still pays for its own.
+///
+/// The type has a **required** field and the literal does not supply it, so 5.6.4's presence scan
+/// runs to the end of the written list instead of stopping at a match. Round five's version used a
+/// type with no required fields at all, where 5.6.4 walks nothing — which is why that version could
+/// not survive the narrowing.
 #[test]
-fn an_input_object_field_list_is_prepaid_for_both_readers() {
+fn each_reader_of_an_input_object_field_list_pays_for_its_own_walk() {
   let schema = build(SCHEMA);
   const FIELDS: usize = 5_000;
   let literal = "a: 1 ".repeat(FIELDS);
-  // `Loose` declares **no required fields**, which is the sharp case: 5.6.4 still walks the whole
-  // written list to size its per-scan charge, and then finds nothing to spend that charge on. The
-  // walk happened and nothing paid for it.
-  let source = std::format!("{{ dog {{ withLoose(opts: {{ {literal} }}) }} }}");
+  let source = std::format!("{{ dog {{ withNeedy(opts: {{ {literal} }}) }} }}");
 
-  // 5.6.2 is the baseline: it descends the same literal and pays for each field name one level
-  // down exactly as 5.6.4 does, reads no scalar literal, and never walks the field list. So the
-  // descent cancels and what is left is the list walk itself.
+  // 5.6.2 is the baseline: it descends the literal and charges each field name once at the object
+  // arm, reads no scalar literal, and walks the field list itself not at all.
+  let names = min_budget(&schema, &source, RuleSet::only(Rule::InputObjectFieldNames));
+  let unique = min_budget(
+    &schema,
+    &source,
+    RuleSet::only(Rule::InputObjectFieldUniqueness),
+  );
   let required = min_budget(
     &schema,
     &source,
     RuleSet::only(Rule::InputObjectRequiredFields),
   );
-  let names = min_budget(&schema, &source, RuleSet::only(Rule::InputObjectFieldNames));
-  println!("input object: 5.6.4 alone {required} units, 5.6.2 alone {names} units");
+  println!("input object: 5.6.2 {names} units, 5.6.3 {unique} units, 5.6.4 {required} units");
 
+  let one_walk = FIELDS as u32 * 9 / 10;
   assert!(
-    required >= names + FIELDS as u32,
-    "5.6.4 walked a {FIELDS}-field list and paid {} units more than a rule that does not walk it",
+    unique >= names + one_walk,
+    "5.6.3 sorts a {FIELDS}-field list and paid {} units more than a rule that does not",
+    unique.saturating_sub(names)
+  );
+  assert!(
+    required >= names + one_walk,
+    "5.6.4 scans a {FIELDS}-field list and paid {} units more than a rule that does not",
+    required.saturating_sub(names)
+  );
+
+  // And **one** walk each, not two. This is what the narrowed gate buys: before it, 5.6.4 paid the
+  // head prepayment for a sort it does not run *and* its own scan, and this bound catches that.
+  assert!(
+    required < names + FIELDS as u32 * 3 / 2,
+    "5.6.4 paid {} units for one walk of a {FIELDS}-field list",
     required.saturating_sub(names)
   );
 }
@@ -2366,5 +2389,145 @@ fn the_required_argument_scan_stops_where_it_matches() {
     last >= first + (OTHERS as u32) * 20,
     "writing the required argument last cost only {} units more than writing it first",
     last.saturating_sub(first)
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// 16. n = 0, n = 1, and the short circuit — three questions, not one
+// ---------------------------------------------------------------------------------------------
+
+/// A spread's name is charged when there is an index to search for it.
+///
+/// `find_fragment` binary-searches the fragment index, and on an **empty** index it invokes its
+/// comparator zero times and reads nothing. The charge in front of it was cleared as "always runs
+/// to completion when charged", which is the `n = 1` answer given to the `n = 0` question.
+#[test]
+fn an_empty_fragment_index_reads_no_spread_name() {
+  let schema = build(SCHEMA);
+  // 5.3.1 only: `FragmentSpreadTargetDefined` is off, so the undefined spread is not reported and
+  // its spelling is not cloned either.
+  let rules = RuleSet::only(Rule::FieldSelections);
+  let document = |pad: usize| {
+    let long = "f".repeat(pad);
+    let mut source = String::from("{ dog {");
+    for _ in 0..200 {
+      source.push_str(&std::format!(" ...{long}"));
+    }
+    source.push_str(" } }");
+    source
+  };
+
+  let short = min_budget(&schema, &document(1), rules);
+  let long = min_budget(&schema, &document(20_000), rules);
+  println!("empty fragment index: 1-byte {short} units, 20,000-byte {long} units");
+  assert!(
+    long - short < 1_000,
+    "200 spreads of a 20,000-byte name cost {} units against an index with nothing in it",
+    long - short
+  );
+}
+
+/// A one-element sort is charged for the comparisons it does not make.
+///
+/// The variable index's per-declaration charge pays for the **sort**, and a sort of one compares
+/// nothing — as the duplicate scan reading its output starts at `base + 1` and compares nothing
+/// either. The same crossing catches 5.2.2.1's operation-name prepayment, which was not named by
+/// review.
+#[test]
+fn a_singleton_sort_is_not_charged_for_comparing() {
+  let schema = build(SCHEMA);
+  let long = "n".repeat(20_000);
+
+  // One declaration, no duplicate, no usage: nothing reports, so no clone charge masks the build.
+  let vars = RuleSet::only(Rule::VariableUniqueness);
+  let one = min_budget(&schema, "query q($v: Boolean) { dog { name } }", vars);
+  let one_long = min_budget(
+    &schema,
+    &std::format!("query q(${long}: Boolean) {{ dog {{ name }} }}"),
+    vars,
+  );
+  println!("singleton variable index: short {one} units, 20,000-byte {one_long} units");
+  assert!(
+    one_long - one < 1_000,
+    "one declaration of 20,000 bytes cost {} units for a sort that compares nothing",
+    one_long - one
+  );
+
+  // Two declarations *do* sort, so the charge is not simply gone.
+  let two = min_budget(
+    &schema,
+    "query q($a: Boolean, $b: Boolean) { dog { name } }",
+    vars,
+  );
+  let two_long = min_budget(
+    &schema,
+    &std::format!("query q(${long}a: Boolean, ${long}b: Boolean) {{ dog {{ name }} }}"),
+    vars,
+  );
+  println!("two declarations: short {two} units, 20,000-byte {two_long} units");
+  assert!(
+    two_long - two >= 4_000,
+    "two declarations of 20,000 bytes cost {} units for a sort that does compare",
+    two_long - two
+  );
+
+  // 5.2.2.1's operation names, the same crossing one rule over.
+  let ops = RuleSet::only(Rule::OperationNameUniqueness);
+  let single = min_budget(&schema, "query q { dog { name } }", ops);
+  let single_long = min_budget(
+    &schema,
+    &std::format!("query q{long} {{ dog {{ name }} }}"),
+    ops,
+  );
+  println!("singleton operation index: short {single} units, 20,000-byte {single_long} units");
+  assert!(
+    single_long - single < 1_000,
+    "one named operation of 20,000 bytes cost {} units for a sort that compares nothing",
+    single_long - single
+  );
+}
+
+/// Draft 5.3.2's conflict subject is charged before it is cloned.
+///
+/// The last direct `source().clone()` in the crate, in a file this branch was fenced out of until
+/// the rebase onto al8n/smear#196 put it in reach. The response name a conflict names is an
+/// **alias**, which the selection walk never charges — it charges the field's own spelling.
+#[test]
+fn a_merge_conflict_subject_is_charged_before_it_is_cloned() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::FieldSelectionMerging);
+  // One conflict, whose subject is the alias. Merge budget raised so this measures the validation
+  // ledger and not draft 5.3.2's own.
+  let budget = Budget::default().with_merge_work(u32::MAX - 1);
+  let document = |pad: usize| {
+    let alias = "a".repeat(pad);
+    std::format!("{{ dog {{ {alias}x: name {alias}x: nickname }} }}")
+  };
+
+  let refused = |source: &str, work: u32| {
+    let b = budget.with_validation_work(work);
+    run(&schema, source, &b, rules).refused
+  };
+  let min = |source: &str| {
+    let (mut lo, mut hi) = (0u32, u32::MAX - 1);
+    assert!(!refused(source, u32::MAX - 1));
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if refused(source, mid) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    lo
+  };
+
+  let short = min(&document(1));
+  let long = min(&document(20_000));
+  println!("merge conflict subject: 1-byte alias {short} units, 20,000-byte {long} units");
+  assert!(
+    long - short >= 2_000,
+    "a 20,000-byte alias was cloned into a conflict diagnostic for {} units",
+    long - short
   );
 }
