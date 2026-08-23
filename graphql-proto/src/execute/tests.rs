@@ -325,21 +325,37 @@ fn collection_work(sdl: &str, query: &str) -> u32 {
   executor.collection_work()
 }
 
-/// `n` repeats of one response key charge exactly `2n`, and the middle term is the interner.
+/// `n` repeats of one response key charge an exact total, and every term of it is named.
 ///
-/// The exact-value case, and it is exact rather than bounded because nothing about it depends on
-/// the hash: one key means one bucket with one entry, so the first selection interns after
-/// comparing nothing and every later one matches on its first comparison. Draft §6.1's lookup over
-/// the document's one definition, plus `n` selections examined, plus `n - 1` comparisons is the
-/// whole of it.
+/// Exact rather than bounded because nothing about it depends on the hash: one key means one bucket
+/// with one entry, so the first selection interns after comparing nothing and every later one
+/// matches on its first comparison.
 ///
-/// **This is the plant against an uncharged lookup.** Deleting the charge leaves `n + 1`, and
-/// nothing about the response changes.
+/// The terms, and the arithmetic is written out rather than folded so a moved number says which one
+/// moved. The key is `a`, one byte, so every [`byte_units`] below is `1`.
+///
+/// - draft §6.1's lookup over the document's one definition;
+/// - one visit per selection examined;
+/// - the **first** intern: one pass to hash the key, no entry to compare, one pass to copy it into
+///   the arena;
+/// - each **later** intern: one pass to hash, one entry compared, and one pass to `memcmp` it —
+///   reached only because the stored hash and the length agreed, which on a repeat of the same key
+///   they always do;
+/// - `expand`'s probe of the field's own spelling, once for the one group the repeats collapse to.
+///
+/// **The plants.** Delete the entry charge and the `n - 1` comparisons go. Delete either
+/// `take_bytes` and the total stops moving with the key's length — which
+/// `distinct_response_keys_are_linear_however_they_are_spelled` measures across lengths and this
+/// one pins at one.
 #[test]
 fn a_repeated_response_key_charges_one_comparison_each_time() {
+  use crate::collect::byte_units;
+
   const REPEATS: u32 = 1024;
   /// The document is one shorthand operation, which is what draft §6.1's lookup reads.
   const LOOKUP: u32 = 1;
+  /// `a`, the one response key and also the one field name `expand` probes.
+  const KEY: usize = 1;
 
   let mut query = std::string::String::from("{");
   for _ in 0..REPEATS {
@@ -347,44 +363,192 @@ fn a_repeated_response_key_charges_one_comparison_each_time() {
   }
   query.push_str(" }");
 
+  let pass = byte_units(KEY);
+  let first_intern = 2 * pass;
+  let later_intern = (REPEATS - 1) * (2 * pass + 1);
+  let expand_probe = pass;
+
   assert_eq!(
     collection_work(ONE_FIELD, &query),
-    LOOKUP + 2 * REPEATS - 1,
-    "one definition read by draft §6.1, {REPEATS} selections examined, and {} comparisons to find \
-     the one interned key each time after the first; a smaller total means a name lookup is not \
-     charging what it compares",
+    LOOKUP + REPEATS + first_intern + later_intern + expand_probe,
+    "one definition read by draft §6.1, {REPEATS} selections examined, {} comparisons to find the \
+     one interned key each time after the first, and {pass} unit(s) for every pass any of them \
+     makes over the key's bytes; a smaller total means a name lookup is not charging what it \
+     compares, or is charging entries where the work is bytes",
     REPEATS - 1
   );
 }
 
-/// `n` *distinct* response keys stay linear, which is the whole of al8n/smear#141.
+/// `n` *distinct* response keys stay linear **however they are spelled**: al8n/smear#141,
+/// al8n/smear#172 and al8n/smear#196 together.
 ///
 /// Distinct on purpose, and a fixture edited to repeat a key destroys the case. A repeated key
 /// interns once and then finds a one-entry table, so it measures like a fix whether or not
 /// anything was fixed — against all three scans at once.
+///
+/// # One spelling is not a case, and five of them are not either
+///
+/// The version al8n/smear#141 shipped named its keys `k0 … k4095` and bounded the total by
+/// `3 * KEYS`. It passed for a reason with nothing to do with the property under test: `k{i}` is
+/// the one ordinary spelling the unfinalized multiply-fold happened to scatter. Substituting
+/// `field{i}` — same count, same shape — measured **169,785** against that same 12,288 ceiling.
+/// Honest input, no collision search, red by 13.8×.
+///
+/// al8n/smear#172 replaced it with five *named* spellings and an absolute two-sided count, and the
+/// second half of that was right: a **ratio** cannot do this job, because the quantity it would
+/// divide by is the one that depends on the spelling, and a denominator that grows with the defect
+/// hides it. Time ratios are worse still — five interleaved passes spread 35%, while these integer
+/// counts reproduce exactly.
+///
+/// The first half was the same mistake one round later. Five exemplars are five points, and what
+/// the hash does is **positional**: it turns on how many values a byte position takes and on where
+/// a chunk boundary falls among the varying bytes. All five named rows sat on one side of that
+/// plane, and 4,096 eight-digit base-36 aliases — `x00000000 … x0000035r`, a document a generator
+/// writes — charged **11,943** units against this ceiling of 8,192, with base-63 at **18,401**.
+/// Two of the five named rows were already emitting duplicate hashes (4,004 and 3,996 for 4,096
+/// names) and stayed green because the duplicates were few. al8n/smear#196.
+///
+/// # So the rows are generated by crossing the two axes that decide it
+///
+/// Radix — 10, 16, 36 and 63, the alphabets a counter is written in — against width, chosen so the
+/// varying bytes land before, on and after **both** chunk boundaries. Twenty-four rows for six
+/// lines of code, and the coordinates of a failure name the mechanism instead of naming a fixture:
+/// the rows that fail without the fold between rounds are exactly widths 8 and 16 at radices 36 and
+/// 63, which is "one byte past a boundary" written down.
+///
+/// The five named spellings stay above them. `k{i}` is the row that stayed green under every plant
+/// this gate has had, and deleting it would delete the evidence for why one row is not a gate.
+///
+/// # The plants, and they land on different rows
+///
+/// Delete the `finalize` call from `smear_schema::hash_bytes`: `field{i}` reads 12,388 and the four
+/// width-6 rows read 44,687, 114,177, 360,209 and **776,036** — short names, where the fold between
+/// rounds cannot help because for eight bytes or fewer its loop body never runs. Delete
+/// `h ^= h >> 32` instead: the width-8 and width-16 rows at radices 36 and 63 read 11,943, 11,766,
+/// 18,401 and 17,568, and every width-6 row stays green. Each defect leaves the other one's rows
+/// passing, which is the whole reason both axes are here.
 #[test]
-fn distinct_response_keys_are_linear() {
+fn distinct_response_keys_are_linear_however_they_are_spelled() {
   const KEYS: u32 = 4096;
 
-  let mut query = std::string::String::from("{");
-  for i in 0..KEYS {
-    query.push_str(&std::format!(" k{i}: a"));
-  }
-  query.push_str(" }");
+  /// The **comparisons**, over and above every term of the total that is not one.
+  ///
+  /// That subtraction is al8n/smear#172's doing and it makes the gate sharper, not looser. The
+  /// ledger now also charges a pass over every key's bytes — hashing it and copying it into the
+  /// arena — and those terms grow with the *width* axis this fixture varies on purpose, so a
+  /// ceiling over the whole total would have had to be loose enough to admit the widest row and
+  /// would then have admitted a clustering hash on the narrowest. `row` computes what a row owes
+  /// before a single comparison, and these two bound what is left.
+  ///
+  /// The comparison term is what this gate is about, and it is under one per key: with the whole
+  /// 64-bit hash mixed, every row below costs about three quarters of a comparison per key — summed
+  /// over every table size the interner grows through, not just the last. One per key is that with
+  /// room, and still three orders of magnitude under the scan.
+  const CEILING: u32 = KEYS;
 
-  let work = collection_work(ONE_FIELD, &query);
-  assert!(
-    work > KEYS,
-    "a successful or failing probe still compares something, so {KEYS} keys cannot cost only \
-     {work}; that total says the interner lookup is not charged"
-  );
-  assert!(
-    work <= 3 * KEYS,
-    "{work} units for {KEYS} distinct keys. Scanning the names instead of probing them costs \
-     about {} — the ceiling here is a linear multiple, so a quadratic lookup misses it by three \
-     orders of magnitude",
-    u64::from(KEYS) * u64::from(KEYS) / 2
-  );
+  /// A lookup that compares nothing costs exactly the overhead, so a floor above it catches a
+  /// charge deleted outright — which `work > KEYS` alone did not.
+  const FLOOR: u32 = KEYS / 2;
+
+  const NAMED: [&str; 5] = [
+    "k{i}",
+    "field{i}",
+    "h{i:0>8}",
+    "user{i:0>4}Name",
+    "pppp{i:04x}",
+  ];
+  const RADICES: [&[u8]; 4] = [
+    b"0123456789",
+    b"0123456789abcdef",
+    b"0123456789abcdefghijklmnopqrstuvwxyz",
+    b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_",
+  ];
+  /// A name is `x` plus the counter, so these are lengths 7, 8, 9, 16, 17 and 18.
+  const WIDTHS: [usize; 6] = [6, 7, 8, 15, 16, 17];
+
+  fn named(scheme: usize, index: u32) -> std::string::String {
+    match scheme {
+      0 => std::format!("k{index}"),
+      1 => std::format!("field{index}"),
+      2 => std::format!("h{index:0>8}"),
+      3 => std::format!("user{index:0>4}Name"),
+      _ => std::format!("pppp{index:04x}"),
+    }
+  }
+
+  fn generated(radix: &[u8], width: usize, index: u32) -> std::string::String {
+    let mut digits = std::vec![radix[0]; width];
+    let mut rest = index as usize;
+    for slot in (0..width).rev() {
+      digits[slot] = radix[rest % radix.len()];
+      rest /= radix.len();
+    }
+    let mut name = std::string::String::from("x");
+    name.push_str(core::str::from_utf8(&digits).expect("ascii"));
+    name
+  }
+
+  /// The query for one spelling, and everything its total costs that is **not** a comparison.
+  ///
+  /// Derived from the row's own names rather than written down, for the reason the collision search
+  /// in `smear_compiler::scratch` gives: a term computed from the fixture moves when the fixture
+  /// does, and a term copied out of a measurement goes stale silently.
+  fn row(spell: impl Fn(u32) -> std::string::String) -> (std::string::String, u32) {
+    use crate::collect::byte_units;
+
+    let mut query = std::string::String::from("{");
+    // Draft §6.1's one definition.
+    let mut overhead = 1;
+    for index in 0..KEYS {
+      let key = spell(index);
+      // One visit for the selection, two passes over the key's bytes to intern it — hashing it and
+      // copying it into the arena, since a distinct key never reaches the `memcmp` — and one pass
+      // over the field's own one-byte spelling for `expand`'s schema probe.
+      overhead += 1 + 2 * byte_units(key.len()) + byte_units(1);
+      query.push_str(&std::format!(" {key}: a"));
+    }
+    query.push_str(" }");
+    (query, overhead)
+  }
+
+  let mut rows: std::vec::Vec<(std::string::String, std::string::String, u32)> =
+    std::vec::Vec::new();
+  for (scheme, label) in NAMED.iter().enumerate() {
+    let (query, overhead) = row(|index| named(scheme, index));
+    rows.push(((*label).into(), query, overhead));
+  }
+  for radix in RADICES {
+    for width in WIDTHS {
+      let (query, overhead) = row(|index| generated(radix, width, index));
+      rows.push((
+        std::format!("x{{i:radix {} width {width}}}", radix.len()),
+        query,
+        overhead,
+      ));
+    }
+  }
+
+  for (label, query, overhead) in &rows {
+    let (floor, ceiling) = (overhead + FLOOR, overhead + CEILING);
+    let work = collection_work(ONE_FIELD, query);
+    assert!(
+      work > floor,
+      "{work} units for {KEYS} distinct keys spelled {label}, under a floor of {floor}. A probe \
+       that succeeds or fails still compares something, and {overhead} is what interning them free \
+       of charge reads as",
+    );
+    assert!(
+      work <= ceiling,
+      "{work} units for {KEYS} distinct keys spelled {label}, against a ceiling of {ceiling} — \
+       {overhead} of which is the walk, the interning passes and the schema probes, so the \
+       comparisons are {}. Scanning the names instead of probing them costs about {}; a total \
+       between the two is the hash dropping an honest document's names into a handful of buckets, \
+       which is what the avalanche step and the fold between rounds in `smear_schema::hash_bytes` \
+       exist to stop",
+      work.saturating_sub(*overhead),
+      u64::from(KEYS) * u64::from(KEYS) / 2
+    );
+  }
 }
 
 /// A flat fragment chain stays linear, which is the other half of the same defect.
@@ -394,22 +558,30 @@ fn distinct_response_keys_are_linear() {
 /// walk stopped spending native frames but still scanned every definition in the document once per
 /// spread, so a chain that no longer killed the process still took quadratic time to answer.
 ///
-/// Five terms, all linear in the chain: draft §6.1's lookup over the definitions, the index pass
-/// over them again, one push per fragment, one visit per selection, and about one comparison per
-/// spread.
+/// Eight terms, all linear in the chain: draft §6.1's lookup over the definitions, the index pass
+/// over them again, one push per fragment, one visit per selection, about one comparison per
+/// spread, and — al8n/smear#172 — a pass over the bytes of each spread's name to hash it, another
+/// over the one it matches, and one over each fragment's type condition before the schema is probed
+/// with it. Every name here is short enough for a pass to be one unit, so the total is about eight
+/// units a link.
+///
+/// The bound is two-sided and both sides are what matters: eight a link against the `LINKS² / 2`
+/// that scanning the definitions per spread costs is three orders of magnitude, so a ceiling with
+/// room in it still separates linear from quadratic.
 #[test]
 fn a_flat_fragment_chain_is_linear() {
   const LINKS: u32 = 4096;
 
   let work = collection_work(ONE_FIELD, &fragment_chain(LINKS));
   assert!(
-    work >= 3 * LINKS,
-    "the index pass alone is a definition and a fragment each, and every spread then compares at \
-     least the entry it returns; {work} units for {LINKS} links is short of that, which is what an \
-     unindexed table or an uncharged one reads as"
+    work >= 6 * LINKS,
+    "the index pass alone is a definition and a fragment each, every spread is a visit, and \
+     resolving one hashes its name and compares at least the entry it returns; {work} units for \
+     {LINKS} links is short of that, which is what an unindexed table, an uncharged one, or one \
+     charging entries where the work is bytes reads as"
   );
   assert!(
-    work <= 6 * LINKS,
+    work <= 10 * LINKS,
     "{work} units for a {LINKS}-link chain. Scanning the definitions per spread costs about {} \
      instead",
     u64::from(LINKS) * u64::from(LINKS) / 2
@@ -680,13 +852,24 @@ fn the_index_pass_reads_each_definition_once() {
   const OPERATIONS: u32 = 512;
   /// The one fragment the selected operation spreads.
   const FRAGMENTS: u32 = 1;
+  /// Hashing that fragment's name, which `Table::fill` does to decide its bucket. `F` is one byte,
+  /// so the pass over it is one unit. al8n/smear#196.
+  const FRAGMENT_NAMES: u32 = 1;
   /// What one walk of the document reads.
   const DEFINITIONS: u32 = OPERATIONS + FRAGMENTS;
   /// Draft §6.1's lookup, which matches `Op0` on the document's first definition and stops.
   const LOOKUP: u32 = 1;
-  /// The whole request: the lookup, the root's spread, the pass, the comparison that finds the
-  /// fragment, and the field inside it.
-  const BUDGET: u32 = LOOKUP + DEFINITIONS + FRAGMENTS + 3;
+  /// Everything the request costs that is not the lookup or the index pass, and every name in it
+  /// is short enough that a pass over its bytes is one unit.
+  ///
+  /// The root's spread and the field inside the fragment are a visit each. Resolving the spread
+  /// hashes `F` (one), compares the one entry it finds (one) and `memcmp`s it (one). The fragment's
+  /// `on Query` condition is hashed before the schema is probed with it (one). Interning `a` hashes
+  /// it and copies it (two), and `expand` hashes the same spelling again to resolve the field
+  /// against the schema (one).
+  const REST: u32 = 2 + 3 + 1 + 2 + 1;
+  /// The whole request.
+  const BUDGET: u32 = LOOKUP + DEFINITIONS + FRAGMENTS + FRAGMENT_NAMES + REST;
 
   let mut query = std::string::String::from("query Op0 { ...F }\n");
   for index in 1..OPERATIONS {
@@ -750,8 +933,21 @@ const COLLIDING: usize = 512;
 const COLLIDING_DEFINITIONS: u32 = COLLIDING as u32 + 1;
 
 /// The index pass's charge for a colliding fixture: one per definition walked, one per fragment
-/// pushed.
-const COLLIDING_INDEX: u32 = COLLIDING_DEFINITIONS + COLLIDING as u32;
+/// pushed, and one `byte_units` for each name `Table::fill` hashes to decide its bucket.
+///
+/// Derived from the names rather than written down, for the reason `colliding_spread_cost` gives:
+/// the search that produces them does not promise how long they are, and a term over their bytes
+/// has to move when they do. A push is a constant and the hash in front of it is not — the count
+/// charges alone left `fill` reading every spelling for free, which is the wrong-dimension defect
+/// this module's other rows are about, at the one site where the charge in front was a count.
+/// al8n/smear#196.
+fn colliding_index_cost(names: &[std::string::String]) -> u32 {
+  use crate::collect::byte_units;
+
+  COLLIDING_DEFINITIONS
+    + COLLIDING as u32
+    + names.iter().map(|name| byte_units(name.len())).sum::<u32>()
+}
 
 /// Draft §6.1's lookup over a colliding fixture, which every one of them enters with no operation
 /// name — so it reads every definition, because ambiguity is only decidable at the end.
@@ -772,13 +968,28 @@ fn colliding_fragment_names() -> std::vec::Vec<std::string::String> {
 /// subset of the same bits. That is what lets the interner fixture pick one `mask` and have it hold
 /// through every rehash the table does on its way to that size.
 fn colliding_names(prefix: &str, mask: u32) -> std::vec::Vec<std::string::String> {
+  colliding_names_of(prefix, mask, COLLIDING, 0)
+}
+
+/// `count` names that land in one bucket of `mask + 1`: `prefix`, then a counter zero-padded to at
+/// least `width` digits.
+///
+/// The padding is what lets the *same* collision structure be searched for at several **lengths**,
+/// which is the axis a ledger over entries cannot see. Searched again per width rather than padded
+/// after the fact, because padding a name changes its hash and so changes its bucket.
+fn colliding_names_of(
+  prefix: &str,
+  mask: u32,
+  count: usize,
+  width: usize,
+) -> std::vec::Vec<std::string::String> {
   let mut by_bucket: std::vec::Vec<std::vec::Vec<std::string::String>> =
     std::vec::from_elem(std::vec::Vec::new(), mask as usize + 1);
   for candidate in 0u64.. {
-    let name = std::format!("{prefix}{candidate}");
+    let name = std::format!("{prefix}{candidate:0width$}");
     let at = smear_schema::bucket(smear_schema::hash_bytes(name.as_bytes()), mask) as usize;
     by_bucket[at].push(name);
-    if by_bucket[at].len() == COLLIDING {
+    if by_bucket[at].len() == count {
       return core::mem::take(&mut by_bucket[at]);
     }
   }
@@ -792,6 +1003,28 @@ fn colliding_document(names: &[std::string::String], spread: &str) -> std::strin
     query.push_str(&std::format!("fragment {name} on Query {{ a }}\n"));
   }
   query
+}
+
+/// Everything a colliding fixture costs beyond draft §6.1's lookup and the index pass, when the
+/// one spread finds its fragment on the **first** entry it compares.
+///
+/// Derived from `spread`'s own length rather than written down, because half of it is a charge over
+/// bytes and the search that produces these names does not promise how long they are.
+///
+/// The terms: the root's spread and the field inside the fragment are a visit each; resolving the
+/// spread hashes the spelling, compares the bucket head and `memcmp`s it; the fragment's `on Query`
+/// condition is hashed before the schema is probed with it; interning the field's key `a` hashes it
+/// and copies it into an empty arena, comparing nothing; and `expand` hashes `a` again to resolve
+/// the field against the schema.
+fn colliding_spread_cost(spread: &str) -> u32 {
+  use crate::collect::byte_units;
+
+  let visits = 2;
+  let lookup = 2 * byte_units(spread.len()) + 1;
+  let condition = byte_units("Query".len());
+  let key = 2 * byte_units("a".len());
+  let probe = byte_units("a".len());
+  visits + lookup + condition + key + probe
 }
 
 /// Indexing the document's fragments is charged, so a budget too small to hold it refuses.
@@ -812,16 +1045,19 @@ fn indexing_the_documents_fragments_is_charged() {
   let query = colliding_document(&names, &head);
   let (schema, document) = compile_against(ONE_FIELD, &query);
 
-  let refused = collected_under(&schema, &document, COLLIDING_LOOKUP + COLLIDING_INDEX - 1);
+  let index = colliding_index_cost(&names);
+  let refused = collected_under(&schema, &document, COLLIDING_LOOKUP + index - 1);
   assert!(
     refused.is_some(),
     "a budget one unit short of the index pass must refuse rather than index for free"
   );
 
-  let served = collected_under(&schema, &document, COLLIDING_LOOKUP + COLLIDING_INDEX + 8);
+  let rest = colliding_spread_cost(&head);
+  let served = collected_under(&schema, &document, COLLIDING_LOOKUP + index + rest);
   assert_eq!(
     served, None,
-    "and eight units past it is enough for the spread, its one comparison and the field it reaches"
+    "and {rest} units past it is enough for the spread, its one comparison, the passes each of \
+     those makes over a name, and the field it reaches"
   );
 }
 
@@ -837,16 +1073,146 @@ fn a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment() {
   let head = names.last().expect("the set is not empty").clone();
   let query = colliding_document(&names, &head);
 
-  // Draft §6.1's lookup over every definition, the index pass, the root's one selection, the one
-  // comparison that finds the bucket head, and the one field inside the fragment. Interning that
-  // field's key compares nothing: it is the first name in an empty arena.
-  let expected = COLLIDING_LOOKUP + COLLIDING_INDEX + 3;
+  // Draft §6.1's lookup over every definition, the index pass, and the constant every one of these
+  // fixtures pays to spread the bucket's head once. The index term is what this gate watches: it is
+  // one unit per definition and one per fragment, and `COLLIDING` names in a single bucket must not
+  // move it, because chaining pushes at a head and never probes.
+  let expected = COLLIDING_LOOKUP + colliding_index_cost(&names) + colliding_spread_cost(&head);
   assert_eq!(
     collection_work(ONE_FIELD, &query),
     expected,
     "{COLLIDING} fragment names in one bucket must cost one unit each to index and no more; a \
      total above this is an insertion whose cost depends on the names"
   );
+}
+
+/// The collection ledger tracks the **bytes** a document-chosen name costs, not merely the entries
+/// it walks past.
+///
+/// # Why a third gate, when the two above already price the pile-up and the chain
+///
+/// Those price *entries*: `k` colliding names walk `k²/2` of them and the budget records `k²/2`.
+/// Neither says anything about `L`, the length of the names, and draft §2.1.9 puts no local ceiling
+/// on one. Charging entries while running bytes recorded `O(k²)` and ran `O(k² · L)` — about 512
+/// aliases of thirty-two kilobytes fit under the default `max_interned_bytes`, and their 130,816
+/// charged comparisons moved roughly four gigabytes. It does not even need the pile-up: a single
+/// long key looked up once per object position hashes and `memcmp`s its whole length for the one or
+/// two units the entry costs, and positions are a factor the query never pays for. al8n/smear#172.
+///
+/// Four sites, one row each, so a repair reaching one and not the others cannot be green:
+///
+/// - the **response-key interner**, whose keys are the document's aliases;
+/// - the **fragment index**, whose keys are the document's fragment names;
+/// - the **schema probe** a type condition goes through, whose key is the document's spelling and
+///   whose table is the schema's — the residual that cleared that one cleared the *run length* and
+///   said nothing about the hash;
+/// - the **schema probe `expand` makes with a field's name**, which collection cannot have charged
+///   for, because what collection interned is the alias.
+///
+/// Each row is the same structure at three lengths: the same collision, the same number of entries
+/// compared, the same number of selections. Only the spelling grows. A ledger over entries reads
+/// the same number three times, which is the assertion below.
+///
+/// # And the totals are exact, which says *which* passes were charged
+///
+/// The interner row's total is written out term by term. The `k²/2` walk contributes no byte term
+/// at all: the whole hash is stored beside each entry, so a bucket collision is rejected on two
+/// integers and reads nothing. That absence is the second half of the repair and the reason the
+/// first half is affordable.
+///
+/// **The plants.** Delete any one `take_bytes`/`spend_bytes` and that row's three totals collapse
+/// onto each other. Drop the stored hash and compare bytes on every chain step instead: the
+/// interner row's exact total gains a `k²/2 · byte_units` term and fails on the first width.
+#[test]
+fn the_collection_charge_tracks_the_bytes_a_name_costs() {
+  use crate::collect::byte_units;
+
+  /// Names in one bucket. Small because the search costs about `RUN × buckets` trial hashes and is
+  /// repeated at every width, and because one bucket holding every name is the worst case at any
+  /// size.
+  const RUN: usize = 64;
+  /// One bucket of 128, and a set colliding under this mask collides under every narrower one the
+  /// table grows through.
+  const MASK: u32 = 127;
+  /// Zero-padding widths, so the names are 5, 37 and 261 bytes: inside one hash chunk, several,
+  /// and many.
+  const WIDTHS: [usize; 3] = [4, 36, 260];
+
+  let mut interner = std::vec::Vec::new();
+  let mut fragments = std::vec::Vec::new();
+  let mut conditions = std::vec::Vec::new();
+  let mut field_names = std::vec::Vec::new();
+
+  for width in WIDTHS {
+    let names = colliding_names_of("k", MASK, RUN, width);
+    let length = names[0].len();
+    assert!(
+      names.iter().all(|name| name.len() == length),
+      "the search must produce names of one length, or the rows are not the same structure"
+    );
+
+    // Response keys: every name is interned, so the `RUN`th walks the `RUN - 1` already in its
+    // bucket and rejects each on the stored hash without reading a byte.
+    let mut query = std::string::String::from("{");
+    for name in &names {
+      query.push_str(&std::format!(" {name}: a"));
+    }
+    query.push_str(" }");
+    let work = collection_work(ONE_FIELD, &query);
+    // Draft §6.1's one definition; one visit per selection; two passes over each key — hashing it
+    // and copying it into the arena — with no third, because a distinct key never reaches the
+    // `memcmp`; the `RUN(RUN - 1)/2` entries the chains compare; and `expand`'s probe of the field's
+    // own one-byte spelling, once per group.
+    let walk = (RUN * (RUN - 1) / 2) as u32;
+    let expected =
+      1 + RUN as u32 + 2 * RUN as u32 * byte_units(length) + walk + RUN as u32 * byte_units(1);
+    assert_eq!(
+      work, expected,
+      "{RUN} keys of {length} bytes in one bucket: each hashed once and copied once, {walk} \
+       entries compared and none of them read"
+    );
+    interner.push((length, work));
+
+    // Fragment names: one spread of the chain's *tail*, so the lookup walks every entry in the
+    // bucket and `memcmp`s exactly the one that matches.
+    let tail = names.first().expect("the set is not empty").clone();
+    let query = colliding_document(&names, &tail);
+    fragments.push((length, collection_work(ONE_FIELD, &query)));
+
+    // Type conditions: inline fragments on a type the schema does not define, so each is hashed,
+    // missed and skipped. The spelling is the only thing that grows.
+    let mut query = std::string::String::from("{");
+    for name in &names {
+      query.push_str(&std::format!(" ... on {name} {{ a }}"));
+    }
+    query.push_str(" }");
+    conditions.push((length, collection_work(ONE_FIELD, &query)));
+
+    // Field names, which `expand` probes the schema with once per group and per object position.
+    // The **alias** is what collection interns, so a short key beside a long field name is a charge
+    // of one or two units in front of a hash of whatever the client wrote — and none of these names
+    // being a field the schema defines changes nothing about what hashing one costs.
+    let mut query = std::string::String::from("{");
+    for (index, name) in names.iter().enumerate() {
+      query.push_str(&std::format!(" k{index}: {name}"));
+    }
+    query.push_str(" }");
+    field_names.push((length, collection_work(ONE_FIELD, &query)));
+  }
+
+  for (label, row) in [
+    ("response keys", &interner),
+    ("fragment names", &fragments),
+    ("type conditions", &conditions),
+    ("field names", &field_names),
+  ] {
+    assert!(
+      row[0].1 < row[1].1 && row[1].1 < row[2].1,
+      "{label}: the charge does not move with the length: {row:?}. The same collision at three \
+       lengths costs three different amounts of work, and a ledger that counts entries reads the \
+       same number three times"
+    );
+  }
 }
 
 /// A probe run that runs out of budget stops where the budget did, not at the end of the bucket.
@@ -872,7 +1238,8 @@ fn a_refused_probe_run_stops_at_the_refusal() {
   let (schema, document) = compile_against(ONE_FIELD, &query);
 
   let mut space = Space;
-  let budget = COLLIDING_LOOKUP + COLLIDING_INDEX + 1 + SLACK;
+  let index = colliding_index_cost(&names);
+  let budget = COLLIDING_LOOKUP + index + 1 + SLACK;
   let limits = Limits {
     max_selection_visits: NonZeroU32::new(budget).expect("not zero"),
     ..Limits::default()
@@ -886,7 +1253,7 @@ fn a_refused_probe_run_stops_at_the_refusal() {
   // the thing the ceiling refused and the bound below holds for a reason the fixture is not about.
   let spent = executor.collection_work();
   assert!(
-    spent > COLLIDING_LOOKUP + COLLIDING_INDEX,
+    spent > COLLIDING_LOOKUP + index,
     "{spent} units spent means this run was refused before it reached the bucket — at draft §6.1's \
      lookup or at the index pass — so the comparison bound below is vacuous"
   );
@@ -1025,6 +1392,10 @@ fn many_operations(count: u32) -> std::string::String {
 #[test]
 fn the_operation_lookup_charges_one_unit_per_definition_read() {
   const OPERATIONS: u32 = 512;
+  /// What collecting the one field `a` costs once the lookup has finished: one visit for the
+  /// selection, one pass over its one-byte key to hash it and one to copy it into the arena, and
+  /// one over the same spelling for `expand`'s schema probe.
+  const FIELD: u32 = 4;
 
   let query = many_operations(OPERATIONS);
   let (schema, document) = compile_against(ONE_FIELD, &query);
@@ -1042,8 +1413,8 @@ fn the_operation_lookup_charges_one_unit_per_definition_read() {
   );
   assert_eq!(
     executor.collection_work(),
-    2,
-    "and it cost one unit for that definition plus one for the field it collects"
+    1 + FIELD,
+    "and it cost one unit for that definition plus {FIELD} for the field it collects"
   );
 
   // The last operation, by name: every definition before it has to be read.
@@ -1059,8 +1430,8 @@ fn the_operation_lookup_charges_one_unit_per_definition_read() {
   );
   assert_eq!(
     executor.collection_work(),
-    OPERATIONS + 1,
-    "and pays one unit for each, plus the field"
+    OPERATIONS + FIELD,
+    "and pays one unit for each, plus the {FIELD} the field costs"
   );
 
   // No name: the walk cannot stop early, because ambiguity is only decidable at the second
@@ -3287,5 +3658,404 @@ fn unsubscribing_releases_the_events_values() {
     live.get(),
     0,
     "draft §6.2.3.3 is where the subscription's resources are cleaned up"
+  );
+}
+
+/// The poison amount is refused, so the public maximum does not restore an unbounded byte pass.
+///
+/// # Arithmetic, because the input is thirty-two gibibytes
+///
+/// `byte_units` is `len / 8 + 1` and saturates at [`u32::MAX`], which a length of about thirty-two
+/// gibibytes reaches — and **every larger length produces the same number**, so past that point the
+/// charge has stopped being a function of the length at all. `Visits::take` used to be
+/// `left.checked_sub(work)` and nothing else, which is a complete bound for every charge a *count*
+/// can produce and not for that one: `Limits::max_selection_visits` is a `NonZeroU32` an operator
+/// may set to `u32::MAX`, `left` therefore starts at `u32::MAX`, and the saturated charge fits
+/// exactly once. `Schema::sym` then hashed the whole thing on a ledger that believed it had paid.
+///
+/// The name is not constructible in a test, so what is pinned here is the arithmetic that decides
+/// it — the shipped expression against the replacement over the same inputs, exactly as
+/// `an_overflowing_charge_refuses_at_the_largest_limit_too` pins `Work::take` one crate over. This
+/// is that finding, in the sibling ledger: the byte charges that made a poison necessary were added
+/// to both, and the poison to one. al8n/smear#196.
+///
+/// This half is the *amount*, and it is target-independent: `Visits::take` takes a `u32`, so
+/// [`u32::MAX`] can be handed to it on any platform whatever a length could produce there. The
+/// length that produces it is a separate fixture, because not every platform has one.
+///
+/// **The plant.** Delete the `work == u32::MAX` arm from `Visits::take` and the first assertion
+/// reads `true` — the poison accepted, and every saturated charge accepted with it.
+#[test]
+fn the_poison_charge_is_refused_at_the_largest_limit_too() {
+  use crate::collect::Visits;
+
+  // The largest budget `Limits::max_selection_visits` accepts, which is where the defect lived.
+  let mut visits = Visits::new(u32::MAX);
+  assert!(
+    !visits.take(u32::MAX),
+    "the poison fits `checked_sub` exactly once at this limit, and admitting it is admitting a \
+     pass whose size the ledger has stopped tracking"
+  );
+  assert_eq!(
+    visits.spent(),
+    0,
+    "and the refusal spends nothing: the callers that degrade rather than raise depend on a \
+     refused charge leaving the budget where it was, which is where this ledger differs from \
+     `Work` and must go on differing"
+  );
+
+  // One unit below the poison is an ordinary charge and is still admitted. This ledger counts
+  // *down*, so the whole budget is spendable and only the poison amount is not — which is the one
+  // way it differs from `Work`, whose ceiling is a total it may not rest on.
+  let mut visits = Visits::new(u32::MAX);
+  assert!(
+    visits.take(u32::MAX - 1),
+    "one unit short of the ceiling is inside it"
+  );
+  assert!(visits.take(1), "and the last unit is still a unit");
+  assert!(!visits.take(1), "and then there is nothing left");
+
+  // Under an ordinary ceiling nothing moves: the limit refuses exactly where it always did.
+  let mut visits = Visits::new(10);
+  assert!(visits.take(10));
+  assert!(!visits.take(1));
+  let mut visits = Visits::new(10);
+  assert!(!visits.take(u32::MAX));
+  assert!(visits.take(10), "and the refusal left the budget intact");
+}
+
+/// The length that produces the poison, on the targets whose `usize` can hold one.
+///
+/// # Why this half carries a `cfg` and the half above does not
+///
+/// The smallest saturating length is `(u32::MAX - 1) * 8`, about thirty-four billion bytes. A
+/// 32-bit `usize` tops out at 4,294,967,295 — **eight times smaller than the shortest name that
+/// could saturate** — so on that target `byte_units` cannot return [`u32::MAX`] at all, and the
+/// constant naming the boundary does not fit the type that would have to hold it. The sibling
+/// fixture below asserts exactly that, so this is not a portability workaround: it is two
+/// platforms, each pinned against its own arithmetic.
+///
+/// Deriving the constant in a wider integer and narrowing at the call site was the alternative and
+/// would have been worse — it manufactures a `usize` the target cannot have, and pins arithmetic
+/// no 32-bit build ever performs. A vacuous claim is better stated than simulated.
+/// al8n/smear#196.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn a_saturating_length_is_refused_at_the_largest_limit_too() {
+  use crate::collect::{Visits, byte_units};
+
+  /// The smallest length whose `byte_units` saturates: `len / 8 + 1 > u32::MAX`.
+  const SATURATING: usize = (u32::MAX as usize) * 8;
+
+  assert_eq!(
+    byte_units(SATURATING),
+    u32::MAX,
+    "the fixture is aimed at the saturation and this length no longer reaches it"
+  );
+  assert_eq!(
+    byte_units(SATURATING * 4),
+    u32::MAX,
+    "and four times the name costs the same, which is the whole reason the value is poison rather \
+     than a quantity"
+  );
+
+  let mut visits = Visits::new(u32::MAX);
+  assert!(
+    !visits.take_bytes(SATURATING),
+    "a saturated byte charge fits `checked_sub` exactly once at this limit, and admitting it is \
+     admitting a pass whose size the ledger has stopped tracking"
+  );
+  assert_eq!(visits.spent(), 0, "and it spends nothing on the way out");
+}
+
+/// On a narrower target there is no saturating length to refuse, and that is the reason for the
+/// `cfg` above rather than an excuse for it.
+///
+/// `byte_units` divides by eight before it adds one, so the widest value it can return is
+/// `usize::MAX / 8 + 1`. On a 32-bit target that is 536,870,912 — an eighth of [`u32::MAX`], and
+/// two orders of magnitude below the value the poison is about. The address space is smaller than
+/// the shortest name that could saturate, so the boundary is not merely untested there: it does
+/// not exist. al8n/smear#196.
+#[cfg(not(target_pointer_width = "64"))]
+#[test]
+fn a_narrower_target_has_no_saturating_length_at_all() {
+  use crate::collect::byte_units;
+
+  assert!(
+    byte_units(usize::MAX) < u32::MAX,
+    "the whole address space charges {} units, and the poison is {}; if these ever met, the \
+     fixture above would have to run here too",
+    byte_units(usize::MAX),
+    u32::MAX
+  );
+}
+
+/// A count charge in front of a byte pass does not pay for it: the fragment name is priced.
+///
+/// # The one site where the charge in front was still a count
+///
+/// `Table::fill` hashes every fragment name to decide its bucket, and the two charges before it
+/// counted *definitions* and *fragments*. The comment on that pass defended the count on the
+/// grounds that it reads every name exactly once for the executor's whole life, with no factor a
+/// client can apply to it. No factor is true; it is also not the question. Draft §2.1.9 puts no
+/// ceiling on a name, so one pass over one name is still a pass whose length the client chose — and
+/// a **valid** document of one long fragment and the spread that selects it exhausts those two
+/// counts exactly, after which `fill` hashed the whole spelling before the metered lookup behind it
+/// could refuse anything.
+///
+/// The row below is the same document at two name lengths. Only the spelling grows, so a ledger
+/// over counts reads the same number twice. al8n/smear#196.
+///
+/// **The plants.** Delete the `name_units` charge in `Table::charge` and the two boundaries become
+/// equal, and the exhaustion case hashes its whole name on a budget that had none for it.
+#[test]
+fn a_fragment_names_hashing_pass_is_charged_for_its_bytes() {
+  use crate::collect::byte_units;
+
+  /// One fragment of the given name, and the spread that selects it.
+  fn document(name: &str) -> std::string::String {
+    std::format!("{{ ...{name} }}\nfragment {name} on Query {{ a }}\n")
+  }
+
+  let short = "F";
+  let long = "F".repeat(4_000);
+  let long = long.as_str();
+
+  // Every count in front of `fill`, to the unit: draft §6.1's lookup reads both definitions
+  // because no operation name is given, the root's one spread is a selection examined, the index
+  // pass walks both definitions, and one fragment is pushed. At exactly this budget the counts are
+  // exhausted and nothing is left for the spelling — which is the construction, and it is one unit
+  // rather than a comfortable margin because a fixture that stops short of `fill` proves nothing
+  // about `fill`. Verified in both directions: with the byte charge deleted this same budget hashes
+  // the whole name.
+  const COUNTS: u32 = 2 + 1 + 2 + 1;
+
+  for name in [short, long] {
+    let source = document(name);
+    let (schema, document) = compile_against(ONE_FIELD, &source);
+    let mut space = Space;
+    let mut executor = Executor::with_limits(
+      &schema,
+      &document,
+      Limits {
+        max_selection_visits: NonZeroU32::new(COUNTS).expect("not zero"),
+        ..Limits::default()
+      },
+    );
+    let _ = executor.start(&mut space, None, Value::Obj);
+    let hashed = executor.fragment_name_bytes_hashed();
+    assert_eq!(
+      hashed,
+      0,
+      "a budget that covers the counts and nothing else hashed {hashed} bytes of a \
+       {}-byte fragment name",
+      name.len()
+    );
+  }
+
+  // And the total a served request pays moves with the spelling.
+  let least = |name: &str| -> u32 {
+    let source = document(name);
+    let (schema, parsed) = compile_against(ONE_FIELD, &source);
+    let clears = |limit: u32| collected_under(&schema, &parsed, limit).is_none();
+    let (mut lo, mut hi) = (1u32, 1u32 << 20);
+    assert!(clears(hi), "the fixture does not clear {hi} visits");
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if clears(mid) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    assert!(clears(lo) && !clears(lo - 1), "{lo} is not a boundary");
+    lo
+  };
+  let narrow = least(short);
+  let wide = least(long);
+  std::println!(
+    "fragment name: {narrow} visits at 1 byte, {wide} at {}",
+    long.len()
+  );
+  assert_eq!(
+    wide - narrow,
+    // The name is read three times over a served request — hashed into the index, hashed again by
+    // the lookup, and `memcmp`d once the bucket agrees — and only the first of those was missing.
+    3 * (byte_units(long.len()) - byte_units(short.len())),
+    "the whole difference between {narrow} and {wide} is the passes over the spelling, and one of \
+     the three is the index pass this fixture is about"
+  );
+}
+
+/// The fragment index's charge does not depend on whether this executor already built it.
+///
+/// # A cached table saves the walking, and must not save the verdict
+///
+/// `Fragments::build` re-charges the pass when the table is already there, in the same amounts and
+/// the same order, precisely so that the budget's remainder is a function of the operation and
+/// never of the executor's history. The byte charge had to join that. Charging it on the build path
+/// alone would refuse a request on an executor's first `start` and serve the identical request on
+/// its second — the table having been left behind by the first — which is the defect
+/// `Names::reset` closed one crate over, arriving by a different route. A ceiling a client clears
+/// by sending the request twice is not a ceiling. al8n/smear#196.
+///
+/// **The plant.** Drop the `name_units` re-charge from the cached branch of `Fragments::build` and
+/// the second boundary falls below the first by the fragment names' own bytes.
+#[test]
+fn a_warm_fragment_table_charges_what_a_cold_one_charges() {
+  let name = "F".repeat(2_000);
+  let source = std::format!("{{ ...{name} }}\nfragment {name} on Query {{ a }}\n");
+  let (schema, document) = compile_against(ONE_FIELD, &source);
+
+  // `runs` is how many times the same executor is asked for the same operation. The first leaves
+  // the table behind whenever it got far enough to build it; the second is the one that must not
+  // profit from it.
+  let clears = |limit: u32, runs: usize| -> bool {
+    let mut space = Space;
+    let mut executor = Executor::with_limits(
+      &schema,
+      &document,
+      Limits {
+        max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
+        ..Limits::default()
+      },
+    );
+    let mut served = false;
+    for _ in 0..runs {
+      served = executor.start(&mut space, None, Value::Obj).is_ok();
+      if !served {
+        continue;
+      }
+      while let Some(request) = executor.poll_resolve(&mut space) {
+        let id = request.id();
+        executor.handle_resolved(&mut space, id, Value::Text);
+      }
+      served = executor
+        .poll_response()
+        .expect("nothing is outstanding")
+        .error_count()
+        == 0;
+    }
+    served
+  };
+
+  let least = |runs: usize| -> u32 {
+    let (mut lo, mut hi) = (1u32, 1u32 << 20);
+    assert!(clears(hi, runs), "the fixture does not clear {hi} visits");
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if clears(mid, runs) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    assert!(
+      clears(lo, runs) && !clears(lo - 1, runs),
+      "{lo} is not a boundary"
+    );
+    lo
+  };
+
+  let cold = least(1);
+  let warm = least(2);
+  std::println!("fragment index: {cold} visits on the first start, {warm} on the second");
+  assert_eq!(
+    cold, warm,
+    "the same document needs {cold} visits the first time this executor is asked and {warm} the \
+     second; what a cached table saves is the walking, and it must not save the verdict"
+  );
+
+  // And the table really is being reused, so the equality above is not the equality of two cold
+  // runs. At a limit that serves, the first start hashes the names and the second does not.
+  let mut space = Space;
+  let mut executor = Executor::with_limits(
+    &schema,
+    &document,
+    Limits {
+      max_selection_visits: NonZeroU32::new(cold).expect("not zero"),
+      ..Limits::default()
+    },
+  );
+  assert!(executor.start(&mut space, None, Value::Obj).is_ok());
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let _ = executor.poll_response();
+  let after_first = executor.fragment_name_bytes_hashed();
+  assert_eq!(
+    after_first,
+    name.len() as u64,
+    "the first start must index the one fragment, or there is no warm state to test"
+  );
+  assert!(executor.start(&mut space, None, Value::Obj).is_ok());
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let _ = executor.poll_response();
+  assert_eq!(
+    executor.fragment_name_bytes_hashed(),
+    after_first,
+    "the second start hashed the names again, so it is not the cached path this fixture is about"
+  );
+}
+
+/// A name the arena cannot hold is not charged for the copy nobody makes.
+///
+/// # A charge in front of a step that can decline is a bill for work that may not happen
+///
+/// "Charge before the work" is this branch's whole posture, and it is right for work that *will*
+/// happen. `intern` took it one step too far: after a complete lookup miss it deducted the copy's
+/// bytes and **then** called `insert`, whose cap and `u32` endpoints can refuse the name before
+/// `push_str` runs. The callers that meet `Unstored::Arena` degrade and carry on —
+/// `handle_field_error` loses the message text and keeps the error — so an unstorable
+/// thirty-two-megabyte driver message under the default sixteen-megabyte arena spent about 4.2
+/// million visits it never used, and short fields behind it then failed with `CollectionBudget`
+/// for a copy that never happened.
+///
+/// Preflight, refuse, charge, then perform a step that cannot decline. al8n/smear#196.
+///
+/// **The plant.** Move the `fit` call back below the copy's `take_bytes` — or restore the fallible
+/// `insert` and its `ok_or` — and the refused half below spends two passes over the name instead
+/// of one.
+#[test]
+fn a_name_the_arena_refuses_is_not_charged_for_its_copy() {
+  use crate::collect::{Interner, Unstored, Visits, byte_units};
+
+  /// An arena with room for a handful of short keys and nothing like the name below.
+  const CAP: u32 = 16;
+
+  let long = "n".repeat(4_096);
+  let units = byte_units(long.len());
+
+  // Refused by the arena: one pass over the name to hash it, and no second one.
+  let mut interner = Interner::new(CAP);
+  let mut visits = Visits::new(u32::MAX - 1);
+  let refused = interner.intern(&long, &mut visits);
+  assert!(
+    matches!(refused, Err(Unstored::Arena { limit }) if limit == CAP),
+    "the arena is what refuses a {}-byte name under a {CAP}-byte cap",
+    long.len()
+  );
+  assert_eq!(
+    visits.spent(),
+    units,
+    "a refused insertion copies nothing, so it owes one pass over the name and not two"
+  );
+
+  // And the accepted half, which is what keeps the assertion above from being a statement about a
+  // name nothing reads: a name the arena *does* hold pays for the hash and for the copy.
+  let short = "n";
+  let mut interner = Interner::new(CAP);
+  let mut visits = Visits::new(u32::MAX - 1);
+  interner
+    .intern(short, &mut visits)
+    .expect("one byte fits a sixteen-byte arena");
+  assert_eq!(
+    visits.spent(),
+    2 * byte_units(short.len()),
+    "an insertion that happens is charged for the hash and for the copy"
   );
 }

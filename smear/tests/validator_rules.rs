@@ -119,11 +119,19 @@ fn diagnose_full<'a>(
   let mut collected = Vec::new();
   let mut sink = Collect::new(&mut collected);
   let result = validate_executable_with(schema, &document, &mut scratch, budget, rules, &mut sink);
-  assert_eq!(
-    result.is_err(),
-    !collected.is_empty(),
-    "the verdict and the diagnostics disagree\n---\n{source}"
-  );
+  // `Err` with an empty sink is one deliberate state and not a disagreement: a `Budget` refused the
+  // document with its own rule outside `rules`, so there was nothing to emit and the refusal itself
+  // is the report. Anything else must match. al8n/smear#196.
+  match result {
+    Ok(()) => assert!(
+      collected.is_empty(),
+      "an `Ok` verdict carried diagnostics\n---\n{source}"
+    ),
+    Err(invalid) => assert!(
+      !collected.is_empty() || invalid.budget_tripped(),
+      "the verdict is `Err` with an empty sink and no budget refusal\n---\n{source}"
+    ),
+  }
   collected
 }
 

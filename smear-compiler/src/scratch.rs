@@ -50,9 +50,11 @@ use super::schema::{PackedType, Range32, TypeId};
 ///   times fragment reuse does — so this is the knob that actually caps the worst case.
 ///
 /// A document that exceeds either one is **refused**, with
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set on the verdict and —
+/// when that bound's rule is in the [`RuleSet`](super::RuleSet) —
 /// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
-/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) naming which, and
-/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set on the verdict.
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) naming which. The refusal does not
+/// depend on the rule being enabled; only being told which bound does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Budget {
   merge_depth: u32,
@@ -111,6 +113,94 @@ impl Default for Budget {
   #[inline]
   fn default() -> Self {
     Self::new(Self::DEFAULT_MERGE_DEPTH, Self::DEFAULT_MERGE_WORK)
+  }
+}
+
+/// A running work total and the ceiling it is charged against.
+///
+/// [`Budget`] is what a caller sets; this is what the engine spends against it. It exists as a type
+/// rather than a pair of fields on the walker because the tables in this module have loops whose
+/// length the **document** decides, and a loop like that must not be reachable without something to
+/// charge. [`Names::intern`] takes one, so there is no way into its chain walk that does not carry
+/// the ledger with it — the shape `graphql-proto` arrived at for the same reason, and the shape
+/// al8n/smear#196 found missing here.
+///
+/// Every method charges *before* the step it prices. A charge taken afterwards bounds nothing: the
+/// work is already spent by the time the counter can refuse it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Work {
+  spent: u32,
+  limit: u32,
+}
+
+impl Work {
+  /// A fresh ledger against `limit`.
+  #[inline]
+  pub(crate) const fn new(limit: u32) -> Self {
+    Self { spent: 0, limit }
+  }
+
+  /// Charges `units` and answers whether the engine may continue.
+  ///
+  /// # Checked, which is not the same as saturating
+  ///
+  /// This saturated, and the comment said that made an overflowing document refuse rather than
+  /// wrap. True at every limit **except the largest one a caller can set**: saturation lands
+  /// `spent` on exactly [`u32::MAX`], and `spent <= limit` with `limit == u32::MAX` is `true`. So
+  /// the charge that overflowed passed, every later charge saturated onto the same value and
+  /// passed as well, and a [`Budget::merge_work`] of `u32::MAX` — a number
+  /// [`Budget::with_merge_work`] accepts — meant *no bound at all*: hashing consumed the nominal
+  /// maximum and every relink, copy and comparison after it was free.
+  ///
+  /// [`Work::take_bytes`] is what made that reachable rather than arithmetic trivia, which is why
+  /// it is repaired with the byte charges and not before them: a ledger over entries counts
+  /// document nodes, and four billion nodes is not a document anybody can send, while a ledger
+  /// over *bytes* reaches the same total from about thirty gigabytes of names.
+  ///
+  /// So the counter is checked, and [`u32::MAX`] is its poison rather than a value it may rest on:
+  /// reaching it — by overflow or exactly — refuses and leaves `spent` there, so nothing after it
+  /// can pass either. What that costs is one unit off the very top of the largest configurable
+  /// budget, and it is the whole price of the strictness. al8n/smear#196.
+  #[inline]
+  pub(crate) fn take(&mut self, units: u32) -> bool {
+    match self.spent.checked_add(units) {
+      Some(spent) if spent < u32::MAX => {
+        self.spent = spent;
+        spent <= self.limit
+      }
+      // The total overflowed, or it landed on the poison value. Both refuse, and both leave the
+      // counter where no later charge of any size the caller can name will pass either.
+      _ => {
+        self.spent = u32::MAX;
+        false
+      }
+    }
+  }
+
+  /// Charges one pass over `len` bytes, and answers whether the engine may continue.
+  ///
+  /// The unit is [`byte_units`]: one per eight-byte chunk plus one for the tail. Hashing a key,
+  /// comparing it against a stored one and copying it into an arena all read it once, at roughly a
+  /// word a step, so the three share a unit — and a step of a chain walk, which is two integer
+  /// comparisons, is the one unit `take` already charges.
+  ///
+  /// It exists because a ledger that counts *entries* while the entry's work is decided by a
+  /// *length the client chose* is not a ledger over the work at all. That is the same defect
+  /// al8n/smear#196 found in the chain walk, one dimension over: `k` names colliding in a bucket
+  /// recorded `O(k²)` and ran `O(k² · L)`, and a GraphQL name has no local length ceiling.
+  #[inline]
+  pub(crate) fn take_bytes(&mut self, len: usize) -> bool {
+    self.take(byte_units(len))
+  }
+
+  /// What has been charged so far.
+  ///
+  /// Counted independently of any structure's own idea of what it did, which is what lets a test
+  /// say the charge and the work agree rather than say it of itself.
+  #[cfg(test)]
+  #[inline]
+  pub(crate) const fn spent(&self) -> u32 {
+    self.spent
   }
 }
 
@@ -360,6 +450,8 @@ pub(crate) struct MergeMemo {
   pub(crate) hash: u64,
   /// The canonical row range for this content.
   pub(crate) rows: Range32,
+  /// The next entry in the same bucket; [`NONE`] ends the chain.
+  pub(crate) next: u32,
   /// Which passes have already run over it.
   pub(crate) flags: u8,
 }
@@ -371,19 +463,66 @@ pub(crate) struct MergeMemo {
 /// and reduced to `u32`s. The schema's own interner cannot serve: an alias is not a schema name,
 /// and two *different* names the schema does not know would both resolve to "absent" and read as
 /// equal.
+///
+/// # It chains rather than probes, and the reason is the budget and not the speed
+///
+/// An open-addressed table's *rehash* walks a probe run per entry, so its cost is decided by the
+/// same collisions the lookup is, and there is no amount that can be charged for it in advance. A
+/// chained table's relink is one step per name and no probe run at all, so [`Names::intern`] can
+/// charge for it *before* it happens and refuse instead of starting it. That is what makes the
+/// whole structure's construction bounded by [`Budget::merge_work`] rather than by the hash
+/// behaving, and it is the shape `graphql-proto`'s executor interner already had. al8n/smear#196.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Names {
   /// Every interned name's bytes, concatenated.
   bytes: Vec<u8>,
   /// Name id to its `(start, end)` range in [`Names::bytes`].
-  ranges: Vec<(u32, u32)>,
-  /// Open-addressing probe slots, power-of-two, [`NONE`] when empty.
-  slots: Vec<u32>,
+  ///
+  /// # `usize` and not two `u32`s, which is a decision about what documents are admissible
+  ///
+  /// These were `u32`s, checked through an `arena_range` helper that answered [`None`] when the
+  /// pair would not narrow — and that [`None`] was the *same* [`None`]
+  /// [`Names::intern`](Names::intern) returns when the ledger refuses. The caller reads a refusal
+  /// as [`Rule::MergeWorkBudget`](crate::Rule::MergeWorkBudget) and sets
+  /// [`Invalid::budget_tripped`](crate::Invalid::budget_tripped), so a document whose only problem
+  /// was that four gibibytes of names will not fit a `u32` was told to raise a knob that could not
+  /// help it. Two different abandonments wearing one `None` — the shape
+  /// [`Match`](crate::executable) was introduced for one level up, where a scan the budget stopped
+  /// had not established that a name was absent. An arena that cannot represent a name has not
+  /// established that the budget was exhausted.
+  ///
+  /// Of the two repairs, this is the one that removes the *condition* rather than widening the
+  /// type that reports it: a `usize` range cannot fail to represent a slice of a `Vec<u8>`, so
+  /// there is nothing left for the second variant to say. What it costs is eight bytes an entry on
+  /// a 64-bit target — the per-name overhead beside the name's own bytes goes from twenty to
+  /// twenty-eight. What it buys is that a caller who raised
+  /// [`Budget::merge_work`](crate::Budget::merge_work) far enough to admit such a document gets the
+  /// document validated rather than a verdict naming a ceiling they had already raised. That is
+  /// this crate's own posture about ceilings: the knob is the bound, and a limit no caller can
+  /// reach past is not one.
+  ranges: Vec<(usize, usize)>,
+  /// Each name's whole [`hash_bytes`], parallel to [`Names::ranges`].
+  ///
+  /// Eight bytes a name, bought for two things the ledger could not otherwise see. A chain step
+  /// rejects a bucket collision on this word and the range's length, so it no longer runs a
+  /// `memcmp` whose length the client picked — the one unit a step is charged buys a two-integer
+  /// test, and the bytes are read only when they are about to be equal. And [`Names::relink`]
+  /// reads it instead of re-hashing every stored byte, which is what makes "one step per name"
+  /// true of the *work* rather than only of the loop count. al8n/smear#196.
+  hashes: Vec<u64>,
+  /// The next id in the same bucket, parallel to [`Names::ranges`]; [`NONE`] ends a chain.
+  chain: Vec<u32>,
+  /// Bucket heads, power-of-two, [`NONE`] when the bucket is empty.
+  ///
+  /// Emptied with [`Vec::clear`], never with a `fill` that keeps the high-water length: the
+  /// logical length is what [`Names::intern`] charges growth against, so a length that outlived
+  /// the previous document made this document's charge depend on that one. al8n/smear#196.
+  heads: Vec<u32>,
 }
 
 impl Names {
-  /// The smallest probe table the interner builds.
-  const MIN_SLOTS: usize = 64;
+  /// The smallest bucket table the interner builds.
+  const MIN_BUCKETS: usize = 64;
 
   /// Creates an empty interner, allocating nothing.
   #[inline]
@@ -391,20 +530,43 @@ impl Names {
     Self {
       bytes: Vec::new(),
       ranges: Vec::new(),
-      slots: Vec::new(),
+      hashes: Vec::new(),
+      chain: Vec::new(),
+      heads: Vec::new(),
     }
   }
 
   /// Empties the interner, keeping every allocation.
+  ///
+  /// # The bucket table is *cleared*, and that is the whole of a defect
+  ///
+  /// [`Vec::clear`] keeps the allocation and returns the length to zero; `fill` keeps both. The
+  /// difference is invisible to the arena and decisive to the ledger, because the length is what
+  /// [`Names::intern`] charges growth against: a table refilled at the high-water mark of every
+  /// document this [`Scratch`] had ever seen made *this* document's relinks free. A cold run paid
+  /// them at 1, 65, 129 …; the identical run behind a larger one paid none, so with a
+  /// [`Budget::merge_work`] between the two totals the same schema, document, budget and rule set
+  /// came back `Err` on a fresh working set and `Ok` on a reused one. Clearing rebuilds the table
+  /// through [`Names::relink`], which is charged, so the charge stops depending on history.
+  ///
+  /// It also deletes the `fill` itself — an O(high-water) sweep that ran *before* the call's
+  /// [`Work`] existed and so was charged to nobody at all. `clear` on a `Vec<u32>` is O(1).
+  /// al8n/smear#196.
   pub(crate) fn reset(&mut self) {
     self.bytes.clear();
     self.ranges.clear();
-    self.slots.fill(NONE);
+    self.hashes.clear();
+    self.chain.clear();
+    self.heads.clear();
   }
 
   /// Returns how many rows the interner is holding capacity for.
   pub(crate) fn capacity(&self) -> usize {
-    self.bytes.capacity() + self.ranges.capacity() + self.slots.capacity()
+    self.bytes.capacity()
+      + self.ranges.capacity()
+      + self.hashes.capacity()
+      + self.chain.capacity()
+      + self.heads.capacity()
   }
 
   /// Returns how many distinct names have been interned.
@@ -413,54 +575,193 @@ impl Names {
     self.ranges.len()
   }
 
-  /// Returns `key`'s id, interning it if this is the first time it has been seen.
-  pub(crate) fn intern(&mut self, key: &[u8]) -> u32 {
-    // Load factor 3/4. Checked before the probe so the loop below always finds an empty slot.
-    if (self.ranges.len() + 1) * 4 >= self.slots.len() * 3 {
-      self.grow();
+  /// Returns `key`'s id, interning it if this is the first time it has been seen, or [`None`]
+  /// when `work` refuses.
+  ///
+  /// # The chain walk is charged, one unit per entry, before the entry is compared
+  ///
+  /// The keys are **response names and field names out of the executable document**, so a client
+  /// chooses every byte of them. [`hash_bytes`] is unkeyed and each of its rounds is invertible in
+  /// the word it folds, so a pile-up in one bucket is *constructible* rather than unlucky, and it
+  /// stays that way: a deterministic search over `q<decimal>` aliases reaches 512 valid names in
+  /// one bucket of 1,024 after 450,077 candidates, against the hash as it ships today.
+  ///
+  /// Against the version of this table that did not charge — open-addressed, and probing without a
+  /// ledger — those 512 names cost 130,816 insertion probes and 96,844 rehash probes: **227,660
+  /// steps against the 512 selections `fill_merge_set` had charged for**, which is what made
+  /// `merge_work` not a bound on CPU work at all. al8n/smear#196.
+  ///
+  /// A charge per compared entry makes that spend the client's budget instead of the server's
+  /// time, and it bounds the *chain* and not merely one walk: putting an `L`th name into a bucket
+  /// first walks the `L - 1` already there, so building a run of length `L` costs about `L²/2` and
+  /// an adversary reaches `√(2 · work)` and no further. It is the same bound, taken for the same
+  /// reason, that `graphql-proto`'s executor interner takes.
+  ///
+  /// # And the bytes are charged too, because a name has no length ceiling
+  ///
+  /// A step of the walk is one unit; a `memcmp` of two `L`-byte names is `L`. Charging the first
+  /// and running the second is the *same* defect one dimension over: `k` aliases sharing a bucket
+  /// recorded `O(k²)` and ran `O(k² · L)`, with `L` a number the client writes, so a hostile
+  /// document could scale both CPU and retained arena bytes without moving the ledger at all.
+  ///
+  /// Two changes close it, and the second is what makes the first cheap. Every pass over the key's
+  /// bytes — hashing it, comparing it, copying it into the arena — is charged with
+  /// [`Work::take_bytes`] *before* the pass. And the whole hash is stored, so a chain step tests
+  /// two integers and reads no bytes: on the bucket collision that is the adversary's whole
+  /// instrument, the byte charge is never even reached, and it is paid only when the bytes are
+  /// about to be equal.
+  ///
+  /// **Before the work, not after it.** A charge taken after the walk it prices has already let
+  /// the walk happen; the counter notices a run it cannot un-spend. That is why the refusal is a
+  /// [`None`] the caller has to handle rather than a total read back afterwards, and why the
+  /// relink below is charged from a count taken *before* it runs.
+  pub(crate) fn intern(&mut self, key: &[u8], work: &mut Work) -> Option<u32> {
+    // Reading the key is work whose length the document chose, so it is charged before the read
+    // and not after it.
+    if !work.take_bytes(key.len()) {
+      return None;
     }
-    let mask = self.slots.len() - 1;
-    let mut slot = (hash_bytes(key) as usize) & mask;
-    loop {
-      let id = self.slots[slot];
-      if id == NONE {
-        let start = self.bytes.len() as u32;
-        self.bytes.extend_from_slice(key);
-        let id = self.ranges.len() as u32;
-        self.ranges.push((start, self.bytes.len() as u32));
-        self.slots[slot] = id;
-        return id;
+    let hash = hash_bytes(key);
+    if !self.heads.is_empty() {
+      let mut id = self.heads[self.bucket(hash)];
+      while id != NONE {
+        if !work.take(1) {
+          return None;
+        }
+        // What that unit buys: two integers. A bucket collision — the constructible case, and the
+        // only one an adversary has — is rejected here without touching a byte.
+        let (start, end) = self.ranges[id as usize];
+        if self.hashes[id as usize] == hash && end - start == key.len() {
+          if !work.take_bytes(key.len()) {
+            return None;
+          }
+          if &self.bytes[start..end] == key {
+            return Some(id);
+          }
+        }
+        id = self.chain[id as usize];
       }
-      let (start, end) = self.ranges[id as usize];
-      if &self.bytes[start as usize..end as usize] == key {
-        return id;
-      }
-      slot = (slot + 1) & mask;
     }
+
+    // A miss inserts, and an insert past the load factor relinks every name. Relinking is one step
+    // per name and one step's worth of work — no probe run, which is the whole reason this table
+    // chains, and no re-hash, which is what storing the hash bought — so the cost is known before
+    // it is paid and is charged here rather than discovered inside the loop. The copy into the
+    // arena is the key's third and last read.
+    // The arena's range needs no narrowing check, because there is no narrowing: a `usize` pair
+    // names a slice of a `Vec<u8>` and cannot fail to. That is deliberate, and the field says what
+    // it costs — the `u32` pair this replaced could refuse, and its refusal wore the same `None`
+    // the ledger's does, so a document too large for the *arena* was reported against the *budget*.
+    //
+    // The addition below cannot overflow either, and at every pointer width rather than only the
+    // one this happens to be built for: `self.bytes` and `key` are two allocations that are both
+    // live at this instant, so their lengths sum to at most the address space. That is a property
+    // of the machine and not of a ceiling somebody chose — which is exactly what the `u32` pair
+    // was not, and why widening these is width-*safe* and not merely width-shaped. 32-bit is a
+    // supported target here and `cross` builds this crate for four of them.
+    //
+    // The id is still a `u32`, and its narrowing cannot be reached rather than being argued not to
+    // be: interning a name charges at least two units — one pass to hash it, one to copy it — and
+    // `Work::take` poisons at `u32::MAX`, so no `Budget` any caller can construct admits more than
+    // `u32::MAX / 2` names. `NONE` is `u32::MAX`, which is above that with a factor of two to
+    // spare, and the arithmetic is pinned rather than described. The check stays regardless,
+    // because a check that never fires costs one comparison and an argument that stops being true
+    // costs a wrapped index. al8n/smear#196.
+    let start = self.bytes.len();
+    let end = start + key.len();
+    let id = u32::try_from(self.ranges.len()).ok()?;
+
+    let relink = if self.ranges.len() + 1 > self.heads.len() {
+      id.saturating_add(1)
+    } else {
+      0
+    };
+    if !work.take(relink) || !work.take_bytes(key.len()) {
+      return None;
+    }
+
+    // Nothing above this line mutated anything, so a refusal leaves the interner exactly as it
+    // was: there is no half-built state for a later call to read.
+    self.bytes.extend_from_slice(key);
+    self.ranges.push((start, end));
+    self.hashes.push(hash);
+    self.chain.push(NONE);
+    if self.ranges.len() > self.heads.len() {
+      self.relink();
+    } else {
+      let bucket = self.bucket(hash);
+      self.chain[id as usize] = self.heads[bucket];
+      self.heads[bucket] = id;
+    }
+    Some(id)
   }
 
-  /// Doubles the probe table and reinserts every name.
-  fn grow(&mut self) {
-    let next = (self.slots.len() * 2).max(Self::MIN_SLOTS);
-    self.slots.clear();
-    self.slots.resize(next, NONE);
-    let mask = next - 1;
-    for id in 0..self.ranges.len() as u32 {
-      let (start, end) = self.ranges[id as usize];
-      let mut slot = (hash_bytes(&self.bytes[start as usize..end as usize]) as usize) & mask;
-      while self.slots[slot] != NONE {
-        slot = (slot + 1) & mask;
-      }
-      self.slots[slot] = id;
+  /// The bucket `hash` lands in. Never called with [`Names::heads`] empty.
+  #[inline]
+  fn bucket(&self, hash: u64) -> usize {
+    (hash as usize) & (self.heads.len() - 1)
+  }
+
+  /// Doubles the bucket table and relinks every name, one step each.
+  ///
+  /// One step, and one step's worth of *work*: the hash is read out of [`Names::hashes`] rather
+  /// than recomputed. Re-hashing would have made this loop cost every stored byte in the table
+  /// while [`Names::intern`] charged one unit per name for it — true about steps, false about
+  /// work, which is precisely the accounting al8n/smear#196 exists to correct.
+  fn relink(&mut self) {
+    let next = self
+      .heads
+      .len()
+      .max(Self::MIN_BUCKETS)
+      .max(self.ranges.len().next_power_of_two());
+    self.heads.clear();
+    self.heads.resize(next, NONE);
+    for id in 0..self.ranges.len() {
+      let bucket = self.bucket(self.hashes[id]);
+      self.chain[id] = self.heads[bucket];
+      self.heads[bucket] = id as u32;
     }
   }
 }
 
-/// FxHash-style multiply-fold over short keys.
+/// FxHash-style multiply-fold over short keys, finished with an avalanche step.
 ///
-/// The same shape the schema's own [`NameIndex`](super::schema::NameIndex) uses, and for the same
-/// reason: the keys are identifiers, so one multiply per eight bytes is all the mixing a probe
-/// table needs and it costs no dependency.
+/// The same shape `smear_schema::hash_bytes` has, and for the same reason: the keys are
+/// identifiers, so one multiply per eight bytes is all the compression a probe table needs and it
+/// costs no dependency.
+///
+/// # It is a *copy*, which is the whole reason this comment exists
+///
+/// al8n/smear#172 found the fold on its own mixing far too little for ordinary names — bit `j` of
+/// `v · K` depends only on bits `0..=j` of `v`, so a name's late bytes decide nothing about where
+/// it lands — and added splitmix64's finalizer to `smear-schema`'s copy. Nothing propagated here,
+/// because this is a private duplicate of that function rather than a call to it. A reader who
+/// assumes the shared dependency carried the repair gets the opposite of what is true.
+///
+/// This table was the **worse** of the two. `smear-schema` masks the hash's high half through
+/// `smear_schema::bucket`; this one masks the low half, which is the least mixed word in the
+/// product. Measured over 4,096 names of the most ordinary spelling there is — `k0` to `k4095` —
+/// the unfinished hash masked low occupies **ten** buckets of 4,096 and costs 464.27 comparisons
+/// per interned name. Through the finalizer the same names cost 0.50 across 2,586 buckets. Hence
+/// the finalizer here too, and hence not simply calling the other crate's: a probe hash is an
+/// internal detail, and importing one would make it a compatibility surface.
+///
+/// The `h ^= h >> 32` between rounds arrived the same way and for the same reason (al8n/smear#196):
+/// the multiply leaves a chunk's late bytes in the high bits, `rotate_left(5)` delivers exactly
+/// those bits to the low byte the *next* chunk's first byte occupies, and the two cancel — so
+/// `x00000009` and `x00000084` hashed identically, and 4,096 eight-digit base-36 aliases produced
+/// 1,660 hashes. Folding the high half down before the next round is what stops a difference from
+/// living in a window one input byte can erase. It costs nothing for the names under nine bytes
+/// that dominate here, because the loop it sits in does not run for them.
+///
+/// It fixes what honest names cost. It does **not** bound what chosen ones do: each round is
+/// invertible in the word it folds and the finalizer is a bijection, so a caller who interns
+/// document text still owes an argument that its probe runs are bounded by something other than the
+/// hash. [`Names::intern`] now makes that argument — it charges [`Work`] one unit per entry a chain
+/// walk *rejects*, on two integers and before reading a byte, and [`byte_units`] for each pass it
+/// does make over the key — and until al8n/smear#196 it did not: draft 5.3.2's index charged
+/// `selections().len()` before interning, which counts the names but neither the entries finding
+/// one compares nor the bytes comparing one reads.
 #[inline]
 pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
   const K: u64 = 0x517c_c1b7_2722_0a95;
@@ -468,11 +769,46 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
   let (chunks, rest) = bytes.as_chunks::<8>();
   for chunk in chunks {
     h = (h.rotate_left(5) ^ u64::from_le_bytes(*chunk)).wrapping_mul(K);
+    h ^= h >> 32;
   }
   let mut tail = [0u8; 8];
   tail[..rest.len()].copy_from_slice(rest);
   let value = u64::from_le_bytes(tail) ^ ((rest.len() as u64) << 56);
-  (h.rotate_left(5) ^ value).wrapping_mul(K)
+  finalize((h.rotate_left(5) ^ value).wrapping_mul(K))
+}
+
+/// splitmix64's finalizer, so that every input bit reaches every output bit.
+///
+/// A bijection on `u64`, so it maps no key onto another — it only moves where a key lands.
+#[inline]
+const fn finalize(mut hash: u64) -> u64 {
+  hash ^= hash >> 30;
+  hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+  hash ^= hash >> 27;
+  hash = hash.wrapping_mul(0x94d0_49bb_1331_11eb);
+  hash ^ (hash >> 31)
+}
+
+/// The work one pass over `len` bytes costs: one unit per eight-byte chunk, plus one for the tail.
+///
+/// Read off [`hash_bytes`]'s own loop, which folds exactly that many rounds, and reused for the
+/// `memcmp` and the `memcpy` of the same key because all three move about a word a step. Saturating
+/// at [`u32::MAX`], so a key no ledger could pay for refuses rather than wrapping.
+///
+/// The merge engine charges with it too, and not only the interner. Pairing two argument lists or
+/// two object literals by name is a scan over lengths the client wrote, so the scan cannot be one
+/// unit an entry — but neither is it this many units an entry, which is what a *step* costs only
+/// when the step reads the whole name. The engine hashes each scanned name once, charged here,
+/// and a step then rejects on the stored hash and the stored length for one unit and no bytes;
+/// this unit is charged again in front of the `memcmp` a step that agrees on both goes on to make.
+#[inline]
+pub(crate) const fn byte_units(len: usize) -> u32 {
+  let units = len / 8 + 1;
+  if units > u32::MAX as usize {
+    u32::MAX
+  } else {
+    units as u32
+  }
 }
 
 /// Mixes one `u32` into a running hash.
@@ -480,6 +816,26 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
 pub(crate) fn hash_u32(state: u64, value: u32) -> u64 {
   const K: u64 = 0x517c_c1b7_2722_0a95;
   (state.rotate_left(5) ^ u64::from(value)).wrapping_mul(K)
+}
+
+/// One name in a merge comparison's lookup index.
+///
+/// The whole hash is stored, not a bucket's worth of it, so a colliding candidate is rejected on
+/// two integers and reads no bytes — the same trade [`Names`] makes, and the reason the byte charge
+/// beside it is reached only where the bytes are about to be compared.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MergeName {
+  /// The name's bytes, hashed whole.
+  pub(crate) hash: u64,
+  /// How many bytes the name is.
+  pub(crate) len: usize,
+  /// The next name in this one's bucket, relative to the index's own base, or [`NONE`].
+  ///
+  /// Linked so that a bucket's chain runs in *ascending* order. Two arguments may share a name —
+  /// draft 5.4.2's business and not draft 5.3.2's — and a scan answered with the first of them,
+  /// so a chain that walked them backwards would pair a different one and could settle the
+  /// comparison differently.
+  pub(crate) next: u32,
 }
 
 /// The caller-held working set.
@@ -571,10 +927,48 @@ pub struct Scratch {
   pub(crate) merge_stack: Vec<MergeFrame>,
   /// One entry per distinct merged field set met so far.
   pub(crate) merge_memo: Vec<MergeMemo>,
-  /// Open-addressing probe slots over [`Scratch::merge_memo`], [`NONE`] when empty.
+  /// Bucket heads over [`Scratch::merge_memo`], power-of-two, [`NONE`] when the bucket is empty.
+  ///
+  /// Chained for the reason [`Names`] is: a relink is one step per entry and no probe run, so the
+  /// walk that rebuilds it can be charged before it starts rather than discovered inside it.
   pub(crate) merge_slots: Vec<u32>,
   /// The value comparison's frame stack: `(index in the left value, index in the right, cursor)`.
   pub(crate) merge_compare: Vec<(u32, u32, u32)>,
+  /// Every name a merge comparison is about to look one of its own up against, as a stack.
+  ///
+  /// One segment per index: an argument list's two sides, and one object literal's fields for each
+  /// live frame of [`Scratch::merge_compare`], so a literal nested inside an argument sits above
+  /// the lists it was reached through and leaves with the frame that hashed it.
+  ///
+  /// It is here for the reason [`Names`] stores a hash beside each entry, and then for the reason
+  /// [`Names`] buckets them. A lookup that rejects a candidate by comparing its bytes has to be
+  /// charged for those bytes *before* it runs, which means charging every candidate the whole of
+  /// the longest thing it could read; a lookup that rejects on two integers is charged one unit
+  /// and reads the bytes only where they are about to matter. And a lookup that reaches the
+  /// candidates through [`Scratch::merge_buckets`] does not visit them all: pairing two lists of
+  /// `n` distinct names by scanning cost `n(n + 1)` steps a pair, which is quadratic in a width
+  /// the client writes, and five identical selections of a hundred and twenty-eight short
+  /// arguments spent 66,048 of a 65,536 budget on the steps alone. al8n/smear#196.
+  pub(crate) merge_hashes: Vec<MergeName>,
+  /// Bucket heads over [`Scratch::merge_hashes`], one power-of-two run per live index.
+  ///
+  /// Chained rather than probed, for the reason [`Names::heads`] is: a chain step is one unit
+  /// whose cost is known before it is taken, and a colliding run can be abandoned in the middle of
+  /// itself. The heads index a segment of [`Scratch::merge_hashes`] *relative to that segment's
+  /// own base*, so a run built for one argument list means the same thing wherever the stack
+  /// happens to have put it.
+  pub(crate) merge_buckets: Vec<u32>,
+  /// The [`Scratch::merge_fields`] row whose argument index currently sits at the bottom of
+  /// [`Scratch::merge_hashes`] and [`Scratch::merge_buckets`], or [`NONE`].
+  ///
+  /// Draft 5.3.2's common-parent pass compares every member of a part against the *first* member,
+  /// so one selection's arguments are the left side of every comparison the part makes. Indexing
+  /// them once per part rather than once per pair is what keeps that side's cost proportional to
+  /// the document rather than to the document times the part's width.
+  ///
+  /// It is set only after a complete build, so a refusal partway through one leaves this at
+  /// [`NONE`] and the next call rebuilds rather than reading a segment that was never finished.
+  pub(crate) merge_indexed: u32,
   /// The document's own names, interned to integers.
   pub(crate) names: Names,
 }
@@ -618,6 +1012,9 @@ impl Scratch {
       merge_memo: Vec::new(),
       merge_slots: Vec::new(),
       merge_compare: Vec::new(),
+      merge_hashes: Vec::new(),
+      merge_buckets: Vec::new(),
+      merge_indexed: NONE,
       names: Names::new(),
     }
   }
@@ -657,10 +1054,18 @@ impl Scratch {
     self.merge_bounds.clear();
     self.merge_stack.clear();
     self.merge_memo.clear();
-    // The probe table is emptied by refilling it, not by shrinking it: its size is the working
-    // set's, and a `clear` would throw that away and make the next document allocate again.
-    self.merge_slots.fill(NONE);
+    // Cleared, not refilled — and `clear` does not give the allocation back, so the next document
+    // still costs nothing to size. What refilling kept was the *length*, and the length is what
+    // `claim` charges the memo's growth against: a table left at a previous document's high-water
+    // mark made this document's relinks free, so the same request could be refused on a fresh
+    // `Scratch` and served on a reused one. The sweep it also ran was O(high-water) and happened
+    // before the call's `Work` existed, so nobody was charged for it. `Names::reset` carries the
+    // same correction and the same reasoning. al8n/smear#196.
+    self.merge_slots.clear();
     self.merge_compare.clear();
+    self.merge_hashes.clear();
+    self.merge_buckets.clear();
+    self.merge_indexed = NONE;
     self.names.reset();
   }
 
@@ -700,6 +1105,8 @@ impl Scratch {
       + self.merge_memo.capacity()
       + self.merge_slots.capacity()
       + self.merge_compare.capacity()
+      + self.merge_hashes.capacity()
+      + self.merge_buckets.capacity()
       + self.names.capacity()
   }
 }
@@ -746,7 +1153,7 @@ pub(crate) fn clear_bit(words: &mut [u64], index: u32) {
 
 #[cfg(test)]
 mod tests {
-  use super::{Budget, Scratch, get_bit, reset_bits, set_bit};
+  use super::{Budget, Scratch, Work, get_bit, reset_bits, set_bit};
   use std::vec::Vec;
 
   #[test]
@@ -771,54 +1178,247 @@ mod tests {
     assert_eq!(scratch.capacity(), capacity, "reset must not free");
   }
 
-  #[test]
-  fn the_interner_round_trips_and_survives_a_reset() {
-    use super::Names;
-
-    let mut names = Names::new();
-    let a = names.intern(b"hero");
-    let b = names.intern(b"hero");
-    let c = names.intern(b"heroes");
-    assert_eq!(a, b, "the same name must intern to the same id");
-    assert_ne!(a, c, "a different name must not");
-    assert_eq!(names.len(), 2);
-
-    // Past the initial probe table, so the growth path is on the measured path rather than a
-    // branch nothing takes.
-    for index in 0..500u32 {
-      let key = std::format!("field{index}");
-      assert_eq!(names.intern(key.as_bytes()), 2 + index);
-    }
-    for index in 0..500u32 {
-      let key = std::format!("field{index}");
-      assert_eq!(
-        names.intern(key.as_bytes()),
-        2 + index,
-        "growth lost an entry"
-      );
-    }
-    assert_eq!(names.len(), 502);
-
-    // A reset empties it without giving the memory back, which is the whole contract.
-    let capacity = names.capacity();
-    names.reset();
-    assert_eq!(names.len(), 0);
-    assert_eq!(names.capacity(), capacity, "reset must not free");
-    assert_eq!(names.intern(b"heroes"), 0, "ids restart after a reset");
+  /// An interner with nothing to refuse it, for the cases that are about identity and not cost.
+  fn unbounded() -> Work {
+    Work::new(u32::MAX)
   }
 
-  /// Names are not text: a `&[u8]` document may spell one with bytes that are not UTF-8, and the
-  /// interner is byte-keyed precisely so that it does not care.
+  /// A ceiling of [`u32::MAX`] is still a ceiling.
+  ///
+  /// [`Work::take`] saturated, and the comment above it said that made an overflowing document
+  /// refuse rather than wrap. It did — at every limit but the one a caller reaches by asking for
+  /// the most work they can ask for. Saturation lands `spent` on exactly [`u32::MAX`], and
+  /// `spent <= limit` with `limit == u32::MAX` is **true**, so the charge that overflowed passed
+  /// and so did every charge after it, each saturating onto the same value. `merge_work` at its
+  /// public maximum bounded nothing at all.
+  ///
+  /// The byte charges are what put that in reach rather than leaving it arithmetic trivia: a
+  /// ledger over entries counts document nodes and four billion nodes is not a document, while a
+  /// ledger over *bytes* gets there from about thirty gigabytes of names.
+  ///
+  /// **The plant.** Restore `saturating_add` and the first `assert!(!…)` below fails — the ledger
+  /// says yes to a charge that overflowed it — and so does every one after.
   #[test]
-  fn the_interner_is_byte_keyed() {
+  fn an_overflowing_charge_refuses_at_the_largest_limit_too() {
+    // The largest budget `Budget::with_merge_work` accepts.
+    let mut work = Work::new(u32::MAX);
+    assert!(
+      work.take(u32::MAX - 1),
+      "one unit short of the ceiling is inside it"
+    );
+    assert!(
+      !work.take(1),
+      "the charge that reaches the ceiling is refused, not admitted onto it"
+    );
+    assert!(
+      !work.take(1),
+      "and the ledger stays refused; a counter that saturates and then answers `true` has no \
+       bound left to enforce"
+    );
+    assert!(!work.take(u32::MAX), "at any size");
+
+    // A single charge no counter could hold refuses on its own, without a run-up.
+    let mut work = Work::new(u32::MAX);
+    assert!(!work.take(u32::MAX));
+    assert!(!work.take(1));
+
+    // Under an ordinary ceiling nothing moves: the limit is what refuses, exactly where it did.
+    let mut work = Work::new(10);
+    assert!(work.take(10), "spending the whole budget is spending it");
+    assert!(!work.take(1));
+    let mut work = Work::new(10);
+    assert!(
+      !work.take(u32::MAX),
+      "and a charge that would overflow is refused here as it always was"
+    );
+  }
+
+  /// The arena's narrowing is gone, and the one narrowing left cannot be reached.
+  ///
+  /// # What this fixture used to say, and why it stopped saying it
+  ///
+  /// It pinned `arena_range`. A name's slice endpoints were `u32`s over a `usize` arena, the gap
+  /// between the two was reachable past four gibibytes of names, and the helper refused rather than
+  /// letting an `as u32` wrap. The check was right; its *report* was not. The [`None`] it answered
+  /// is the same [`None`] a ledger refusal answers, and [`Names::intern`]'s only caller reads a
+  /// [`None`] as [`Rule::MergeWorkBudget`](crate::Rule::MergeWorkBudget) — so a document whose only
+  /// problem was that its names will not fit a `u32` was told to raise a knob that could not help
+  /// it, and `Invalid::budget_tripped` said a budget had refused when none had. Two abandonments
+  /// wearing one `None`, which is the shape `Match` was introduced for one level up.
+  ///
+  /// [`Names::ranges`] is a `usize` pair now, so the condition that helper guarded does not exist
+  /// and there is nothing left for it to check. The field says what the eight bytes an entry buy
+  /// and what they cost.
+  ///
+  /// # What is left is the id, and the ledger is what makes it unreachable
+  ///
+  /// The entry id is still a `u32` against a [`NONE`] of [`u32::MAX`]. Interning a name charges at
+  /// least two units — one pass to hash it and one to copy it — and [`Work::take`] poisons at
+  /// [`u32::MAX`], so no [`Budget`] any caller can construct admits enough interns to reach the
+  /// sentinel. That is derived below from the interner's own measured floor rather than restated
+  /// from the comment, so an intern that got cheaper would move this fixture instead of quietly
+  /// invalidating it.
+  ///
+  /// **The plant.** Make an intern cost one unit instead of two — delete either `take_bytes` — and
+  /// the margin below halves; delete both and it vanishes, because a free intern is one the ledger
+  /// cannot bound the count of.
+  #[test]
+  fn the_only_narrowing_left_cannot_be_reached() {
+    use super::{NONE, Names};
+
+    /// Enough distinct keys to get past the first bucket doubling, so the floor measured below is
+    /// the steady-state one and not the first insert's.
+    const RUN: u32 = 256;
+
+    let mut work = unbounded();
+    let mut table = Names::new();
+    let mut floor = u32::MAX;
+    for index in 0..RUN {
+      let key = std::format!("{index}");
+      let before = work.spent();
+      table
+        .intern(key.as_bytes(), &mut work)
+        .expect("the budget is unbounded");
+      floor = floor.min(work.spent() - before);
+    }
+    assert!(
+      floor >= 2,
+      "one intern costs {floor} units at its cheapest, and two is what the two passes over the key \
+       are worth; below that the count of interns is not bounded by the ledger at all"
+    );
+
+    // Every unit any `Budget` can spend, because `Work::take` refuses at the poison and leaves the
+    // counter there. The id narrows at `NONE`, and the ledger cannot pay for that many.
+    let payable = u64::from(u32::MAX) / u64::from(floor);
+    assert!(
+      payable < u64::from(NONE),
+      "the ledger can pay for {payable} interns and the id narrows at {NONE}, so the narrowing is \
+       reachable — and its refusal would wear the same `None` the ledger's does, which is the \
+       defect this fixture replaced"
+    );
+  }
+  /// The charge a request pays must not depend on what the previous request left behind.
+  ///
+  /// [`Names::reset`] used to `fill` the bucket table with [`NONE`], which keeps its *length* as
+  /// well as its allocation — and the length is exactly what `intern` charges growth against. So a
+  /// cold table paid the relinks at 1, 65, 129 …, and the identical run behind a larger one paid
+  /// none of them. With a [`Budget::merge_work`] between the two totals, the same schema,
+  /// document, budget and rule set was refused on a fresh working set and served on a reused one.
+  ///
+  /// **The plant.** Put the `fill(NONE)` back in [`Names::reset`] and the warm total drops by the
+  /// whole relink term — 195 for the 200 names below — while the cold one does not move.
+  #[test]
+  fn a_reset_charges_what_a_fresh_table_charges() {
     use super::Names;
 
-    let mut names = Names::new();
-    let a = names.intern(&[0xff, 0x00, b'a']);
-    let b = names.intern(&[0xff, 0x00, b'b']);
-    assert_ne!(a, b);
-    assert_eq!(names.intern(&[0xff, 0x00, b'a']), a);
-    assert_eq!(names.intern(b""), 2, "the empty key is a key");
+    /// Past two doublings, so the relink term the warm run used to skip is 1 + 65 + 129 and not a
+    /// rounding error.
+    const RUN: u32 = 200;
+
+    fn charge(table: &mut Names) -> u32 {
+      let mut work = unbounded();
+      for index in 0..RUN {
+        let key = std::format!("subject{index}");
+        table.intern(key.as_bytes(), &mut work).expect("budget");
+      }
+      work.spent()
+    }
+
+    let mut cold = Names::new();
+    let cold_spent = charge(&mut cold);
+
+    // A larger request first, on the same table, and then the same names again after a reset.
+    let mut warm = Names::new();
+    let mut prelude = unbounded();
+    for index in 0..500u32 {
+      let key = std::format!("prelude{index}");
+      warm.intern(key.as_bytes(), &mut prelude).expect("budget");
+    }
+    let capacity = warm.capacity();
+    warm.reset();
+    assert_eq!(
+      warm.capacity(),
+      capacity,
+      "clearing the table must not give the arena back — the reuse is the whole point"
+    );
+
+    let warm_spent = charge(&mut warm);
+    assert_eq!(
+      cold_spent, warm_spent,
+      "{RUN} names cost {cold_spent} on a fresh table and {warm_spent} behind a larger request"
+    );
+    assert_eq!(warm.len(), RUN as usize, "the reused table lost a name");
+  }
+
+  /// A refused intern leaves the interner exactly as it was.
+  ///
+  /// This is the property that decided the structure. An open-addressed table's rehash walks a
+  /// probe run per entry, so a budget can only stop it *inside* the walk — which leaves the slots
+  /// describing a prefix of the arena, and a later lookup then misses a name that is present. A
+  /// chained relink is one step per name, so its whole cost is charged before it starts and a
+  /// refusal happens with nothing yet moved.
+  #[test]
+  fn a_refused_intern_moves_nothing() {
+    use super::Names;
+
+    let mut work = Work::new(4);
+    let mut table = Names::new();
+    for index in 0..64u32 {
+      let key = std::format!("n{index}");
+      if table.intern(key.as_bytes(), &mut work).is_none() {
+        break;
+      }
+    }
+    let interned = table.len();
+
+    // Whatever it managed, every one of those names is still findable and still has its own id.
+    let mut work = unbounded();
+    for index in 0..interned as u32 {
+      let key = std::format!("n{index}");
+      assert_eq!(
+        table.intern(key.as_bytes(), &mut work),
+        Some(index),
+        "a refusal lost an entry the table had already taken"
+      );
+    }
+    assert_eq!(table.len(), interned, "a refusal left a half-written name");
+  }
+
+  /// [`hash_u32`] spreads the row-id sequences the merge memo keys on.
+  ///
+  /// `claim` charges its probe walk because the *loop* is one a document decides the length of, not
+  /// because the hash misbehaves — and this is the half of that sentence that can be checked. The
+  /// keys are ordinals the walk assigns, so the shapes below are the ones a document produces: one
+  /// row, two adjacent rows, and runs of four and eight.
+  ///
+  /// Anything at or near `8192 · (1 − e^(−1/2)) ≈ 3,224` is a hash behaving. This is a canary
+  /// rather than a bound: if it ever fires, the charge is still the bound and what has changed is
+  /// what an honest document pays.
+  #[test]
+  fn the_memo_hash_spreads_ordinary_row_sequences() {
+    use super::hash_u32;
+
+    const SETS: u32 = 4096;
+    const SLOTS: usize = 8192;
+    /// Two thirds of the 3,224 an ideal hash occupies.
+    const FLOOR: usize = 2149;
+
+    for run in [1u32, 2, 4, 8] {
+      let mut seen = std::vec![false; SLOTS];
+      for first in 0..SETS {
+        let mut state = 0xcbf2_9ce4_8422_2325u64 ^ u64::from(run);
+        for row in first..first + run {
+          state = hash_u32(state, row);
+        }
+        seen[(state as usize) & (SLOTS - 1)] = true;
+      }
+      let occupied = seen.iter().filter(|hit| **hit).count();
+      assert!(
+        occupied >= FLOOR,
+        "runs of {run}: {SETS} sets occupy {occupied} buckets of {SLOTS}, under a floor of {FLOOR} \
+         and against the 3,224 an ideal hash occupies"
+      );
+    }
   }
 
   #[test]

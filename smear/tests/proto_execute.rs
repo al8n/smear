@@ -3355,10 +3355,12 @@ fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
 #[test]
 fn a_driver_message_refused_for_work_names_the_work_ceiling() {
   // Exactly what `{ a }` costs: draft §6.1's lookup over the document's one definition, one
-  // selection examined, and an intern into an empty table that compares nothing. So the budget is
-  // spent when the driver's failure arrives.
+  // selection examined, the two passes an intern makes over the one-byte key `a` — hashing it and
+  // copying it into an empty table, comparing nothing — and one more over the same spelling when
+  // `expand` resolves the field against the schema. So the budget is spent to the unit when the
+  // driver's failure arrives.
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(2).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(5).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
@@ -3375,7 +3377,7 @@ fn a_driver_message_refused_for_work_names_the_work_ceiling() {
     "the driver's failure is still the finding, whichever ceiling ate the text: {errors:?}"
   );
   assert!(
-    errors[0].1.contains("2 selection visits"),
+    errors[0].1.contains("5 selection visits"),
     "and the message names the ceiling that refused, which is the knob an operator can move: {}",
     errors[0].1
   );
@@ -3389,13 +3391,17 @@ fn a_driver_message_refused_for_work_names_the_work_ceiling() {
 /// An impossible runtime type the *work* ceiling could not quote says so too.
 #[test]
 fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
-  // Draft §6.1's lookup over one definition, one selection at the root and an intern that compares
-  // nothing, as above. The driver then names `pet` as the runtime type: the schema knows the
-  // spelling — it is a field — so `sym` answers and `type_of_sym` does not, which is the "not a
-  // possible type" branch, and the name it wants to quote is the response key already sitting in
-  // that bucket.
+  // Draft §6.1's lookup over one definition, one selection at the root, the two passes interning
+  // `pet` makes over it and the one `expand`'s schema probe makes, as above — and one more for the
+  // pass `Schema::sym` makes over the runtime spelling, which al8n/smear#196 charges before it
+  // hashes. Six, so the budget is spent to the unit at the *intern*, which is what this fixture is
+  // about; at five the lookup itself is refused and the case below is the one that fires.
+  //
+  // The driver then names `pet` as the runtime type: the schema knows the spelling — it is a
+  // field — so `sym` answers and `type_of_sym` does not, which is the "not a possible type"
+  // branch, and the name it wants to quote is the response key already sitting in that bucket.
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(2).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(6).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
@@ -3412,12 +3418,150 @@ fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
     "still the driver naming a type the position cannot hold: {errors:?}"
   );
   assert!(
-    errors[0].1.contains("2 selection visits"),
+    errors[0].1.contains("6 selection visits"),
     "and it names the ceiling that silenced the quote; this arm used to render the arena's cap \
      unconditionally, so it read `16777216 interned bytes` against an arena that was empty: {}",
     errors[0].1
   );
   assert!(!errors[0].1.contains("interned bytes"), "{}", errors[0].1);
+}
+
+/// A runtime-type lookup the budget cannot pay for does not run, and does not accuse the schema.
+///
+/// # The lookup was outside the ledger entirely
+///
+/// `Schema::sym` hashes its whole key before it compares anything, and this key is the driver's:
+/// [`Values::type_name`] returns whatever the backend says. Nothing charged for that pass, and an
+/// abstract position *inside a list* asks for it once per element — so one constant-size query
+/// over a driver handing back the same long discriminator for every element performed
+/// `positions × length` byte work against `max_response_slots`, a ceiling that counts positions
+/// and never looked at the string.
+///
+/// The sharp end was what happened **after** exhaustion. Past the point where the interner's own
+/// refusal had already fired, every remaining element still paid the whole hash before degrading
+/// its error text — the ledger was refusing and the expensive path ran anyway.
+///
+/// # And the refusal is its own error
+///
+/// A budget that stopped the lookup has established nothing about the type: not that the schema
+/// knows it, not that the position cannot hold it. Reporting it as
+/// [`Kind::AbstractNotPossible`] would tell an operator their schema is missing a type when what
+/// happened is that the executor stopped looking, and that is the one reading a caller cannot
+/// recover from. al8n/smear#196.
+///
+/// **The plant.** Delete the `take` in front of `Schema::sym` and this reads
+/// `Kind::AbstractNotPossible`: the lookup runs on an exhausted ledger and reports the answer it
+/// had no budget to compute.
+#[test]
+fn a_runtime_type_lookup_the_budget_refuses_is_not_an_impossible_type() {
+  // One unit short of the fixture above, so the ledger is empty at exactly the moment the runtime
+  // spelling would be hashed.
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(5).expect("not zero"),
+    ..Limits::default()
+  };
+  let (_, errors) = run_bounded(
+    ARENA_SDL,
+    "{ pet { n } }",
+    obj(vec![("pet", J::Obj("pet", vec![("n", J::Null)]))]),
+    limits,
+  );
+
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(
+    errors[0].0,
+    Kind::ResponseBudget,
+    "the executor stopped looking; nothing was established about the driver's type: {errors:?}"
+  );
+  assert!(
+    errors[0].1.contains("5 selection visits"),
+    "and it names the knob that stopped it: {}",
+    errors[0].1
+  );
+  assert!(
+    !errors[0].1.contains("not a possible type"),
+    "a lookup that never ran cannot say the type was impossible: {}",
+    errors[0].1
+  );
+  assert!(!errors[0].1.contains("interned bytes"), "{}", errors[0].1);
+}
+
+/// The per-position cost of a driver's runtime type name reaches the ledger.
+///
+/// # The instrument is the *resolvable* path, which is the one with nothing else in it
+///
+/// A resolvable abstract position never interns: the concrete id comes out of the schema and the
+/// spelling is wanted for no diagnostic, so `Schema::sym`'s hash is the **only** pass anything
+/// makes over the driver's string. Two schemas that differ in nothing but their concrete type's
+/// name, one query, the same twenty-four positions — so the budget that just clears the run moves
+/// by exactly what those hashes cost, or by nothing at all.
+///
+/// The "not a possible type" path would have made a poor instrument for the same reason it makes a
+/// poor claim: the interner charges its own passes over the same string, so the two boundaries
+/// would move apart whether or not the lookup itself was ever charged.
+///
+/// **The plant.** Delete the `take` in front of `Schema::sym` and the two boundaries become equal.
+#[test]
+fn a_drivers_runtime_type_name_is_charged_once_a_position() {
+  /// Elements in the list the driver returns.
+  const WIDTH: usize = 24;
+
+  /// The same schema at whatever length its one concrete type's name is given.
+  fn sdl(concrete: &str) -> String {
+    std::format!(
+      "type Query {{ pets: [Pet] }}\n\
+       interface Pet {{ n: String }}\n\
+       type {concrete} implements Pet {{ n: String }}\n"
+    )
+  }
+
+  /// The least `max_selection_visits` at which the fixture emits no budget error.
+  fn least(concrete: &'static str) -> u32 {
+    let schema = sdl(concrete);
+    let elements: Vec<J> = (0..WIDTH)
+      .map(|_| J::Obj(concrete, vec![("n", J::Null)]))
+      .collect();
+    let clears = |limit: u32| {
+      let limits = Limits {
+        max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
+        ..Limits::default()
+      };
+      let (_, errors) = run_bounded(
+        &schema,
+        "{ pets { n } }",
+        obj(vec![("pets", J::List(elements.clone()))]),
+        limits,
+      );
+      errors.is_empty()
+    };
+    let (mut lo, mut hi) = (1u32, 1u32 << 20);
+    assert!(clears(hi), "the fixture does not clear {hi} visits");
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if clears(mid) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    assert!(clears(lo) && !clears(lo - 1), "{lo} is not a boundary");
+    lo
+  }
+
+  // `J::Obj` tags a value with a `&'static str` because a real driver's type name outlives the
+  // value it describes; the long one is built at run time and leaked to match.
+  let long_name: &'static str = Box::leak(std::format!("P{}", "n".repeat(3_999)).into_boxed_str());
+  let short = least("Pn");
+  let long = least(long_name);
+  println!(
+    "driver runtime type name: {short} visits at 2 bytes, {long} at {} bytes",
+    long_name.len()
+  );
+  assert!(
+    long > short,
+    "the same {WIDTH} positions cost {short} visits over a two-byte runtime type name and {long} \
+     over a four-thousand-byte one. Equal totals mean the driver's string is outside the ledger"
+  );
 }
 
 /// A missing variable reports a missing variable, whether or not its name can be quoted.

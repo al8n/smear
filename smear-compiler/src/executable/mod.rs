@@ -54,7 +54,7 @@ use super::{
     DirectiveLocation, MAX_WRAPPERS, PackedType, RootOperation, Schema, Sym, TypeId, is_reserved,
   },
   scratch::{
-    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, clear_bit, get_bit, reset_bits,
+    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, clear_bit, get_bit, reset_bits,
     set_bit,
   },
 };
@@ -64,9 +64,10 @@ use values::ValueLocation;
 
 /// The verdict of a failed validation.
 ///
-/// Returned when at least one diagnostic was emitted. What the diagnostics *were* is the sink's
-/// business — this is only the count, and whether the sink asked to stop before the document had
-/// been fully examined.
+/// Returned when the document was refused: because at least one diagnostic was emitted, or because
+/// a [`Budget`] abandoned a rule partway through. What the diagnostics *were* is the sink's
+/// business — this is only the count, whether a budget refused, and whether the sink asked to stop
+/// before the document had been fully examined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Invalid {
   emitted: u32,
@@ -79,15 +80,33 @@ impl Invalid {
   ///
   /// This counts what the validator emitted, not what the sink kept: [`Ignore`](super::Ignore)
   /// discards everything and the count is still right.
+  ///
+  /// **Zero is a possible count on a verdict that is still `Err`**, and it means exactly one
+  /// thing: a budget refused the document with the bound's own rule outside the
+  /// [`RuleSet`](super::RuleSet), so there was nothing to emit. [`Invalid::budget_tripped`] is
+  /// true whenever that happens, and a caller that reports "no findings" without reading it would
+  /// be describing a check the engine abandoned.
   #[inline]
   pub const fn emitted(&self) -> u32 {
     self.emitted
   }
 
-  /// Returns whether the sink stopped validation before the document was fully examined.
+  /// Returns whether the **sink** stopped validation before the document was fully examined.
   ///
-  /// True for [`First`](super::First) on any invalid document. When it is true, the absence of a
-  /// diagnostic says nothing: the rest of the document was never looked at.
+  /// True for [`First`](super::First) on any invalid document *that produced a diagnostic*. The
+  /// qualification is not pedantry: there is exactly one verdict that is `Err` with nothing
+  /// emitted — a resource bound refusing with its own rule outside the
+  /// [`RuleSet`](super::RuleSet) — and no diagnostic ever reaches the sink there, so the sink
+  /// never asks for anything to stop and this reads `false` on a document that was very much not
+  /// fully examined. Read as "was the whole document looked at", it says the opposite of the truth
+  /// on the one case where it matters most.
+  ///
+  /// So the two flags answer two questions and neither answers the other's: this one says **who**
+  /// stopped the walk, and [`Invalid::budget_tripped`] says whether a bound refused. A caller who
+  /// wants "is anything about this document still unknown" reads both.
+  ///
+  /// When it is true, the absence of a diagnostic says nothing: the rest of the document was never
+  /// looked at. al8n/smear#196.
   #[inline]
   pub const fn stopped(&self) -> bool {
     self.stopped
@@ -97,9 +116,14 @@ impl Invalid {
   ///
   /// True when draft 5.3.2's merge engine reached
   /// [`Budget::merge_depth`](super::Budget::merge_depth) or
-  /// [`Budget::merge_work`](super::Budget::merge_work) — the diagnostic is
+  /// [`Budget::merge_work`](super::Budget::merge_work). With the bound's own rule in the
+  /// [`RuleSet`](super::RuleSet) the diagnostic is
   /// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
-  /// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) and says which.
+  /// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) and says which; **without it there is
+  /// no diagnostic and this flag is the whole of the report**, on a verdict whose
+  /// [`Invalid::emitted`] is zero. Filtering a bound's rule out switches off its diagnostic, not
+  /// the refusal: an engine that stopped and then answered `Ok` would be reporting a clean result
+  /// for a check it never finished. al8n/smear#196.
   ///
   /// When it is true the document is **invalid**, not "unvalidated": the engine refuses rather
   /// than passing what it could not finish examining. What it does *not* mean is that the rest of
@@ -113,6 +137,11 @@ impl Invalid {
 
 impl core::fmt::Display for Invalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    if self.emitted == 0 {
+      // The budget refused with its own rule filtered out. "0 validation errors" would read as the
+      // opposite of what happened.
+      return f.write_str("resource budget exceeded before the document was fully examined");
+    }
     let plural = if self.emitted == 1 { "" } else { "s" };
     write!(f, "{} validation error{plural}", self.emitted)?;
     if self.stopped {
@@ -133,7 +162,9 @@ impl core::error::Error for Invalid {}
 /// validator owns neither, which is what lets the steady state allocate nothing. `budget` bounds
 /// draft 5.3.2's merge engine.
 ///
-/// Returns `Err(Invalid)` when at least one rule fired.
+/// Returns `Err(Invalid)` when at least one rule fired **or** a [`Budget`] bound refused the
+/// document. Those are not the same thing and [`Invalid::budget_tripped`] is what separates them:
+/// a refusal with the bound's own rule filtered out has an [`Invalid::emitted`] of zero.
 ///
 /// # Example
 ///
@@ -199,9 +230,31 @@ where
 
 /// Validates an executable document against a subset of the rules.
 ///
-/// A rule outside `rules` is not evaluated, not merely filtered: a consumer that wants only the
-/// fragment rules does not pay for value coercion. With [`RuleSet::ALL`] this is exactly
+/// A draft §5 rule outside `rules` is not evaluated, not merely filtered: a consumer that wants
+/// only the fragment rules does not pay for value coercion. With [`RuleSet::ALL`] this is exactly
 /// [`validate_executable`].
+///
+/// **`rules` does not reach the resource bounds.** Narrowing removes a bound's *diagnostic*, never
+/// the bound: a caller who asks for
+/// [`Rule::FieldSelectionMerging`](super::Rule::FieldSelectionMerging) alone is still handed `Err`
+/// with [`Invalid::emitted`] zero and [`Invalid::budget_tripped`] set when `budget` refuses.
+///
+/// What narrowing *can* do is leave a bound with nothing to bound, and this said the opposite —
+/// that `budget` is enforced whatever the set contains.
+/// [`Budget::merge_work`](super::Budget::merge_work) and
+/// [`Budget::merge_depth`](super::Budget::merge_depth) are spent by draft 5.3.2's engine, and that
+/// engine is started by draft 5.3.2's own rule: with
+/// [`Rule::FieldSelectionMerging`](super::Rule::FieldSelectionMerging),
+/// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) and
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) all absent it does not run, so nothing
+/// is expanded, interned or compared and a `merge_work` of zero has nothing to refuse. **That is
+/// vacuity and not an exemption** — nothing expensive was let through, because nothing expensive
+/// happened. A bound whose passes *do* run is enforced whether or not its rule is in `rules`.
+///
+/// So `budget` is not an admission policy. Deciding whether to accept a document by what it would
+/// cost means leaving the rule that does the costing switched on: `rules` chooses what is
+/// **checked** and [`Budget`] chooses what is **afforded**, and neither answers the other's
+/// question. al8n/smear#196.
 pub fn validate_executable_with<S, K>(
   schema: &Schema,
   document: &ExecutableDocument<S>,
@@ -227,19 +280,16 @@ where
     in_operation: false,
     emitted: 0,
     stopped: false,
-    work: 0,
+    work: Work::new(budget.merge_work()),
     generation: 0,
     tripped: false,
-    budget_tripped: false,
     blame: SimpleSpan::const_new(0, 0),
   };
   let _ = validator.run();
-  let (emitted, stopped, budget) = (
-    validator.emitted,
-    validator.stopped,
-    validator.budget_tripped,
-  );
-  if emitted == 0 {
+  let (emitted, stopped, budget) = (validator.emitted, validator.stopped, validator.tripped);
+  // A budget refusal is a refusal whether or not it had a rule to emit. `Ok` here would be a clean
+  // verdict on a rule the engine abandoned partway through. al8n/smear#196.
+  if emitted == 0 && !budget {
     Ok(())
   } else {
     Err(Invalid {
@@ -293,15 +343,17 @@ struct Validator<'a, 'd, S, K> {
   in_operation: bool,
   emitted: u32,
   stopped: bool,
-  /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent.
-  work: u32,
+  /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent, and the ceiling it is
+  /// spending against.
+  work: Work,
   /// Distinguishes one fragment expansion from the next without clearing a bitset per expansion.
   generation: u32,
-  /// Whether a budget stopped the merge engine. Set even when the bound's own rule is switched
-  /// off: the bound holds either way, and only the diagnostic is optional.
+  /// Whether a budget stopped the merge engine, which is both what abandons the walk and what the
+  /// verdict reports. Set even when the bound's own rule is switched off: the bound holds either
+  /// way, and only the *diagnostic* is optional. It used to be two fields — one for the walk and
+  /// one for the verdict, the second set only when something was emitted — which is how a refused
+  /// document with its rule filtered out came back `Ok`. al8n/smear#196.
   tripped: bool,
-  /// Whether a budget diagnostic was actually emitted, which is what the verdict reports.
-  budget_tripped: bool,
   /// The definition to blame for a budget diagnostic — the one being merged when the bound hit.
   blame: SimpleSpan,
 }

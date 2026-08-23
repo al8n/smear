@@ -172,11 +172,19 @@ fn syntactic<'a>(
   let mut collected = Vec::new();
   let mut sink = Collect::new(&mut collected);
   let verdict = validate_executable_with(schema, &document, &mut scratch, budget, rules, &mut sink);
-  assert_eq!(
-    verdict.is_err(),
-    !collected.is_empty(),
-    "the syntactic verdict and its diagnostics disagree\n---\n{source}"
-  );
+  // `Err` with an empty sink is one deliberate state and not a disagreement: a `Budget` refused the
+  // document with its own rule outside `rules`, so there was nothing to emit and the refusal is the
+  // whole report. Anything else must match. al8n/smear#196.
+  match verdict {
+    Ok(()) => assert!(
+      collected.is_empty(),
+      "the syntactic door reported diagnostics under an `Ok` verdict\n---\n{source}"
+    ),
+    Err(invalid) => assert!(
+      !collected.is_empty() || invalid.budget_tripped(),
+      "the syntactic door returned `Err` with an empty sink and no budget refusal\n---\n{source}"
+    ),
+  }
   collected
 }
 
@@ -210,8 +218,8 @@ fn lossless<'a>(
     }
     Err(refused) => {
       assert!(
-        !collected.is_empty(),
-        "the lossless door returned `Err` with nothing in the sink\n---\n{source}"
+        !collected.is_empty() || refused.invalid().budget_tripped(),
+        "the lossless door returned `Err` with an empty sink and no budget refusal\n---\n{source}"
       );
       assert_eq!(
         refused.invalid().emitted() as usize,
