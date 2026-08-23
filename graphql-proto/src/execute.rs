@@ -3019,9 +3019,38 @@ where
         );
         return;
       };
+      // `Schema::sym` hashes the whole key before it compares anything, and the key is the
+      // **driver's**: `Values::type_name` returns whatever the backend says, so its length is the
+      // resolver's choice rather than the request's. Charged before the hash, in the ledger that
+      // already prices every other read of a name this executor did not write — the abstract
+      // position inside a list asks once per element, so a constant-size query over a driver
+      // returning one long discriminator per element performed `positions × length` byte work
+      // against a ceiling that counts positions. And it ran *after* exhaustion too: past the
+      // interner's refusal below, every remaining element still paid this hash before degrading
+      // its own error text.
+      //
+      // A refusal here is its own error. The success arm resolves a type and the failure arm below
+      // says the driver named an impossible one; a budget that stopped the lookup has established
+      // neither, so it says so rather than borrowing a sentence about the caller's schema.
+      // al8n/smear#196.
+      let name_bytes = name.as_bytes();
+      if !self.visits.take(byte_units(name_bytes.len())) {
+        let (parent, field) = self.owner(slot);
+        let limit = self.visits.limit();
+        self.fail(
+          slot,
+          Raw::RuntimeTypeBudget {
+            abstract_ty: base,
+            parent,
+            field,
+            limit,
+          },
+        );
+        return;
+      }
       let resolved = self
         .schema
-        .sym(name.as_bytes())
+        .sym(name_bytes)
         .and_then(|sym| self.schema.type_of_sym(sym))
         .filter(|&id| self.schema.type_def(id).kind() == TypeKind::Object)
         .filter(|&id| self.schema.is_possible_object(base, id));
