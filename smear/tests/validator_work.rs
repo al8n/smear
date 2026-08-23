@@ -86,6 +86,7 @@ input Opts { need: Int! a: Int }
 input Loose { a: Int b: Int }
 
 directive @onField repeatable on FIELD
+directive @onFragDef(if: Boolean) on FRAGMENT_DEFINITION
 "#;
 
 fn build(sdl: &str) -> Schema {
@@ -1822,5 +1823,116 @@ fn the_variable_definition_loop_charges_per_definition() {
     many - few >= 9_000,
     "9,990 more declarations cost {} units",
     many - few
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// 12. a gate that skips is a wrong answer
+// ---------------------------------------------------------------------------------------------
+
+/// The verdict does not depend on the order the operations were written in.
+///
+/// A fragment definition's own directives are the **non-constant** family, so they can carry a
+/// variable usage — and a usage is operation-local while the directive *rules* over them are
+/// definition-local. `begin_fragment` ran behind the bit that deduplicates the reporting, so only
+/// the **first** operation to reach a fragment ever visited those directives.
+///
+/// The consequence is not a number moving. With `$v` declared by one operation and not the other,
+/// putting the declaring one first hides draft 5.8.3 entirely; putting it second makes 5.8.4 report
+/// the declaration unused. Two orderings of the same three definitions, two different verdicts —
+/// and a budget test cannot see either of them.
+#[test]
+fn the_verdict_does_not_depend_on_operation_order() {
+  let schema = build(SCHEMA);
+  let budget = Budget::default();
+
+  let declares = "query a($v: Boolean) { dog { ...F } }";
+  let does_not = "query b { dog { ...F } }";
+  let fragment = "fragment F on Dog @onFragDef(if: $v) { name }";
+
+  let first = run(
+    &schema,
+    &std::format!("{declares} {does_not} {fragment}"),
+    &budget,
+    RuleSet::ALL,
+  );
+  let second = run(
+    &schema,
+    &std::format!("{does_not} {declares} {fragment}"),
+    &budget,
+    RuleSet::ALL,
+  );
+  println!(
+    "operation order: declaring first {:?}, declaring second {:?}",
+    first.rules(),
+    second.rules()
+  );
+
+  assert_eq!(
+    first.rules(),
+    second.rules(),
+    "the same definitions in a different order produced a different verdict"
+  );
+  // And the verdict is the right one: `b` uses `$v` without declaring it, `a` declares and uses it.
+  assert_eq!(first.rules(), [Rule::AllVariableUsesDefined]);
+  assert_eq!(first.emitted, 1, "{:?}", first.diagnostics);
+  assert_eq!(second.emitted, 1, "{:?}", second.diagnostics);
+}
+
+/// A scan over a schema-sized group is charged for every position that reaches it.
+///
+/// The group is the schema's and its size is not an input — which is what the pass table said, and
+/// it was silent about the other factor. A request chooses **how many times** to reach it, and the
+/// per-required charge inside the loop sees none of the scan: an optional entry `continue`s before
+/// spending, and with no written arguments a required one spends zero.
+#[test]
+fn a_schema_sized_scan_is_charged_per_position_that_reaches_it() {
+  const DECLARED: usize = 200;
+  const POSITIONS: usize = 200;
+
+  // Every argument optional and every input field optional, so the loops scan the whole group and
+  // reach no `spend` inside it.
+  let args = (0..DECLARED)
+    .map(|i| std::format!("a{i}: Int, "))
+    .collect::<String>();
+  let fields = (0..DECLARED)
+    .map(|i| std::format!("f{i}: Int "))
+    .collect::<String>();
+  let sdl = std::format!(
+    "type Query {{ dog: Dog }} \
+     type Dog {{ name: String manyArgs({args}): Boolean withWide(opts: Wide): Boolean }} \
+     input Wide {{ {fields} }}"
+  );
+  let schema = build(&sdl);
+
+  let positions = |body: &str, n: usize| {
+    let mut source = String::from("{ dog {");
+    for i in 0..n {
+      source.push_str(&std::format!(" x{i}: {body}"));
+    }
+    source.push_str(" } }");
+    source
+  };
+
+  // 5.4.3's presence half: the argument group.
+  let rules = RuleSet::only(Rule::RequiredArguments);
+  let one = min_budget(&schema, &positions("manyArgs", 1), rules);
+  let many = min_budget(&schema, &positions("manyArgs", POSITIONS), rules);
+  println!("argument group: 1 position {one} units, {POSITIONS} positions {many} units");
+  assert!(
+    many - one >= ((POSITIONS - 1) * DECLARED) as u32,
+    "{POSITIONS} positions over a {DECLARED}-argument group cost {} units",
+    many - one
+  );
+
+  // 5.6.4's presence half: the input-field group, reached through an empty literal.
+  let rules = RuleSet::only(Rule::InputObjectRequiredFields);
+  let one = min_budget(&schema, &positions("withWide(opts: {})", 1), rules);
+  let many = min_budget(&schema, &positions("withWide(opts: {})", POSITIONS), rules);
+  println!("input-field group: 1 position {one} units, {POSITIONS} positions {many} units");
+  assert!(
+    many - one >= ((POSITIONS - 1) * DECLARED) as u32,
+    "{POSITIONS} literals over a {DECLARED}-field group cost {} units",
+    many - one
   );
 }

@@ -339,6 +339,16 @@ where
       && check
       && self.on(Rule::RequiredArguments)
     {
+      // One per declared entry the scan **examines**, before it examines any.
+      //
+      // The group is the schema's and its size is not an input; how many times a request can reach
+      // it is. This runs once per position that selects the field, so `positions × group` is a
+      // product with one caller-controlled factor — and the per-required charge below sees none of
+      // it: an optional entry `continue`s before spending, and with no written arguments the
+      // required ones spend zero. "Not the caller's population" was true about the size and silent
+      // about the count. al8n/smear#198.
+      let declared = self.schema.inputs(group).len() as u32;
+      self.spend(declared, blame)?;
       let written: u32 = arguments
         .iter()
         .map(|argument| units(name_bytes(argument.argument_name()).len()))
@@ -706,11 +716,14 @@ where
     // 5.6.4 — every required field is supplied. The same cross product 5.4.3's presence half is,
     // and charged the same way and for the same reason.
     if self.on(Rule::InputObjectRequiredFields) {
+      // The same scan over the schema's population, reached once per literal a request writes.
+      // See 5.4.3's presence half for the argument.
+      let count = self.schema.input_fields_of(object).len();
+      self.spend(count as u32, value.value_span())?;
       let written: u32 = fields
         .iter()
         .map(|field| units(name_bytes(field.field_name()).len()))
         .fold(0u32, u32::saturating_add);
-      let count = self.schema.input_fields_of(object).len();
       for index in 0..count {
         let field_definition = self.schema.input_fields_of(object)[index];
         if !field_definition.is_required() {

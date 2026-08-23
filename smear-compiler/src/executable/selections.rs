@@ -268,10 +268,12 @@ where
       return ControlFlow::Continue(None);
     }
 
+    // Every operation's expansion, not only the first. `enter` is the definition-local half — the
+    // directive rules over the definition's own directives, deduplicated — and the usages those
+    // directives can carry are operation-local, so they have to be collected again each time. See
+    // `Validator::begin_fragment`.
     let enter = !get_bit(&self.scratch.checked, row.definition);
-    if enter {
-      self.begin_fragment(row.definition)?;
-    }
+    self.begin_fragment(row.definition, enter)?;
     let scope = target.map_or(NONE, |id| id.get());
     let flags = if enter { Frame::CHECK } else { 0 };
     ControlFlow::Continue(Some((
@@ -293,6 +295,15 @@ where
     let Some(parent) = frame.type_id() else {
       return ControlFlow::Continue(());
     };
+    // The possible-object bitset is the schema's and its width is not an input; the number of
+    // spreads and inline fragments that reach it is. `possible_objects_intersect` walks both word
+    // lists to the first overlap, and 5.5.2.3 fires exactly when there is none — so the reporting
+    // case is the full scan. Charged in the dimension the scan is measured in: words.
+    let words = self
+      .schema
+      .possible_objects(target)
+      .map_or(0, |words| u32::try_from(words.len()).unwrap_or(u32::MAX));
+    self.spend(words, *name.as_span())?;
     if possible(self.schema, target, parent) {
       return ControlFlow::Continue(());
     }

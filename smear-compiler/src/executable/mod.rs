@@ -50,6 +50,18 @@
 //!   it found sites the previous version could not see: a charge counting **selections** in front
 //!   of a comparison measured in **bytes**, and a charge gated on one of a list's two readers while
 //!   the other read it for free.
+//! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
+//!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
+//!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a
+//!   second reader in another module; the variable index had one that survived an empty range; and
+//!   `begin_fragment` — behind the bit that deduplicates *reporting* — skipped the
+//!   operation-local usages on a fragment definition's own directives, which made the verdict
+//!   depend on the order the operations were written in.
+//! - **"Not the caller's population" is an answer about size, and half an answer.** The other half
+//!   is how many times a caller can reach it. Three scans over schema-sized groups — 5.4.3's
+//!   argument list, 5.6.4's input-field list, and 5.5.2.3's possible-object bitset — are reached
+//!   once per position a request writes, so each is a product with one caller-controlled factor and
+//!   each is charged in its own dimension: entries, entries, words.
 //! - **A charge lives where the work happens, not where a caller remembered to put it.** Four
 //!   rounds sharpened *what* is charged; this one is about *where*. A charge separated from its
 //!   work by a **call boundary** depends on the caller naming the right subject — `report_name`
@@ -1801,17 +1813,36 @@ where
       let condition = body.type_condition().name();
       self.spend_name(condition)?;
       let scope = self.composite_of(condition).map_or(NONE, |id| id.get());
-      self.begin_fragment(row.definition)?;
+      self.begin_fragment(row.definition, true)?;
       self.walk_selections(Frame::root(row.definition, scope, Frame::CHECK))?;
     }
     ControlFlow::Continue(())
   }
 
-  /// Records that a fragment's definition-local rules are running now, and checks the directives
-  /// on the definition itself.
-  pub(super) fn begin_fragment(&mut self, index: u32) -> ControlFlow<()> {
-    grow_bits(&mut self.scratch.checked, index as usize + 1);
-    set_bit(&mut self.scratch.checked, index);
+  /// Visits a fragment definition's own directives, and records that its definition-local rules
+  /// have run.
+  ///
+  /// `check` is the **definition-local** half: draft 5.7's rules over these directives fire once
+  /// however many operations spread the fragment, so the `checked` bit and the reporting move
+  /// together. It is deliberately not the whole of what this function does.
+  ///
+  /// A fragment definition's directives are the **non-constant** family — `fragment F on Dog
+  /// @include(if: $v)` puts a variable usage on the definition itself — and a usage is
+  /// *operation-local*: draft 5.8 scopes to one operation, and the same fragment is valid under one
+  /// operation's variables and invalid under another's. So this runs on **every** operation's
+  /// expansion and only the reporting is deduplicated.
+  ///
+  /// It used to be called only on the first expansion, behind the same bit that gates the
+  /// reporting. Every later operation therefore missed those usages: 5.8.3 and 5.8.5 could accept
+  /// an undefined or incompatible variable, 5.8.4 could call a used one unused, and **the verdict
+  /// depended on the order the operations were written in**. Present on a46ab95 and on every
+  /// commit of this branch before al8n/smear#198's eighth round; not a consequence of any gate this
+  /// branch added, which the diff over `selections.rs` shows.
+  pub(super) fn begin_fragment(&mut self, index: u32, check: bool) -> ControlFlow<()> {
+    if check {
+      grow_bits(&mut self.scratch.checked, index as usize + 1);
+      set_bit(&mut self.scratch.checked, index);
+    }
     let Some(body) = fragment(self.document, index) else {
       return ControlFlow::Continue(());
     };
@@ -1819,7 +1850,7 @@ where
       Some(directives) => self.check_directives(
         directives.directives(),
         DirectiveLocation::FragmentDefinition,
-        true,
+        check,
       ),
       None => ControlFlow::Continue(()),
     }
