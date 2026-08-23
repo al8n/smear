@@ -594,8 +594,11 @@ fn every_refusal_commits_at_least_one_item() {
   for (dialect, root, alphabet) in cells {
     for junk in alphabet {
       // Junk alone, with no sync point after it: every scan fails, and once the allowance is gone
-      // every call refuses. No burn prefix, because GraphQLx has no atom that provides one — see
-      // `Cell`. The two dialects then read identically, which is the point.
+      // every call refuses. No burn prefix, because none is needed here — junk on its own drives
+      // the refusals this cell measures, in both dialects, which is what lets the two rows read
+      // identically. NOT because GraphQLx has no burn to offer: `-.5` is one, `DensityCell` runs
+      // on it, and `Cell`'s own note records "GraphQLx has no atom that drives the regime" as a
+      // generalisation this file already corrected once.
       let src = junk.repeat(6_000);
       let got = run(root, &src);
       assert_eq!(got.covered, src.len(), "{dialect} {junk:?}");

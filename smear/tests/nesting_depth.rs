@@ -762,8 +762,10 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
   // Above the door's clamp and above every shape's own depth below, so the *parse* refuses at
   // `HARD_MAX` and the lexer's tally — which reads this number unclamped — never fires.
   const CEILING: usize = MAX_NESTING_DEPTH * 64;
-  // Deep enough that a per-token tail would be unmistakable, shallow enough to stay under the
-  // ceiling. The refusal happens far above this, wherever tokora's default sits.
+  // Deep enough that a per-token tail would be unmistakable, and deep enough to clear the door's
+  // clamp: the budget installed is `min(CEILING, HARD_MAX)`, so the parse refuses at `HARD_MAX` —
+  // BELOW this number, which is what makes a refusal happen at all. Shallow enough to stay under
+  // `CEILING`, which is the number the lexer's own tally reads unclamped.
   const DEPTH: usize = 300;
   // `0` is the cell the first version of this test had; the rest are the axis it was missing.
   const TAILS: &[usize] = &[0, 1, 4, 64];
@@ -982,33 +984,36 @@ fn a_refusal_ends_every_document_root() {
 ///
 /// `lossless_error_impls!` generates two conversions onto a dialect's error container that both
 /// mean *the frame budget refused*, and only one of them was repaired by smear issue #169.
-/// `FromNestingLimit` — the one `depth::descend` calls —
-/// moved to `ErrorData::NestingLimitExceeded`, precisely because a `Cow` discriminator is one
-/// reword away from answering `false` forever. `From<RecursionLimitReached>` — the one
-/// [`InputRef::descend`](tokora::InputRef::descend) carries as a where-clause — kept
-/// `Other("nesting limit exceeded")`, and `Other`'s [`MaybeTerminal`](tokora::error::MaybeTerminal)
-/// arm answers **`false`**. A trip arriving through it was therefore classified *recoverable*, and
-/// a root loop resynchronised past it: the pre-#169 amplification, on the one carrier #169's
-/// repair did not reach.
+/// `FromNestingLimit` — the one `depth::descend` calls for the **emitted** diagnostic — moved to
+/// `ErrorData::NestingLimitExceeded`, precisely because a `Cow` discriminator is one reword away
+/// from answering `false` forever. `From<RecursionLimitReached>` — the one
+/// [`InputRef::descend`](tokora::InputRef::descend) carries as a where-clause — was left on
+/// `Other("nesting limit exceeded")`, and `Other`'s
+/// [`MaybeTerminal`](tokora::error::MaybeTerminal) arm answers **`false`**. A trip arriving
+/// through it was therefore classified *recoverable*, and a root loop resynchronised past it: the
+/// pre-#169 amplification, on the one carrier #169's repair did not reach. It is on
+/// `NestingLimitExceeded` now, and these four cells are what says so.
 ///
 /// # Why it is a value assertion rather than an end-to-end parse
 ///
-/// Nothing shipped reaches this conversion today, and that is measured rather than assumed:
+/// **Not because nothing shipped reaches the conversion.** An earlier revision of this note said
+/// so, on the strength of a pre-check inside `depth::descend` that refused at
+/// `min(ceiling, inp.recursion().limitation())` before ever calling `inp.descend()`. That function
+/// does not work that way any more, and the guidance was obsolete in the direction that matters:
+/// it **probes** — `inp.descend().map(|_| ())` — and the `Err` the probe hands back **is** this
+/// impl's output, which `depth::descend` then returns unchanged after emitting the
+/// `FromNestingLimit` diagnostic beside it. Every lossless parser-frame refusal in either dialect
+/// is a value this impl built, and it is the value the six document roots stop on.
 ///
-/// * every one of smear's 28 descending production call sites goes through
-///   `depth::descend`, which refuses at
-///   `min(ceiling, inp.recursion().limitation())` **before** calling `inp.descend()` — so
-///   `live < limitation()` holds at the call, tokora's `check()` fails only at
-///   `depth > limitation()`, and the trip cannot fire;
-/// * tokora's own internal descents are the two Pratt engines (`input_ref/pratt.rs`,
-///   `parser/pratt/expr.rs`), and neither dialect uses Pratt at all.
+/// What a parse still cannot do is **redden** on the arm. `depth::root_turn` ends the document
+/// when the entry's error `is_terminal()` **or** when tokora's own resource-trip counter moved
+/// during that entry, and a refusal always moves the counter — so the roots stop on the trip term
+/// whatever arm the carrier answers. That second term is deliberate (smear PR #189), and it is
+/// exactly what makes an end-to-end parse the wrong instrument for this claim: the carrier is the
+/// subject, and the parse has a reason to stop that does not consult it.
 ///
-/// So the impl is live for exactly one population now — smear itself, the moment `depth::descend`
-/// stops pre-checking. It used to be two: a consumer driving the generic layer with its own
-/// composition was the other, and smear PR #189's round 5 withdrew that layer, which removes the
-/// population rather than the conversion. Neither has a parse in this tree to observe. A
-/// conversion no test can redden is a
-/// conversion that drifts, which is the argument the `MaybeTerminal` censuses in
+/// So the assertion is on the value. A conversion no test can redden is a conversion that drifts,
+/// which is the argument the `MaybeTerminal` censuses in
 /// `smear-parser/src/*/error/tests/terminal.rs` already make about their own arms.
 ///
 /// # The plant

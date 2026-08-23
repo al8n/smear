@@ -658,6 +658,10 @@ impl RootStop {
 /// and nothing else. The sixth propagates both failure arms instead of resynchronising on the
 /// third — a dialect's own divergence, recorded where that root is defined (smear issue #168).
 ///
+/// The six root loops are not the whole caller set — the driver macro and the in-crate cells call
+/// this too — and the set is pinned rather than narrated, for the reason
+/// [`drain_unless_stopped`]'s `Who calls it is not written here` note gives.
+///
 /// # `stop` is written here, and only here
 ///
 /// The verdict this returns is what the loop needs; [`RootStop`] is what the **drain above the
@@ -797,8 +801,25 @@ where
 ///
 /// A `compile_fail` doctest used to pin the missing argument position from outside the crate, and
 /// round 5 deleted it with the surface it was about: on a `pub(crate)` function it fails at the
-/// visibility boundary rather than at the signature. The shape is still what the signature says,
-/// and the six `*_entry` productions and the driver macro's own driver are its only callers.
+/// visibility boundary rather than at the signature. The shape is still what the signature says.
+///
+/// # Who calls it is not written here, and that is a repair rather than an omission
+///
+/// This paragraph used to end by naming the callers, and it named them **wrongly three times
+/// running**: five roots, then six roots, then six roots plus the driver macro. Each of those
+/// revisions was written by a sweep that reported itself complete, and each of them left out the
+/// in-crate cells that drive this function directly — the ones this module's closing comment
+/// sends a reader to by name. A caller set is a claim about the whole crate, it changes whenever
+/// anyone writes a test, and nothing in a build says a word when it goes stale.
+///
+/// So it is data now: `DECLARED`, in `ci/source_census/src/roots.rs`, keyed by callee, file and
+/// enclosing item and carrying a count, because a total cannot see a swap. It is checked against
+/// the **token tree** of every file in this crate — a walk that descends into macro bodies, where
+/// fourteen of the twenty-five calls are written, and that refuses a file it cannot parse rather
+/// than reporting no callers in it. A caller added without its row is a red gate, and so is a row
+/// whose caller went away. Four families: the six `*_entry` productions here, the six document
+/// roots' [`root_turn`] calls, the driver macro's own driver, and the cells in
+/// `smear-parser/src/graphql/lossless/tests.rs`.
 ///
 /// # The witness is read again above the root, and the slot is what scopes it — round 4
 ///

@@ -4,9 +4,9 @@
 //!
 //! Each of these would be a function, a trait or an `impl` if it could be. None of them can:
 //!
-//! - `lossless_production!` declares a **signature**, not a value — nine where-clauses over a
-//!   dialect's seven types. A generic function cannot stand in for a signature its caller writes
-//!   bodies against.
+//! - `lossless_production!` declares a **signature**, not a value — six where-predicates carrying
+//!   fourteen trait bounds, spelled over seven of the eight names a dialect owes it. A generic
+//!   function cannot stand in for a signature its caller writes bodies against.
 //! - `lossless_drivers!` declares a module of `fn(&str) -> Parse` entry points whose closure
 //!   parameter types must be **spelled out**: a closure's parameter is not inferred through a
 //!   `ParseInput` bound, only through an `Fn` bound.
@@ -70,41 +70,62 @@
 ///
 /// # Why the bundle is one block, and why it is here rather than per dialect
 ///
-/// The bundle is eight clauses long and **not one of them is optional** once a production both
-/// opens a node and goes through the atom set — which is every production in either suite.
-/// Written out per function it is ~150 lines of boilerplate across `value.rs` alone, and the
-/// failure mode of drifting copies is a compile error a hundred lines from its cause. Written out
-/// per *dialect* it is the same nine clauses twice, and the failure mode is worse: the two copies
-/// drift and the second dialect's productions accept a bound the first rejects.
+/// The bundle is **six where-predicates carrying fourteen trait bounds**, and not one of them is
+/// optional once a production both opens a node and goes through the atom set — which is every
+/// production in either suite. Written out per function it is ~150 lines of boilerplate across
+/// `value.rs` alone, and the failure mode of drifting copies is a compile error a hundred lines
+/// from its cause. Written out per *dialect* it is the same six predicates twice, and the failure
+/// mode is worse: the two copies drift and the second dialect's productions accept a bound the
+/// first rejects.
 ///
-/// # The clauses, and what each one buys
+/// # The predicates, and what each bound buys
 ///
-/// - **`Token<'inp, Kind = TokenKind>`** — a dialect's lossless `Token` impl is macro-generated
-///   **once per concrete slice type** (`smear-lexer`'s `token_impl!`), unlike the syntactic
-///   token's generic impl, so over a generic `Src` the projection `<Token<…>>::Kind` has nothing
-///   to normalize against. `Token<'inp>` alone makes the projection *nameable*; only the `Kind =`
-///   equality makes a token-kind **literal** — which is what every `expect(inp, Kind::LBracket)`
-///   passes — typecheck against it.
-/// - **`FromLogos<'inp>`** — `LogosLexer<'inp, T>` carries it on its struct definition, so without
-///   it the lexer alias is ill-formed rather than merely unbounded.
-/// - **`Clone`** — `UnexpectedToken::with_found` takes the token by value, and a declined token is
-///   only ever borrowed (it stays unconsumed, on purpose).
-/// - **`DowncastRef<Keyword>`** — `true`/`false`/`null` and every other contextual keyword arrive
-///   as identifier tokens; the value dispatcher tells them apart on their spelling.
-/// - **the `Lexer` associated-type pins** — without `Span`/`Offset` the two error `From` bounds
-///   cannot be spelled at all.
-/// - **`Ctx::Emitter: CstEmitter`** — the structural gate on the whole `node` family.
-/// - **the three error conversions** — `UnexpectedEot` for every peek, `UnexpectedToken` for every
-///   declined `expect`, and `FromUnclosed` for the unterminated-delimiter reports.
-/// - **`RecursionLimitReached` and `FromNestingLimit`** — the parser-frame descent
-///   ([`crate::lossless::depth`]). The first is [`InputRef::descend`](tokora::InputRef::descend)'s
-///   own where-clause; the second is how the refusal reaches the dialect's error container. They
-///   ride the whole bundle rather than only the delimiter productions because the bundle is one
-///   block and a per-production subset is the drift this macro exists to prevent.
+/// One bullet per predicate, in the order the expansion writes them, and every bound the
+/// expansion spells appears under one of them. A bound in the macro body with no line here is the
+/// drift this section exists to be read against — the count in the paragraph above is derived
+/// from this list, so the two cannot disagree without one of them being visibly wrong.
 ///
-/// # The clause that used to be here and is not
+/// - **`Src: Source<usize> + ?Sized`** — the source stays the caller's representation rather than
+///   this crate's, and the `?Sized` relaxation is what lets `str` itself be the `Src` every
+///   driver passes. Two entries, and only `Source<usize>` is a trait bound.
+/// - **`Token<'inp, Src>: Token<'inp, Kind = TokenKind> + FromLogos<'inp> + Clone +
+///   DowncastRef<Keyword>`** — four bounds.
+///   - `Token<'inp, Kind = TokenKind>` — a dialect's lossless `Token` impl is macro-generated
+///     **once per concrete slice type** (`smear-lexer`'s `token_impl!`), unlike the syntactic
+///     token's generic impl, so over a generic `Src` the projection `<Token<…>>::Kind` has
+///     nothing to normalize against. `Token<'inp>` alone makes the projection *nameable*; only
+///     the `Kind =` equality makes a token-kind **literal** — which is what every
+///     `expect(inp, Kind::LBracket)` passes — typecheck against it.
+///   - `FromLogos<'inp>` — `LogosLexer<'inp, T>` carries it on its struct definition, so without
+///     it the lexer alias is ill-formed rather than merely unbounded.
+///   - `Clone` — `UnexpectedToken::with_found` takes the token by value, and a declined token is
+///     only ever borrowed (it stays unconsumed, on purpose).
+///   - `DowncastRef<Keyword>` — `true`/`false`/`null` and every other contextual keyword arrive
+///     as identifier tokens; the value dispatcher tells them apart on their spelling.
+/// - **`Lexer<'inp, Src>: Lexer<'inp, Token = …, Span = …, Offset = …, State = …>`** — one bound
+///   and four associated-type pins. Without `Span`/`Offset` the two error `From` bounds cannot be
+///   spelled at all; `Token =` is what ties the predicate above to *this* lexer; `State =` is the
+///   pin described under the eight names.
+/// - **`Ctx: ParseContext<'inp, Lexer, Brand>`** — the context the parse runs under. It is what
+///   makes `Input<'inp, '_, Src, Ctx>`, the `inp` every body takes, a well-formed `InputRef` at
+///   all, and what the next predicate projects `Emitter` out of.
+/// - **`Ctx::Emitter: CstEmitter<'inp, Lexer, Brand>`** — the structural gate on the whole `node`
+///   family.
+/// - **`Error<'inp, Src, Ctx>: From<UnexpectedEot> + From<UnexpectedToken> + FromUnclosed +
+///   From<RecursionLimitReached> + FromNestingLimit + MaybeTerminal`** — six bounds. The first
+///   three are the ordinary reports: `UnexpectedEot` for every peek, `UnexpectedToken` for every
+///   declined `expect`, `FromUnclosed` for the unterminated-delimiter reports. The next two are
+///   the parser-frame descent ([`crate::lossless::depth`]) —
+///   [`InputRef::descend`](tokora::InputRef::descend) carries `From<RecursionLimitReached>` as its
+///   own where-clause and it is the carrier a refusal *arrives* on, while `FromNestingLimit` is
+///   how that refusal's **diagnostic** reaches the dialect's container. The last, `MaybeTerminal`,
+///   is what the drains above a root read to tell a resource refusal from a syntax error. All six
+///   ride the whole bundle rather than only the productions that need them, because the bundle is
+///   one block and a per-production subset is the drift this macro exists to prevent.
 ///
-/// A ninth clause, `<Lexer as Lexer<'inp>>::State: Clone`, rode along documented as
+/// # The predicate that used to be here and is not
+///
+/// A seventh predicate, `<Lexer as Lexer<'inp>>::State: Clone`, rode along documented as
 /// *"`InputRef::sync_balanced` lives in an impl block that requires it; nothing else in this suite
 /// does"*. The first half is true (`tokora/src/input/input_ref/sync_balanced.rs:153-157`) and the
 /// conclusion does not follow: `Lexer::State: State` and `trait State: Debug + Clone`
