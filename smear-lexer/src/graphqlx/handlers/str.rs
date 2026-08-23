@@ -40,13 +40,12 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
-  match lexer.slice().as_ref().chars().next() {
-    Some(ch) => {
-      lexer.extras.increase_token();
-      LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start)
-    }
-    None => LexerError::unexpected_eoi(lexer.span().into()),
-  }
+  handlers::cst_default_error(
+    lexer,
+    |lexer| lexer.slice().as_ref().chars().next(),
+    LexerError::unknown_char,
+    LexerError::unexpected_eoi,
+  )
   .into()
 }
 

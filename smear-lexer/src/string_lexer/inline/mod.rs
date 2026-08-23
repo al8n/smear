@@ -54,6 +54,78 @@ where
 }
 
 /// An inline string representation in GraphQL.
+///
+/// # Not a map key reachable through `&str`
+///
+/// This type, [`LitBlockStr`](super::LitBlockStr) and both complex carriers deliberately do **not**
+/// implement [`Borrow`](core::borrow::Borrow). That trait is not a synonym for [`AsRef`]: it
+/// promises the borrowed and the owned value are interchangeable as map keys, and every carrier
+/// here derives `Hash` over more than the bytes `as_str` hands out. The impls existed and the
+/// promise was false — a `&str` lookup hashed the bytes while the key hashed the discriminant, so
+/// it could never hit. The absence is what the snippet pins — with `Borrow<str>` gone the only
+/// candidate left is the blanket `Borrow<T> for T`, so the refusal arrives as a type mismatch on
+/// the argument rather than as an unsatisfied bound:
+///
+/// ```compile_fail,E0308
+/// use std::collections::HashMap;
+/// use smear_lexer::LitInlineStr;
+///
+/// let map: HashMap<LitInlineStr<&str>, ()> = HashMap::new();
+/// let _ = map.get("query");
+/// ```
+///
+/// [`AsRef`], [`Deref`](core::ops::Deref) and `From<LitInlineStr<&str>> for &str` all still hand
+/// back the source spelling, so a caller who wants that key writes it: `map.get(lit.as_str())` on
+/// a `HashMap<&str, _>`.
+///
+/// # Not ordered against `str` or `[u8]` either
+///
+/// The same disagreement, one trait along, and this one needs no map to show itself.
+/// [`PartialOrd`]'s requirements hold **across** implementations — `a < b` and `b < c` drawn from
+/// two different impls still have to give `a < c` — so an impl reading the source alone cannot sit
+/// beside a derived `Ord` that reads something else first. This one does: derived `Ord` on an enum
+/// ranks the discriminant ahead of the fields, so `Plain < Complex` before a byte is compared.
+/// Three ordinarily lexed values witnessed the break, none of them forged:
+///
+/// | pair | route | answer |
+/// |---|---|---|
+/// | plain `"z"` vs complex `"a\n"` | derived, discriminant first | `Less` |
+/// | complex `"a\n"` vs the `str` `"\"m\""` | cross-type, source bytes | `Less` |
+/// | plain `"z"` vs the `str` `"\"m\""` | cross-type, source bytes | **`Greater`** |
+///
+/// The third value is any spelling that sorts between the two sources, and `"\"m\""` is one — the
+/// probe carries the literal's `"` delimiters because the source does. Narrowing the enum's own
+/// `Ord` to source order was the other way to close it, and it is the way this type has already
+/// refused once: `Ord` must stay consistent with `Eq`, so `Plain` and `Complex` carrying the same
+/// bytes — two different claims about them — would compare equal in every `BTreeMap` and `sort`.
+///
+/// So this type and [`LitBlockStr`](super::LitBlockStr) have no `PartialOrd<str>` and no
+/// `PartialOrd<[u8]>`. The refusal arrives the same way the `Borrow` one does, as a type mismatch
+/// against the derived `PartialOrd<Self>`:
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::LitStr;
+///
+/// let LitStr::Inline(lit) = LitStr::try_from("\"z\"").unwrap() else { unreachable!() };
+/// let _ = lit < *"\"m\"";
+/// ```
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::LitStr;
+///
+/// let LitStr::Inline(lit) = LitStr::try_from(b"\"z\"".as_slice()).unwrap() else {
+///   unreachable!()
+/// };
+/// let _ = lit < *b"\"m\"".as_slice();
+/// ```
+///
+/// The complex carriers keep theirs: `variant_type!` declares `source` first, so their derived
+/// `Ord` compares the source first and breaks ties on line facts computed from that same source —
+/// one relation, with no gap for a third value to fall into. A caller who wants source order over
+/// a whole literal writes it, and says so: `lit.as_str().cmp(other)`.
+///
+/// Per this repository's convention the error codes are checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippets do not compile at all.
 #[derive(
   Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant, Unwrap, TryUnwrap,
 )]
@@ -121,9 +193,8 @@ impl<'a> TryFrom<LitInlineStr<&'a [u8]>> for LitInlineStr<&'a str> {
 /// # Value, not spelling
 ///
 /// This type has a second `&str` door that answers the other question, and the two are not
-/// interchangeable: [`as_str`](LitInlineStr::as_str), [`Deref`](core::ops::Deref),
-/// [`AsRef`], [`Borrow`](core::borrow::Borrow) and `From<LitInlineStr<&str>> for &str` all
-/// hand back the **source spelling**, `"` delimiters and backslashes included, because keeping the
+/// interchangeable: [`as_str`](LitInlineStr::as_str), [`Deref`](core::ops::Deref), [`AsRef`]
+/// and `From<LitInlineStr<&str>> for &str` all hand back the **source spelling**, `"` delimiters and backslashes included, because keeping the
 /// source is what makes lexing allocate nothing. This conversion is the cooked reading, and
 /// [`Cow`] is its return type precisely so that the [`Plain`](LitInlineStr::Plain) half — a
 /// literal with no escape in it — still costs nothing but a reslice.
@@ -254,6 +325,12 @@ impl_common_traits!(LitInlineStr::<&'a str>::as_str);
 impl_common_traits!(LitInlineStr::<&'a [u8]>::as_bytes);
 impl_common_traits!(LitComplexInlineStr::<&'a str>::as_str);
 impl_common_traits!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
+
+// The complex carrier only. `LitInlineStr` is an enum, and its derived `Ord` ranks `Plain` ahead
+// of `Complex` before it reads a byte, so a source-ordered impl beside it would not be part of the
+// same order — see `impl_source_ordering`.
+impl_source_ordering!(LitComplexInlineStr::<&'a str>::as_str);
+impl_source_ordering!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
 
 /// Applies draft §2.9.1's escapes to an inline literal's body.
 ///

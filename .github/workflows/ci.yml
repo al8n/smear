@@ -1377,8 +1377,25 @@ jobs:
         # outright ("--tests may not be used together with --doctests"). `--doctests` alone
         # already runs the default set (lib unit tests + `tests/*`) in addition to doc tests,
         # which is the full equivalent of the old lib+tests+doctests selection.
+        #
+        # `graphqlx` and `rowan` are named for the reason the `parser` paragraph gives, and NOT
+        # because the leg would otherwise resolve without them. `--workspace` selects
+        # `smear-smoke`, whose `smear` dependency names every declared feature, and cargo unifies
+        # that across the selected packages, so the unit graph is identical with these two names
+        # and without them. What changes is who decided. Until they were written, the resolve this
+        # job leans on was another member's dependency edge — the shape the paragraph above
+        # refuses for `parser`.
+        #
+        # It is this leg the decision rests on, because this is the repository's ONLY nightly
+        # `cargo test --doc`. A `compile_fail,EXXXX` fence has its ERROR CODE checked only by a
+        # nightly rustdoc; on stable a snippet that fails with some other code satisfies the fence
+        # and the run is green. So every coded fence in the workspace — 17 of the 18 today — is
+        # enforced here or nowhere. Two of the 18 need exactly what these names buy:
+        # `smear_parser::graphqlx`'s `OperationType` sits behind `#[cfg(feature = "graphqlx")]`,
+        # and the crate-root cross-dialect cast fence is a `cfg_attr(all(graphql, rowan), doc)`.
+        # Neither is compiled by `graphql,parser` alone.
         run: |
-          cargo llvm-cov --no-default-features --features graphql,parser \
+          cargo llvm-cov --no-default-features --features graphql,graphqlx,rowan,parser \
             --doctests --workspace \
             --cobertura --output-path cobertura.xml
       - name: Upload to codecov.io

@@ -199,10 +199,26 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 #                                            chain_is_linear` returned inside ten minutes under
 #                                            `cargo miri test`. The attribute's own `ignore = "..."`
 #                                            reason carries the argument.
+#   graphql-proto/src/execute/tests.rs       `a_colliding_set_of_document_variables_cannot_outrun_
+#                                            the_budget`, also a COST gate, and the one whose
+#                                            FIXTURE is what an interpreter cannot hold: its search
+#                                            for 512 names in one bucket of 2048 keeps every
+#                                            rejected candidate live, about a million `String`s at
+#                                            once, and `i686-unknown-linux-gnu` answered `resource
+#                                            exhaustion: there are no more free addresses in the
+#                                            address space` and took the whole `graphql-proto`
+#                                            lib binary — and this guard's own "no `test result:`
+#                                            line" finding — down with it. `ci/miri_sb.sh` already
+#                                            runs that target with
+#                                            `-Zmiri-address-reuse-rate=1.0` and records it as
+#                                            measured insufficient; nothing is freed inside the
+#                                            call, so there is nothing to reuse. The attribute's
+#                                            own `ignore = "..."` reason carries the argument.
 MIRI_DECLARED_IGNORES = {
     "smear/tests/syntactic_span_extent.rs": 2,
     "smear/tests/syntactic_x_span_extent.rs": 2,
     "graphql-proto/src/response/tests.rs": 1,
+    "graphql-proto/src/execute/tests.rs": 1,
 }
 
 # The same decision as one number, because `.github/workflows/miri.yml` states a total and every

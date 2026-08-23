@@ -3,8 +3,6 @@
 //! Shared executable carriers live at crate level. This module binds them to
 //! GraphQL's names, values, directives, selections, and operation keywords.
 
-use core::borrow::Borrow;
-
 use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::keywords::{Mutation, Query, Subscription};
 use tokora::{
@@ -57,6 +55,31 @@ pub type FragmentDefinition<S> = crate::executable::FragmentDefinition<
 /// this type structurally does not have and charge for it where it costs most — the exhaustiveness
 /// `smear-compiler`'s draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
 /// `graphqlx`'s own `OperationType` keeps the attribute, correctly.
+///
+/// # Not a map key reachable through `&str`
+///
+/// Each variant carries its keyword, each keyword carries a span, and this type derives `Eq` and
+/// `Hash` over both — while [`as_str`](Self::as_str) answers a per-variant **constant**. A
+/// `Borrow<str>` impl promised those agree; two `query` keywords read at different offsets borrow
+/// *equal*, compare *unequal*, and hash differently. It is gone, and the map below does not
+/// compile:
+///
+/// ```compile_fail,E0308
+/// use std::collections::HashMap;
+/// use smear_parser::graphql::ast::OperationType;
+///
+/// let map: HashMap<OperationType, ()> = HashMap::new();
+/// let _ = map.get("query");
+/// ```
+///
+/// This one is worth reading beside `graphqlx`'s, because the two look different and are not:
+/// there the variants carry a bare `Span` rather than a keyword type, so neither is the fieldless
+/// enum whose derived `Eq` a `&str` lookup could have agreed with. Both carry a position and both
+/// are excluded for it. Use [`as_str`](Self::as_str) or `AsRef<str>` and key a
+/// `HashMap<&str, _>` on that.
+///
+/// Per this repository's convention the error code is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -115,13 +138,6 @@ impl IntoSpan<Span> for OperationType {
 impl AsRef<str> for OperationType {
   #[inline]
   fn as_ref(&self) -> &str {
-    self.as_str()
-  }
-}
-
-impl Borrow<str> for OperationType {
-  #[inline]
-  fn borrow(&self) -> &str {
     self.as_str()
   }
 }

@@ -9,6 +9,48 @@
 ///   (AnotherKeyword, "ANOTHER_KEYWORD", "another_keyword"),
 /// }
 /// ```
+///
+/// # A keyword is not a map key reachable through `&str`
+///
+/// The generated type carries a span and derives `PartialEq`, `Eq` and `Hash` over it, while its
+/// `AsRef<str>` answers the keyword's spelling — a **constant**, carrying nothing at all from the
+/// value. A `Borrow<str>` impl here would therefore be false in both of the directions that trait
+/// forbids at once: two `MyKeyword`s at different offsets borrow *equal* while comparing
+/// *unequal*, and they hash differently besides. So there is none, and the map below does not
+/// compile:
+///
+/// ```compile_fail,E0308
+/// use std::collections::HashMap;
+/// use smear_lexer::keyword;
+///
+/// keyword! { (MyKeyword, "MY_KEYWORD", "my_keyword") }
+///
+/// let map: HashMap<MyKeyword, ()> = HashMap::new();
+/// let _ = map.get("my_keyword");
+/// ```
+///
+/// The control, which is the same snippet without that one line, so the refusal above is the
+/// lookup rather than the expansion:
+///
+/// ```rust
+/// use std::collections::HashMap;
+/// use smear_lexer::keyword;
+///
+/// keyword! { (MyKeyword, "MY_KEYWORD", "my_keyword") }
+///
+/// let map: HashMap<MyKeyword, ()> = HashMap::new();
+/// assert_eq!(MyKeyword::raw(), "my_keyword");
+/// ```
+///
+/// Narrowing `Eq` and `Hash` to make the promise true is not available either: they would have to
+/// ignore the span outright — every `MyKeyword` equal to every other, whatever it was read from —
+/// which deletes the only field the type has, silently passes `assert_eq!` between keywords at
+/// different positions, and buys a map that can hold exactly one key. Use
+/// the generated `raw()` or `AsRef<str>` for the spelling, and key a `HashMap<&str, _>` on that if
+/// a map is what is wanted.
+///
+/// Per this repository's convention the error code above is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
 #[macro_export]
 macro_rules! keyword {
   ($(
@@ -30,13 +72,6 @@ macro_rules! keyword {
           #[inline]
           fn as_ref(&self) -> &str {
             $kw
-          }
-        }
-
-        impl ::core::borrow::Borrow<str> for $name {
-          #[inline]
-          fn borrow(&self) -> &str {
-            ::core::convert::AsRef::<str>::as_ref(self)
           }
         }
 

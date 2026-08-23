@@ -109,7 +109,7 @@ True by construction — the two dialects derive their kind spaces independently
 `rowan::SyntaxNode<GraphQLLang>` and `rowan::SyntaxNode<GraphQLxLang>` are different types. But
 "true by construction" is what a refactor breaks silently, so it is asserted:
 
-```compile_fail
+```compile_fail,E0308
 # use smear_parser::{graphql, graphqlx};
 # use smear_parser::lossless::ast::CastNode;
 let parse = graphql::lossless::parse_document("type T { f: Int }");
@@ -118,12 +118,33 @@ let node = parse.syntax();
 let _ = graphqlx::lossless::ast::ObjectTypeDefinition::cast_node(node);
 ```
 
-Two things about where this sits.
+and this one must compile, over the same paths:
 
-It is **gated on `graphql`**. Without the gate the snippet would still fail to compile — on
-`graphql` being an unresolved module — and a `compile_fail` doctest that fails for the wrong reason
-is green in exactly the same way as one that fails for the right one. The failure was checked by
-running the block un-gated and reading the error: `E0308`, naming both languages.
+```
+# use smear_parser::{graphql, graphqlx};
+# use smear_parser::lossless::ast::CastNode;
+let parse = graphql::lossless::parse_document("type T { f: Int }");
+let node = parse.syntax();
+// The same call with the dialects matching. `cast_node` is a kind check, so the document root
+// answers `None` — the point is that it resolves.
+assert!(graphql::lossless::ast::ObjectTypeDefinition::cast_node(node).is_none());
+let _ = graphqlx::lossless::parse_document("type T { f: Int }");
+```
+
+Three things about how this is written.
+
+It is **coded**, and the control beneath it is why the code can be trusted. A bare `compile_fail`
+is satisfied by *any* failure, so an unresolved import, a renamed `cast_node` or a moved
+`parse_document` would keep it green while never reaching the mismatch it claims to pin — the
+failure mode the paragraph below names for the module gate, reached through the snippet instead.
+`E0308` makes rustdoc report `Some expected error codes were not found` for those, but a rustdoc
+checks the code only on nightly, and this repository has exactly one nightly `cargo test --doc`
+(the `coverage` job). The block above carries the same names in a snippet that must **compile**, so
+a rename is caught on every toolchain that runs doctests, whether or not the code is being read.
+
+It is **gated on `graphql`**. Without the gate the snippet would fail on `graphql` being an
+unresolved module rather than on the cast — `E0433`, not `E0308`, which the fence now rejects on
+nightly and the positive control rejects everywhere.
 
 It is **at the crate root and not in `graphqlx::lossless::ast`**, where the plan put it. A doctest
 that names both dialects has to live in a module allowed to name both, and

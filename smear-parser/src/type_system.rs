@@ -4,7 +4,7 @@
 //! dialect. GraphQL and GraphQLx bind their own name, type, value, and directive
 //! nodes through aliases in their AST modules.
 
-use core::{borrow::Borrow, marker::PhantomData};
+use core::marker::PhantomData;
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use std::vec::Vec;
@@ -894,6 +894,32 @@ impl<Name, Directives, MemberTypes, Span> UnionTypeDefinition<Name, Directives, 
 }
 
 /// A location where an executable directive can be applied.
+///
+/// # Not a map key reachable through `&str`
+///
+/// Every variant carries a span and this type derives `Eq` and `Hash` over it, while
+/// [`as_str`](Self::as_str) answers a per-variant **constant**. A `Borrow<str>` impl would
+/// promise those two agree, and they do not in either direction: two `QUERY` locations read at
+/// different offsets borrow *equal* while comparing *unequal*, and they hash differently besides.
+/// There was such an impl; it is gone, and the map below does not compile:
+///
+/// ```compile_fail,E0308
+/// use std::collections::HashMap;
+/// use smear_parser::graphql::ast::ExecutableDirectiveLocation;
+///
+/// let map: HashMap<ExecutableDirectiveLocation, ()> = HashMap::new();
+/// let _ = map.get("QUERY");
+/// ```
+///
+/// Narrowing `Eq` and `Hash` to the discriminant would make it true and is a decision about what
+/// a *location* is, not about `Borrow`: it silently drops the span from equality, so every rule
+/// that compares two locations — draft §5's duplicate-location checks among them — changes answer
+/// with nothing to announce it. `Ord` is not derived here, so unlike the string literal carriers
+/// there is no sort order to lose; the violation is `Eq` and `Hash` alone. Use
+/// [`as_str`](Self::as_str) or `AsRef<str>` and key a `HashMap<&str, _>` on that.
+///
+/// Per this repository's convention the error code is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -1031,6 +1057,20 @@ impl<Span> IntoComponents for ExecutableDirectiveLocation<Span> {
 }
 
 /// A location where a type-system directive can be applied.
+///
+/// # Not a map key reachable through `&str`
+///
+/// The same span-against-constant mismatch as
+/// [`ExecutableDirectiveLocation`](ExecutableDirectiveLocation#not-a-map-key-reachable-through-str),
+/// and the same removed impl:
+///
+/// ```compile_fail,E0308
+/// use std::collections::HashMap;
+/// use smear_parser::graphql::ast::TypeSystemDirectiveLocation;
+///
+/// let map: HashMap<TypeSystemDirectiveLocation, ()> = HashMap::new();
+/// let _ = map.get("SCHEMA");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -1201,6 +1241,19 @@ impl<Span> IntoComponents for TypeSystemDirectiveLocation<Span> {
 }
 
 /// A directive location in either executable or type-system syntax.
+///
+/// # Not a map key reachable through `&str`
+///
+/// It wraps the two enums above and inherits their mismatch — a discriminant *and* a span against
+/// a per-variant constant — so it carried the same removed impl:
+///
+/// ```compile_fail,E0308
+/// use std::collections::HashMap;
+/// use smear_parser::graphql::ast::Location;
+///
+/// let map: HashMap<Location, ()> = HashMap::new();
+/// let _ = map.get("QUERY");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -1267,13 +1320,6 @@ impl<Span> AsRef<str> for ExecutableDirectiveLocation<Span> {
   }
 }
 
-impl<Span> Borrow<str> for ExecutableDirectiveLocation<Span> {
-  #[inline]
-  fn borrow(&self) -> &str {
-    self.as_str()
-  }
-}
-
 impl<Span> AsRef<str> for TypeSystemDirectiveLocation<Span> {
   #[inline]
   fn as_ref(&self) -> &str {
@@ -1281,23 +1327,9 @@ impl<Span> AsRef<str> for TypeSystemDirectiveLocation<Span> {
   }
 }
 
-impl<Span> Borrow<str> for TypeSystemDirectiveLocation<Span> {
-  #[inline]
-  fn borrow(&self) -> &str {
-    self.as_str()
-  }
-}
-
 impl<Span> AsRef<str> for Location<Span> {
   #[inline]
   fn as_ref(&self) -> &str {
-    self.as_str()
-  }
-}
-
-impl<Span> Borrow<str> for Location<Span> {
-  #[inline]
-  fn borrow(&self) -> &str {
     self.as_str()
   }
 }
@@ -2506,7 +2538,6 @@ impl<Definition, Extension> TypeSystemDefinitionOrExtension<Definition, Extensio
 
 #[cfg(test)]
 mod tests {
-  use core::borrow::Borrow;
 
   use tokora::{
     span::{AsSpan, IntoSpan},
@@ -2616,7 +2647,7 @@ mod tests {
     assert!(query.is_query());
     assert_eq!(query.unwrap_query_ref(), &CustomSpan(1));
     assert_eq!(query.try_unwrap_query_ref(), Ok(&CustomSpan(1)));
-    assert_eq!(Borrow::<str>::borrow(&query), "QUERY");
+    assert_eq!(AsRef::<str>::as_ref(&query), "QUERY");
 
     let input_field = TypeSystemDirectiveLocation::input_field_definition(CustomSpan(2));
     assert!(input_field.is_input_field_definition());
@@ -2624,15 +2655,12 @@ mod tests {
       input_field.unwrap_input_field_definition_ref(),
       &CustomSpan(2)
     );
-    assert_eq!(
-      Borrow::<str>::borrow(&input_field),
-      "INPUT_FIELD_DEFINITION"
-    );
+    assert_eq!(AsRef::<str>::as_ref(&input_field), "INPUT_FIELD_DEFINITION");
 
     let location: Location<CustomSpan> = query.into();
     assert!(location.is_executable());
     assert_eq!(location.unwrap_executable_ref().as_str(), "QUERY");
     assert!(location.try_unwrap_type_system_ref().is_err());
-    assert_eq!(Borrow::<str>::borrow(&location), "QUERY");
+    assert_eq!(AsRef::<str>::as_ref(&location), "QUERY");
   }
 }
