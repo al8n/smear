@@ -45,6 +45,18 @@
 //!   `tripped` carries the whole of "a bound abandoned this run". Each replaced a value plus a
 //!   caveat — a maximum documented as an absence, a count documented as a floor, a flag documented
 //!   as needing a second flag read with it — and a caveat is only ever as good as the next reader.
+//! - **A charge is three facts, not one.** Where it sits, what dimension it prices, and what gates
+//!   it. The table on [`Validator::spend`] asks all three, and each time the question got sharper
+//!   it found sites the previous version could not see: a charge counting **selections** in front
+//!   of a comparison measured in **bytes**, and a charge gated on one of a list's two readers while
+//!   the other read it for free.
+//! - **A gate belongs on the call path, not only on the condition.** Round three swept the
+//!   conditions that had been written and missed the paths that reach a charge without passing one:
+//!   a directive list precharged before anything asked whether a directive, argument, value or
+//!   usage rule was on; an argument list the same; a variable's declared type resolved for two
+//!   readers that could both be off; a variable leaf searching an index no enabled rule reads. Each
+//!   is a **false refusal** — a caller handed `Err` for work nobody asked for — so the sweep that
+//!   matters names, for every `spend` site, the predicate that gates it.
 //! - **An activation condition with more than one rule in it gets a name.** [`merges`],
 //!   [`checks_values`], [`collects_usages`] and [`reports_type_conditions`] exist because each has
 //!   two readers, and a condition with two readers written out twice is two conditions. One of
@@ -371,8 +383,12 @@ where
     rules,
     budget: *budget,
     scalars: Scalars::resolve(schema),
+    checks_directives: checks_directives(rules),
+    checks_arguments: checks_arguments(rules),
+    checks_input_objects: checks_input_objects(rules),
     checks_values: checks_values(rules),
     collects_usages: collects_usages(rules),
+    resolves_variable_types: rules.contains(Rule::VariablesAreInputTypes),
     variables: &[],
     in_operation: false,
     variable_index: Range32::new(0, 0),
@@ -523,6 +539,30 @@ const fn reports_type_conditions(rules: RuleSet) -> bool {
     || rules.contains(Rule::FragmentsOnCompositeTypes)
 }
 
+/// Whether draft 5.7's directive rules are enabled.
+const fn checks_directives(rules: RuleSet) -> bool {
+  rules.contains(Rule::DirectivesAreDefined)
+    || rules.contains(Rule::DirectivesAreInValidLocations)
+    || rules.contains(Rule::DirectivesAreUniquePerLocation)
+}
+
+/// Whether draft 5.4's argument rules are enabled.
+const fn checks_arguments(rules: RuleSet) -> bool {
+  rules.contains(Rule::ArgumentNames)
+    || rules.contains(Rule::ArgumentUniqueness)
+    || rules.contains(Rule::RequiredArguments)
+}
+
+/// Whether either rule that reads an input object literal's **field list** is enabled.
+///
+/// Two consumers, one prepayment: 5.6.3 sorts the list and 5.6.4 rescans it once per required
+/// field. Gating the prepayment on the first alone left the second's own scan of the same list
+/// unpaid — the charge existed, and the rule that switched it on was not the rule that needed it.
+const fn checks_input_objects(rules: RuleSet) -> bool {
+  rules.contains(Rule::InputObjectFieldUniqueness)
+    || rules.contains(Rule::InputObjectRequiredFields)
+}
+
 /// Whether draft 5.6's literal rules are enabled.
 ///
 /// **A property of a definition**, which is why it is not enough on its own to start a value walk:
@@ -583,8 +623,16 @@ struct Validator<'a, 'd, S, K> {
   rules: RuleSet,
   budget: Budget,
   scalars: Scalars,
+  /// [`checks_directives`] for this run's [`RuleSet`], resolved once.
+  checks_directives: bool,
+  /// [`checks_arguments`] for this run's [`RuleSet`], resolved once.
+  checks_arguments: bool,
+  /// [`checks_input_objects`] for this run's [`RuleSet`], resolved once.
+  checks_input_objects: bool,
   /// [`checks_values`] for this run's [`RuleSet`], resolved once.
   checks_values: bool,
+  /// Whether draft 5.8.2 is enabled, which is one of the two readers of a variable's packed type.
+  resolves_variable_types: bool,
   /// [`collects_usages`] for this run's [`RuleSet`], resolved once.
   collects_usages: bool,
   /// The variable definitions of the operation being walked; empty outside one.
@@ -661,43 +709,68 @@ where
   /// `blame` is the span the refusal points at — the node whose examination could not be afforded,
   /// which is the narrowest true answer to "where did this document stop being validated".
   ///
-  /// # Where every charge sits, relative to the work it prices
+  /// # Every charge, in three facts
   ///
-  /// The first version of this table asked "does this pass charge?". Every pass did, and four of
-  /// them charged *behind* work a caller sizes — which bounds nothing, because the work is spent
-  /// by the time the counter can refuse it. The question is where the charge sits, so that is what
-  /// the table records. A row that says "postpaid" is a defect, not a note.
+  /// The question this table asks has been sharpened twice, and each sharpening found sites the
+  /// previous one could not see.
   ///
-  /// | pass | charge site | what it prices |
-  /// |---|---|---|
-  /// | projection (lossless door only) | `lossless.rs`, before `project_*` | one prepayment of `units(source.len())`, an upper bound on the AST it builds |
-  /// | `prep`, per definition | before the row is pushed | the row, and the fragment-name sort `index_fragments` runs next |
-  /// | `collect_definition_edges` | after the cursor bump, before the arm | the selection; a spread's name before `find_fragment` searches it |
-  /// | 5.2.2.1 operation names | in the collection loop, before the sort | every name the sort will compare |
-  /// | 5.5.1.2/5.5.1.3 declarations | before `check_type_condition` | the `Schema::sym` hash of the condition |
-  /// | 5.5.2.2 cycles | before the edge is read | one edge |
-  /// | 5.5.1.4 used | `mark_reachable`, before the group loop | every member of a duplicated name's group |
-  /// | 5.2.4.1 subscription roots | after the cursor bump, before `conditional_directive` | the selection, every directive on it, and every condition name it resolves |
-  /// | selection walk | after the cursor bump, before the arm | the selection; then the field, spread or inline-condition name before each is resolved |
-  /// | 5.7.x directives | `spend_names` at the head of `check_directives` | every directive name, ahead of 5.7.3's sort |
-  /// | 5.4.x arguments | `spend_names` at the head of `check_arguments` | every argument name, ahead of 5.4.2's sort |
-  /// | 5.4.3 presence half | before each declared argument's rescan | one rescan of the written list |
-  /// | 5.6.3/5.6.4 input objects | `spend_names` at the head of `check_input_object` | every field name, ahead of 5.6.3's sort and 5.6.4's rescan |
-  /// | value walk | top of the loop, before `resolve` | the descent `resolve` makes, which is the frame depth |
-  /// | scalar and enum literals | before the kind dispatch | the literal's own spelling, which `fits_i32`, `is_finite` and `has_enum_value` read |
-  /// | 5.8.1/5.8.2 definitions | in the collection loop, before the sort | every variable name, and the declared type's base name before `pack_type` |
-  /// | 5.8.3/5.8.5 usages | before the index search, and again before the marking | the search, and the run of definitions sharing the name |
-  /// | 5.8.4 used | — | reads bits; the definitions were charged when the index was built |
-  /// | 5.2.1.1, 5.2.3.1 | — | `O(1)` per operation, and the operations were charged at `prep` |
-  /// | 5.3.2 merge engine | its own ledger | [`Budget::merge_work`](super::Budget::merge_work), unchanged and not double-charged |
+  /// - *"Does this pass charge?"* — every pass did, and four charged **behind** work a caller
+  ///   sizes.
+  /// - *"Is the charge in front of the work it prices?"* — that found those four, and missed two
+  ///   more that pass it: one charging **depth** for a cost measured in **bytes**, and one whose
+  ///   charge existed but was **gated on a rule that may be off** while the walk computing it was
+  ///   unpaid.
+  /// - So: **where it sits, what dimension it prices, and what gates it.** A row with no dimension
+  ///   named is unfinished, and a row whose gate is "none" is a claim that the work is the
+  ///   traversal itself rather than a rule's.
   ///
-  /// Three rows deserve their reason stated rather than assumed. The **sorts** — 5.2.2.1, 5.4.2,
-  /// 5.6.3, 5.7.3, 5.8.1 and the fragment index — do `N log N` comparisons against `N` units of
-  /// prepayment; `log N` is at most thirty-two whatever the document does, so that is a bounded
-  /// constant multiple of the charge and not a second factor the client can grow. The **binary
-  /// searches** — `find_fragment`, the variable index — are the same argument one dimension
-  /// smaller. And **`Schema` lookups keyed by an already-charged name** are free by construction:
-  /// the schema is the server's, so its group sizes are not an input.
+  /// | charge | sits | dimension | gate |
+  /// |---|---|---|---|
+  /// | projection (lossless door only) | before `project_*` | bytes of `max(source, parse text)` | none — it is the door |
+  /// | prep, per operation | before the row is pushed | one node | none — builds what every rule reads |
+  /// | prep, per fragment | before the row is pushed | bytes, for `index_fragments`' sort | none — same |
+  /// | `collect_definition_edges` | loop top, before `resolve` | depth | none — it is the traversal |
+  /// | ” spread name | before `find_fragment` | bytes | none |
+  /// | 5.2.2.1 operation names | in the collection loop, before the sort | bytes | `OperationNameUniqueness` |
+  /// | 5.5.1.2/5.5.1.3 | before `check_type_condition` | bytes | [`reports_type_conditions`] |
+  /// | 5.5.2.2 cycles | before the edge is read | one edge | `FragmentSpreadsMustNotFormCycles` |
+  /// | 5.5.1.4 reachability | before the group loop | entries | `FragmentsMustBeUsed` \|\| [`merges`] |
+  /// | 5.2.4.1 collection | loop top, before `resolve` | depth | `SingleRootField` |
+  /// | ” directive scan | before `conditional_directive` reads them | bytes | ” |
+  /// | ” **response name** | before the alias comparison | **bytes** | ” |
+  /// | ” condition / spread name | before `type_of` / `find_fragment` | bytes | ” |
+  /// | selection walk | loop top, before `resolve` | depth | none — it is the traversal |
+  /// | ” field / spread / inline condition | before each resolution | bytes | none |
+  /// | 5.7.x directives | head of `check_directives` | bytes | [`Validator::reaches_directives`] |
+  /// | 5.4.x arguments | head of `check_arguments` | bytes | [`Validator::reaches_arguments`] |
+  /// | 5.4.3 presence half | before each declared argument's rescan | bytes × entries | `check` && `RequiredArguments`; its sizing fold is paid by the row above |
+  /// | 5.6.3/5.6.4 field list | head of `check_input_object` | bytes | [`checks_input_objects`] |
+  /// | 5.6.4 presence half | before each required field's rescan | bytes × entries | `InputObjectRequiredFields`; its sizing fold is paid by the row above |
+  /// | value walk | loop top, before `resolve` | depth | [`Validator::walks_values`] |
+  /// | ” object field name | before the schema lookup | bytes | ” |
+  /// | scalar / enum literal | before the coercion reads it | bytes | `check` && `ValuesOfCorrectType` |
+  /// | 5.8.1 index build | in the collection loop, before the sort | bytes | `collects_usages` \|\| `VariableUniqueness` |
+  /// | variable declared type | before `pack_type` | bytes | `VariablesAreInputTypes` \|\| `walks_values(true)` |
+  /// | 5.8.3/5.8.5 usage | before the index search | bytes | [`collects_usages`] |
+  /// | ” duplicate run | before the marking | entries | ” |
+  /// | 5.8.5 usage type | before `pack_type` | bytes | `AllVariableUsagesAreAllowed` |
+  /// | 5.8.4 | — | reads bits | charged when the index was built |
+  /// | 5.2.1.1, 5.2.3.1 | — | `O(1)` per operation | charged at prep |
+  /// | 5.3.2 merge engine | its own ledger | [`Budget::merge_work`](super::Budget::merge_work) | [`merges`] |
+  ///
+  /// # Four standing arguments the rows lean on
+  ///
+  /// - **Sorts.** 5.2.2.1, 5.4.2, 5.6.3, 5.7.3, 5.8.1 and the fragment index do `N log N`
+  ///   comparisons against `N` units of prepayment. `log N` is at most thirty-two whatever the
+  ///   document does — a bounded constant multiple of the charge, not a second factor a client can
+  ///   grow.
+  /// - **Binary searches.** `find_fragment` and the variable index: the same argument one
+  ///   dimension smaller.
+  /// - **Schema lookups keyed by an already-charged name.** Free by construction — the schema is
+  ///   the server's, so its group sizes are not an input.
+  /// - **A diagnostic's subject clone.** `S: Clone`, so an owned source type copies the spelling:
+  ///   `O(L)` against a charge of `L / 8`. A constant multiple, and bounded besides — a diagnostic
+  ///   needs a node, and the node's name was charged before it was read.
   #[inline]
   pub(super) fn spend(&mut self, units: u32, blame: SimpleSpan) -> ControlFlow<()> {
     match self.left.take(units) {
@@ -738,6 +811,33 @@ where
   #[inline]
   pub(super) fn spend_name(&mut self, name: &Name<S>) -> ControlFlow<()> {
     self.spend(units(name_bytes(name).len()), *name.as_span())
+  }
+
+  /// Whether anything a **directive list** can reach is enabled for this visit.
+  ///
+  /// A directive list leads to draft 5.7's own rules, to the argument rules over its arguments, to
+  /// the value rules under those, and to the variable usages inside them. The first three are
+  /// properties of a definition and are asked with `check`; the last is a property of an operation
+  /// and is asked every visit. With none of them enabled, precharging and resolving every
+  /// directive name is a refusal a caller can be handed for a long spelling nothing reads.
+  #[inline]
+  fn reaches_directives(&self, check: bool) -> bool {
+    (check && (self.checks_directives || self.checks_arguments || self.checks_values))
+      || self.collects_usages
+  }
+
+  /// Whether anything an **argument list** can reach is enabled for this visit.
+  ///
+  /// [`Validator::reaches_directives`] one level in: draft 5.7 is no longer downstream.
+  #[inline]
+  fn reaches_arguments(&self, check: bool) -> bool {
+    (check && (self.checks_arguments || self.checks_values)) || self.collects_usages
+  }
+
+  /// Whether anything a **value literal** can reach is enabled for this visit.
+  #[inline]
+  pub(super) fn walks_values(&self, check: bool) -> bool {
+    (check && self.checks_values) || self.collects_usages
   }
 
   /// Charges a whole list of names before anything sorts, hashes or compares any of them.
@@ -1389,6 +1489,12 @@ where
       match selection {
         Selection::Field(field) => {
           let response = nodes::response_name(field);
+          // Charged in **bytes**, because what happens next is a byte comparison. The depth charge
+          // at the top of this loop prices `resolve`, which is a coordinate walk and costs no
+          // bytes at all; it was the only charge on this path, so two very long aliases sharing a
+          // prefix were compared end to end for one unit. A charge in front of the work is not a
+          // charge for the work unless it is in the work's own dimension.
+          self.spend_name(response)?;
           match first_response {
             None => {
               first_response = Some(response);
@@ -1656,11 +1762,22 @@ where
       }
     }
 
+    // `pack_type` hashes the declared type's base name, and exactly two things read what it
+    // returns: draft 5.8.2's report, and the expected type a default value is walked against. With
+    // neither enabled there is nothing to resolve — and the charge for resolving it was
+    // unconditional, so an empty rule set paid bytes per variable for a name nobody looked at.
+    // Found by asking each charge which predicate gates it; the reviewer did not name this one.
+    let resolves_types = self.resolves_variable_types || self.walks_values(true);
+
     for described in definitions {
       let definition = described.node();
       let variable = definition.variable();
-      self.spend_type(definition.ty(), *variable.span())?;
-      let declared = self.pack_type(definition.ty());
+      let declared = if resolves_types {
+        self.spend_type(definition.ty(), *variable.span())?;
+        self.pack_type(definition.ty())
+      } else {
+        None
+      };
 
       // 5.8.2 — objects, interfaces and unions cannot be variable types, and neither can a name
       // the schema does not have.

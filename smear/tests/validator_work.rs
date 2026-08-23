@@ -75,10 +75,15 @@ type Dog {
   barkVolume: Int
   isHouseTrained(atOtherHomes: Boolean): Boolean
   counted(times: Int): Boolean
+  withOpts(opts: Opts): Boolean
+  withLoose(opts: Loose): Boolean
 }
 
 type Subscription { newMessage: Message }
 type Message { body: String }
+
+input Opts { need: Int! a: Int }
+input Loose { a: Int b: Int }
 
 directive @onField repeatable on FIELD
 "#;
@@ -1437,4 +1442,122 @@ fn a_refused_projection_of_an_empty_parse_reports_no_recovery() {
     );
     assert!(invalid.to_string().ends_with("(nothing was projected)"));
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9. the dimension, and the gate on the call path
+// ---------------------------------------------------------------------------------------------
+
+/// The subscription pass charges the response names it compares, in bytes.
+///
+/// Draft 5.2.4.1's collection asks whether two selections share a response key, which is a **byte**
+/// comparison over spellings the document chose and a GraphQL alias has no length bound. The only
+/// charge on that path was the frame depth at the top of the loop — a coordinate walk that costs no
+/// bytes at all — so a handful of very long aliases were compared end to end for `O(fields)` units.
+///
+/// A charge in front of the work is not a charge *for* the work unless it is in the work's own
+/// dimension, which is the fact the second version of the pass table could not see.
+#[test]
+fn the_subscription_pass_charges_the_names_it_compares() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::SingleRootField);
+
+  // The same number of selections either way; only the spelling grows. Sharing a prefix is what
+  // makes the comparison read to the end rather than stopping at the first byte.
+  let document = |pad: usize| {
+    let alias = "a".repeat(pad);
+    std::format!(
+      "subscription s {{ {alias}x: newMessage {{ body }} {alias}y: newMessage {{ body }} }}"
+    )
+  };
+
+  let short = min_budget(&schema, &document(1), rules);
+  let long = min_budget(&schema, &document(20_000), rules);
+  println!("subscription aliases: 1-byte {short} units, 20,000-byte {long} units");
+
+  // Two aliases of twenty thousand bytes are 5,002 units of spelling. A charge counting selections
+  // cannot see any of it.
+  assert!(
+    long - short >= 5_000,
+    "20,000-byte aliases cost {} units more than one-byte ones; the comparison is unpriced",
+    long - short
+  );
+}
+
+/// The input object's field list is prepaid for **both** of its readers.
+///
+/// 5.6.3 sorts the list and 5.6.4 walks it to size its per-scan charge and then rescans it once per
+/// required field. The prepayment sat inside 5.6.3's guard, so with only 5.6.4 enabled the sizing
+/// fold ran over an arbitrarily wide literal before the `spend` it feeds — and the rescan's charge
+/// was the only one taken.
+#[test]
+fn an_input_object_field_list_is_prepaid_for_both_readers() {
+  let schema = build(SCHEMA);
+  const FIELDS: usize = 5_000;
+  let literal = "a: 1 ".repeat(FIELDS);
+  // `Loose` declares **no required fields**, which is the sharp case: 5.6.4 still walks the whole
+  // written list to size its per-scan charge, and then finds nothing to spend that charge on. The
+  // walk happened and nothing paid for it.
+  let source = std::format!("{{ dog {{ withLoose(opts: {{ {literal} }}) }} }}");
+
+  // 5.6.2 is the baseline: it descends the same literal and pays for each field name one level
+  // down exactly as 5.6.4 does, reads no scalar literal, and never walks the field list. So the
+  // descent cancels and what is left is the list walk itself.
+  let required = min_budget(
+    &schema,
+    &source,
+    RuleSet::only(Rule::InputObjectRequiredFields),
+  );
+  let names = min_budget(&schema, &source, RuleSet::only(Rule::InputObjectFieldNames));
+  println!("input object: 5.6.4 alone {required} units, 5.6.2 alone {names} units");
+
+  assert!(
+    required >= names + FIELDS as u32,
+    "5.6.4 walked a {FIELDS}-field list and paid {} units more than a rule that does not walk it",
+    required.saturating_sub(names)
+  );
+}
+
+/// A rule set that reads no directive, argument, value or variable usage pays for none of them.
+///
+/// The gate-per-charge-site sweep, as one document. `RuleSet::only(FieldSelections)` needs the
+/// selection walk and nothing under it, so every charge below it must be behind a predicate that
+/// names its consumers — and four were not: the directive list's prepayment, the argument list's,
+/// the packed type behind every variable definition, and the search a variable leaf runs against
+/// an index no enabled rule reads.
+///
+/// Each is a **false refusal**: work nobody asked for, charged to a ledger that can refuse.
+#[test]
+fn a_selection_only_rule_set_pays_for_selections() {
+  let schema = build(SCHEMA);
+  let long = "z".repeat(100_000);
+  // One of each: a directive whose name is a hundred kilobytes, an argument likewise, a variable
+  // whose declared type is likewise, and a usage of it.
+  let source = std::format!(
+    "query q($v{long}: Boolean{long}) {{ \
+       dog @d{long}(arg{long}: 1) {{ \
+         isHouseTrained(atOtherHomes: $v{long}) \
+       }} \
+     }}"
+  );
+
+  let spent = min_budget(&schema, &source, RuleSet::only(Rule::FieldSelections));
+  println!("selection-only: {} bytes, {spent} units", source.len());
+
+  // Four hundred kilobytes of spelling is 50,000 units if any of it is read. 5.3.1 reads the
+  // field names and nothing else, so what it may pay for is the walk.
+  assert!(
+    spent < 5_000,
+    "a selection-only rule set spent {spent} units; something below the walk is charging"
+  );
+
+  // And it is still `Ok`: the document is valid for the one rule that is on.
+  let outcome = run(
+    &schema,
+    &source,
+    &Budget::default(),
+    RuleSet::only(Rule::FieldSelections),
+  );
+  assert!(!outcome.refused);
+  assert_eq!(outcome.emitted, 0);
 }

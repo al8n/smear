@@ -155,6 +155,9 @@ pub enum Rule {
   ///
   /// The companion to [`Rule::MergeDepthBudget`], and the one that actually caps the worst case:
   /// depth alone does not bound draft 5.3.2, breadth times fragment reuse does.
+  ///
+  /// Excluding it behaves exactly as excluding [`Rule::MergeDepthBudget`] does, and for the same
+  /// reason: one verdict tail, one refusal.
   MergeWorkBudget,
   /// Validation outside draft 5.3.2 reached this crate's absolute work ceiling.
   ///
@@ -176,9 +179,10 @@ pub enum Rule {
   ///
   /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *diagnostic*, not the refusal:
   /// the verdict is still `Err` with
-  /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set and nothing emitted. A
-  /// validator that abandoned a pass and then answered `Ok` would be spelling giving up the same
-  /// way it spells finishing.
+  /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set and nothing emitted — the
+  /// same answer all three bounds give, because all three write the same field and one tail reads
+  /// it. A validator that abandoned a pass and then answered `Ok` would be spelling giving up the
+  /// same way it spells finishing.
   ValidationWorkBudget,
 }
 
@@ -512,13 +516,13 @@ impl Rule {
         "a nullable variable may stand in a non-null position only if it has a default; otherwise widen the position or narrow the variable.",
       ),
       Self::MergeDepthBudget => Some(
-        "raise `Budget::merge_depth`, or refuse the document: the depth is this crate's bound on draft 5.3.2, which the specification leaves unbounded.",
+        "raise `Budget::merge_depth`, or send a shallower document: the depth is this crate's bound on draft 5.3.2, which the specification leaves unbounded.",
       ),
       Self::MergeWorkBudget => Some(
-        "raise `Budget::merge_work`, or refuse the document: breadth times fragment reuse is what actually bounds draft 5.3.2.",
+        "raise `Budget::merge_work`, or send a narrower document: breadth times fragment reuse is what actually bounds draft 5.3.2.",
       ),
       Self::ValidationWorkBudget => Some(
-        "raise `Budget::validation_work`, or refuse the document: what this bounds is every pass except draft 5.3.2, and draft 5.3.2 runs last.",
+        "raise `Budget::validation_work`, or send a smaller document: what this bounds is every pass except draft 5.3.2, and draft 5.3.2 runs last.",
       ),
       Self::OperationNameUniqueness
       | Self::ArgumentNames

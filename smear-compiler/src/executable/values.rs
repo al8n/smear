@@ -82,6 +82,15 @@ where
   where
     D: DirectiveLike<S>,
   {
+    // Asked before anything is charged or read, over **every** rule this list can reach: 5.7's
+    // own three, the argument rules over each directive's arguments, the value rules under those,
+    // and the variable usages inside them. The prepayment below was unconditional, so an empty
+    // rule set — or one asking only for 5.3.1 — could be handed a budget refusal for a long
+    // directive spelling that no enabled rule was ever going to look at.
+    if !self.reaches_directives(check) {
+      return ControlFlow::Continue(());
+    }
+
     // Prepaid, and the position matters more than the amount. `check_directive_uniqueness` below
     // **sorts** these names — `O(N log N)` comparisons over bytes the client chose — and the charge
     // used to sit in the loop *after* it, so every one of those comparisons happened before a
@@ -200,7 +209,16 @@ where
   where
     A: ArgumentLike<S>,
   {
-    // Prepaid ahead of the sort below, for the reason `check_directives` states.
+    // [`Validator::reaches_directives`] one level in, and for the same reason: the prepayment
+    // below is unconditional, so without this an argument list would charge for its spellings
+    // whether or not any rule that reads an argument, a value or a variable usage is enabled.
+    if !self.reaches_arguments(check) {
+      return ControlFlow::Continue(());
+    }
+
+    // Prepaid ahead of the sort below, for the reason `check_directives` states. It also pays for
+    // the fold in 5.4.3's presence half further down, which walks this same list to size its
+    // per-scan charge.
     self.spend_names(arguments.iter().map(A::argument_name))?;
 
     // 5.4.2 — one argument set, one value per name.
@@ -348,7 +366,7 @@ where
     // fragment still descended and charged its literals to produce nothing at all — `O(operations
     // × literal size)` off `O(operations + literal size)` of input, and a `validation_work`
     // exhausted on work that could not have had an effect.
-    if !(check && self.checks_values) && !self.collects_usages {
+    if !self.walks_values(check) {
       return ControlFlow::Continue(());
     }
     let base = self.scratch.values.len();
@@ -468,7 +486,12 @@ where
     V: ValueLike<S>,
   {
     if let Some(variable) = value.as_variable() {
-      self.check_variable_usage(variable, expected, location)?;
+      // `Range32` made an unbuilt index safe to search; it did not make searching it worth doing.
+      // With no usage rule enabled there is nothing for 5.8.3, 5.8.4 or 5.8.5 to conclude, and
+      // `check_variable_usage` would charge the spelling and search an empty range to conclude it.
+      if self.collects_usages {
+        self.check_variable_usage(variable, expected, location)?;
+      }
       return ControlFlow::Continue(None);
     }
 
@@ -586,14 +609,20 @@ where
   where
     V: ValueLike<S>,
   {
+    // Prepaid once, ahead of **both** readers of this field list, and gated on either of them.
+    //
+    // It sat inside 5.6.3's guard, which was right about one consumer and wrong about the other:
+    // 5.6.4 below walks the same list to size its per-scan charge and then rescans it once per
+    // required field, and with only 5.6.4 enabled none of that was paid for. The fold that
+    // computes `written` is itself `O(fields)` and ran *before* the `spend` it feeds, so an
+    // arbitrarily wide literal was walked in full before a nearly empty budget could refuse it —
+    // and with no required fields in the schema, walked and never charged at all.
+    if self.checks_input_objects {
+      self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
+    }
+
     // 5.6.3 — one value per field name.
     if self.on(Rule::InputObjectFieldUniqueness) {
-      // Prepaid ahead of the sort, for the reason `check_directives` states, and **inside** the
-      // guard because the sort is the only thing it pays for: `walk_value` charges each field name
-      // one level down for the schema lookup, and 5.6.4's rescan below charges its own. Outside
-      // the guard this was a second charge for a sort that was not going to run — which cannot
-      // under-bound anything, but can refuse a document over work nobody did.
-      self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
       let base = self.scratch.keys.len();
       for index in 0..fields.len() {
         self.scratch.keys.push(index as u32);
