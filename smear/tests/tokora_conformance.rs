@@ -7,9 +7,12 @@
 //!
 //! * the `SyntacticLexer`s are smear's own hand-written scanners, so the kit
 //!   checks that smear honours the contract tokora's input machinery relies on;
-//! * the `LosslessLexer`s are aliases for `tokora::lexer::LogosLexer`, so those
-//!   runs exercise tokora's own Logos adapter, including gap-free tiling via
-//!   `.lossless()`.
+//! * the `LosslessLexer`s are smear newtypes that delegate every `Lexer` item
+//!   to `tokora::lexer::LogosLexer`, so those runs exercise tokora's own Logos
+//!   adapter *and* the delegation over it, including gap-free tiling via
+//!   `.lossless()`. They were bare aliases for `LogosLexer` until the newtype
+//!   took away the three accessors that handed out the raw `logos::Lexer`; the
+//!   kit is what says the delegation still answers as the adapter does.
 
 #![cfg(all(feature = "std", any(feature = "graphql", feature = "graphqlx")))]
 

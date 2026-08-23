@@ -14,7 +14,15 @@ mod slice;
 mod str;
 
 /// The lexer type for lossless GraphQLx tokenization.
-pub type LosslessLexer<'a, S = &'a str> = tokora::lexer::LogosLexer<'a, LosslessToken<S>>;
+///
+/// [`crate::LosslessLexer`] at this dialect's vocabulary. It is a newtype over
+/// [`tokora::lexer::LogosLexer`] rather than the alias for it this used to be, because that
+/// alias also published `into_inner`, `inner` and `inner_mut` — and the raw `logos::Lexer`
+/// they hand back runs neither the post-scan check that enforces
+/// [`LosslessLimits::max_tokens`](crate::limits::LosslessLimits::max_tokens) nor the latch
+/// that stops the scan after it trips. See [`crate::LosslessLexer`] for the measurement and
+/// for why a latch inside the state cannot replace this.
+pub type LosslessLexer<'a, S = &'a str> = crate::LosslessLexer<'a, LosslessToken<S>>;
 
 /// The error data type for lexing based on lossless token with `char` source.
 pub type LosslessLexerErrorData = error::LexerErrorData<char, LimitExceeded>;

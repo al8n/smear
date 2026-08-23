@@ -35,6 +35,9 @@ extern crate alloc as std;
 #[allow(unused_extern_crates)]
 extern crate std;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub use lossless_lexer::LosslessLexer;
+
 pub use string_lexer::*;
 
 pub use tokora;
@@ -184,6 +187,9 @@ mod string_lexer;
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod handlers;
+
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod lossless_lexer;
 
 /// Dialect-agnostic SIMD-lexer primitives shared by the GraphQL and GraphQLx
 /// SIMD lexers.
