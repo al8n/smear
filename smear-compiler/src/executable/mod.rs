@@ -50,6 +50,17 @@
 //!   it found sites the previous version could not see: a charge counting **selections** in front
 //!   of a comparison measured in **bytes**, and a charge gated on one of a list's two readers while
 //!   the other read it for free.
+//! - **An over-charge is a wrong answer too, and it has two shapes.** Neither lets anything
+//!   through, so neither moves a number the way a bypass does; both refuse honest documents.
+//!   A charge sized to the work's **worst path** rather than its taken one — 5.5.2.3 billing the
+//!   width of a bitset for a comparison that answers on `target == parent` and never reads one.
+//!   And a prepayment whose **reader has moved** — the operation-name charge existed partly because
+//!   5.2.1.1 cloned a spelling for free, and centralising that charge in [`Validator::subject`] left
+//!   the prepayment billing every named operation for a rule that performs one `O(1)` lookup.
+//!   Which implies a sweep of its own: a repair that gives a cost a home can leave every earlier
+//!   charge that named it over-charging, so **a prepayment is redundant exactly when its only
+//!   remaining reader is a clone**. Twenty-three prepayments in this module, one such, repaired;
+//!   every other has a sort, a hash, a search or a scan behind it.
 //! - **Setup is work, and a per-operation walk is where it hides.** A ledger charges what a pass
 //!   examines; what a pass *prepares* has no row unless one is written for it. Every `reset_bits`,
 //!   `resize`, `fill` and `clear` on a document-sized buffer therefore owes two numbers — how large,
@@ -1286,11 +1297,19 @@ where
   fn check_operations(&mut self) -> ControlFlow<()> {
     let document = self.document;
 
-    // Prepaid ahead of **both** readers of an operation's spelling: 5.2.2.1 sorts them, and
-    // 5.2.1.1 *clones* one into a diagnostic's subject. The charge sat inside 5.2.2.1's block, so
-    // under `RuleSet::only(OperationTypeExistence)` a caller-sized name was copied against prep's
-    // one unit — and with an owned source type that copy is an allocation the ledger never saw.
-    if self.on(Rule::OperationTypeExistence) || self.on(Rule::OperationNameUniqueness) {
+    // Prepaid for the **sort**, and for nothing else.
+    //
+    // It used to name 5.2.1.1 as a second reader, because that rule clones an operation's spelling
+    // into a diagnostic's subject and the clone was unpriced. [`Validator::subject`] prices it now,
+    // at the clone, so this prepayment is the sort's alone — and leaving 5.2.1.1 in the condition
+    // billed every named operation's bytes for a rule that otherwise performs one `O(1)` root
+    // lookup and reads no name at all. A long enough name could exhaust the ledger and refuse a
+    // document that is valid under the rule the caller selected.
+    //
+    // The shape is worth naming: **centralising a charge can make an older prepayment redundant**,
+    // and a repair that removes a reader leaves every prepayment that named it over-charging. See
+    // this module's header for the sweep that question implies.
+    if self.on(Rule::OperationNameUniqueness) {
       for index in 0..self.scratch.operations.len() {
         if !self.scratch.operations[index].named {
           continue;

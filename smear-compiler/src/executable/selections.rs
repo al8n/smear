@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
   diagnostic::Context,
-  schema::{DirectiveLocation, Schema},
+  schema::DirectiveLocation,
   scratch::{Frame, NONE, get_bit},
 };
 
@@ -295,6 +295,25 @@ where
     let Some(parent) = frame.type_id() else {
       return ControlFlow::Continue(());
     };
+    // Draft 5.5.2.3 is `GetPossibleTypes(fragmentType) ∩ GetPossibleTypes(parentType) ≠ ∅`, and this
+    // is the ecosystem's **self-spread exception** to it.
+    //
+    // The exception matters for exactly one shape: an interface with no implementors, spread on
+    // itself. Its possible-object set is empty, so a literal reading of the rule refuses
+    // `fragment F on Empty { ... F }`. graphql-js, apollo-compiler and the graphql-spec#1109
+    // discussion all accept it, and diverging alone would only make a differential comparison noisy
+    // without protecting anybody from anything.
+    //
+    // It is taken **before the charge** because it is taken before the scan. This was one
+    // `target == parent || intersect(..)` below the charge, so an equal pair — which answers on the
+    // first operand and never touches a bitset — was billed for the whole width of one. A charge
+    // sized to the work's worst path rather than its taken one is a false refusal, which is the
+    // same defect as a charge in the wrong dimension wearing different clothes. It was a charge
+    // this branch added one round earlier, from its own count audit.
+    if target == parent {
+      return ControlFlow::Continue(());
+    }
+
     // The possible-object bitset is the schema's and its width is not an input; the number of
     // spreads and inline fragments that reach it is. `possible_objects_intersect` walks both word
     // lists to the first overlap, and 5.5.2.3 fires exactly when there is none — so the reporting
@@ -304,7 +323,7 @@ where
       .possible_objects(target)
       .map_or(0, |words| u32::try_from(words.len()).unwrap_or(u32::MAX));
     self.spend(words, *name.as_span())?;
-    if possible(self.schema, target, parent) {
+    if self.schema.possible_objects_intersect(target, parent) {
       return ControlFlow::Continue(());
     }
     let context = Context::Type(self.schema.type_def(parent).name());
@@ -321,16 +340,4 @@ where
     let id = self.type_of(condition)?;
     self.schema.type_def(id).kind().is_composite().then_some(id)
   }
-}
-
-/// `GetPossibleTypes(fragmentType) ∩ GetPossibleTypes(parentType) ≠ ∅`, with the ecosystem's
-/// self-spread exception.
-///
-/// The exception matters for exactly one shape: an interface with no implementors, spread on
-/// itself. Its possible-object set is empty, so a literal reading of the rule refuses
-/// `fragment F on Empty { ... F }`. graphql-js, apollo-compiler and the graphql-spec#1109
-/// discussion all accept it, and diverging alone would only make a differential comparison noisy
-/// without protecting anybody from anything.
-fn possible(schema: &Schema, target: TypeId, parent: TypeId) -> bool {
-  target == parent || schema.possible_objects_intersect(target, parent)
 }

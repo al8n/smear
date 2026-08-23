@@ -2017,3 +2017,95 @@ fn opening_a_walk_does_not_scale_with_the_fragment_population() {
     );
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// 14. over-charges: a false refusal is still a wrong answer
+// ---------------------------------------------------------------------------------------------
+
+/// 5.2.1.1 pays for a name only when it names one.
+///
+/// The operation-name prepayment existed for two readers: 5.2.2.1's sort, and 5.2.1.1's *clone* of
+/// a name into a diagnostic's subject. Centralising the clone charge in `Validator::subject` left
+/// the second reader paid for twice — and, on the path where 5.2.1.1 emits nothing at all, paid for
+/// once by a rule that performs one `O(1)` root lookup and never reads a name. A long enough
+/// operation name could exhaust `validation_work` and refuse a document that is **valid** under the
+/// only rule the caller asked for.
+///
+/// Both halves are pinned: the silent path must not scale with the spelling, and the reporting path
+/// must still scale, because that clone is real.
+#[test]
+fn operation_type_existence_pays_for_a_name_only_when_it_names_one() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::OperationTypeExistence);
+  let pad = "q".repeat(40_000);
+
+  // The schema has a query root, so the rule looks it up and says nothing.
+  let quiet_short = min_budget(&schema, "query q { dog { name } }", rules);
+  let quiet_long = min_budget(
+    &schema,
+    &std::format!("query q{pad} {{ dog {{ name }} }}"),
+    rules,
+  );
+  println!("5.2.1.1 silent: short {quiet_short} units, 40,000-byte name {quiet_long} units");
+  assert!(
+    quiet_long - quiet_short < 1_000,
+    "a 40,000-byte operation name cost {} units for a rule that reads no name",
+    quiet_long - quiet_short
+  );
+
+  // The schema has no mutation root, so the rule emits and clones the name into it.
+  let loud_short = min_budget(&schema, "mutation m { x }", rules);
+  let loud_long = min_budget(&schema, &std::format!("mutation m{pad} {{ x }}"), rules);
+  println!("5.2.1.1 reporting: short {loud_short} units, 40,000-byte name {loud_long} units");
+  assert!(
+    loud_long - loud_short >= 5_000,
+    "the reporting path cloned a 40,000-byte name for {} units",
+    loud_long - loud_short
+  );
+}
+
+/// 5.5.2.3 pays for the bitset scan it runs, not the one it skips.
+///
+/// `possible` is `target == parent || intersect(..)`. An equal pair — the ecosystem's self-spread
+/// exception — answers on the first operand and never touches a bitset, and the charge added from
+/// this branch's own count audit one round earlier was taken above that test. A charge sized to the
+/// work's worst path rather than its taken one is a false refusal.
+#[test]
+fn an_equal_type_spread_pays_for_no_bitset_scan() {
+  // A wide possible-object set: the charge is one unit per word, so the interface needs enough
+  // implementors for a word count to be visible.
+  const IMPLEMENTORS: usize = 3_200;
+  const SPREADS: usize = 200;
+  let types = (0..IMPLEMENTORS)
+    .map(|i| std::format!("type Impl{i} implements Wide {{ name: String }} "))
+    .collect::<String>();
+  let sdl = std::format!(
+    "type Query {{ w: Wide }} interface Wide {{ name: String }} \
+     type Other {{ name: String }} {types}"
+  );
+  let schema = build(&sdl);
+
+  // Same spread count, same spelling lengths; only the target differs. `Other` implements nothing,
+  // so its set is disjoint from `Wide`'s and the scan runs to the end.
+  let document = |target: &str| {
+    let spreads = std::format!("...{target} ").repeat(SPREADS);
+    std::format!(
+      "{{ w {{ ...F }} }} fragment F on Wide {{ {spreads} name }} fragment G on Other {{ name }}"
+    )
+  };
+
+  let rules = RuleSet::only(Rule::FragmentSpreadIsPossible);
+  let equal = min_budget(&schema, &document("F"), rules);
+  let scanned = min_budget(&schema, &document("G"), rules);
+  println!(
+    "5.5.2.3: {SPREADS} equal spreads {equal} units, {SPREADS} scanned spreads {scanned} units"
+  );
+
+  // `IMPLEMENTORS / 64` words per scan. The equal spreads must pay for none of it.
+  let words = (IMPLEMENTORS / 64) as u32;
+  assert!(
+    scanned >= equal + (SPREADS as u32) * words / 2,
+    "the scanning document paid only {} units more than the one that scans nothing",
+    scanned.saturating_sub(equal)
+  );
+}
