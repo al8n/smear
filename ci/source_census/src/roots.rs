@@ -31,6 +31,42 @@
 //! is neither a call, the declaration, nor an import is reported as **unclassified** rather than
 //! ignored — the census refuses what it cannot read.
 //!
+//! # Every spelling of a call, or a refusal
+//!
+//! Watching two names is not the same as watching two functions. `use …::root_turn as turn;`
+//! binds a second spelling; a scan that knows only the original reads that line as an import,
+//! ignores it, and then cannot see `turn(inp, stop, entry)` at all. The call needs no `DECLARED`
+//! row and the gate stays green — the caller-set claim false again, with the census agreeing with
+//! itself about it, which is the very failure this file exists to end.
+//!
+//! So [`bindings`] runs first, over the same token tree, and reads every `X as Y` written inside
+//! a `use`. A rename of a watched callee gives the file a second spelling, watched exactly like
+//! the first. Every spelling one file cannot follow is **refused**, and a refusal is a finding:
+//!
+//! - a rename that is exported (`pub(crate) use …::root_turn as turn;`), or an exported re-import
+//!   of a local alias, because the new spelling leaves this file and a per-file scan cannot meet
+//!   it where it is called;
+//! - a rename of a rename (`use self::turn as spin;`), because the census follows one hop rather
+//!   than a graph;
+//! - a `use` that binds a watched *name* to something else (`use elsewhere::other as root_turn;`),
+//!   because every bare `root_turn(…)` under it is then a call of something else;
+//! - a `paste!` `[< … >]` or a `concat_idents!` that spells a watched name, or one whose pieces
+//!   the census cannot evaluate — an identifier assembled out of fragments is one no walk over
+//!   identifiers can recognise.
+//!
+//! With those refused the coverage argument closes. A call has to *name* its function. The name is
+//! either the callee's own — which the ident walk sees bare, `r#`-escaped, path-qualified,
+//! turbofished, glob-imported or written inside a macro body, because it is a walk over tokens —
+//! or a spelling some `use` bound to it. A `use` in this file is in [`bindings`]; a `use` anywhere
+//! else has to cross a file boundary through an exported one, which is refused on the line that
+//! writes it. Naming the function without calling it — `let f = root_turn;`, which is how a root
+//! is handed to the drain today — is neither a call nor an import, so it is unclassified, which is
+//! a finding too.
+//!
+//! What stays outside is a call that is not in the crate's tokens at all: a proc macro that
+//! synthesises `root_turn(…)` into its own output. No token census can see that one, and
+//! [`selftest`] does not claim it can.
+//!
 //! # What a change to [`DECLARED`] means
 //!
 //! Editing that table is the decision being recorded, and the diff to those lines is the thing a
@@ -61,6 +97,21 @@ const ROOT: &str = "smear-parser/src";
 
 /// The two functions whose caller set is pinned.
 const WATCHED: &[&str] = &["drain_unless_stopped", "root_turn"];
+
+/// An identifier without its `r#` escape, which is not part of its name.
+///
+/// `Ident`'s own `Display` keeps the `r#`, and `r#root_turn(inp, stop, entry)` is a call of
+/// `root_turn`. Normalising here rather than at each comparison is what keeps that from being a
+/// spelling the walk does not recognise.
+fn bare(spelling: &str) -> &str {
+  spelling.strip_prefix("r#").unwrap_or(spelling)
+}
+
+/// The [`WATCHED`] name this identifier spells, if it spells one.
+fn watched(spelling: &str) -> Option<&'static str> {
+  let bare = bare(spelling);
+  WATCHED.iter().copied().find(|name| *name == bare)
+}
 
 /// The file both are declared in, which is also the only file allowed to declare them.
 const DECLARED_IN: &str = "smear-parser/src/lossless/depth.rs";
@@ -258,6 +309,9 @@ pub enum Occurrence {
 /// One occurrence, with where it is and what encloses it.
 pub struct Hit {
   pub callee: String,
+  /// The identifier as it is written, which is [`Hit::callee`] unless this file renamed it. A
+  /// finding names this and not only the callee: `turn` is what a reader has to go and look at.
+  pub spelling: String,
   pub file: String,
   pub owner: String,
   pub line: usize,
@@ -271,6 +325,9 @@ pub struct Report {
   pub hits: Vec<Hit>,
   /// Files the census could not read as Rust, with the reason.
   pub unreadable: Vec<String>,
+  /// Spellings of a watched callee that one file's tokens cannot follow, with the reason. Each is
+  /// a finding: a rename the census cannot resolve makes it red rather than making it blinder.
+  pub refusals: Vec<String>,
   /// Every way the tree and [`DECLARED`] disagree, and every occurrence that is neither a call,
   /// a declaration nor an import.
   pub findings: Vec<String>,
@@ -304,6 +361,7 @@ pub fn detect(repository: &Path) -> Report {
     files_read: 0,
     hits: Vec::new(),
     unreadable: Vec::new(),
+    refusals: Vec::new(),
     findings: Vec::new(),
   };
   let mut files = match rust_files(&repository.join(ROOT)) {
@@ -326,7 +384,10 @@ pub fn detect(repository: &Path) -> Report {
       }
     };
     match scan(&shown, &text) {
-      Ok(hits) => report.hits.extend(hits),
+      Ok(scan) => {
+        report.hits.extend(scan.hits);
+        report.refusals.extend(scan.refusals);
+      }
       Err(message) => report.unreadable.push(message),
     }
   }
@@ -340,6 +401,14 @@ fn reconcile(report: &mut Report) {
   for message in &report.unreadable {
     report.findings.push(format!(
       "unreadable, so nothing below is a statement about it — {message}"
+    ));
+  }
+
+  // A spelling the census will not follow is red here rather than absent from the counts below.
+  // Reducing what a gate can see is the one way it fails that nothing else announces.
+  for refusal in &report.refusals {
+    report.findings.push(format!(
+      "a second spelling this census will not follow — {refusal}"
     ));
   }
 
@@ -389,10 +458,18 @@ fn reconcile(report: &mut Report) {
 
   for hit in &report.hits {
     if hit.what == Occurrence::Unclassified {
+      let named = if hit.spelling == hit.callee {
+        format!("`{}`", hit.callee)
+      } else {
+        format!(
+          "`{}`, this file\'s name for `{}`,",
+          hit.spelling, hit.callee
+        )
+      };
       report.findings.push(format!(
-        "{}:{}: `{}` occurs inside `{}` and is neither a call, the declaration, nor an import — \
-         the census will not guess",
-        hit.file, hit.line, hit.callee, hit.owner
+        "{}:{}: {named} occurs inside `{}` and is neither a call, the declaration, nor an import \
+         — the census will not guess",
+        hit.file, hit.line, hit.owner
       ));
     }
   }
@@ -443,14 +520,267 @@ fn reconcile(report: &mut Report) {
 /// `syn::parse_file` runs first and its failure is returned: a file this tool cannot read as Rust
 /// must not contribute a confident zero. The walk below is over `proc_macro2`'s token tree, which
 /// descends into macro bodies — where four of the five calling files keep their calls.
-pub fn scan(file: &str, text: &str) -> Result<Vec<Hit>, String> {
+pub fn scan(file: &str, text: &str) -> Result<Scan, String> {
   syn::parse_file(text).map_err(|e| format!("{file}: syn cannot parse this file: {e}"))?;
   let stream: TokenStream = text
     .parse()
     .map_err(|e| format!("{file}: this file does not tokenize: {e}"))?;
+  // What this file calls the two functions is read before anything is counted, because a rename
+  // decides which identifiers the walk below is even looking at.
+  let bound = bindings(file, &stream);
   let mut hits = Vec::new();
-  walk(&stream, file, &mut Vec::new(), false, &mut hits);
-  Ok(hits)
+  walk(
+    &stream,
+    file,
+    &mut Vec::new(),
+    false,
+    &bound.alias,
+    &mut hits,
+  );
+  Ok(Scan {
+    hits,
+    refusals: bound.refusals,
+  })
+}
+
+/// What one file's tokens said: every occurrence, and every spelling the census will not follow.
+pub struct Scan {
+  pub hits: Vec<Hit>,
+  /// See [`Report::refusals`].
+  pub refusals: Vec<String>,
+}
+
+/// The second spellings one file binds, and the ones it refuses to follow.
+struct Bindings {
+  /// The identifier written at a call site, `r#` stripped, to the watched callee it stands for.
+  alias: BTreeMap<String, &'static str>,
+  refusals: Vec<String>,
+}
+
+/// One identifier a `use` names: what it says, what it renames to, and whether it is exported.
+struct Named {
+  spelling: String,
+  renamed_to: Option<String>,
+  exported: bool,
+  line: usize,
+}
+
+/// Every second spelling of a watched callee this file binds, and every one it will not follow.
+///
+/// One hop is followed, because `use …::root_turn as turn;` is a rename a single file can read off
+/// its own tokens. Everything past that hop leaves this file or leaves the census guessing, and is
+/// refused instead — a shape it cannot read has to make it red, not quietly make it cover less.
+fn bindings(file: &str, stream: &TokenStream) -> Bindings {
+  let mut named = Vec::new();
+  let mut pasted = Vec::new();
+  collect(stream, false, false, &mut named, &mut pasted);
+
+  let mut alias: BTreeMap<String, &'static str> = BTreeMap::new();
+  let mut refusals = Vec::new();
+
+  // The hop the census follows.
+  for entry in &named {
+    let (Some(new), Some(callee)) = (entry.renamed_to.as_deref(), watched(&entry.spelling)) else {
+      continue;
+    };
+    // Renaming one watched name onto the other is a rebinding, refused in the loop below.
+    if watched(new).is_some() {
+      continue;
+    }
+    match alias.insert(bare(new).to_string(), callee) {
+      Some(other) if other != callee => refusals.push(format!(
+        "{file}:{}: `{new}` is this file's name for both `{other}` and `{callee}`",
+        entry.line
+      )),
+      _ => {}
+    }
+    if entry.exported {
+      refusals.push(format!(
+        "{file}:{}: `{callee}` is re-exported as `{new}`, so a call written `{new}(…)` in another \
+         file is one this per-file scan cannot see",
+        entry.line
+      ));
+    }
+  }
+
+  // Everything the hop does not reach.
+  for entry in &named {
+    let spelled = bare(&entry.spelling);
+    if let Some(new) = entry.renamed_to.as_deref() {
+      if let Some(callee) = watched(new) {
+        refusals.push(format!(
+          "{file}:{}: `{spelled} as {new}` binds the watched name `{callee}` to something else, \
+           so a `{callee}(…)` written below it is not a call of the function this census watches",
+          entry.line
+        ));
+        continue;
+      }
+      if let Some(callee) = alias.get(spelled) {
+        refusals.push(format!(
+          "{file}:{}: `{spelled}` is already this file's name for `{callee}`, and renaming it \
+           again to `{new}` is a second hop — the census follows one",
+          entry.line
+        ));
+      }
+      continue;
+    }
+    if !entry.exported {
+      continue;
+    }
+    if let Some(callee) = alias.get(spelled) {
+      refusals.push(format!(
+        "{file}:{}: `{spelled}` is this file's name for `{callee}` and is re-exported under it, \
+         so a call written `{spelled}(…)` in another file is one this per-file scan cannot see",
+        entry.line
+      ));
+    }
+  }
+
+  for (spelled, line) in pasted {
+    match spelled {
+      Some(name) if watched(&name).is_some() => refusals.push(format!(
+        "{file}:{line}: a `[< … >]` concatenation spells `{name}`, and an identifier assembled \
+         from pieces is not one an identifier walk can recognise"
+      )),
+      None => refusals.push(format!(
+        "{file}:{line}: a `[< … >]` concatenation the census cannot evaluate, so it cannot say \
+         the identifier it builds is not {}",
+        WATCHED.join(" or ")
+      )),
+      Some(_) => {}
+    }
+  }
+
+  Bindings { alias, refusals }
+}
+
+/// Reads what every `use` names and what every identifier-pasting macro assembles.
+///
+/// `in_use` and the export flag descend into groups the way [`walk`]'s own state does, so a rename
+/// written inside a `use` group, inside a nested module, or inside a macro body is read the same.
+/// A rename consumes its `as NEW`, so the new name is not also recorded as a plain import — which
+/// would refuse every exported rename twice.
+fn collect(
+  stream: &TokenStream,
+  in_use: bool,
+  exported: bool,
+  named: &mut Vec<Named>,
+  pasted: &mut Vec<(Option<String>, usize)>,
+) {
+  let tokens: Vec<TokenTree> = stream.clone().into_iter().collect();
+  let mut in_use = in_use;
+  let mut exported = exported;
+  // A `pub` seen at this level and not yet spent, which is what makes the next `use` an export.
+  let mut saw_pub = false;
+  let mut i = 0;
+  while i < tokens.len() {
+    match &tokens[i] {
+      TokenTree::Ident(ident) => {
+        let name = ident.to_string();
+        match name.as_str() {
+          "pub" => saw_pub = true,
+          "use" => {
+            in_use = true;
+            exported = saw_pub;
+            saw_pub = false;
+          }
+          // The two ways a file spells an identifier it does not write. They have different
+          // syntax and so different readers: `paste!` concatenates inside `[< … >]`, anywhere in
+          // its body; `concat_idents!`'s whole body is the one identifier it builds.
+          "paste" => {
+            if let (true, Some(TokenTree::Group(body))) =
+              (is_bang(&tokens, i + 1), tokens.get(i + 2))
+            {
+              concatenations(&body.stream(), pasted);
+            }
+          }
+          "concat_idents" => {
+            if let (true, Some(TokenTree::Group(body))) =
+              (is_bang(&tokens, i + 1), tokens.get(i + 2))
+            {
+              let pieces: Vec<TokenTree> = body.stream().into_iter().collect();
+              pasted.push((spells(&pieces), body.span().start().line));
+            }
+          }
+          _ => {}
+        }
+        if in_use && name != "use" {
+          let renamed_to = match (tokens.get(i + 1), tokens.get(i + 2)) {
+            (Some(TokenTree::Ident(keyword)), Some(TokenTree::Ident(new)))
+              // `as _` binds nothing that can be called, so it binds no spelling either.
+              if keyword == "as" && new != "_" =>
+            {
+              Some(new.to_string())
+            }
+            _ => None,
+          };
+          let renamed = renamed_to.is_some();
+          named.push(Named {
+            spelling: name,
+            renamed_to,
+            exported,
+            line: ident.span().start().line,
+          });
+          if renamed {
+            i += 3;
+            continue;
+          }
+        }
+      }
+      TokenTree::Punct(p) => {
+        if p.as_char() == ';' {
+          in_use = false;
+          saw_pub = false;
+        }
+      }
+      TokenTree::Group(group) => {
+        collect(&group.stream(), in_use, exported, named, pasted);
+        if group.delimiter() == Delimiter::Brace {
+          saw_pub = false;
+        }
+      }
+      TokenTree::Literal(_) => {}
+    }
+    i += 1;
+  }
+}
+
+/// Every `[< … >]` inside a pasting macro's body, as the identifier it spells — or `None` where a
+/// piece is not literal text, which is where the census stops being able to say what it spells.
+fn concatenations(stream: &TokenStream, out: &mut Vec<(Option<String>, usize)>) {
+  for token in stream.clone() {
+    let TokenTree::Group(group) = token else {
+      continue;
+    };
+    let inner: Vec<TokenTree> = group.stream().into_iter().collect();
+    let opens = matches!(inner.first(), Some(TokenTree::Punct(p)) if p.as_char() == '<');
+    let closes = matches!(inner.last(), Some(TokenTree::Punct(p)) if p.as_char() == '>');
+    if group.delimiter() == Delimiter::Bracket && opens && closes && inner.len() > 2 {
+      out.push((
+        spells(&inner[1..inner.len() - 1]),
+        group.span().start().line,
+      ));
+    }
+    concatenations(&group.stream(), out);
+  }
+}
+
+/// The identifier a run of tokens spells, or `None` where a piece is not literal text.
+///
+/// A `,` contributes nothing because it is `concat_idents!`'s separator. Anything else — a `$`
+/// metavariable above all — is where the census stops being able to say what is built, and `None`
+/// is what makes that a refusal rather than a silent pass.
+fn spells(pieces: &[TokenTree]) -> Option<String> {
+  let mut spelled = String::new();
+  for piece in pieces {
+    match piece {
+      TokenTree::Ident(ident) => spelled.push_str(&ident.to_string()),
+      TokenTree::Literal(literal) => spelled.push_str(&literal.to_string()),
+      TokenTree::Punct(punct) if punct.as_char() == ',' => {}
+      _ => return None,
+    }
+  }
+  Some(spelled)
 }
 
 /// Whether a token is a `::`, taking the two-punct spelling `proc_macro2` gives it.
@@ -466,11 +796,16 @@ fn is_path_sep(tokens: &[TokenTree], at: usize) -> bool {
 /// is written in, which is what puts a call in a closure under the function that wrote the
 /// closure. `fn $name` in a macro's transcriber sets no name — the function does not have one yet
 /// — so those calls land on the macro.
+///
+/// `alias` is what [`bindings`] read: the identifiers this file has made into second names for a
+/// watched callee. They are watched exactly as the callee's own name is, and the [`Hit`] they
+/// produce carries the callee, so two spellings from one owner are one caller.
 fn walk(
   stream: &TokenStream,
   file: &str,
   owner: &mut Vec<String>,
   in_use: bool,
+  alias: &BTreeMap<String, &'static str>,
   out: &mut Vec<Hit>,
 ) {
   let tokens: Vec<TokenTree> = stream.clone().into_iter().collect();
@@ -497,9 +832,12 @@ fn walk(
           "fn" | "mod" => {
             if let Some(TokenTree::Ident(next)) = tokens.get(i + 1) {
               let declared = next.to_string();
-              if name == "fn" && WATCHED.contains(&declared.as_str()) {
+              if name == "fn"
+                && let Some(callee) = watched(&declared)
+              {
                 out.push(Hit {
-                  callee: declared.clone(),
+                  callee: callee.to_string(),
+                  spelling: declared.clone(),
                   file: file.to_string(),
                   owner: owner.join("::"),
                   line: next.span().start().line,
@@ -525,18 +863,24 @@ fn walk(
               continue;
             }
           }
-          _ if WATCHED.contains(&name.as_str()) => {
-            let what = classify(&tokens, i, in_use);
-            out.push(Hit {
-              callee: name,
-              file: file.to_string(),
-              owner: owner.join("::"),
-              line: ident.span().start().line,
-              what,
-              visibility: String::new(),
-            });
+          _ => {
+            let own = watched(&name);
+            if let Some(callee) = own.or_else(|| alias.get(bare(&name)).copied()) {
+              // Where a `use` binds an alias, the import is already recorded against the callee's
+              // own name in the same tree; recording the new name there too would double it.
+              if own.is_some() || !in_use {
+                out.push(Hit {
+                  callee: callee.to_string(),
+                  spelling: name,
+                  file: file.to_string(),
+                  owner: owner.join("::"),
+                  line: ident.span().start().line,
+                  what: classify(&tokens, i, in_use),
+                  visibility: String::new(),
+                });
+              }
+            }
           }
-          _ => {}
         }
       }
       TokenTree::Punct(p) => {
@@ -552,7 +896,7 @@ fn walk(
           owner.push(pending.take().expect("a brace group with a pending name"));
           visibility.clear();
         }
-        walk(&group.stream(), file, owner, in_use, out);
+        walk(&group.stream(), file, owner, in_use, alias, out);
         if named {
           owner.pop();
         }
@@ -669,20 +1013,33 @@ pub fn verdict(report: &Report) -> bool {
 
 /// Proves each branch of [`classify`] and of the walk can fire, against synthetic sources.
 ///
-/// The cases run through the same [`scan`] a real run uses — the `syn` gate, the token walk, the
-/// owner stack and the classification, end to end. A census that has only ever agreed with itself
-/// is the defect class this file is the cure for, so the shapes that matter each get a case: a
-/// call inside a `macro_rules!` transcriber, a call inside a macro *invocation*'s body, prose that
-/// names the function, a `use` that imports it, and a mention that is none of those.
+/// Two halves, and the second is the one that matters.
+///
+/// The first is a list of pinned shapes, each with the exact hits it must produce. That is what
+/// fixes owners, counts and classifications, and it is what a reader consults to see what the scan
+/// does with a shape.
+///
+/// But a list of shapes is written out of the shapes its author thought of, and a claim derived
+/// from what someone could imagine is the defect this file exists to end — one level up. Nine
+/// cases stood here while `use …::root_turn as turn;` made a caller invisible, because none of the
+/// nine was aliased. The census had the same blindness as the tree it was auditing.
+///
+/// So the second half lists no shapes. It crosses the axes a call varies along — how the name gets
+/// into scope, how the call site spells it, and where the call sits — and asserts one property
+/// over the whole product: **every spelling is either counted or refused, and never silently
+/// absent.** A new way to write a call is a new row in one axis, and its combination with every
+/// other axis comes for free.
 pub fn selftest() -> Result<usize, Vec<String>> {
   struct Case {
     name: &'static str,
     source: &'static str,
     /// `(callee, owner, occurrence)`, every hit the scan must produce, in order.
     want: &'static [(&'static str, &'static str, Occurrence)],
+    /// A fragment of each refusal the scan must make, in order. Empty means it must make none.
+    refuses: &'static [&'static str],
   }
 
-  let cases: &[Case] = &[
+  let pinned: &[Case] = &[
     Case {
       name: "a call inside a macro invocation's body is seen, and named for its own fn",
       source: r#"
@@ -694,6 +1051,7 @@ pub fn selftest() -> Result<usize, Vec<String>> {
         }
       "#,
       want: &[("drain_unless_stopped", "document_entry", Occurrence::Call)],
+      refuses: &[],
     },
     Case {
       name: "a call inside a macro_rules transcriber lands on the macro, not on `$modname`",
@@ -714,6 +1072,7 @@ pub fn selftest() -> Result<usize, Vec<String>> {
         ("drain_unless_stopped", "lossless_drivers", Occurrence::Call),
         ("root_turn", "lossless_drivers", Occurrence::Call),
       ],
+      refuses: &[],
     },
     Case {
       name: "prose naming the function is not a token and cannot be a call",
@@ -725,6 +1084,7 @@ pub fn selftest() -> Result<usize, Vec<String>> {
         }
       "#,
       want: &[],
+      refuses: &[],
     },
     Case {
       name: "an import is an import, at any nesting",
@@ -740,6 +1100,7 @@ pub fn selftest() -> Result<usize, Vec<String>> {
         ("root_turn", "", Occurrence::Import),
         ("root_turn", "body", Occurrence::Import),
       ],
+      refuses: &[],
     },
     Case {
       name: "a mention that is neither call, declaration nor import is refused",
@@ -757,6 +1118,7 @@ pub fn selftest() -> Result<usize, Vec<String>> {
           Occurrence::Unclassified,
         ),
       ],
+      refuses: &[],
     },
     Case {
       name: "the declaration is a declaration, and its visibility is read",
@@ -769,6 +1131,7 @@ pub fn selftest() -> Result<usize, Vec<String>> {
         ("drain_unless_stopped", "", Occurrence::Declaration),
         ("root_turn", "drain_unless_stopped", Occurrence::Call),
       ],
+      refuses: &[],
     },
     Case {
       name: "the owner is a path, so four `drive`s are four callers",
@@ -786,6 +1149,7 @@ pub fn selftest() -> Result<usize, Vec<String>> {
         ("root_turn", "first::drive", Occurrence::Call),
         ("root_turn", "second::drive", Occurrence::Call),
       ],
+      refuses: &[],
     },
     Case {
       name: "a turbofished call is still a call",
@@ -795,15 +1159,137 @@ pub fn selftest() -> Result<usize, Vec<String>> {
         }
       "#,
       want: &[("drain_unless_stopped", "t", Occurrence::Call)],
+      refuses: &[],
+    },
+    Case {
+      name: "a rename gives the file a second spelling, and a call through it is a call",
+      source: r#"
+        use crate::lossless::depth::root_turn as turn;
+        fn drive() { turn(inp, stop, entry) }
+      "#,
+      want: &[
+        ("root_turn", "", Occurrence::Import),
+        ("root_turn", "drive", Occurrence::Call),
+      ],
+      refuses: &[],
+    },
+    Case {
+      name: "a raw identifier is the same identifier",
+      source: r#"
+        fn drive() { r#root_turn(inp, stop, entry) }
+      "#,
+      want: &[("root_turn", "drive", Occurrence::Call)],
+      refuses: &[],
+    },
+    Case {
+      name: "a glob brings the name in unchanged, so nothing about the call moves",
+      source: r#"
+        use crate::lossless::depth::*;
+        fn drive() { root_turn(inp, stop, entry) }
+      "#,
+      want: &[("root_turn", "drive", Occurrence::Call)],
+      refuses: &[],
+    },
+    Case {
+      name: "an exported rename is refused, because the spelling leaves this file",
+      source: r#"
+        pub(crate) use crate::lossless::depth::drain_unless_stopped as drain;
+        fn drive() { drain(inp, root) }
+      "#,
+      want: &[
+        ("drain_unless_stopped", "", Occurrence::Import),
+        ("drain_unless_stopped", "drive", Occurrence::Call),
+      ],
+      refuses: &["is re-exported as `drain`"],
+    },
+    Case {
+      name: "a local rename that is then re-exported is refused for the same reason",
+      source: r#"
+        use crate::lossless::depth::root_turn as turn;
+        pub(crate) use self::turn;
+        fn drive() { turn(inp, stop, entry) }
+      "#,
+      want: &[
+        ("root_turn", "", Occurrence::Import),
+        ("root_turn", "drive", Occurrence::Call),
+      ],
+      refuses: &["is re-exported under it"],
+    },
+    Case {
+      name: "a second hop is refused, and the name it binds is watched by nothing",
+      source: r#"
+        use crate::lossless::depth::root_turn as turn;
+        use self::turn as spin;
+        fn drive() { spin(inp, stop, entry) }
+      "#,
+      want: &[("root_turn", "", Occurrence::Import)],
+      refuses: &["is a second hop"],
+    },
+    Case {
+      name: "a `use` that binds a watched name to something else is refused",
+      source: r#"
+        use crate::elsewhere::other as root_turn;
+        fn drive() { root_turn(inp, stop, entry) }
+      "#,
+      want: &[
+        ("root_turn", "", Occurrence::Import),
+        ("root_turn", "drive", Occurrence::Call),
+      ],
+      refuses: &["binds the watched name `root_turn` to something else"],
+    },
+    Case {
+      name: "`as _` binds no spelling, because nothing can call what it binds",
+      source: r#"
+        pub(crate) use crate::lossless::depth::root_turn as _;
+        fn drive() { let _ = 1; }
+      "#,
+      want: &[("root_turn", "", Occurrence::Import)],
+      refuses: &[],
+    },
+    Case {
+      name: "a paste that spells a watched name is refused; one that spells something else is not",
+      source: r#"
+        fn drive() {
+          paste::paste! { [<root_ turn>](inp, stop, entry) }
+        }
+        fn elsewhere() {
+          paste::paste! { [<Named Type>]::new() }
+        }
+      "#,
+      want: &[],
+      refuses: &["concatenation spells `root_turn`"],
+    },
+    Case {
+      name: "a `concat_idents!` is read by its own syntax, not by `paste!`'s",
+      source: r#"
+        fn drive() {
+          concat_idents!(drain_unless_, stopped)(inp, root)
+        }
+      "#,
+      want: &[],
+      refuses: &["concatenation spells `drain_unless_stopped`"],
+    },
+    Case {
+      name: "a paste the census cannot evaluate is refused rather than assumed harmless",
+      source: r#"
+        macro_rules! driver {
+          ($name:ident) => {
+            paste::paste! { [<$name _turn>](inp, stop, entry) }
+          };
+        }
+      "#,
+      want: &[],
+      refuses: &["cannot evaluate"],
     },
   ];
 
   let mut problems = Vec::new();
-  for case in cases {
+  for case in pinned {
     match scan("selftest.rs", case.source) {
       Err(message) => problems.push(format!("{}: {message}", case.name)),
-      Ok(hits) => {
-        let got: Vec<(&str, &str, Occurrence)> = hits
+      Ok(scan) => {
+        let got: Vec<(&str, &str, Occurrence)> = scan
+          .hits
           .iter()
           .map(|hit| (hit.callee.as_str(), hit.owner.as_str(), hit.what))
           .collect();
@@ -812,6 +1298,18 @@ pub fn selftest() -> Result<usize, Vec<String>> {
           problems.push(format!(
             "{}:\n     want {want:?}\n     got  {got:?}",
             case.name
+          ));
+        }
+        if scan.refusals.len() != case.refuses.len()
+          || scan
+            .refusals
+            .iter()
+            .zip(case.refuses)
+            .any(|(refusal, fragment)| !refusal.contains(fragment))
+        {
+          problems.push(format!(
+            "{}:\n     want refusals {:?}\n     got  {:?}",
+            case.name, case.refuses, scan.refusals
           ));
         }
       }
@@ -827,9 +1325,224 @@ pub fn selftest() -> Result<usize, Vec<String>> {
     );
   }
 
+  problems.extend(every_spelling());
+
   if problems.is_empty() {
-    Ok(cases.len() + 1)
+    Ok(pinned.len() + 1 + SPELLINGS.len() * PLACEMENTS.len() * WATCHED.len())
   } else {
     Err(problems)
   }
+}
+
+/// One way the name of a watched callee reaches a call site, and how the call site then writes it.
+struct Spelling {
+  what: &'static str,
+  /// The items the file carries to make the call mean the watched function. `{callee}` is its
+  /// name.
+  binding: &'static str,
+  /// The call expression. `{callee}` is the callee's name, `{head}`/`{tail}` its two halves.
+  call: &'static str,
+  /// Whether one file's tokens can follow this spelling, or the census must refuse it.
+  followed: bool,
+}
+
+/// The ways a name reaches a call site, which is the axis the nine pinned cases had one value of.
+///
+/// A rename is followed because a single file can read it off its own tokens. The three that leave
+/// the file, and the one that assembles an identifier out of pieces, are refused — see [`bindings`]
+/// for why that direction and not more resolution.
+const SPELLINGS: &[Spelling] = &[
+  Spelling {
+    what: "a path, with nothing imported",
+    binding: "",
+    call: "crate::lossless::depth::{callee}(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "a path with a turbofish",
+    binding: "",
+    call: "crate::lossless::depth::{callee}::<Src, Ctx>(inp, stop)",
+    followed: true,
+  },
+  Spelling {
+    what: "the imported name",
+    binding: "use crate::lossless::depth::{callee};",
+    call: "{callee}(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "the imported name, turbofished",
+    binding: "use crate::lossless::depth::{callee};",
+    call: "{callee}::<Src, Ctx>(inp, stop)",
+    followed: true,
+  },
+  Spelling {
+    what: "a name a glob brought in",
+    binding: "use crate::lossless::depth::*;",
+    call: "{callee}(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "a raw identifier",
+    binding: "use crate::lossless::depth::r#{callee};",
+    call: "r#{callee}(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "a rename",
+    binding: "use crate::lossless::depth::{callee} as turn;",
+    call: "turn(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "a rename, turbofished",
+    binding: "use crate::lossless::depth::{callee} as turn;",
+    call: "turn::<Src, Ctx>(inp, stop)",
+    followed: true,
+  },
+  Spelling {
+    what: "a rename inside a group",
+    binding: "use crate::lossless::depth::{RootStop, {callee} as turn};",
+    call: "turn(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "a rename to a raw identifier",
+    binding: "use crate::lossless::depth::{callee} as r#turn;",
+    call: "turn(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "a rename inside a nested module",
+    binding: "mod inner { use crate::lossless::depth::{callee} as turn; }",
+    call: "turn(inp, stop, entry)",
+    followed: true,
+  },
+  Spelling {
+    what: "a rename that is exported",
+    binding: "pub(crate) use crate::lossless::depth::{callee} as turn;",
+    call: "turn(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "a local rename that is re-exported",
+    binding: "use crate::lossless::depth::{callee} as turn;\npub(crate) use self::turn;",
+    call: "turn(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "a rename of a rename",
+    binding: "use crate::lossless::depth::{callee} as turn;\nuse self::turn as spin;",
+    call: "spin(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "the watched name bound to something else",
+    binding: "use crate::elsewhere::other as {callee};",
+    call: "{callee}(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "an identifier assembled by a paste",
+    binding: "",
+    call: "paste::paste! { [<{head} {tail}>](inp, stop, entry) }",
+    followed: false,
+  },
+  Spelling {
+    what: "an identifier assembled by `concat_idents!`",
+    binding: "",
+    call: "concat_idents!({head}, {tail})(inp, stop, entry)",
+    followed: false,
+  },
+];
+
+/// Where the call sits: `{items}` is the [`Spelling::binding`], `{call}` the call expression.
+///
+/// The macro placements are the ones that matter most and the ones a visitor-based census cannot
+/// reach at all — twelve of the fourteen shipped calls are written inside a macro invocation, and
+/// two inside a `macro_rules!` transcriber.
+const PLACEMENTS: &[(&str, &str)] = &[
+  ("a function body", "{items}\nfn holder() { {call}; }"),
+  (
+    "a nested module",
+    "{items}\nmod outer { use super::*; pub fn holder() { {call}; } }",
+  ),
+  (
+    "a closure",
+    "{items}\nfn holder() { let f = |inp| { {call} }; }",
+  ),
+  (
+    "a `macro_rules!` transcriber",
+    "{items}\nmacro_rules! driver { () => { fn made() { {call}; } }; }",
+  ),
+  (
+    "a macro invocation's body",
+    "{items}\nlossless_production! { fn holder(inp) { {call} } }",
+  ),
+];
+
+/// Crosses [`SPELLINGS`] with [`PLACEMENTS`] and [`WATCHED`], and holds one property over all of
+/// it: the call is counted, or the spelling is refused, and never neither.
+///
+/// This is the half that is not a list of remembered shapes. It cannot be made to pass by adding
+/// the case someone last thought of, and a spelling nobody has thought of yet fails it the moment
+/// it is written as a row rather than as a case.
+fn every_spelling() -> Vec<String> {
+  let mut problems = Vec::new();
+  for spelling in SPELLINGS {
+    for placement in PLACEMENTS {
+      for &callee in WATCHED {
+        let cut = callee.rfind('_').map_or(0, |at| at + 1);
+        let (head, tail) = callee.split_at(cut);
+        let items = spelling.binding.replace("{callee}", callee);
+        let call = spelling
+          .call
+          .replace("{callee}", callee)
+          .replace("{head}", head)
+          .replace("{tail}", tail);
+        let source = placement
+          .1
+          .replace("{items}", &items)
+          .replace("{call}", &call);
+        let name = format!("{} of `{callee}`, in {}", spelling.what, placement.0);
+
+        let scan = match scan("selftest.rs", &source) {
+          Ok(scan) => scan,
+          Err(message) => {
+            problems.push(format!("{name}: {message}\n{source}"));
+            continue;
+          }
+        };
+        let counted = scan
+          .hits
+          .iter()
+          .any(|hit| hit.what == Occurrence::Call && hit.callee == callee);
+        let refused = !scan.refusals.is_empty()
+          || scan
+            .hits
+            .iter()
+            .any(|hit| hit.what == Occurrence::Unclassified);
+
+        if !counted && !refused {
+          problems.push(format!(
+            "{name}: invisible — nothing counted the call and nothing refused the spelling\n{source}"
+          ));
+        } else if spelling.followed && !counted {
+          problems.push(format!(
+            "{name}: a spelling the census is written to follow was not counted\n{source}"
+          ));
+        } else if spelling.followed && !scan.refusals.is_empty() {
+          problems.push(format!(
+            "{name}: a spelling the census follows is refused anyway: {:?}",
+            scan.refusals
+          ));
+        } else if !spelling.followed && !refused {
+          problems.push(format!(
+            "{name}: counted, without refusing a spelling one file cannot follow\n{source}"
+          ));
+        }
+      }
+    }
+  }
+  problems
 }
