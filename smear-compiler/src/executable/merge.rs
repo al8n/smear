@@ -161,10 +161,9 @@ where
   /// nothing about it, but an unbounded rule that runs *before* the cheap structural refusals is
   /// a denial-of-service posture, not just an ordering preference.
   pub(super) fn check_field_merging(&mut self) -> ControlFlow<()> {
-    let wanted = self.on(Rule::FieldSelectionMerging)
-      || self.on(Rule::MergeDepthBudget)
-      || self.on(Rule::MergeWorkBudget);
-    if !wanted {
+    // `super::merges`, not a copy of it: `check_fragments_used` produces the `reachable` bitset
+    // this pass reads, and the two must activate together or the reader sees a cleared one.
+    if !super::merges(self.rules) {
       return ControlFlow::Continue(());
     }
 

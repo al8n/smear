@@ -964,9 +964,9 @@ fn the_projection_is_charged_before_it_runs() {
     collected.iter().map(Diagnostic::rule).collect::<Vec<_>>(),
     [Rule::ValidationWorkBudget]
   );
-  // Nothing was projected, and the recovery says so rather than reading as a clean parse.
-  assert_eq!(invalid.recovery().projected(), 0);
-  assert!(!invalid.recovery().is_complete());
+  // Nothing was projected, so there is no recovery — not a recovery that reads as a clean parse,
+  // and not one carrying a number nobody counted.
+  assert_eq!(invalid.recovery(), None);
   // And it did not project first: the whole point is that this is not a walk of the CST.
   let ceiling = if cfg!(debug_assertions) { 20.0 } else { 2.0 };
   assert!(
@@ -981,7 +981,7 @@ fn the_projection_is_charged_before_it_runs() {
   assert!(invalid.invalid().budget_tripped());
   assert_eq!(invalid.invalid().emitted(), 0);
   assert!(collected.is_empty());
-  assert_eq!(invalid.recovery().projected(), 0);
+  assert_eq!(invalid.recovery(), None);
 
   // Raised, and the same parse projects and validates: the charge is a bound, not a wall.
   let budget = Budget::default().with_validation_work(u32::MAX);
@@ -998,6 +998,7 @@ fn the_projection_is_charged_before_it_runs() {
   )
   .expect("the document is valid once the budget admits it");
   assert!(recovery.is_complete());
+  let _ = &recovery;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1162,7 +1163,7 @@ fn the_projection_is_priced_over_both_inputs() {
 
   let invalid = verdict.expect_err("a 160 KB parse beside an empty source came back Ok");
   assert!(invalid.invalid().budget_tripped());
-  assert_eq!(invalid.recovery().projected(), 0);
+  assert_eq!(invalid.recovery(), None);
   assert_eq!(
     collected.iter().map(Diagnostic::rule).collect::<Vec<_>>(),
     [Rule::ValidationWorkBudget]
@@ -1203,17 +1204,20 @@ fn a_refused_projection_reports_what_it_did_not_look_at() {
   )
   .expect_err("the projection was not paid for and the door said Ok");
 
-  let recovery = invalid.recovery();
-  println!("refused projection: 501 definitions, recovery {recovery}");
-  // The count is unknown, and the type says so rather than a doc comment saying so. `skipped` is a
-  // floor here and a ceiling everywhere else, and those are opposite readings — a caller comparing
-  // it against anything has to know which one it holds.
-  assert!(
-    !invalid.projection_ran(),
-    "a refusal taken before the projection reports that the projection ran"
+  // The count does not exist, which is the only representation that cannot be misread. It was `1`
+  // with a prose disclosure, then `1` with a flag beside it saying how to read the `1`; both still
+  // constructed a number, and for an empty or trivia-only parse the true count is zero, so the `1`
+  // was not even the floor it claimed to be.
+  assert_eq!(
+    invalid.recovery(),
+    None,
+    "a refusal taken before the projection invented a recovery"
   );
-  assert_eq!(recovery.projected(), 0);
-  assert!(!recovery.is_complete());
+  // And it renders as the state rather than as a count.
+  assert!(
+    invalid.to_string().ends_with("(nothing was projected)"),
+    "{invalid}"
+  );
 
   // And the ordinary refusal — inside the walk, after a projection that did run — says so too, so
   // the flag separates the two rather than being always false on an error.
@@ -1230,7 +1234,10 @@ fn a_refused_projection_reports_what_it_did_not_look_at() {
     &mut quiet,
   )
   .expect_err("a budget of four thousand does not validate this document");
-  assert!(inside.projection_ran());
+  assert!(
+    inside.recovery().is_some(),
+    "a refusal taken inside the walk reports no recovery"
+  );
   assert!(inside.invalid().budget_tripped());
 
   // `First` keeps one diagnostic and breaks. The verdict has to say so.
@@ -1240,4 +1247,194 @@ fn a_refused_projection_reports_what_it_did_not_look_at() {
     "the sink asked to stop and the verdict reports that it did not"
   );
   assert!(sink.get().is_some());
+}
+
+// ---------------------------------------------------------------------------------------------
+// 8. states that cannot be half-read
+// ---------------------------------------------------------------------------------------------
+
+/// The smallest `merge_work` at which `source` is not refused.
+///
+/// [`min_budget`]'s twin over the other knob, and the instrument for a producer that failed to run:
+/// a consumer reading a bitset nobody filled does more work, and "more work" is exactly what this
+/// number measures.
+fn min_merge_work(schema: &Schema, source: &str, rules: RuleSet) -> u32 {
+  // Keyed on the rule firing rather than on `Invalid::budget_tripped`, deliberately: the verdict
+  // flag is the subject of another finding in this same round, and an instrument that depended on
+  // it would stop measuring the moment that one regressed.
+  let refused = |work: u32| {
+    let budget = Budget::default().with_merge_work(work);
+    run(schema, source, &budget, rules)
+      .rules()
+      .contains(&Rule::MergeWorkBudget)
+  };
+  assert!(!refused(u32::MAX - 1), "refused at every merge budget");
+  let (mut lo, mut hi) = (0u32, u32::MAX - 1);
+  while lo < hi {
+    let mid = lo + (hi - lo) / 2;
+    if refused(mid) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  lo
+}
+
+/// A merge budget that stops the engine refuses the document, whether or not it had a rule to emit.
+///
+/// The seam between two branches' repairs. `probe/interner-charge` unified the merge engine's
+/// "stopped" and "reported" flags onto one field; this branch added a third for its own ledger; and
+/// the verdict tail — which both branches write — then read one of the two. With draft 5.3.2
+/// enabled and its two budget rules filtered out, the engine stopped, emitted nothing, and the
+/// document came back `Ok` on a merge it never finished.
+#[test]
+fn a_merge_bound_refuses_even_with_both_of_its_rules_off() {
+  let schema = build(SCHEMA);
+  // Enough same-named selections to exhaust the default merge budget several times over.
+  let mut source = String::from("{ ");
+  for _ in 0..20_000 {
+    source.push_str("a: nest { leaf } ");
+  }
+  source.push('}');
+
+  let quiet = RuleSet::ALL
+    .without(Rule::MergeWorkBudget)
+    .without(Rule::MergeDepthBudget);
+  let outcome = run(&schema, &source, &Budget::default(), quiet);
+  println!(
+    "merge bound, both rules off: {} bytes, refused={} emitted={}",
+    source.len(),
+    outcome.refused,
+    outcome.emitted
+  );
+  assert!(
+    outcome.refused,
+    "the merge engine stopped and the verdict says the document passed"
+  );
+  assert_eq!(outcome.emitted, 0, "{:?}", outcome.diagnostics);
+  assert_eq!(outcome.diagnostics, []);
+
+  // And with the rule on, the same document is refused *and* told about — so the flag is not just
+  // always true on an error.
+  let loud = run(&schema, &source, &Budget::default(), RuleSet::ALL);
+  assert!(loud.refused);
+  assert_eq!(loud.rules(), [Rule::MergeWorkBudget]);
+}
+
+/// Every rule that starts draft 5.3.2's engine also starts the pass that fills what it reads.
+///
+/// `check_fragments_used` produces `Scratch::reachable` and the engine reads it to skip the
+/// fragments an operation's own merge already covered. The producer's guard named two of the
+/// engine's three activating rules, so under `RuleSet::only(MergeWorkBudget)` the engine read a
+/// cleared bitset: every fragment looked unreached, a chain already expanded from the operation was
+/// merged again from every suffix, and the extra work showed up as a **false budget refusal**.
+///
+/// Measured as the merge budget the document needs, which is the quantity that was inflated.
+#[test]
+fn every_rule_that_starts_the_merge_engine_starts_its_producer() {
+  let schema = build(SCHEMA);
+  // A chain: the operation reaches f0, which reaches f1, and so on. Every one of them is reachable,
+  // so a correct `reachable` bitset makes the engine merge the chain once.
+  const LINKS: usize = 40;
+  let mut source = String::from("{ dog { ...f0 } } ");
+  for i in 0..LINKS {
+    source.push_str(&std::format!("fragment f{i} on Dog {{ ...f{} }} ", i + 1));
+  }
+  source.push_str(&std::format!("fragment f{LINKS} on Dog {{ name }}"));
+
+  let alone = min_merge_work(&schema, &source, RuleSet::only(Rule::MergeWorkBudget));
+  let with_rule = min_merge_work(
+    &schema,
+    &source,
+    RuleSet::only(Rule::MergeWorkBudget).with(Rule::FieldSelectionMerging),
+  );
+  println!("merge activation: only(MergeWorkBudget) {alone}, with 5.3.2 {with_rule}");
+
+  // The reachability is a fact about the document, not about which rule asked for it, so the two
+  // rule sets must need the same budget. Without the shared predicate the first is `LINKS` times
+  // the second, because every suffix of the chain gets merged again from its own root.
+  assert_eq!(
+    alone, with_rule,
+    "a rule set that starts the engine without 5.3.2 needs a different merge budget, which is the \
+     engine reading a bitset nobody filled"
+  );
+}
+
+/// A definition-local rule does not pay per operation for a fragment it checks once.
+///
+/// `walks_values` answered two different questions with one boolean. Draft 5.6's rules are a
+/// property of a **definition** and fire under `Frame::CHECK`, which a definition carries exactly
+/// once; the variable rules are a property of an **operation**. With only 5.6.1 enabled, the second
+/// and later operations to reach a shared fragment still descended and charged its literals to
+/// produce nothing — `O(operations × literal size)` off `O(operations + literal size)` of input.
+#[test]
+fn a_definition_local_rule_does_not_pay_per_operation() {
+  let schema = build(SCHEMA);
+  // The size that matters is the literal's **node count**, not its byte length: what a repeat visit
+  // redoes is the descent, and a scalar however long is one node. A wide list in an *undeclared*
+  // argument is the shape with no type to stop the walk, which is the one an adversary writes.
+  let entries = "1 ".repeat(5_000);
+  let document = |operations: usize| {
+    let mut source = String::new();
+    for i in 0..operations {
+      source.push_str(&std::format!("query q{i} {{ dog {{ ...F }} }} "));
+    }
+    source.push_str(&std::format!(
+      "fragment F on Dog {{ counted(bogus: [{entries}]) }}"
+    ));
+    source
+  };
+
+  let rules = RuleSet::only(Rule::ValuesOfCorrectType);
+  let one = min_budget(&schema, &document(1), rules);
+  let many = min_budget(&schema, &document(200), rules);
+  println!("definition-local: 1 operation {one} units, 200 operations {many} units");
+
+  // Five thousand entries is about ten thousand units of descent, spent once when the definition is
+  // checked. The other 199 operations add their own selection walks — a handful of units each —
+  // and must not add that descent again.
+  assert!(
+    many - one < 10_000,
+    "199 more operations over one already-checked fragment cost {} units",
+    many - one
+  );
+}
+
+/// An empty parse the budget cannot pay for reports no recovery at all.
+///
+/// The reviewer's own counterexample to the `1`: a parse with nothing in it has a true skipped
+/// count of **zero**, so `1` was not the floor it was documented as. The repair is that there is no
+/// number — the state carries no [`Recovery`], and the rendering branches on the state.
+#[cfg(feature = "rowan")]
+#[test]
+fn a_refused_projection_of_an_empty_parse_reports_no_recovery() {
+  use smear::{
+    parser::graphql::lossless::parse_executable_document,
+    validator::validate_executable_lossless_with,
+  };
+
+  let schema = build(SCHEMA);
+  for source in ["", "   \n# just a comment\n"] {
+    let parse = parse_executable_document(source);
+    let budget = Budget::default().with_validation_work(0);
+    let mut scratch = Scratch::new();
+    let mut sink = smear::validator::Ignore;
+    let invalid = validate_executable_lossless_with(
+      &schema,
+      &parse,
+      source,
+      &mut scratch,
+      &budget,
+      RuleSet::ALL,
+      &mut sink,
+    )
+    .expect_err("a zero budget cannot pay for a projection");
+    assert_eq!(
+      invalid.recovery(),
+      None,
+      "an empty parse was given a recovery it did not earn"
+    );
+    assert!(invalid.to_string().ends_with("(nothing was projected)"));
+  }
 }

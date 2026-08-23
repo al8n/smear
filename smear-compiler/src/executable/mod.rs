@@ -40,6 +40,16 @@
 //! - **A ledger's "off" must be a state.** [`Ledger::Off`] is closed under [`Ledger::take`]
 //!   because `u32::MAX` as a large number is a budget the first charge shrinks. That defect has
 //!   now been written four times in this repository under four different names.
+//! - **A state that must not be read must not exist.** [`Ledger::Off`] carries no number,
+//!   `LosslessInvalid::recovery` carries no [`Recovery`] when nothing was projected, and one
+//!   `tripped` carries the whole of "a bound abandoned this run". Each replaced a value plus a
+//!   caveat — a maximum documented as an absence, a count documented as a floor, a flag documented
+//!   as needing a second flag read with it — and a caveat is only ever as good as the next reader.
+//! - **An activation condition with more than one rule in it gets a name.** [`merges`],
+//!   [`checks_values`], [`collects_usages`] and [`reports_type_conditions`] exist because each has
+//!   two readers, and a condition with two readers written out twice is two conditions. One of
+//!   them shipped naming two of draft 5.3.2's three activating rules, so a rule set that started
+//!   the engine without starting the pass that fills what it reads produced false refusals.
 //! - **A rule that is off must not read caller-sized data.** Draft 5.6.1's leaf arms hashed an
 //!   enum spelling and parsed a digit string before asking whether 5.6.1 was on. Sweeping the
 //!   class found four more: the value walk itself, the fragment-declaration pass, 5.6.3's
@@ -75,7 +85,8 @@ use super::{
   Budget, Diagnostic, Rule, RuleSet, Scratch, Sink,
   diagnostic::Context,
   schema::{
-    DirectiveLocation, MAX_WRAPPERS, PackedType, RootOperation, Schema, Sym, TypeId, is_reserved,
+    DirectiveLocation, MAX_WRAPPERS, PackedType, Range32, RootOperation, Schema, Sym, TypeId,
+    is_reserved,
   },
   scratch::{
     Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, clear_bit, get_bit, reset_bits,
@@ -360,31 +371,36 @@ where
     rules,
     budget: *budget,
     scalars: Scalars::resolve(schema),
-    walks_values: walks_values(rules),
+    checks_values: checks_values(rules),
+    collects_usages: collects_usages(rules),
     variables: &[],
     in_operation: false,
-    variable_base: 0,
+    variable_index: Range32::new(0, 0),
     emitted: 0,
     stopped: false,
     work: Work::new(budget.merge_work()),
     left,
-    refused: false,
     generation: 0,
     tripped: false,
     blame: SimpleSpan::const_new(0, 0),
   };
   let _ = validator.run();
-  let refused = validator.refused || validator.tripped;
-  let (emitted, stopped, budget) = (validator.emitted, validator.stopped, refused);
-  // A refusal is a refusal whether or not it had a rule to emit. `Ok` here would be a clean
-  // verdict on a pass the validator abandoned partway through. al8n/smear#196, al8n/smear#198.
-  if emitted == 0 && !refused {
+  // ONE field, read once. Both branches that met here arrived at the same repair from opposite
+  // sides: al8n/smear#196 collapsed the merge engine's "stopped" and "reported" flags onto
+  // `tripped`, and al8n/smear#198 added `refused` for its own ledger — so the rebased tail briefly
+  // read two fields for one fact, which is the shape that produced the original defect. With draft
+  // 5.3.2 enabled and its two budget *rules* filtered out, a tail that read only one of them
+  // returned `Ok` on a document the engine had abandoned. There is one fact now and no way to
+  // consult half of it.
+  let tripped = validator.tripped;
+  let (emitted, stopped) = (validator.emitted, validator.stopped);
+  if emitted == 0 && !tripped {
     Ok(())
   } else {
     Err(Invalid {
       emitted,
       stopped,
-      budget,
+      budget: tripped,
     })
   }
 }
@@ -473,18 +489,60 @@ pub(crate) const fn units(len: usize) -> u32 {
   }
 }
 
-/// Whether any rule the value walk carries is enabled.
+/// Whether draft 5.3.2's engine runs.
 ///
-/// The value walk exists for exactly two reasons: draft 5.6's literal rules, and collecting the
-/// variable usages 5.8.3, 5.8.4 and 5.8.5 read. With none of those on it descends a literal whose
-/// nesting and breadth the document chose, produces nothing, and — since al8n/smear#198 — charges
-/// a ledger for the descent. Resolved once per run rather than asked per literal.
-const fn walks_values(rules: RuleSet) -> bool {
+/// **One definition, read by the engine and by everything that feeds it.** The engine is activated
+/// by three rules, not one: [`Rule::FieldSelectionMerging`] is the rule it implements, and
+/// [`Rule::MergeDepthBudget`] and [`Rule::MergeWorkBudget`] each start it as well, because a
+/// caller who wants only the resource refusals still needs the pass that can produce them.
+///
+/// It exists as a named predicate because it has a **producer** as well as a consumer.
+/// `check_fragments_used` fills `Scratch::reachable`, and the engine reads it to skip the fragments
+/// an operation's own merge already covered; a hand-written condition on the producer that listed
+/// two of the three rules left `RuleSet::only(MergeWorkBudget)` reading a cleared bitset, so every
+/// fragment looked unreached and a chain already expanded from an operation was merged again from
+/// every suffix — linear work inflated toward quadratic, and false budget refusals out of it.
+///
+/// A fourth merge rule would desynchronise a copied condition and cannot desynchronise this one.
+const fn merges(rules: RuleSet) -> bool {
+  rules.contains(Rule::FieldSelectionMerging)
+    || rules.contains(Rule::MergeDepthBudget)
+    || rules.contains(Rule::MergeWorkBudget)
+}
+
+/// Whether either rule a type condition is reported against is enabled.
+///
+/// The third named predicate, and the third for the same reason: `check_fragment_declarations`
+/// exists only to run [`Validator::check_type_condition`] for its reports, and that function's
+/// reports are gated one rule at a time inside it. A hand-written pair on the caller and two
+/// separate guards on the callee is a condition in two places; a third rule added to the callee
+/// would be silently skipped by the caller. Any rule `check_type_condition` can report belongs
+/// here.
+const fn reports_type_conditions(rules: RuleSet) -> bool {
+  rules.contains(Rule::FragmentSpreadTypeExistence)
+    || rules.contains(Rule::FragmentsOnCompositeTypes)
+}
+
+/// Whether draft 5.6's literal rules are enabled.
+///
+/// **A property of a definition**, which is why it is not enough on its own to start a value walk:
+/// these rules fire under `Frame::CHECK` and a definition carries that flag exactly once, however
+/// many operations reach it. See [`collects_usages`] for the half that is a property of an
+/// *operation*, and `values::walk_value` for what asking one question where there were two cost.
+const fn checks_values(rules: RuleSet) -> bool {
   rules.contains(Rule::ValuesOfCorrectType)
     || rules.contains(Rule::InputObjectFieldNames)
     || rules.contains(Rule::InputObjectFieldUniqueness)
     || rules.contains(Rule::InputObjectRequiredFields)
-    || rules.contains(Rule::AllVariableUsesDefined)
+}
+
+/// Whether the variable rules that read a usage's position are enabled.
+///
+/// **A property of an operation.** The same fragment is valid under one operation's variables and
+/// invalid under another's, so these are collected on every visit rather than on the first — which
+/// is the whole reason the selection walk repeats per operation at all.
+const fn collects_usages(rules: RuleSet) -> bool {
+  rules.contains(Rule::AllVariableUsesDefined)
     || rules.contains(Rule::AllVariablesUsed)
     || rules.contains(Rule::AllVariableUsagesAreAllowed)
 }
@@ -525,21 +583,27 @@ struct Validator<'a, 'd, S, K> {
   rules: RuleSet,
   budget: Budget,
   scalars: Scalars,
-  /// [`walks_values`] for this run's [`RuleSet`], resolved once.
-  walks_values: bool,
+  /// [`checks_values`] for this run's [`RuleSet`], resolved once.
+  checks_values: bool,
+  /// [`collects_usages`] for this run's [`RuleSet`], resolved once.
+  collects_usages: bool,
   /// The variable definitions of the operation being walked; empty outside one.
   variables: &'d [DescribedVariableDefinition<S>],
   /// Whether a variable scope is in effect. Distinguishes "an operation with no variables" from
   /// "a fragment nothing reached", which is the difference between draft 5.8.3 firing and not.
   in_operation: bool,
-  /// Where the current operation's variable-name index starts in [`Scratch::keys`].
+  /// The current operation's variable-name index, as a range into [`Scratch::keys`].
   ///
   /// The index is the ordinals of [`Validator::variables`] sorted by name with ties broken on the
   /// ordinal, built once per operation by [`Validator::check_variable_definitions`] and read by
-  /// every usage. It outlives the pass that builds it, which is why it needs a recorded base:
-  /// every other user of `keys` pushes at the buffer's current length and truncates back, so a
-  /// prefix that stays put is safe.
-  variable_base: u32,
+  /// every usage. It outlives the pass that builds it, which is why it is recorded: every other
+  /// user of `keys` pushes at the buffer's current length and truncates back, so a prefix that
+  /// stays put is safe.
+  ///
+  /// A **range** and not a base, because the index is not always built — the rules that read it
+  /// can all be off — and a base plus an assumed length would then name whatever the next pass
+  /// pushed. Empty is the representation of "not built"; there is no second field saying so.
+  variable_index: Range32,
   emitted: u32,
   stopped: bool,
   /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent, and the ceiling it is
@@ -549,17 +613,16 @@ struct Validator<'a, 'd, S, K> {
   /// [`Ledger::Off`]. Charged by every pass that is not draft 5.3.2's engine, and pre-spent by the
   /// lossless door's projection before this struct exists.
   left: Ledger,
-  /// Whether the ceiling refused the document.
-  ///
-  /// Separate from [`Validator::tripped`], which is the merge engine's; the verdict reads both.
-  refused: bool,
   /// Distinguishes one fragment expansion from the next without clearing a bitset per expansion.
   generation: u32,
-  /// Whether a budget stopped the merge engine, which is both what abandons the walk and what the
-  /// verdict reports. Set even when the bound's own rule is switched off: the bound holds either
-  /// way, and only the *diagnostic* is optional. It used to be two fields — one for the walk and
-  /// one for the verdict, the second set only when something was emitted — which is how a refused
-  /// document with its rule filtered out came back `Ok`. al8n/smear#196.
+  /// Whether **any** resource bound abandoned this run.
+  ///
+  /// Draft 5.3.2's engine writes it through `merge::trip`, and this crate's validation ledger
+  /// writes it through [`Validator::refuse`]. One field because it is one fact, and because both
+  /// alternatives were tried and both failed the same way: a field for the walk plus a field for
+  /// whether anything was emitted (al8n/smear#196), and that pair plus a third for the ledger
+  /// (al8n/smear#198). Set even when the bound's own rule is switched off — the bound holds either
+  /// way, and only the diagnostic is optional.
   tripped: bool,
   /// The definition to blame for a budget diagnostic — the one being merged when the bound hit.
   blame: SimpleSpan,
@@ -660,8 +723,8 @@ where
   fn refuse(&mut self, blame: SimpleSpan) -> ControlFlow<()> {
     // `Left(0)` and not `Off`: this is an exhausted bound, which is the opposite of an absent one.
     self.left = Ledger::Left(0);
-    if !self.refused {
-      self.refused = true;
+    if !self.tripped {
+      self.tripped = true;
       if self.on(Rule::ValidationWorkBudget) {
         let diagnostic = Diagnostic::new(Rule::ValidationWorkBudget, blame)
           .context(Context::Count(self.budget.validation_work()));
@@ -1072,11 +1135,12 @@ where
   // -- 3. fragment declaration rules ------------------------------------------------------------
 
   fn check_fragment_declarations(&mut self) -> ControlFlow<()> {
-    // Both of this pass's rules, asked before the condition names are read. `check_type_condition`
-    // resolves each one through `Schema::sym`, and here — unlike at an inline fragment — the
-    // resolved type is discarded, so with both rules off the pass hashes a document-chosen name per
-    // fragment for nothing.
-    if !self.on(Rule::FragmentSpreadTypeExistence) && !self.on(Rule::FragmentsOnCompositeTypes) {
+    // Asked before the condition names are read. `check_type_condition` resolves each one through
+    // `Schema::sym`, and here — unlike at an inline fragment — the resolved type is discarded, so
+    // with nothing to report the pass hashes a document-chosen name per fragment for nothing.
+    // Through [`reports_type_conditions`] rather than a pair written out here: the callee's own
+    // guards are the other copy of this condition.
+    if !reports_type_conditions(self.rules) {
       return ControlFlow::Continue(());
     }
     let document = self.document;
@@ -1094,6 +1158,10 @@ where
   }
 
   /// Draft 5.5.1.2 and 5.5.1.3, shared by fragment definitions and inline fragments.
+  ///
+  /// **A rule added here belongs in [`reports_type_conditions`].** `check_fragment_declarations`
+  /// calls this only for what it reports and skips itself when that predicate is false, so a rule
+  /// reported here and missing there would never fire on a fragment definition.
   ///
   /// Returns the condition's type when it resolved to a composite one, which is also the scope its
   /// selection set is written against.
@@ -1179,13 +1247,12 @@ where
   /// Reachability propagates across every definition sharing a name, so one duplicated fragment
   /// name reports 5.5.1.1 and nothing else — the copy is not also "unused".
   fn check_fragments_used(&mut self) -> ControlFlow<()> {
-    // Two rules, not one, and that is the trap. The `reachable` bitset reads like 5.5.1.4's
-    // private working set and is not: draft 5.3.2's engine reads it too, to skip the fragments an
-    // operation's own merge already covered. Guarding this pass on 5.5.1.4 alone would leave the
-    // merge engine reading an unwritten bitset — every bit false, every fragment merged again —
-    // so the guard names both readers. Found by asking which *other* passes the rule-guard repair
-    // applies to, which is also what stopped it from becoming a defect.
-    if !self.on(Rule::FragmentsMustBeUsed) && !self.on(Rule::FieldSelectionMerging) {
+    // The `reachable` bitset reads like 5.5.1.4's private working set and is not: draft 5.3.2's
+    // engine reads it too. So this pass runs for its own rule **or** for anything that starts that
+    // engine — and what starts it is [`merges`], the one definition the engine itself is gated on,
+    // rather than a copy of its condition. The copy is how this guard shipped naming two of the
+    // engine's three activating rules.
+    if !self.on(Rule::FragmentsMustBeUsed) && !merges(self.rules) {
       return ControlFlow::Continue(());
     }
     let count = self.scratch.fragments.len();
@@ -1467,7 +1534,10 @@ where
       // The index is a persistent prefix of `keys` for exactly the length of this operation. Every
       // other user of the buffer pushes at its current length and truncates back, so it survives
       // the walk; this is where it stops.
-      self.scratch.keys.truncate(self.variable_base as usize);
+      self
+        .scratch
+        .keys
+        .truncate(self.variable_index.start() as usize);
       self.variables = &[];
       self.in_operation = false;
     }
@@ -1544,12 +1614,14 @@ where
     // this index is cheaper than the linear scan it replaces in every rule set, empty ones
     // included.
     let base = self.scratch.keys.len();
-    self.variable_base = base as u32;
+    self.variable_index = Range32::new(base as u32, base as u32);
     // 5.8.1 reads the index directly and 5.8.3/5.8.5 read it through the value walk. Nothing else
     // looks at it, so with none of them on it is a sort over document-chosen names, charged, for
     // nobody. Not an early return: 5.8.2 and the default-value and directive walks below are a
     // different question and answer it themselves.
-    let indexed = self.walks_values || self.on(Rule::VariableUniqueness);
+    // 5.8.1 reads the index directly; 5.8.3 and 5.8.5 read it through the value walk. Nothing
+    // else looks at it.
+    let indexed = self.collects_usages || self.on(Rule::VariableUniqueness);
     if indexed {
       for (index, described) in definitions.iter().enumerate() {
         let variable = described.node().variable();
@@ -1562,8 +1634,9 @@ where
         let right = name_bytes(definitions[*b as usize].node().variable().name());
         left.cmp(right).then(a.cmp(b))
       });
+      self.variable_index = Range32::new(base as u32, end as u32);
     }
-    let end = self.scratch.keys.len();
+    let end = self.variable_index.end() as usize;
 
     // 5.8.1 — one type per variable name, per operation, off the adjacent pairs of that index.
     if indexed && self.on(Rule::VariableUniqueness) {

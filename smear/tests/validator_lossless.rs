@@ -221,8 +221,14 @@ fn lossless<'a>(
       recovery
     }
     Err(refused) => {
+      // `Err` with an empty sink is legitimate in exactly one state and this names it: a resource
+      // bound refused the document with its own rule outside `rules`, so the validator stopped and
+      // had nothing to emit. Anything else reaching `Err` with nothing in the sink is a door that
+      // has quietly stopped reporting, which is what this harness exists to catch — so the
+      // assertion is narrowed to that one state rather than dropped.
+      let refused_quietly = refused.invalid().budget_tripped() && refused.invalid().emitted() == 0;
       assert!(
-        !collected.is_empty() || refused.invalid().budget_tripped(),
+        !collected.is_empty() || refused_quietly,
         "the lossless door returned `Err` with an empty sink and no budget refusal\n---\n{source}"
       );
       assert_eq!(
@@ -230,7 +236,11 @@ fn lossless<'a>(
         collected.len(),
         "the lossless verdict's count is not what the sink received\n---\n{source}"
       );
-      refused.recovery()
+      // Every fixture here runs under a budget that pays for the projection, so a `None` would be
+      // a bug in this harness rather than a verdict worth threading.
+      refused
+        .recovery()
+        .expect("the projection ran for every fixture in this corpus")
     }
   };
   (collected, recovery)

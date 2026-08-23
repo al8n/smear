@@ -339,11 +339,16 @@ where
   where
     V: ValueLike<S>,
   {
-    if !self.walks_values {
-      // Nothing downstream of here is enabled. The walk exists for draft 5.6's literal rules and
-      // for collecting the usages 5.8.3, 5.8.4 and 5.8.5 read, and with none of those on it would
-      // descend an attacker-chosen literal to produce nothing — and charge for the descent while
-      // doing it. See `Validator::walks_values`.
+    // Two demands, asked separately, because they are answered at different rates.
+    //
+    // Draft 5.6's literal rules are a property of a **definition** and fire under `Frame::CHECK`,
+    // which a definition carries exactly once however many operations reach it. The variable rules
+    // are a property of an **operation** and must be collected on every visit. One boolean for
+    // both meant that with only 5.6.1 enabled, the second and later operations to reach a shared
+    // fragment still descended and charged its literals to produce nothing at all — `O(operations
+    // × literal size)` off `O(operations + literal size)` of input, and a `validation_work`
+    // exhausted on work that could not have had an effect.
+    if !(check && self.checks_values) && !self.collects_usages {
       return ControlFlow::Continue(());
     }
     let base = self.scratch.values.len();
@@ -750,8 +755,8 @@ where
     // Every one of them, not only the first: a duplicated variable is 5.8.1's business, and
     // calling the copy "never used" as well would report one mistake twice.
     let variables = self.variables;
-    let base = self.variable_base as usize;
-    let end = base + variables.len();
+    let base = self.variable_index.start() as usize;
+    let end = self.variable_index.end() as usize;
     let (lo, hi) = {
       let index = &self.scratch.keys[base..end];
       let named = |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());

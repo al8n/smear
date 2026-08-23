@@ -106,8 +106,9 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LosslessInvalid {
   invalid: Invalid,
-  recovery: Recovery,
-  projection_ran: bool,
+  /// `None` when the projection never ran, which is a *different thing* from a projection that ran
+  /// and dropped nothing — and the only representation that cannot be confused with one.
+  recovery: Option<Recovery>,
 }
 
 impl LosslessInvalid {
@@ -117,35 +118,28 @@ impl LosslessInvalid {
     self.invalid
   }
 
-  /// Returns how much of the parse had an AST image.
+  /// Returns how much of the parse had an AST image, when the projection ran.
   ///
   /// [`Recovery::is_complete`] false means at least one of these diagnostics may be an artifact
   /// of a definition that was dropped rather than of one the author wrote — see
   /// [`validate_executable_lossless`].
   ///
-  /// **Read [`projection_ran`](Self::projection_ran) first.** When it is false this is not a
-  /// measurement of anything: nothing was projected and nothing counted what was not.
+  /// # `None` means the projection never ran
+  ///
+  /// One path produces it: [`Budget::validation_work`](super::Budget::validation_work) could not
+  /// pay for the projection, so the door refused before building any AST. There is no [`Recovery`]
+  /// to report because nothing examined anything, and a caller that unwraps this gets an
+  /// `Option`'s answer rather than a number.
+  ///
+  /// It took three rounds to arrive at the absence. The count was `1`, disclosed in prose as a
+  /// floor; then `1` with a `projection_ran()` flag beside it saying which way to read it. Both
+  /// still *constructed* the number, so both still let it be compared, printed and believed — and
+  /// for an empty or trivia-only parse the real skipped count is **zero**, so `1` was not even the
+  /// floor it claimed. A value that must not be read is a value that must not exist; that is the
+  /// same repair as `Ledger::Off`, one type over. al8n/smear#198.
   #[inline]
-  pub const fn recovery(&self) -> Recovery {
+  pub const fn recovery(&self) -> Option<Recovery> {
     self.recovery
-  }
-
-  /// Whether the projection ran at all.
-  ///
-  /// False on exactly one path: [`Budget::validation_work`](super::Budget::validation_work) could
-  /// not pay for the projection, so the door refused before building any AST. On that path
-  /// [`recovery`](Self::recovery) reports `0` projected and `1` skipped, and **that `1` is a floor
-  /// rather than [`Recovery::skipped`]'s usual ceiling** — every top-level element was dropped and
-  /// counting them is precisely the walk the refusal declined to make.
-  ///
-  /// It is an accessor and not a sentence in a doc comment because the two readings of `skipped`
-  /// are opposite: the ordinary one over-counts and this one under-counts, and a caller comparing
-  /// it against anything needs to know which it holds. The first version of this path shipped the
-  /// `1` with the disclosure in prose, which is the same defect one level up — a wrong number is
-  /// not made right by being documented.
-  #[inline]
-  pub const fn projection_ran(&self) -> bool {
-    self.projection_ran
   }
 }
 
@@ -159,10 +153,16 @@ impl From<LosslessInvalid> for Invalid {
 impl core::fmt::Display for LosslessInvalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     core::fmt::Display::fmt(&self.invalid, f)?;
-    if !self.recovery.is_complete() {
-      write!(f, " ({} skipped by recovery)", self.recovery.skipped())?;
+    // Branching on the state, not on a count synthesised to keep this arm total. The `1` this used
+    // to be handed rendered as the exact text "1 skipped by recovery" for a projection that had not
+    // looked at anything.
+    match self.recovery {
+      None => f.write_str(" (nothing was projected)"),
+      Some(recovery) if !recovery.is_complete() => {
+        write!(f, " ({} skipped by recovery)", recovery.skipped())
+      }
+      Some(_) => Ok(()),
     }
-    Ok(())
   }
 }
 
@@ -252,8 +252,9 @@ impl core::error::Error for LosslessInvalid {}
 ///     .expect_err("`title` is not a field of `Character`");
 ///
 /// assert_eq!(refused.invalid().emitted(), 1);
-/// assert_eq!(refused.recovery().projected(), 1);
-/// assert!(!refused.recovery().is_complete());
+/// let recovery = refused.recovery().expect("the projection ran");
+/// assert_eq!(recovery.projected(), 1);
+/// assert!(!recovery.is_complete());
 ///
 /// let diagnostic = sink.get().expect("a diagnostic");
 /// assert_eq!(diagnostic.rule(), Rule::FieldSelections);
@@ -336,16 +337,11 @@ where
 /// The same thing every other refusal looks like: `Err`, with
 /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set, and
 /// [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget) in the sink when the rule set
-/// contains it. [`LosslessInvalid::projection_ran`] is **false**, and that is the load-bearing
-/// half: on this path [`Recovery`] is not a measurement. It reports `0` projected, which is exact,
-/// and `1` skipped, which is a floor rather than [`Recovery::skipped`]'s usual ceiling.
-///
-/// The `1` shipped once as a floor disclosed in prose, and prose is the wrong place for it: the two
-/// readings of `skipped` are opposite — the ordinary one over-counts, this one under-counts — so a
-/// caller needs the difference in the type. Counting the elements exactly is the walk the refusal
-/// declined to make, and doing it here from the green root's children would put a second copy of
-/// `recovered_top_level`'s idea of where the top level is into this crate, where it could drift.
-/// [`Recovery::is_complete`] is false either way, which is the half nothing may get wrong.
+/// contains it. [`LosslessInvalid::recovery`] is **`None`**: nothing was projected, so there is no
+/// [`Recovery`] to report and no synthetic count for a caller to compare against. Counting the
+/// elements exactly is the walk the refusal declined to make, and doing it here from the green
+/// root's children would put a second copy of `recovered_top_level`'s idea of where the top level
+/// is into this crate, where it could drift.
 pub fn validate_executable_lossless_with<'src, K>(
   schema: &Schema,
   parse: &Parse,
@@ -365,9 +361,8 @@ where
       invalid: Invalid::refused(emitted, stopped),
       // Nothing was projected, and the count of what was not is the green root's child list:
       // exact or over, never under, and `O(1)`. See this function's header.
-      // A floor, not a ceiling, and `projection_ran` is what says so.
-      recovery: Recovery::new(0, 1),
-      projection_ran: false,
+      // Nothing looked at anything, so there is nothing to report.
+      recovery: None,
     });
   };
   let (document, recovery) = project_executable_document_recovered(parse, source);
@@ -375,8 +370,7 @@ where
     Ok(()) => Ok(recovery),
     Err(invalid) => Err(LosslessInvalid {
       invalid,
-      recovery,
-      projection_ran: true,
+      recovery: Some(recovery),
     }),
   }
 }
