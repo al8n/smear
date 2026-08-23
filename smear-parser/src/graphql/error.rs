@@ -827,6 +827,15 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// The reader is this enum's [`MaybeTerminal`] arm, which answers `true` off the variant
   /// itself — so the ask and the construction are one enum apart rather than one string
   /// comparison apart.
+  ///
+  /// **It is no longer the only reader, and smear issue #178 is that change.** The substrate's
+  /// crate-private `root_turn` reads tokora's own resource-trip counter beside this arm, so a
+  /// refusal ends the document even where the arm answers `false`. That mattered most for the
+  /// generic layer the substrate used to publish, whose error type was a consumer's rather than
+  /// this one; smear PR #189's round 5 withdrew that layer, and the reading stays because it is
+  /// what makes the stop the *input's* fact rather than the error value's. The arm is still
+  /// asserted at the value in `error/tests/terminal.rs`, because it is what a **scanner** stop
+  /// rides and no published witness sees that.
   #[from(skip)]
   NestingLimitExceeded,
   /// Some other error.

@@ -40,9 +40,9 @@
 //!
 //! # The cell, and why it is tokora's rather than the lexer state's
 //!
-//! [`InputRef::descend`](tokora::InputRef::descend)'s, whose [`Descent`] guard releases the level
+//! [`InputRef::descend`](tokora::InputRef::descend)'s, whose [`tokora::input::Descent`] guard releases the level
 //! on return, on `?` and on an unwind alike. It is deliberately **not** in
-//! [`Lexer::State`], where the lexer's tally lives, and the difference is
+//! [`tokora::Lexer::State`], where the lexer's tally lives, and the difference is
 //! not stylistic:
 //!
 //! - a [`Checkpoint`](tokora::input::Checkpoint) carries `L::State`, so a speculative branch's
@@ -64,7 +64,7 @@
 //!
 //! # There is one ceiling now, and it is the parse's own limiter
 //!
-//! [`descend`] used to take a `ceiling` argument and refuse at `min(ceiling, limitation())`, and
+//! `descend` used to take a `ceiling` argument and refuse at `min(ceiling, limitation())`, and
 //! that second number was tokora's `RecursionLimiter::PARSE_DEFAULT_DEPTH` — installed by
 //! `InputContext::new`, which [`parse_lossless`](tokora::cst::parse_lossless) called with no hook
 //! for a caller to raise. So the effective bound was `min(what the caller asked for, whatever
@@ -75,7 +75,7 @@
 //! [`cst::parse_lossless_with_context`](tokora::cst::parse_lossless_with_context) is the hook that
 //! removes it. Each door installs `min(the caller's ceiling, smear's own stack-safety maximum)` as
 //! **the** limiter, so what [`InputRef::descend`](tokora::InputRef::descend) checks against IS the
-//! ceiling and there is no second number to reconcile. What [`descend`] still does is **emit**:
+//! ceiling and there is no second number to reconcile. What `descend` still does is **emit**:
 //! a trip is returned and never emitted, and the lossless doors discard the `Result`, so a refusal
 //! that only rode the `Result` would leave a consumer with a truncated tree and no diagnostic.
 //!
@@ -93,17 +93,174 @@
 //!   *shipped* ceiling of 24, with both numbers equal: `{` then 60 repetitions of `) f {` then 61
 //!   `}` — 483 bytes — leaves the tally at 1 for the whole document while the parse reaches 24,
 //!   and produced **115** diagnostics against 61 for the same input under a ceiling it does not
-//!   reach. So the parser side has to end the document itself. [`descend`] does, and its
+//!   reach. So the parser side has to end the document itself. `descend` does, and its
 //!   `The refusal ends the document` note is where that lives.
+//!
+//! # Ending the document is a call, not a predicate — smear issue #178
+//!
+//! A refusal ends the document because the roots stop on it, and for three rounds *how* they knew
+//! to stop was a predicate written out at each catch site over something a **caller** implements:
+//! a `Cow` discriminator, then a variant, then [`tokora::error::MaybeTerminal`]
+//! over that variant. The last one
+//! is safe for smear's own containers — the orphan rule leaves smear's impl the only possible one
+//! — and was not for the generic layer this module used to publish, where a consumer's error type
+//! answers for itself and `()` discards [`tokora::error::RecursionLimitReached`] outright.
+//!
+//! `root_turn` is the one door that closes it, and it reads tokora's **resource-trip counter**
+//! beside the trait: written by the trip arm before any grammar code runs, outside the checkpoint
+//! set, one writer, no public route to lower it. It takes the counter's baseline itself, at the
+//! granularity of the attempt it judges — **one entry** — because the baseline is a value whose
+//! *placement* is the whole verdict and a misplaced one is silent.
+//!
+//! The trait is still read, and beside rather than under: a **scanner** stop moves no descent
+//! counter, and tokora's scanner-side witness is withdrawn for cause (al8n/tokora#311). Each term
+//! is alone on a population, and `smear-parser/src/graphql/lossless/tests.rs` reddens separately
+//! for each deletion. That path is the dialect's and not this directory's, for the reason the
+//! comment at the end of this file records; `lossless/depth/tests.rs` does not exist and creating
+//! it reddens gate 6.
+//!
+//! # The drain does not re-derive the verdict, and cannot be handed a forged one — smear PR #189
+//!
+//! `drain_unless_stopped` used to take the counter's baseline itself, around the **whole root**,
+//! and that placement is wrong for the same reason hoisting one out of a root loop is: the counter
+//! is monotone, so one entry that catches a refusal and carries on makes every later failure in
+//! that root read as *tripped*. The drain is then skipped, the valid suffix is left opaque, and
+//! the diagnostics that would have covered it are never emitted.
+//!
+//! So the drain no longer asks *that* question of the counter. `root_turn` already decided which
+//! of `RootTurn`'s three arms the entry ended on, and that classification is **carried** to the
+//! drain — through `RootStop`, the slot a root threads down to its loop, which only `root_turn`
+//! writes. The four steps are **one call**: `drain_unless_stopped` mints the slot, lends it to
+//! that root for the duration of that call, spends *that* slot against *that* root's `Result`,
+//! and drains or does not. The claim and the subject are joined by the frame that owns both.
+//!
+//! What the drain still reads for itself is a **residual**, not the verdict: a trip that reached
+//! it that no turn of this root judged. `drain_unless_stopped`'s `The witness is read again above
+//! the root` note carries the cells and the measurements.
+//!
+//! # The verdict machinery and the descent it judges are crate-private — smear PR #189, round 5
+//!
+//! `drain_unless_stopped`, `root_turn`, `RootStop`, `RootTurn` and `descend` are `pub(crate)`.
+//! They were
+//! public, on the reading that this substrate is dialect-generic and that a consumer assembling
+//! its own document root is one of the things it is for. Four adversarial rounds found four
+//! defects and **every one of them was on that surface**: a verdict re-derived over the whole
+//! root when the question's span is one entry; a verdict a caller could mint outright, from a
+//! `Default` slot, a `Copy` of someone else's, or a variant written by hand; a nested drain's
+//! correct verdict that could not travel in the `Result` it had to return through; and a trip
+//! taken **outside** any `root_turn` — a speculative prefix probe, or a caught nested stop —
+//! which moves the counter, leaves the slot's latch `false`, and makes the root's next *ordinary*
+//! failure read as a stop. That last one is round 1's signature relocated from catches inside
+//! turns to catches outside them, measured at `(Err(Ordinary), 0 tail diagnostics)` for n = 1, 4,
+//! 16 where the control gives `(Err(Ordinary), n)`.
+//!
+//! **It cannot be closed here, and not for want of paying.** Telling *which* trip a turn judged
+//! needs the slot to carry a moving baseline, and tokora's baseline is
+//! `ResourceTripBaseline<'closure>` — a value in the handle region. A root runs inside
+//! `node(…).parse_input(inp)`, and tokora's closure `ParseInput` impl is higher-ranked in that
+//! region, so a baseline minted inside the loop cannot flow into a slot minted outside it;
+//! tokora's own variance table pins that shape as refused. It is not a price in signature count.
+//! It does not compile at any price. What would close it is hand-rolled
+//! `cst_start`/`cst_finish`/`cst_demote` brackets in place of `node` at each of the six roots, or
+//! an acknowledgement API on tokora's side.
+//!
+//! So shipping the capability means shipping an obligation on the caller — *every attempt that can
+//! descend runs inside a `root_turn`* — that nothing enforces and nothing announces when it is
+//! broken. That is a to-do wearing a limitation's clothes, and the repair for that shape is a type
+//! rather than a tighter sentence. The type is unavailable, so the surface is withdrawn instead.
+//!
+//! **`descend` goes with them, and the reason is not round 4's.** It is worth being exact here,
+//! because the tempting argument is wrong: `descend` is the only route smear published to *move*
+//! the counter, so it looks like the writer whose retraction the four rounds demand. It is not.
+//! Round 4's false stop happens **inside** `drain_unless_stopped`, and that is now crate-private,
+//! so a consumer who moves the counter has no published reader left to mislead. Narrowing the
+//! readers alone would have closed the finding.
+//!
+//! What narrows `descend` is the test round 5 already applied to `drain_unless_terminal` one
+//! section down: **a door whose guarantee the crate's public API can no longer deliver is not a
+//! door a caller should be offered.** `descend`'s contract is *the refusal ends the document* —
+//! its own `The refusal ends the document` note is the longest thing in this file — and every
+//! mechanism that ends one is now `pub(crate)`: the six roots, `root_turn`, both drains. A
+//! consumer left holding a public `descend` gets a terminal value and has to write its own catch
+//! predicate over it, which is the `1 + n` amplification of smear issue #169 arriving by exactly
+//! the route this module spends its length saying must be **one call and not a pattern to copy**.
+//! Against that, what the function still offers over calling
+//! [`InputRef::descend`](tokora::InputRef::descend) directly is the emission — and the emission is
+//! only correct in a parse whose roots stop.
+//!
+//! It is the wider of the two available boundaries and it is recorded as a choice, not a
+//! consequence: the finding is closed either way.
+//!
+//! **The mechanism is unchanged**, and it is correct for the population that remains. The only
+//! roots left are the six this crate writes and the driver macro's one-entry root; `recover.rs`
+//! and `trivia.rs` contain no `descend`, so every trip a shipped parse can take is inside a
+//! judged entry window, and on the shipped error types the witness and the arm agree on every
+//! path.
+//!
+//! What stays public is [`lossless_context`] and [`FromNestingLimit`] — the ceiling, and the
+//! dialect conversion a refusal lands through. Neither reaches a drain and neither takes a level,
+//! so a consumer holding both cannot assemble a root, and the two gates below are what say so:
+//!
+//! ```compile_fail
+//! // The readers' door is shut. This reddens by COMPILING if the verdict machinery is ever
+//! // widened back to `pub` — which is the only way the retraction above gets undone by accident.
+//! use smear_parser::lossless::depth::drain_unless_stopped;
+//! ```
+//!
+//! ```compile_fail
+//! // And the writer's. Separate from the one above ON PURPOSE: a single gate naming both items
+//! // stays red while *either* is private, so re-widening `descend` alone — the case that matters,
+//! // since it is the counter's only published mover — would pass it.
+//! use smear_parser::lossless::depth::descend;
+//! ```
+//!
+//! # The residual is tokora's writer, and the retraction is what prices it — smear PR #189
+//!
+//! A consumer holding an `InputRef` can call [`InputRef::descend`](tokora::InputRef::descend)
+//! itself and move the resource-trip counter. That is tokora's published API, not smear's, and
+//! narrowing anything here does not reach it. It is recorded rather than closed because with the
+//! machinery above crate-private it costs nothing: **smear publishes no reader of that counter.**
+//! `root_turn` is the only thing in this crate that turns a counter movement into a verdict, and
+//! it is `pub(crate)`; nothing a consumer can reach draws a conclusion from a trip it took by
+//! hand. The defect the four rounds found was never "the counter moved" — it was "the counter
+//! moved and a *published* reader spent that movement against an unrelated failure." Retracting
+//! the reader is what removes the second half, and the second half is the whole cost.
+//!
+//! What would change that is publishing any door that reads the counter. Whatever the shape, it
+//! re-acquires this residual on the day it ships, and the entry above records that the type which
+//! would make it safe does not compile.
 
+// WHAT SURVIVES THE DIALECT-LESS CELL, AND NOTHING ELSE. `lossless_context` and
+// `FromNestingLimit` are the two items here that are not gated, and between them they name exactly
+// these three.
+use tokora::{SimpleSpan, input::InputContext, state::recursion_tracker::RecursionLimiter};
+
+// SAME CFG AS THE ITEMS THAT NAME THEM. Everything below `FromNestingLimit` in this file — the
+// verdict cluster and `descend` — is compiled only where a dialect is, so under
+// `--no-default-features --features rowan` each of these imports is an `unused_imports` denial
+// under `-Dwarnings`. Splitting the `use` is the repair, and it has a second half that is easy to
+// miss AND that has exactly one spelling, because two rustdoc lints close on it from opposite
+// sides. Every link to one of these names from an item that is NOT gated — the module header
+// above, `lossless_context`, `FromNestingLimit` — is a **bare link whose label is the full
+// `tokora::` path**, and neither obvious alternative survives both feature cells:
+//
+//   - a bare short label resolves *through the import*, so in the cell that turns the import off
+//     it is a `broken_intra_doc_links` warning;
+//   - a short label with an explicit target is `redundant_explicit_links` in the cell where the
+//     import is ON, because there the label alone already resolves to the same item.
+//
+// The full path as the label has neither problem: it resolves without the import, so nothing is
+// broken and nothing is redundant. All five links written the other two ways failed one cell or
+// the other before they were written this way.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use tokora::{
-  InputRef, Lexer, ParseContext, SimpleSpan,
+  InputRef, Lexer, ParseContext,
   error::{MaybeTerminal, RecursionLimitReached},
-  input::{Descent, InputContext},
+  input::Descent,
   span::Spanned,
-  state::recursion_tracker::RecursionLimiter,
 };
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use crate::combinator::ErrorOf;
 
 /// The [`InputContext`] a lossless door drives its parse under: the caller's emitter and cache,
@@ -127,7 +284,7 @@ use crate::combinator::ErrorOf;
 ///
 /// # This is the whole ceiling, and it was not before
 ///
-/// [`descend`] used to take a `ceiling` argument and refuse at `min(ceiling, limitation())`,
+/// `descend` used to take a `ceiling` argument and refuse at `min(ceiling, limitation())`,
 /// because a lossless parse could not install a limiter at all and tokora's default could sit
 /// below the caller's request. `cst::parse_lossless_with_context` is the hook that removes the
 /// second number: the budget installed here IS what
@@ -149,22 +306,64 @@ pub trait FromNestingLimit {
   /// `span` is empty and sits at the parse's committed end — the position the descent was refused
   /// at. A refused frame has consumed nothing of its own yet, so there is no lexeme to point at.
   ///
-  /// **The value this builds must answer [`MaybeTerminal::is_terminal`] with `true`**, and that is
-  /// a requirement rather than an expectation: it is what stops a document root from
-  /// resynchronising past the refusal. The bound is not on this trait — a `From`-style constructor
-  /// cannot state a property of what it returns — so it is carried where the readers are, in the
-  /// `lossless_production!` bundle's `Error: MaybeTerminal` clause, and asserted where it matters
-  /// in `nesting_depth.rs`. tokora's own rule says the same thing from the other side: a frame
-  /// budget is never cleared by more input, so `false` here is the arm its table calls spent
-  /// silently.
+  /// **The value this builds should answer
+  /// [`tokora::error::MaybeTerminal::is_terminal`] with `true`**, and
+  /// it is
+  /// no longer the thing that stops a document root from resynchronising past the refusal — the
+  /// crate-private `root_turn` reads the input's own trip witness beside the arm, and smear issue
+  /// #178 is that change. What the arm is still alone on is a **scanner** stop, which no published witness sees,
+  /// so it is a requirement of the dialect containers rather than a hope: the arm censuses in
+  /// `smear-parser/src/*/error/tests/terminal.rs` assert it at the value, and flipping it there
+  /// reddens them.
+  ///
+  /// The bound is not on this trait — a `From`-style constructor cannot state a property of what it
+  /// returns — so it is carried where the readers are, in the `lossless_production!` bundle's
+  /// `Error: MaybeTerminal` clause. tokora's own rule says the same thing from the other side: a
+  /// frame budget is never cleared by more input, so `false` here is the arm its table calls spent
+  /// silently — and the witness is what stops that spending from costing the document.
+  ///
+  /// # It stays public and unsealed while its only consumers are crate-private, deliberately
+  ///
+  /// The rest of this module's cluster was withdrawn on one test — *a door whose guarantee the
+  /// crate's public API can no longer deliver is not a door a caller should be offered* — and that
+  /// test does not reach this trait: what `descend` promised was **the refusal ends the document**,
+  /// which needs readers this crate no longer publishes, whereas what this trait asks for is a
+  /// property of the **value** a dialect container mints, and every public door still delivers it.
+  /// That nothing publicly reachable consumes an out-of-crate impl today — `descend` and the
+  /// production bundle are both `pub(crate)`, and every shipped door pins smear's own containers —
+  /// is consistency residue rather than a promise the API cannot keep, and narrowing it would be a
+  /// further public-API removal on no finding at all.
   fn nesting_limit_exceeded(span: SimpleSpan, attempted: usize, limit: usize) -> Self;
 }
 
-/// Drains whatever a document production left uncommitted — unless the parse ended on a terminal
-/// stop.
+/// Drains whatever a document production left uncommitted — unless the **error value** says the
+/// parse ended.
 ///
-/// Every dialect's `document_entry` calls this instead of writing `inp.skip_while(|_| true)?`
-/// itself, and the exception is the whole reason it is a function.
+/// This is the trait half alone, and no dialect entry calls it directly: [`drain_unless_stopped`]
+/// is the door, and it is handed the witness's verdict beside this.
+///
+/// # It was the first item of this cluster to be narrowed, and now they all are
+///
+/// It was `pub`, on the reasoning that it is the primitive composition is built from and that a
+/// consumer holding a `Result` produced some other way still has a use for it. What that missed is
+/// that the signature **structurally cannot** carry the other term: it takes an already-evaluated
+/// `Result`, so there is no pre-attempt baseline for it to have taken and no verdict for it to
+/// have been handed. A downstream error whose [`MaybeTerminal`] arm answers `false` for a
+/// converted descent refusal therefore got a full tail drain through this door — the exact `1 + n`
+/// amplification this branch exists to close — and a call site reaching for it compiled with
+/// nothing on any channel saying so.
+///
+/// A door that cannot ask the question is not a door a caller should be offered. Round 5 reached
+/// the same verdict about the doors that *can* ask it, for a different reason — see the module
+/// header — so the whole cluster is `pub(crate)` and this is no longer the odd one out.
+///
+/// **Narrowing an item in this substrate is not the local tidy-up it looks like** — see
+/// `lossless/mod.rs`'s `pub` IS LOAD-BEARING note. A `pub` item is exempt from `dead_code`; a
+/// `pub(crate)` one is not, and under `--no-default-features --features rowan` this substrate is
+/// compiled with **no dialect in the crate**, so nothing calls any of this cluster there. That is
+/// why every item of it carries the same `any(graphql, graphqlx)` cfg `mod macros` carries: not to
+/// silence a lint, but because a verdict machinery whose only callers are dialect assemblies has
+/// nothing to mean in a build that contains none.
 ///
 /// # The drain is still not optional, and on the terminal path it is worse than optional
 ///
@@ -198,9 +397,11 @@ pub trait FromNestingLimit {
 /// **scanner trip the emitter rejected** is the case tokora documents as reaching a caller with
 /// nothing marking it, on a carrier the narrow predicate was never going to recognise.
 ///
-/// [`MaybeTerminal`] is the notion tokora already has for exactly this, so it is what both this
-/// and the five document roots read. A predicate written against one defect is how the narrow one
-/// got here.
+/// [`MaybeTerminal`] is the notion tokora already has for exactly this, so it is what this reads
+/// and what [`root_turn`] reads first. A predicate written against one defect is how the narrow one
+/// got here — and a predicate written against a *value* is how smear issue #178 got here, which is
+/// why [`root_turn`] asks the input as well, and why its verdict is **carried** to
+/// [`drain_unless_stopped`] rather than re-derived there.
 ///
 /// # Why the drain's error may still displace a non-terminal outcome
 ///
@@ -208,8 +409,26 @@ pub trait FromNestingLimit {
 /// for a *lexer* error that `Err` **is** the delivery — the input layer advances its dedup
 /// watermark before calling, so the diagnostic is offered exactly once and dropping the `Err`
 /// would drop it. That is the case [`descend`] is careful to distinguish from its own.
+///
+/// # What pins the early return, and the round it spent unpinned
+///
+/// `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone`, in
+/// `smear-parser/src/graphql/lossless/tests.rs`. It hands this function a terminal, **untripped**
+/// `Err` — directly, and again through [`drain_unless_stopped`]'s `Recoverable` arm — and reads
+/// the tail diagnostics: `0`, against `n` for the same unclassified failure on a non-terminal
+/// value.
+///
+/// It was written because for one round the population had no cell at all.
+/// `a_refusal_is_the_error_returned_even_under_a_rejecting_emitter` used to call this function
+/// directly and was the pin; round 5 rewrote it to go through [`drain_unless_stopped`], whose root
+/// descends outside every [`root_turn`], so its residual reading answers first and this function
+/// is never reached on those cells. Measured with the terminality check deleted and before the new
+/// cell existed: 363/363 `smear-parser --lib`, 14/14 `nesting_depth`, 16/16 `resync_allowance` and
+/// 5/5 `lossless_isolation` — the whole claimed guard population green over a `1 + n`
+/// amplification that had been reopened.
 #[inline]
-pub fn drain_unless_terminal<'inp, L, Ctx, Lang, T>(
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) fn drain_unless_terminal<'inp, L, Ctx, Lang, T>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   out: Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
 ) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
@@ -226,6 +445,551 @@ where
   out
 }
 
+/// What one turn of a document-root loop decided about one entry — and, one scale up, how the root
+/// itself ended.
+///
+/// Three arms rather than a `Result` plus a predicate, because **the predicate is the thing this
+/// module keeps having to stop a root from re-deriving**. Every earlier round of smear issue #169
+/// left the "does this failure end the document" decision at the catch site, spelled out by hand,
+/// and each round only changed *which* material the hand-written spelling read: a `Cow`
+/// discriminator, then a dedicated variant, then [`MaybeTerminal`] over that variant. All three
+/// are things a caller writes. This enum moves the decision itself into [`root_turn`] and leaves
+/// the root with a value to match on, so the six catch sites — and the seventh a later dialect
+/// adds — copy a **call** rather than a predicate.
+///
+/// # One type at two scales, because it is one question
+///
+/// [`drain_unless_stopped`] builds one of these too, out of what the root's **last** turn decided
+/// and the `Result` that root returned. The scales differ — the loop asks about one entry, the
+/// drain about the whole root — and the question does not: *did this failure end the document, or
+/// is there a tail still worth committing?* A second three-arm type spelled the same way would be
+/// two places for one answer to drift, and drift between exactly these two readers is smear
+/// PR #189.
+///
+/// # It used to be forgeable, and then it stopped being reachable — smear PR #189
+///
+/// Round 2's finding was that this enum was public **data**: a caller who found [`root_turn`]
+/// inconvenient could write out the arm they preferred and hand it to the drain, which is
+/// [`root_turn`]'s whole job re-implemented by the party the input's trip witness exists to be
+/// independent of — in both directions. A fabricated `Recoverable` runs the tail drain over a
+/// genuine refusal (`1 + n` diagnostics, the amplification smear issue #178 closes); a fabricated
+/// `EndsTheDocument` suppresses the drain and leaves a valid suffix opaque.
+///
+/// Round 3 answered it with `#[non_exhaustive]` on each variant, which out of crate removes the
+/// constructor and leaves the pattern. **That attribute is gone with round 5's narrowing**, and
+/// not because the property stopped mattering: `#[non_exhaustive]` has no effect inside the
+/// defining crate, so on a `pub(crate)` enum it is inert — an attribute claiming a guarantee it no
+/// longer provides, which is the shape this module has spent four rounds removing. What guards the
+/// forgery now is that nothing outside this crate can name the type at all.
+///
+/// **The variants stay braced.** Round 3's reason was the attribute — on a *tuple* variant
+/// `#[non_exhaustive]` privates the constructor and an out-of-crate tuple pattern resolves through
+/// it — and the shape survives it because six match sites read these arms and a named field costs
+/// one word at each.
+///
+/// `#[must_use]`, and that is the last hand-copied step this could still lose: a root that calls
+/// [`root_turn`] and drops the verdict compiles, parses, and resynchronises past every refusal —
+/// the whole of smear issue #169 back, at a call site that looks like it consulted something.
+/// Under `-Dwarnings` it is a build failure instead.
+#[must_use = "the verdict is the whole point of the call: dropping it resynchronises past a \
+              refusal, which is smear issue #169"]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) enum RootTurn<T, E> {
+  /// The entry parsed. The loop takes another turn.
+  Parsed {
+    /// What the entry produced — `()` for every production in this workspace.
+    parsed: T,
+  },
+  /// The entry failed, and the failure **ends the document**: return it, resynchronise past
+  /// nothing, and read no more input.
+  ///
+  /// Two independent things can put a failure here — the error value's own
+  /// [`MaybeTerminal::is_terminal`] arm, and the input's resource-trip witness — and
+  /// [`root_turn`] documents why neither covers the other.
+  EndsTheDocument {
+    /// The failure, already reported at the point of failure.
+    error: E,
+  },
+  /// The entry failed with an ordinary syntax error, already reported at the point of failure.
+  /// The root drops it and resynchronises.
+  Recoverable {
+    /// The syntax error, already reported at the point of failure.
+    error: E,
+  },
+}
+
+/// Carries what [`root_turn`] decided out of the loop that asked it and up to the drain above the
+/// root — smear PR #189.
+///
+/// # Why a slot rather than a return value
+///
+/// [`root_turn`] already returns its verdict, and for the loop's own arm that is all a root needs.
+/// The drain sits one frame further out, on the other side of a [`node`](tokora::parser::node)
+/// bracket the root's loop runs *inside*: the loop signals a stop by returning `Err` from that
+/// closure, because `Err` is what demotes the node, and an `Err` is exactly what cannot say which
+/// of the two failures it is. The verdict has to cross that boundary out of band or be
+/// reconstructed on the far side — and reconstructing it from tokora's session counter is the
+/// defect PR #189 repairs, because that counter's span is the whole root and the question's span
+/// is one entry.
+///
+/// So a root takes one of these as a parameter and threads it into the closure. Nothing else can
+/// write it: the field is private and [`root_turn`] is the only writer in the module, so a root
+/// loop cannot mark a stop by hand.
+///
+/// # Nothing outside this module mints one, copies one, or spends one — smear PR #189, round 3
+///
+/// Making the field private closed the *marking* path and left the *minting* one open, and a fresh
+/// slot already carries the dangerous verdict. `Default` and a public constructor meant a caller
+/// could produce a slot that says "no stop" and pair it with any `Result` at all — a full tail
+/// drain over a genuine refusal, reached without asking [`root_turn`] anything, which is smear
+/// issue #178's amplification through the front door. `Copy` meant a classified slot could be
+/// duplicated and one copy paired with a *different* root's result, so "spent exactly once, by the
+/// frame that owns both" described a guarantee the type did not have. `Clone` alone meant the
+/// same: clone the fresh slot, call and match [`root_turn`], restore the clone over what it wrote,
+/// and the written verdict is gone without the private field ever being touched.
+///
+/// So it has no `Default`, no `Clone`, no `Copy`, a private field, a private constructor and a
+/// private spend, and the only handle any caller holds is the `&mut` [`drain_unless_stopped`]
+/// lends to the root it is about to judge, for that one call. That borrow is higher-ranked — the
+/// `Root` bound elides its lifetime, so it is `for<'s> &'s mut RootStop` — which is what stops it
+/// being stashed anywhere that outlives the call, and what keeps two nested drains from reaching
+/// each other's slot.
+///
+/// Four `compile_fail` doctests used to pin the three derives and the mint from **outside** the
+/// crate, and round 5 deleted them with the surface they were about: on a `pub(crate)` type every
+/// one of them fails at the visibility boundary rather than at the property, which is a green gate
+/// whose subject is gone. The derives are still absent and still deliberate — in-crate they bound
+/// what the six roots and the driver macro can do with a slot — and the boundary itself has one
+/// gate, in the module header.
+///
+/// # The verdict is assigned; the judged trip beside it is latched
+///
+/// Each [`root_turn`] **overwrites** the verdict, so it always describes the most recent entry
+/// rather than any entry. Latching it would put PR #189's own defect back one scale in: a root
+/// that catches a refusal and takes another turn would carry the first turn's verdict into the
+/// second's ordinary failure, skip the drain, and leave the valid suffix opaque. The roots in this
+/// workspace return `Err` immediately on [`RootTurn::EndsTheDocument`], so for them the last turn
+/// is the only turn that can be a stop; assignment is what keeps that true for a root that does
+/// not.
+///
+/// The second field is the opposite, and deliberately: *has any entry of this root already judged
+/// a tripped attempt*. That is a fact about the past, so it **latches**, and it is not the verdict
+/// — it is the term [`drain_unless_stopped`] subtracts from its own reading of the witness so that
+/// an already-judged, recovered-from trip is not judged a second time above the root. Assigning it
+/// would put round 1's defect back; assigning the verdict alongside is what keeps round 1's repair.
+/// Neither field is readable, writable or constructible from outside this module.
+#[derive(Debug)]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) struct RootStop {
+  ends_the_document: bool,
+  a_classified_entry_saw_a_trip: bool,
+}
+
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+impl RootStop {
+  /// A fresh slot, recording no stop and no judged trip.
+  ///
+  /// Private, and that is the round-3 half of smear PR #189: [`drain_unless_stopped`] is the only
+  /// frame that mints one, and it mints it for the root it is about to run. See the type's own
+  /// note for what a public one bought a caller.
+  #[inline]
+  const fn new() -> Self {
+    Self {
+      ends_the_document: false,
+      a_classified_entry_saw_a_trip: false,
+    }
+  }
+
+  /// Records what one [`root_turn`] decided, and whether that entry's own attempt tripped.
+  ///
+  /// The verdict is **assigned** — the type's own note says why latching it puts PR #189's defect
+  /// back one scale in. `tripped` is **latched**, and the asymmetry is the whole of round 4,
+  /// because the two answer different questions. The verdict is *this failure ends the document*,
+  /// which is about the most recent entry and stops being true when a later one recovers.
+  /// `tripped` is *some entry of this root has already judged a trip*, which is a fact about the
+  /// past and cannot stop being true; it is what keeps [`drain_unless_stopped`]'s own reading of
+  /// the witness from mistaking an already-judged, recovered-from trip for a live one.
+  #[inline]
+  fn record(&mut self, ends_the_document: bool, tripped: bool) {
+    self.ends_the_document = ends_the_document;
+    self.a_classified_entry_saw_a_trip |= tripped;
+  }
+
+  /// Whether any [`root_turn`] in this root has already judged a tripped attempt.
+  ///
+  /// Read by [`drain_unless_stopped`] **before** the slot is spent, and only to scope its own
+  /// reading of the witness — see that function's `The witness is read again above the root` note.
+  #[inline]
+  const fn a_classified_entry_saw_a_trip(&self) -> bool {
+    self.a_classified_entry_saw_a_trip
+  }
+
+  /// Spends the slot: pairs the root's own `Result` with what its last turn decided.
+  ///
+  /// Private, and consuming `self`, so the classification and the outcome are joined exactly once
+  /// and only by [`drain_unless_stopped`] — which holds both because it minted the one and ran the
+  /// root that produced the other. A public spend is a `fn(verdict, any Result) -> verdict about
+  /// that Result`, which is the forgery this module's two earlier rounds each relocated.
+  ///
+  /// No `#[must_use]` here: [`RootTurn`] already carries one, with the message that says what
+  /// dropping it costs, and a second bare one is `clippy::double_must_use`.
+  #[inline]
+  fn ending<T, E>(self, out: Result<T, E>) -> RootTurn<T, E> {
+    match out {
+      Ok(parsed) => RootTurn::Parsed { parsed },
+      Err(error) if self.ends_the_document => RootTurn::EndsTheDocument { error },
+      Err(error) => RootTurn::Recoverable { error },
+    }
+  }
+}
+
+/// Runs one document-root entry and says what its outcome means for the document.
+///
+/// This is the one place the six root loops' catch arm lives. Five of them write
+///
+/// ```text
+/// match depth::root_turn(inp, stop, one_entry::<Src, Ctx>) {
+///   RootTurn::Parsed { .. } => {}
+///   RootTurn::EndsTheDocument { error } => return Err(error),
+///   RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
+/// }
+/// ```
+///
+/// and nothing else. The sixth propagates both failure arms instead of resynchronising on the
+/// third — a dialect's own divergence, recorded where that root is defined (smear issue #168).
+///
+/// The six root loops are not the whole caller set — the driver macro and the in-crate cells call
+/// this too — and the set is pinned rather than narrated, for the reason
+/// [`drain_unless_stopped`]'s `Who calls it is not written here` note gives.
+///
+/// # `stop` is written here, and only here
+///
+/// The verdict this returns is what the loop needs; [`RootStop`] is what the **drain above the
+/// root** needs, and the two are the same value written twice because the loop's `Err` cannot
+/// carry it across the [`node`](tokora::parser::node) bracket the loop runs inside. Writing it
+/// here rather than at the arm is what makes it unforgettable: a root that reaches the arm has
+/// already been recorded, whatever it then does with the verdict. See [`RootStop`] for why the
+/// write is an assignment rather than a latch.
+///
+/// # The witness is read *beside* the trait, not instead of it
+///
+/// The verdict is `e.is_terminal() || inp.tripped_during_attempt(since)`, and both terms are
+/// load-bearing over a population the other one misses:
+///
+/// * [`InputRef::tripped_during_attempt`](tokora::InputRef::tripped_during_attempt) is the only
+///   term that survives a **caller-implemented** [`MaybeTerminal`] arm. It reads a counter written
+///   by tokora's own trip arm before any grammar code runs, on the input rather than in the error:
+///   no `From` conversion can discard it — the grammar's error type may be `()`, whose conversion
+///   drops [`RecursionLimitReached`] outright — no [`Checkpoint`](tokora::input::Checkpoint)
+///   rollback refunds it, and no public API lowers it. tokora's own note on `resource_trips` is
+///   the ruling this implements: *"read the error" is exactly the design this cell exists to
+///   replace*.
+/// * [`MaybeTerminal::is_terminal`] is the only term that sees a **scanner** stop. The descent
+///   counter counts descent refusals and nothing else, and tokora's scanner twin of this pair —
+///   `scanner_trip_snapshot` / `scanner_tripped_during_attempt` — is deliberately unpublished: it
+///   answers `true` for a document fully recovered through the documented
+///   [`set_state`](tokora::InputRef::set_state) path, so it would end a document that was fine
+///   (al8n/tokora#311). smear's own lexer tally is such a stop, and the population it is alone on
+///   is stated narrowly because it is narrow: with an **accepting** emitter a lexer state trip
+///   latches tokora's poison boundary, the root's next peek answers `None`, and the loop exits
+///   with no error to classify — so through the shipped doors, which pin `Verbose`, nothing
+///   reaches this arm at all. It reaches it for a consumer whose emitter **rejects**, which is
+///   the caller tokora's rule tells to write the arm.
+///
+/// So the disjunction is not belt-and-braces, and each term is pinned separately rather than
+/// argued for: `each_term_of_a_roots_stop_is_alone_on_a_population`, in
+/// `smear-parser/src/graphql/lossless/tests.rs`, drives this function with a rejected scanner stop
+/// and with a real descent trip on an arm that answers `false`, and deleting either term turns
+/// exactly one of those cells from `EndsTheDocument` into `Recoverable` while the ordinary-error
+/// control stays put under both.
+///
+/// # The baseline is taken here, per entry, and that is the whole verdict
+///
+/// tokora's counter is a **monotone session fact**, so the reading is only meaningful against a
+/// baseline, and *where* the baseline is taken decides what the reading means. The unit is **one
+/// attempt** — tokora states the floor as one speculative parse for a recovery, one retry cycle
+/// for `skip_then_retry`, one *element* for its resilient collection loops — and a root
+/// loop's attempt is **one entry**: one definition, one type-system definition-or-extension, one
+/// import-or-executable-definition. That is the unit this function takes it at.
+///
+/// Hoisting it above the loop compiles and is arithmetically a session-absolute read for every
+/// entry after the first: the counter never comes back down, so one entry that catches a trip and
+/// carries on makes every later failure in the document read as "tripped". tokora measures the
+/// difference on a document whose first entry catches its own refusal and whose next three fail
+/// ordinarily — the per-entry loop files all three, the hoisted loop files none and ends the
+/// document on the first (`tokora/tests/root_loop_trip_witness.rs`, section 2) — and its own
+/// wording for that failure is that it *ends a document that was fine and discards the valid
+/// suffix*, returning `Ok`, so the mistake survives testing and points at nothing.
+///
+/// **That is why the baseline is not a parameter.** It is a value a caller places, no type can
+/// say where it belongs, and the placement is silent when it is wrong. A root that never holds one
+/// cannot hoist one, take it after the attempt it is judging, or carry it into a second loop.
+///
+/// # No production below a root catches, and this does not depend on that
+///
+/// The granularity floor tokora documents is that a trip *caught inside the attempt* followed by
+/// an ordinary failure in the same attempt is re-raised as the trip. No production in either
+/// dialect catches — the six catch sites are the roots themselves — so the floor is not reached
+/// today. It fails **closed** when it is: an ordinary failure sharing its entry with a swallowed
+/// refusal ends the document, which is the direction that costs a suffix rather than the direction
+/// that costs the whole amplification back.
+#[inline]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) fn root_turn<'inp, 'closure, L, Ctx, Lang, T, Entry>(
+  inp: &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
+  stop: &mut RootStop,
+  entry: Entry,
+) -> RootTurn<T, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseContext<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: MaybeTerminal,
+  Entry:
+    FnOnce(&mut InputRef<'inp, 'closure, L, Ctx, Lang>) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
+{
+  // PER ENTRY, INSIDE THE CALL, AND NOT A PARAMETER. See this function's `The baseline is taken
+  // here` note: hoisting one of these out of a root loop compiles, degrades into a
+  // session-absolute read, and ends a document that was fine with no test failing.
+  let since = inp.trip_snapshot();
+  let out = entry(inp);
+  // READ UNCONDITIONALLY, INCLUDING ON `Ok`. The verdict below only needs it on the failing path,
+  // and the slot needs it on every path: an entry that tripped, CAUGHT the refusal and returned
+  // `Ok` has still judged that trip, and recording that is what stops the drain above this root
+  // from judging it a second time — smear PR #189, round 4. It costs a nonce compare and a `u64`
+  // compare per entry, against an entry that has already parsed a whole definition.
+  let tripped = inp.tripped_during_attempt(since);
+  // BOTH TERMS. Neither covers the other — the note above enumerates the population each one is
+  // alone on.
+  let ends_the_document = out.as_ref().is_err_and(|e| e.is_terminal() || tripped);
+  // ASSIGNED HERE, NOT AT THE ARM — and the trip beside it, LATCHED. See `RootStop::record` for
+  // why one of the two may not be a latch and the other may not be an assignment.
+  stop.record(ends_the_document, tripped);
+  match out {
+    Ok(parsed) => RootTurn::Parsed { parsed },
+    Err(error) if ends_the_document => RootTurn::EndsTheDocument { error },
+    Err(error) => RootTurn::Recoverable { error },
+  }
+}
+
+/// Runs a document root, then drains whatever it left uncommitted — unless the root said its
+/// failure stopped the parse.
+///
+/// `drain_unless_terminal` over an ending that has already been classified, rather than over a
+/// bare `Result`. The classification is [`root_turn`]'s. An `*_entry` production writes
+///
+/// ```text
+/// depth::drain_unless_stopped(inp, the_root::<Src, Ctx>)
+/// ```
+///
+/// and nothing else.
+///
+/// # It runs the root, and that is the whole of smear PR #189's round 3
+///
+/// It used to take the finished [`RootTurn`], leaving four separately spellable steps: mint a
+/// slot, run a root with it, spend the slot against a `Result`, drain. Three of the four were
+/// public, so the pairing they exist to make was a pairing a caller could make differently — a
+/// `Default` slot spent against a genuine refusal, a `Copy` of one root's classified slot spent
+/// against another root's result, or a [`RootTurn`] variant written out with no root behind it at
+/// all. Each is a verdict that describes nothing, and the drain has no way to tell.
+///
+/// **The invariant is *the verdict handed to the drain describes the failure being drained*, and
+/// four steps cannot state it.** One call can: this function mints the slot, lends it to `root`
+/// for exactly that call, spends *that* slot against *that* root's `Result`, and drains on the
+/// answer. Nothing else mints, copies or spends a slot, and there is no argument position for a
+/// verdict — the drain takes the root, not a classification of it.
+///
+/// A `compile_fail` doctest used to pin the missing argument position from outside the crate, and
+/// round 5 deleted it with the surface it was about: on a `pub(crate)` function it fails at the
+/// visibility boundary rather than at the signature. The shape is still what the signature says.
+///
+/// # Who calls it is not written here, and that is a repair rather than an omission
+///
+/// This paragraph used to end by naming the callers, and it named them **wrongly three times
+/// running**: five roots, then six roots, then six roots plus the driver macro. Each of those
+/// revisions was written by a sweep that reported itself complete, and each of them left out the
+/// in-crate cells that drive this function directly — the ones this module's closing comment
+/// sends a reader to by name. A caller set is a claim about the whole crate, it changes whenever
+/// anyone writes a test, and nothing in a build says a word when it goes stale.
+///
+/// So it is data now: `DECLARED`, in `ci/source_census/src/roots.rs`, keyed by callee, file and
+/// enclosing item and carrying a count, because a total cannot see a swap. It is checked against
+/// the **token tree** of every file in this crate — a walk that descends into macro bodies, where
+/// fourteen of the twenty-five calls are written, and that refuses a file it cannot parse rather
+/// than reporting no callers in it. A caller added without its row is a red gate, and so is a row
+/// whose caller went away. Four families: the six `*_entry` productions here, the six document
+/// roots' [`root_turn`] calls, the driver macro's own driver, and the cells in
+/// `smear-parser/src/graphql/lossless/tests.rs`.
+///
+/// # The witness is read again above the root, and the slot is what scopes it — round 4
+///
+/// The seal above is about who may **mint** a verdict. It says nothing about a failure for which
+/// no verdict was ever minted, and that population is not the exotic one it looks like:
+///
+/// * the shipped loops' `peek_kind(inp)?`, `report_unexpected` and `resync_to_definition(inp)?`
+///   all return `Err` without going through [`root_turn`];
+/// * a root may call [`descend`] outside one;
+/// * and a root may **compose**, by returning a nested `drain_unless_stopped` call.
+///
+/// The third is the one that pays for this section. `Root` returns a plain `Result`, so a root
+/// that delegates to another root's drain hands back an `Err` and never touches the slot it was
+/// lent. The inner drain classified correctly — recorded [`RootTurn::EndsTheDocument`] in *its*
+/// slot, skipped *its* drain — and the `Err` carries none of that. Nothing in the shape is forged,
+/// copied, or dropped, so no seal on the *minting* side reaches it, and the outer slot reading
+/// `false` turns a stop back into a `Recoverable`: `1 + n` diagnostics again. Measured through two
+/// nested drains at a descent budget of `0`, with the consumer's `MaybeTerminal` arm answering
+/// `false` for its own refusal, over a tail of `n` lexemes that do not lex: **n** tail diagnostics
+/// at n = 0, 1, 4, 16, against **0** for the identical refusal through a single drain
+/// (`a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it`).
+///
+/// **A type cannot close that population, and trying is what this round measured first.** The
+/// amplification does not need the inner drain's `Result` at all — the caller owns `E`, so
+/// `Err(anything)` out of a root with an unwritten slot reproduces it in one line. Sealing the
+/// drain's return value so that a nested one cannot become a `Result` pins a *spelling*: it makes
+/// the honest composition unspellable and leaves the amplification exactly where it was.
+///
+/// So this frame asks the witness too, over its own baseline — and the slot **scopes** the
+/// reading. [`RootStop`] latches whether any [`root_turn`] of this root has already judged a
+/// tripped attempt, and the drain stops on `Recoverable` only when a trip happened during the root
+/// that no such turn judged.
+///
+/// **The axes are three, not two, and an earlier version of this table had only two.** What the
+/// arm reads is *(the root's ending, the counter, the latch)* — and it never reads what the
+/// failure **is**. So the row that used to read "a refusal no entry classified" was naming a
+/// failure the arm cannot see; the condition it actually tests is *a trip moved the counter and no
+/// turn judged one*, which an **ordinary** failure satisfies too whenever the trip was taken and
+/// handled outside every turn. That cell was unrepresentable in the two-axis table and it is
+/// round 5's finding, so it has a row of its own:
+///
+/// | the root's ending | trip during the root | judged by a `root_turn` | drain | |
+/// |---|---|---|---|---|
+/// | `Err`, no turn said stop | no | — | **runs** — the tail is committed and its diagnostics emitted | correct |
+/// | `Err`, no turn said stop | yes | yes | **runs** — round 1's cell, and `a_caught_trip_does_not_silence_a_later_failures_drain` is it | correct |
+/// | `Err`, last turn said stop | yes | yes | **skipped**, by [`RootTurn::EndsTheDocument`] before the reading is reached | correct |
+/// | `Err`, no turn said stop, and the failure IS a refusal — `descend` outside a turn, or a nested drain's | yes | no | **skipped** — round 4's cell | correct |
+/// | `Err`, no turn said stop, and the failure is **ordinary**, after a trip taken and handled outside every turn | yes | no | **skipped** | **wrong — a false stop** |
+///
+/// The whole-root reading on its own is round 1: it cannot subtract, so it ends a document that
+/// was fine. No reading at all is round 4: it drains a document that ended. The subtraction is the
+/// difference between them, and it is only available because [`root_turn`] wrote down what it
+/// judged — but it subtracts a *count*, and the last row is what a count cannot answer.
+///
+/// [`MaybeTerminal`] still runs on both remaining arms, through [`drain_unless_terminal`], and is
+/// still alone on the population the counter cannot see: a **scanner** stop moves no descent
+/// counter, and tokora's scanner-side twin is withdrawn for cause (al8n/tokora#311).
+/// `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone` is the cell that
+/// says so, and it exists because for one round nothing did — see
+/// [`drain_unless_terminal`]'s own note.
+///
+/// # The residue, stated
+///
+/// The two directions are not symmetrical and the residue below names which one each cell is in.
+/// A **drained tail** costs diagnostics; a **false stop** costs the valid suffix of a document
+/// that was fine, returns without saying so, and is the failure tokora's own note says survives
+/// testing and points at nothing. The false-stop direction is **not** confined to a root that
+/// returns `Ok` — an earlier version of this section said it was, and the second bullet is the
+/// counter-example.
+///
+/// * **A judged trip, then an unjudged one, in one root.** The latch says *some* trip was judged,
+///   not *which*, so a root that catches a classified refusal and later takes an unjudged one
+///   drains. The drained-tail direction, chosen deliberately by round 1's repair.
+/// * **A trip taken and handled outside every [`root_turn`], then an ordinary failure.** The
+///   counter has moved and the latch is `false`, so the arm below reads the ordinary failure as a
+///   stop and leaves the valid suffix opaque — the **false-stop** direction, on the `Err` path.
+///   Measured at `(Err(Ordinary), 0)` tail diagnostics for n = 1, 4, 16 where the control gives
+///   `(Err(Ordinary), n)`. It is why the machinery is `pub(crate)`: closing it needs the slot to
+///   record *which* trip was judged, that needs a moving `ResourceTripBaseline<'closure>` in the
+///   slot, and a root runs inside `node(…).parse_input(inp)` whose closure `ParseInput` impl is
+///   higher-ranked in the handle region — so a baseline minted in the loop cannot flow into a slot
+///   minted outside it, at any price in signatures. **No root in this crate reaches this cell**:
+///   the six document roots and the driver macro descend only inside a turn, and `recover.rs` and
+///   `trivia.rs` contain no [`descend`] at all.
+/// * **A root that returns `Ok`.** Then it has said it parsed, and the drain takes it at its word.
+///   `Parsed` is deliberately not on the stopping arm — ending a document on a successful root is
+///   the false-stop direction too, and this is the cell where refusing to enter it is cheap.
+/// * **A stale failure.** The slot is assigned, so a root that keeps parsing after a stop and then
+///   returns an *earlier* entry's error pairs this scope's verdict with a stale failure. That is a
+///   root discarding a verdict [`root_turn`] handed it — `#[must_use]` fires if it is dropped
+///   rather than matched — and not a forged one.
+///
+/// # Why the drain needs the verdict, and it is not a smaller version of the root loop's point
+///
+/// A root loop that stops on the witness still returns the failure to its `*_entry` production,
+/// and a drain that judges only the error *value* then reads the tail of a document the loop
+/// already refused to read. That costs a full lex of the tail and one lexer diagnostic per
+/// malformed lexeme — the `1 + n` amplification `drain_unless_terminal` measures — so a
+/// consumer whose [`MaybeTerminal`] arm answers `false` gets the amplification back through the
+/// drain even though every root arm stopped. Measured, with the roots witnessed and this one not,
+/// over 300 nested selection sets past the clamp with a dialect's `NestingLimitExceeded` arm
+/// flipped to `false`: **1, 2, 5 and 65** diagnostics for tails of 0, 1, 4 and 64 invalid lexemes,
+/// identical in both dialects — `1 + n`, the same curve the trait-only drain was written to
+/// prevent, reached through the one term it does not have.
+///
+/// # Why its own baseline is not the verdict — smear PR #189
+///
+/// It used to read `inp.tripped_during_attempt(since)` over the whole root **as** the verdict, on
+/// the reasoning that the attempt being judged here *is* the whole root. The arithmetic does not
+/// follow: tokora's counter is monotone, so that reading answers `true` for a root in which
+/// **any** entry ever tripped, including one that was caught and recovered from. `root` is a
+/// closure parameter and this module was publicly reachable when the defect was found, so a root
+/// that catches an early refusal and later fails ordinarily — a shape a consumer could write, and
+/// one no arm of theirs was wrong for — satisfied both conjuncts, skipped the drain, and left a
+/// valid suffix opaque with its diagnostics unemitted. That is the *false-stop* direction: it truncates a document that was
+/// fine, which is the failure tokora's own note says survives testing and points at nothing.
+///
+/// The information was never missing — [`root_turn`] had already decided, per entry, at the only
+/// granularity where the question means anything. It was being discarded at the arm and rebuilt
+/// here out of a counter whose span is the wrong span. So it is carried instead, and the reading
+/// that remains here is a **residual** rather than the verdict: not *did this root trip*, which is
+/// the question with the wrong span, but *did a trip reach this frame that no turn of this root
+/// judged*, which is the question the slot's latch makes answerable at all.
+#[inline]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) fn drain_unless_stopped<'inp, 'closure, L, Ctx, Lang, T, Root>(
+  inp: &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
+  root: Root,
+) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseContext<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: MaybeTerminal,
+  Root: FnOnce(
+    &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
+    &mut RootStop,
+  ) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
+{
+  // THIS FRAME'S OWN BASELINE, over the whole root, and it is not the verdict — it is the
+  // residue: the trips that happen inside this root that no `root_turn` of this root judges. See
+  // `The witness is read again above the root`.
+  let since = inp.trip_snapshot();
+  // MINTED, LENT AND SPENT HERE, AND NOWHERE ELSE. The three lines below are the whole
+  // transaction: the slot this frame created, the root this frame ran, and the pairing of the
+  // one against the other. None of the three steps is reachable on its own — see this function's
+  // `It runs the root` note for what each separately spellable step bought a caller.
+  let mut stop = RootStop::new();
+  let out = root(inp, &mut stop);
+  // READ BEFORE THE SLOT IS SPENT, because spending consumes it. The conjunction is the scoping:
+  // a trip an entry of this root already judged is subtracted, and what is left is a trip that
+  // reached this frame unjudged.
+  let unjudged_trip = !stop.a_classified_entry_saw_a_trip() && inp.tripped_during_attempt(since);
+  match stop.ending(out) {
+    // The root said it stopped. Nothing reads the tail, which is what makes the refusal one
+    // diagnostic — `drain_unless_terminal`'s own note carries the count.
+    RootTurn::EndsTheDocument { error } => Err(error),
+    // The trait is still asked, on both remaining arms, by `drain_unless_terminal`: a terminal
+    // value reaching a drain by a path no `root_turn` classified — a scanner stop, which moves no
+    // descent counter — is the population it is alone on.
+    RootTurn::Parsed { parsed } => drain_unless_terminal(inp, Ok(parsed)),
+    // A failure carrying a trip this root never judged. It is a stop whatever the error value
+    // says, for the reason `root_turn` reads the witness beside the trait at all — smear PR #189,
+    // round 4. `Parsed` is deliberately not here: a root that returns `Ok` has said it parsed,
+    // and ending a document on that word would be the false-stop direction.
+    RootTurn::Recoverable { error } if unjudged_trip => Err(error),
+    RootTurn::Recoverable { error } => drain_unless_terminal(inp, Err(error)),
+  }
+}
+
 /// Enters one level of parser recursion, or reports and refuses.
 ///
 /// **Bind the guard for the whole frame.** It is `#[must_use]` and dropping it early releases the
@@ -236,6 +1000,32 @@ where
 /// let mut frame = super::descend::<Src, Ctx>(inp)?;
 /// let inp = &mut *frame;
 /// ```
+///
+/// # It is `pub(crate)`, and it is the item the retraction is actually about
+///
+/// **Not because round 4's finding needs it.** That defect — a trip taken where no `root_turn`
+/// sees it, then an ordinary failure read as a stop — is produced *inside* `drain_unless_stopped`,
+/// which is `pub(crate)` now. A consumer can still move the counter and has nothing published left
+/// to mislead with it. The finding is closed by the readers alone, and claiming otherwise would
+/// make this narrowing look forced when it is chosen.
+///
+/// What it is chosen on is this function's **contract**, which the crate can no longer keep in
+/// public. `The refusal ends the document` below is the guarantee, and every mechanism that ends
+/// one — the six roots, `root_turn`, both drains — is crate-private. A consumer holding a public
+/// `descend` is handed a terminal value and left to write the catch predicate themselves; that is
+/// smear issue #169's `1 + n` amplification arriving by the one route this module keeps saying
+/// must be a call and not a pattern to copy. What the function would still be offering them over
+/// [`InputRef::descend`](tokora::InputRef::descend) is the emission — and the emission is only
+/// correct in a parse whose roots stop.
+///
+/// **What remains reachable is tokora's own, and the retraction is what prices it.**
+/// A consumer holding an `InputRef` can call
+/// [`InputRef::descend`](tokora::InputRef::descend) directly and move the same counter; that is
+/// tokora's published API and smear cannot withdraw it. It costs nothing here because smear now
+/// publishes no **reader** of that counter — `root_turn`, `RootStop` and `drain_unless_stopped`
+/// are all crate-private — so there is no smear-side verdict for a counter moved that way to be
+/// wrongly spent against. The pair is what matters: a public writer is only a defect while some
+/// published reader draws a conclusion from it.
 ///
 /// # The trip is emitted *and* returned
 ///
@@ -289,9 +1079,11 @@ where
 ///
 /// ## Where the terminal state lives, and why it is the error value
 ///
-/// **In the `Err` this returns**, read through [`MaybeTerminal::is_terminal`] by the five root
-/// loops that catch and by [`drain_unless_terminal`]. Two other homes were available and neither
-/// works:
+/// **In the `Err` this returns**, read through
+/// [`MaybeTerminal::is_terminal`](tokora::error::MaybeTerminal::is_terminal) by the crate-private
+/// `root_turn` and `drain_unless_terminal` — beside tokora's own resource-trip counter, which is
+/// where the same fact lives on the input side and which those two read first. Two other homes were available for
+/// smear's own copy and neither works:
 ///
 /// - **A cell.** al8n/tokora#285 is why not: the two homes a budget can have in that crate have
 ///   opposite durability. `L::State` — where smear's lexer tally lives — is a
@@ -320,11 +1112,15 @@ where
 /// trip's.
 ///
 /// The one thing a cell would have bought and this does not is a record for a production that
-/// **catches** the refusal and carries on. No production in either dialect does — the five catch
-/// sites are the document roots, and all five now stop — but a dialect added later could, and its
+/// **catches** the refusal and carries on. No production in either dialect does — the six catch
+/// sites are the document roots, and all six now stop — but a dialect added later could, and its
 /// loop would re-descend and refuse again rather than reading a latch. That is the residual, and
-/// it is bounded by the same predicate: a catch site that ignores
-/// [`is_terminal`](MaybeTerminal::is_terminal) is the only way to reach it.
+/// what bounds it has changed: tokora's resource-trip counter **is** the durable cell this section
+/// says smear cannot write, published read-only, and `root_turn` reads it. A catch site that goes
+/// through `root_turn` cannot reach the residual whatever its `MaybeTerminal` arm says; a catch
+/// site that writes its own predicate still can, which is why the arm is one call and not a
+/// pattern to copy — and, since smear PR #189's round 5, why `root_turn` is the crate's own and
+/// not a consumer's.
 ///
 /// ## The emitted `Err` is dropped, and this is the one call where that is right
 ///
@@ -348,12 +1144,14 @@ where
 /// What it does cost is real and worth naming: a host that rejects in order to say *"I am at my
 /// diagnostic limit"* cannot distinguish that from *"this document is too deep"* at this one call
 /// site. The alternative — propagate, and rely on the caller's
-/// [`MaybeTerminal`] arm to keep the loops from resynchronising — makes correctness depend on an
+/// [`MaybeTerminal`](tokora::error::MaybeTerminal) arm to keep the loops from resynchronising —
+/// makes correctness depend on an
 /// arm the caller might not write, and tokora's own rule already records that a wrong `false` arm
 /// is spent silently. An unconditional guarantee here and a terminality check at the readers is
 /// the pair that needs neither.
 #[inline]
-pub fn descend<'r, 'inp, 'closure, L, Ctx, Lang>(
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) fn descend<'r, 'inp, 'closure, L, Ctx, Lang>(
   inp: &'r mut InputRef<'inp, 'closure, L, Ctx, Lang>,
 ) -> Result<Descent<'r, 'inp, 'closure, L, Ctx, Lang>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -393,3 +1191,26 @@ where
   // nothing between the two calls can change the depth.
   inp.descend()
 }
+
+// THE CELLS THAT DRIVE THIS MODULE DIRECTLY LIVE IN `smear-parser/src/graphql/lossless/tests.rs`,
+// AND NOT HERE — smear PR #189, round 5. Four of them had to come in-crate: they call `root_turn`,
+// `RootStop` and `drain_unless_stopped`, which `smear/tests/nesting_depth.rs` cannot reach any more
+// because an integration test is a separate crate and sees `pub` and nothing else. A fifth was
+// written in crate in round 6, for the population `drain_unless_terminal`'s own note describes.
+// In-crate is not the same as in *this* module, though, and putting them here was wrong on the rule
+// this directory exists to keep: every one of them pins one dialect's lexer, its `Lang` marker and
+// the lexer crate's limits, so as a `mod tests` under `lossless/` they put a dialect import each
+// and thirty-odd dialect-typed signatures inside the dialect-generic substrate. Gate 6,
+// `lossless_isolation.rs`, reddens on exactly that and did. A dialect assembly driving the
+// substrate is what the Lego rule is *for*; the substrate hosting a dialect-naming test is what it
+// forbids.
+//
+// SPELLING THE PATH HERE IS ALLOWED, and an earlier version of this comment said it was not. Gate
+// 6 classifies every line of this directory that names a dialect: a comment is prose and passes,
+// and only a line that is neither a comment nor the one feature gate is an offender. What it
+// forbids over every line, prose included, is the *spellings* its `SUBSTRATE_FORBIDDEN` table
+// lists — a `crate::`-rooted dialect module path, either dialect's `Lang` marker, the lexer
+// crate's own path prefix — and a source-tree path is none of those. Do not write one of them out
+// here, not even as an example: this paragraph reddened the gate on its first draft, which is the
+// gate working. Declining to name the file at all is what left three pointers aimed at
+// `lossless/depth/tests.rs`, which does not exist and which reddens gate 6 if anyone recreates it.

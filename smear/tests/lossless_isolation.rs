@@ -343,7 +343,7 @@ fn the_substrate_names_no_dialect() {
 /// is exactly how a generic layer starts having a favourite. The count is pinned so that adding one
 /// is a decision rather than a drift.
 ///
-/// Seven, in two families:
+/// Sixteen, in three families, and the third is why this number moved:
 ///
 /// - **two in `lossless/mod.rs`** — `mod macros` and its `pub(crate) use`. The substrate's macros
 ///   have no invoker without a dialect assembly, and three uninvoked macros are three
@@ -354,9 +354,24 @@ fn the_substrate_names_no_dialect() {
 ///   wrappers in the two dialects' own `recover.rs`, so with no dialect in the crate they are dead
 ///   and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that — rustc counts a
 ///   reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed it.
+/// - **nine in `lossless/depth.rs`**, from smear PR #189's round 5, and every one of them is the
+///   `recover.rs` shape rather than a new one. Seven are the retracted cluster —
+///   `drain_unless_terminal`, `RootTurn`, `RootStop`, its `impl`, `root_turn`,
+///   `drain_unless_stopped` and `descend` — which went `pub(crate)` when the public generic
+///   root-composition capability was withdrawn, and whose only callers are the two dialect
+///   assemblies and the driver macro. The remaining two are the `use` blocks those items need:
+///   **`unused_imports` fires before `dead_code` does**, so narrowing the items without gating
+///   `tokora::{InputRef, Lexer, ParseContext, error::…, input::Descent, span::Spanned}` and
+///   `crate::combinator::ErrorOf` alongside them reddens the dialect-less cell on the imports
+///   first and never reaches the lint this family is about.
+///
+/// **Raising this number is the decision, not the bookkeeping.** Nine at once is a large move and
+/// it is one narrowing, not nine: the count went from 7 to 16 in a single PR because a whole
+/// cluster left the public API together. A future increment of one or two, unaccompanied by a
+/// family added above, is the drift this constant exists to catch.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 7;
+const SUBSTRATE_FEATURE_GATES: usize = 16;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {

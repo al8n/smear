@@ -21,7 +21,12 @@
 //! cargo run -p source-census -- --no-probe     # skip D2's `cargo check`; fails, loudly, on purpose
 //! ```
 //!
-//! Six modules carry the design and each states its own reasoning:
+//! The [`roots`] census is smear PR #189's, and it is here for the third time for the same three
+//! reasons: it needs the source parsed rather than grepped, a declared table whose every row is an
+//! argument, and a selftest that makes the verdict fire. Its subject is one sentence in
+//! `smear-parser/src/lossless/depth.rs` that three consecutive sweeps wrote wrong.
+//!
+//! Seven modules carry the design and each states its own reasoning:
 //!
 //! * [`surface`] — which entries a consumer can reach, derived from the code rather than listed.
 //! * [`rule`] — what counts as a parameter carrying source text, which is the whole judgement.
@@ -29,6 +34,7 @@
 //! * [`diagnose`] — the diagnostic contract's four checks and what each of them derives.
 //! * [`diagnose::probe`] — why D2 hands the trait question to `rustc` instead of answering it.
 //! * [`diagnose::exempt`] — the types recorded as outside the contract, and their arguments.
+//! * [`roots`] — who calls the two functions that mint and spend a document root's verdict.
 //!
 //! # What makes this gate non-vacuous
 //!
@@ -41,10 +47,15 @@
 //!   tables go stale in the same instant and the run goes red, rather than reporting a clean crate.
 //! * A run that reads zero public entries, zero parameters, zero error types, zero accessor
 //!   matches or zero inventories fails outright, and so does a D2 probe with nothing in it.
+//! * [`roots`] fails on a source file it cannot parse, on a tree with fewer files than it was
+//!   written against, and on an occurrence of a watched name it cannot classify — a caller set is
+//!   a claim about absence, and absence is only evidence once the instrument has been shown to
+//!   find things.
 
 mod census;
 mod diagnose;
 mod exempt;
+mod roots;
 mod rule;
 mod selftest;
 mod surface;
@@ -207,7 +218,28 @@ fn main() -> ExitCode {
   diagnose::render(&contract, outcome.as_ref(), verbose);
   let contract_ok = diagnose::verdict(&contract, outcome.as_ref());
 
-  if source_ok && contract_ok && probe_ok {
+  // Reads a directory rather than a mounted crate root, because its subject is `pub(crate)` and
+  // therefore invisible to `surface`. It is skipped when `--crate-root` points this tool at some
+  // other workspace, where `smear-parser/src` is not there to read.
+  let roots_ok = if defaulted {
+    match roots::repository_root() {
+      Ok(repository) => {
+        let report = roots::detect(&repository);
+        roots::render(&report, verbose);
+        roots::verdict(&report)
+      }
+      Err(message) => {
+        error(&format!(
+          "the caller census could not be run at all: {message}"
+        ));
+        false
+      }
+    }
+  } else {
+    true
+  };
+
+  if source_ok && contract_ok && probe_ok && roots_ok {
     ExitCode::SUCCESS
   } else {
     ExitCode::FAILURE
@@ -231,6 +263,16 @@ fn selftests() -> ExitCode {
     Ok(cases) => println!("diagnostic-census selftest OK: {cases} cases"),
     Err(problems) => {
       error("the diagnostic-contract selftest did not behave as `diagnose`'s header claims");
+      for problem in problems {
+        println!("  - {problem}");
+      }
+      ok = false;
+    }
+  }
+  match roots::selftest() {
+    Ok(cases) => println!("caller-census selftest OK: {cases} cases"),
+    Err(problems) => {
+      error("the caller census did not read the shapes `roots`'s header claims it reads");
       for problem in problems {
         println!("  - {problem}");
       }

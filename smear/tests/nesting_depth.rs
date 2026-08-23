@@ -751,8 +751,8 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
 /// * **Malformed bytes *before* the refusal.** The refusal's position is a function of the prefix,
 ///   so a prefix lexer error is an ordinary second diagnostic and not this property.
 /// * **A refusal below a production that catches.** No production in either dialect catches except
-///   the five document roots; a sixth would need its own cell, and
-///   [`descend`](smear::parser::lossless::depth::descend)'s note records that as the residual.
+///   the six document roots, and a production added later that does would need its own cell —
+///   `depth::descend`'s note records that as the residual.
 /// * **Partial (`Sans-I/O`) input.** Both doors here are `Complete`.
 #[cfg(all(feature = "rowan", feature = "graphqlx", feature = "graphql"))]
 #[test]
@@ -762,8 +762,10 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
   // Above the door's clamp and above every shape's own depth below, so the *parse* refuses at
   // `HARD_MAX` and the lexer's tally — which reads this number unclamped — never fires.
   const CEILING: usize = MAX_NESTING_DEPTH * 64;
-  // Deep enough that a per-token tail would be unmistakable, shallow enough to stay under the
-  // ceiling. The refusal happens far above this, wherever tokora's default sits.
+  // Deep enough that a per-token tail would be unmistakable, and deep enough to clear the door's
+  // clamp: the budget installed is `min(CEILING, HARD_MAX)`, so the parse refuses at `HARD_MAX` —
+  // BELOW this number, which is what makes a refusal happen at all. Shallow enough to stay under
+  // `CEILING`, which is the number the lexer's own tally reads unclamped.
   const DEPTH: usize = 300;
   // `0` is the cell the first version of this test had; the rest are the axis it was missing.
   const TAILS: &[usize] = &[0, 1, 4, 64];
@@ -856,22 +858,15 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
 /// # Why this is a second test and not another axis on the one above
 ///
 /// [`a_refusal_is_one_diagnostic_at_every_cycle`] drives `parse_document` alone, which is one root
-/// per dialect. The repair has **five** catch sites — the mixed root in each dialect, the SDL-only
-/// root in each, and GraphQLx's executable-only root (GraphQL's executable root propagates instead
-/// of catching, so it never had the defect) — and three of them are unreachable from that entry
-/// point. Reverting them was planted with the cycle test in place and it stayed green: a cell set
-/// derived over *cycles* is blind to an axis of *roots*, however many cycles it has.
+/// per dialect. The repair has **six** catch sites — the mixed root in each dialect, the SDL-only
+/// root in each, and each dialect's executable-only root (GraphQL's propagates instead of
+/// catching, but the one-diagnostic, whole-document guarantee below still has to hold there, so it
+/// gets a cell too) — and four of them are unreachable from that entry point. Reverting them was
+/// planted with the cycle test in place and it stayed green: a cell set derived over *cycles* is
+/// blind to an axis of *roots*, however many cycles it has.
 ///
 /// So the axis here is the entry point, and the shape is whatever reaches the ceiling from it. The
 /// cycle coverage stays where it is; this asks only that each root stops.
-///
-/// # What this still does not cover
-///
-/// GraphQL's `parse_executable_document` has no catch arm to revert — its loop is
-/// `executable_definition(inp)?` — so the cell below proves its `document_entry` drain and nothing
-/// about a catch site it does not have. If that loop ever grows one, this test passes unchanged
-/// and the amplification is back; the guard against that is
-/// [`descend`](smear::parser::lossless::depth::descend)'s note naming the five, not this file.
 #[cfg(all(feature = "rowan", feature = "graphqlx", feature = "graphql"))]
 #[test]
 fn a_refusal_ends_every_document_root() {
@@ -983,240 +978,42 @@ fn a_refusal_ends_every_document_root() {
   assert_eq!(cells, roots.len() * 2, "the cell set collapsed");
 }
 
-/// A refusal is the error [`descend`](smear::parser::lossless::depth::descend) returns, whichever
-/// emission a rejecting emitter refuses and whatever value it substitutes — smear issue #169.
-///
-/// # Why this needs an emitter no shipped door installs
-///
-/// The lossless doors pin `tokora::emitter::Verbose`, which records everything and returns `Ok`
-/// from every method, so no `Err` can arrive from the emitter and this path is unreachable through
-/// `parse_document`. `descend` is nevertheless a **public generic function** over any
-/// `ParseContext`, so a consumer with a rejecting emitter reaches it.
-///
-/// # Two rejection sites, and the second one was found by review rather than by this test
-///
-/// The first version of this test rejected **`emit_lexer_error`** and accepted `emit_error`, which
-/// covers the drain: the drain sat between the emit and the return and was propagated with `?`, so
-/// `skip_while`'s fatal exit replaced the refusal (`Refusal` for `{ f }`, `LexerError` for
-/// `{ f } ~ ~`). Removing the drain closed that and left the *same defect one call earlier*, on
-/// the emission the test accepted: `emit_error(...)?` propagated whatever the emitter returned.
-/// Tokora permits a rejecting emitter to return **any same-typed value**, not the payload it was
-/// handed, so a host rejecting with an error-budget sentinel got the sentinel — and then, since
-/// the sentinel is not the refusal, the entry drain ran over the tail and *its* rejection replaced
-/// the sentinel in turn. Measured against that version: `Budget` for `{ f }`, and **`LexerError`
-/// for `{ f } ~ ~` via the entry** — a third value, neither the refusal nor the host's.
-///
-/// So the axis is *which* emission is rejected and *what* it substitutes, and the assertion is the
-/// same in every cell: the saved refusal comes back.
-///
-/// # Which value the refusal IS, and why this cell is where that shows
-///
-/// `Which::Recursion`, and it used to be `Which::Refusal`. `descend` no longer decides the
-/// refusal — it takes the level through
-/// [`InputRef::descend`](tokora::InputRef::descend) and hands back what tokora returns — so the
-/// value that comes out is built by `From<RecursionLimitReached>`, while the value it *emits* is
-/// still built by [`FromNestingLimit`]. Every shipped dialect lands both on the same variant
-/// (smear PR #180), so no other test in this file can see the difference; `Which` maps them apart
-/// on purpose, which is what makes this the cell that says which path is live.
-///
-/// The property is unchanged and still discriminating: `Budget` here would mean the rejecting
-/// emitter's substituted value displaced the refusal, and `LexerError` would mean the entry drain
-/// ran and displaced it. Both were measured before the #169 repair and both are still what a
-/// regression looks like.
-///
-/// # What this still does not cover
-///
-/// * **A host whose own [`MaybeTerminal`](tokora::error::MaybeTerminal) arm is wrong.** `descend`
-///   needs no cooperation — it drops the emit result — but the document roots stop on
-///   `is_terminal()`, so a caller whose error type answers `false` for its own fatal value has
-///   told the emitter *stop* and the recovery machinery *recoverable*. That contradiction is the
-///   caller's, it is the residue tokora's own rule documents, and `Which` below deliberately
-///   answers `false` for `LexerError` so that a cell returning it is visibly the drain having run.
-/// * **The shipped doors.** `Verbose` cannot reject, so none of this is reachable through
-///   `parse_document`; the two tests above are what cover that path.
-#[cfg(all(feature = "rowan", feature = "graphql"))]
-#[test]
-fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
-  use smear::parser::{
-    graphql::{GraphQL, lossless::GraphqlLosslessLexer},
-    lossless::depth::{FromNestingLimit, descend, drain_unless_terminal},
-  };
-  use tokora::{
-    Emitter, Lexer, ParserContext, SimpleSpan, Token,
-    cache::DefaultCache,
-    error::{MaybeTerminal, RecursionLimitReached},
-    prelude::UnexpectedTokenOf,
-    span::Spanned,
-    state::recursion_tracker::RecursionLimiter,
-  };
-
-  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
-  // A `ParserContext` rather than the `(emitter, cache)` tuple, because the ceiling this cell
-  // needs is now a property of the parse rather than an argument to `descend`: the tuple's
-  // `ParseContext` impl seeds tokora's default budget and has no door to set one.
-  type Ctx<'inp> = ParserContext<'inp, Lx<'inp>, Rejecting, DefaultCache<'inp, Lx<'inp>>, GraphQL>;
-
-  /// Which error came back — the whole observation.
-  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-  enum Which {
-    Refusal,
-    /// The host's own "I am at my diagnostic limit" value: a fatal stop that is **not** the
-    /// payload it was handed.
-    Budget,
-    LexerError,
-    Unexpected,
-    Recursion,
-  }
-
-  impl FromNestingLimit for Which {
-    fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
-      Which::Refusal
-    }
-  }
-
-  impl MaybeTerminal for Which {
-    fn is_terminal(&self) -> bool {
-      // `LexerError` answers `false` ON PURPOSE. It is the value the drain produces, so leaving it
-      // non-terminal keeps a cell that returns it a visible failure rather than one the predicate
-      // absorbs.
-      matches!(self, Which::Refusal | Which::Budget | Which::Recursion)
-    }
-  }
-
-  impl<Lang: ?Sized> From<RecursionLimitReached<usize, Lang>> for Which {
-    fn from(_: RecursionLimitReached<usize, Lang>) -> Self {
-      Which::Recursion
-    }
-  }
-
-  /// What the emitter does with the refusal's own `emit_error`.
-  #[derive(Clone, Copy, Debug)]
-  enum OnError {
-    /// A collecting host: records it and carries on. `Verbose`'s behaviour.
-    Accept,
-    /// `Fatal`'s behaviour: reject, returning the payload it was handed.
-    RejectWithPayload,
-    /// The case the review found: reject, returning a value of the host's own choosing.
-    RejectWithSentinel,
-  }
-
-  struct Rejecting {
-    on_error: OnError,
-    reject_lexer: bool,
-  }
-
-  impl<'inp, L: Lexer<'inp>> Emitter<'inp, L, GraphQL> for Rejecting {
-    type Error = Which;
-
-    fn emit_lexer_error(
-      &mut self,
-      _err: Spanned<<L::Token as Token<'inp>>::Error, L::Span>,
-    ) -> Result<(), Self::Error> {
-      if self.reject_lexer {
-        Err(Which::LexerError)
-      } else {
-        Ok(())
-      }
-    }
-
-    fn emit_error(&mut self, err: Spanned<Self::Error, L::Span>) -> Result<(), Self::Error> {
-      match self.on_error {
-        OnError::Accept => Ok(()),
-        OnError::RejectWithPayload => Err(*err.data()),
-        OnError::RejectWithSentinel => Err(Which::Budget),
-      }
-    }
-
-    fn emit_unexpected_token(
-      &mut self,
-      _err: UnexpectedTokenOf<'inp, L, GraphQL>,
-    ) -> Result<(), Self::Error> {
-      Err(Which::Unexpected)
-    }
-
-    fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
-  }
-
-  // A recursion budget of **0**: the first descent is over budget, so the whole of `src` is the
-  // tail a drain would cross. That is the shape, minus a 64-level nest that would prove nothing
-  // extra. It used to be spelled `descend(inp, 0)`; the ceiling is the parse's own limiter now,
-  // which is the same statement one layer down and is what makes the refusal below tokora's own
-  // trip rather than a smear pre-check that agreed with it.
-  fn run<'inp>(src: &'inp str, via_entry: bool, on_error: OnError, reject_lexer: bool) -> Which {
-    tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
-      |inp: &mut tokora::InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
-        let out = descend::<Lx<'inp>, Ctx<'inp>, GraphQL>(inp).map(|_| ());
-        if via_entry {
-          drain_unless_terminal(inp, out)
-        } else {
-          out
-        }
-      },
-      src,
-      ParserContext::of(Rejecting {
-        on_error,
-        reject_lexer,
-      })
-      .with_recursion_limiter(RecursionLimiter::with_limitation(0)),
-    )
-    .expect_err("a budget of 0 refuses the first descent")
-  }
-
-  let mut cells = 0usize;
-  for on_error in [
-    OnError::Accept,
-    OnError::RejectWithPayload,
-    OnError::RejectWithSentinel,
-  ] {
-    for reject_lexer in [false, true] {
-      // A clean tail and one that does not lex, because only the second makes a drain observable.
-      for src in ["{ f }", "{ f } ~ ~", "~ { f }", "~"] {
-        for via_entry in [false, true] {
-          assert_eq!(
-            run(src, via_entry, on_error, reject_lexer),
-            Which::Recursion,
-            "{src:?} (via_entry={via_entry}, on_error={on_error:?}, \
-             reject_lexer={reject_lexer}): the saved refusal was displaced"
-          );
-          cells += 1;
-        }
-      }
-    }
-  }
-  assert_eq!(cells, 3 * 2 * 4 * 2, "the cell set collapsed");
-}
-
 /// tokora's **own** descent trip lands terminal in both dialects, and not on a string.
 ///
 /// # What this pins, and why it is not covered by anything above
 ///
 /// `lossless_error_impls!` generates two conversions onto a dialect's error container that both
 /// mean *the frame budget refused*, and only one of them was repaired by smear issue #169.
-/// `FromNestingLimit` — the one [`descend`](smear::parser::lossless::depth::descend) calls —
-/// moved to `ErrorData::NestingLimitExceeded`, precisely because a `Cow` discriminator is one
-/// reword away from answering `false` forever. `From<RecursionLimitReached>` — the one
-/// [`InputRef::descend`](tokora::InputRef::descend) carries as a where-clause — kept
-/// `Other("nesting limit exceeded")`, and `Other`'s [`MaybeTerminal`](tokora::error::MaybeTerminal)
-/// arm answers **`false`**. A trip arriving through it was therefore classified *recoverable*, and
-/// a root loop resynchronised past it: the pre-#169 amplification, on the one carrier #169's
-/// repair did not reach.
+/// `FromNestingLimit` — the one `depth::descend` calls for the **emitted** diagnostic — moved to
+/// `ErrorData::NestingLimitExceeded`, precisely because a `Cow` discriminator is one reword away
+/// from answering `false` forever. `From<RecursionLimitReached>` — the one
+/// [`InputRef::descend`](tokora::InputRef::descend) carries as a where-clause — was left on
+/// `Other("nesting limit exceeded")`, and `Other`'s
+/// [`MaybeTerminal`](tokora::error::MaybeTerminal) arm answers **`false`**. A trip arriving
+/// through it was therefore classified *recoverable*, and a root loop resynchronised past it: the
+/// pre-#169 amplification, on the one carrier #169's repair did not reach. It is on
+/// `NestingLimitExceeded` now, and these four cells are what says so.
 ///
 /// # Why it is a value assertion rather than an end-to-end parse
 ///
-/// Nothing shipped reaches this conversion today, and that is measured rather than assumed:
+/// **Not because nothing shipped reaches the conversion.** An earlier revision of this note said
+/// so, on the strength of a pre-check inside `depth::descend` that refused at
+/// `min(ceiling, inp.recursion().limitation())` before ever calling `inp.descend()`. That function
+/// does not work that way any more, and the guidance was obsolete in the direction that matters:
+/// it **probes** — `inp.descend().map(|_| ())` — and the `Err` the probe hands back **is** this
+/// impl's output, which `depth::descend` then returns unchanged after emitting the
+/// `FromNestingLimit` diagnostic beside it. Every lossless parser-frame refusal in either dialect
+/// is a value this impl built, and it is the value the six document roots stop on.
 ///
-/// * every one of smear's 28 descending production call sites goes through
-///   [`depth::descend`](smear::parser::lossless::depth::descend), which refuses at
-///   `min(ceiling, inp.recursion().limitation())` **before** calling `inp.descend()` — so
-///   `live < limitation()` holds at the call, tokora's `check()` fails only at
-///   `depth > limitation()`, and the trip cannot fire;
-/// * tokora's own internal descents are the two Pratt engines (`input_ref/pratt.rs`,
-///   `parser/pratt/expr.rs`), and neither dialect uses Pratt at all.
+/// What a parse still cannot do is **redden** on the arm. `depth::root_turn` ends the document
+/// when the entry's error `is_terminal()` **or** when tokora's own resource-trip counter moved
+/// during that entry, and a refusal always moves the counter — so the roots stop on the trip term
+/// whatever arm the carrier answers. That second term is deliberate (smear PR #189), and it is
+/// exactly what makes an end-to-end parse the wrong instrument for this claim: the carrier is the
+/// subject, and the parse has a reason to stop that does not consult it.
 ///
-/// So the impl is live for exactly two populations — a consumer driving the **public** generic
-/// layer with its own composition, and smear itself the moment `depth::descend` stops pre-checking
-/// — and neither has a parse in this tree to observe. A conversion no test can redden is a
-/// conversion that drifts, which is the argument the `MaybeTerminal` censuses in
+/// So the assertion is on the value. A conversion no test can redden is a conversion that drifts,
+/// which is the argument the `MaybeTerminal` censuses in
 /// `smear-parser/src/*/error/tests/terminal.rs` already make about their own arms.
 ///
 /// # The plant
@@ -1283,3 +1080,30 @@ fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
 
   assert_eq!(cells, 4, "the cell set collapsed");
 }
+
+// FOUR CELLS OF THIS SUITE LIVE IN `smear-parser/src/graphql/lossless/tests.rs` — smear PR #189,
+// round 5. They drove `root_turn`, `RootStop` and `drain_unless_stopped`, which that round
+// narrowed to `pub(crate)`: this file is an integration test, so it is a separate crate and sees
+// `pub` and nothing else. Moving them was the alternative to losing them.
+//
+// THE ADDRESS IS THE DIALECT'S AND NOT THE SUBSTRATE'S. `smear-parser/src/lossless/depth/tests.rs`
+// is where they landed first and gate 6 — `smear/tests/lossless_isolation.rs` — reddened on it:
+// every one of those cells pins GraphQL's lexer and its `Lang` marker, which under `lossless/`
+// puts a dialect inside the dialect-generic substrate. Recreating that file reddens gate 6 again.
+//
+// They are `a_refusal_is_the_error_returned_even_under_a_rejecting_emitter`,
+// `each_term_of_a_roots_stop_is_alone_on_a_population`,
+// `a_caught_trip_does_not_silence_a_later_failures_drain` and
+// `a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it`. THE FIRST OF THEM DID NOT COME
+// THROUGH THE MOVE UNCHANGED, and an earlier version of this comment said all four did. Round 5
+// rewrote its entry cells to reach the drain through `drain_unless_stopped`, whose residual
+// reading of the trip witness answers before `drain_unless_terminal` is consulted — so that cell
+// measures the witness now and no longer the trait. The trait's own population is carried over
+// there by a fifth cell,
+// `a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone`, which was written
+// for it in round 6 rather than moved.
+//
+// Every plant recorded in either file is stated over all nineteen cells, because splitting the
+// file did not split the population: `NestingLimitExceeded => false` in both dialects still leaves
+// 18 passing with `tokoras_own_descent_trip_lands_terminal_in_both_dialects` the one that reddens,
+// and that cell is here.
