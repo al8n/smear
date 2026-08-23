@@ -1362,9 +1362,16 @@ where
     }
     let a = self.scratch.merge_fields[first as usize];
     let b = self.scratch.merge_fields[other as usize];
-    let subject = self
-      .resolve_merge_field(other)?
-      .map(|field| response_name(field).source().clone());
+    // Through `Validator::subject`, which charges the spelling before copying it.
+    //
+    // This was the last direct `source().clone()` in the crate: al8n/smear#198 centralised the
+    // charge at that door and swept its own module for callers, and this one was in a file that
+    // branch was fenced out of. The rebase onto al8n/smear#196 is what put it in reach — the same
+    // shape as the two the sweep did find, and reachable here once per reported conflict.
+    let subject = match self.resolve_merge_field(other)? {
+      Some(field) => Some(self.subject(response_name(field))?),
+      None => None,
+    };
     let mut diagnostic = Diagnostic::new(Rule::FieldSelectionMerging, b.span)
       .related(a.span)
       .context(Context::Merge(conflict));
