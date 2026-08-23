@@ -52,9 +52,8 @@ where
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
     .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
+      increase_token(lexer);
+      f(lexer)
     })
 }
 
@@ -74,9 +73,8 @@ where
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
     .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
+      increase_token(lexer);
+      f(lexer)
     })
 }
 
@@ -133,6 +131,52 @@ where
   lexer.extras.decrease_recursion();
   // right punctuation also increases the token count
   lexer.extras.increase_token();
+}
+
+/// The lossless `error(TokenErrors, …)` callback, charge included.
+///
+/// # Why the charge lives here and not in the four callbacks
+///
+/// Both dialects install this callback at both source types, so there are four
+/// `cst_default_error` bodies — `{graphql,graphqlx}/handlers/{str,slice}.rs` — and they differ on
+/// exactly two things: how the first unit of the unmatched slice is read (`char` against `u8`) and
+/// which dialect's `LexerError` constructs the value. The charge is neither of those, and it was
+/// written out four times.
+///
+/// Four byte-identical copies of a load-bearing charge is the shape that lets one drift. Deleting
+/// `increase_token` from any single copy left that dialect-and-source lexer processing unmatched
+/// input with no regard for `max_tokens` — the fail-open smear issue #183 closed for the rules —
+/// and the gate on it reached one of the four. Here the charge is one line reached by all four, so
+/// a copy that stops charging can only do it by abandoning this call, which is a visibly larger
+/// edit than deleting a line.
+///
+/// The two varying pieces come in as arguments, which is the shape [`handle_number_suffix`] and
+/// [`lit_float_suffix_error`] already use for dialect-specific error construction.
+///
+/// The charge is on the **attempt**: input no rule matched is a lexeme the scanner tried, and a
+/// ceiling that cannot see it is a ceiling untrusted input walks straight past. No `check()` runs
+/// here — like [`decrease_recursion_depth_and_increase_token`], this route relies on the one
+/// post-scan `check()` tokora's logos adapter runs outside the `Ok`/`Err` split, which is why a
+/// ceiling of `n` stops the lex at `n + 1` lexemes rather than at `n`.
+#[inline(always)]
+pub(super) fn cst_default_error<'a, Char, T, E>(
+  lexer: &mut Lexer<'a, T>,
+  first: impl FnOnce(&Lexer<'a, T>) -> Option<Char>,
+  unknown_char: impl FnOnce(Span, Char, usize) -> E,
+  unexpected_eoi: impl FnOnce(Span) -> E,
+) -> E
+where
+  T: Logos<'a, Extras = LosslessLimits>,
+{
+  match first(lexer) {
+    Some(ch) => {
+      increase_token(lexer);
+      let span = lexer.span();
+      let position = span.start;
+      unknown_char(span.into(), ch, position)
+    }
+    None => unexpected_eoi(lexer.span().into()),
+  }
 }
 
 #[inline]

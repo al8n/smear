@@ -527,7 +527,14 @@ impl State for SyntacticLimits {
 /// The **token** half is left at tokora's unlimited default and is not part of issue #61's
 /// decision: a token count is bounded by the input length, so unlike nesting depth it cannot
 /// exhaust the native stack. It is carried here because the lossless lexer's `Extras` is the
-/// combined tracker, and it is settable so that a caller who wants a total-work bound has one.
+/// combined tracker, and it is settable so that a caller who wants the lex to stop early can say
+/// where.
+///
+/// **It is not a total-work bound**, and an earlier revision of this paragraph said it was. The
+/// whole of this type is the lexer's rewindable state, so a recovery scan that finds nothing
+/// restores it and refunds every charge it made; what survives is the count of lexemes that
+/// survived. [`max_tokens`](Self::max_tokens) states what the ceiling therefore bounds, and names
+/// the number a caller sizing a defence has to use instead.
 ///
 /// ```
 /// use smear_lexer::limits::{LosslessLimits, MAX_NESTING_DEPTH};
@@ -581,6 +588,10 @@ impl LosslessLimits {
   }
 
   /// The same budget with `max` as its token ceiling.
+  ///
+  /// See [`max_tokens`](Self::max_tokens) for what the number counts — lexemes attempted, tallied
+  /// in state a failed recovery scan gives back — and for the durable produce-event count that
+  /// follows from it, which is roughly eight times this one.
   #[inline(always)]
   pub const fn with_max_tokens(self, max: usize) -> Self {
     Self(Limiter::with_trackers(
@@ -595,7 +606,86 @@ impl LosslessLimits {
     self.0.recursion().limitation()
   }
 
-  /// The token ceiling this budget refuses past.
+  /// The token ceiling this budget refuses past — counted in lexemes the scanner **attempted**,
+  /// and counted in **rewindable** lexer state, so what it bounds is one scan attempt rather than
+  /// the parse. It is not a durable work budget. The number that is, is below.
+  ///
+  /// # What it bounds: the lexemes that survive, plus the attempt in flight
+  ///
+  /// Every lossless lexeme charges this tally before its rule runs, so the unit is the lexeme the
+  /// scanner *tried* rather than the token it managed to produce. Rules reach the charge through
+  /// the five hooks in `smear-lexer`'s `handlers` module; input **no** rule matches reaches it
+  /// through `cst_default_error`, the logos `error(…)` callback, which is a charge route and not a
+  /// rule. But the tally is a field of this type, this type is
+  /// [`Lexer::State`](tokora::Lexer::State), and lossless recovery scans ahead through tokora's
+  /// `InputRef::sync_balanced`, whose no-match exit **restores the lexer state** along with the
+  /// position, the dedup watermark and the emissions. Every charge that scan made comes back with
+  /// it, so a lexeme crossed by eight failed scans is charged once.
+  ///
+  /// What this ceiling refuses past is therefore *surviving lexemes plus the attempt in flight*,
+  /// and what `with_max_tokens(n)` buys is a lex that stops one lexeme after its `n`th survivor —
+  /// measured, GraphQL `-` repeated 4 000 times under `with_max_tokens(100)` reports exactly 101
+  /// diagnostics and stops. That is a real ceiling on how much document a parse will look at. It
+  /// is not a statement about how much scanning happened on the way there.
+  ///
+  /// # The durable number, which is the one a defence is sized against
+  ///
+  /// The count no rollback refunds is the input layer's — `TokenBudgetTally::spent`, every item
+  /// tokora's driver ever handed back, a re-lex included. What bounds *that* is smear issue #168's
+  /// scan allowance, `scan_allowance_exhausted` in `smear-parser/src/lossless/recover.rs`, which
+  /// refuses to start a recovery scan once
+  ///
+  /// ```text
+  /// spent > SCAN_ALLOWANCE_FACTOR * committed + SCAN_ALLOWANCE_FLOOR
+  /// ```
+  ///
+  /// and whose `committed` is this tally, so it is at most `max_tokens + 1`. **A
+  /// `with_max_tokens(n)` budget therefore permits on the order of `8n + 4096` produce-events
+  /// rather than `n`**, and that module's docs are where the two constants and their derivation
+  /// live.
+  ///
+  /// Measured, because the multiplier is the whole of the difference: `[ type ] ` repeated 2 000
+  /// times is 12 000 lexical items; `with_max_tokens(12_000)` **completes** — the tally is refunded
+  /// by every failed scan, so it never gets past the 12 000 lexemes the document actually contains
+  /// and nothing is ever refused on its account — and the parse records **99 963** produce-events.
+  /// That ratio belongs to the two constants and not to that document: it is
+  /// `SCAN_ALLOWANCE_FACTOR + SCAN_ALLOWANCE_FLOOR / n`.
+  /// `max_tokens_does_not_bound_the_work_the_scan_allowance_does`, in
+  /// `smear/tests/resync_allowance.rs`, is the pin on both sides of that ceiling, and what it runs
+  /// is two shapes at two sizes in each dialect: **8.330 / 8.164** for `[ type ] ` at 12 000 and
+  /// 24 000 items, **8.337 / 8.169** for `! ` at the same two. Those four are the readings
+  /// something in this tree reproduces.
+  ///
+  /// Wider than that gate, and marked so because nothing reproduces it: 8.330 / 8.334 / 8.337 over
+  /// #168's four census shapes at 12 000 items in both dialects, and
+  /// 9.320 / 8.655 / 8.330 / 8.164 / 8.082 over `[ type ] ` at
+  /// 3 000 / 6 000 / 12 000 / 24 000 / 48 000 items as the floor amortises. That is a campaign
+  /// measurement, kept because re-deriving the bound wants it.
+  ///
+  /// The durable cell is reachable — it is tokora's own `TokenBudget`, configured through an
+  /// `InputContext` — and no lossless door installs one. Doing so is smear issue #193 rather than
+  /// part of this repair: PR #189 is restructuring exactly that door plumbing, and the two changes
+  /// at once could not be reviewed against a stable base.
+  ///
+  /// # The unit changed, and the direction it changed in
+  ///
+  /// Every lossless lexeme charges this tally before its rule runs. Until smear issue #183 the
+  /// two hooks that wrap a fallible rule — `tt_hook_and_then` and `tt_hook_and_then_into_errors` —
+  /// charged through `Result::inspect`, which runs on `Ok` alone, so a rule that failed cost
+  /// nothing and four rules that can only fail (`.` and `..`, GraphQL's `-` and `+`) could never
+  /// charge at all.
+  ///
+  /// A ceiling whose whole job is to bound what an untrusted document can cost therefore bounded
+  /// **nothing** over malformed input, and it failed open on the cheaper document to write:
+  /// measured at `with_max_tokens(100)`, 4 000 `!` truncated at 2 diagnostics while 4 000 `-`
+  /// parsed to the end at 4 001. Both truncate now, at 2 and 101.
+  ///
+  /// For well-formed input the two units are identical, because a rule that succeeds was also a
+  /// rule that was attempted. For malformed input the attempted count is the larger of the two, so
+  /// an existing budget became **stricter** rather than looser — the safe direction for a defence,
+  /// and the reason this is a documented change of meaning rather than a silent one. A caller
+  /// parsing input that is expected to carry lexer errors and who sized a budget against the old
+  /// unit should raise it by the number of bad lexemes it must tolerate.
   #[inline(always)]
   pub const fn max_tokens(&self) -> usize {
     self.0.token().limitation()

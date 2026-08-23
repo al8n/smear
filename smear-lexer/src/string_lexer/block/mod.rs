@@ -41,6 +41,33 @@ variant_type!(
 );
 
 /// A block string representation in GraphQL.
+///
+/// # Neither a map key nor an ordering against `str`/`[u8]`
+///
+/// Both refusals, and the reasoning behind each, are written out on
+/// [`LitInlineStr`](super::LitInlineStr) — this type is the other half of the same shape. It is an
+/// enum, so its derived `Ord` ranks `Plain` ahead of `Complex` before it compares a byte, while a
+/// cross-type impl would answer on the source alone; two relations, and [`PartialOrd`]'s
+/// requirements hold across implementations. The pins are the same two, in this type's spelling:
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::LitStr;
+///
+/// let LitStr::Block(lit) = LitStr::try_from("\"\"\"z\"\"\"").unwrap() else { unreachable!() };
+/// let _ = lit < *"\"\"\"m\"\"\"";
+/// ```
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::LitStr;
+///
+/// let LitStr::Block(lit) = LitStr::try_from(b"\"\"\"z\"\"\"".as_slice()).unwrap() else {
+///   unreachable!()
+/// };
+/// let _ = lit < *b"\"\"\"m\"\"\"".as_slice();
+/// ```
+///
+/// Per this repository's convention the error codes are checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippets do not compile at all.
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant, Unwrap, TryUnwrap,
 )]
@@ -151,6 +178,12 @@ impl_common_traits!(LitBlockStr::<&'a [u8]>::as_bytes);
 impl_common_traits!(LitComplexBlockStr::<&'a str>::as_str);
 impl_common_traits!(LitComplexBlockStr::<&'a [u8]>::as_bytes);
 
+// The complex carrier only. `LitBlockStr` is an enum, and its derived `Ord` ranks `Plain` ahead of
+// `Complex` before it reads a byte, so a source-ordered impl beside it would not be part of the
+// same order — see `impl_source_ordering`.
+impl_source_ordering!(LitComplexBlockStr::<&'a str>::as_str);
+impl_source_ordering!(LitComplexBlockStr::<&'a [u8]>::as_bytes);
+
 #[inline(always)]
 fn is_blank_line(s: &[u8]) -> bool {
   s.iter().all(|&b| b == b' ' || b == b'\t')
@@ -200,8 +233,8 @@ fn block_body(raw: &str) -> &str {
 /// # Value, not spelling
 ///
 /// The same split as [`LitInlineStr`](super::LitInlineStr)'s conversion: `as_str`,
-/// [`Deref`](core::ops::Deref), [`AsRef`], [`Borrow`](core::borrow::Borrow) and
-/// `From<LitBlockStr<&str>> for &str` answer the **source spelling**, `"""` delimiters and all;
+/// [`Deref`](core::ops::Deref), [`AsRef`] and `From<LitBlockStr<&str>> for &str` answer the
+/// **source spelling**, `"""` delimiters and all;
 /// this one answers the cooked value. `Plain` used to answer the spelling too, which made the two
 /// variants disagree about what the conversion was for.
 ///

@@ -924,6 +924,25 @@ fn a_refused_probe_run_stops_at_the_refusal() {
 /// Charging every insertion's probe run bounds the chain as well as the walk: an `L`th name into a
 /// bucket first walks the `L - 1` there, so the run this document can build is `√(2 · budget)`
 /// rather than one per field.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND ITS FIXTURE CANNOT FIT IN A 32-BIT INTERPRETED ADDRESS SPACE. What \
+            is asserted below is `interner_compares()` against a ceiling — a claim about how much \
+            work a colliding document can buy, not about whether that work has undefined \
+            behaviour, and the interner's MIR is interpreted by every sibling in this file that \
+            names a variable at all. What it costs is the search: `colliding_names` walks \
+            candidates until 512 of them share one bucket of 2048, holding EVERY candidate it \
+            rejected in `by_bucket` until it returns, which is on the order of a million live \
+            `String` allocations at once. Under `i686-unknown-linux-gnu` that is `resource \
+            exhaustion: there are no more free addresses in the address space`, and the whole \
+            `-p graphql-proto --lib` binary dies with it — `ci/miri_sb.sh` already carries \
+            `-Zmiri-address-reuse-rate=1.0` for that target and records it as measured \
+            insufficient, and no reuse is possible inside one call where nothing has been freed \
+            yet. The three `colliding_fragment_names` gates above run the same search at half the \
+            mask and DO complete in this binary, which is what puts the peak in this call rather \
+            than in the accumulation. Declared in `ci/miri_scope.py`'s ignore table, which is \
+            what stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn a_colliding_set_of_document_variables_cannot_outrun_the_budget() {
   /// Wide enough that the uncharged version's `n²/2` is two orders of magnitude past the ceiling.

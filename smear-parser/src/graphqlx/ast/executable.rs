@@ -1,7 +1,5 @@
 //! GraphQLx executable-definition AST aliases and enums.
 
-use core::borrow::Borrow;
-
 use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
@@ -42,6 +40,26 @@ pub type VariablesDefinition<
   crate::executable::VariablesDefinition<DescribedVariableDefinition<S, Span, Ty>, Span, Container>;
 
 /// The GraphQLx operation keyword (`query`, `mutation`, or `subscription`).
+///
+/// # Not a map key reachable through `&str`
+///
+/// Every variant carries a span and this type derives `Eq` and `Hash` over it, while
+/// [`as_str`](Self::as_str) answers a per-variant **constant** — so the `Borrow<str>` impl this
+/// type used to carry promised an agreement that does not hold in either direction. Gone, and the
+/// map below does not compile:
+///
+/// ```compile_fail,E0308
+/// use std::collections::HashMap;
+/// use smear_parser::graphqlx::ast::OperationType;
+///
+/// let map: HashMap<OperationType, ()> = HashMap::new();
+/// let _ = map.get("query");
+/// ```
+///
+/// Use [`as_str`](Self::as_str) or `AsRef<str>` and key a `HashMap<&str, _>` on that.
+///
+/// Per this repository's convention the error code is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -97,13 +115,6 @@ impl<Span> IntoSpan<Span> for OperationType<Span> {
 impl<Span> AsRef<str> for OperationType<Span> {
   #[inline]
   fn as_ref(&self) -> &str {
-    self.as_str()
-  }
-}
-
-impl<Span> Borrow<str> for OperationType<Span> {
-  #[inline]
-  fn borrow(&self) -> &str {
     self.as_str()
   }
 }

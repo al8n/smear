@@ -116,7 +116,9 @@
 //! `spent == committed` holds for a parse in which **every produced item both survives and
 //! increments the tally**. That is narrower than "an honest parse", and the wording here has been
 //! wrong twice already — first as `spent <= source bytes`, then as an unqualified identity — so
-//! the two exceptions are named rather than left to be discovered a third time.
+//! the exceptions are named rather than left to be discovered a third time. One of the two has
+//! since been closed, and it is still written out below, because the arithmetic underneath it is
+//! what the gates here are calibrated on.
 //!
 //! **Exception 1 — re-lexing.** An item lexed twice is charged twice to `spent` and once to the
 //! tally, because the tally lives in `L::State` and comes back with the rewind. In this tree the
@@ -126,41 +128,48 @@
 //! speculation is four single-token probes, and the remainder is the failed scan this guard exists
 //! to bound. This exception is the mechanism, not a leak in it.
 //!
-//! **Exception 2 — lexer errors.** tokora charges `spent` for *every* item the lexer hands back,
-//! errors included ("a lexer error is charged. This is the shape the budget exists for"). smear's
-//! tally does not: `smear-lexer`'s `tt_hook_and_then` and `tt_hook_and_then_into_errors` increment
-//! through `Result::inspect`, which runs on `Ok` alone, and the rules routed through them include
-//! several that **never** succeed — `.` and `..` (unterminated spread), `-` and `+` (unexpected
-//! character) — plus every malformed number and unterminated string. `tt_hook`, `tt_hook_map`,
-//! `increase_recursion_depth_and_token` and `decrease_recursion_depth_and_increase_token` are
-//! unconditional; those four cover all punctuation, all trivia, identifiers and comments.
+//! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
+//! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included
+//! ("a lexer error is charged. This is the shape the budget exists for"). smear's tally did not:
+//! `smear-lexer`'s `tt_hook_and_then` and `tt_hook_and_then_into_errors` incremented through
+//! `Result::inspect`, which runs on `Ok` alone, and the rules routed through them include several
+//! that **never** succeed — `.` and `..` (unterminated spread), GraphQL's `-` and `+` (unexpected
+//! character) — plus every malformed number and unterminated string. So an unbroken error run moved
+//! the numerator and not the denominator, and the ratio inflated without bound: **514** over a
+//! document of one `!` per 256 unspaced `-`.
 //!
-//! So error density inflates the ratio without bound — measured at **514** over a document of one
-//! `!` per 256 **unspaced** `-` — and unlike re-lexing it is *linear* work being charged, which the
-//! guard has no business rationing.
+//! Both hooks charge when the rule is **attempted** now, which is smear issue #183. The repair was
+//! owed on its own terms rather than to this guard — the same asymmetry meant
+//! `LosslessLimits::max_tokens` bounded *nothing* over malformed input, truncating 4 000 `!` at 2
+//! diagnostics under a budget of 100 while letting 4 000 `-` through at 4 001 — and closing it
+//! makes every lossless lexeme charge exactly once, so `spent` and the tally count the same events
+//! again. The measured signature: GraphQL's `-` read `spent = 80 001` against `committed = 60 000`
+//! and now reads `committed + 1`, and GraphQLx's `-.5` read 20 040 against 39.
+//! `an_error_run_no_longer_burns_the_scan_allowance` is the pin, and it runs the atoms that used to
+//! burn precisely so that their absence is what gets measured.
 //!
-//! The spacing is load-bearing and the first version of this sentence omitted it. A space is a
-//! counted commit, so `! - - - …` with the same 256 dashes reads **8.00** rather than 514: it is
-//! the *unbroken* error run that separates the two counters, and any committed token between them
-//! closes the gap again. Sixty-four unspaced dashes read 130; sixty-four spaced read 8.02.
+//! What that repair did **not** give `max_tokens` is a durable work bound, and the documentation
+//! that landed beside it claimed one — "lexemes the scanner attempted", of a tally `committed`
+//! above is the other name for, living exactly where a rewind can reach it. The bound on the
+//! durable side is this guard, stated in that knob's own terms two sections down.
 //!
-//! ## Why exception 2 is a bounded cost rather than a repair
+//! That leaves one exception rather than two, so the identity above is exact for any parse that
+//! never re-lexes.
 //!
-//! Because it is nearly unreachable, and where it is reachable it is small and self-clearing.
-//! A run of error lexemes does not become tokens the parser recovers from — the scanner emits a
-//! diagnostic per bad lexeme and keeps looking — so a document dense in them reaches **no recovery
-//! call at all**: `- + 00 1.` repeated 4 000 times each measure `spent = 0`, `committed = 0`,
-//! `refusals = 0`. Interleaving them with junk that *does* reach recovery inflates the ratio to
-//! 514, and refusing there costs nothing, because those scans were going to fail anyway.
+//! ## What error density used to cost, kept because `m` outlives it
 //!
-//! The reachable cost needs a third thing: an error run of `k` lexemes, long enough to blow the
-//! allowance, followed by a junk run whose scan would have **succeeded**.
+//! It was never much, because a run of error lexemes does not become tokens the parser recovers
+//! from — the scanner emits a diagnostic per bad lexeme and keeps looking — so a document dense in
+//! them reaches **no recovery call at all**: `- + 00 1.` repeated 4 000 times each measure
+//! `spent = 0`, `committed = 0`, `refusals = 0`. The reachable cost needed a third thing: an error
+//! run of `k` lexemes, long enough to blow the allowance, followed by a junk run whose scan would
+//! have **succeeded**.
 //!
-//! Below `SCAN_ALLOWANCE_FLOOR` nothing happens at all. Above it the guard refuses until the
-//! denominator catches up, and the rate it catches up at is **not a constant** — it is set by how
-//! many items the junk commits per refusal. Refusals continue while `k + c > FACTOR * c + floor`,
-//! so they stop at `c = (k - floor) / (FACTOR - 1)` committed items; a junk run committing `m`
-//! items per refusal therefore takes
+//! Below `SCAN_ALLOWANCE_FLOOR` nothing happened at all. Above it the guard refused until the
+//! denominator caught up, and the rate it caught up at was **not a constant** — it was set by how
+//! many items the junk commits per refusal. Refusals continued while `k + c > FACTOR * c + floor`,
+//! so they stopped at `c = (k - floor) / (FACTOR - 1)` committed items; a junk run committing `m`
+//! items per refusal therefore took
 //!
 //! ```text
 //! refusals ≈ (k - SCAN_ALLOWANCE_FLOOR) / ((SCAN_ALLOWANCE_FACTOR - 1) * m)
@@ -172,37 +181,30 @@
 //! | `!` (dense) | 1 | 2 273 | 4 130 | 10 844 |
 //! | formula | | 2 272 / 1 136 | 4 129 / 2 064 | 10 843 / 5 421 |
 //!
-//! **`m` is why the first version of this note was wrong.** It read `(k - floor) / 16`, which is
+//! Every cell of it reads **1** now, and the formula is what the gate prints beside that 1: the
+//! number a reintroduced success-only charge would restore.
+//!
+//! **`m` is why the first version of this note was wrong**, and it outlives exception 2 because it
+//! is a property of the junk rather than of the lexer. It read `(k - floor) / 16`, which is
 //! `m = 2` — a property of the `! ` witness it was measured on, not of the guard. A dense `!!!!`
 //! suffix commits one item per refusal instead of two and doubles the count, and the pin written
 //! beside it (`beyond <= k / 8`) held for `! ` at every size and **broke for the dense shape at
-//! k = 33 000**, exactly where `k/7 - 585 > k/8` predicts. The pin now asserts the formula and the
-//! gate runs the dense shape, which is the one that stresses it.
+//! k = 33 000**, exactly where `k/7 - 585 > k/8` predicts.
 //!
-//! **`m` cannot be zero, which is what makes this self-clearing at all.** [`unexpected`]'s
-//! no-progress fallback consumes exactly one token through `try_expect`, and a consumed token is
-//! by definition one the lexer produced *and* the tally counted — error lexemes never reach the
-//! parser, because the scanner absorbs them into diagnostics on the way past. So every refusal
-//! moves the denominator by at least one. Measured over every single-token junk alphabet in both
-//! dialects, per refusal rather than averaged over the run: the smallest gap between two
-//! consecutive refusals is **1** for dense junk and 2 for spaced, and zero never occurs.
-//! `every_refusal_commits_at_least_one_item` runs both dialects, and it has to — GraphQLx
-//! carries 46 `tt_hook_and_then` rules of its own, so the arithmetic behind exception 2 is its
-//! arithmetic too, even though its richer token set commits most ASCII junk and makes the regime
-//! harder to reach there.
+//! **`m` cannot be zero, which is what makes this self-clearing at all**, and that part the repair
+//! did not touch. [`unexpected`]'s no-progress fallback consumes exactly one token through
+//! `try_expect`, and a consumed token is by definition one the lexer produced *and* the tally
+//! counted — error lexemes never reach the parser, because the scanner absorbs them into
+//! diagnostics on the way past. So every refusal moves the denominator by at least one. Measured
+//! over every single-token junk alphabet in both dialects, per refusal rather than averaged over
+//! the run: the smallest gap between two consecutive refusals is **1** for dense junk and 2 for
+//! spaced, and zero never occurs. `every_refusal_commits_at_least_one_item` runs both dialects.
 //!
 //! **That is a floor on `m`, not a promise that the guard re-closes.** Re-closing needs the local
-//! commit rate to outpace the local spend rate, so junk carrying more than `FACTOR - 1` error
-//! lexemes per committed token holds the guard shut for as long as that regime lasts — it re-opens
-//! when the regime ends, not after a bounded number of refusals. The table above prices exactly
-//! that case. What `m >= 1` buys is that the denominator is never *frozen*, which is what makes
-//! the count proportional to `k` rather than unbounded.
-//!
-//! Repairing it belongs in `smear-lexer`, not here — the tally would have to increment before the
-//! rule runs rather than after it succeeds — and that changes what `LosslessLimits::max_tokens`
-//! counts, which is a public knob with its own contract. It is worth doing on its own terms: that
-//! same asymmetry means `max_tokens` bounds **nothing** over malformed input today, and a budget
-//! of 100 truncates 4 000 `!` at 2 diagnostics while letting 4 000 `-` through at 4 001.
+//! commit rate to outpace the local spend rate, so junk whose scans keep failing holds the guard
+//! shut for as long as that regime lasts — it re-opens when the regime ends, not after a bounded
+//! number of refusals. What `m >= 1` buys is that the denominator is never *frozen*, which is what
+//! keeps the count proportional to the waste rather than unbounded.
 //!
 //! ## The bound is on the whole parse, and it does not depend on the shape
 //!
@@ -213,6 +215,26 @@
 //! `FACTOR * T + floor` plus the one scan in flight when the guard closes — **linear in the
 //! document, whatever order the shape puts its progress and its scans in**.
 //!
+//! `T` is where a configured `LosslessLimits::max_tokens` enters, and it is the only way that knob
+//! reaches the durable count at all: the tally stops the lex one lexeme past its ceiling, so
+//! `committed <= min(T, max_tokens + 1)` and the total becomes `FACTOR * max_tokens + floor`.
+//! **That is the number a caller sizing a defence needs, and it is eight times the one they
+//! configured.** Measured: `[ type ] ` repeated 2 000 times is 12 000 lexical items, and
+//! `with_max_tokens(12_000)` — a ceiling equal to the whole document, so it never trips — records
+//! **99 963** produce-events against `FACTOR * 12 000 + floor = 100 096`. The ratio is
+//! `FACTOR + floor / T` rather than anything about the document.
+//!
+//! `max_tokens_does_not_bound_the_work_the_scan_allowance_does` is the pin, and `smear-lexer`'s
+//! `LosslessLimits::max_tokens` carries the same statement at the door a caller actually reads.
+//! What that gate runs is two shapes at two sizes in each dialect, and its four readings —
+//! 8.330 / 8.164 for `[ type ] ` at 12 000 and 24 000 items, 8.337 / 8.169 for `! ` at the same
+//! two — are the only ones anything here reproduces. Wider than the gate, taken by hand:
+//! 8.330 / 8.334 / 8.337 over the four census shapes at 12 000 items in both dialects, and
+//! 9.320 / 8.655 / 8.330 / 8.164 / 8.082 over `[ type ] ` at
+//! 3 000 / 6 000 / 12 000 / 24 000 / 48 000 as the floor amortises. Those are a campaign
+//! measurement rather than a witness, and they are labelled so rather than dropped because a
+//! reader re-deriving the bound wants them.
+//!
 //! That is worth stating because the self-clearing property reads as a liability from the other
 //! side: a shape that alternates cheap commits with expensive failed scans re-opens the guard on
 //! purpose. It cannot win, because refilling the allowance costs exactly the committed items that
@@ -220,12 +242,17 @@
 //! and buys back only `FACTOR` times its own cost, out of a total that is already capped at `T`.
 //! `the_guard_cannot_be_refilled_into_superlinearity` asserts that, and it asserts it by
 //! **doubling** rather than by reading `spent / committed`. That ratio is not a work bound and must
-//! not be pinned as one: on an error-dense construction it climbs 73 → 93 → 109 → 118 across four
-//! doublings *while `spent` doubles at ×1.99, ×1.99, ×2.00* — perfectly linear work, a metric that
-//! grows 1.6× over the same range. The numerator counts error lexemes the denominator does not
-//! (exception 2), so their ratio drifts with error density by construction, and a threshold on it
-//! fails with no defect present. Doubling the construction and watching the numerator is the
-//! mechanism; the ratio was an artifact of the four error-free shapes it was read on.
+//! not be pinned as one: when this was written it climbed 73 → 93 → 109 → 118 across four doublings
+//! of an error-dense construction *while `spent` doubled at ×1.99, ×1.99, ×2.00* — perfectly linear
+//! work, a metric that grew 1.6× over the same range, so a threshold on it would have failed with
+//! no defect present.
+//!
+//! Closing exception 2 removed that particular drift — the same four doublings read **8.0, 8.0,
+//! 8.0, 8.0** now, because the numerator no longer counts events the denominator misses — and the
+//! gate stays on the numerator anyway. A ratio sitting at `FACTOR` is a restatement of the guard's
+//! own comparison rather than an independent reading of the work, and any threshold on it carries
+//! a constant belonging to the shapes it was read on. Doubling the construction and watching
+//! `spent` carries neither.
 //!
 //! **What that gate cannot see, stated here so it is not rediscovered.** One doubling at one
 //! size is blind to superlinearity milder than about `n^1.38` — the gap between the 2.6
@@ -521,6 +548,24 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// **They must be the same unit.** Dividing events by bytes is what the first version of this did,
 /// and the module docs carry the measurement that killed it.
 ///
+/// # This is the parse's durable work bound, and `max_tokens` is not
+///
+/// `smear-lexer`'s `LosslessLimits::max_tokens` reads like the total-work knob and is not one:
+/// its tally is `committed` above, which lives in `Lexer::State` and comes back with
+/// `sync_balanced`'s rewind, so a failed scan refunds every charge it made and a lexeme crossed
+/// eight times is charged once. `spent` is the reading no rollback refunds, and this comparison is
+/// the only thing standing between it and the document. Rearranged against the ceiling a caller
+/// configured, with `committed <= max_tokens + 1`:
+///
+/// ```text
+/// produce-events <= SCAN_ALLOWANCE_FACTOR * max_tokens + SCAN_ALLOWANCE_FLOOR
+/// ```
+///
+/// The module header carries the measurement — 99 963 produce-events under a ceiling of 12 000 —
+/// and `max_tokens`'s own docs carry it at the door a caller reads. Installing the durable cell
+/// there instead, tokora's `TokenBudget` through an `InputContext`, is smear issue #193; it is
+/// held behind PR #189's restructuring of that door plumbing rather than declined.
+///
 /// # Why this takes numbers instead of the handle
 ///
 /// `committed` is the lexer state's token tally, and reaching it means naming `smear-lexer` —
@@ -601,6 +646,7 @@ pub mod scan_allowance {
     static PEAK_COMMITTED: Cell<usize> = const { Cell::new(0) };
     static LAST_REFUSAL_COMMITTED: Cell<usize> = const { Cell::new(0) };
     static MIN_COMMIT_BETWEEN_REFUSALS: Cell<usize> = const { Cell::new(usize::MAX) };
+    static RESTART_POINTS_AT_HAND: Cell<usize> = const { Cell::new(0) };
   }
 
   // The write half is gated where its caller is. `scan_allowance_exhausted` is the only thing
@@ -625,6 +671,13 @@ pub mod scan_allowance {
     LAST_REFUSAL_COMMITTED.with(|c| c.set(committed));
   }
 
+  /// Ungated, unlike its two neighbours: [`super::resync_to`] is the caller and it exists without
+  /// a dialect, so there is no `dead_code` to move one level down.
+  #[inline]
+  pub(super) fn record_restart_point_at_hand() {
+    RESTART_POINTS_AT_HAND.with(|c| c.set(c.get().saturating_add(1)));
+  }
+
   #[cfg(any(feature = "graphql", feature = "graphqlx"))]
   #[inline]
   pub(super) fn record(spent: usize, committed: usize) {
@@ -639,6 +692,7 @@ pub mod scan_allowance {
     PEAK_COMMITTED.with(|c| c.set(0));
     LAST_REFUSAL_COMMITTED.with(|c| c.set(0));
     MIN_COMMIT_BETWEEN_REFUSALS.with(|c| c.set(usize::MAX));
+    RESTART_POINTS_AT_HAND.with(|c| c.set(0));
   }
 
   /// How many scans this thread has refused since its [`reset`].
@@ -659,6 +713,19 @@ pub mod scan_allowance {
   /// whole subject.
   pub fn peak_committed() -> usize {
     PEAK_COMMITTED.with(Cell::get)
+  }
+
+  /// How many times [`resync_to`](super::resync_to) took its **refused** path and found a restart
+  /// point already at hand — the `head_satisfies` arm, and the only place it is exercised.
+  ///
+  /// `refusals() > 0` is not a substitute and the difference is measured, not theoretical. The
+  /// guard is a rate limiter that re-opens as committed items accrue, so a document can refuse
+  /// twelve thousand scans in a prefix and still arrive at the shape under test with the guard
+  /// **open** — `[ type ] ` repeated does exactly that, at 11 937 refusals and zero calls counted
+  /// here. A cell that asserts only `refusals() > 0` then measures the unrefused path under a name
+  /// that says otherwise, which is what this counter exists to stop.
+  pub fn restart_points_at_hand_under_refusal() -> usize {
+    RESTART_POINTS_AT_HAND.with(Cell::get)
   }
 
   /// The **smallest** number of committed items between two consecutive refusals — `m` at its
@@ -752,7 +819,12 @@ where
   // wrong about this subsystem in this issue's own investigation, and a peek is cheaper than being
   // right about it.
   let restart_point_at_hand = if allowance_exhausted {
-    inp.head_satisfies(is_restart_point)?
+    let at_hand = inp.head_satisfies(is_restart_point)?;
+    #[cfg(all(feature = "test-support", feature = "std"))]
+    if at_hand {
+      scan_allowance::record_restart_point_at_hand();
+    }
+    at_hand
   } else {
     inp
       .sync_balanced(delimiters, |t| is_restart_point(t.data))?
