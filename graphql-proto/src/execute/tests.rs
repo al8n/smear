@@ -325,21 +325,37 @@ fn collection_work(sdl: &str, query: &str) -> u32 {
   executor.collection_work()
 }
 
-/// `n` repeats of one response key charge exactly `2n`, and the middle term is the interner.
+/// `n` repeats of one response key charge an exact total, and every term of it is named.
 ///
-/// The exact-value case, and it is exact rather than bounded because nothing about it depends on
-/// the hash: one key means one bucket with one entry, so the first selection interns after
-/// comparing nothing and every later one matches on its first comparison. Draft §6.1's lookup over
-/// the document's one definition, plus `n` selections examined, plus `n - 1` comparisons is the
-/// whole of it.
+/// Exact rather than bounded because nothing about it depends on the hash: one key means one bucket
+/// with one entry, so the first selection interns after comparing nothing and every later one
+/// matches on its first comparison.
 ///
-/// **This is the plant against an uncharged lookup.** Deleting the charge leaves `n + 1`, and
-/// nothing about the response changes.
+/// The terms, and the arithmetic is written out rather than folded so a moved number says which one
+/// moved. The key is `a`, one byte, so every [`byte_units`] below is `1`.
+///
+/// - draft §6.1's lookup over the document's one definition;
+/// - one visit per selection examined;
+/// - the **first** intern: one pass to hash the key, no entry to compare, one pass to copy it into
+///   the arena;
+/// - each **later** intern: one pass to hash, one entry compared, and one pass to `memcmp` it —
+///   reached only because the stored hash and the length agreed, which on a repeat of the same key
+///   they always do;
+/// - `expand`'s probe of the field's own spelling, once for the one group the repeats collapse to.
+///
+/// **The plants.** Delete the entry charge and the `n - 1` comparisons go. Delete either
+/// `take_bytes` and the total stops moving with the key's length — which
+/// `distinct_response_keys_are_linear_however_they_are_spelled` measures across lengths and this
+/// one pins at one.
 #[test]
 fn a_repeated_response_key_charges_one_comparison_each_time() {
+  use crate::collect::byte_units;
+
   const REPEATS: u32 = 1024;
   /// The document is one shorthand operation, which is what draft §6.1's lookup reads.
   const LOOKUP: u32 = 1;
+  /// `a`, the one response key and also the one field name `expand` probes.
+  const KEY: usize = 1;
 
   let mut query = std::string::String::from("{");
   for _ in 0..REPEATS {
@@ -347,12 +363,18 @@ fn a_repeated_response_key_charges_one_comparison_each_time() {
   }
   query.push_str(" }");
 
+  let pass = byte_units(KEY);
+  let first_intern = 2 * pass;
+  let later_intern = (REPEATS - 1) * (2 * pass + 1);
+  let expand_probe = pass;
+
   assert_eq!(
     collection_work(ONE_FIELD, &query),
-    LOOKUP + 2 * REPEATS - 1,
-    "one definition read by draft §6.1, {REPEATS} selections examined, and {} comparisons to find \
-     the one interned key each time after the first; a smaller total means a name lookup is not \
-     charging what it compares",
+    LOOKUP + REPEATS + first_intern + later_intern + expand_probe,
+    "one definition read by draft §6.1, {REPEATS} selections examined, {} comparisons to find the \
+     one interned key each time after the first, and {pass} unit(s) for every pass any of them \
+     makes over the key's bytes; a smaller total means a name lookup is not charging what it \
+     compares, or is charging entries where the work is bytes",
     REPEATS - 1
   );
 }
@@ -409,18 +431,24 @@ fn a_repeated_response_key_charges_one_comparison_each_time() {
 fn distinct_response_keys_are_linear_however_they_are_spelled() {
   const KEYS: u32 = 4096;
 
-  /// One selection examined, draft §6.1's one definition, and the entries interning it compares.
+  /// The **comparisons**, over and above every term of the total that is not one.
   ///
-  /// The last is what this gate is about, and it is under one per key: with the whole 64-bit hash
-  /// mixed, every row below costs about three quarters of a comparison per key — summed over every
-  /// table size the interner grows through, not just the last — for totals in the low seven
-  /// thousands. Two units per key is that with room, and still three orders of magnitude under the
-  /// scan.
-  const CEILING: u32 = 2 * KEYS;
+  /// That subtraction is al8n/smear#172's doing and it makes the gate sharper, not looser. The
+  /// ledger now also charges a pass over every key's bytes — hashing it and copying it into the
+  /// arena — and those terms grow with the *width* axis this fixture varies on purpose, so a
+  /// ceiling over the whole total would have had to be loose enough to admit the widest row and
+  /// would then have admitted a clustering hash on the narrowest. `row` computes what a row owes
+  /// before a single comparison, and these two bound what is left.
+  ///
+  /// The comparison term is what this gate is about, and it is under one per key: with the whole
+  /// 64-bit hash mixed, every row below costs about three quarters of a comparison per key — summed
+  /// over every table size the interner grows through, not just the last. One per key is that with
+  /// room, and still three orders of magnitude under the scan.
+  const CEILING: u32 = KEYS;
 
-  /// A lookup that compares nothing costs `1 + KEYS`, so a floor above that catches a charge
-  /// deleted outright — which `work > KEYS` alone did not.
-  const FLOOR: u32 = KEYS + KEYS / 2;
+  /// A lookup that compares nothing costs exactly the overhead, so a floor above it catches a
+  /// charge deleted outright — which `work > KEYS` alone did not.
+  const FLOOR: u32 = KEYS / 2;
 
   const NAMED: [&str; 5] = [
     "k{i}",
@@ -460,44 +488,64 @@ fn distinct_response_keys_are_linear_however_they_are_spelled() {
     name
   }
 
-  let mut rows: std::vec::Vec<(std::string::String, std::string::String)> = std::vec::Vec::new();
-  for (scheme, label) in NAMED.iter().enumerate() {
+  /// The query for one spelling, and everything its total costs that is **not** a comparison.
+  ///
+  /// Derived from the row's own names rather than written down, for the reason the collision search
+  /// in `smear_compiler::scratch` gives: a term computed from the fixture moves when the fixture
+  /// does, and a term copied out of a measurement goes stale silently.
+  fn row(spell: impl Fn(u32) -> std::string::String) -> (std::string::String, u32) {
+    use crate::collect::byte_units;
+
     let mut query = std::string::String::from("{");
+    // Draft §6.1's one definition.
+    let mut overhead = 1;
     for index in 0..KEYS {
-      query.push_str(&std::format!(" {}: a", named(scheme, index)));
+      let key = spell(index);
+      // One visit for the selection, two passes over the key's bytes to intern it — hashing it and
+      // copying it into the arena, since a distinct key never reaches the `memcmp` — and one pass
+      // over the field's own one-byte spelling for `expand`'s schema probe.
+      overhead += 1 + 2 * byte_units(key.len()) + byte_units(1);
+      query.push_str(&std::format!(" {key}: a"));
     }
     query.push_str(" }");
-    rows.push(((*label).into(), query));
+    (query, overhead)
+  }
+
+  let mut rows: std::vec::Vec<(std::string::String, std::string::String, u32)> =
+    std::vec::Vec::new();
+  for (scheme, label) in NAMED.iter().enumerate() {
+    let (query, overhead) = row(|index| named(scheme, index));
+    rows.push(((*label).into(), query, overhead));
   }
   for radix in RADICES {
     for width in WIDTHS {
-      let mut query = std::string::String::from("{");
-      for index in 0..KEYS {
-        query.push_str(&std::format!(" {}: a", generated(radix, width, index)));
-      }
-      query.push_str(" }");
+      let (query, overhead) = row(|index| generated(radix, width, index));
       rows.push((
         std::format!("x{{i:radix {} width {width}}}", radix.len()),
         query,
+        overhead,
       ));
     }
   }
 
-  for (label, query) in &rows {
+  for (label, query, overhead) in &rows {
+    let (floor, ceiling) = (overhead + FLOOR, overhead + CEILING);
     let work = collection_work(ONE_FIELD, query);
     assert!(
-      work > FLOOR,
-      "{work} units for {KEYS} distinct keys spelled {label}, under a floor of {FLOOR}. A probe \
-       that succeeds or fails still compares something, and {} is what interning them free of \
-       charge reads as",
-      KEYS + 1
+      work > floor,
+      "{work} units for {KEYS} distinct keys spelled {label}, under a floor of {floor}. A probe \
+       that succeeds or fails still compares something, and {overhead} is what interning them free \
+       of charge reads as",
     );
     assert!(
-      work <= CEILING,
-      "{work} units for {KEYS} distinct keys spelled {label}, against a ceiling of {CEILING}. \
-       Scanning the names instead of probing them costs about {}; a total between the two is the \
-       hash dropping an honest document's names into a handful of buckets, which is what the \
-       avalanche step and the fold between rounds in `smear_schema::hash_bytes` exist to stop",
+      work <= ceiling,
+      "{work} units for {KEYS} distinct keys spelled {label}, against a ceiling of {ceiling} — \
+       {overhead} of which is the walk, the interning passes and the schema probes, so the \
+       comparisons are {}. Scanning the names instead of probing them costs about {}; a total \
+       between the two is the hash dropping an honest document's names into a handful of buckets, \
+       which is what the avalanche step and the fold between rounds in `smear_schema::hash_bytes` \
+       exist to stop",
+      work.saturating_sub(*overhead),
       u64::from(KEYS) * u64::from(KEYS) / 2
     );
   }
@@ -510,22 +558,30 @@ fn distinct_response_keys_are_linear_however_they_are_spelled() {
 /// walk stopped spending native frames but still scanned every definition in the document once per
 /// spread, so a chain that no longer killed the process still took quadratic time to answer.
 ///
-/// Five terms, all linear in the chain: draft §6.1's lookup over the definitions, the index pass
-/// over them again, one push per fragment, one visit per selection, and about one comparison per
-/// spread.
+/// Eight terms, all linear in the chain: draft §6.1's lookup over the definitions, the index pass
+/// over them again, one push per fragment, one visit per selection, about one comparison per
+/// spread, and — al8n/smear#172 — a pass over the bytes of each spread's name to hash it, another
+/// over the one it matches, and one over each fragment's type condition before the schema is probed
+/// with it. Every name here is short enough for a pass to be one unit, so the total is about eight
+/// units a link.
+///
+/// The bound is two-sided and both sides are what matters: eight a link against the `LINKS² / 2`
+/// that scanning the definitions per spread costs is three orders of magnitude, so a ceiling with
+/// room in it still separates linear from quadratic.
 #[test]
 fn a_flat_fragment_chain_is_linear() {
   const LINKS: u32 = 4096;
 
   let work = collection_work(ONE_FIELD, &fragment_chain(LINKS));
   assert!(
-    work >= 3 * LINKS,
-    "the index pass alone is a definition and a fragment each, and every spread then compares at \
-     least the entry it returns; {work} units for {LINKS} links is short of that, which is what an \
-     unindexed table or an uncharged one reads as"
+    work >= 6 * LINKS,
+    "the index pass alone is a definition and a fragment each, every spread is a visit, and \
+     resolving one hashes its name and compares at least the entry it returns; {work} units for \
+     {LINKS} links is short of that, which is what an unindexed table, an uncharged one, or one \
+     charging entries where the work is bytes reads as"
   );
   assert!(
-    work <= 6 * LINKS,
+    work <= 10 * LINKS,
     "{work} units for a {LINKS}-link chain. Scanning the definitions per spread costs about {} \
      instead",
     u64::from(LINKS) * u64::from(LINKS) / 2
@@ -800,9 +856,17 @@ fn the_index_pass_reads_each_definition_once() {
   const DEFINITIONS: u32 = OPERATIONS + FRAGMENTS;
   /// Draft §6.1's lookup, which matches `Op0` on the document's first definition and stops.
   const LOOKUP: u32 = 1;
-  /// The whole request: the lookup, the root's spread, the pass, the comparison that finds the
-  /// fragment, and the field inside it.
-  const BUDGET: u32 = LOOKUP + DEFINITIONS + FRAGMENTS + 3;
+  /// Everything the request costs that is not the lookup or the index pass, and every name in it
+  /// is short enough that a pass over its bytes is one unit.
+  ///
+  /// The root's spread and the field inside the fragment are a visit each. Resolving the spread
+  /// hashes `F` (one), compares the one entry it finds (one) and `memcmp`s it (one). The fragment's
+  /// `on Query` condition is hashed before the schema is probed with it (one). Interning `a` hashes
+  /// it and copies it (two), and `expand` hashes the same spelling again to resolve the field
+  /// against the schema (one).
+  const REST: u32 = 2 + 3 + 1 + 2 + 1;
+  /// The whole request.
+  const BUDGET: u32 = LOOKUP + DEFINITIONS + FRAGMENTS + REST;
 
   let mut query = std::string::String::from("query Op0 { ...F }\n");
   for index in 1..OPERATIONS {
@@ -888,13 +952,28 @@ fn colliding_fragment_names() -> std::vec::Vec<std::string::String> {
 /// subset of the same bits. That is what lets the interner fixture pick one `mask` and have it hold
 /// through every rehash the table does on its way to that size.
 fn colliding_names(prefix: &str, mask: u32) -> std::vec::Vec<std::string::String> {
+  colliding_names_of(prefix, mask, COLLIDING, 0)
+}
+
+/// `count` names that land in one bucket of `mask + 1`: `prefix`, then a counter zero-padded to at
+/// least `width` digits.
+///
+/// The padding is what lets the *same* collision structure be searched for at several **lengths**,
+/// which is the axis a ledger over entries cannot see. Searched again per width rather than padded
+/// after the fact, because padding a name changes its hash and so changes its bucket.
+fn colliding_names_of(
+  prefix: &str,
+  mask: u32,
+  count: usize,
+  width: usize,
+) -> std::vec::Vec<std::string::String> {
   let mut by_bucket: std::vec::Vec<std::vec::Vec<std::string::String>> =
     std::vec::from_elem(std::vec::Vec::new(), mask as usize + 1);
   for candidate in 0u64.. {
-    let name = std::format!("{prefix}{candidate}");
+    let name = std::format!("{prefix}{candidate:0width$}");
     let at = smear_schema::bucket(smear_schema::hash_bytes(name.as_bytes()), mask) as usize;
     by_bucket[at].push(name);
-    if by_bucket[at].len() == COLLIDING {
+    if by_bucket[at].len() == count {
       return core::mem::take(&mut by_bucket[at]);
     }
   }
@@ -908,6 +987,28 @@ fn colliding_document(names: &[std::string::String], spread: &str) -> std::strin
     query.push_str(&std::format!("fragment {name} on Query {{ a }}\n"));
   }
   query
+}
+
+/// Everything a colliding fixture costs beyond draft §6.1's lookup and the index pass, when the
+/// one spread finds its fragment on the **first** entry it compares.
+///
+/// Derived from `spread`'s own length rather than written down, because half of it is a charge over
+/// bytes and the search that produces these names does not promise how long they are.
+///
+/// The terms: the root's spread and the field inside the fragment are a visit each; resolving the
+/// spread hashes the spelling, compares the bucket head and `memcmp`s it; the fragment's `on Query`
+/// condition is hashed before the schema is probed with it; interning the field's key `a` hashes it
+/// and copies it into an empty arena, comparing nothing; and `expand` hashes `a` again to resolve
+/// the field against the schema.
+fn colliding_spread_cost(spread: &str) -> u32 {
+  use crate::collect::byte_units;
+
+  let visits = 2;
+  let lookup = 2 * byte_units(spread.len()) + 1;
+  let condition = byte_units("Query".len());
+  let key = 2 * byte_units("a".len());
+  let probe = byte_units("a".len());
+  visits + lookup + condition + key + probe
 }
 
 /// Indexing the document's fragments is charged, so a budget too small to hold it refuses.
@@ -934,10 +1035,16 @@ fn indexing_the_documents_fragments_is_charged() {
     "a budget one unit short of the index pass must refuse rather than index for free"
   );
 
-  let served = collected_under(&schema, &document, COLLIDING_LOOKUP + COLLIDING_INDEX + 8);
+  let rest = colliding_spread_cost(&head);
+  let served = collected_under(
+    &schema,
+    &document,
+    COLLIDING_LOOKUP + COLLIDING_INDEX + rest,
+  );
   assert_eq!(
     served, None,
-    "and eight units past it is enough for the spread, its one comparison and the field it reaches"
+    "and {rest} units past it is enough for the spread, its one comparison, the passes each of \
+     those makes over a name, and the field it reaches"
   );
 }
 
@@ -953,16 +1060,146 @@ fn a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment() {
   let head = names.last().expect("the set is not empty").clone();
   let query = colliding_document(&names, &head);
 
-  // Draft §6.1's lookup over every definition, the index pass, the root's one selection, the one
-  // comparison that finds the bucket head, and the one field inside the fragment. Interning that
-  // field's key compares nothing: it is the first name in an empty arena.
-  let expected = COLLIDING_LOOKUP + COLLIDING_INDEX + 3;
+  // Draft §6.1's lookup over every definition, the index pass, and the constant every one of these
+  // fixtures pays to spread the bucket's head once. The index term is what this gate watches: it is
+  // one unit per definition and one per fragment, and `COLLIDING` names in a single bucket must not
+  // move it, because chaining pushes at a head and never probes.
+  let expected = COLLIDING_LOOKUP + COLLIDING_INDEX + colliding_spread_cost(&head);
   assert_eq!(
     collection_work(ONE_FIELD, &query),
     expected,
     "{COLLIDING} fragment names in one bucket must cost one unit each to index and no more; a \
      total above this is an insertion whose cost depends on the names"
   );
+}
+
+/// The collection ledger tracks the **bytes** a document-chosen name costs, not merely the entries
+/// it walks past.
+///
+/// # Why a third gate, when the two above already price the pile-up and the chain
+///
+/// Those price *entries*: `k` colliding names walk `k²/2` of them and the budget records `k²/2`.
+/// Neither says anything about `L`, the length of the names, and draft §2.1.9 puts no local ceiling
+/// on one. Charging entries while running bytes recorded `O(k²)` and ran `O(k² · L)` — about 512
+/// aliases of thirty-two kilobytes fit under the default `max_interned_bytes`, and their 130,816
+/// charged comparisons moved roughly four gigabytes. It does not even need the pile-up: a single
+/// long key looked up once per object position hashes and `memcmp`s its whole length for the one or
+/// two units the entry costs, and positions are a factor the query never pays for. al8n/smear#172.
+///
+/// Four sites, one row each, so a repair reaching one and not the others cannot be green:
+///
+/// - the **response-key interner**, whose keys are the document's aliases;
+/// - the **fragment index**, whose keys are the document's fragment names;
+/// - the **schema probe** a type condition goes through, whose key is the document's spelling and
+///   whose table is the schema's — the residual that cleared that one cleared the *run length* and
+///   said nothing about the hash;
+/// - the **schema probe `expand` makes with a field's name**, which collection cannot have charged
+///   for, because what collection interned is the alias.
+///
+/// Each row is the same structure at three lengths: the same collision, the same number of entries
+/// compared, the same number of selections. Only the spelling grows. A ledger over entries reads
+/// the same number three times, which is the assertion below.
+///
+/// # And the totals are exact, which says *which* passes were charged
+///
+/// The interner row's total is written out term by term. The `k²/2` walk contributes no byte term
+/// at all: the whole hash is stored beside each entry, so a bucket collision is rejected on two
+/// integers and reads nothing. That absence is the second half of the repair and the reason the
+/// first half is affordable.
+///
+/// **The plants.** Delete any one `take_bytes`/`spend_bytes` and that row's three totals collapse
+/// onto each other. Drop the stored hash and compare bytes on every chain step instead: the
+/// interner row's exact total gains a `k²/2 · byte_units` term and fails on the first width.
+#[test]
+fn the_collection_charge_tracks_the_bytes_a_name_costs() {
+  use crate::collect::byte_units;
+
+  /// Names in one bucket. Small because the search costs about `RUN × buckets` trial hashes and is
+  /// repeated at every width, and because one bucket holding every name is the worst case at any
+  /// size.
+  const RUN: usize = 64;
+  /// One bucket of 128, and a set colliding under this mask collides under every narrower one the
+  /// table grows through.
+  const MASK: u32 = 127;
+  /// Zero-padding widths, so the names are 5, 37 and 261 bytes: inside one hash chunk, several,
+  /// and many.
+  const WIDTHS: [usize; 3] = [4, 36, 260];
+
+  let mut interner = std::vec::Vec::new();
+  let mut fragments = std::vec::Vec::new();
+  let mut conditions = std::vec::Vec::new();
+  let mut field_names = std::vec::Vec::new();
+
+  for width in WIDTHS {
+    let names = colliding_names_of("k", MASK, RUN, width);
+    let length = names[0].len();
+    assert!(
+      names.iter().all(|name| name.len() == length),
+      "the search must produce names of one length, or the rows are not the same structure"
+    );
+
+    // Response keys: every name is interned, so the `RUN`th walks the `RUN - 1` already in its
+    // bucket and rejects each on the stored hash without reading a byte.
+    let mut query = std::string::String::from("{");
+    for name in &names {
+      query.push_str(&std::format!(" {name}: a"));
+    }
+    query.push_str(" }");
+    let work = collection_work(ONE_FIELD, &query);
+    // Draft §6.1's one definition; one visit per selection; two passes over each key — hashing it
+    // and copying it into the arena — with no third, because a distinct key never reaches the
+    // `memcmp`; the `RUN(RUN - 1)/2` entries the chains compare; and `expand`'s probe of the field's
+    // own one-byte spelling, once per group.
+    let walk = (RUN * (RUN - 1) / 2) as u32;
+    let expected =
+      1 + RUN as u32 + 2 * RUN as u32 * byte_units(length) + walk + RUN as u32 * byte_units(1);
+    assert_eq!(
+      work, expected,
+      "{RUN} keys of {length} bytes in one bucket: each hashed once and copied once, {walk} \
+       entries compared and none of them read"
+    );
+    interner.push((length, work));
+
+    // Fragment names: one spread of the chain's *tail*, so the lookup walks every entry in the
+    // bucket and `memcmp`s exactly the one that matches.
+    let tail = names.first().expect("the set is not empty").clone();
+    let query = colliding_document(&names, &tail);
+    fragments.push((length, collection_work(ONE_FIELD, &query)));
+
+    // Type conditions: inline fragments on a type the schema does not define, so each is hashed,
+    // missed and skipped. The spelling is the only thing that grows.
+    let mut query = std::string::String::from("{");
+    for name in &names {
+      query.push_str(&std::format!(" ... on {name} {{ a }}"));
+    }
+    query.push_str(" }");
+    conditions.push((length, collection_work(ONE_FIELD, &query)));
+
+    // Field names, which `expand` probes the schema with once per group and per object position.
+    // The **alias** is what collection interns, so a short key beside a long field name is a charge
+    // of one or two units in front of a hash of whatever the client wrote — and none of these names
+    // being a field the schema defines changes nothing about what hashing one costs.
+    let mut query = std::string::String::from("{");
+    for (index, name) in names.iter().enumerate() {
+      query.push_str(&std::format!(" k{index}: {name}"));
+    }
+    query.push_str(" }");
+    field_names.push((length, collection_work(ONE_FIELD, &query)));
+  }
+
+  for (label, row) in [
+    ("response keys", &interner),
+    ("fragment names", &fragments),
+    ("type conditions", &conditions),
+    ("field names", &field_names),
+  ] {
+    assert!(
+      row[0].1 < row[1].1 && row[1].1 < row[2].1,
+      "{label}: the charge does not move with the length: {row:?}. The same collision at three \
+       lengths costs three different amounts of work, and a ledger that counts entries reads the \
+       same number three times"
+    );
+  }
 }
 
 /// A probe run that runs out of budget stops where the budget did, not at the end of the bucket.
@@ -1141,6 +1378,10 @@ fn many_operations(count: u32) -> std::string::String {
 #[test]
 fn the_operation_lookup_charges_one_unit_per_definition_read() {
   const OPERATIONS: u32 = 512;
+  /// What collecting the one field `a` costs once the lookup has finished: one visit for the
+  /// selection, one pass over its one-byte key to hash it and one to copy it into the arena, and
+  /// one over the same spelling for `expand`'s schema probe.
+  const FIELD: u32 = 4;
 
   let query = many_operations(OPERATIONS);
   let (schema, document) = compile_against(ONE_FIELD, &query);
@@ -1158,8 +1399,8 @@ fn the_operation_lookup_charges_one_unit_per_definition_read() {
   );
   assert_eq!(
     executor.collection_work(),
-    2,
-    "and it cost one unit for that definition plus one for the field it collects"
+    1 + FIELD,
+    "and it cost one unit for that definition plus {FIELD} for the field it collects"
   );
 
   // The last operation, by name: every definition before it has to be read.
@@ -1175,8 +1416,8 @@ fn the_operation_lookup_charges_one_unit_per_definition_read() {
   );
   assert_eq!(
     executor.collection_work(),
-    OPERATIONS + 1,
-    "and pays one unit for each, plus the field"
+    OPERATIONS + FIELD,
+    "and pays one unit for each, plus the {FIELD} the field costs"
   );
 
   // No name: the walk cannot stop early, because ambiguity is only decidable at the second

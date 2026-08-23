@@ -33,8 +33,8 @@ use smear::{
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   validator::{
-    Budget, Collect, Context, Count, Diagnostic, First, Ignore, MergeConflict, Rule, Schema,
-    Scratch, validate_executable,
+    Budget, Collect, Context, Count, Diagnostic, First, Ignore, MergeConflict, Rule, RuleSet,
+    Schema, Scratch, validate_executable, validate_executable_with,
   },
 };
 
@@ -175,6 +175,55 @@ fn fired(schema: &Schema, source: &str) -> Vec<Rule> {
   rules.sort_unstable();
   rules.dedup();
   rules
+}
+
+/// The smallest `merge_work` at which `subject` comes back clean under `rules`, with `warm_with`
+/// validated on the same `Scratch` first when there is one.
+///
+/// A boundary rather than a hand-picked limit: what a document costs is the quantity these fixtures
+/// are about, so bisecting for it names the axis instead of one of its consequences. The two
+/// assertions at the end pin the boundary the search landed on, so a non-monotone engine cannot
+/// hide behind a bisection that happened to agree.
+fn least_work_that_clears(
+  schema: &Schema,
+  subject: &str,
+  warm_with: Option<&str>,
+  rules: RuleSet,
+) -> u32 {
+  let subject = parse(subject);
+  let prelude = warm_with.map(parse);
+  let clears = |limit: u32| {
+    let mut scratch = Scratch::new();
+    if let Some(prelude) = prelude.as_ref() {
+      assert!(
+        validate_executable(
+          schema,
+          prelude,
+          &mut scratch,
+          &Budget::default(),
+          &mut Ignore
+        )
+        .is_ok(),
+        "the prelude must finish, or it is not the state a real reuse leaves"
+      );
+    }
+    let budget = Budget::default().with_merge_work(limit);
+    validate_executable_with(schema, &subject, &mut scratch, &budget, rules, &mut Ignore).is_ok()
+  };
+
+  let (mut lo, mut hi) = (0u32, Budget::default().merge_work());
+  assert!(clears(hi), "the subject does not clear the default budget");
+  while lo < hi {
+    let mid = lo + (hi - lo) / 2;
+    if clears(mid) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  assert!(clears(lo));
+  assert!(lo > 0 && !clears(lo - 1), "{lo} is not a boundary");
+  lo
 }
 
 /// Which of draft 5.3.2's three requirements a document breaks, in report order.
@@ -579,8 +628,6 @@ fn the_budget_flag_pins_both_states() {
 /// clean result for a check it gave up on.
 #[test]
 fn a_refusal_with_its_rule_filtered_out_is_still_a_refusal() {
-  use smear::validator::{RuleSet, validate_executable_with};
-
   on_a_deep_stack(|| {
     let schema = build();
     let budget = Budget::default();
@@ -731,49 +778,8 @@ fn the_verdict_does_not_depend_on_history() {
     scratch.capacity()
   );
 
-  /// The smallest `merge_work` at which `subject` comes back clean, with `warm_with` validated on
-  /// the same `Scratch` first when there is one.
-  fn least_work_that_clears(schema: &Schema, subject: &str, warm_with: Option<&str>) -> u32 {
-    let subject = parse(subject);
-    let prelude = warm_with.map(parse);
-    let clears = |limit: u32| {
-      let mut scratch = Scratch::new();
-      if let Some(prelude) = prelude.as_ref() {
-        assert!(
-          validate_executable(
-            schema,
-            prelude,
-            &mut scratch,
-            &Budget::default(),
-            &mut Ignore
-          )
-          .is_ok(),
-          "the prelude must finish, or it is not the state a real reuse leaves"
-        );
-      }
-      let budget = Budget::default().with_merge_work(limit);
-      validate_executable(schema, &subject, &mut scratch, &budget, &mut Ignore).is_ok()
-    };
-
-    let (mut lo, mut hi) = (0u32, Budget::default().merge_work());
-    assert!(clears(hi), "the subject does not clear the default budget");
-    while lo < hi {
-      let mid = lo + (hi - lo) / 2;
-      if clears(mid) {
-        hi = mid;
-      } else {
-        lo = mid + 1;
-      }
-    }
-    // The search assumes the verdict is monotone in the limit; these two pin the boundary it
-    // found, so a non-monotone engine could not hide behind a bisection that happened to agree.
-    assert!(clears(lo));
-    assert!(lo > 0 && !clears(lo - 1), "{lo} is not a boundary");
-    lo
-  }
-
-  let cold = least_work_that_clears(&schema, &subject, None);
-  let warm = least_work_that_clears(&schema, &subject, Some(&prelude));
+  let cold = least_work_that_clears(&schema, &subject, None, RuleSet::ALL);
+  let warm = least_work_that_clears(&schema, &subject, Some(&prelude), RuleSet::ALL);
   println!("least merge_work that clears the subject: cold {cold}, warm {warm}");
   assert_eq!(
     cold, warm,
@@ -872,6 +878,143 @@ fn a_wide_literal_comparison_is_charged_for_its_scans() {
   payload.push_str(" }");
   let source = std::format!("{{ x: note(payload: {payload}) x: note(payload: {payload}) }}");
   assert_eq!(fired(&schema, &source), []);
+}
+
+/// Every comparison draft 5.3.2 makes over a **spelling** is charged for that spelling's length.
+///
+/// # Why a second gate, when the width one above is already one
+///
+/// `a_wide_literal_comparison_is_charged_for_its_scans` prices the *entries*: pairing `n` object
+/// fields by name is `n²` comparisons and the ledger records `n²`. It says nothing about `L`, the
+/// length of what each of those comparisons reads, and `L` is a number the client writes with no
+/// ceiling in draft §2.1.9 or §2.9. Charging entries while running bytes recorded `Θ(n²)` and ran
+/// `Θ(n² · L)` — the defect al8n/smear#196 opened against in the interner, at three more sites
+/// inside the engine that consumes it.
+///
+/// Three sites, and one axis each, so a repair that reaches one and not the others cannot be green:
+///
+/// - **argument names**, paired by `same_arguments`' two scans;
+/// - **scalar values**, compared by `same_value`'s `shallow_equal` on their source spellings;
+/// - **object-literal field names**, paired by `same_value`'s inner scan.
+///
+/// Each row is the *same structure* at two lengths — same widths, same nesting, same number of
+/// comparisons — so the only thing that moves between the two documents is how many bytes each
+/// comparison reads. A ledger over entries reads the same number twice.
+///
+/// # Only 5.3.2 is switched on, which is the point about reachability
+///
+/// The argument names below are ones the schema does not define, and 5.4.1 would ordinarily refuse
+/// the document before the merge engine ever compared them. It does not have to: `same_arguments`
+/// runs on what the *document* wrote, so a caller running `FieldSelectionMerging` alone — or one
+/// whose sink does not stop — reaches this scan with no other rule pre-empting it. The rule set
+/// here is that caller.
+///
+/// **The plants.** Replace any of the three `scan_units`/`shallow_units` charges with the entry
+/// count it replaced and that row's two boundaries become equal.
+#[test]
+fn a_comparison_over_a_spelling_is_charged_for_its_length() {
+  /// Selections per side. Small enough that the padded documents still clear the **default**
+  /// budget, which is what keeps the boundary search's upper end honest.
+  const WIDTH: usize = 24;
+  /// The two spelling lengths every row is measured at; the second is `PAD` bytes longer.
+  const PAD: usize = 200;
+
+  /// `WIDTH` names of one length, sharing a `pad`-byte prefix and differing only at the end — so a
+  /// `memcmp` between any two of them runs to the last byte rather than stopping at the first.
+  fn names(pad: usize) -> Vec<String> {
+    (0..WIDTH)
+      .map(|index| std::format!("{}{index:04}", "z".repeat(pad + 1)))
+      .collect()
+  }
+
+  /// The same arguments on both sides, in opposite orders, so every scan runs the whole width.
+  fn arguments(pad: usize) -> String {
+    let names = names(pad);
+    let mut left = String::new();
+    let mut right = String::new();
+    for name in &names {
+      left.push_str(&std::format!(" {name}: 1"));
+    }
+    for name in names.iter().rev() {
+      right.push_str(&std::format!(" {name}: 1"));
+    }
+    std::format!("{{ dog {{ x: name({left} ) x: name({right} ) }} }}")
+  }
+
+  /// The same object literal twice, its fields in opposite orders.
+  fn object_fields(pad: usize) -> String {
+    let names = names(pad);
+    let mut left = String::new();
+    let mut right = String::new();
+    for name in &names {
+      left.push_str(&std::format!(" {name}: 1"));
+    }
+    for name in names.iter().rev() {
+      right.push_str(&std::format!(" {name}: 1"));
+    }
+    std::format!("{{ x: note(payload: {{{left} }}) x: note(payload: {{{right} }}) }}")
+  }
+
+  /// `WIDTH` list elements of one string literal, compared element by element.
+  fn scalar_values(pad: usize) -> String {
+    let body = "z".repeat(pad + 1);
+    let mut list = String::new();
+    for _ in 0..WIDTH {
+      list.push_str(&std::format!(" \"{body}\""));
+    }
+    std::format!("{{ x: note(payload: [{list} ]) x: note(payload: [{list} ]) }}")
+  }
+
+  on_a_deep_stack(|| {
+    let schema = build();
+    // Draft 5.3.2 and the two bounds that stop it, and nothing else: the point is that this scan is
+    // reached without 5.4.1 or 5.6.x having a say.
+    let rules = RuleSet::EMPTY
+      .with(Rule::FieldSelectionMerging)
+      .with(Rule::MergeWorkBudget)
+      .with(Rule::MergeDepthBudget);
+
+    for (label, build_row) in [
+      ("argument names", arguments as fn(usize) -> String),
+      ("object-literal field names", object_fields),
+      ("scalar values", scalar_values),
+    ] {
+      let short = build_row(0);
+      let long = build_row(PAD);
+
+      // Both documents merge; what separates them is only what merging costs.
+      for source in [&short, &long] {
+        let mut scratch = Scratch::new();
+        assert!(
+          validate_executable_with(
+            &schema,
+            &parse(source),
+            &mut scratch,
+            &Budget::default(),
+            rules,
+            &mut Ignore
+          )
+          .is_ok(),
+          "{label}: the fixture must merge under the default budget, or the boundary search below \
+           has nothing to search for"
+        );
+      }
+
+      let least_short = least_work_that_clears(&schema, &short, None, rules);
+      let least_long = least_work_that_clears(&schema, &long, None, rules);
+      println!(
+        "{label}: {least_short} units at {} bytes a name, {least_long} at {} bytes",
+        1 + 4,
+        PAD + 1 + 4
+      );
+      assert!(
+        least_long > least_short,
+        "{label}: the same {WIDTH} comparisons cost {least_short} units over short spellings and \
+         {least_long} over spellings {PAD} bytes longer. Equal totals mean the ledger counts the \
+         comparisons and the machine reads the bytes"
+      );
+    }
+  });
 }
 
 /// How much legitimate document the shipped default actually clears.

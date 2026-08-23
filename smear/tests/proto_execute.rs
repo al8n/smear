@@ -3355,10 +3355,12 @@ fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
 #[test]
 fn a_driver_message_refused_for_work_names_the_work_ceiling() {
   // Exactly what `{ a }` costs: draft §6.1's lookup over the document's one definition, one
-  // selection examined, and an intern into an empty table that compares nothing. So the budget is
-  // spent when the driver's failure arrives.
+  // selection examined, the two passes an intern makes over the one-byte key `a` — hashing it and
+  // copying it into an empty table, comparing nothing — and one more over the same spelling when
+  // `expand` resolves the field against the schema. So the budget is spent to the unit when the
+  // driver's failure arrives.
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(2).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(5).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
@@ -3375,7 +3377,7 @@ fn a_driver_message_refused_for_work_names_the_work_ceiling() {
     "the driver's failure is still the finding, whichever ceiling ate the text: {errors:?}"
   );
   assert!(
-    errors[0].1.contains("2 selection visits"),
+    errors[0].1.contains("5 selection visits"),
     "and the message names the ceiling that refused, which is the knob an operator can move: {}",
     errors[0].1
   );
@@ -3389,13 +3391,13 @@ fn a_driver_message_refused_for_work_names_the_work_ceiling() {
 /// An impossible runtime type the *work* ceiling could not quote says so too.
 #[test]
 fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
-  // Draft §6.1's lookup over one definition, one selection at the root and an intern that compares
-  // nothing, as above. The driver then names `pet` as the runtime type: the schema knows the
-  // spelling — it is a field — so `sym` answers and `type_of_sym` does not, which is the "not a
-  // possible type" branch, and the name it wants to quote is the response key already sitting in
-  // that bucket.
+  // Draft §6.1's lookup over one definition, one selection at the root, the two passes interning
+  // `pet` makes over it and the one `expand`'s schema probe makes, as above. The driver then names
+  // `pet` as the runtime type: the schema knows the spelling — it is a field — so `sym` answers and
+  // `type_of_sym` does not, which is the "not a possible type" branch, and the name it wants to
+  // quote is the response key already sitting in that bucket.
   let limits = Limits {
-    max_selection_visits: NonZeroU32::new(2).expect("not zero"),
+    max_selection_visits: NonZeroU32::new(5).expect("not zero"),
     ..Limits::default()
   };
   let (_, errors) = run_bounded(
@@ -3412,7 +3414,7 @@ fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
     "still the driver naming a type the position cannot hold: {errors:?}"
   );
   assert!(
-    errors[0].1.contains("2 selection visits"),
+    errors[0].1.contains("5 selection visits"),
     "and it names the ceiling that silenced the quote; this arm used to render the arena's cap \
      unconditionally, so it read `16777216 interned bytes` against an arena that was empty: {}",
     errors[0].1

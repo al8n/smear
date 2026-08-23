@@ -82,7 +82,8 @@ use super::{
   Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
   SourceEventError, SourceField, Values,
   collect::{
-    Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields, variable_key,
+    Allowance, Fragments, Interner, Scratch, Unstored, Visits, byte_units, collect_fields,
+    variable_key,
   },
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
@@ -663,12 +664,12 @@ pub struct Limits {
   /// response key is the position — so that one refuses the position.
   ///
   /// **It bounds bytes, and the memory is a multiple of them.** Every entry carries bookkeeping the
-  /// arena's length does not count — its span, its hash-chain link, its share of the bucket table
-  /// and its slot in collection's key-to-group scratch — and a GraphQL name is at least one byte,
-  /// so `B` bytes of ceiling can be `B` entries costing about `25 · B`. That is a constant multiple
-  /// and not a second factor, which is the difference between a cost to know about and the product
-  /// shape this module refuses; it is stated because a caller choosing this number is choosing
-  /// twenty-five times it.
+  /// arena's length does not count — its span, its stored hash, its hash-chain link, its share of
+  /// the bucket table and its slot in collection's key-to-group scratch — and a GraphQL name is at
+  /// least one byte, so `B` bytes of ceiling can be `B` entries costing about `33 · B`. That is a
+  /// constant multiple and not a second factor, which is the difference between a cost to know
+  /// about and the product shape this module refuses; it is stated because a caller choosing this
+  /// number is choosing thirty-three times it.
   pub max_interned_bytes: NonZeroU32,
 
   /// How many entries a draft §7.1.7 [`Extensions`] map may hold.
@@ -3208,6 +3209,21 @@ where
     for group in scratch.groups() {
       let selections = &scratch.fields[group.start as usize..(group.start + group.len) as usize];
       let first = selections[0].1;
+      // The probe hashes the field's *document* spelling, and this runs once per object position.
+      // The response key collection interned is the **alias** when there is one, so `{ a: <a
+      // megabyte of name> }` charges a byte or two at collection and hashes a megabyte here, per
+      // position — a factor the query never pays for. Charged before the pass, in the budget that
+      // already prices every other read of a document-chosen name; a refusal is the collection
+      // budget's, which is exactly what `Exhausted::Unstored` renders.
+      if !self.visits.take(byte_units(name_bytes(first).len())) {
+        exhausted = Some((
+          Exhausted::Unstored(Unstored::Budget {
+            limit: self.visits.limit(),
+          }),
+          group.first,
+        ));
+        break;
+      }
       let Some(sym) = self.schema.sym(name_bytes(first)) else {
         // Draft 5.3.1 makes a field the type does not define a validation failure, so a validated
         // document cannot reach this. Omitting the key is the only response that cannot invent one.

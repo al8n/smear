@@ -83,6 +83,39 @@ pub(super) enum Unstored {
   },
 }
 
+/// The work one pass over `len` bytes costs: one unit per eight-byte chunk, plus one for the tail.
+///
+/// Read off [`hash_bytes`]'s own loop, which folds exactly that many rounds, and reused for the
+/// `memcmp` and the `memcpy` of the same key because all three move about a word a step.
+/// Saturating at [`u32::MAX`], so a key no budget could pay for refuses rather than wrapping.
+///
+/// # Why the ledger needs a second unit at all
+///
+/// [`Visits`] counts *things looked at* — a selection examined, an entry a lookup compares, a
+/// definition the index pass reads — and every one of those was charged one unit. That is a bound
+/// on the number of comparisons and not on the comparisons, because the keys are the document's
+/// and draft §2.1.9 puts no ceiling on a name's length: `k` aliases in one bucket recorded `O(k²)`
+/// and ran `O(k² · L)`, with `L` a number the client writes. About 512 aliases of thirty-two
+/// kilobytes fit under the default `max_interned_bytes`, and their 130,816 charged comparisons
+/// moved about four gigabytes.
+///
+/// A single long key needs no collision at all: looked up once per object position, it hashes and
+/// then `memcmp`s its whole length for the one or two units the entry costs, and positions are a
+/// factor the query does not have to pay for twice.
+///
+/// So a pass over the bytes is charged in this unit before the pass, and the whole hash is stored
+/// beside each entry so that the pass a bucket collision used to force is not made at all.
+/// al8n/smear#172.
+#[inline]
+pub(super) const fn byte_units(len: usize) -> u32 {
+  let units = len / 8 + 1;
+  if units > u32::MAX as usize {
+    u32::MAX
+  } else {
+    units as u32
+  }
+}
+
 /// An empty open-addressing slot, an unterminated chain, and "this key has no group yet".
 ///
 /// One sentinel for all three because all three are `u32` indexes into a table this module bounds
@@ -206,11 +239,20 @@ pub(super) struct Fault<'a> {
 /// behind it, and a scan by key is no longer something a walk can be written to do. See
 /// [`Groups`].
 ///
-/// **`Schema::sym`, which is examined and cleared rather than left unsaid.** `expand` and
-/// [`applies`] probe the schema's [`NameIndex`](smear_schema::NameIndex) with *document* bytes,
-/// uncharged. The rule above is what clears it: the table is populated from the **schema**, which
-/// the operator wrote, so a client chooses the lookup key and never the run it walks. That is the
-/// same question that condemned [`Fragments`], answered the other way.
+/// **`Schema::sym`, which was examined, cleared, and cleared on the wrong axis.** `expand` and
+/// [`applies`] probe the schema's [`NameIndex`](smear_schema::NameIndex) with *document* bytes.
+/// The residual here used to end there: the table is populated from the **schema**, which the
+/// operator wrote, so a client chooses the lookup key and never the run it walks — the same
+/// question that condemned [`Fragments`], answered the other way.
+///
+/// Every word of that is true about the run's **length** and silent about what one probe costs. A
+/// probe begins by hashing the key, and the key is the client's, so its length is too: a
+/// megabyte-long type condition inside a fragment reached once per object position hashed a
+/// megabyte for the one unit the selection was charged, and positions are a factor the query does
+/// not pay for twice. Both probes are charged in [`byte_units`] now, before the hash. The lesson
+/// is the same one this module keeps re-learning one dimension over: a residual that clears a site
+/// has to name the axis it clears it on, because "a client cannot lengthen the run" and "a client
+/// cannot lengthen the work" are different sentences. al8n/smear#172.
 ///
 /// # State that survives `reset`, and exactly how much of it is enforced
 ///
@@ -317,6 +359,19 @@ impl Visits {
     }
   }
 
+  /// Charges one pass over `len` bytes, in [`byte_units`].
+  ///
+  /// A unit here used to mean an *entry*, and that is a ledger over the number of things compared
+  /// and not over what comparing one costs. Every name this module reads is the **document's**, so
+  /// the client writes the length as well as the count, and the two multiply: hashing a key,
+  /// comparing it against a stored one, copying it into the arena and probing the schema with it
+  /// all read the whole key at about a word a step, so they all charge this. al8n/smear#172.
+  #[inline]
+  #[must_use]
+  pub(super) fn take_bytes(&mut self, len: usize) -> bool {
+    self.take(byte_units(len))
+  }
+
   /// [`take`](Visits::take), as the collection fault a walk returns.
   #[inline]
   fn spend(&mut self, work: u32, location: SimpleSpan) -> Result<(), Fault<'static>> {
@@ -328,6 +383,12 @@ impl Visits {
       location,
       name: None,
     })
+  }
+
+  /// [`take_bytes`](Visits::take_bytes), as the collection fault a walk returns.
+  #[inline]
+  fn spend_bytes(&mut self, len: usize, location: SimpleSpan) -> Result<(), Fault<'static>> {
+    self.spend(byte_units(len), location)
   }
 
   /// The ceiling, for the message that reports a refusal.
@@ -658,6 +719,15 @@ mod table {
     /// into this is a *fragment ordinal*, which is what [`Visited`](super::Visited) is a bitset
     /// over.
     defs: std::vec::Vec<&'a FragmentDefinition<S>>,
+    /// Each definition's whole [`hash_bytes`], parallel to `defs`.
+    ///
+    /// The same eight bytes an entry, bought for the same thing, that [`Interner`](super::Interner)
+    /// buys them for: a chain step rejects a bucket collision on this word and the name's length,
+    /// so the `memcmp` a collision used to force is not made at all. The names here are the
+    /// **document's**, and the hash is unkeyed, so the collision is constructible — and without the
+    /// stored hash `k` colliding names of `L` bytes cost `k` charged units and `k · L` compared
+    /// bytes on every spread that lands in that bucket. al8n/smear#172.
+    hashes: std::vec::Vec<u64>,
     /// The newest ordinal in each bucket, or [`NONE`]. Power-of-two length.
     heads: std::vec::Vec<u32>,
     /// The ordinal pushed into the same bucket before this one, or [`NONE`]. Parallel to `defs`.
@@ -692,6 +762,7 @@ mod table {
     pub(super) const fn new() -> Self {
       Self {
         defs: std::vec::Vec::new(),
+        hashes: std::vec::Vec::new(),
         heads: std::vec::Vec::new(),
         chain: std::vec::Vec::new(),
         indexed: false,
@@ -768,7 +839,7 @@ mod table {
     /// then cleared it: every length reads zero and every allocation is exactly where it was.
     #[cfg(test)]
     pub(super) fn reserved(&self) -> usize {
-      self.defs.capacity() + self.heads.capacity() + self.chain.capacity()
+      self.defs.capacity() + self.hashes.capacity() + self.heads.capacity() + self.chain.capacity()
     }
   }
 
@@ -809,18 +880,32 @@ mod table {
       let mask = (buckets - 1) as u32;
       self.heads.resize(buckets, NONE);
       self.chain.resize(count, NONE);
+      self.hashes.reserve(count);
       for ordinal in 0..count {
-        let at = bucket(
-          hash_bytes(self.defs[ordinal].name().source().as_ref()),
-          mask,
-        ) as usize;
+        // One pass over each fragment's name, once per document, and the hash is kept so that no
+        // later lookup or growth has to make it again. It is charged in *definitions* rather than
+        // in bytes deliberately: this reads every name exactly once for the whole executor's life,
+        // so it is a single pass over text the parser has already read, with no factor a client can
+        // apply to it. That is the question the byte charges elsewhere in this module answer the
+        // other way — see `Visits::take_bytes`.
+        let hash = hash_bytes(self.defs[ordinal].name().source().as_ref());
+        self.hashes.push(hash);
+        let at = bucket(hash, mask) as usize;
         self.chain[ordinal] = self.heads[at];
         self.heads[at] = ordinal as u32;
       }
     }
 
-    /// The fragment `name` denotes and its ordinal, charging **before** each entry compared. See
-    /// [`Fragments::get`](super::Fragments::get).
+    /// The fragment `name` denotes and its ordinal, charging **before** each entry compared and
+    /// before every pass over the spelling. See [`Fragments::get`](super::Fragments::get).
+    ///
+    /// The entry charge bounds the chain; it did not bound the chain's *cost*, because comparing
+    /// one entry was `fragment.name() == name` at whatever length the document wrote. The whole
+    /// hash is stored beside each definition now, so a chain step tests two integers and reads no
+    /// bytes, and the two passes that do read the spelling — hashing it to find the bucket, and the
+    /// one `memcmp` a matching hash and length admits — are charged in [`byte_units`] first.
+    /// Without that, `k` colliding `L`-byte names cost `k` units and `k · L` bytes per lookup, and
+    /// a document is free to pay for the pile-up once and walk it on every spread. al8n/smear#172.
     pub(super) fn get(
       &mut self,
       name: &[u8],
@@ -830,17 +915,24 @@ mod table {
       if self.heads.is_empty() {
         return Ok(None);
       }
+      visits.spend_bytes(name.len(), location)?;
+      let hash = hash_bytes(name);
       let mask = (self.heads.len() - 1) as u32;
-      let mut ordinal = self.heads[bucket(hash_bytes(name), mask) as usize];
+      let mut ordinal = self.heads[bucket(hash, mask) as usize];
       while ordinal != NONE {
         visits.spend(1, location)?;
         #[cfg(test)]
         {
           self.compares += 1;
         }
+        // What that unit buys: two integers, and no read of a name a client chose the length of.
         let fragment = self.defs[ordinal as usize];
-        if fragment.name().source().as_ref() == name {
-          return Ok(Some((ordinal, fragment)));
+        let spelling = fragment.name().source().as_ref();
+        if self.hashes[ordinal as usize] == hash && spelling.len() == name.len() {
+          visits.spend_bytes(name.len(), location)?;
+          if spelling == name {
+            return Ok(Some((ordinal, fragment)));
+          }
         }
         ordinal = self.chain[ordinal as usize];
       }
@@ -1078,12 +1170,17 @@ mod groups {
 /// # Its memory is a multiple of the byte ceiling, not the byte ceiling
 ///
 /// [`max_interned_bytes`](super::Limits::max_interned_bytes) bounds the arena's *bytes*, and every
-/// entry carries bookkeeping on top: eight bytes of `spans`, four of `chain`, up to eight of
-/// `heads`, and four of the caller's key-to-group scratch. A GraphQL name is at least one byte, so
-/// an arena of `B` bytes can hold `B` entries and cost about `25 · B`, where before this index it
-/// cost about `9 · B`. That is a constant and not a second factor, which is what keeps it a memory
-/// *cost* rather than the product shape this module refuses — but it is a constant a caller
-/// choosing the ceiling is choosing too, so [`max_interned_bytes`] says so as well.
+/// entry carries bookkeeping on top: eight bytes of `spans`, eight of `hashes`, four of `chain`, up
+/// to eight of `heads`, and four of the caller's key-to-group scratch. A GraphQL name is at least
+/// one byte, so an arena of `B` bytes can hold `B` entries and cost about `33 · B`, where before
+/// this index it cost about `9 · B`. That is a constant and not a second factor, which is what
+/// keeps it a memory *cost* rather than the product shape this module refuses — but it is a
+/// constant a caller choosing the ceiling is choosing too, so [`max_interned_bytes`] says so as
+/// well.
+///
+/// The `hashes` row is the newest eight of those, and it is bought back in CPU rather than in
+/// memory: without it a chain step reads the arena to reject a bucket collision, and a rehash reads
+/// all of it. See [`intern`](Interner::intern). al8n/smear#172.
 ///
 /// [`max_interned_bytes`]: super::Limits::max_interned_bytes
 #[derive(Debug)]
@@ -1105,6 +1202,16 @@ pub(super) struct Interner {
   /// fallback left to choose wrongly.
   names: std::string::String,
   spans: std::vec::Vec<(u32, u32)>,
+  /// Each entry's whole [`hash_bytes`], parallel to [`spans`](Interner::spans).
+  ///
+  /// Eight bytes an entry, bought for three things the budget could not otherwise see. A chain step
+  /// rejects a bucket collision on this word and the span's length, so it no longer runs a `memcmp`
+  /// whose length the client picked — the unit a step is charged buys a two-integer test, and the
+  /// bytes are read only when they are about to be equal, which is the pass the collision was the
+  /// instrument for. [`rehash`](Interner::rehash) reads it instead of hashing every stored byte
+  /// again, and so does [`restore`](Interner::restore), which unwinds a failed collection.
+  /// al8n/smear#172.
+  hashes: std::vec::Vec<u64>,
   /// Entries compared, over the executor's whole life. See [`Fragments::compares`].
   #[cfg(test)]
   compares: u64,
@@ -1128,6 +1235,7 @@ impl Interner {
     Self {
       names: std::string::String::new(),
       spans: std::vec::Vec::new(),
+      hashes: std::vec::Vec::new(),
       #[cfg(test)]
       compares: 0,
       heads: std::vec::Vec::new(),
@@ -1177,8 +1285,37 @@ impl Interner {
   /// [`Unstored::Arena`] is a storage refusal and never a lookup failure: a name already present is
   /// always returned, whatever the ceiling says, so a full arena degrades what it *records* and
   /// never what it can still *read*.
+  ///
+  /// # And the bytes are charged, because a key has no length ceiling
+  ///
+  /// Charging every entry a run compares bounds the *chain*, and it was still a ledger over
+  /// entries while the work was bytes: this hashed the whole key before any charge existed, then
+  /// charged one unit per entry and ran `&names[start..start + len] == bytes` at whatever length
+  /// the client wrote. About 512 aliases of thirty-two kilobytes fit under the default
+  /// `max_interned_bytes`, and their 130,816 charged comparisons moved roughly four gigabytes;
+  /// growth re-hashed every stored byte for nothing at all. Draft §2.1.9 puts no local ceiling on
+  /// a name, and the bucket-colliding suffixes are searchable against an unkeyed hash, so `L`
+  /// scaled the CPU with no movement in the recorded charge. It does not even need the collision:
+  /// one long key looked up once per object position hashes and `memcmp`s its whole length for the
+  /// one or two units the entry costs.
+  ///
+  /// Two changes, and the second is what makes the first cheap — the same pair
+  /// `smear_compiler`'s merge interner took, for the same reason. Every pass over the key is
+  /// charged in [`byte_units`] *before* the pass: before hashing it, before comparing it, and
+  /// before copying it into the arena. And the whole 64-bit hash is stored beside each entry, so a
+  /// chain step tests two integers and reads no bytes — on the bucket collision that is the
+  /// adversary's whole instrument the byte charge is never reached, and it is paid only when the
+  /// bytes are about to be equal. [`rehash`](Interner::rehash) and [`restore`](Interner::restore)
+  /// read that stored hash rather than hashing the arena again. al8n/smear#172.
   pub(super) fn intern(&mut self, name: &str, visits: &mut Visits) -> Result<u32, Unstored> {
     let bytes = name.as_bytes();
+    // Reading the key is work whose length the document chose, so it is charged before the read
+    // and not after it.
+    if !visits.take_bytes(bytes.len()) {
+      return Err(Unstored::Budget {
+        limit: visits.limit(),
+      });
+    }
     let hash = hash_bytes(bytes);
     if !self.heads.is_empty() {
       let mut id = self.heads[self.bucket(hash)];
@@ -1192,12 +1329,29 @@ impl Interner {
         {
           self.compares += 1;
         }
+        // What that unit buys: two integers. A bucket collision — the constructible case, and the
+        // only one an adversary has — is rejected here without touching a byte.
         let (start, len) = self.spans[id as usize];
-        if &self.names.as_bytes()[start as usize..(start + len) as usize] == bytes {
-          return Ok(id);
+        if self.hashes[id as usize] == hash && len as usize == bytes.len() {
+          if !visits.take_bytes(bytes.len()) {
+            return Err(Unstored::Budget {
+              limit: visits.limit(),
+            });
+          }
+          if &self.names.as_bytes()[start as usize..(start + len) as usize] == bytes {
+            return Ok(id);
+          }
         }
         id = self.chain[id as usize];
       }
+    }
+    // The key's last read is the copy into the arena, and it is charged like the other two. A
+    // refusal here is the budget's and not the arena's, which is what keeps the message pointing
+    // at the ceiling that actually stopped it.
+    if !visits.take_bytes(bytes.len()) {
+      return Err(Unstored::Budget {
+        limit: visits.limit(),
+      });
     }
     self
       .insert(name, hash)
@@ -1213,10 +1367,10 @@ impl Interner {
 
   /// What this is holding, as `(entries, arena bytes)`.
   ///
-  /// Entries covers `spans`, `chain` and `heads` at once: the first two are parallel to it by
-  /// construction, and `heads` is a power of two that [`rehash`](Interner::rehash) keeps at or above
-  /// it and never more than double. `clear` empties all four and shrinks none, so both numbers
-  /// survive every operation this executor runs.
+  /// Entries covers `spans`, `hashes`, `chain` and `heads` at once: the first three are parallel to
+  /// it by construction, and `heads` is a power of two that [`rehash`](Interner::rehash) keeps at or
+  /// above it and never more than double. `clear` empties all five and shrinks none, so both
+  /// numbers survive every operation this executor runs.
   #[cfg(test)]
   pub(super) fn capacity(&self) -> (usize, usize) {
     (self.spans.capacity(), self.names.capacity())
@@ -1224,8 +1378,10 @@ impl Interner {
 
   /// Appends `name` and links it, or `None` when the arena has no room.
   ///
-  /// Unbudgeted, and it does not need to be: it runs at most once per selection, which the caller
-  /// has already charged, and the rehash it may trigger is amortised over those same insertions.
+  /// Unbudgeted *here*, and it does not need to be: [`intern`](Interner::intern) charges the copy's
+  /// bytes before calling this, it runs at most once per selection, which the caller has already
+  /// charged, and the rehash it may trigger reads stored hashes rather than the arena — so it is
+  /// one step per entry and one step's worth of work, amortised over those same insertions.
   fn insert(&mut self, name: &str, hash: u64) -> Option<u32> {
     // Checked, not reasoned about. The ceiling below makes each of these unreachable, and they
     // stay because "unreachable given the ceiling" is exactly the kind of claim that stops being
@@ -1239,6 +1395,7 @@ impl Interner {
     let id = u32::try_from(self.spans.len()).ok()?;
     self.names.push_str(name);
     self.spans.push((start, len));
+    self.hashes.push(hash);
     self.chain.push(NONE);
     if self.spans.len() > self.heads.len() {
       self.rehash();
@@ -1262,6 +1419,11 @@ impl Interner {
   /// again. That ordering is not cosmetic: it is exactly what lets [`restore`](Interner::restore)
   /// unwind a suffix by taking heads, and a rehash that reversed it would leave the unwind removing
   /// entries that are not heads.
+  ///
+  /// One step per entry, and one step's worth of *work*: the hash is read out of
+  /// [`hashes`](Interner::hashes) rather than recomputed. Re-hashing made this loop cost every
+  /// stored byte in the arena while the caller had charged one unit per selection for it — true
+  /// about steps, false about work, which is the accounting al8n/smear#172 exists to correct.
   fn rehash(&mut self) {
     let buckets = self
       .heads
@@ -1271,9 +1433,7 @@ impl Interner {
     self.heads.clear();
     self.heads.resize(buckets, NONE);
     for id in 0..self.spans.len() {
-      let (start, len) = self.spans[id];
-      let hash = hash_bytes(&self.names.as_bytes()[start as usize..(start + len) as usize]);
-      let bucket = self.bucket(hash);
+      let bucket = self.bucket(self.hashes[id]);
       self.chain[id] = self.heads[bucket];
       self.heads[bucket] = id as u32;
     }
@@ -1296,6 +1456,7 @@ impl Interner {
   pub(super) fn clear(&mut self) {
     self.names.clear();
     self.spans.clear();
+    self.hashes.clear();
     self.chain.clear();
     // Emptied rather than refilled with the sentinel: writing `NONE` over every bucket would be
     // linear in the *largest* table this executor ever grew, once per operation, and an operation
@@ -1321,13 +1482,12 @@ impl Interner {
   /// is minted after this runs and not before, which is why [`Fault::name`](super::collect::Fault)
   /// carries bytes.
   ///
-  /// The index is unwound before the arena, because unlinking an entry needs the bytes the
-  /// truncation is about to remove.
+  /// The index is unwound before the arena, and the bucket each entry is unlinked from is read out
+  /// of [`hashes`](Interner::hashes) rather than recomputed from bytes the truncation is about to
+  /// remove — so the unwind is one pointer write per entry and reads no arena at all.
   pub(super) fn restore(&mut self, (names, spans): (usize, usize)) {
     for id in (spans..self.spans.len()).rev() {
-      let (start, len) = self.spans[id];
-      let hash = hash_bytes(&self.names.as_bytes()[start as usize..(start + len) as usize]);
-      let bucket = self.bucket(hash);
+      let bucket = self.bucket(self.hashes[id]);
       debug_assert_eq!(
         self.heads[bucket], id as u32,
         "an id being unwound was not the head of its bucket; the chain is no longer in decreasing \
@@ -1337,6 +1497,7 @@ impl Interner {
     }
     self.names.truncate(names);
     self.spans.truncate(spans);
+    self.hashes.truncate(spans);
     self.chain.truncate(spans);
   }
 }
@@ -1713,6 +1874,12 @@ where
           continue;
         }
         let condition = fragment.type_condition().name().source().as_ref();
+        // The probe below hashes the *document's* spelling, and the residual that cleared
+        // `Schema::sym` cleared the wrong half of it: the table is the schema's, so a client
+        // cannot lengthen the run it walks — and a client does choose every byte of the key, so it
+        // can lengthen the *hash*. A one-unit charge over a spelling with no ceiling is a ledger
+        // over the number of probes and not over probing. See `Visits::take_bytes`.
+        visits.spend_bytes(condition.len(), *spread.span())?;
         if !applies(schema, condition, object_type) {
           continue;
         }
@@ -1722,10 +1889,14 @@ where
         if !included(inline.directives(), ctx)? {
           continue;
         }
-        if let Some(condition) = inline.type_condition()
-          && !applies(schema, condition.name().source().as_ref(), object_type)
-        {
-          continue;
+        if let Some(condition) = inline.type_condition() {
+          // Charged for the same reason the spread's condition above is: the key is the client's
+          // and so is its length.
+          let condition = condition.name().source().as_ref();
+          visits.spend_bytes(condition.len(), *inline.span())?;
+          if !applies(schema, condition, object_type) {
+            continue;
+          }
         }
         stack.push((inline.selection_set(), 0));
       }

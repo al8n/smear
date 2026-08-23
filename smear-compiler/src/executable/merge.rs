@@ -68,7 +68,9 @@ use super::{
 use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
-  scratch::{MergeField, MergeFrame, MergeKid, MergeMemo, MergeSet, NONE, get_bit, hash_u32},
+  scratch::{
+    MergeField, MergeFrame, MergeKid, MergeMemo, MergeSet, NONE, byte_units, get_bit, hash_u32,
+  },
 };
 
 /// One of the two independent traversals of a merged field set.
@@ -970,8 +972,17 @@ where
     // Matching by name is a scan, so each scan is charged for its own length rather than the pair
     // being charged once: a field written with a thousand arguments is a quadratic comparison, and
     // an uncharged quadratic inside a budgeted engine is the hole the budget exists to close.
+    //
+    // And each *step* of that scan is a `memcmp` of a length the client also wrote, which is the
+    // half `right.len()` could not see. Charging the entries while running the bytes is the same
+    // defect `Names::intern` had one dimension over: `n` arguments in reverse order recorded
+    // `Θ(n²)` and ran `Θ(n² · L)`, so a few hundred four-kilobyte argument names turned a two
+    // megabyte document into more than a hundred megabytes of comparison before the default budget
+    // said anything — reachable with `FieldSelectionMerging` alone, since this scan runs before any
+    // rule about whether the schema knows those names. `scan_units` is the product.
+    // al8n/smear#196.
     for argument in left {
-      if !self.charge(right.len() as u32) {
+      if !self.charge(scan_units(right.len(), name_bytes(argument.name()).len())) {
         self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
         return ControlFlow::Continue(true);
       }
@@ -985,7 +996,7 @@ where
     // The counts already agree, but a set with a repeated argument name — draft 5.4.2's business,
     // not this rule's — could still hide a name the other side does not have.
     for argument in right {
-      if !self.charge(left.len() as u32) {
+      if !self.charge(scan_units(left.len(), name_bytes(argument.name()).len())) {
         self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
         return ControlFlow::Continue(true);
       }
@@ -1028,8 +1039,21 @@ where
         // shallow check below has already refused.
         return ControlFlow::Continue(false);
       };
-      if cursor == 0 && !shallow_equal(a, b) {
-        return ControlFlow::Continue(false);
+      if cursor == 0 {
+        // Four of `shallow_equal`'s arms compare *source spellings* and a fifth compares a
+        // variable's name, and draft §2.1 puts no more of a ceiling on an `Int`'s digits or a
+        // `String`'s characters than draft §2.1.9 does on a field name. Charging `depth` prices
+        // the descent and says nothing about the `memcmp` at the bottom of it, so the bytes are
+        // charged before they are read — for the length the comparison can actually reach, which
+        // is the shorter of the two. Every other arm settles on a tag, a boolean or a length and
+        // costs nothing here. al8n/smear#196.
+        if !self.charge(shallow_units(a, b)) {
+          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+          return ControlFlow::Continue(true);
+        }
+        if !shallow_equal(a, b) {
+          return ControlFlow::Continue(false);
+        }
       }
 
       let children = match (a.as_list(), a.as_object()) {
@@ -1048,12 +1072,16 @@ where
       let mate = match (a.as_object(), b.as_object()) {
         (Some(fields), Some(others)) => {
           // Charged for the scan, not for the field: pairing an object literal's fields by name is
-          // quadratic in its width, and the budget has to see that.
-          if !self.charge(others.len() as u32) {
+          // quadratic in its width, and the budget has to see that. Charged in *bytes* and not in
+          // entries, for the reason `same_arguments` gives: every step of the scan is a `memcmp`
+          // whose length the same client wrote, so the width and the spelling are two factors and
+          // a count sees one of them. Reading the name's length is not the scan, so it happens
+          // before the charge.
+          let name = name_bytes(fields[cursor as usize].name());
+          if !self.charge(scan_units(others.len(), name.len())) {
             self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
             return ControlFlow::Continue(true);
           }
-          let name = name_bytes(fields[cursor as usize].name());
           match others
             .iter()
             .position(|other| name_bytes(other.name()) == name)
@@ -1123,6 +1151,55 @@ where
 // ---------------------------------------------------------------------------------------------
 // free helpers
 // ---------------------------------------------------------------------------------------------
+
+/// What a scan of `entries` names costs, when the name being matched is `len` bytes.
+///
+/// One entry is one `memcmp`, and a `memcmp` is [`byte_units`] and not one unit. It stops at the
+/// first differing byte — but two names of the same length sharing a long prefix run to the end of
+/// it, and both the length and the prefix are the client's, so this is an upper bound the client
+/// can make tight and not a worst case nobody reaches.
+///
+/// **It costs an honest document nothing.** `byte_units` is `len / 8 + 1`, so every argument or
+/// object-field name of seven bytes or fewer — which is most of them — charges exactly the one
+/// unit per entry that this replaced.
+///
+/// Saturating in both directions, so a width or a length no ledger could pay for refuses through
+/// [`Work::take`](crate::scratch::Work)'s own poison value rather than wrapping under it.
+#[inline]
+fn scan_units(entries: usize, len: usize) -> u32 {
+  byte_units(len).saturating_mul(u32::try_from(entries).unwrap_or(u32::MAX))
+}
+
+/// What comparing two values at their own level costs in bytes.
+///
+/// Zero for every arm [`shallow_equal`] settles on a tag, a boolean or a length — a `memcmp` is
+/// only reached by the four that compare source spellings and by the variable, which compares a
+/// name. The length is the shorter of the two, because that is as far as a slice comparison can
+/// read.
+fn shallow_units<S>(left: &InputValue<S>, right: &InputValue<S>) -> u32
+where
+  S: AsRef<[u8]>,
+{
+  let len = match (left, right) {
+    (InputValue::Int(a), InputValue::Int(b)) => {
+      a.source().as_ref().len().min(b.source().as_ref().len())
+    }
+    (InputValue::Float(a), InputValue::Float(b)) => {
+      a.source().as_ref().len().min(b.source().as_ref().len())
+    }
+    (InputValue::String(a), InputValue::String(b)) => {
+      a.source().as_ref().len().min(b.source().as_ref().len())
+    }
+    (InputValue::Enum(a), InputValue::Enum(b)) => {
+      a.source().as_ref().len().min(b.source().as_ref().len())
+    }
+    (InputValue::Variable(a), InputValue::Variable(b)) => {
+      name_bytes(a.name()).len().min(name_bytes(b.name()).len())
+    }
+    _ => return 0,
+  };
+  byte_units(len)
+}
 
 /// Finds the argument of the same name.
 fn by_name<'a, S>(arguments: &'a [Argument<S>], wanted: &Argument<S>) -> Option<&'a Argument<S>>

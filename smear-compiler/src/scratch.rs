@@ -142,12 +142,39 @@ impl Work {
 
   /// Charges `units` and answers whether the engine may continue.
   ///
-  /// Saturating, so a document large enough to overflow the counter refuses rather than wrapping
-  /// back under the ceiling.
+  /// # Checked, which is not the same as saturating
+  ///
+  /// This saturated, and the comment said that made an overflowing document refuse rather than
+  /// wrap. True at every limit **except the largest one a caller can set**: saturation lands
+  /// `spent` on exactly [`u32::MAX`], and `spent <= limit` with `limit == u32::MAX` is `true`. So
+  /// the charge that overflowed passed, every later charge saturated onto the same value and
+  /// passed as well, and a [`Budget::merge_work`] of `u32::MAX` — a number
+  /// [`Budget::with_merge_work`] accepts — meant *no bound at all*: hashing consumed the nominal
+  /// maximum and every relink, copy and comparison after it was free.
+  ///
+  /// [`Work::take_bytes`] is what made that reachable rather than arithmetic trivia, which is why
+  /// it is repaired with the byte charges and not before them: a ledger over entries counts
+  /// document nodes, and four billion nodes is not a document anybody can send, while a ledger
+  /// over *bytes* reaches the same total from about thirty gigabytes of names.
+  ///
+  /// So the counter is checked, and [`u32::MAX`] is its poison rather than a value it may rest on:
+  /// reaching it — by overflow or exactly — refuses and leaves `spent` there, so nothing after it
+  /// can pass either. What that costs is one unit off the very top of the largest configurable
+  /// budget, and it is the whole price of the strictness. al8n/smear#196.
   #[inline]
   pub(crate) fn take(&mut self, units: u32) -> bool {
-    self.spent = self.spent.saturating_add(units);
-    self.spent <= self.limit
+    match self.spent.checked_add(units) {
+      Some(spent) if spent < u32::MAX => {
+        self.spent = spent;
+        spent <= self.limit
+      }
+      // The total overflowed, or it landed on the poison value. Both refuse, and both leave the
+      // counter where no later charge of any size the caller can name will pass either.
+      _ => {
+        self.spent = u32::MAX;
+        false
+      }
+    }
   }
 
   /// Charges one pass over `len` bytes, and answers whether the engine may continue.
@@ -598,8 +625,21 @@ impl Names {
     // chains, and no re-hash, which is what storing the hash bought — so the cost is known before
     // it is paid and is charged here rather than discovered inside the loop. The copy into the
     // arena is the key's third and last read.
+    // Both narrowings this insert needs, checked before anything is charged and long before
+    // anything is written. The arena is a `usize` and the range that names a slice of it is two
+    // `u32`s, and the gap between the two is *reachable*: `merge_work`'s ceiling admits far more
+    // than four gigabytes of names, since two charged passes over four gigabytes is about 1.07
+    // billion units. Past that an `as u32` does not fail to intern — it **wraps**, and a wrapped
+    // range reads back as somebody else's bytes, so an existing response name compares as distinct
+    // and the merge check it owed is skipped, or the slice below panics on a start above its end.
+    // Checked rather than argued, for the reason `graphql_proto`'s arena gives: "unreachable given
+    // the ceiling" is exactly the claim that stops being true when somebody sets a different
+    // ceiling. al8n/smear#196.
+    let (start, end) = arena_range(self.bytes.len(), key.len())?;
+    let id = u32::try_from(self.ranges.len()).ok()?;
+
     let relink = if self.ranges.len() + 1 > self.heads.len() {
-      self.ranges.len() as u32 + 1
+      id.saturating_add(1)
     } else {
       0
     };
@@ -609,10 +649,8 @@ impl Names {
 
     // Nothing above this line mutated anything, so a refusal leaves the interner exactly as it
     // was: there is no half-built state for a later call to read.
-    let start = self.bytes.len() as u32;
     self.bytes.extend_from_slice(key);
-    let id = self.ranges.len() as u32;
-    self.ranges.push((start, self.bytes.len() as u32));
+    self.ranges.push((start, end));
     self.hashes.push(hash);
     self.chain.push(NONE);
     if self.ranges.len() > self.heads.len() {
@@ -718,13 +756,32 @@ const fn finalize(mut hash: u64) -> u64 {
   hash ^ (hash >> 31)
 }
 
+/// The `(start, end)` a key of `len` bytes occupies after `filled` bytes of arena, or [`None`]
+/// when that pair does not fit a `u32`.
+///
+/// A function rather than two `as` casts at the call site, because the endpoints have to be known
+/// to be representable **before** the arena is grown: a refusal discovered afterwards would leave
+/// bytes in the arena that no range names. See [`Names::intern`]'s insert for what a wrapped range
+/// costs. al8n/smear#196.
+#[inline]
+fn arena_range(filled: usize, len: usize) -> Option<(u32, u32)> {
+  let start = u32::try_from(filled).ok()?;
+  let end = start.checked_add(u32::try_from(len).ok()?)?;
+  Some((start, end))
+}
+
 /// The work one pass over `len` bytes costs: one unit per eight-byte chunk, plus one for the tail.
 ///
 /// Read off [`hash_bytes`]'s own loop, which folds exactly that many rounds, and reused for the
 /// `memcmp` and the `memcpy` of the same key because all three move about a word a step. Saturating
 /// at [`u32::MAX`], so a key no ledger could pay for refuses rather than wrapping.
+///
+/// The merge engine charges with it too, and not only the interner: pairing two argument lists or
+/// two object literals by name is a scan whose every step is a `memcmp` of a length the client
+/// wrote, so the scan's charge is this many units per entry rather than one. `merge::scan_units`
+/// is that product.
 #[inline]
-const fn byte_units(len: usize) -> u32 {
+pub(crate) const fn byte_units(len: usize) -> u32 {
   let units = len / 8 + 1;
   if units > u32::MAX as usize {
     u32::MAX
@@ -1040,6 +1097,104 @@ mod tests {
   /// An interner with nothing to refuse it, for the cases that are about identity and not cost.
   fn unbounded() -> Work {
     Work::new(u32::MAX)
+  }
+
+  /// A ceiling of [`u32::MAX`] is still a ceiling.
+  ///
+  /// [`Work::take`] saturated, and the comment above it said that made an overflowing document
+  /// refuse rather than wrap. It did — at every limit but the one a caller reaches by asking for
+  /// the most work they can ask for. Saturation lands `spent` on exactly [`u32::MAX`], and
+  /// `spent <= limit` with `limit == u32::MAX` is **true**, so the charge that overflowed passed
+  /// and so did every charge after it, each saturating onto the same value. `merge_work` at its
+  /// public maximum bounded nothing at all.
+  ///
+  /// The byte charges are what put that in reach rather than leaving it arithmetic trivia: a
+  /// ledger over entries counts document nodes and four billion nodes is not a document, while a
+  /// ledger over *bytes* gets there from about thirty gigabytes of names.
+  ///
+  /// **The plant.** Restore `saturating_add` and the first `assert!(!…)` below fails — the ledger
+  /// says yes to a charge that overflowed it — and so does every one after.
+  #[test]
+  fn an_overflowing_charge_refuses_at_the_largest_limit_too() {
+    // The largest budget `Budget::with_merge_work` accepts.
+    let mut work = Work::new(u32::MAX);
+    assert!(
+      work.take(u32::MAX - 1),
+      "one unit short of the ceiling is inside it"
+    );
+    assert!(
+      !work.take(1),
+      "the charge that reaches the ceiling is refused, not admitted onto it"
+    );
+    assert!(
+      !work.take(1),
+      "and the ledger stays refused; a counter that saturates and then answers `true` has no \
+       bound left to enforce"
+    );
+    assert!(!work.take(u32::MAX), "at any size");
+
+    // A single charge no counter could hold refuses on its own, without a run-up.
+    let mut work = Work::new(u32::MAX);
+    assert!(!work.take(u32::MAX));
+    assert!(!work.take(1));
+
+    // Under an ordinary ceiling nothing moves: the limit is what refuses, exactly where it did.
+    let mut work = Work::new(10);
+    assert!(work.take(10), "spending the whole budget is spending it");
+    assert!(!work.take(1));
+    let mut work = Work::new(10);
+    assert!(
+      !work.take(u32::MAX),
+      "and a charge that would overflow is refused here as it always was"
+    );
+  }
+
+  /// An arena range that will not narrow is refused before anything is written.
+  ///
+  /// The endpoints of a name's slice are `u32`s over a `usize` arena, and the gap between the two
+  /// is *reachable*: `merge_work`'s public maximum admits far more than four gigabytes of names,
+  /// since two charged passes over four gigabytes is about 1.07 billion units. An `as u32` past
+  /// that does not fail to intern — it **wraps**.
+  ///
+  /// The wrap is spelled out below rather than described, because both of its consequences follow
+  /// from the same arithmetic: a range whose end lands under its start panics on the slice, and one
+  /// that lands somewhere else entirely reads back as another name's bytes — so an interned
+  /// response name compares as distinct and the merge check it owed is skipped.
+  ///
+  /// **This is the one repair on this branch with no behavioural fixture, and that is a statement
+  /// about the trigger and not about the check.** Reaching it needs a four-gigabyte arena, which no
+  /// test can allocate, so what is pinned here is the arithmetic that decides it: the same two
+  /// inputs, through the expression that shipped and through the one that replaced it.
+  #[test]
+  fn an_arena_range_that_will_not_narrow_is_refused() {
+    use super::arena_range;
+
+    assert_eq!(arena_range(0, 0), Some((0, 0)), "the empty key is a key");
+    assert_eq!(arena_range(7, 4), Some((7, 11)));
+    assert_eq!(
+      arena_range(u32::MAX as usize - 4, 4),
+      Some((u32::MAX - 4, u32::MAX)),
+      "an arena filled to the last representable byte is still representable"
+    );
+
+    // One byte further, and the two answers part company.
+    let (filled, len) = (u32::MAX as usize - 4, 5usize);
+    assert_eq!(
+      arena_range(filled, len),
+      None,
+      "a range one byte past what a `u32` holds has to refuse"
+    );
+    #[allow(clippy::cast_possible_truncation)]
+    let shipped = (filled as u32, (filled + len) as u32);
+    assert!(
+      shipped.1 < shipped.0,
+      "the expression this replaced produces {shipped:?}, whose end is before its start: a slice \
+       that panics, and a name that reads as somebody else's bytes if it does not"
+    );
+
+    // And an arena longer than a `u32` altogether, which is the same refusal one step earlier.
+    assert_eq!(arena_range(u32::MAX as usize + 1, 1), None);
+    assert_eq!(arena_range(0, u32::MAX as usize + 1), None);
   }
 
   #[test]
