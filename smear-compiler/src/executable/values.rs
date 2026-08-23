@@ -87,7 +87,7 @@ where
     // and the variable usages inside them. The prepayment below was unconditional, so an empty
     // rule set — or one asking only for 5.3.1 — could be handed a budget refusal for a long
     // directive spelling that no enabled rule was ever going to look at.
-    if !self.reaches_directives(check) {
+    if !self.reaches_directives(check, D::HAS_VARIABLES) {
       return ControlFlow::Continue(());
     }
 
@@ -212,7 +212,7 @@ where
     // [`Validator::reaches_directives`] one level in, and for the same reason: the prepayment
     // below is unconditional, so without this an argument list would charge for its spellings
     // whether or not any rule that reads an argument, a value or a variable usage is enabled.
-    if !self.reaches_arguments(check) {
+    if !self.reaches_arguments(check, A::HAS_VARIABLES) {
       return ControlFlow::Continue(());
     }
 
@@ -366,7 +366,7 @@ where
     // fragment still descended and charged its literals to produce nothing at all — `O(operations
     // × literal size)` off `O(operations + literal size)` of input, and a `validation_work`
     // exhausted on work that could not have had an effect.
-    if !self.walks_values(check) {
+    if !self.walks_values(check, V::HAS_VARIABLES) {
       return ControlFlow::Continue(());
     }
     let base = self.scratch.values.len();
@@ -655,6 +655,10 @@ where
         if fields.len() != 1 {
           self.report_value(value, Context::Expected(expected))?;
         } else if fields[0].field_value().is_null() {
+          // `check_input_object`'s prepayment is gated on 5.6.3 and 5.6.4, and this is 5.6.1's
+          // report — so under `only(ValuesOfCorrectType)` the spelling reaches a clone before the
+          // descent one level down charges it. One field, charged in front of the copy.
+          self.spend_name(fields[0].field_name())?;
           let diagnostic = Diagnostic::new(Rule::ValuesOfCorrectType, fields[0].field_span())
             .subject(fields[0].field_name().source().clone())
             .context(Context::Type(definition.name()));
@@ -786,28 +790,40 @@ where
     let variables = self.variables;
     let base = self.variable_index.start() as usize;
     let end = self.variable_index.end() as usize;
-    let (lo, hi) = {
+    let lo = {
       let index = &self.scratch.keys[base..end];
       let named = |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
-      (
-        index.partition_point(|ordinal| named(ordinal) < bytes),
-        index.partition_point(|ordinal| named(ordinal) <= bytes),
-      )
+      index.partition_point(|ordinal| named(ordinal) < bytes)
     };
-    // Charged before the marking, because the marking is the one part of this that a document
-    // still chooses the length of: `V` definitions of one name against `U` usages of it is the
-    // product the scan was, surviving in the run.
-    self.spend((hi - lo) as u32, *name.as_span())?;
-    let first = if lo < hi {
+    // One comparison decides existence, which is what 5.8.3 asks and what 5.8.5 needs the ordinal
+    // for. The run's *end* is a different question with exactly one reader.
+    let found = lo < end - base
+      && name_bytes(
+        variables[self.scratch.keys[base + lo] as usize]
+          .node()
+          .variable()
+          .name(),
+      ) == bytes;
+
+    // **Only draft 5.8.4 reads the `used` bitset**, so only 5.8.4 pays for filling it. The run was
+    // walked, and charged, whenever any usage rule was on — and with `V` duplicate declarations
+    // against `U` usages that is `O(U · V)` of marking that 5.8.3 and 5.8.5 never look at. A gate
+    // named after a rule *family* is not a gate on the family's readers. al8n/smear#198.
+    if found && self.marks_usage {
+      let hi = {
+        let index = &self.scratch.keys[base..end];
+        let named =
+          |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
+        index.partition_point(|ordinal| named(ordinal) <= bytes)
+      };
+      self.spend((hi - lo) as u32, *name.as_span())?;
       let scratch = &mut *self.scratch;
       for slot in lo..hi {
         let ordinal = scratch.keys[base + slot];
         set_bit(&mut scratch.used, ordinal);
       }
-      Some(scratch.keys[base + lo] as usize)
-    } else {
-      None
-    };
+    }
+    let first = found.then(|| self.scratch.keys[base + lo] as usize);
 
     let Some(index) = first else {
       if self.on(Rule::AllVariableUsesDefined) {

@@ -50,6 +50,15 @@
 //!   it found sites the previous version could not see: a charge counting **selections** in front
 //!   of a comparison measured in **bytes**, and a charge gated on one of a list's two readers while
 //!   the other read it for free.
+//! - **A gate is named after its readers, not after a rule family.** The charge went
+//!   *exists → in front of the work → in the right dimension → over the right population*, and a
+//!   gate has the same four steps: the last one is asking which rules actually **read** what the
+//!   gated work produces. `Scratch::used` has exactly one reader and was filled for three;
+//!   a variable's packed type has two and was resolved for every definition, with or without a
+//!   default; and a constant tree cannot contain a variable at all, which is now
+//!   [`ValueLike::HAS_VARIABLES`](super::nodes::ValueLike::HAS_VARIABLES) — an associated const
+//!   with no default, so a third value family has to state its own case rather than inherit an
+//!   answer that happens to fit two.
 //! - **A gate belongs on the call path, not only on the condition.** Round three swept the
 //!   conditions that had been written and missed the paths that reach a charge without passing one:
 //!   a directive list precharged before anything asked whether a directive, argument, value or
@@ -389,6 +398,8 @@ where
     checks_values: checks_values(rules),
     collects_usages: collects_usages(rules),
     resolves_variable_types: rules.contains(Rule::VariablesAreInputTypes),
+    marks_usage: rules.contains(Rule::AllVariablesUsed),
+    visits_variable_definitions: visits_variable_definitions(rules),
     variables: &[],
     in_operation: false,
     variable_index: Range32::new(0, 0),
@@ -539,6 +550,20 @@ const fn reports_type_conditions(rules: RuleSet) -> bool {
     || rules.contains(Rule::FragmentsOnCompositeTypes)
 }
 
+/// Whether anything inside a variable definition's own body can act.
+///
+/// Named after the **readers**, not a family: draft 5.8.2's report, the value rules over a default
+/// value, and the directive and argument rules over the definition's directives. A default value
+/// and a definition's directives are both **constant** trees, so no usage rule appears here — a
+/// `ConstInputValue` has no variable arm, and a gate that admitted `collects_usages` was admitting
+/// a reader that cannot act.
+const fn visits_variable_definitions(rules: RuleSet) -> bool {
+  rules.contains(Rule::VariablesAreInputTypes)
+    || checks_values(rules)
+    || checks_directives(rules)
+    || checks_arguments(rules)
+}
+
 /// Whether draft 5.7's directive rules are enabled.
 const fn checks_directives(rules: RuleSet) -> bool {
   rules.contains(Rule::DirectivesAreDefined)
@@ -633,6 +658,10 @@ struct Validator<'a, 'd, S, K> {
   checks_values: bool,
   /// Whether draft 5.8.2 is enabled, which is one of the two readers of a variable's packed type.
   resolves_variable_types: bool,
+  /// Whether draft 5.8.4 is enabled, which is the **only** reader of `Scratch::used`.
+  pub(super) marks_usage: bool,
+  /// [`visits_variable_definitions`] for this run's [`RuleSet`], resolved once.
+  visits_variable_definitions: bool,
   /// [`collects_usages`] for this run's [`RuleSet`], resolved once.
   collects_usages: bool,
   /// The variable definitions of the operation being walked; empty outside one.
@@ -731,9 +760,10 @@ where
   /// | prep, per fragment | before the row is pushed | bytes, for `index_fragments`' sort | none — same |
   /// | `collect_definition_edges` | loop top, before `resolve` | depth | none — it is the traversal |
   /// | ” spread name | before `find_fragment` | bytes | none |
-  /// | 5.2.2.1 operation names | in the collection loop, before the sort | bytes | `OperationNameUniqueness` |
+  /// | 5.2.2.1 / 5.2.1.1 operation names | before the sort **and** before 5.2.1.1's subject clone | bytes | `OperationNameUniqueness` \|\| `OperationTypeExistence` |
   /// | 5.5.1.2/5.5.1.3 | before `check_type_condition` | bytes | [`reports_type_conditions`] |
   /// | 5.5.2.2 cycles | before the edge is read | one edge | `FragmentSpreadsMustNotFormCycles` |
+  /// | ” cycle subject | before the clone | bytes | ” — the population is edges, not fragments |
   /// | 5.5.1.4 reachability | before the group loop | entries | `FragmentsMustBeUsed` \|\| [`merges`] |
   /// | 5.2.4.1 collection | loop top, before `resolve` | depth | `SingleRootField` |
   /// | ” directive scan | before `conditional_directive` reads them | bytes | ” |
@@ -746,13 +776,14 @@ where
   /// | 5.4.3 presence half | before each declared argument's rescan | bytes × entries | `check` && `RequiredArguments`; its sizing fold is paid by the row above |
   /// | 5.6.3/5.6.4 field list | head of `check_input_object` | bytes | [`checks_input_objects`] |
   /// | 5.6.4 presence half | before each required field's rescan | bytes × entries | `InputObjectRequiredFields`; its sizing fold is paid by the row above |
-  /// | value walk | loop top, before `resolve` | depth | [`Validator::walks_values`] |
+  /// | value walk | loop top, before `resolve` | depth | [`Validator::walks_values`], and the family's `HAS_VARIABLES` |
   /// | ” object field name | before the schema lookup | bytes | ” |
   /// | scalar / enum literal | before the coercion reads it | bytes | `check` && `ValuesOfCorrectType` |
   /// | 5.8.1 index build | in the collection loop, before the sort | bytes | `collects_usages` \|\| `VariableUniqueness` |
-  /// | variable declared type | before `pack_type` | bytes | `VariablesAreInputTypes` \|\| `walks_values(true)` |
+  /// | variable declared type | before `pack_type` | bytes | `VariablesAreInputTypes` \|\| (`checks_values` && this definition has a default) |
   /// | 5.8.3/5.8.5 usage | before the index search | bytes | [`collects_usages`] |
-  /// | ” duplicate run | before the marking | entries | ” |
+  /// | ” duplicate run | before the marking | entries | `AllVariablesUsed` — the bitset's only reader |
+  /// | 5.6.1 OneOf subject | before the clone | bytes | `ValuesOfCorrectType` |
   /// | 5.8.5 usage type | before `pack_type` | bytes | `AllVariableUsagesAreAllowed` |
   /// | 5.8.4 | — | reads bits | charged when the index was built |
   /// | 5.2.1.1, 5.2.3.1 | — | `O(1)` per operation | charged at prep |
@@ -768,9 +799,13 @@ where
   ///   dimension smaller.
   /// - **Schema lookups keyed by an already-charged name.** Free by construction — the schema is
   ///   the server's, so its group sizes are not an input.
-  /// - **A diagnostic's subject clone.** `S: Clone`, so an owned source type copies the spelling:
-  ///   `O(L)` against a charge of `L / 8`. A constant multiple, and bounded besides — a diagnostic
-  ///   needs a node, and the node's name was charged before it was read.
+  /// - **A diagnostic's subject clone.** Charged in the name's own bytes in front of every clone,
+  ///   which bounds how many clones a run makes and how long a name each one names — and **not**
+  ///   what `S::clone` does with them, because `AsRef<[u8]> + Clone` promises no relationship
+  ///   between the two. `&str` is `O(1)` and `String` is `O(L)` against `L / 8`; anything else is
+  ///   the caller's, and [`Budget::validation_work`](super::Budget::validation_work) says so where
+  ///   a consumer reads the ceiling. Three sites cloned ahead of that charge until al8n/smear#198:
+  ///   5.2.1.1's operation name, 5.5.2.2's cycle target, and 5.6.1's OneOf field.
   #[inline]
   pub(super) fn spend(&mut self, units: u32, blame: SimpleSpan) -> ControlFlow<()> {
     match self.left.take(units) {
@@ -820,24 +855,31 @@ where
   /// properties of a definition and are asked with `check`; the last is a property of an operation
   /// and is asked every visit. With none of them enabled, precharging and resolving every
   /// directive name is a refusal a caller can be handed for a long spelling nothing reads.
+  ///
+  /// `has_variables` is [`ValueLike::HAS_VARIABLES`](super::nodes::ValueLike::HAS_VARIABLES) for
+  /// the family under this list. A **constant** directive's arguments cannot contain a variable, so
+  /// no usage rule can act on one however many are enabled — the gate used to admit them anyway,
+  /// which walked and charged a variable definition's default directives for a rule set that could
+  /// only ever conclude nothing.
   #[inline]
-  fn reaches_directives(&self, check: bool) -> bool {
+  fn reaches_directives(&self, check: bool, has_variables: bool) -> bool {
     (check && (self.checks_directives || self.checks_arguments || self.checks_values))
-      || self.collects_usages
+      || (has_variables && self.collects_usages)
   }
 
   /// Whether anything an **argument list** can reach is enabled for this visit.
   ///
   /// [`Validator::reaches_directives`] one level in: draft 5.7 is no longer downstream.
   #[inline]
-  fn reaches_arguments(&self, check: bool) -> bool {
-    (check && (self.checks_arguments || self.checks_values)) || self.collects_usages
+  fn reaches_arguments(&self, check: bool, has_variables: bool) -> bool {
+    (check && (self.checks_arguments || self.checks_values))
+      || (has_variables && self.collects_usages)
   }
 
   /// Whether anything a **value literal** can reach is enabled for this visit.
   #[inline]
-  pub(super) fn walks_values(&self, check: bool) -> bool {
-    (check && self.checks_values) || self.collects_usages
+  pub(super) fn walks_values(&self, check: bool, has_variables: bool) -> bool {
+    (check && self.checks_values) || (has_variables && self.collects_usages)
   }
 
   /// Charges a whole list of names before anything sorts, hashes or compares any of them.
@@ -1151,6 +1193,21 @@ where
   fn check_operations(&mut self) -> ControlFlow<()> {
     let document = self.document;
 
+    // Prepaid ahead of **both** readers of an operation's spelling: 5.2.2.1 sorts them, and
+    // 5.2.1.1 *clones* one into a diagnostic's subject. The charge sat inside 5.2.2.1's block, so
+    // under `RuleSet::only(OperationTypeExistence)` a caller-sized name was copied against prep's
+    // one unit — and with an owned source type that copy is an allocation the ledger never saw.
+    if self.on(Rule::OperationTypeExistence) || self.on(Rule::OperationNameUniqueness) {
+      for index in 0..self.scratch.operations.len() {
+        if !self.scratch.operations[index].named {
+          continue;
+        }
+        let name = operation_name_bytes(document, &self.scratch.operations, index as u32);
+        let span = self.scratch.operations[index].span;
+        self.spend(units(name.len()), span)?;
+      }
+    }
+
     // 5.2.1.1 — the schema must provide the root operation type the operation needs.
     if self.on(Rule::OperationTypeExistence) {
       for index in 0..self.scratch.operations.len() {
@@ -1173,9 +1230,6 @@ where
       let base = self.scratch.keys.len();
       for index in 0..self.scratch.operations.len() {
         if self.scratch.operations[index].named {
-          let name = operation_name_bytes(document, &self.scratch.operations, index as u32);
-          let span = self.scratch.operations[index].span;
-          self.spend(units(name.len()), span)?;
           self.scratch.keys.push(index as u32);
         }
       }
@@ -1323,6 +1377,9 @@ where
           let Some(target) = fragment(self.document, subject.definition) else {
             continue;
           };
+          // The name is charged once at prep, and this can clone it once **per edge**. Charged
+          // again here, in front of the clone, because the population is edges and not fragments.
+          self.spend_name(target.name())?;
           let diagnostic = Diagnostic::new(Rule::FragmentSpreadsMustNotFormCycles, edge.span)
             .subject(target.name().source().clone())
             .related(subject.span);
@@ -1698,7 +1755,12 @@ where
   /// appear.
   fn check_variable_definitions(&mut self) -> ControlFlow<()> {
     let definitions = self.variables;
-    reset_bits(&mut self.scratch.used, definitions.len());
+    // Sized by the operation's own declaration list, so it is caller-sized — and read by draft
+    // 5.8.4 and nothing else. Clearing it for a rule set that never looks is work in front of every
+    // gate this function has.
+    if self.marks_usage {
+      reset_bits(&mut self.scratch.used, definitions.len());
+    }
 
     // The operation's variable-name index, built once and read by every usage.
     //
@@ -1762,17 +1824,25 @@ where
       }
     }
 
-    // `pack_type` hashes the declared type's base name, and exactly two things read what it
-    // returns: draft 5.8.2's report, and the expected type a default value is walked against. With
-    // neither enabled there is nothing to resolve — and the charge for resolving it was
-    // unconditional, so an empty rule set paid bytes per variable for a name nobody looked at.
-    // Found by asking each charge which predicate gates it; the reviewer did not name this one.
-    let resolves_types = self.resolves_variable_types || self.walks_values(true);
+    // Nothing in the loop below has a reader. 5.8.2, the value rules over a default and the
+    // directive rules over the definition's own directives are the whole of it, and an operation's
+    // declaration list is caller-sized, so iterating it for an empty rule set is a walk with no
+    // conclusion at the end of it.
+    if !self.visits_variable_definitions {
+      return ControlFlow::Continue(());
+    }
 
     for described in definitions {
       let definition = described.node();
       let variable = definition.variable();
-      let declared = if resolves_types {
+      // `pack_type` hashes the declared type's base name, and exactly two things read what it
+      // returns: draft 5.8.2's report, and the expected type a **default value** is walked
+      // against. So the second reader is per-definition — a declaration with no default has only
+      // the first — and it is `checks_values`, not `walks_values`: a default is a constant tree
+      // and no usage rule can act on one. The gate was run-wide and admitted both.
+      let resolves_type = self.resolves_variable_types
+        || (self.checks_values && definition.default_value().is_some());
+      let declared = if resolves_type {
         self.spend_type(definition.ty(), *variable.span())?;
         self.pack_type(definition.ty())
       } else {

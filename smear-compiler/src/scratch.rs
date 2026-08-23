@@ -86,6 +86,34 @@ use super::schema::{PackedType, Range32, TypeId};
 /// The same sentence is **not** made here about [`merge_depth`](Budget::merge_depth) and
 /// [`merge_work`](Budget::merge_work). Their engine reads them itself, and what a maximum means
 /// there is that engine's to say.
+///
+/// # What [`validation_work`](Budget::validation_work) does not bound: the caller's `Clone`
+///
+/// A diagnostic carries the spelling it is about, as a value of the document's own source type —
+/// which is how a caller holding an owned source gets that spelling back at all. Producing it is a
+/// `S::clone`, and the validator charges the **name's bytes** in front of every one of them.
+///
+/// That bounds two things and not a third. It bounds **how many** clones a run can make, because a
+/// clone needs a node and every node is charged before it is read. It bounds the length of the name
+/// each clone names. It does **not** bound what `S::clone` does: the bound on this type is
+/// `AsRef<[u8]> + Clone`, and `Clone` carries no promise of any relationship to `as_ref().len()`.
+///
+/// For the source types this crate is written around the relationship holds and the ceiling is a
+/// ceiling: `&str` and `&[u8]` clone in constant time, and `String` or `Vec<u8>` copy `L` bytes
+/// against a charge of `L / 8` — a constant multiple. For a source type whose `Clone` is expensive
+/// independently of its length, the ceiling bounds the count and nothing else, and the remaining
+/// cost is the caller's own. That is the same standing this crate gives [`Sink`](super::Sink): a
+/// caller-implemented behaviour on the validator's hot path, priced by what the validator can
+/// measure and named where the measurement stops.
+///
+/// The alternative was to stop storing the spelling — a representation whose copy cost is
+/// measurable, which is the move that has closed every other unknown here. It is not taken because
+/// it removes a *capability* rather than a caveat: a diagnostic's span indexes bytes the AST owns,
+/// not bytes an owned-source caller holds, so
+/// [`Diagnostic::subject_source`](super::Diagnostic::subject_source) is the only way back to the
+/// name. A cost contract on the source type was the other, and no signature can prove a `Clone` is
+/// proportional to a length — it would be a documentation request wearing a trait bound's clothes,
+/// on every public entry point of this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Budget {
   merge_depth: u32,

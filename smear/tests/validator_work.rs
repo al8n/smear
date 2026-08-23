@@ -1561,3 +1561,141 @@ fn a_selection_only_rule_set_pays_for_selections() {
   assert!(!outcome.refused);
   assert_eq!(outcome.emitted, 0);
 }
+
+// ---------------------------------------------------------------------------------------------
+// 10. gates named after readers, not families
+// ---------------------------------------------------------------------------------------------
+
+/// A usage-only rule set does not resolve declared types or walk constant defaults.
+///
+/// The gate on a variable definition's body was the **family** `walks_values(true)`, which ORs in
+/// `collects_usages`. A default value and a definition's directives are `ConstInputValue` trees and
+/// a constant value has no variable arm to return, so no usage rule can ever conclude anything
+/// about one. The gate admitted three readers that cannot act, and it was run-wide besides — so it
+/// hashed the declared type of every definition, including the ones with no default at all.
+#[test]
+fn a_usage_only_rule_set_does_not_walk_constant_defaults() {
+  let schema = build(SCHEMA);
+  const VARS: usize = 400;
+  let long = "T".repeat(2_000);
+
+  // Short variable names, very long declared types, and a constant default on each. What a
+  // usage-only rule set needs from this list is the names; everything else has no reader.
+  let mut source = String::from("query q(");
+  for i in 0..VARS {
+    source.push_str(&std::format!("$v{i}: Boolean{long} = true, "));
+  }
+  source.pop();
+  source.pop();
+  source.push_str(") { dog { name } }");
+
+  let usages = min_budget(
+    &schema,
+    &source,
+    RuleSet::only(Rule::AllVariableUsesDefined),
+  );
+  let types = min_budget(
+    &schema,
+    &source,
+    RuleSet::only(Rule::VariablesAreInputTypes),
+  );
+  println!("constant defaults: 5.8.3 alone {usages} units, 5.8.2 alone {types} units");
+
+  // 5.8.2 is a real reader of the declared type and pays for all 400 of them — 251 units each.
+  // 5.8.3 reads none of them.
+  assert!(
+    types >= usages + (VARS as u32 * 250),
+    "5.8.2 paid only {} units more than a rule that reads no declared type",
+    types.saturating_sub(usages)
+  );
+  assert!(
+    usages < 10_000,
+    "a usage-only rule set spent {usages} units on a list of constant defaults"
+  );
+}
+
+/// Only the rule that reads the `used` bitset pays to fill it.
+///
+/// Draft 5.8.4 is its only reader. 5.8.3 asks whether a name exists and 5.8.5 wants the *first*
+/// declaration of it — neither looks at a mark. Marking was gated on `collects_usages`, the family,
+/// so with `V` duplicate declarations against `U` usages either of them alone performed and charged
+/// `O(U · V)` of marking that nothing consumed.
+#[test]
+fn only_the_rule_that_reads_the_bitset_pays_to_fill_it() {
+  let schema = build(SCHEMA);
+  const DUPES: usize = 300;
+  const USAGES: usize = 300;
+
+  let mut source = String::from("query q(");
+  for _ in 0..DUPES {
+    source.push_str("$a: Boolean, ");
+  }
+  source.pop();
+  source.pop();
+  source.push_str(") { dog {");
+  for i in 0..USAGES {
+    source.push_str(&std::format!(" u{i}: isHouseTrained(atOtherHomes: $a)"));
+  }
+  source.push_str(" } }");
+
+  let exists = min_budget(
+    &schema,
+    &source,
+    RuleSet::only(Rule::AllVariableUsesDefined),
+  );
+  let marks = min_budget(&schema, &source, RuleSet::only(Rule::AllVariablesUsed));
+  println!("duplicate marking: 5.8.3 alone {exists} units, 5.8.4 alone {marks} units");
+
+  // 5.8.4 walks the run of 300 declarations at each of 300 usages and pays for it; 5.8.3 walks no
+  // run at all.
+  let product = (DUPES * USAGES) as u32;
+  assert!(
+    marks >= exists + product / 2,
+    "5.8.4 paid {} units more than a rule that marks nothing",
+    marks.saturating_sub(exists)
+  );
+  assert!(
+    exists < product / 4,
+    "5.8.3 spent {exists} units on a bitset it never reads"
+  );
+}
+
+/// A diagnostic's subject is charged in bytes before it is cloned.
+///
+/// The clone is the one piece of caller-sized work the validator does that is not a comparison, and
+/// two sites reached it ahead of any byte charge: draft 5.2.1.1 copies the operation's name under a
+/// charge of one unit from prep — the byte charge lived under 5.2.2.1, a different rule — and
+/// 5.5.2.2 copies the cycle target's name once per **edge** against a charge taken once per
+/// fragment.
+///
+/// What this pins is the charge, not the clone: see
+/// [`Budget::validation_work`] for what `S: Clone` does and does not promise.
+///
+/// # Only 5.2.1.1 is pinned, and the other two are named here instead
+///
+/// The audit found three sites reaching a clone ahead of a byte charge, and two of them **cannot**
+/// be told apart by a budget measurement, because a neighbouring charge already scales with the
+/// same quantity. Measured: reverting 5.5.2.2's repair alone still moved the minimum budget from
+/// 1,627 to 102,377 units, because `find_fragment` charges the same fragment name once per spread
+/// on the way in. 5.6.1's OneOf field is the same one node over — the value walk charges that name
+/// one level down, immediately after the clone. Both repairs are real and neither has a witness
+/// that would fail without it, so asserting them here would be asserting the neighbour.
+#[test]
+fn a_diagnostic_subject_is_charged_before_it_is_cloned() {
+  let schema = build(SCHEMA);
+  let long = "n".repeat(20_000);
+
+  // 5.2.1.1: the schema has no mutation root, so the name is cloned into the diagnostic — and no
+  // other charge on this rule set reads an operation's spelling at all.
+  let short_op = "mutation m { x }".to_owned();
+  let long_op = std::format!("mutation m{long} {{ x }}");
+  let rules = RuleSet::only(Rule::OperationTypeExistence);
+  let short = min_budget(&schema, &short_op, rules);
+  let long_cost = min_budget(&schema, &long_op, rules);
+  println!("5.2.1.1 subject: short {short} units, 20,000-byte name {long_cost} units");
+  assert!(
+    long_cost - short >= 2_500,
+    "a 20,000-byte operation name was cloned for {} units",
+    long_cost - short
+  );
+}
