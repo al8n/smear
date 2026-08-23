@@ -50,6 +50,18 @@
 //!   it found sites the previous version could not see: a charge counting **selections** in front
 //!   of a comparison measured in **bytes**, and a charge gated on one of a list's two readers while
 //!   the other read it for free.
+//! - **The branch a document takes is the branch that decides what it owes.** A charge above a
+//!   `match`, an `||`, an `any` or a `find_map` prices the arm that costs most, and the arms below
+//!   it may cost nothing at all: an empty population searched with no comparisons, a first element
+//!   stored rather than compared, a custom scalar accepted without being read, an intersection that
+//!   overlaps in its first word. Four sub-shapes, and the audit found three more of them than the
+//!   review named — the enum arm reached by a non-enum literal, 5.4.3's presence scan stopping at
+//!   the argument it finds, and the `@skip`/`@include` test that reads seven bytes of a spelling
+//!   however long it is. **A charge is correct only when every path below it performs the work it
+//!   prices; otherwise it belongs on the arm that does.** Moving one there has a symmetric
+//!   hazard — a per-step charge is sound only when the step it prices has not yet been read, which
+//!   is why 5.5.2.3's intersection is a loop here rather than a `zip(..).any(..)` with a charge
+//!   above it.
 //! - **An over-charge is a wrong answer too, and it has two shapes.** Neither lets anything
 //!   through, so neither moves a number the way a bypass does; both refuse honest documents.
 //!   A charge sized to the work's **worst path** rather than its taken one — 5.5.2.3 billing the
@@ -1243,18 +1255,18 @@ where
     let mut current = root_selection_set(document, index);
     let blame = current.map_or(SimpleSpan::const_new(0, 0), |set| *set.span());
     while let Some(frame) = self.scratch.frames.last().copied() {
-      // `selections::resolve` costs the frame depth and runs after every pop. See
+      // One for the iteration; the depth is charged where it is spent. See
       // `selections::walk_selections` for the whole argument.
-      self.spend(self.scratch.frames.len() as u32, blame)?;
+      self.spend(1, blame)?;
       let Some(set) = current else {
         self.scratch.frames.pop();
-        current = selections::resolve(document, &self.scratch.frames);
+        current = self.resolve_frames(blame)?;
         continue;
       };
       let selections = set.selections();
       let Some(selection) = selections.get(frame.cursor as usize) else {
         self.scratch.frames.pop();
-        current = selections::resolve(document, &self.scratch.frames);
+        current = self.resolve_frames(blame)?;
         continue;
       };
       if let Some(top) = self.scratch.frames.last_mut() {
@@ -1636,16 +1648,16 @@ where
     let blame = current.map_or(SimpleSpan::const_new(0, 0), |set| *set.span());
 
     while let Some(frame) = self.scratch.roots.last().copied() {
-      // `selections::resolve` again, over the other stack. Same cost, same placement.
-      self.spend(self.scratch.roots.len() as u32, blame)?;
+      // The other stack, same shape: one for the iteration, the depth at the resolution.
+      self.spend(1, blame)?;
       let Some(set) = current else {
         self.scratch.roots.pop();
-        current = selections::resolve(document, &self.scratch.roots);
+        current = self.resolve_roots(blame)?;
         continue;
       };
       let Some(selection) = set.selections().get(frame.cursor as usize) else {
         self.scratch.roots.pop();
-        current = selections::resolve(document, &self.scratch.roots);
+        current = self.resolve_roots(blame)?;
         continue;
       };
       if let Some(top) = self.scratch.roots.last_mut() {
@@ -1664,19 +1676,22 @@ where
       match selection {
         Selection::Field(field) => {
           let response = nodes::response_name(field);
-          // Charged in **bytes**, because what happens next is a byte comparison. The depth charge
-          // at the top of this loop prices `resolve`, which is a coordinate walk and costs no
-          // bytes at all; it was the only charge on this path, so two very long aliases sharing a
-          // prefix were compared end to end for one unit. A charge in front of the work is not a
-          // charge for the work unless it is in the work's own dimension.
-          self.spend_name(response)?;
           match first_response {
+            // The first root field is *stored*, not compared: two references move and no byte is
+            // read. The charge below used to sit above this match and bill it anyway.
             None => {
               first_response = Some(response);
               first_field = Some(field.name());
             }
-            Some(seen) if name_bytes(seen) != name_bytes(response) => multiple = true,
-            Some(_) => {}
+            Some(seen) => {
+              // Charged in **bytes**, because what happens next is a byte comparison, and the
+              // iteration charge at the top of this loop prices a coordinate walk that costs no
+              // bytes at all. Two very long aliases sharing a prefix are compared end to end.
+              self.spend_name(response)?;
+              if name_bytes(seen) != name_bytes(response) {
+                multiple = true;
+              }
+            }
           }
         }
         Selection::InlineFragment(inline) => {
@@ -1742,6 +1757,18 @@ where
     ControlFlow::Continue(())
   }
 
+  /// [`selections::resolve`] over the subscription root stack, charged for the descent it makes.
+  ///
+  /// [`Validator::resolve_frames`]'s twin over the other stack, and for the same reason: the
+  /// descent costs the depth and happens only after a pop.
+  fn resolve_roots(
+    &mut self,
+    blame: SimpleSpan,
+  ) -> ControlFlow<(), Option<&'d smear_parser::graphql::ast::SelectionSet<S>>> {
+    self.spend(self.scratch.roots.len() as u32, blame)?;
+    ControlFlow::Continue(selections::resolve(self.document, &self.scratch.roots))
+  }
+
   /// Returns the `@skip` or `@include` a selection carries, if it carries one.
   ///
   /// `&mut self` and a [`ControlFlow`] because it **scans every directive on the selection**, and a
@@ -1761,11 +1788,20 @@ where
       return ControlFlow::Continue(None);
     };
     let directives = directives.directives();
-    self.spend_names(directives.iter().map(|directive| directive.name()))?;
-    ControlFlow::Continue(directives.iter().find_map(|directive| {
+    // One unit per directive **examined**, charged before examining it, and one unit is the right
+    // dimension: the test is `matches!(bytes, b"skip" | b"include")`, which compares a length and
+    // then at most seven bytes however long the spelling is. The scan also stops at the first
+    // match. Charging every name's full length up front was the wrong dimension *and* the wrong
+    // count — the two halves of al8n/smear#198's tenth and eleventh rounds in one line. Found by
+    // the taken-branch audit rather than named by the review.
+    for directive in directives {
+      self.spend(1, *directive.name().as_span())?;
       let name = directive.name();
-      matches!(name_bytes(name), b"skip" | b"include").then_some(name)
-    }))
+      if matches!(name_bytes(name), b"skip" | b"include") {
+        return ControlFlow::Continue(Some(name));
+      }
+    }
+    ControlFlow::Continue(None)
   }
 
   /// `DoesFragmentTypeApply` against a known object type.

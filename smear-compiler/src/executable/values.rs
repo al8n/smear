@@ -245,9 +245,10 @@ where
       return ControlFlow::Continue(());
     }
 
-    // Prepaid ahead of the sort below, for the reason `check_directives` states. It also pays for
-    // the fold in 5.4.3's presence half further down, which walks this same list to size its
-    // per-scan charge.
+    // Prepaid ahead of the sort below, for the reason `check_directives` states, and for the
+    // per-argument `Schema::sym` in the loop that follows it. 5.4.3's presence half no longer needs
+    // it: that scan charges each spelling as it resolves it, which is what let the sizing fold —
+    // an `O(arguments)` walk taken to compute a charge — stop existing.
     self.spend_names(arguments.iter().map(A::argument_name))?;
 
     // 5.4.2 — one argument set, one value per name.
@@ -349,20 +350,25 @@ where
       // about the count. al8n/smear#198.
       let declared = self.schema.inputs(group).len() as u32;
       self.spend(declared, blame)?;
-      let written: u32 = arguments
-        .iter()
-        .map(|argument| units(name_bytes(argument.argument_name()).len()))
-        .fold(0u32, u32::saturating_add);
       for index in 0..self.schema.inputs(group).len() {
         let definition = self.schema.inputs(group)[index];
         if !definition.is_required() {
           continue;
         }
-        self.spend(written, blame)?;
+        // Per written argument, before resolving it, because `any` stops at the first match — a
+        // required argument that *is* supplied, which is the ordinary case, usually stops on the
+        // first or second. Charging the whole list per declared entry billed the common case for
+        // the worst one. Found by the taken-branch audit.
         let schema = self.schema;
-        let supplied = arguments.iter().any(|argument| {
-          schema.sym(name_bytes(argument.argument_name())) == Some(definition.name())
-        });
+        let mut supplied = false;
+        for argument in arguments {
+          let spelling = name_bytes(argument.argument_name());
+          self.spend(units(spelling.len()), blame)?;
+          if schema.sym(spelling) == Some(definition.name()) {
+            supplied = true;
+            break;
+          }
+        }
         if !supplied {
           let context = match owner {
             Some(owner) => Context::Member {
@@ -608,11 +614,21 @@ where
       }
       TypeKind::Enum => {
         if coerces {
-          self.spend(literal_units::<S, V>(value), value.value_span())?;
-          let member = value
-            .as_enum()
-            .and_then(|literal| self.schema.sym(literal.source().as_ref()))
-            .is_some_and(|sym| self.schema.has_enum_value(base, sym));
+          // Charged on the arm that reads, not above the match. A literal in an enum position is
+          // not necessarily an enum literal — `{ f(e: 12345…) }` is a legal thing to write and a
+          // rejected thing to write — and `as_enum` answers `None` for it without looking at a
+          // byte, so the spelling that used to be billed there was never read.
+          let member = match value.as_enum() {
+            Some(literal) => {
+              let spelling = literal.source().as_ref();
+              self.spend(units(spelling.len()), value.value_span())?;
+              self
+                .schema
+                .sym(spelling)
+                .is_some_and(|sym| self.schema.has_enum_value(base, sym))
+            }
+            None => false,
+          };
           if !member {
             self.report_value(value, Context::Expected(expected))?;
           }
@@ -620,11 +636,8 @@ where
         ControlFlow::Continue(None)
       }
       TypeKind::Scalar => {
-        if coerces {
-          self.spend(literal_units::<S, V>(value), value.value_span())?;
-          if !self.scalar_accepts(value, definition.name()) {
-            self.report_value(value, Context::Expected(expected))?;
-          }
+        if coerces && !self.scalar_accepts(value, definition.name(), value.value_span())? {
+          self.report_value(value, Context::Expected(expected))?;
         }
         ControlFlow::Continue(None)
       }
@@ -720,20 +733,22 @@ where
       // See 5.4.3's presence half for the argument.
       let count = self.schema.input_fields_of(object).len();
       self.spend(count as u32, value.value_span())?;
-      let written: u32 = fields
-        .iter()
-        .map(|field| units(name_bytes(field.field_name()).len()))
-        .fold(0u32, u32::saturating_add);
       for index in 0..count {
         let field_definition = self.schema.input_fields_of(object)[index];
         if !field_definition.is_required() {
           continue;
         }
-        self.spend(written, value.value_span())?;
+        // The same short circuit one rule over. See 5.4.3's presence half.
         let schema = self.schema;
-        let supplied = fields
-          .iter()
-          .any(|field| schema.sym(name_bytes(field.field_name())) == Some(field_definition.name()));
+        let mut supplied = false;
+        for field in fields {
+          let spelling = name_bytes(field.field_name());
+          self.spend(units(spelling.len()), value.value_span())?;
+          if schema.sym(spelling) == Some(field_definition.name()) {
+            supplied = true;
+            break;
+          }
+        }
         if !supplied {
           let diagnostic = Diagnostic::new(Rule::InputObjectRequiredFields, value.value_span())
             .context(Context::Member {
@@ -759,38 +774,63 @@ where
   /// `the_two_coercion_tables_agree` in `tests/validator_rules.rs` asserts it literal by literal,
   /// because an audit that forced the *other* copy's `ID` range arm open found every gate in the
   /// repository still green. An arm added here needs the matching arm there.
-  fn scalar_accepts<V>(&self, value: &V, name: Sym) -> bool
+  fn scalar_accepts<V>(&mut self, value: &V, name: Sym, blame: SimpleSpan) -> ControlFlow<(), bool>
   where
     V: ValueLike<S>,
   {
     let name = Some(name);
     if name == self.scalars.int {
-      return value
-        .as_int()
-        .is_some_and(|int| fits_i32(int.source().as_ref()));
+      // `fits_i32` parses the digits, so this arm reads them and pays for them. The `None` arm
+      // has already decided on the variant.
+      return match value.as_int() {
+        Some(int) => {
+          let digits = int.source().as_ref();
+          self.spend(units(digits.len()), blame)?;
+          ControlFlow::Continue(fits_i32(digits))
+        }
+        None => ControlFlow::Continue(false),
+      };
     }
     if name == self.scalars.float {
-      // The coercion rules let an Int literal stand for a Float.
+      // The coercion rules let an Int literal stand for a Float — and that arm reads **nothing**:
+      // being an Int is the whole of the answer. Only `is_finite` reads a spelling.
       return match (value.as_float(), value.as_int()) {
-        (Some(float), _) => is_finite(float.source().as_ref()),
-        (None, Some(_)) => true,
-        (None, None) => false,
+        (Some(float), _) => {
+          let digits = float.source().as_ref();
+          self.spend(units(digits.len()), blame)?;
+          ControlFlow::Continue(is_finite(digits))
+        }
+        (None, Some(_)) => ControlFlow::Continue(true),
+        (None, None) => ControlFlow::Continue(false),
       };
     }
     if name == self.scalars.string {
-      return value.as_string().is_some();
+      return ControlFlow::Continue(value.as_string().is_some());
     }
     if name == self.scalars.boolean {
-      return value.as_boolean().is_some();
+      return ControlFlow::Continue(value.as_boolean().is_some());
     }
     if name == self.scalars.id {
-      // ID accepts both spellings an identifier is written with.
-      return value.as_string().is_some()
-        || value
-          .as_int()
-          .is_some_and(|int| fits_id(int.source().as_ref()));
+      // ID accepts both spellings an identifier is written with, and the `||` short-circuits: a
+      // string answers without the integer arm being reached, so the digits are read — and paid
+      // for — only when they are the thing being tested.
+      if value.as_string().is_some() {
+        return ControlFlow::Continue(true);
+      }
+      return match value.as_int() {
+        Some(int) => {
+          let digits = int.source().as_ref();
+          self.spend(units(digits.len()), blame)?;
+          ControlFlow::Continue(fits_id(digits))
+        }
+        None => ControlFlow::Continue(false),
+      };
     }
-    true
+    // A custom scalar accepts everything **without inspecting anything**: only the service knows
+    // how to read one. There is no spelling read on this path and there is no charge for one, which
+    // is the whole of al8n/smear#198's tenth-round shape — the branch a document actually takes is
+    // the branch that decides what it owes.
+    ControlFlow::Continue(true)
   }
 
   fn report_value<V>(&mut self, value: &V, context: Context) -> ControlFlow<()>
@@ -819,7 +859,6 @@ where
     }
     let name = variable.name();
     let bytes = name_bytes(name);
-    self.spend_name(name)?;
 
     // The operation's variable-name index, built once by `check_variable_definitions`: ordinals
     // sorted by name, ties broken on the ordinal. This used to be a scan over *every* definition
@@ -836,6 +875,13 @@ where
     let variables = self.variables;
     let base = self.variable_index.start() as usize;
     let end = self.variable_index.end() as usize;
+    // Charged only where there is an index to search. With no declarations — an operation that
+    // takes none, or a rule set that builds no index — `partition_point` runs zero comparisons and
+    // the existence test below never reaches its second operand, so not one byte of this spelling
+    // is read. The report's own copy is charged by `Validator::subject`, wherever it happens.
+    if end > base {
+      self.spend_name(name)?;
+    }
     let lo = {
       let index = &self.scratch.keys[base..end];
       let named = |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
@@ -960,33 +1006,6 @@ fn level_frame(
     object,
     flags,
   }
-}
-
-/// The bytes a scalar or enum literal's own spelling occupies, as a charge.
-///
-/// Strings and booleans are absent on purpose: recognising one is a discriminant test that never
-/// reads the bytes. An integer, a float and an enum name are all read end to end by the check that
-/// follows, and all three are as long as the document says.
-fn literal_units<S, V>(value: &V) -> u32
-where
-  V: ValueLike<S>,
-  S: AsRef<[u8]>,
-{
-  let len = value
-    .as_int()
-    .map(|literal| literal.source().as_ref().len())
-    .or_else(|| {
-      value
-        .as_float()
-        .map(|literal| literal.source().as_ref().len())
-    })
-    .or_else(|| {
-      value
-        .as_enum()
-        .map(|literal| literal.source().as_ref().len())
-    })
-    .unwrap_or(0);
-  units(len)
 }
 
 /// Sorts a duplicate-scan segment by name, breaking ties on the source index so the order is

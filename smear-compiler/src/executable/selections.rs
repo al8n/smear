@@ -63,24 +63,22 @@ where
     let blame = current.map_or(SimpleSpan::const_new(0, 0), |set| *set.span());
 
     while let Some(frame) = self.scratch.frames.last().copied() {
-      // Charged in front of `resolve`, which scans the frame stack for the definition root and
-      // then descends it again — so it costs the current depth, on **every** iteration, including
-      // the ones that only pop. One unit per selection priced `O(1)` of that, so a definition
-      // nested `D` deep did `Θ(D²)` frame and selection lookups on `Θ(D)` of units.
+      // One unit for the iteration. Examining the next sibling is `O(1)`; what costs the depth is
+      // `resolve`, and `resolve` runs only on the two arms that pop.
       //
-      // This is the repair `values::walk_value` got in round one of al8n/smear#198 and this
-      // resolver did not, though the review named it. The two stacks are the same shape and the
-      // same argument applies to both; the sweep that would have caught it is the one this branch
-      // now runs over every repair.
-      self.spend(self.scratch.frames.len() as u32, blame)?;
+      // The depth used to be charged here, at the top, on **every** iteration — so a level of `W`
+      // siblings was billed `W · D` for `W` `O(1)` examinations and one `O(D)` resolution. That is
+      // the mirror of the defect it was written to fix: the charge was moved in front of the work
+      // and not onto the branch that performs it. al8n/smear#198.
+      self.spend(1, blame)?;
       let Some(set) = current else {
         self.scratch.frames.pop();
-        current = resolve(document, &self.scratch.frames);
+        current = self.resolve_frames(blame)?;
         continue;
       };
       let Some(selection) = set.selections().get(frame.cursor as usize) else {
         self.scratch.frames.pop();
-        current = resolve(document, &self.scratch.frames);
+        current = self.resolve_frames(blame)?;
         continue;
       };
       if let Some(top) = self.scratch.frames.last_mut() {
@@ -118,6 +116,19 @@ where
       }
     }
     ControlFlow::Continue(())
+  }
+
+  /// [`resolve`] over the selection stack, charged for the descent it makes.
+  ///
+  /// It scans the stack for the definition root and then descends it again, so it costs the depth —
+  /// and it is called only after a pop, which is why the charge lives here rather than at the top
+  /// of the loop that sometimes calls it.
+  pub(super) fn resolve_frames(
+    &mut self,
+    blame: SimpleSpan,
+  ) -> ControlFlow<(), Option<&'d SelectionSet<S>>> {
+    self.spend(self.scratch.frames.len() as u32, blame)?;
+    ControlFlow::Continue(resolve(self.document, &self.scratch.frames))
   }
 
   /// Draft 5.3.1 and 5.3.3, plus the field's arguments and directives.
@@ -314,17 +325,31 @@ where
       return ControlFlow::Continue(());
     }
 
-    // The possible-object bitset is the schema's and its width is not an input; the number of
-    // spreads and inline fragments that reach it is. `possible_objects_intersect` walks both word
-    // lists to the first overlap, and 5.5.2.3 fires exactly when there is none — so the reporting
-    // case is the full scan. Charged in the dimension the scan is measured in: words.
-    let words = self
-      .schema
-      .possible_objects(target)
-      .map_or(0, |words| u32::try_from(words.len()).unwrap_or(u32::MAX));
-    self.spend(words, *name.as_span())?;
-    if self.schema.possible_objects_intersect(target, parent) {
-      return ControlFlow::Continue(());
+    // The intersection, walked here rather than through `Schema::possible_objects_intersect`, so
+    // that each word can be paid for **immediately before it is read**.
+    //
+    // The bitset is the schema's and its width is not an input; the number of spreads that reach it
+    // is — so it is charged, and it was charged at its full width. But the walk stops at the first
+    // overlapping word, and the overlapping case is the common one: a spread that *can* apply
+    // usually says so in the first word. Prepaying the width billed every legal spread for a scan
+    // that ended immediately.
+    //
+    // A per-step charge is only sound when the step it prices has not yet been read, which is the
+    // whole reason this is a loop here and not a `zip(..).any(..)` with a charge above it.
+    let schema = self.schema;
+    let (Some(target_words), Some(parent_words)) = (
+      schema.possible_objects(target),
+      schema.possible_objects(parent),
+    ) else {
+      // A type with no possible-object set intersects nothing, and no word is read to find out.
+      let context = Context::Type(schema.type_def(parent).name());
+      return self.report_name(Rule::FragmentSpreadIsPossible, name, context);
+    };
+    for (a, b) in target_words.iter().zip(parent_words.iter()) {
+      self.spend(1, *name.as_span())?;
+      if a & b != 0 {
+        return ControlFlow::Continue(());
+      }
     }
     let context = Context::Type(self.schema.type_def(parent).name());
     self.report_name(Rule::FragmentSpreadIsPossible, name, context)

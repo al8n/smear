@@ -77,7 +77,10 @@ type Dog {
   counted(times: Int): Boolean
   withOpts(opts: Opts): Boolean
   withLoose(opts: Loose): Boolean
+  withJson(payload: Json): Boolean
 }
+
+scalar Json
 
 type Subscription { newMessage: Message }
 type Message { body: String }
@@ -1476,10 +1479,14 @@ fn the_subscription_pass_charges_the_names_it_compares() {
   let long = min_budget(&schema, &document(20_000), rules);
   println!("subscription aliases: 1-byte {short} units, 20,000-byte {long} units");
 
-  // Two aliases of twenty thousand bytes are 5,002 units of spelling. A charge counting selections
+  // **One** alias of twenty thousand bytes is read, not two: the first root field is *stored* into
+  // `first_response` and the second is compared against it, so 2,501 units is the whole of what
+  // this document owes. This assertion said 5,000 until al8n/smear#198's eleventh round, which is
+  // the over-charge it was written to catch showing up in the plant that caught it — the charge
+  // sat above the match and billed the storing arm as well. A charge counting selections still
   // cannot see any of it.
   assert!(
-    long - short >= 5_000,
+    long - short >= 2_000,
     "20,000-byte aliases cost {} units more than one-byte ones; the comparison is unpriced",
     long - short
   );
@@ -2107,5 +2114,257 @@ fn an_equal_type_spread_pays_for_no_bitset_scan() {
     scanned >= equal + (SPREADS as u32) * words / 2,
     "the scanning document paid only {} units more than the one that scans nothing",
     scanned.saturating_sub(equal)
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// 15. the branch a document takes is the branch that decides what it owes
+// ---------------------------------------------------------------------------------------------
+
+/// 5.5.2.3 pays for the words the intersection reads, not the words it could have.
+///
+/// `possible_objects_intersect` stops at the first overlapping word, and for a spread that *can*
+/// apply the overlap is usually immediate. Prepaying the bitset's width billed every legal spread
+/// for a scan that ended on its first comparison.
+#[test]
+fn a_short_circuited_intersection_pays_for_the_words_it_reads() {
+  const IMPLEMENTORS: usize = 3_200;
+  const SPREADS: usize = 200;
+  let types = (0..IMPLEMENTORS)
+    .map(|i| std::format!("type Impl{i} implements Wide {{ name: String }} "))
+    .collect::<String>();
+  let schema = build(&std::format!(
+    "type Query {{ w: Wide }} interface Wide {{ name: String }} {types}"
+  ));
+
+  // Both spreads are possible, so both report nothing and differ only in *where* the overlap is:
+  // the first implementor sits in word zero, the last in word forty-nine.
+  let document = |target: &str| {
+    let spreads = "...G ".repeat(SPREADS);
+    std::format!(
+      "{{ w {{ ...F }} }} fragment F on Wide {{ {spreads} name }} \
+       fragment G on {target} {{ name }}"
+    )
+  };
+
+  let rules = RuleSet::only(Rule::FragmentSpreadIsPossible);
+  let first = min_budget(&schema, &document("Impl0"), rules);
+  let last = min_budget(
+    &schema,
+    &document(&std::format!("Impl{}", IMPLEMENTORS - 1)),
+    rules,
+  );
+  println!("5.5.2.3 short circuit: first-word overlap {first} units, last-word {last} units");
+
+  // Forty-nine words of difference at each of two hundred spreads. Prepaying the width makes the
+  // two identical.
+  assert!(
+    last >= first + (SPREADS as u32) * 40,
+    "an overlap in word zero cost {} units less than one in word forty-nine",
+    last.saturating_sub(first)
+  );
+}
+
+/// The frame depth is paid by the arm that descends, not by every sibling.
+///
+/// `resolve` rebuilds the path from the definition root and runs **only after a pop**; examining
+/// the next sibling is `O(1)`. Charging the depth at the top of the loop billed a level of `W`
+/// siblings `W · D` for `W` examinations and one resolution.
+#[test]
+fn the_resolve_charge_is_paid_by_the_arm_that_resolves() {
+  on_a_deep_stack(|| {
+    let schema = build(SCHEMA);
+    let rules = without_merge();
+
+    // Two hundred levels deep, then `width` siblings at the bottom. The depth is fixed; only the
+    // number of `O(1)` sibling examinations changes.
+    let document = |width: usize| {
+      let mut source = String::from("{");
+      for _ in 0..200 {
+        source.push_str(" nest {");
+      }
+      for i in 0..width {
+        source.push_str(&std::format!(" a{i}: leaf"));
+      }
+      for _ in 0..200 {
+        source.push_str(" } ");
+      }
+      source.push('}');
+      source
+    };
+
+    let narrow = min_budget_of(&schema, &parse_deep(&document(1)), rules);
+    let wide = min_budget_of(&schema, &parse_deep(&document(200)), rules);
+    println!("resolve placement: 1 sibling {narrow} units, 200 siblings {wide} units");
+
+    // 199 more siblings at depth 200 is about 39,800 units of depth charge if every iteration pays
+    // it, and a few hundred if only the resolutions do.
+    assert!(
+      wide - narrow < 10_000,
+      "199 more siblings at depth 200 cost {} units",
+      wide - narrow
+    );
+  });
+}
+
+/// A usage reads no name when there is no index to search.
+///
+/// With no variable declarations the search runs zero comparisons and the existence test never
+/// reaches its second operand, so not one byte of the spelling is read. The charge sat above both.
+#[test]
+fn an_empty_variable_index_reads_no_name() {
+  let schema = build(SCHEMA);
+  // A shorthand operation declares no variables, and 5.8.4 reports nothing about declarations that
+  // do not exist — so nothing on this path reads or clones the spelling.
+  let document = |pad: usize| {
+    let long = "v".repeat(pad);
+    let mut source = String::from("{ dog {");
+    for i in 0..200 {
+      source.push_str(&std::format!(
+        " a{i}: isHouseTrained(atOtherHomes: ${long})"
+      ));
+    }
+    source.push_str(" } }");
+    source
+  };
+
+  let rules = RuleSet::only(Rule::AllVariablesUsed);
+  let short = min_budget(&schema, &document(1), rules);
+  let long = min_budget(&schema, &document(20_000), rules);
+  println!("empty index: 1-byte name {short} units, 20,000-byte name {long} units");
+  assert!(
+    long - short < 1_000,
+    "a 20,000-byte variable name cost {} units against an index with nothing in it",
+    long - short
+  );
+}
+
+/// A custom scalar pays for no literal, because it reads none.
+///
+/// `scalar_accepts` returns `true` for a custom scalar without inspecting anything — only the
+/// service knows how to read one — while `Int` hands the digits to `fits_i32`. The charge sat above
+/// the call and billed both the same.
+#[test]
+fn a_custom_scalar_pays_for_no_literal() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::ValuesOfCorrectType);
+  let digits = "9".repeat(200_000);
+
+  let custom = min_budget(
+    &schema,
+    &std::format!("{{ dog {{ withJson(payload: {digits}) }} }}"),
+    rules,
+  );
+  let integer = min_budget(
+    &schema,
+    &std::format!("{{ dog {{ counted(times: {digits}) }} }}"),
+    rules,
+  );
+  println!("literal arms: custom scalar {custom} units, Int {integer} units");
+
+  // 200,000 digits is 25,001 units. `Int` reads them; `Json` does not.
+  assert!(
+    integer >= custom + 20_000,
+    "the Int arm paid only {} units more than a custom scalar that reads nothing",
+    integer.saturating_sub(custom)
+  );
+  assert!(
+    custom < 1_000,
+    "a custom scalar spent {custom} units on a literal it never looks at"
+  );
+}
+
+/// A subscription's first root field is stored, not compared.
+///
+/// Draft 5.2.4.1 keeps the first response name and compares every later one against it. The `None`
+/// arm moves two references and reads nothing; the charge sat above the match.
+#[test]
+fn a_stored_response_name_is_not_compared() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::SingleRootField);
+
+  // Exactly one root field, so the storing arm is the only arm taken.
+  let document = |pad: usize| {
+    let alias = "a".repeat(pad);
+    std::format!("subscription s {{ {alias}x: newMessage {{ body }} }}")
+  };
+  let short = min_budget(&schema, &document(1), rules);
+  let long = min_budget(&schema, &document(40_000), rules);
+  println!("stored response name: 1-byte {short} units, 40,000-byte {long} units");
+  assert!(
+    long - short < 1_000,
+    "a 40,000-byte alias that is stored and never compared cost {} units",
+    long - short
+  );
+}
+
+/// The `@skip`/`@include` scan pays one unit per directive, and stops when it finds one.
+///
+/// Draft 5.2.4.1 asks each root selection whether it carries a conditional directive. The test is
+/// `matches!(bytes, b"skip" | b"include")` — a length check and at most seven bytes, however long
+/// the spelling is — and the scan stops at the first match. Charging every name's full length up
+/// front was the wrong dimension and the wrong count at once. Found by the taken-branch audit.
+#[test]
+fn the_conditional_directive_scan_pays_one_unit_per_directive() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::SingleRootField);
+
+  // Two hundred directives that are not `@skip` or `@include`, so the scan runs to the end and
+  // reads at most seven bytes of each.
+  let document = |pad: usize| {
+    let long = "z".repeat(pad);
+    let directives = std::format!("@d{long} ").repeat(200);
+    std::format!("subscription s {{ newMessage {directives} {{ body }} }}")
+  };
+
+  let short = min_budget(&schema, &document(1), rules);
+  let long = min_budget(&schema, &document(1_000), rules);
+  println!("conditional scan: 1-byte names {short} units, 1,000-byte names {long} units");
+  assert!(
+    long - short < 1_000,
+    "200 directives of 1,000 bytes cost {} units for a scan that reads seven of each",
+    long - short
+  );
+}
+
+/// 5.4.3's presence scan stops at the argument it finds.
+///
+/// `any` returns on the first match, and a required argument that *is* supplied — the ordinary case
+/// — usually matches early. Charging the whole written list per declared entry billed the common
+/// case for the worst one. Found by the taken-branch audit.
+#[test]
+fn the_required_argument_scan_stops_where_it_matches() {
+  const OTHERS: usize = 200;
+  let pad = "a".repeat(200);
+  let declared = (0..OTHERS)
+    .map(|i| std::format!("{pad}{i}: Int, "))
+    .collect::<String>();
+  let schema = build(&std::format!(
+    "type Query {{ dog: Dog }} type Dog {{ manyArgs(need: Int!, {declared}): Boolean }}"
+  ));
+
+  let written = (0..OTHERS)
+    .map(|i| std::format!("{pad}{i}: 1, "))
+    .collect::<String>();
+  let rules = RuleSet::only(Rule::RequiredArguments);
+  // The same arguments, the required one written first or last. `any` walks the written order.
+  let first = min_budget(
+    &schema,
+    &std::format!("{{ dog {{ manyArgs(need: 1, {written}) }} }}"),
+    rules,
+  );
+  let last = min_budget(
+    &schema,
+    &std::format!("{{ dog {{ manyArgs({written} need: 1) }} }}"),
+    rules,
+  );
+  println!("presence scan: required first {first} units, required last {last} units");
+
+  // Two hundred names of two hundred bytes is 26 units each. Finding the match immediately must
+  // cost none of them.
+  assert!(
+    last >= first + (OTHERS as u32) * 20,
+    "writing the required argument last cost only {} units more than writing it first",
+    last.saturating_sub(first)
   );
 }
