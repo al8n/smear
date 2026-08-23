@@ -1383,6 +1383,89 @@ fn a_comparison_two_lengths_settle_is_not_charged_for_either_spelling() {
   });
 }
 
+/// A merge bound governs the merge engine's work, and with no rule to start the engine there is
+/// none.
+///
+/// # The contract sentence this replaces, and why it was wrong
+///
+/// `validate_executable_with` said `budget` is enforced whatever the rule set contains. That is
+/// true of a bound whose passes run unconditionally. It is not true of these two:
+/// [`Budget::merge_work`] and [`Budget::merge_depth`] are spent by draft 5.3.2's engine, and
+/// `check_field_merging` returns before it builds anything when
+/// [`Rule::FieldSelectionMerging`], [`Rule::MergeDepthBudget`] and [`Rule::MergeWorkBudget`] are
+/// all absent. Nothing is expanded, interned or compared — `build_merge_index` has one caller and
+/// it is past that gate, and `Scratch::names` has two touchers and both are inside it.
+///
+/// **So the bound is vacuous rather than disabled, and the difference is the whole point.** No
+/// expensive thing was let through; no expensive thing happened. A caller using `budget` as an
+/// admission policy — "refuse anything that would cost more than this" — is holding the wrong
+/// instrument, because the cost it prices is the cost of a rule they switched off.
+///
+/// # The assertion that decides it
+///
+/// The old sentence requires the middle case below to be `Err`. It is `Ok`, so the sentence was
+/// the wrong half. And the last case is what separates vacuity from suppression: a bound that
+/// governed work that happens would have to change *something* between zero and the shipped
+/// default. Nothing moves — not the verdict, not the working set — because there is no work in
+/// between for it to govern. al8n/smear#196.
+#[test]
+fn a_merge_bound_governs_the_engine_and_is_vacuous_without_it() {
+  on_a_deep_stack(|| {
+    let schema = build();
+    // Wide enough that the engine cannot finish it under any small budget.
+    let source = wide_query(20_000);
+    let document = parse(&source);
+    let none = Budget::default().with_merge_work(0);
+
+    /// The verdict and the working set the run leaves behind.
+    fn run(
+      schema: &Schema,
+      document: &ExecutableDocument<&str>,
+      budget: &Budget,
+      rules: RuleSet,
+    ) -> (bool, bool, usize) {
+      let mut scratch = Scratch::new();
+      let verdict =
+        validate_executable_with(schema, document, &mut scratch, budget, rules, &mut Ignore);
+      let tripped = verdict
+        .as_ref()
+        .err()
+        .is_some_and(smear::validator::Invalid::budget_tripped);
+      (verdict.is_ok(), tripped, scratch.capacity())
+    }
+
+    // The bound is real where the engine runs: draft 5.3.2 started, and a `merge_work` of zero
+    // cannot pay for the first thing it does.
+    let started = RuleSet::EMPTY
+      .with(Rule::FieldSelectionMerging)
+      .with(Rule::MergeWorkBudget);
+    let (ok, tripped, _) = run(&schema, &document, &none, started);
+    assert!(!ok && tripped, "a zero merge budget refused nothing");
+
+    // And with every merge rule absent it is served. **This is the assertion the old contract
+    // sentence forbade**: it promised `budget` was enforced whatever the set contained, and the
+    // document below is one the same budget refuses two lines up.
+    let (ok, tripped, cold) = run(&schema, &document, &none, RuleSet::EMPTY);
+    assert!(
+      ok && !tripped,
+      "an empty rule set was refused by a bound over an engine it never started; the bound is not \
+       an admission policy and cannot be made into one by narrowing"
+    );
+
+    // Vacuous and not suppressed. A bound over work that happens moves something when it moves
+    // from nothing to the shipped default; this one moves neither the verdict nor the working set,
+    // because between the two there is no work for it to price.
+    let (ok, tripped, warm) = run(&schema, &document, &Budget::default(), RuleSet::EMPTY);
+    assert!(ok && !tripped);
+    assert_eq!(
+      cold, warm,
+      "the working set differs between a zero merge budget and the shipped one under a rule set \
+       that starts no merge engine, so something in between was being priced after all and the \
+       sentence above is a rationalisation"
+    );
+  });
+}
+
 /// How much legitimate document the shipped default actually clears.
 ///
 /// The design's estimate was "the measured 87 KB hostile grid", taken from apollo's row counting.

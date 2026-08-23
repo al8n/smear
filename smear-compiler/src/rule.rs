@@ -565,12 +565,28 @@ impl core::fmt::Display for Rule {
 /// [`Invalid::emitted`](super::Invalid::emitted) zero, because a validator that abandoned a pass
 /// and then answered `Ok` would be spelling giving up the same way it spells finishing.
 ///
-/// The knob is what switches a bound off: see [`Budget`](super::Budget). al8n/smear#196.
+/// What narrowing *can* do is leave a bound with nothing to bound. Both of these are spent by
+/// draft 5.3.2's engine, and [`Rule::FieldSelectionMerging`] is what starts it: with all three
+/// absent the engine does not run, so a [`Budget::merge_work`](super::Budget::merge_work) of zero
+/// refuses nothing — and refuses it *vacuously*, because no expensive thing was let through, only
+/// none happened. A bound whose passes run regardless of the set would refuse there and be right
+/// to; these two do not run.
+///
+/// The knob is what switches a bound off: see [`Budget`](super::Budget). And neither instrument is
+/// an admission policy — a set chooses what is checked, a budget chooses what is afforded.
+/// al8n/smear#196.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RuleSet(u64);
 
 impl RuleSet {
-  /// The empty set. Validation with it emits nothing and is always `Ok`.
+  /// The empty set. Validation with it evaluates no rule and emits no diagnostic.
+  ///
+  /// **Not "always `Ok`" as a contract**, which is what this said. That was a promise about
+  /// resources a rule set is in no position to make: a set reaches a bound's diagnostic and never
+  /// the bound. It *is* `Ok` on this crate's two bounds, and for a reason narrower than the old
+  /// sentence claimed — draft 5.3.2's engine does not run under an empty set at all,
+  /// [`Rule::FieldSelectionMerging`] is what starts it, so neither knob has any work to refuse. A
+  /// bound whose passes ran regardless would refuse here and would be right to. al8n/smear#196.
   pub const EMPTY: Self = Self(0);
 
   /// Every rule.

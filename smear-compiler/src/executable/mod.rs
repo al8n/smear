@@ -234,11 +234,27 @@ where
 /// only the fragment rules does not pay for value coercion. With [`RuleSet::ALL`] this is exactly
 /// [`validate_executable`].
 ///
-/// **`rules` does not reach the resource bounds.** Narrowing removes a bound's diagnostic, never
-/// the bound: `budget` is enforced whatever this set contains, so a caller who asks for
-/// [`Rule::FieldSelectionMerging`](super::Rule::FieldSelectionMerging) alone can still be handed
-/// `Err` with [`Invalid::emitted`] zero and [`Invalid::budget_tripped`] set. The knob is what
-/// switches a bound off — see [`Budget`]. al8n/smear#196.
+/// **`rules` does not reach the resource bounds.** Narrowing removes a bound's *diagnostic*, never
+/// the bound: a caller who asks for
+/// [`Rule::FieldSelectionMerging`](super::Rule::FieldSelectionMerging) alone is still handed `Err`
+/// with [`Invalid::emitted`] zero and [`Invalid::budget_tripped`] set when `budget` refuses.
+///
+/// What narrowing *can* do is leave a bound with nothing to bound, and this said the opposite —
+/// that `budget` is enforced whatever the set contains.
+/// [`Budget::merge_work`](super::Budget::merge_work) and
+/// [`Budget::merge_depth`](super::Budget::merge_depth) are spent by draft 5.3.2's engine, and that
+/// engine is started by draft 5.3.2's own rule: with
+/// [`Rule::FieldSelectionMerging`](super::Rule::FieldSelectionMerging),
+/// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) and
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) all absent it does not run, so nothing
+/// is expanded, interned or compared and a `merge_work` of zero has nothing to refuse. **That is
+/// vacuity and not an exemption** — nothing expensive was let through, because nothing expensive
+/// happened. A bound whose passes *do* run is enforced whether or not its rule is in `rules`.
+///
+/// So `budget` is not an admission policy. Deciding whether to accept a document by what it would
+/// cost means leaving the rule that does the costing switched on: `rules` chooses what is
+/// **checked** and [`Budget`] chooses what is **afforded**, and neither answers the other's
+/// question. al8n/smear#196.
 pub fn validate_executable_with<S, K>(
   schema: &Schema,
   document: &ExecutableDocument<S>,
