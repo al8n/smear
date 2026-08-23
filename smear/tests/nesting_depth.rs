@@ -751,7 +751,7 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
 /// * **Malformed bytes *before* the refusal.** The refusal's position is a function of the prefix,
 ///   so a prefix lexer error is an ordinary second diagnostic and not this property.
 /// * **A refusal below a production that catches.** No production in either dialect catches except
-///   the five document roots; a sixth would need its own cell, and
+///   the six document roots, and a production added later that does would need its own cell —
 ///   `depth::descend`'s note records that as the residual.
 /// * **Partial (`Sans-I/O`) input.** Both doors here are `Complete`.
 #[cfg(all(feature = "rowan", feature = "graphqlx", feature = "graphql"))]
@@ -856,22 +856,15 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
 /// # Why this is a second test and not another axis on the one above
 ///
 /// [`a_refusal_is_one_diagnostic_at_every_cycle`] drives `parse_document` alone, which is one root
-/// per dialect. The repair has **five** catch sites — the mixed root in each dialect, the SDL-only
-/// root in each, and GraphQLx's executable-only root (GraphQL's executable root propagates instead
-/// of catching, so it never had the defect) — and three of them are unreachable from that entry
-/// point. Reverting them was planted with the cycle test in place and it stayed green: a cell set
-/// derived over *cycles* is blind to an axis of *roots*, however many cycles it has.
+/// per dialect. The repair has **six** catch sites — the mixed root in each dialect, the SDL-only
+/// root in each, and each dialect's executable-only root (GraphQL's propagates instead of
+/// catching, but the one-diagnostic, whole-document guarantee below still has to hold there, so it
+/// gets a cell too) — and four of them are unreachable from that entry point. Reverting them was
+/// planted with the cycle test in place and it stayed green: a cell set derived over *cycles* is
+/// blind to an axis of *roots*, however many cycles it has.
 ///
 /// So the axis here is the entry point, and the shape is whatever reaches the ceiling from it. The
 /// cycle coverage stays where it is; this asks only that each root stops.
-///
-/// # What this still does not cover
-///
-/// GraphQL's `parse_executable_document` has no catch arm to revert — its loop is
-/// `executable_definition(inp)?` — so the cell below proves its `document_entry` drain and nothing
-/// about a catch site it does not have. If that loop ever grows one, this test passes unchanged
-/// and the amplification is back; the guard against that is
-/// `depth::descend`'s note naming the five, not this file.
 #[cfg(all(feature = "rowan", feature = "graphqlx", feature = "graphql"))]
 #[test]
 fn a_refusal_ends_every_document_root() {

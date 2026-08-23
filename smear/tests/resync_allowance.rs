@@ -254,8 +254,9 @@ fn every_graphql_census_shape_stays_linear() {
 
 /// GraphQL's executable root has no `resync_to_definition` call site, and must not gain one.
 ///
-/// It writes `executable_definition(inp)?` and propagates where the other five document roots
-/// catch and resynchronise, so #168's resync-shaped witnesses — a definition head parked at
+/// It matches `depth::root_turn`'s verdict like the other five document roots, but returns `Err`
+/// on both non-`Parsed` arms instead of calling `resync_to_definition` on the third, so #168's
+/// resync-shaped witnesses — a definition head parked at
 /// depth 1 — never reach a scan here at all: the `Err` leaves the loop, `drain_unless_stopped`
 /// takes the tail in one pass, and the parse reports the two diagnostics it already had.
 ///

@@ -797,8 +797,8 @@ where
 ///
 /// A `compile_fail` doctest used to pin the missing argument position from outside the crate, and
 /// round 5 deleted it with the surface it was about: on a `pub(crate)` function it fails at the
-/// visibility boundary rather than at the signature. The shape is still what the signature says
-/// and the six `*_entry` productions are still its only callers.
+/// visibility boundary rather than at the signature. The shape is still what the signature says,
+/// and the six `*_entry` productions and the driver macro's own driver are its only callers.
 ///
 /// # The witness is read again above the root, and the slot is what scopes it — round 4
 ///
