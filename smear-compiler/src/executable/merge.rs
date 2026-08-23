@@ -1427,31 +1427,50 @@ fn buckets_for(count: usize) -> usize {
 ///
 /// Zero for every arm [`shallow_equal`] settles on a tag, a boolean or a length — a `memcmp` is
 /// only reached by the four that compare source spellings and by the variable, which compares a
-/// name. The length is the shorter of the two, because that is as far as a slice comparison can
-/// read.
+/// name.
+///
+/// # And zero again whenever the two lengths differ
+///
+/// This charged `byte_units` of the *shorter* of the two, on the reasoning that a slice comparison
+/// cannot read past it. True, and it prices a comparison this code does not make: `[u8] == [u8]`
+/// settles unequal lengths **before** it reads a byte of either side. So two string spellings of
+/// 524,288 and 524,289 bytes cost one integer compare and were charged 65,537 units — the whole
+/// default `merge_work` and more, for an `O(1)` decision.
+///
+/// What that bought was not safety. The document has a real draft 5.3.2 conflict — the two
+/// literals differ — and the over-charge replaced that diagnostic with a resource refusal, so the
+/// caller is told the wrong thing about their own document; with `MergeWorkBudget` outside the
+/// rule set it becomes an `Err` carrying nothing at all. A ledger that overcharges is not a safer
+/// ledger, one dimension over from where al8n/smear#196 first said so. al8n/smear#196.
 fn shallow_units<S>(left: &InputValue<S>, right: &InputValue<S>) -> u32
 where
   S: AsRef<[u8]>,
 {
-  let len = match (left, right) {
-    (InputValue::Int(a), InputValue::Int(b)) => {
-      a.source().as_ref().len().min(b.source().as_ref().len())
+  /// What comparing two source spellings costs: nothing unless they are the same length, and then
+  /// one pass over that length.
+  fn spelling(left: &[u8], right: &[u8]) -> u32 {
+    if left.len() != right.len() {
+      return 0;
     }
+    byte_units(left.len())
+  }
+
+  match (left, right) {
+    (InputValue::Int(a), InputValue::Int(b)) => spelling(a.source().as_ref(), b.source().as_ref()),
     (InputValue::Float(a), InputValue::Float(b)) => {
-      a.source().as_ref().len().min(b.source().as_ref().len())
+      spelling(a.source().as_ref(), b.source().as_ref())
     }
     (InputValue::String(a), InputValue::String(b)) => {
-      a.source().as_ref().len().min(b.source().as_ref().len())
+      spelling(a.source().as_ref(), b.source().as_ref())
     }
     (InputValue::Enum(a), InputValue::Enum(b)) => {
-      a.source().as_ref().len().min(b.source().as_ref().len())
+      spelling(a.source().as_ref(), b.source().as_ref())
     }
     (InputValue::Variable(a), InputValue::Variable(b)) => {
-      name_bytes(a.name()).len().min(name_bytes(b.name()).len())
+      spelling(name_bytes(a.name()), name_bytes(b.name()))
     }
-    _ => return 0,
-  };
-  byte_units(len)
+    _ => 0,
+  }
 }
 
 /// Follows a comparison stack's child-index chain into one of the two value trees.

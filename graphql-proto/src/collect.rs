@@ -469,6 +469,20 @@ impl Allowance {
   }
 }
 
+/// Where an accepted insertion will put a name, and the id it will get.
+///
+/// Its own type so that [`Interner::insert`] takes the *answer* rather than recomputing it, which
+/// is what makes that function infallible: there is no second place for the arena to say no.
+#[derive(Debug, Clone, Copy)]
+struct Fit {
+  /// Where the name starts in the arena.
+  start: u32,
+  /// How many bytes it is.
+  len: u32,
+  /// The entry id it will be given.
+  id: u32,
+}
+
 /// A document's named fragments, indexed by name once instead of scanned once per spread.
 ///
 /// # Why it holds the definition and not the definition's index
@@ -1456,17 +1470,32 @@ impl Interner {
         id = self.chain[id as usize];
       }
     }
+    // The arena answers first, and the charge comes second.
+    //
+    // "Charge before the work" is right for work that *will* happen; where the work is conditional
+    // on a check that can decline, charging first bills a caller for a copy nobody made. `insert`
+    // could decline — the cap, and two `u32` endpoints over a `usize` arena — and the callers that
+    // meet `Unstored::Arena` **degrade and carry on**: `handle_field_error` loses the message text
+    // and keeps the error. So an unstorable thirty-two-megabyte driver message under the default
+    // sixteen-megabyte arena spent about 4.2 million visits it never used, and short fields behind
+    // it then failed with `CollectionBudget` for a copy that never happened.
+    //
+    // Preflight, refuse, then charge, then perform a step that cannot decline. The last word is
+    // the shape: what follows a charge has to be infallible, or the charge is a bill for work that
+    // may not occur. al8n/smear#196.
+    let Some(fit) = self.fit(name) else {
+      return Err(Unstored::Arena { limit: self.cap });
+    };
     // The key's last read is the copy into the arena, and it is charged like the other two. A
     // refusal here is the budget's and not the arena's, which is what keeps the message pointing
-    // at the ceiling that actually stopped it.
+    // at the ceiling that actually stopped it — and the arena has already said yes, so this is the
+    // only thing left that can say no.
     if !visits.take_bytes(bytes.len()) {
       return Err(Unstored::Budget {
         limit: visits.limit(),
       });
     }
-    self
-      .insert(name, hash)
-      .ok_or(Unstored::Arena { limit: self.cap })
+    Ok(self.insert(name, hash, fit))
   }
 
   /// Entries this executor's name lookups have compared. See [`Fragments::compares`] for why a
@@ -1487,16 +1516,17 @@ impl Interner {
     (self.spans.capacity(), self.names.capacity())
   }
 
-  /// Appends `name` and links it, or `None` when the arena has no room.
+  /// The place an insertion of `name` would take, or [`None`] when the arena cannot hold it.
   ///
-  /// Unbudgeted *here*, and it does not need to be: [`intern`](Interner::intern) charges the copy's
-  /// bytes before calling this, it runs at most once per selection, which the caller has already
-  /// charged, and the rehash it may trigger reads stored hashes rather than the arena — so it is
-  /// one step per entry and one step's worth of work, amortised over those same insertions.
-  fn insert(&mut self, name: &str, hash: u64) -> Option<u32> {
-    // Checked, not reasoned about. The ceiling below makes each of these unreachable, and they
-    // stay because "unreachable given the ceiling" is exactly the kind of claim that stops being
-    // true when somebody sets a different ceiling.
+  /// Every way an insertion can decline, decided **before** anything is charged or written, so
+  /// that [`insert`](Interner::insert) is a step with no refusal left in it. Splitting the two is
+  /// the whole of the repair al8n/smear#196 made here: a charge in front of a fallible step bills
+  /// for work the step may not do.
+  ///
+  /// Checked, not reasoned about. The cap makes each narrowing unreachable, and they stay because
+  /// "unreachable given the ceiling" is exactly the kind of claim that stops being true when
+  /// somebody sets a different ceiling.
+  fn fit(&self, name: &str) -> Option<Fit> {
     let start = u32::try_from(self.names.len()).ok()?;
     let len = u32::try_from(name.len()).ok()?;
     let end = start.checked_add(len)?;
@@ -1504,6 +1534,21 @@ impl Interner {
       return None;
     }
     let id = u32::try_from(self.spans.len()).ok()?;
+    Some(Fit { start, len, id })
+  }
+
+  /// Appends `name` at the place [`fit`](Interner::fit) found for it and links it.
+  ///
+  /// **Infallible**, and that is a property this function is written to have rather than one it
+  /// happens to have: it is reached only past a charge, and a charge in front of something that
+  /// can decline is a bill for a copy nobody made.
+  ///
+  /// Unbudgeted *here*, and it does not need to be: [`intern`](Interner::intern) charges the copy's
+  /// bytes before calling this, it runs at most once per selection, which the caller has already
+  /// charged, and the rehash it may trigger reads stored hashes rather than the arena — so it is
+  /// one step per entry and one step's worth of work, amortised over those same insertions.
+  fn insert(&mut self, name: &str, hash: u64, fit: Fit) -> u32 {
+    let Fit { start, len, id } = fit;
     self.names.push_str(name);
     self.spans.push((start, len));
     self.hashes.push(hash);
@@ -1515,7 +1560,7 @@ impl Interner {
       self.chain[id as usize] = self.heads[bucket];
       self.heads[bucket] = id;
     }
-    Some(id)
+    id
   }
 
   /// The bucket `hash` lands in. Never called with `heads` empty.

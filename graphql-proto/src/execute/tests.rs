@@ -3950,3 +3950,61 @@ fn a_warm_fragment_table_charges_what_a_cold_one_charges() {
     "the second start hashed the names again, so it is not the cached path this fixture is about"
   );
 }
+
+/// A name the arena cannot hold is not charged for the copy nobody makes.
+///
+/// # A charge in front of a step that can decline is a bill for work that may not happen
+///
+/// "Charge before the work" is this branch's whole posture, and it is right for work that *will*
+/// happen. `intern` took it one step too far: after a complete lookup miss it deducted the copy's
+/// bytes and **then** called `insert`, whose cap and `u32` endpoints can refuse the name before
+/// `push_str` runs. The callers that meet `Unstored::Arena` degrade and carry on —
+/// `handle_field_error` loses the message text and keeps the error — so an unstorable
+/// thirty-two-megabyte driver message under the default sixteen-megabyte arena spent about 4.2
+/// million visits it never used, and short fields behind it then failed with `CollectionBudget`
+/// for a copy that never happened.
+///
+/// Preflight, refuse, charge, then perform a step that cannot decline. al8n/smear#196.
+///
+/// **The plant.** Move the `fit` call back below the copy's `take_bytes` — or restore the fallible
+/// `insert` and its `ok_or` — and the refused half below spends two passes over the name instead
+/// of one.
+#[test]
+fn a_name_the_arena_refuses_is_not_charged_for_its_copy() {
+  use crate::collect::{Interner, Unstored, Visits, byte_units};
+
+  /// An arena with room for a handful of short keys and nothing like the name below.
+  const CAP: u32 = 16;
+
+  let long = "n".repeat(4_096);
+  let units = byte_units(long.len());
+
+  // Refused by the arena: one pass over the name to hash it, and no second one.
+  let mut interner = Interner::new(CAP);
+  let mut visits = Visits::new(u32::MAX - 1);
+  let refused = interner.intern(&long, &mut visits);
+  assert!(
+    matches!(refused, Err(Unstored::Arena { limit }) if limit == CAP),
+    "the arena is what refuses a {}-byte name under a {CAP}-byte cap",
+    long.len()
+  );
+  assert_eq!(
+    visits.spent(),
+    units,
+    "a refused insertion copies nothing, so it owes one pass over the name and not two"
+  );
+
+  // And the accepted half, which is what keeps the assertion above from being a statement about a
+  // name nothing reads: a name the arena *does* hold pays for the hash and for the copy.
+  let short = "n";
+  let mut interner = Interner::new(CAP);
+  let mut visits = Visits::new(u32::MAX - 1);
+  interner
+    .intern(short, &mut visits)
+    .expect("one byte fits a sixteen-byte arena");
+  assert_eq!(
+    visits.spent(),
+    2 * byte_units(short.len()),
+    "an insertion that happens is charged for the hash and for the copy"
+  );
+}

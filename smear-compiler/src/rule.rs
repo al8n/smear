@@ -552,8 +552,20 @@ impl core::fmt::Display for Rule {
 /// A set of [`Rule`]s, as a bitmask.
 ///
 /// The default is [`RuleSet::ALL`] — validation checks everything unless a caller narrows it.
-/// Narrowing does not merely filter diagnostics: a rule that is off is not evaluated, so a
-/// consumer that only wants, say, the fragment rules does not pay for value coercion.
+/// Narrowing does not merely filter diagnostics: a draft §5 rule that is off is not evaluated, so
+/// a consumer that only wants, say, the fragment rules does not pay for value coercion.
+///
+/// **The resource bounds are not rules in that sense**, and reading the sentence above as though
+/// they were is the one way to be wrong about this type. [`Rule::MergeDepthBudget`] and
+/// [`Rule::MergeWorkBudget`] are each a rule *and* a bound, and a set reaches only the rule:
+/// narrowing removes a bound's diagnostic, never the bound. A validator asked for
+/// [`Rule::FieldSelectionMerging`] alone still stops when the merge engine reaches
+/// [`Budget::merge_work`](super::Budget::merge_work), and still answers `Err` — with
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set and
+/// [`Invalid::emitted`](super::Invalid::emitted) zero, because a validator that abandoned a pass
+/// and then answered `Ok` would be spelling giving up the same way it spells finishing.
+///
+/// The knob is what switches a bound off: see [`Budget`](super::Budget). al8n/smear#196.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RuleSet(u64);
 

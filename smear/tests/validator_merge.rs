@@ -661,6 +661,13 @@ fn a_refusal_with_its_rule_filtered_out_is_still_a_refusal() {
       invalid.to_string().contains("resource budget exceeded"),
       "{invalid}"
     );
+    assert!(
+      !invalid.stopped(),
+      "`stopped` is the *sink's* answer, and no diagnostic reached the sink here. It reading \
+       `true` would mean the two flags had been folded into one, and a caller asking `stopped` \
+       whether the whole document was looked at would be right by accident on this verdict and \
+       wrong on every other refusal. al8n/smear#196"
+    );
     assert!(ms < 500.0, "the bound stopped holding: {ms} ms");
 
     // The work bound, the same way, with a collecting sink so the empty sink is observed rather
@@ -1317,6 +1324,61 @@ fn a_scan_is_not_charged_for_bytes_no_candidate_reads() {
       "the reverse-order long-prefix comparison served under the default budget"
     );
     assert_eq!(fired, [Rule::MergeWorkBudget], "{fired:?}");
+    assert!(ms < 500.0, "{ms} ms");
+  });
+}
+
+/// A comparison that two lengths settle is not charged for bytes neither side reads.
+///
+/// # An over-charge does not merely refuse; it answers the wrong question
+///
+/// `shallow_units` charged `byte_units` of the *shorter* spelling, on the reasoning that a slice
+/// comparison cannot read past it. True, and it prices a comparison this code does not make:
+/// `[u8] == [u8]` settles unequal lengths before it reads a byte of either side. So the two string
+/// literals below — 524,288 bytes against 524,289 — cost one integer compare and were charged
+/// 65,537 units, which is the whole shipped `merge_work` and one more.
+///
+/// What that bought was not safety, and this is the half that makes it worth a fixture of its own.
+/// The document has a **real** draft 5.3.2 conflict: the two literals differ, so `x` cannot merge.
+/// The over-charge spent the budget before the comparison could say so, and the caller was handed
+/// a resource refusal in place of the finding — told to raise a knob when what they have is a
+/// document that will not merge. With `MergeWorkBudget` outside the rule set it degrades further
+/// still, to an `Err` carrying nothing at all. al8n/smear#196.
+///
+/// **The plant.** Charge `byte_units(min(left, right))` again and this reads `[MergeWorkBudget]`
+/// where the conflict should be.
+#[test]
+fn a_comparison_two_lengths_settle_is_not_charged_for_either_spelling() {
+  /// Long enough that one `byte_units` of it exceeds the shipped `merge_work` on its own.
+  const LEN: usize = 524_288;
+
+  on_a_deep_stack(|| {
+    let schema = build();
+    let left = "a".repeat(LEN);
+    let right = "a".repeat(LEN + 1);
+    let source = std::format!("{{ x: note(payload: \"{left}\") x: note(payload: \"{right}\") }}");
+
+    let (tripped, fired, ms) = timed(&schema, &source, &Budget::default());
+    println!(
+      "length-decided comparison: {} bytes, spellings of {LEN} and {}, {ms:.3} ms",
+      source.len(),
+      LEN + 1
+    );
+    assert!(
+      !tripped,
+      "an `O(1)` decision exhausted the merge budget: {fired:?}"
+    );
+    assert_eq!(
+      fired,
+      [Rule::FieldSelectionMerging],
+      "the document's finding is that the two literals differ, and that is what the caller must be \
+       told: {fired:?}"
+    );
+    assert_eq!(
+      conflicts(&schema, &source),
+      [MergeConflict::Arguments],
+      "and it is the arguments that conflict, not the shapes"
+    );
     assert!(ms < 500.0, "{ms} ms");
   });
 }

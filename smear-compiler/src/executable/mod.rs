@@ -91,10 +91,22 @@ impl Invalid {
     self.emitted
   }
 
-  /// Returns whether the sink stopped validation before the document was fully examined.
+  /// Returns whether the **sink** stopped validation before the document was fully examined.
   ///
-  /// True for [`First`](super::First) on any invalid document. When it is true, the absence of a
-  /// diagnostic says nothing: the rest of the document was never looked at.
+  /// True for [`First`](super::First) on any invalid document *that produced a diagnostic*. The
+  /// qualification is not pedantry: there is exactly one verdict that is `Err` with nothing
+  /// emitted — a resource bound refusing with its own rule outside the
+  /// [`RuleSet`](super::RuleSet) — and no diagnostic ever reaches the sink there, so the sink
+  /// never asks for anything to stop and this reads `false` on a document that was very much not
+  /// fully examined. Read as "was the whole document looked at", it says the opposite of the truth
+  /// on the one case where it matters most.
+  ///
+  /// So the two flags answer two questions and neither answers the other's: this one says **who**
+  /// stopped the walk, and [`Invalid::budget_tripped`] says whether a bound refused. A caller who
+  /// wants "is anything about this document still unknown" reads both.
+  ///
+  /// When it is true, the absence of a diagnostic says nothing: the rest of the document was never
+  /// looked at. al8n/smear#196.
   #[inline]
   pub const fn stopped(&self) -> bool {
     self.stopped
@@ -150,7 +162,9 @@ impl core::error::Error for Invalid {}
 /// validator owns neither, which is what lets the steady state allocate nothing. `budget` bounds
 /// draft 5.3.2's merge engine.
 ///
-/// Returns `Err(Invalid)` when at least one rule fired.
+/// Returns `Err(Invalid)` when at least one rule fired **or** a [`Budget`] bound refused the
+/// document. Those are not the same thing and [`Invalid::budget_tripped`] is what separates them:
+/// a refusal with the bound's own rule filtered out has an [`Invalid::emitted`] of zero.
 ///
 /// # Example
 ///
@@ -216,9 +230,15 @@ where
 
 /// Validates an executable document against a subset of the rules.
 ///
-/// A rule outside `rules` is not evaluated, not merely filtered: a consumer that wants only the
-/// fragment rules does not pay for value coercion. With [`RuleSet::ALL`] this is exactly
+/// A draft §5 rule outside `rules` is not evaluated, not merely filtered: a consumer that wants
+/// only the fragment rules does not pay for value coercion. With [`RuleSet::ALL`] this is exactly
 /// [`validate_executable`].
+///
+/// **`rules` does not reach the resource bounds.** Narrowing removes a bound's diagnostic, never
+/// the bound: `budget` is enforced whatever this set contains, so a caller who asks for
+/// [`Rule::FieldSelectionMerging`](super::Rule::FieldSelectionMerging) alone can still be handed
+/// `Err` with [`Invalid::emitted`] zero and [`Invalid::budget_tripped`] set. The knob is what
+/// switches a bound off — see [`Budget`]. al8n/smear#196.
 pub fn validate_executable_with<S, K>(
   schema: &Schema,
   document: &ExecutableDocument<S>,

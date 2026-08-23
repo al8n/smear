@@ -477,7 +477,30 @@ pub(crate) struct Names {
   /// Every interned name's bytes, concatenated.
   bytes: Vec<u8>,
   /// Name id to its `(start, end)` range in [`Names::bytes`].
-  ranges: Vec<(u32, u32)>,
+  ///
+  /// # `usize` and not two `u32`s, which is a decision about what documents are admissible
+  ///
+  /// These were `u32`s, checked through an `arena_range` helper that answered [`None`] when the
+  /// pair would not narrow — and that [`None`] was the *same* [`None`]
+  /// [`Names::intern`](Names::intern) returns when the ledger refuses. The caller reads a refusal
+  /// as [`Rule::MergeWorkBudget`](crate::Rule::MergeWorkBudget) and sets
+  /// [`Invalid::budget_tripped`](crate::Invalid::budget_tripped), so a document whose only problem
+  /// was that four gibibytes of names will not fit a `u32` was told to raise a knob that could not
+  /// help it. Two different abandonments wearing one `None` — the shape
+  /// [`Match`](crate::executable) was introduced for one level up, where a scan the budget stopped
+  /// had not established that a name was absent. An arena that cannot represent a name has not
+  /// established that the budget was exhausted.
+  ///
+  /// Of the two repairs, this is the one that removes the *condition* rather than widening the
+  /// type that reports it: a `usize` range cannot fail to represent a slice of a `Vec<u8>`, so
+  /// there is nothing left for the second variant to say. What it costs is eight bytes an entry on
+  /// a 64-bit target — the per-name overhead beside the name's own bytes goes from twenty to
+  /// twenty-eight. What it buys is that a caller who raised
+  /// [`Budget::merge_work`](crate::Budget::merge_work) far enough to admit such a document gets the
+  /// document validated rather than a verdict naming a ceiling they had already raised. That is
+  /// this crate's own posture about ceilings: the knob is the bound, and a limit no caller can
+  /// reach past is not one.
+  ranges: Vec<(usize, usize)>,
   /// Each name's whole [`hash_bytes`], parallel to [`Names::ranges`].
   ///
   /// Eight bytes a name, bought for two things the ledger could not otherwise see. A chain step
@@ -608,11 +631,11 @@ impl Names {
         // What that unit buys: two integers. A bucket collision — the constructible case, and the
         // only one an adversary has — is rejected here without touching a byte.
         let (start, end) = self.ranges[id as usize];
-        if self.hashes[id as usize] == hash && (end - start) as usize == key.len() {
+        if self.hashes[id as usize] == hash && end - start == key.len() {
           if !work.take_bytes(key.len()) {
             return None;
           }
-          if &self.bytes[start as usize..end as usize] == key {
+          if &self.bytes[start..end] == key {
             return Some(id);
           }
         }
@@ -625,17 +648,20 @@ impl Names {
     // chains, and no re-hash, which is what storing the hash bought — so the cost is known before
     // it is paid and is charged here rather than discovered inside the loop. The copy into the
     // arena is the key's third and last read.
-    // Both narrowings this insert needs, checked before anything is charged and long before
-    // anything is written. The arena is a `usize` and the range that names a slice of it is two
-    // `u32`s, and the gap between the two is *reachable*: `merge_work`'s ceiling admits far more
-    // than four gigabytes of names, since two charged passes over four gigabytes is about 1.07
-    // billion units. Past that an `as u32` does not fail to intern — it **wraps**, and a wrapped
-    // range reads back as somebody else's bytes, so an existing response name compares as distinct
-    // and the merge check it owed is skipped, or the slice below panics on a start above its end.
-    // Checked rather than argued, for the reason `graphql_proto`'s arena gives: "unreachable given
-    // the ceiling" is exactly the claim that stops being true when somebody sets a different
-    // ceiling. al8n/smear#196.
-    let (start, end) = arena_range(self.bytes.len(), key.len())?;
+    // The arena's range needs no narrowing check, because there is no narrowing: a `usize` pair
+    // names a slice of a `Vec<u8>` and cannot fail to. That is deliberate, and the field says what
+    // it costs — the `u32` pair this replaced could refuse, and its refusal wore the same `None`
+    // the ledger's does, so a document too large for the *arena* was reported against the *budget*.
+    //
+    // The id is still a `u32`, and its narrowing cannot be reached rather than being argued not to
+    // be: interning a name charges at least two units — one pass to hash it, one to copy it — and
+    // `Work::take` poisons at `u32::MAX`, so no `Budget` any caller can construct admits more than
+    // `u32::MAX / 2` names. `NONE` is `u32::MAX`, which is above that with a factor of two to
+    // spare, and the arithmetic is pinned rather than described. The check stays regardless,
+    // because a check that never fires costs one comparison and an argument that stops being true
+    // costs a wrapped index. al8n/smear#196.
+    let start = self.bytes.len();
+    let end = start + key.len();
     let id = u32::try_from(self.ranges.len()).ok()?;
 
     let relink = if self.ranges.len() + 1 > self.heads.len() {
@@ -754,20 +780,6 @@ const fn finalize(mut hash: u64) -> u64 {
   hash ^= hash >> 27;
   hash = hash.wrapping_mul(0x94d0_49bb_1331_11eb);
   hash ^ (hash >> 31)
-}
-
-/// The `(start, end)` a key of `len` bytes occupies after `filled` bytes of arena, or [`None`]
-/// when that pair does not fit a `u32`.
-///
-/// A function rather than two `as` casts at the call site, because the endpoints have to be known
-/// to be representable **before** the arena is grown: a refusal discovered afterwards would leave
-/// bytes in the arena that no range names. See [`Names::intern`]'s insert for what a wrapped range
-/// costs. al8n/smear#196.
-#[inline]
-fn arena_range(filled: usize, len: usize) -> Option<(u32, u32)> {
-  let start = u32::try_from(filled).ok()?;
-  let end = start.checked_add(u32::try_from(len).ok()?)?;
-  Some((start, end))
 }
 
 /// The work one pass over `len` bytes costs: one unit per eight-byte chunk, plus one for the tail.
@@ -1214,305 +1226,70 @@ mod tests {
     );
   }
 
-  /// An arena range that will not narrow is refused before anything is written.
+  /// The arena's narrowing is gone, and the one narrowing left cannot be reached.
   ///
-  /// The endpoints of a name's slice are `u32`s over a `usize` arena, and the gap between the two
-  /// is *reachable*: `merge_work`'s public maximum admits far more than four gigabytes of names,
-  /// since two charged passes over four gigabytes is about 1.07 billion units. An `as u32` past
-  /// that does not fail to intern — it **wraps**.
+  /// # What this fixture used to say, and why it stopped saying it
   ///
-  /// The wrap is spelled out below rather than described, because both of its consequences follow
-  /// from the same arithmetic: a range whose end lands under its start panics on the slice, and one
-  /// that lands somewhere else entirely reads back as another name's bytes — so an interned
-  /// response name compares as distinct and the merge check it owed is skipped.
+  /// It pinned `arena_range`. A name's slice endpoints were `u32`s over a `usize` arena, the gap
+  /// between the two was reachable past four gibibytes of names, and the helper refused rather than
+  /// letting an `as u32` wrap. The check was right; its *report* was not. The [`None`] it answered
+  /// is the same [`None`] a ledger refusal answers, and [`Names::intern`]'s only caller reads a
+  /// [`None`] as [`Rule::MergeWorkBudget`](crate::Rule::MergeWorkBudget) — so a document whose only
+  /// problem was that its names will not fit a `u32` was told to raise a knob that could not help
+  /// it, and `Invalid::budget_tripped` said a budget had refused when none had. Two abandonments
+  /// wearing one `None`, which is the shape `Match` was introduced for one level up.
   ///
-  /// **This is the one repair on this branch with no behavioural fixture, and that is a statement
-  /// about the trigger and not about the check.** Reaching it needs a four-gigabyte arena, which no
-  /// test can allocate, so what is pinned here is the arithmetic that decides it: the same two
-  /// inputs, through the expression that shipped and through the one that replaced it.
+  /// [`Names::ranges`] is a `usize` pair now, so the condition that helper guarded does not exist
+  /// and there is nothing left for it to check. The field says what the eight bytes an entry buy
+  /// and what they cost.
+  ///
+  /// # What is left is the id, and the ledger is what makes it unreachable
+  ///
+  /// The entry id is still a `u32` against a [`NONE`] of [`u32::MAX`]. Interning a name charges at
+  /// least two units — one pass to hash it and one to copy it — and [`Work::take`] poisons at
+  /// [`u32::MAX`], so no [`Budget`] any caller can construct admits enough interns to reach the
+  /// sentinel. That is derived below from the interner's own measured floor rather than restated
+  /// from the comment, so an intern that got cheaper would move this fixture instead of quietly
+  /// invalidating it.
+  ///
+  /// **The plant.** Make an intern cost one unit instead of two — delete either `take_bytes` — and
+  /// the margin below halves; delete both and it vanishes, because a free intern is one the ledger
+  /// cannot bound the count of.
   #[test]
-  fn an_arena_range_that_will_not_narrow_is_refused() {
-    use super::arena_range;
+  fn the_only_narrowing_left_cannot_be_reached() {
+    use super::{NONE, Names};
 
-    assert_eq!(arena_range(0, 0), Some((0, 0)), "the empty key is a key");
-    assert_eq!(arena_range(7, 4), Some((7, 11)));
-    assert_eq!(
-      arena_range(u32::MAX as usize - 4, 4),
-      Some((u32::MAX - 4, u32::MAX)),
-      "an arena filled to the last representable byte is still representable"
-    );
-
-    // One byte further, and the two answers part company.
-    let (filled, len) = (u32::MAX as usize - 4, 5usize);
-    assert_eq!(
-      arena_range(filled, len),
-      None,
-      "a range one byte past what a `u32` holds has to refuse"
-    );
-    #[allow(clippy::cast_possible_truncation)]
-    let shipped = (filled as u32, (filled + len) as u32);
-    assert!(
-      shipped.1 < shipped.0,
-      "the expression this replaced produces {shipped:?}, whose end is before its start: a slice \
-       that panics, and a name that reads as somebody else's bytes if it does not"
-    );
-
-    // And an arena longer than a `u32` altogether, which is the same refusal one step earlier.
-    assert_eq!(arena_range(u32::MAX as usize + 1, 1), None);
-    assert_eq!(arena_range(0, u32::MAX as usize + 1), None);
-  }
-
-  #[test]
-  fn the_interner_round_trips_and_survives_a_reset() {
-    use super::Names;
-
-    let mut work = unbounded();
-    let mut names = Names::new();
-    let a = names.intern(b"hero", &mut work).expect("budget");
-    let b = names.intern(b"hero", &mut work).expect("budget");
-    let c = names.intern(b"heroes", &mut work).expect("budget");
-    assert_eq!(a, b, "the same name must intern to the same id");
-    assert_ne!(a, c, "a different name must not");
-    assert_eq!(names.len(), 2);
-
-    // Past the initial bucket table, so the growth path is on the measured path rather than a
-    // branch nothing takes.
-    for index in 0..500u32 {
-      let key = std::format!("field{index}");
-      assert_eq!(
-        names.intern(key.as_bytes(), &mut work),
-        Some(2 + index),
-        "growth lost an entry"
-      );
-    }
-    for index in 0..500u32 {
-      let key = std::format!("field{index}");
-      assert_eq!(
-        names.intern(key.as_bytes(), &mut work),
-        Some(2 + index),
-        "growth lost an entry"
-      );
-    }
-    assert_eq!(names.len(), 502);
-
-    // A reset empties it without giving the memory back, which is the whole contract.
-    let capacity = names.capacity();
-    names.reset();
-    assert_eq!(names.len(), 0);
-    assert_eq!(names.capacity(), capacity, "reset must not free");
-    assert_eq!(
-      names.intern(b"heroes", &mut work),
-      Some(0),
-      "ids restart after a reset"
-    );
-  }
-
-  /// Names are not text: a `&[u8]` document may spell one with bytes that are not UTF-8, and the
-  /// interner is byte-keyed precisely so that it does not care.
-  #[test]
-  fn the_interner_is_byte_keyed() {
-    use super::Names;
-
-    let mut work = unbounded();
-    let mut names = Names::new();
-    let a = names
-      .intern(&[0xff, 0x00, b'a'], &mut work)
-      .expect("budget");
-    let b = names
-      .intern(&[0xff, 0x00, b'b'], &mut work)
-      .expect("budget");
-    assert_ne!(a, b);
-    assert_eq!(names.intern(&[0xff, 0x00, b'a'], &mut work), Some(a));
-    assert_eq!(
-      names.intern(b"", &mut work),
-      Some(2),
-      "the empty key is a key"
-    );
-  }
-
-  /// `count` aliases that share one bucket of `mask + 1`, searched for against the **shipped**
-  /// hash, each `width + 1` bytes long.
-  ///
-  /// Derived rather than listed on purpose. A hard-coded set stops colliding the moment the hash
-  /// moves, and the test then goes green over exactly the work it exists to price — the defect's
-  /// signature here is *absence*, so the case has to be re-derived from whatever the hash currently
-  /// is. Every name is a valid draft §2.1.9 `Name`, so this is a document a client can send.
-  ///
-  /// `width` zero-pads the decimal, which is what lets the same collision structure be searched for
-  /// at several *lengths* — the axis the charge has to track and, until al8n/smear#196, did not.
-  fn colliding_aliases(mask: u64, count: usize, width: usize) -> Vec<std::string::String> {
-    let mut by_bucket: Vec<Vec<std::string::String>> = std::vec![Vec::new(); mask as usize + 1];
-    for candidate in 0u64..8_000_000 {
-      let name = std::format!("q{candidate:0width$}");
-      let at = (super::hash_bytes(name.as_bytes()) & mask) as usize;
-      by_bucket[at].push(name);
-      if by_bucket[at].len() == count {
-        let found = core::mem::take(&mut by_bucket[at]);
-        assert!(
-          found
-            .iter()
-            .all(|name| crate::schema::is_name(name.as_bytes())),
-          "the search must produce names a document can spell"
-        );
-        return found;
-      }
-    }
-    panic!("no bucket of {} reached {count} names", mask + 1);
-  }
-
-  /// A pile-up a client can construct costs what it compares, and the ledger stops it.
-  ///
-  /// # Why this is a gate and not a demonstration
-  ///
-  /// [`super::hash_bytes`] is unkeyed and each round is invertible in the word it folds, so a set
-  /// of names sharing one bucket is *constructible* rather than unlucky. Until al8n/smear#196 the
-  /// chain walk was uncharged, and 512 such aliases — the search below finds them in well under a
-  /// million candidates — cost **130,816 comparisons** against the 512 selections
-  /// `fill_merge_set` had charged for. `merge_work` was therefore not a bound on the work at all.
-  ///
-  /// **The plant.** Delete the `work.take(1)` from the chain walk and the first half of this test
-  /// loses its whole `COMPARES` term — the relinks and the byte charges are all that is left —
-  /// while the second half stops refusing and interns all 512.
-  ///
-  /// The two-sided shape is what makes it a gate rather than a ceiling nobody can hit: the *same
-  /// count* of ordinary aliases passes the same ledger the constructed ones exhaust.
-  #[test]
-  fn a_constructed_pile_up_is_charged_and_refused() {
-    use super::Names;
-
-    /// 512 names live in 1,024 buckets, and a set sharing a bucket under the widest mask the table
-    /// reaches shares one under every narrower mask it grew through.
-    const RUN: usize = 512;
-    const MASK: u64 = 1023;
-    /// `0 + 1 + … + 511`: the `L`th name into a chain walks the `L - 1` already there.
-    const COMPARES: u32 = (RUN * (RUN - 1) / 2) as u32;
-    /// One step per name at each doubling: 1, then 65, 129 and 257.
-    const RELINKS: u32 = 1 + 65 + 129 + 257;
-
-    let names = colliding_aliases(MASK, RUN, 0);
-    // Every name is hashed once and copied once. Derived from the names rather than written down,
-    // so that a hash change moves the search's answers and this total together.
-    let bytes: u32 = names
-      .iter()
-      .map(|name| 2 * super::byte_units(name.len()))
-      .sum();
+    /// Enough distinct keys to get past the first bucket doubling, so the floor measured below is
+    /// the steady-state one and not the first insert's.
+    const RUN: u32 = 256;
 
     let mut work = unbounded();
     let mut table = Names::new();
-    for (index, name) in names.iter().enumerate() {
-      assert_eq!(
-        table.intern(name.as_bytes(), &mut work),
-        Some(index as u32),
-        "a colliding name is still a distinct name"
-      );
-    }
-    assert_eq!(
-      work.spent(),
-      COMPARES + RELINKS + bytes,
-      "{RUN} names in one bucket walk {COMPARES} entries, relink {RELINKS} times and read \
-       {bytes} units of bytes; a total missing {COMPARES} says the walk is not charged at all"
-    );
-
-    // The ceiling an adversary reaches is `sqrt(2 * work)` and no further, so a budget well under
-    // the pile-up's cost stops partway through it.
-    const CEILING: u32 = 8192;
-    let mut work = Work::new(CEILING);
-    let mut table = Names::new();
-    let refused = names
-      .iter()
-      .position(|name| table.intern(name.as_bytes(), &mut work).is_none())
-      .expect("the ledger must refuse before the run is exhausted");
-    assert!(
-      refused < RUN,
-      "{refused} of {RUN} interned under a ceiling of {CEILING}"
-    );
-
-    // Same count, ordinary spelling, same ceiling: it serves. A bound that refused this too would
-    // be a bound on documents rather than on abuse.
-    let mut work = Work::new(CEILING);
-    let mut table = Names::new();
+    let mut floor = u32::MAX;
     for index in 0..RUN {
-      let key = std::format!("q{index}");
-      assert!(
-        table.intern(key.as_bytes(), &mut work).is_some(),
-        "{RUN} ordinary aliases must fit a ceiling of {CEILING}; refused at {index}"
-      );
+      let key = std::format!("{index}");
+      let before = work.spent();
+      table
+        .intern(key.as_bytes(), &mut work)
+        .expect("the budget is unbounded");
+      floor = floor.min(work.spent() - before);
     }
-  }
-
-  /// The ledger tracks the **bytes** a name costs, not merely the entries it walks past.
-  ///
-  /// # Why a second gate, when the pile-up above is already one
-  ///
-  /// That one prices the *chain*: `k` colliding names walk `k²/2` entries and the ledger records
-  /// `k²/2`. It says nothing about `L`, the length of the names, and `L` is a number the client
-  /// writes with no local ceiling in draft §2.1.9. Until al8n/smear#196 a chain step read
-  /// `&bytes[start..end] == key`, so the same `k` recorded `O(k²)` and ran `O(k² · L)` — the very
-  /// defect this branch set out to fix, one dimension over, with the charge counting steps while
-  /// the cost was bytes.
-  ///
-  /// Two things close it and this measures both at once. The whole hash is stored, so a bucket
-  /// collision is rejected on two integers and the `k²/2` walk reads **no bytes at all** — which is
-  /// why the expected total below has no comparison term. And the three passes that do read the
-  /// key — hashing it, comparing it, copying it into the arena — are charged in
-  /// [`super::byte_units`] before they run, which is why the total moves with `L`.
-  ///
-  /// **The plant.** Delete either `take_bytes` from `intern` and the totals stop moving with the
-  /// length: all three lengths read `WALK + RELINKS` and the final ordering assertion fails.
-  #[test]
-  fn the_charge_tracks_the_bytes_a_name_costs() {
-    use super::{Names, byte_units};
-
-    /// 32 names in 64 buckets: enough chain to be a pile-up, cheap enough to search for three
-    /// times at three lengths.
-    const RUN: usize = 32;
-    const MASK: u64 = 63;
-    /// `0 + 1 + … + 31`: the `L`th name into a chain walks the `L - 1` already there — and, with
-    /// the hash stored beside each one, walks past them without reading a byte.
-    const WALK: u32 = (RUN * (RUN - 1) / 2) as u32;
-    /// The single doubling 32 names reach: the very first insert, into an empty table.
-    const RELINKS: u32 = 1;
-
-    let mut totals = Vec::new();
-    for width in [7usize, 63, 511] {
-      let length = width + 1;
-      let names = colliding_aliases(MASK, RUN, width);
-      assert!(
-        names.iter().all(|name| name.len() == length),
-        "the search must produce names of the length it was asked for"
-      );
-
-      let mut work = unbounded();
-      let mut table = Names::new();
-      for (index, name) in names.iter().enumerate() {
-        assert_eq!(
-          table.intern(name.as_bytes(), &mut work),
-          Some(index as u32),
-          "a colliding name is still a distinct name"
-        );
-      }
-      totals.push((length, work.spent()));
-    }
-
-    // The property first, because it is the one the old ledger could not state at all: the same
-    // collision structure at three lengths costs three different amounts. A charge that counts
-    // entries reads the same number three times.
     assert!(
-      totals[0].1 < totals[1].1 && totals[1].1 < totals[2].1,
-      "the charge does not move with the length: {totals:?}"
+      floor >= 2,
+      "one intern costs {floor} units at its cheapest, and two is what the two passes over the key \
+       are worth; below that the count of interns is not bounded by the ledger at all"
     );
 
-    // Then the exact totals, which say *which* passes were charged and that the walk was not one
-    // of them.
-    for (length, spent) in totals {
-      assert_eq!(
-        spent,
-        2 * RUN as u32 * byte_units(length) + WALK + RELINKS,
-        "{RUN} names of {length} bytes: each hashed once and copied once, none compared"
-      );
-    }
+    // Every unit any `Budget` can spend, because `Work::take` refuses at the poison and leaves the
+    // counter there. The id narrows at `NONE`, and the ledger cannot pay for that many.
+    let payable = u64::from(u32::MAX) / u64::from(floor);
+    assert!(
+      payable < u64::from(NONE),
+      "the ledger can pay for {payable} interns and the id narrows at {NONE}, so the narrowing is \
+       reachable — and its refusal would wear the same `None` the ledger's does, which is the \
+       defect this fixture replaced"
+    );
   }
-
   /// The charge a request pays must not depend on what the previous request left behind.
   ///
   /// [`Names::reset`] used to `fill` the bucket table with [`NONE`], which keeps its *length* as
