@@ -82,8 +82,7 @@ use super::{
   Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
   SourceEventError, SourceField, Values,
   collect::{
-    Allowance, Fragments, Interner, Scratch, Unstored, Visits, byte_units, collect_fields,
-    variable_key,
+    Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields, variable_key,
   },
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
@@ -3034,7 +3033,7 @@ where
       // neither, so it says so rather than borrowing a sentence about the caller's schema.
       // al8n/smear#196.
       let name_bytes = name.as_bytes();
-      if !self.visits.take(byte_units(name_bytes.len())) {
+      if !self.visits.take_bytes(name_bytes.len()) {
         let (parent, field) = self.owner(slot);
         let limit = self.visits.limit();
         self.fail(
@@ -3244,7 +3243,7 @@ where
       // position — a factor the query never pays for. Charged before the pass, in the budget that
       // already prices every other read of a document-chosen name; a refusal is the collection
       // budget's, which is exactly what `Exhausted::Unstored` renders.
-      if !self.visits.take(byte_units(name_bytes(first).len())) {
+      if !self.visits.take_bytes(name_bytes(first).len()) {
         exhausted = Some((
           Exhausted::Unstored(Unstored::Budget {
             limit: self.visits.limit(),
@@ -3874,6 +3873,17 @@ where
   #[cfg(test)]
   fn fragment_definitions_walked(&self) -> u64 {
     self.fragments.walked()
+  }
+
+  /// Fragment-name bytes the index pass has hashed, counted independently of what it charged.
+  ///
+  /// The charge in front of a pass and the pass itself agree by construction, so a ledger that
+  /// priced this one in *definitions* read as consistent with itself while `Table::fill` hashed
+  /// whatever the document wrote. Only this count separates "the pass was refused" from "the pass
+  /// ran and the refusal came afterwards". See `collect::table`.
+  #[cfg(test)]
+  fn fragment_name_bytes_hashed(&self) -> u64 {
+    self.fragments.hashed()
   }
 
   /// Entries the name lookups have compared, counted independently of what they charged.

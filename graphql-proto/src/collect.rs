@@ -347,9 +347,33 @@ impl Visits {
   ///
   /// This is the shape the callers that *degrade* need: an error message that cannot be charged is
   /// shortened, not raised, so they have no selection to point at and no fault to build.
+  ///
+  /// # [`u32::MAX`] is poison and not a quantity
+  ///
+  /// [`byte_units`] saturates there, and saturation is the ledger giving up on the length: every
+  /// name from about thirty-two gibibytes upward produces exactly that number, so accepting it
+  /// accepts a pass whose size the counter has stopped tracking, and accepts every larger one for
+  /// the same price. `checked_sub` alone does not catch it, because
+  /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits) is a
+  /// [`NonZeroU32`](core::num::NonZeroU32) an operator may set to [`u32::MAX`] — and at that
+  /// setting `left` starts there too, so the saturated charge fits exactly once and
+  /// `Schema::sym` hashes thirty-two gibibytes on a ledger that thinks it paid. The public maximum
+  /// restored the unbounded byte pass that the byte charges exist to close.
+  ///
+  /// So the saturation value is refused whatever the remainder is. That is the convention
+  /// `smear_compiler`'s `Work::take` already keeps, arrived at from the other direction: that
+  /// ledger counts up and poisons its total, this one counts down and refuses the amount, and both
+  /// make [`u32::MAX`] a number no charge may rest on. One convention across the two crates, and
+  /// not two — the byte charges that made the poison necessary were added to both ledgers, and the
+  /// poison was added to only one. What this one must *not* do is spend the remainder on the
+  /// refusal: the degrading callers above depend on a refused charge leaving the budget where it
+  /// was. al8n/smear#196.
   #[inline]
   #[must_use]
   pub(super) fn take(&mut self, work: u32) -> bool {
+    if work == u32::MAX {
+      return false;
+    }
     match self.left.checked_sub(work) {
       Some(left) => {
         self.left = left;
@@ -583,13 +607,15 @@ where
       location,
     )?;
     if self.table.is_indexed() {
-      // The second charge, in the amount the pass would cost if it ran now. The table holds exactly
-      // the fragments the counting pass would find again, so this is the same number the build path
-      // spends and not an estimate of it.
+      // The second and third charges, in the amounts the pass would cost if it ran now, and in the
+      // order it would take them. The table holds exactly the fragments the counting pass would
+      // find again and the byte total the hashing pass was admitted on, so these are the same two
+      // numbers the build path spends and not estimates of them.
       visits.spend(
         u32::try_from(self.table.count()).unwrap_or(u32::MAX),
         location,
       )?;
+      visits.spend(self.table.name_units(), location)?;
       visits.fragment_pass_charged();
       return Ok(());
     }
@@ -630,6 +656,12 @@ where
   #[cfg(test)]
   pub(super) const fn walked(&self) -> u64 {
     self.table.walked()
+  }
+
+  /// Name bytes this executor's index pass has hashed. See [`Table`]'s field.
+  #[cfg(test)]
+  pub(super) const fn hashed(&self) -> u64 {
+    self.table.hashed()
   }
 
   /// Entries the index has reserved room for. See [`Table::reserved`].
@@ -701,7 +733,7 @@ mod table {
   };
   use smear_schema::{bucket, hash_bytes};
 
-  use super::{Fault, NONE, Visits};
+  use super::{Fault, NONE, Visits, byte_units};
 
   /// One accepted charge, and the fragments it was taken over.
   ///
@@ -711,6 +743,12 @@ mod table {
     /// The fragments the charged walk selected, which is also what the population indexes — not a
     /// count of them, and not the slice they were selected out of. See the module.
     fragments: std::vec::Vec<&'a FragmentDefinition<S>>,
+    /// What hashing every one of those names costs, in [`byte_units`], saturating.
+    ///
+    /// Carried on the receipt rather than recomputed by [`Table::fill`] so that the number the
+    /// population is admitted to spend is the number that was accepted, and so that the table can
+    /// keep it: a warm executor charges this again without the names being read a second time.
+    name_units: u32,
   }
 
   /// A document's named fragments, chained by the hash of their names.
@@ -738,6 +776,13 @@ mod table {
     /// It is **not** the record of who has paid: this outlives the operation and the charge does
     /// not. That one is `Visits::fragments_charged`.
     indexed: bool,
+    /// What hashing every indexed name cost, in [`byte_units`], for the operation that paid it.
+    ///
+    /// Zero until [`fill`](Table::fill) has run. It is here for the same reason the count is
+    /// re-spent on the cached path: a table this executor already built is work a later operation
+    /// does not repeat, and a *charge* a later operation must repeat anyway, or the same request
+    /// is refused cold and served warm.
+    name_units: u32,
     /// Entries compared, over the executor's whole life.
     ///
     /// The gate for "a refused probe run stops at the refusal" reads this. It cannot be read from
@@ -755,6 +800,15 @@ mod table {
     /// two. Only a count taken at the read itself can say how many walks there were.
     #[cfg(test)]
     walked: u64,
+    /// Name bytes [`fill`](Table::fill) has hashed, over the executor's whole life.
+    ///
+    /// Counted for the reason `walked` is, one dimension over. `Table::charge` prices this pass and
+    /// `fill` performs it, so the charge and the pass agree by construction and a version that
+    /// priced it in *definitions* — as this did — agrees with itself too. Only a count taken at the
+    /// read can say whether a refused operation hashed a name before it was refused.
+    /// al8n/smear#196.
+    #[cfg(test)]
+    hashed: u64,
   }
 
   impl<'a, S> Table<'a, S> {
@@ -766,10 +820,13 @@ mod table {
         heads: std::vec::Vec::new(),
         chain: std::vec::Vec::new(),
         indexed: false,
+        name_units: 0,
         #[cfg(test)]
         compares: 0,
         #[cfg(test)]
         walked: 0,
+        #[cfg(test)]
+        hashed: 0,
       }
     }
 
@@ -785,32 +842,64 @@ mod table {
     /// refusal drops the vector and leaves the table not cleared but *untouched*, there being
     /// nothing in it yet to clear.
     ///
-    /// The charge is exact rather than an upper bound, because chaining has no data-dependent
+    /// The count charge is exact rather than an upper bound, because chaining has no data-dependent
     /// insertion loop: indexing what the walk selected costs one push each whatever the names are.
+    ///
+    /// # And a second charge, because one push each is not one *pass* each
+    ///
+    /// A push is a constant, and the hash [`Table::fill`] takes to decide the bucket is not: it
+    /// reads the whole fragment name, and draft §2.1.9 puts no ceiling on one. A count charge in
+    /// front of a byte pass is the wrong-dimension defect this branch exists to close, and here it
+    /// was reachable from a *valid* document — one long fragment name and the spread that selects
+    /// it exhausts the definition and fragment counts exactly, and `fill` then hashes the whole
+    /// spelling before the metered lookup that follows can refuse anything.
+    ///
+    /// So the pass is priced with the names' own lengths, before `fill` may run. Reading a name's
+    /// length is not reading the name — it is a slice header — so the accumulation below is not
+    /// itself the work being charged for, exactly as the merge engine's argument scan is charged
+    /// off lengths it reads before it compares anything. Saturating, which the poison in
+    /// [`Visits::take`] then turns into a refusal rather than into an accepted `u32::MAX`.
+    /// al8n/smear#196.
     pub(super) fn charge(
       &mut self,
       definitions: &'a [DescribedExecutableDefinition<S>],
       visits: &mut Visits,
       location: SimpleSpan,
-    ) -> Result<Paid<'a, S>, Fault<'static>> {
+    ) -> Result<Paid<'a, S>, Fault<'static>>
+    where
+      S: AsRef<[u8]>,
+    {
       let mut fragments = std::vec::Vec::new();
+      let mut name_units = 0u32;
       for described in definitions {
         #[cfg(test)]
         {
           self.walked += 1;
         }
         if let ExecutableDefinition::Fragment(fragment) = described.node() {
+          name_units =
+            name_units.saturating_add(byte_units(fragment.name().source().as_ref().len()));
           fragments.push(fragment);
         }
       }
       visits.spend(u32::try_from(fragments.len()).unwrap_or(u32::MAX), location)?;
-      Ok(Paid { fragments })
+      visits.spend(name_units, location)?;
+      Ok(Paid {
+        fragments,
+        name_units,
+      })
     }
 
     /// Whether the pass has run. See the field.
     #[inline]
     pub(super) const fn is_indexed(&self) -> bool {
       self.indexed
+    }
+
+    /// What hashing the indexed names cost the operation that built this table. See the field.
+    #[inline]
+    pub(super) const fn name_units(&self) -> u32 {
+      self.name_units
     }
 
     /// How many fragments it holds, which is what the population cost.
@@ -831,6 +920,13 @@ mod table {
     #[inline]
     pub(super) const fn walked(&self) -> u64 {
       self.walked
+    }
+
+    /// Name bytes this executor's index pass has hashed. See the field.
+    #[cfg(test)]
+    #[inline]
+    pub(super) const fn hashed(&self) -> u64 {
+      self.hashed
     }
 
     /// Entries the three vectors have reserved room for.
@@ -863,8 +959,15 @@ mod table {
         "the table is being populated a second time; the second selection would replace `defs` \
          while `heads` and `chain` still chain the ordinals of the first"
       );
-      let Paid { fragments } = paid;
+      let Paid {
+        fragments,
+        name_units,
+      } = paid;
       self.indexed = true;
+      // Kept so a warm executor charges what a cold one charges. The number was already accepted
+      // by the receipt above; storing it means the *verdict* does not depend on whether this table
+      // happens to be built, which is the same thing `Names::reset` had to fix one crate over.
+      self.name_units = name_units;
       let count = fragments.len();
       if count == 0 {
         return;
@@ -883,12 +986,20 @@ mod table {
       self.hashes.reserve(count);
       for ordinal in 0..count {
         // One pass over each fragment's name, once per document, and the hash is kept so that no
-        // later lookup or growth has to make it again. It is charged in *definitions* rather than
-        // in bytes deliberately: this reads every name exactly once for the whole executor's life,
-        // so it is a single pass over text the parser has already read, with no factor a client can
-        // apply to it. That is the question the byte charges elsewhere in this module answer the
-        // other way — see `Visits::take_bytes`.
-        let hash = hash_bytes(self.defs[ordinal].name().source().as_ref());
+        // later lookup or growth has to make it again. It used to be charged in *definitions*
+        // rather than in bytes, on the argument that reading every name exactly once for the
+        // executor's whole life is a single pass over text the parser has already read, with no
+        // factor a client can apply to it. "No factor" is true and is not the question: one pass
+        // over a name draft §2.1.9 puts no ceiling on is still a pass whose length the client
+        // chose, and the counts in front of it can be exhausted exactly by a valid document that
+        // then gets the whole spelling hashed for free. `Table::charge` prices it now, in
+        // `byte_units`, before this may run. al8n/smear#196.
+        let name = self.defs[ordinal].name().source().as_ref();
+        #[cfg(test)]
+        {
+          self.hashed += name.len() as u64;
+        }
+        let hash = hash_bytes(name);
         self.hashes.push(hash);
         let at = bucket(hash, mask) as usize;
         self.chain[ordinal] = self.heads[at];

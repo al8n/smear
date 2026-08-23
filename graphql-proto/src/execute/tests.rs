@@ -852,6 +852,9 @@ fn the_index_pass_reads_each_definition_once() {
   const OPERATIONS: u32 = 512;
   /// The one fragment the selected operation spreads.
   const FRAGMENTS: u32 = 1;
+  /// Hashing that fragment's name, which `Table::fill` does to decide its bucket. `F` is one byte,
+  /// so the pass over it is one unit. al8n/smear#196.
+  const FRAGMENT_NAMES: u32 = 1;
   /// What one walk of the document reads.
   const DEFINITIONS: u32 = OPERATIONS + FRAGMENTS;
   /// Draft §6.1's lookup, which matches `Op0` on the document's first definition and stops.
@@ -866,7 +869,7 @@ fn the_index_pass_reads_each_definition_once() {
   /// against the schema (one).
   const REST: u32 = 2 + 3 + 1 + 2 + 1;
   /// The whole request.
-  const BUDGET: u32 = LOOKUP + DEFINITIONS + FRAGMENTS + REST;
+  const BUDGET: u32 = LOOKUP + DEFINITIONS + FRAGMENTS + FRAGMENT_NAMES + REST;
 
   let mut query = std::string::String::from("query Op0 { ...F }\n");
   for index in 1..OPERATIONS {
@@ -930,8 +933,21 @@ const COLLIDING: usize = 512;
 const COLLIDING_DEFINITIONS: u32 = COLLIDING as u32 + 1;
 
 /// The index pass's charge for a colliding fixture: one per definition walked, one per fragment
-/// pushed.
-const COLLIDING_INDEX: u32 = COLLIDING_DEFINITIONS + COLLIDING as u32;
+/// pushed, and one `byte_units` for each name `Table::fill` hashes to decide its bucket.
+///
+/// Derived from the names rather than written down, for the reason `colliding_spread_cost` gives:
+/// the search that produces them does not promise how long they are, and a term over their bytes
+/// has to move when they do. A push is a constant and the hash in front of it is not — the count
+/// charges alone left `fill` reading every spelling for free, which is the wrong-dimension defect
+/// this module's other rows are about, at the one site where the charge in front was a count.
+/// al8n/smear#196.
+fn colliding_index_cost(names: &[std::string::String]) -> u32 {
+  use crate::collect::byte_units;
+
+  COLLIDING_DEFINITIONS
+    + COLLIDING as u32
+    + names.iter().map(|name| byte_units(name.len())).sum::<u32>()
+}
 
 /// Draft §6.1's lookup over a colliding fixture, which every one of them enters with no operation
 /// name — so it reads every definition, because ambiguity is only decidable at the end.
@@ -1029,18 +1045,15 @@ fn indexing_the_documents_fragments_is_charged() {
   let query = colliding_document(&names, &head);
   let (schema, document) = compile_against(ONE_FIELD, &query);
 
-  let refused = collected_under(&schema, &document, COLLIDING_LOOKUP + COLLIDING_INDEX - 1);
+  let index = colliding_index_cost(&names);
+  let refused = collected_under(&schema, &document, COLLIDING_LOOKUP + index - 1);
   assert!(
     refused.is_some(),
     "a budget one unit short of the index pass must refuse rather than index for free"
   );
 
   let rest = colliding_spread_cost(&head);
-  let served = collected_under(
-    &schema,
-    &document,
-    COLLIDING_LOOKUP + COLLIDING_INDEX + rest,
-  );
+  let served = collected_under(&schema, &document, COLLIDING_LOOKUP + index + rest);
   assert_eq!(
     served, None,
     "and {rest} units past it is enough for the spread, its one comparison, the passes each of \
@@ -1064,7 +1077,7 @@ fn a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment() {
   // fixtures pays to spread the bucket's head once. The index term is what this gate watches: it is
   // one unit per definition and one per fragment, and `COLLIDING` names in a single bucket must not
   // move it, because chaining pushes at a head and never probes.
-  let expected = COLLIDING_LOOKUP + COLLIDING_INDEX + colliding_spread_cost(&head);
+  let expected = COLLIDING_LOOKUP + colliding_index_cost(&names) + colliding_spread_cost(&head);
   assert_eq!(
     collection_work(ONE_FIELD, &query),
     expected,
@@ -1225,7 +1238,8 @@ fn a_refused_probe_run_stops_at_the_refusal() {
   let (schema, document) = compile_against(ONE_FIELD, &query);
 
   let mut space = Space;
-  let budget = COLLIDING_LOOKUP + COLLIDING_INDEX + 1 + SLACK;
+  let index = colliding_index_cost(&names);
+  let budget = COLLIDING_LOOKUP + index + 1 + SLACK;
   let limits = Limits {
     max_selection_visits: NonZeroU32::new(budget).expect("not zero"),
     ..Limits::default()
@@ -1239,7 +1253,7 @@ fn a_refused_probe_run_stops_at_the_refusal() {
   // the thing the ceiling refused and the bound below holds for a reason the fixture is not about.
   let spent = executor.collection_work();
   assert!(
-    spent > COLLIDING_LOOKUP + COLLIDING_INDEX,
+    spent > COLLIDING_LOOKUP + index,
     "{spent} units spent means this run was refused before it reached the bucket — at draft §6.1's \
      lookup or at the index pass — so the comparison bound below is vacuous"
   );
@@ -3644,5 +3658,295 @@ fn unsubscribing_releases_the_events_values() {
     live.get(),
     0,
     "draft §6.2.3.3 is where the subscription's resources are cleaned up"
+  );
+}
+
+/// The saturation value is refused, so the public maximum does not restore an unbounded byte pass.
+///
+/// # Arithmetic, because the input is thirty-two gibibytes
+///
+/// `byte_units` is `len / 8 + 1` and saturates at [`u32::MAX`], which a length of about thirty-two
+/// gibibytes reaches — and **every larger length produces the same number**, so past that point the
+/// charge has stopped being a function of the length at all. `Visits::take` used to be
+/// `left.checked_sub(work)` and nothing else, which is a complete bound for every charge a *count*
+/// can produce and not for that one: `Limits::max_selection_visits` is a `NonZeroU32` an operator
+/// may set to `u32::MAX`, `left` therefore starts at `u32::MAX`, and the saturated charge fits
+/// exactly once. `Schema::sym` then hashed the whole thing on a ledger that believed it had paid.
+///
+/// The name is not constructible in a test, so what is pinned here is the arithmetic that decides
+/// it — the shipped expression against the replacement over the same inputs, exactly as
+/// `an_overflowing_charge_refuses_at_the_largest_limit_too` pins `Work::take` one crate over. This
+/// is that finding, in the sibling ledger: the byte charges that made a poison necessary were added
+/// to both, and the poison to one. al8n/smear#196.
+///
+/// **The plant.** Delete the `work == u32::MAX` arm from `Visits::take` and the first assertion
+/// reads `true` — the saturated charge accepted, and every larger name accepted with it.
+#[test]
+fn the_saturated_byte_charge_is_refused_at_the_largest_limit_too() {
+  use crate::collect::{Visits, byte_units};
+
+  /// The smallest length whose `byte_units` saturates: `len / 8 + 1 > u32::MAX`.
+  const SATURATING: usize = (u32::MAX as usize) * 8;
+
+  assert_eq!(
+    byte_units(SATURATING),
+    u32::MAX,
+    "the fixture is aimed at the saturation and this length no longer reaches it"
+  );
+  assert_eq!(
+    byte_units(SATURATING * 4),
+    u32::MAX,
+    "and four times the name costs the same, which is the whole reason the value is poison rather \
+     than a quantity"
+  );
+
+  // The largest budget `Limits::max_selection_visits` accepts, which is where the defect lived.
+  let mut visits = Visits::new(u32::MAX);
+  assert!(
+    !visits.take_bytes(SATURATING),
+    "a saturated byte charge fits `checked_sub` exactly once at this limit, and admitting it is \
+     admitting a pass whose size the ledger has stopped tracking"
+  );
+  assert!(
+    !visits.take(u32::MAX),
+    "the amount is refused however it is spelled"
+  );
+  assert_eq!(
+    visits.spent(),
+    0,
+    "and the refusal spends nothing: the callers that degrade rather than raise depend on a \
+     refused charge leaving the budget where it was, which is where this ledger differs from \
+     `Work` and must go on differing"
+  );
+
+  // One unit below the poison is an ordinary charge and is still admitted. This ledger counts
+  // *down*, so the whole budget is spendable and only the poison amount is not — which is the one
+  // way it differs from `Work`, whose ceiling is a total it may not rest on.
+  let mut visits = Visits::new(u32::MAX);
+  assert!(
+    visits.take(u32::MAX - 1),
+    "one unit short of the ceiling is inside it"
+  );
+  assert!(visits.take(1), "and the last unit is still a unit");
+  assert!(!visits.take(1), "and then there is nothing left");
+
+  // Under an ordinary ceiling nothing moves: the limit refuses exactly where it always did.
+  let mut visits = Visits::new(10);
+  assert!(visits.take(10));
+  assert!(!visits.take(1));
+  let mut visits = Visits::new(10);
+  assert!(!visits.take(u32::MAX));
+  assert!(visits.take(10), "and the refusal left the budget intact");
+}
+
+/// A count charge in front of a byte pass does not pay for it: the fragment name is priced.
+///
+/// # The one site where the charge in front was still a count
+///
+/// `Table::fill` hashes every fragment name to decide its bucket, and the two charges before it
+/// counted *definitions* and *fragments*. The comment on that pass defended the count on the
+/// grounds that it reads every name exactly once for the executor's whole life, with no factor a
+/// client can apply to it. No factor is true; it is also not the question. Draft §2.1.9 puts no
+/// ceiling on a name, so one pass over one name is still a pass whose length the client chose — and
+/// a **valid** document of one long fragment and the spread that selects it exhausts those two
+/// counts exactly, after which `fill` hashed the whole spelling before the metered lookup behind it
+/// could refuse anything.
+///
+/// The row below is the same document at two name lengths. Only the spelling grows, so a ledger
+/// over counts reads the same number twice. al8n/smear#196.
+///
+/// **The plants.** Delete the `name_units` charge in `Table::charge` and the two boundaries become
+/// equal, and the exhaustion case hashes its whole name on a budget that had none for it.
+#[test]
+fn a_fragment_names_hashing_pass_is_charged_for_its_bytes() {
+  use crate::collect::byte_units;
+
+  /// One fragment of the given name, and the spread that selects it.
+  fn document(name: &str) -> std::string::String {
+    std::format!("{{ ...{name} }}\nfragment {name} on Query {{ a }}\n")
+  }
+
+  let short = "F";
+  let long = "F".repeat(4_000);
+  let long = long.as_str();
+
+  // Every count in front of `fill`, to the unit: draft §6.1's lookup reads both definitions
+  // because no operation name is given, the root's one spread is a selection examined, the index
+  // pass walks both definitions, and one fragment is pushed. At exactly this budget the counts are
+  // exhausted and nothing is left for the spelling — which is the construction, and it is one unit
+  // rather than a comfortable margin because a fixture that stops short of `fill` proves nothing
+  // about `fill`. Verified in both directions: with the byte charge deleted this same budget hashes
+  // the whole name.
+  const COUNTS: u32 = 2 + 1 + 2 + 1;
+
+  for name in [short, long] {
+    let source = document(name);
+    let (schema, document) = compile_against(ONE_FIELD, &source);
+    let mut space = Space;
+    let mut executor = Executor::with_limits(
+      &schema,
+      &document,
+      Limits {
+        max_selection_visits: NonZeroU32::new(COUNTS).expect("not zero"),
+        ..Limits::default()
+      },
+    );
+    let _ = executor.start(&mut space, None, Value::Obj);
+    let hashed = executor.fragment_name_bytes_hashed();
+    assert_eq!(
+      hashed,
+      0,
+      "a budget that covers the counts and nothing else hashed {hashed} bytes of a \
+       {}-byte fragment name",
+      name.len()
+    );
+  }
+
+  // And the total a served request pays moves with the spelling.
+  let least = |name: &str| -> u32 {
+    let source = document(name);
+    let (schema, parsed) = compile_against(ONE_FIELD, &source);
+    let clears = |limit: u32| collected_under(&schema, &parsed, limit).is_none();
+    let (mut lo, mut hi) = (1u32, 1u32 << 20);
+    assert!(clears(hi), "the fixture does not clear {hi} visits");
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if clears(mid) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    assert!(clears(lo) && !clears(lo - 1), "{lo} is not a boundary");
+    lo
+  };
+  let narrow = least(short);
+  let wide = least(long);
+  std::println!(
+    "fragment name: {narrow} visits at 1 byte, {wide} at {}",
+    long.len()
+  );
+  assert_eq!(
+    wide - narrow,
+    // The name is read three times over a served request — hashed into the index, hashed again by
+    // the lookup, and `memcmp`d once the bucket agrees — and only the first of those was missing.
+    3 * (byte_units(long.len()) - byte_units(short.len())),
+    "the whole difference between {narrow} and {wide} is the passes over the spelling, and one of \
+     the three is the index pass this fixture is about"
+  );
+}
+
+/// The fragment index's charge does not depend on whether this executor already built it.
+///
+/// # A cached table saves the walking, and must not save the verdict
+///
+/// `Fragments::build` re-charges the pass when the table is already there, in the same amounts and
+/// the same order, precisely so that the budget's remainder is a function of the operation and
+/// never of the executor's history. The byte charge had to join that. Charging it on the build path
+/// alone would refuse a request on an executor's first `start` and serve the identical request on
+/// its second — the table having been left behind by the first — which is the defect
+/// `Names::reset` closed one crate over, arriving by a different route. A ceiling a client clears
+/// by sending the request twice is not a ceiling. al8n/smear#196.
+///
+/// **The plant.** Drop the `name_units` re-charge from the cached branch of `Fragments::build` and
+/// the second boundary falls below the first by the fragment names' own bytes.
+#[test]
+fn a_warm_fragment_table_charges_what_a_cold_one_charges() {
+  let name = "F".repeat(2_000);
+  let source = std::format!("{{ ...{name} }}\nfragment {name} on Query {{ a }}\n");
+  let (schema, document) = compile_against(ONE_FIELD, &source);
+
+  // `runs` is how many times the same executor is asked for the same operation. The first leaves
+  // the table behind whenever it got far enough to build it; the second is the one that must not
+  // profit from it.
+  let clears = |limit: u32, runs: usize| -> bool {
+    let mut space = Space;
+    let mut executor = Executor::with_limits(
+      &schema,
+      &document,
+      Limits {
+        max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
+        ..Limits::default()
+      },
+    );
+    let mut served = false;
+    for _ in 0..runs {
+      served = executor.start(&mut space, None, Value::Obj).is_ok();
+      if !served {
+        continue;
+      }
+      while let Some(request) = executor.poll_resolve(&mut space) {
+        let id = request.id();
+        executor.handle_resolved(&mut space, id, Value::Text);
+      }
+      served = executor
+        .poll_response()
+        .expect("nothing is outstanding")
+        .error_count()
+        == 0;
+    }
+    served
+  };
+
+  let least = |runs: usize| -> u32 {
+    let (mut lo, mut hi) = (1u32, 1u32 << 20);
+    assert!(clears(hi, runs), "the fixture does not clear {hi} visits");
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if clears(mid, runs) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    assert!(
+      clears(lo, runs) && !clears(lo - 1, runs),
+      "{lo} is not a boundary"
+    );
+    lo
+  };
+
+  let cold = least(1);
+  let warm = least(2);
+  std::println!("fragment index: {cold} visits on the first start, {warm} on the second");
+  assert_eq!(
+    cold, warm,
+    "the same document needs {cold} visits the first time this executor is asked and {warm} the \
+     second; what a cached table saves is the walking, and it must not save the verdict"
+  );
+
+  // And the table really is being reused, so the equality above is not the equality of two cold
+  // runs. At a limit that serves, the first start hashes the names and the second does not.
+  let mut space = Space;
+  let mut executor = Executor::with_limits(
+    &schema,
+    &document,
+    Limits {
+      max_selection_visits: NonZeroU32::new(cold).expect("not zero"),
+      ..Limits::default()
+    },
+  );
+  assert!(executor.start(&mut space, None, Value::Obj).is_ok());
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let _ = executor.poll_response();
+  let after_first = executor.fragment_name_bytes_hashed();
+  assert_eq!(
+    after_first,
+    name.len() as u64,
+    "the first start must index the one fragment, or there is no warm state to test"
+  );
+  assert!(executor.start(&mut space, None, Value::Obj).is_ok());
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let _ = executor.poll_response();
+  assert_eq!(
+    executor.fragment_name_bytes_hashed(),
+    after_first,
+    "the second start hashed the names again, so it is not the cached path this fixture is about"
   );
 }
