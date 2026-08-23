@@ -10,7 +10,7 @@ use tokora::{
 };
 
 use crate::{
-  LitComplexBlockStr, LitComplexInlineStr, LitPlainStr,
+  LitComplexBlockStr, LitComplexInlineStr, LitPlainBlockStr, LitPlainInlineStr,
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphql::error::{LexerError, LexerErrorData, LexerErrors},
   simd::{
@@ -809,7 +809,7 @@ where
               self.last_span = SimpleSpan::new(token_start, self.cursor);
               let slice = self.src.slice(&token_start..&self.cursor).unwrap();
               let block = match lit {
-                LitBlockStr::Plain(_) => LitBlockStr::Plain(LitPlainStr::new(slice)),
+                LitBlockStr::Plain(_) => LitBlockStr::Plain(LitPlainBlockStr::new(slice)),
                 LitBlockStr::Complex(c) => LitBlockStr::Complex(LitComplexBlockStr::new(
                   slice,
                   c.num_escaped_triple_quotes(),
@@ -833,7 +833,7 @@ where
               self.cursor += 2;
               self.last_span = SimpleSpan::new(token_start, self.cursor);
               let slice = self.src.slice(&token_start..&self.cursor).unwrap();
-              SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new(slice)))
+              SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new(slice)))
             }
             None => {
               // Lone `"` at end of input — an unterminated inline string.
@@ -852,7 +852,7 @@ where
                 self.last_span = SimpleSpan::new(token_start, self.cursor);
                 let slice = self.src.slice(&token_start..&self.cursor).unwrap();
                 let inline = match lit {
-                  LitInlineStr::Plain(_) => LitInlineStr::Plain(LitPlainStr::new(slice)),
+                  LitInlineStr::Plain(_) => LitInlineStr::Plain(LitPlainInlineStr::new(slice)),
                   LitInlineStr::Complex(c) => {
                     LitInlineStr::Complex(LitComplexInlineStr::new(slice, c.required_capacity()))
                   }

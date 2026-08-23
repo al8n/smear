@@ -241,31 +241,23 @@ fn a_block_literal_gets_draft_2_9_4() {
 /// long before this module and with no knowledge of it. Agreeing with it on a corpus is a real
 /// check on this walk, so this is a differential and not a restatement.
 ///
-/// **Inline literals only**, and the reason is three measured findings about the oracle rather
-/// than a narrower ambition. None of them is repaired here: they are `smear-lexer`'s, no caller
-/// anywhere in this workspace reaches either conversion, and a writer is not where another crate's
-/// public API moves. Together they are why
-/// [`Json::graphql_string`](super::Json::graphql_string) cooks the literal itself instead of
-/// calling the conversion — routing through it would have inherited all three.
+/// # It used to be inline-only, and it used to need a workaround
 ///
-/// 1. **It panics on a braced escape.** `normalize_str_to_string` has no arm for `\u{...}` and its
-///    `read_hex4` panics on the `{`, while `handle_braced_escape_unicode` in the lexer beside it
-///    accepts the escape. Measured: `Cow::from` on the literal `"\u{1F600}"` panics with
-///    `invalid hex digit in \u escape`, so the oracle cannot be asked about a legal GraphQL string.
-/// 2. **`Plain` and `Complex` disagree about what they return.** `Complex` returns the cooked
-///    value; `Plain` returns `Cow::Borrowed(s.as_str())`, and a `LitPlainStr` holds the literal
-///    *with its delimiters* — so `Cow::from` of the literal `""` is the two-character string `""`.
-///    The delimiters come off below, which is what the other branch already does inside itself.
-/// 3. **Its block-string dedent is not draft §2.9.4's.** `write_line` skips the dedent for the
-///    first *kept* line, where the specification's step 4 skips only the first line of the raw
-///    split and drops blank leading lines afterwards, and it does not dedent a blank line at all.
-///    Measured on the specification's own worked example, it returns a first line of
-///    `    Hello,` where §2.9.4 and `graphql-js`'s `dedentBlockStringLines` both return `Hello,`.
-///    Block strings are checked against the specification's examples in the test above and against
-///    a third-party parser in `tests/json_writer.rs` instead of against this.
+/// The corpus below now spells the braced escape and the block-string shapes that this test could
+/// not ask the oracle about, and it converts the `Plain` variant through the same door as the
+/// `Complex` one instead of un-delimiting it here. That is #163 landing: the conversion panicked
+/// on `\u{1F600}`, its `Plain` arm answered the source spelling where its `Complex` arm answered
+/// the cooked value, and its block dedent was not draft §2.9.4's. All three are repaired in
+/// `smear-lexer`, so what this test measures is now the whole of both implementations rather than
+/// the part of one that could be reached.
+///
+/// [`Json::graphql_string`](super::Json::graphql_string) still cooks the literal itself. Routing
+/// it through the conversion is a separate change with its own cost — a `Cow` per string on the
+/// response path against a walk that writes straight into the sink — and this test is what would
+/// have to disagree first for that change to be wrong.
 #[test]
-fn the_lexers_own_inline_cooking_agrees() {
-  use smear_lexer::{LitInlineStr, LitStr};
+fn the_lexers_own_cooking_agrees() {
+  use smear_lexer::LitStr;
   use std::borrow::Cow;
 
   const CORPUS: &[&str] = &[
@@ -278,9 +270,22 @@ fn the_lexers_own_inline_cooking_agrees() {
     r#""\u0041""#,
     r#""\u00e9""#,
     r#""\ud83d\ude00""#,
+    r#""\u{41}""#,
+    r#""\u{1F600}""#,
     r#""tab\there""#,
     r#"" ""#,
     "\"caf\u{e9} \u{1f600}\"",
+    r#""""""""#,
+    r#""""plain""""#,
+    "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n    \"\"\"",
+    "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n\"\"\"",
+    "\"\"\"a\n\"\"\"",
+    "\"\"\"\n  a\n    \n  b\n\"\"\"",
+    "\"\"\"\n\t\ta\n\t\t\tb\n\"\"\"",
+    "\"\"\"a\r\nb\rc\n\"\"\"",
+    "\"\"\"\n   \n  \n\"\"\"",
+    r#""""a\"""b""""#,
+    r#""""a\nb""""#,
   ];
 
   for literal in CORPUS {
@@ -288,12 +293,8 @@ fn the_lexers_own_inline_cooking_agrees() {
       .try_into()
       .unwrap_or_else(|_| panic!("`{literal}` is a literal the lexer accepts"));
     let theirs: Cow<'_, str> = match lit {
-      LitStr::Inline(LitInlineStr::Plain(plain)) => {
-        let raw = plain.as_str();
-        Cow::Borrowed(&raw[1..raw.len() - 1])
-      }
       LitStr::Inline(inline) => inline.into(),
-      LitStr::Block(_) => unreachable!("the corpus is inline literals"),
+      LitStr::Block(block) => block.into(),
     };
 
     // Theirs is the cooked value; ours is that value as a JSON string. Comparing them means

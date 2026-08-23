@@ -330,7 +330,10 @@ fn keyword_literal_and_punctuator_capabilities_are_mapped() {
 /// the variant, instead of silently staying untested.
 #[test]
 fn syntactic_token_kind_census() {
-  use crate::{LitBlockStr, LitInlineStr, LitPlainStr, graphqlx::syntactic::SyntacticTokenKind};
+  use crate::{
+    LitBlockStr, LitInlineStr, LitPlainBlockStr, LitPlainInlineStr,
+    graphqlx::syntactic::SyntacticTokenKind,
+  };
 
   macro_rules! census {
     ($($variant:ident => $token:expr),+ $(,)?) => {
@@ -355,8 +358,8 @@ fn syntactic_token_kind_census() {
     Identifier => SyntacticToken::Identifier("x"),
     Int => SyntacticToken::LitInt(LitInt::Decimal("1")),
     Float => SyntacticToken::LitFloat(LitFloat::Decimal("1.0")),
-    InlineString => SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
-    BlockString => SyntacticToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+    InlineString => SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new("\"s\""))),
+    BlockString => SyntacticToken::LitBlockStr(LitBlockStr::Plain(LitPlainBlockStr::new("\"\"\"b\"\"\""))),
     Dollar => SyntacticToken::Dollar,
     FatArrow => SyntacticToken::FatArrow,
     LAngle => SyntacticToken::LAngle,

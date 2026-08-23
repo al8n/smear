@@ -510,11 +510,13 @@ fn every_string_survives_the_round_trip() {
 
 /// Block-string cooking, against `apollo-parser`.
 ///
-/// This one needs a *GraphQL* oracle rather than a JSON one, and it must not be `smear-lexer`'s:
-/// that implementation's own dedent disagrees with draft §2.9.4 on the specification's worked
-/// example, which the unit tests record. `apollo-parser` is a dev-dependency of this package
-/// already, is a different organisation's implementation, and cooks a `StringValue` into a
-/// `String` through its own code.
+/// This one needs a *GraphQL* oracle rather than a JSON one, and it must not be `smear-lexer`'s —
+/// no longer because that implementation's dedent disagreed with draft §2.9.4 on the
+/// specification's worked example, which #163 repaired, but because it is in this workspace and an
+/// oracle that shares a repository with its subject can be wrong in the same direction.
+/// `apollo-parser` is a dev-dependency of this package already, is a different organisation's
+/// implementation, and cooks a `StringValue` into a `String` through its own code. The differential
+/// against `smear-lexer` lives in `src/json/tests.rs` and is a second check, not this one.
 #[test]
 fn block_string_cooking_agrees_with_apollo_parser() {
   const CORPUS: &[&str] = &[

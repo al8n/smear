@@ -2502,7 +2502,7 @@ OK  53052..53062  Identifier("BigDecimal")
 OK  53062..53063  Bang
 OK  53063..53064  RBracket
 OK  53065..53066  RBrace
-OK  53174..53654  LitBlockStr(Complex(LitComplexBlockStr { source: "\"\"\"\nAn event is any user action that occurs in a protocol. Generally, they are Ethereum events\nemitted by a function in the smart contracts, stored in transaction receipts as event logs.\nHowever, some user actions of interest are function calls that don't emit events. For example,\nthe deposit and withdraw functions in Yearn do not emit any events. In our subgraphs, we still\nstore them as events, although they are not technically Ethereum events emitted by smart\ncontracts.\n\"\"\"", num_escaped_triple_quotes: 0, has_cr_terminators: false, leading_blank_lines: 1, trailing_blank_lines: 0, common_indent: 0, total_lines: 8, required_capacity: 473 }))
+OK  53174..53654  LitBlockStr(Complex(LitComplexBlockStr { source: "\"\"\"\nAn event is any user action that occurs in a protocol. Generally, they are Ethereum events\nemitted by a function in the smart contracts, stored in transaction receipts as event logs.\nHowever, some user actions of interest are function calls that don't emit events. For example,\nthe deposit and withdraw functions in Yearn do not emit any events. In our subgraphs, we still\nstore them as events, although they are not technically Ethereum events emitted by smart\ncontracts.\n\"\"\"", num_escaped_triple_quotes: 0, has_cr_terminators: false, leading_blank_lines: 1, trailing_blank_lines: 1, common_indent: 0, total_lines: 8, required_capacity: 472 }))
 OK  53655..53664  Identifier("interface")
 OK  53665..53670  Identifier("Event")
 OK  53671..53672  LBrace

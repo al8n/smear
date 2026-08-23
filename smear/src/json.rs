@@ -468,12 +468,18 @@ impl<W: fmt::Write> Json<W> {
   /// escapes and draft §2.9.4's block-string algorithm before a JSON string can be written.
   ///
   /// `smear-lexer` has a second implementation of that, as `Cow<str>` conversions on its literal
-  /// types, and this writer deliberately does **not** route through them: measured on this tree,
-  /// `Cow::from(LitInlineStr::from(…))` **panics** on `\u{1F600}` — a braced escape its own lexer
-  /// accepts and its `normalize_str_to_string` has no arm for. Inheriting that would put a panic
-  /// on the response path for a legal document. The conversions are used as a differential oracle
-  /// in this module's tests instead, where a second implementation is worth having and a panic is
-  /// a finding rather than an outage.
+  /// types, and this writer does **not** route through them. The reason it did not used to be a
+  /// cost argument at all: measured on this tree, `Cow::from(LitInlineStr::from(…))` **panicked**
+  /// on `\u{1F600}`, its two variants disagreed about whether they answered the value or the
+  /// spelling, and its block dedent was not draft §2.9.4's. #163 repaired all three, so that
+  /// argument is spent and the remaining one is the cost: a `Cow` is a **`String` per literal that
+  /// needed cooking**, where this walk writes each cooked character straight into the sink and the
+  /// allocation gates in this module's tests are what say so. Routing through the conversions is
+  /// therefore a decision with a number attached, and not one this door makes on its own.
+  ///
+  /// The conversions are a differential oracle in this module's tests either way — a second
+  /// implementation is worth having — and that differential now covers the whole of both, escapes
+  /// and block strings alike, rather than the part of one that could be reached.
   ///
   /// # Escapes
   ///

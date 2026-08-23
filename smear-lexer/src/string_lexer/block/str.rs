@@ -5,7 +5,9 @@ use tokora::{
 
 use crate::error::{StringError, StringErrors};
 
-use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
+use super::{
+  super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainBlockStr,
+};
 
 /// SIMD-accelerated scan over a block-string body to locate the closing
 /// `"""` and count any `\"""` escape sequences along the way.
@@ -150,7 +152,7 @@ where
       );
 
       if plan.is_clean {
-        return Ok(LitPlainStr::new(lexer.slice()).into());
+        return Ok(LitPlainBlockStr::new(lexer.slice()).into());
       }
 
       Ok(
@@ -158,7 +160,7 @@ where
           lexer.slice(),
           escaped_triple_count,
           lines.extras.has_cr_terminators,
-          lines.extras.leading_blank_lines,
+          plan.leading_blank_lines,
           plan.effective_trailing,
           plan.common_indent,
           plan.total_lines,

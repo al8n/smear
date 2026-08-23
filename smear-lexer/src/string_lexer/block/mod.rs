@@ -13,7 +13,7 @@ pub(crate) use self::{
 mod str;
 mod u8_slice;
 
-use super::LitPlainStr;
+use super::LitPlainBlockStr;
 
 variant_type!(
   /// A block string representation in GraphQL containing one or more escaped triple quotes,
@@ -49,7 +49,7 @@ variant_type!(
 pub enum LitBlockStr<S> {
   /// A clean block string, no escaped triple quotes, no CR/CRLF,
   /// no leading/trailing blank lines, and no common indent.
-  Plain(LitPlainStr<S>),
+  Plain(LitPlainBlockStr<S>),
 
   /// A block string required some processing to unescape or normalize.
   /// This includes handling escaped triple quotes, line endings, and indentation.
@@ -121,18 +121,6 @@ impl<S> LitBlockStr<S> {
     }
   }
 
-  /// Map
-  #[inline(always)]
-  pub fn map<O, F>(self, f: F) -> LitBlockStr<O>
-  where
-    F: FnOnce(S) -> O,
-  {
-    match self {
-      Self::Plain(s) => LitBlockStr::Plain(s.map(f)),
-      Self::Complex(s) => LitBlockStr::Complex(s.map(f)),
-    }
-  }
-
   /// Converts this to an equivalent type.
   #[inline(always)]
   pub fn to_equivalent<T>(&self) -> LitBlockStr<T>
@@ -192,16 +180,79 @@ fn chop_indent(s: &str, mut n: usize) -> &str {
   &s[i..]
 }
 
+/// Strips a block literal's `"""` delimiters.
+///
+/// Total on a slice that does not carry them, for the reason the inline conversion's `inline_body`
+/// is: the carriers are `pub(crate)`-constructed and every construction in this crate spans a whole
+/// `"""…"""` token, so re-checking the lexer with a panicking index would only add a way for this
+/// conversion to abort.
+#[inline]
+fn block_body(raw: &str) -> &str {
+  raw
+    .strip_prefix(r#"""""#)
+    .and_then(|rest| rest.strip_suffix(r#"""""#))
+    .unwrap_or(raw)
+}
+
+/// Answers the literal's **value** — draft §2.9.4's `BlockStringValue` — borrowing it whenever the
+/// spelling between the delimiters already *is* the value.
+///
+/// # Value, not spelling
+///
+/// The same split as [`LitInlineStr`](super::LitInlineStr)'s conversion: `as_str`,
+/// [`Deref`](core::ops::Deref), [`AsRef`], [`Borrow`](core::borrow::Borrow) and
+/// `From<LitBlockStr<&str>> for &str` answer the **source spelling**, `"""` delimiters and all;
+/// this one answers the cooked value. `Plain` used to answer the spelling too, which made the two
+/// variants disagree about what the conversion was for.
+///
+/// # The algorithm is §2.9.4's, step for step
+///
+/// [`Plain`](LitBlockStr::Plain) is the case where the algorithm is the identity — the lexer's
+/// `is_clean` — so it is a reslice. [`Complex`](LitBlockStr::Complex) replays the steps from the
+/// line facts the lexer already collected: the common indent comes off every line **but the first
+/// of the raw split** (step 4, which exempts neither a blank line nor the line that happens to
+/// survive steps 5 and 6), leading and trailing blank lines go (steps 5 and 6), each surviving
+/// line is joined by a single line feed whatever terminator the source spelled (step 8), and
+/// `\"""` — §2.9.5's only escape — becomes `"""` on the way past.
+///
+/// # `Plain` means the lexer looked, and looked at *this* grammar
+///
+/// The identity case is a claim about *these* bytes read under *this* algorithm — §2.9.4's, whose
+/// `is_clean` says it has nothing to do to them. Both halves have to be the lexer's.
+///
+/// **The bytes.** A source-replacing conversion falsified that half, which is why this type has no
+/// `map` — a `Plain` `"""block"""` remapped to `"""a\n"""` stayed `Plain`, and this conversion
+/// returned the trailing line feed that step 5 removes. [`into_equivalent`] is the only
+/// representation change left, and its sealed bound keeps the bytes.
+///
+/// **The algorithm.** Removing `map` did not close the other half, because the carrier does not
+/// name a grammar — the variant does, and one kind-agnostic carrier fitted both. An inline
+/// literal's carrier re-labelled as a block one is an honest source under an algorithm that never
+/// ran on it, and `block_body` finds no `"""` to strip, so the inline quotes stay in the value.
+/// [`LitPlainStr`](super::LitPlainStr) carries its kind in its type now:
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
+///
+/// let LitStr::Inline(inline) = LitStr::try_from("\"x\"").unwrap() else { unreachable!() };
+/// let LitInlineStr::Plain(carrier) = inline else { unreachable!() };
+/// // This used to typecheck, and `Cow::from` of it answered the spelling `"x"` — quotes included
+/// // — where the value of the literal the carrier came from is `x`.
+/// let forged = LitBlockStr::Plain(carrier);
+/// ```
+///
+/// Per this repository's convention the error code above is checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
+///
+/// [`into_equivalent`]: LitBlockStr::into_equivalent
 impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
   #[inline]
   fn from(value: LitBlockStr<&'a str>) -> Self {
     match value {
-      LitBlockStr::Plain(s) => Cow::Borrowed(s.as_str()),
+      LitBlockStr::Plain(s) => Cow::Borrowed(block_body(s.as_str())),
       LitBlockStr::Complex(s) => {
-        let raw = s.as_str();
-
         // Inner content between the surrounding delimiters.
-        let inner = &raw[3..raw.len() - 3];
+        let inner = block_body(s.as_str());
 
         let total_lines = s.total_lines();
         let leading_blank_lines = s.leading_blank_lines();
@@ -218,11 +269,13 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
         }
 
         // Write one logical line body:
-        // - optionally dedent (only non-first, non-blank lines),
+        // - dedent unless this is the first line of the RAW split (§2.9.4 step 4 exempts that one
+        //   line and nothing else — not a blank line, and not the first line that survives steps 5
+        //   and 6, which is a different line whenever the block opens with a terminator),
         // - unescape \"\"\" -> """
         #[inline(always)]
-        fn write_line(out: &mut String, line: &str, dedent: usize, is_first_kept: bool) {
-          let body = if is_first_kept || is_blank_line(line.as_bytes()) {
+        fn write_line(out: &mut String, line: &str, dedent: usize, is_first_raw_line: bool) {
+          let body = if is_first_raw_line {
             line
           } else {
             chop_indent(line, dedent)
@@ -266,7 +319,6 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
         let mut i = 0usize;
         let bytes = inner.as_bytes();
         let mut line_idx = 0usize;
-        let mut wrote_any = false;
 
         while line_idx < total_lines {
           // find [line_start, line_end) + terminator length
@@ -296,9 +348,7 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
 
           // Keep line?
           if line_idx >= keep_start && line_idx < keep_end {
-            let is_first_kept = !wrote_any;
-            write_line(&mut out, body, common_indent, is_first_kept);
-            wrote_any = true;
+            write_line(&mut out, body, common_indent, line_idx == 0);
 
             // Emit normalized newline between kept lines
             if line_idx + 1 < keep_end {
@@ -337,23 +387,55 @@ struct BlockLineExtras {
 /// Result of computing the normalization plan/capacity.
 #[derive(Debug, Clone, Copy)]
 struct BlockNormalizationPlan {
-  required_capacity: usize,  // exact UTF-8 bytes after normalization
-  is_clean: bool,            // normalization would be a no-op
-  total_lines: usize,        // extras.terminators + 1
+  required_capacity: usize, // UTF-8 bytes after normalization; see the note below
+  is_clean: bool,           // normalization would be a no-op
+  total_lines: usize,       // extras.terminators + 1
+  leading_blank_lines: usize, // leading blanks actually trimmed
   effective_trailing: usize, // trailing blanks actually trimmed
-  common_indent: usize,      // extras.common_indent.unwrap_or(0)
+  common_indent: usize,     // extras.common_indent.unwrap_or(0)
 }
 
 /// Compute the required capacity (and related flags) for a block string.
 ///
 /// `content_nonempty`: true iff the inner slice between the delimiters is non-empty  
 /// `escaped_triple_count`: number of `\"\"\"` sequences seen by the outer lexer
+///
+/// # The line the sub-lexer cannot announce
+///
+/// `BlockLineTok` emits a `LineBody` for a line with content and a `Terminator` for each line
+/// terminator, so the **empty line a trailing terminator opens** is never announced: nothing
+/// follows it to close it. Draft §2.9.4 splits the raw value on terminators, so `"""\na\n"""`
+/// is three lines — ``, `a`, `` — and the third is a trailing blank step 6 removes. Counting it
+/// here is what makes `total_lines` (`terminators + 1`) and the blank-line counts describe the
+/// *same* split; without it `"""a\n"""` came back `is_clean` and cooked to `a\n`.
+///
+/// The one shape this deliberately leaves alone is empty content, where there is no terminator at
+/// all: `content_nonempty` already carries that case, and counting its single blank line would
+/// turn `""""""` from a borrow into an allocation of the empty string.
+///
+/// # `required_capacity` is an allocation hint, and an upper bound
+///
+/// It is exact except for a *kept blank* line that carries more whitespace than the common indent:
+/// the dedent takes that whitespace off and this arithmetic does not model it, because doing so
+/// needs each such line's length rather than their sum. Every other term is exact — and one of
+/// them only became exact here, since `indent_removed` has always charged for dedenting every
+/// non-blank line after the first of the raw split, which is what the writer now actually does.
 #[inline]
 fn compute_block_normalization_plan(
   extras: &BlockLineExtras,
   content_nonempty: bool,
   escaped_triple_count: usize,
 ) -> BlockNormalizationPlan {
+  let mut extras = *extras;
+  if !extras.saw_body_this_line && extras.terminators > 0 {
+    if extras.saw_nonblank_any {
+      extras.trailing_blank_lines += 1;
+    } else {
+      extras.leading_blank_lines += 1;
+    }
+  }
+  let extras = &extras;
+
   let total_lines = extras.terminators + 1;
 
   // Special case: all-blank block → treat trailing as leading to keep invariants stable.
@@ -404,6 +486,7 @@ fn compute_block_normalization_plan(
     required_capacity,
     is_clean,
     total_lines,
+    leading_blank_lines: extras.leading_blank_lines,
     effective_trailing,
     common_indent,
   }

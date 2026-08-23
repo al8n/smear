@@ -5,7 +5,9 @@ use tokora::{
 
 use crate::error::{StringError, StringErrors};
 
-use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
+use super::{
+  super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainBlockStr,
+};
 
 /// `&[u8]`-source variant of [`super::str::find_block_close_simd`]. The
 /// algorithm is byte-for-byte identical (block-string scanning works on
@@ -115,7 +117,7 @@ where
       );
 
       if plan.is_clean {
-        return Ok(LitPlainStr::new(lexer.slice()).into());
+        return Ok(LitPlainBlockStr::new(lexer.slice()).into());
       }
 
       Ok(
@@ -123,7 +125,7 @@ where
           lexer.slice(),
           num_escaped_triple_quotes,
           lines.extras.has_cr_terminators,
-          lines.extras.leading_blank_lines,
+          plan.leading_blank_lines,
           plan.effective_trailing,
           plan.common_indent,
           plan.total_lines,
@@ -187,7 +189,7 @@ pub(crate) fn skip_block_str_from_bytes(
       let consumed = start + 3;
 
       if plan.is_clean {
-        return Ok(LitPlainStr::new(consumed).into());
+        return Ok(LitPlainBlockStr::new(consumed).into());
       }
 
       Ok(
@@ -195,7 +197,7 @@ pub(crate) fn skip_block_str_from_bytes(
           consumed,
           num_escaped_triple_quotes,
           lines.extras.has_cr_terminators,
-          lines.extras.leading_blank_lines,
+          plan.leading_blank_lines,
           plan.effective_trailing,
           plan.common_indent,
           plan.total_lines,

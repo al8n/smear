@@ -311,7 +311,7 @@ impl core::fmt::Display for LosslessTokenKind {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::LitPlainStr;
+  use crate::{LitPlainBlockStr, LitPlainInlineStr};
   use tokora::token::IdentifierToken;
 
   #[test]
@@ -386,8 +386,8 @@ mod tests {
       Float => LosslessToken::LitFloat("1.0"),
       Identifier => LosslessToken::Identifier("x"),
       Int => LosslessToken::LitInt("1"),
-      InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
-      BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+      InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new("\"s\""))),
+      BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainBlockStr::new("\"\"\"b\"\"\""))),
       Comment => LosslessToken::Comment("# c"),
     }
   }
