@@ -776,10 +776,12 @@ fn arena_range(filled: usize, len: usize) -> Option<(u32, u32)> {
 /// `memcmp` and the `memcpy` of the same key because all three move about a word a step. Saturating
 /// at [`u32::MAX`], so a key no ledger could pay for refuses rather than wrapping.
 ///
-/// The merge engine charges with it too, and not only the interner: pairing two argument lists or
-/// two object literals by name is a scan whose every step is a `memcmp` of a length the client
-/// wrote, so the scan's charge is this many units per entry rather than one. `merge::scan_units`
-/// is that product.
+/// The merge engine charges with it too, and not only the interner. Pairing two argument lists or
+/// two object literals by name is a scan over lengths the client wrote, so the scan cannot be one
+/// unit an entry — but neither is it this many units an entry, which is what a *step* costs only
+/// when the step reads the whole name. The engine hashes each scanned name once, charged here,
+/// and a step then rejects on the stored hash and the stored length for one unit and no bytes;
+/// this unit is charged again in front of the `memcmp` a step that agrees on both goes on to make.
 #[inline]
 pub(crate) const fn byte_units(len: usize) -> u32 {
   let units = len / 8 + 1;
@@ -893,6 +895,20 @@ pub struct Scratch {
   pub(crate) merge_slots: Vec<u32>,
   /// The value comparison's frame stack: `(index in the left value, index in the right, cursor)`.
   pub(crate) merge_compare: Vec<(u32, u32, u32)>,
+  /// The `(hash, length)` of every name a merge comparison is about to scan against, as a stack.
+  ///
+  /// One segment per scan: an argument list's two sides, and one object literal's fields for each
+  /// live frame of [`Scratch::merge_compare`], so a literal nested inside an argument sits above
+  /// the tables it was reached through and leaves with the frame that hashed it.
+  ///
+  /// It is here for the reason [`Names`] stores a hash beside each entry. A scan that rejects a
+  /// candidate by comparing its bytes has to be charged for those bytes *before* it runs, which
+  /// means charging every candidate the whole of the longest thing it could read; a scan that
+  /// rejects on two integers is charged one unit for the rejection and the bytes only where the
+  /// bytes are about to be read. The first is an upper bound on the work and nothing else — it
+  /// refused thirty-two kilobytes of valid document — and the second is an upper bound that stays
+  /// near it. al8n/smear#196.
+  pub(crate) merge_hashes: Vec<(u64, usize)>,
   /// The document's own names, interned to integers.
   pub(crate) names: Names,
 }
@@ -936,6 +952,7 @@ impl Scratch {
       merge_memo: Vec::new(),
       merge_slots: Vec::new(),
       merge_compare: Vec::new(),
+      merge_hashes: Vec::new(),
       names: Names::new(),
     }
   }
@@ -984,6 +1001,7 @@ impl Scratch {
     // same correction and the same reasoning. al8n/smear#196.
     self.merge_slots.clear();
     self.merge_compare.clear();
+    self.merge_hashes.clear();
     self.names.reset();
   }
 
@@ -1023,6 +1041,7 @@ impl Scratch {
       + self.merge_memo.capacity()
       + self.merge_slots.capacity()
       + self.merge_compare.capacity()
+      + self.merge_hashes.capacity()
       + self.names.capacity()
   }
 }

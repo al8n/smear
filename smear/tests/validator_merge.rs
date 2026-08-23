@@ -909,8 +909,12 @@ fn a_wide_literal_comparison_is_charged_for_its_scans() {
 /// whose sink does not stop — reaches this scan with no other rule pre-empting it. The rule set
 /// here is that caller.
 ///
-/// **The plants.** Replace any of the three `scan_units`/`shallow_units` charges with the entry
-/// count it replaced and that row's two boundaries become equal.
+/// **The plants.** Replace `shallow_units` with the entry count it replaced and the scalar row's
+/// two boundaries become equal. Delete *both* of the `byte_units` charges a scanned name passes
+/// through — the one in front of the hash `same_arguments` and `same_value` take of it, and the
+/// one `Validator::find` takes in front of the `memcmp` a step that agrees on hash and length goes
+/// on to make — and the other two rows' do. Both, because either alone still leaves a term in `L`:
+/// the two charges are one repair and the second is what makes the first affordable.
 #[test]
 fn a_comparison_over_a_spelling_is_charged_for_its_length() {
   /// Selections per side. Small enough that the padded documents still clear the **default**
@@ -1014,6 +1018,181 @@ fn a_comparison_over_a_spelling_is_charged_for_its_length() {
          comparisons and the machine reads the bytes"
       );
     }
+  });
+}
+
+/// A scan's charge bounds the bytes the scan reads, and does not bound a worst case it never runs.
+///
+/// # One direction is half a repair, and half a repair is the other denial of service
+///
+/// [`a_comparison_over_a_spelling_is_charged_for_its_length`] pins the first direction: recorded
+/// units cannot understate performed byte work, or a caller buys `Θ(n² · L)` of `memcmp` with
+/// `Θ(n²)` of ledger. Taken alone it also admits a charge of `entries × wanted`, taken before the
+/// scan — and that is not what the scan does. Matching by name returns at the first hit and a
+/// byte-slice comparison settles at the first difference, so a whole-worst-case charge prices
+/// bytes no candidate ever reads, and a ledger that overcharges refuses honest documents rather
+/// than hostile ones.
+///
+/// The honest half below is what that cost. Thirty-two arguments of five hundred and twelve valid
+/// bytes, written twice with the same spelling and **distinct first bytes**, settle every one of
+/// the thirty-one non-matching candidates of every lookup without reading a byte — and the
+/// pre-scan product charged `2 × 32 × 32 × 65 = 133,120` units against a default `merge_work` of
+/// 65,536. Forty kilobytes of valid document, refused for work nobody performs.
+///
+/// The repair is the pair [`Names::intern`](smear::validator::Scratch) already takes: a stored
+/// hash beside a length makes a non-matching candidate a two-integer rejection that reads no
+/// bytes, so the byte charge is reached only where the bytes are about to be. al8n/smear#196.
+///
+/// **The plants.** Charge either of `same_arguments`' scans `entries × wanted` in front of itself
+/// — the product this replaced — and the honest half is refused. Delete both of the `byte_units`
+/// charges a scanned name passes through, the one in front of its hash and the one
+/// `Validator::find` takes in front of a matching step's `memcmp`, and the hostile half is served.
+#[test]
+fn a_scan_is_not_charged_for_bytes_no_candidate_reads() {
+  /// Arguments a side in the honest half.
+  const WIDTH: usize = 32;
+  /// Bytes a name in the honest half.
+  const LEN: usize = 512;
+  /// Arguments a side in the hostile half.
+  const HOSTILE_WIDTH: usize = 200;
+  /// Bytes a name in the hostile half.
+  const HOSTILE_LEN: usize = 4096;
+
+  /// `width` valid names of `len` bytes, no two sharing a first byte.
+  fn distinct(width: usize, len: usize) -> Vec<String> {
+    const LEAD: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEF";
+    assert!(width <= LEAD.len() && len > 0);
+    (0..width)
+      .map(|index| {
+        let mut name = String::from(LEAD[index] as char);
+        name.push_str(&"z".repeat(len - 1));
+        name
+      })
+      .collect()
+  }
+
+  /// `width` valid names of `len` bytes, sharing every byte but the last four.
+  fn prefixed(width: usize, len: usize) -> Vec<String> {
+    assert!(width <= 10_000 && len > 4);
+    (0..width)
+      .map(|index| std::format!("{}{index:04}", "z".repeat(len - 4)))
+      .collect()
+  }
+
+  /// Two selections behind one response name, holding `names` as arguments on both sides.
+  fn document(names: &[String], reversed: bool) -> String {
+    let mut left = String::new();
+    for name in names {
+      left.push_str(&std::format!(" {name}: 1"));
+    }
+    let mut right = String::new();
+    if reversed {
+      for name in names.iter().rev() {
+        right.push_str(&std::format!(" {name}: 1"));
+      }
+    } else {
+      right.push_str(&left);
+    }
+    std::format!("{{ dog {{ x: name({left} ) x: name({right} ) }} }}")
+  }
+
+  /// The least `merge_work` at which `source` comes back clean, searched past the shipped default.
+  ///
+  /// [`least_work_that_clears`] cannot measure this one: its upper end *is* the default budget, and
+  /// what is under test here is a document that the defect puts above it.
+  fn least(schema: &Schema, source: &str, rules: RuleSet) -> u32 {
+    let document = parse(source);
+    let clears = |limit: u32| {
+      let mut scratch = Scratch::new();
+      let budget = Budget::default().with_merge_work(limit);
+      validate_executable_with(schema, &document, &mut scratch, &budget, rules, &mut Ignore).is_ok()
+    };
+    let (mut lo, mut hi) = (0u32, 1u32 << 24);
+    assert!(clears(hi), "the subject does not clear {hi} units");
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if clears(mid) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    assert!(clears(lo));
+    assert!(lo > 0 && !clears(lo - 1), "{lo} is not a boundary");
+    lo
+  }
+
+  on_a_deep_stack(|| {
+    let schema = build();
+    // Draft 5.3.2 and its two bounds alone, for the reason
+    // `a_comparison_over_a_spelling_is_charged_for_its_length` gives: this scan runs on what the
+    // document wrote, so no rule about whether the schema knows these names pre-empts it.
+    let rules = RuleSet::EMPTY
+      .with(Rule::FieldSelectionMerging)
+      .with(Rule::MergeWorkBudget)
+      .with(Rule::MergeDepthBudget);
+    let default = Budget::default().merge_work();
+
+    let honest = document(&distinct(WIDTH, LEN), false);
+    let charged = least(&schema, &honest, rules);
+    println!(
+      "honest: {} bytes, {WIDTH} arguments of {LEN} bytes with distinct first bytes, {charged} \
+       units against a default of {default}",
+      honest.len()
+    );
+    assert!(
+      charged <= default,
+      "a valid {}-byte document costs {charged} units against a default merge_work of {default}: \
+       the ledger charged {WIDTH} whole-name comparisons for every lookup and every lookup settles \
+       {} of them on the first byte",
+      honest.len(),
+      WIDTH - 1
+    );
+    let mut scratch = Scratch::new();
+    assert!(
+      validate_executable_with(
+        &schema,
+        &parse(&honest),
+        &mut scratch,
+        &Budget::default(),
+        rules,
+        &mut Ignore
+      )
+      .is_ok(),
+      "the honest half must serve under the shipped default, not merely under {charged}"
+    );
+
+    // And the shape the charge exists for is still refused: the same names in reverse order, all
+    // sharing every byte but the last four, so no lookup settles early and the comparison the
+    // ledger has to see is the whole of `Θ(n² · L)`.
+    let hostile = document(&prefixed(HOSTILE_WIDTH, HOSTILE_LEN), true);
+    let mut scratch = Scratch::new();
+    let mut collected = Vec::new();
+    let mut sink = Collect::new(&mut collected);
+    let start = Instant::now();
+    let verdict = validate_executable_with(
+      &schema,
+      &parse(&hostile),
+      &mut scratch,
+      &Budget::default(),
+      rules,
+      &mut sink,
+    );
+    let ms = start.elapsed().as_secs_f64() * 1e3;
+    let mut fired: Vec<_> = collected.iter().map(Diagnostic::rule).collect();
+    fired.sort_unstable();
+    fired.dedup();
+    println!(
+      "hostile: {} bytes, {HOSTILE_WIDTH} arguments of {HOSTILE_LEN} bytes in reverse order, \
+       {ms:.3} ms",
+      hostile.len()
+    );
+    assert!(
+      verdict.as_ref().err().is_some_and(|i| i.budget_tripped()),
+      "the reverse-order long-prefix comparison served under the default budget"
+    );
+    assert_eq!(fired, [Rule::MergeWorkBudget], "{fired:?}");
+    assert!(ms < 500.0, "{ms} ms");
   });
 }
 

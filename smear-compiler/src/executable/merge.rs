@@ -57,7 +57,7 @@
 
 use core::ops::ControlFlow;
 
-use smear_parser::graphql::ast::{Argument, Field, InputValue, Selection, SelectionSet};
+use smear_parser::graphql::ast::{Field, InputValue, Selection, SelectionSet};
 
 use super::{
   Diagnostic, Rule, Validator,
@@ -69,7 +69,8 @@ use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{
-    MergeField, MergeFrame, MergeKid, MergeMemo, MergeSet, NONE, byte_units, get_bit, hash_u32,
+    MergeField, MergeFrame, MergeKid, MergeMemo, MergeSet, NONE, byte_units, get_bit, hash_bytes,
+    hash_u32,
   },
 };
 
@@ -109,6 +110,21 @@ enum Claim {
   /// The budget refused before the claim was settled. Nothing about this set has been examined,
   /// and the engine is abandoned: a caller that reads this as work already done is reporting a
   /// result for a check that never ran.
+  Refused,
+}
+
+/// What a charged scan for a name found.
+///
+/// Three states and not an `Option`, because a scan the budget stopped has not established that
+/// the name is absent — reading it that way reports a merge conflict for a comparison that never
+/// finished. al8n/smear#196.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Match {
+  /// The list holds the name, at this index into the list.
+  At(usize),
+  /// The list does not hold the name.
+  Absent,
+  /// The budget refused before the scan finished, and the engine is abandoned.
   Refused,
 }
 
@@ -947,6 +963,49 @@ where
     left.is_composite() && right.is_composite()
   }
 
+  /// Finds `name` in a list whose `(hash, length)` rows are `table` in `Scratch::merge_hashes`,
+  /// charging every step in front of the work that step does.
+  ///
+  /// A step is one unit, and one unit buys two integers: a candidate whose stored hash or stored
+  /// length disagrees is rejected without a byte of it being read. Only a candidate that agrees on
+  /// both reaches a `memcmp`, and that `memcmp`'s bytes are charged before it runs.
+  ///
+  /// That pairing is what lets one charge satisfy both directions at once. Recorded units cannot
+  /// understate the bytes read, because every pass over bytes is charged in front of itself; and
+  /// they do not wildly overstate them either, because a scan over a hundred names that differ at
+  /// their first byte costs a hundred units rather than a hundred whole names. A product taken
+  /// before the scan gets the first and refuses valid documents for the second. al8n/smear#196.
+  ///
+  /// `candidate` is indexed relative to `table`'s start, which is also what [`Match::At`] carries.
+  fn find(
+    &mut self,
+    table: core::ops::Range<usize>,
+    wanted: u64,
+    name: &[u8],
+    candidate: impl Fn(usize) -> &'d [u8],
+  ) -> ControlFlow<(), Match> {
+    let base = table.start;
+    for slot in table {
+      if !self.charge(1) {
+        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+        return ControlFlow::Continue(Match::Refused);
+      }
+      let (hash, len) = self.scratch.merge_hashes[slot];
+      if hash != wanted || len != name.len() {
+        continue;
+      }
+      if !self.charge(byte_units(len)) {
+        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+        return ControlFlow::Continue(Match::Refused);
+      }
+      let index = slot - base;
+      if candidate(index) == name {
+        return ControlFlow::Continue(Match::At(index));
+      }
+    }
+    ControlFlow::Continue(Match::Absent)
+  }
+
   /// Whether two field selections were written with identical sets of arguments.
   fn same_arguments(&mut self, a: u32, b: u32) -> ControlFlow<(), bool> {
     let left = self.scratch.merge_fields[a as usize];
@@ -973,35 +1032,70 @@ where
     // being charged once: a field written with a thousand arguments is a quadratic comparison, and
     // an uncharged quadratic inside a budgeted engine is the hole the budget exists to close.
     //
-    // And each *step* of that scan is a `memcmp` of a length the client also wrote, which is the
-    // half `right.len()` could not see. Charging the entries while running the bytes is the same
-    // defect `Names::intern` had one dimension over: `n` arguments in reverse order recorded
-    // `Θ(n²)` and ran `Θ(n² · L)`, so a few hundred four-kilobyte argument names turned a two
-    // megabyte document into more than a hundred megabytes of comparison before the default budget
-    // said anything — reachable with `FieldSelectionMerging` alone, since this scan runs before any
-    // rule about whether the schema knows those names. `scan_units` is the product.
-    // al8n/smear#196.
-    for argument in left {
-      if !self.charge(scan_units(right.len(), name_bytes(argument.name()).len())) {
+    // And each *step* of that scan reads a length the client also wrote, which is the half
+    // `right.len()` could not see. Counting entries while running bytes is the same defect
+    // `Names::intern` had one dimension over: `n` arguments in reverse order recorded `Θ(n²)` and
+    // ran `Θ(n² · L)`, so a few hundred four-kilobyte argument names turned a two megabyte
+    // document into more than a hundred megabytes of comparison before the default budget said
+    // anything — reachable with `FieldSelectionMerging` alone, since this scan runs before any
+    // rule about whether the schema knows those names.
+    //
+    // The repair is not that product taken in front of the scan. It bounds the bytes and comes no
+    // nearer them: a lookup returns at its first hit and a byte-slice comparison settles at its
+    // first difference, so thirty-two arguments of five hundred and twelve valid bytes with
+    // distinct *first* bytes read about a kilobyte between them and were charged
+    // `2 · 32 · 32 · 65 = 133,120` units against a default budget of 65,536. A ledger that
+    // overcharges is not a safer ledger; it is the same denial of service, aimed at the documents
+    // the server means to serve.
+    //
+    // So both sides are hashed once, here, each name charged for the single pass its hash makes
+    // over it. A step of the scan is then two integers out of `Scratch::merge_hashes` for one
+    // unit, reading no byte of the candidate — and the `memcmp`, charged in front of itself, is
+    // reached only where the hash and the length already agree. An upper bound on the work that
+    // stays near it, which is the pair `Names::intern` takes. al8n/smear#196.
+    self.scratch.merge_hashes.clear();
+    for argument in left.iter().chain(right) {
+      let name = name_bytes(argument.name());
+      if !self.charge(byte_units(name.len())) {
         self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
         return ControlFlow::Continue(true);
       }
-      let Some(other) = by_name(right, argument) else {
-        return ControlFlow::Continue(false);
+      self
+        .scratch
+        .merge_hashes
+        .push((hash_bytes(name), name.len()));
+    }
+    let split = left.len();
+    let tables = split + right.len();
+
+    for (slot, argument) in left.iter().enumerate() {
+      let name = name_bytes(argument.name());
+      let wanted = self.scratch.merge_hashes[slot].0;
+      let other = match self.find(split..tables, wanted, name, |index| {
+        name_bytes(right[index].name())
+      })? {
+        Match::At(index) => &right[index],
+        Match::Absent => return ControlFlow::Continue(false),
+        Match::Refused => return ControlFlow::Continue(true),
       };
+      // The literal comparison hashes above these two tables and leaves behind whatever an early
+      // refusal left it, so the tables' own top is restored before it runs again.
+      self.scratch.merge_hashes.truncate(tables);
       if !self.same_value(argument.value(), other.value())? {
         return ControlFlow::Continue(false);
       }
     }
     // The counts already agree, but a set with a repeated argument name — draft 5.4.2's business,
     // not this rule's — could still hide a name the other side does not have.
-    for argument in right {
-      if !self.charge(scan_units(left.len(), name_bytes(argument.name()).len())) {
-        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-        return ControlFlow::Continue(true);
-      }
-      if by_name(left, argument).is_none() {
-        return ControlFlow::Continue(false);
+    for (slot, argument) in right.iter().enumerate() {
+      let name = name_bytes(argument.name());
+      let wanted = self.scratch.merge_hashes[split + slot].0;
+      match self.find(0..split, wanted, name, |index| {
+        name_bytes(left[index].name())
+      })? {
+        Match::At(_) => {}
+        Match::Absent => return ControlFlow::Continue(false),
+        Match::Refused => return ControlFlow::Continue(true),
       }
     }
     ControlFlow::Continue(true)
@@ -1054,6 +1148,26 @@ where
         if !shallow_equal(a, b) {
           return ControlFlow::Continue(false);
         }
+        // Pairing this literal's fields by name is one scan per field, so the names those scans
+        // reject candidates on are hashed once for the node rather than re-read once for every
+        // step of every scan. Charged per name, in front of the pass the hash makes over it.
+        //
+        // The table is the tail of `Scratch::merge_hashes` for exactly as long as this frame is
+        // the top one: a child pushes its own above it and takes it away again on the way out, so
+        // there is no base to carry in the frame. al8n/smear#196.
+        if let Some(others) = b.as_object() {
+          for field in others {
+            let name = name_bytes(field.name());
+            if !self.charge(byte_units(name.len())) {
+              self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+              return ControlFlow::Continue(true);
+            }
+            self
+              .scratch
+              .merge_hashes
+              .push((hash_bytes(name), name.len()));
+          }
+        }
       }
 
       let children = match (a.as_list(), a.as_object()) {
@@ -1062,6 +1176,12 @@ where
         _ => 0,
       };
       if cursor >= children {
+        // The names this frame hashed leave with it. Every path that skips the table build above
+        // leaves the walk rather than reaching this pop, so the frame's own segment is the tail
+        // and the subtraction is exact.
+        let width = b.as_object().map_or(0, <[_]>::len);
+        let keep = self.scratch.merge_hashes.len().saturating_sub(width);
+        self.scratch.merge_hashes.truncate(keep);
         self.scratch.merge_compare.pop();
         continue;
       }
@@ -1073,21 +1193,23 @@ where
         (Some(fields), Some(others)) => {
           // Charged for the scan, not for the field: pairing an object literal's fields by name is
           // quadratic in its width, and the budget has to see that. Charged in *bytes* and not in
-          // entries, for the reason `same_arguments` gives: every step of the scan is a `memcmp`
-          // whose length the same client wrote, so the width and the spelling are two factors and
-          // a count sees one of them. Reading the name's length is not the scan, so it happens
-          // before the charge.
+          // entries, for the reason `same_arguments` gives: the width and the spelling are two
+          // factors and a count sees one of them. And charged for the bytes the scan reads rather
+          // than for the bytes it could read, for the other reason `same_arguments` gives: this
+          // one hashes the field it is looking for and then rejects a candidate on two integers.
           let name = name_bytes(fields[cursor as usize].name());
-          if !self.charge(scan_units(others.len(), name.len())) {
+          if !self.charge(byte_units(name.len())) {
             self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
             return ControlFlow::Continue(true);
           }
-          match others
-            .iter()
-            .position(|other| name_bytes(other.name()) == name)
-          {
-            Some(index) => index as u32,
-            None => return ControlFlow::Continue(false),
+          let wanted = hash_bytes(name);
+          let end = self.scratch.merge_hashes.len();
+          match self.find(end - others.len()..end, wanted, name, |index| {
+            name_bytes(others[index].name())
+          })? {
+            Match::At(index) => index as u32,
+            Match::Absent => return ControlFlow::Continue(false),
+            Match::Refused => return ControlFlow::Continue(true),
           }
         }
         // A list pairs positionally; `shallow_equal` has already established equal lengths.
@@ -1152,24 +1274,6 @@ where
 // free helpers
 // ---------------------------------------------------------------------------------------------
 
-/// What a scan of `entries` names costs, when the name being matched is `len` bytes.
-///
-/// One entry is one `memcmp`, and a `memcmp` is [`byte_units`] and not one unit. It stops at the
-/// first differing byte — but two names of the same length sharing a long prefix run to the end of
-/// it, and both the length and the prefix are the client's, so this is an upper bound the client
-/// can make tight and not a worst case nobody reaches.
-///
-/// **It costs an honest document nothing.** `byte_units` is `len / 8 + 1`, so every argument or
-/// object-field name of seven bytes or fewer — which is most of them — charges exactly the one
-/// unit per entry that this replaced.
-///
-/// Saturating in both directions, so a width or a length no ledger could pay for refuses through
-/// [`Work::take`](crate::scratch::Work)'s own poison value rather than wrapping under it.
-#[inline]
-fn scan_units(entries: usize, len: usize) -> u32 {
-  byte_units(len).saturating_mul(u32::try_from(entries).unwrap_or(u32::MAX))
-}
-
 /// What comparing two values at their own level costs in bytes.
 ///
 /// Zero for every arm [`shallow_equal`] settles on a tag, a boolean or a length — a `memcmp` is
@@ -1199,17 +1303,6 @@ where
     _ => return 0,
   };
   byte_units(len)
-}
-
-/// Finds the argument of the same name.
-fn by_name<'a, S>(arguments: &'a [Argument<S>], wanted: &Argument<S>) -> Option<&'a Argument<S>>
-where
-  S: AsRef<[u8]>,
-{
-  let name = name_bytes(wanted.name());
-  arguments
-    .iter()
-    .find(|argument| name_bytes(argument.name()) == name)
 }
 
 /// Follows a comparison stack's child-index chain into one of the two value trees.
