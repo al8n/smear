@@ -29,36 +29,58 @@ use tokora::SimpleSpan;
 
 use super::schema::{PackedType, Range32, TypeId};
 
-/// How much work draft 5.3.2's merge engine may do before a document is refused.
+/// How much work validation may do before a document is refused.
 ///
-/// Both knobs are **absolute**, never proportional to the input: an attacker chooses the input,
-/// so a proportional bound is not a bound. On a trip the engine emits its own rule and fails the
+/// Every knob is **absolute**, never proportional to the input: an attacker chooses the input, so
+/// a proportional bound is not a bound. On a trip the validator emits its own rule and fails the
 /// document — never "passes unvalidated", never panics.
 ///
 /// This is a *validation* budget and has nothing to do with the parser's recursion budget. They
-/// bound different resources — parse-time nesting against merge-time work — and are set
-/// independently.
+/// bound different resources — parse-time nesting against validation-time work — and are set
+/// independently. Nor may one be leaned on for the other: the AST constructors are public, so a
+/// caller can hand [`validate_executable`](super::validate_executable) a document no parser ever
+/// saw and no parser limit ever bounded. Nothing here rests on a document having provenance.
 ///
-/// # What the two knobs count
+/// # What the three knobs count
 ///
 /// - [`merge_depth`](Budget::merge_depth) bounds how deeply the merge recursion may nest. One
 ///   level is one field-nesting level of the *response shape*, so it is the same quantity
 ///   `serde_json` bounds when it deserialises the answer.
-/// - [`merge_work`](Budget::merge_work) bounds everything else, as one running total for the whole
-///   call: expanded field rows, pair comparisons, the rows a common-parent partition duplicates,
-///   and the tree steps a node resolution walks. Depth alone does not bound the engine — breadth
-///   times fragment reuse does — so this is the knob that actually caps the worst case.
+/// - [`merge_work`](Budget::merge_work) bounds everything else *inside draft 5.3.2*, as one
+///   running total: expanded field rows, pair comparisons, the rows a common-parent partition
+///   duplicates, and the tree steps a node resolution walks. Depth alone does not bound the engine
+///   — breadth times fragment reuse does — so this is the knob that caps that rule's worst case.
+/// - [`validation_work`](Budget::validation_work) bounds **every other pass**, as one running
+///   total for the whole call including the projection the lossless door runs before any rule
+///   does. One unit is one node examined; one more is charged per eight bytes of every
+///   document-chosen name a pass reads, because a name has no length ceiling and where two names
+///   differ decides what comparing them costs.
 ///
-/// A document that exceeds either one is **refused**, with
-/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set on the verdict and —
-/// when that bound's rule is in the [`RuleSet`](super::RuleSet) —
-/// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
-/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) naming which. The refusal does not
-/// depend on the rule being enabled; only being told which bound does.
+/// A document that exceeds any of the three is **refused**, with
+/// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget),
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) or
+/// [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget) naming which — when that
+/// bound's rule is in the [`RuleSet`](super::RuleSet) — and
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set on the verdict either way. The
+/// refusal does not depend on the rule being enabled; only being told which bound does.
+///
+/// The third knob is not redundant with the first two, and the reason is *pass order*: draft
+/// 5.3.2 runs **last**, so the merge budget is consulted after every other pass has already
+/// finished spending. Measured, a 129 KB document of 3,200 operations spreading one 3,200-field
+/// fragment spent 189 ms in the selection walk with the merge rules fully enabled, and tripped
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) afterwards, on work already done.
+///
+/// # Turning a bound off
+///
+/// Set the knob to [`u32::MAX`]. That is the supported spelling of "never refuse for this
+/// resource", and it is the only one: an empty [`RuleSet`](super::RuleSet) switches off the
+/// bound's *diagnostic*, not the bound. A caller who wants a validator that cannot refuse — an
+/// offline linter over trusted input, a test harness — sets the knobs, not the rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Budget {
   merge_depth: u32,
   merge_work: u32,
+  validation_work: u32,
 }
 
 impl Budget {
@@ -73,12 +95,29 @@ impl Budget {
   /// work counter is the knob that actually caps the worst case.
   pub const DEFAULT_MERGE_WORK: u32 = 65_536;
 
-  /// Creates a budget from both knobs.
+  /// The default bound on validation work outside draft 5.3.2.
+  ///
+  /// 2^22. Measured in these units: the four executable fixtures in
+  /// `smear/tests/fixtures/executables` spend 4, 54, 124 and 789 — about a fifth of a unit per
+  /// byte — so this admits over twenty megabytes of document written that way. Fragment reuse is
+  /// where the units are a product rather than a sum, and it is the shape this knob is for: fifty
+  /// operations sharing one two-hundred-field fragment is 3,451 bytes and 20,651 units, and even
+  /// there the default admits about two hundred times what a real client sends.
+  pub const DEFAULT_VALIDATION_WORK: u32 = 1 << 22;
+
+  /// Creates a budget from the two merge knobs, leaving
+  /// [`validation_work`](Budget::validation_work) at its default.
+  ///
+  /// Two parameters and not three, deliberately. This constructor predates the third knob and is
+  /// spelled in a hundred call sites and fixtures; widening it would have moved every one of them
+  /// to say nothing new. [`with_validation_work`](Budget::with_validation_work) is how the third
+  /// is set, which is also how a reader can see at the call site that it was set at all.
   #[inline]
   pub const fn new(merge_depth: u32, merge_work: u32) -> Self {
     Self {
       merge_depth,
       merge_work,
+      validation_work: Self::DEFAULT_VALIDATION_WORK,
     }
   }
 
@@ -105,6 +144,23 @@ impl Budget {
   #[inline]
   pub const fn with_merge_work(mut self, merge_work: u32) -> Self {
     self.merge_work = merge_work;
+    self
+  }
+
+  /// Returns the bound on validation work outside draft 5.3.2.
+  #[inline]
+  pub const fn validation_work(&self) -> u32 {
+    self.validation_work
+  }
+
+  /// Returns the budget with a different bound on validation work outside draft 5.3.2.
+  ///
+  /// [`u32::MAX`] is the spelling of "do not refuse for this resource". It is not a bound and is
+  /// not treated as one; it is here so that a caller who needs a validator that cannot refuse has
+  /// a way to say so that does not involve switching off a diagnostic and hoping.
+  #[inline]
+  pub const fn with_validation_work(mut self, validation_work: u32) -> Self {
+    self.validation_work = validation_work;
     self
   }
 }
@@ -1163,8 +1219,15 @@ mod tests {
     assert_eq!(budget.merge_work(), 65_536);
     assert_eq!(budget.with_merge_depth(8).merge_depth(), 8);
     assert_eq!(budget.with_merge_work(9).merge_work(), 9);
-    // The knobs are independent; setting one must not disturb the other.
+    assert_eq!(budget.validation_work(), 1 << 22);
+    assert_eq!(budget.with_validation_work(7).validation_work(), 7);
+    // The knobs are independent; setting one must not disturb the others.
     assert_eq!(budget.with_merge_depth(8).merge_work(), 65_536);
+    assert_eq!(budget.with_merge_depth(8).validation_work(), 1 << 22);
+    assert_eq!(budget.with_validation_work(7).merge_work(), 65_536);
+    // `Budget::new` predates the third knob and leaves it at the default rather than at zero,
+    // which is what keeps every existing two-argument call site meaning what it meant.
+    assert_eq!(Budget::new(1, 2).validation_work(), 1 << 22);
   }
 
   #[test]

@@ -141,6 +141,29 @@ impl Invalid {
   }
 }
 
+/// The lossless door's constructor, and nothing else's.
+///
+/// Gated to its one caller rather than left ungated: without `rowan` there is no door that refuses
+/// before a [`Validator`] exists, so an ungated constructor is dead code in exactly the feature
+/// selection `cargo clippy --no-default-features -D warnings` builds.
+#[cfg(feature = "rowan")]
+impl Invalid {
+  /// The verdict of a run a resource bound abandoned, with `emitted` diagnostics behind it.
+  ///
+  /// `pub(crate)` and used by exactly one caller: the lossless door refuses **before** it projects,
+  /// so there is no [`Validator`] in existence to carry the flag out. The shape is the same one
+  /// `validate_charged` produces — `Err`, `budget_tripped`, and an `emitted` that may be zero —
+  /// because a second spelling of "gave up" is how a caller ends up reading one of them as
+  /// "finished".
+  pub(crate) const fn refused(emitted: u32) -> Self {
+    Self {
+      emitted,
+      stopped: false,
+      budget: true,
+    }
+  }
+}
+
 impl core::fmt::Display for Invalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     if self.emitted == 0 {
@@ -166,7 +189,7 @@ impl core::error::Error for Invalid {}
 ///
 /// `scratch` is the caller's reusable working set and `sink` the caller's diagnostic storage; the
 /// validator owns neither, which is what lets the steady state allocate nothing. `budget` bounds
-/// draft 5.3.2's merge engine.
+/// draft 5.3.2's merge engine and, separately, every other pass.
 ///
 /// Returns `Err(Invalid)` when at least one rule fired **or** a [`Budget`] bound refused the
 /// document. Those are not the same thing and [`Invalid::budget_tripped`] is what separates them:
@@ -273,6 +296,37 @@ where
   S: AsRef<[u8]> + Clone,
   K: Sink<S>,
 {
+  validate_charged(
+    schema,
+    document,
+    scratch,
+    budget,
+    rules,
+    sink,
+    budget.validation_work(),
+  )
+}
+
+/// [`validate_executable_with`] with the validation ledger opened at `left` rather than at
+/// [`Budget::validation_work`](super::Budget::validation_work).
+///
+/// The lossless door needs this. Its projection builds the whole AST **before** any rule exists to
+/// charge, so the ledger has to be opened before the [`Validator`] is and carried into it; a
+/// second, private ledger would be a second number for a caller to reason about and a second place
+/// for the two to disagree. See `lossless::validate_executable_lossless_with`.
+pub(crate) fn validate_charged<S, K>(
+  schema: &Schema,
+  document: &ExecutableDocument<S>,
+  scratch: &mut Scratch,
+  budget: &Budget,
+  rules: RuleSet,
+  sink: &mut K,
+  left: u32,
+) -> Result<(), Invalid>
+where
+  S: AsRef<[u8]> + Clone,
+  K: Sink<S>,
+{
   scratch.reset();
   let mut validator = Validator {
     schema,
@@ -288,7 +342,7 @@ where
     emitted: 0,
     stopped: false,
     work: Work::new(budget.merge_work()),
-    left: WORK_CEILING,
+    left,
     refused: false,
     generation: 0,
     tripped: false,
@@ -310,55 +364,34 @@ where
   }
 }
 
-/// The absolute ceiling on validation work outside draft 5.3.2's merge engine.
+/// The unit [`Budget::validation_work`](super::Budget::validation_work) is spent in.
 ///
-/// # The unit
+/// One per node examined, plus one per eight bytes of any **document-chosen** name a pass reads.
 ///
-/// One per node examined, plus one per eight bytes of any **document-chosen** name a pass reads —
-/// [`units`] is the whole of it. Every charge is taken *before* the step it prices, because a
-/// charge taken afterwards bounds nothing: the work is already spent by the time the counter can
-/// refuse it.
+/// # Charged in front of the work, which is the property and not the convention
 ///
-/// Bytes and not entries, and the difference is measurable rather than theoretical. A GraphQL name
-/// has no length ceiling, every name comparison here is `[u8] == [u8]`, and *where* two names
-/// differ decides what that costs. At 2,000 variable definitions and 2,000 usages, names padded to
-/// 200 bytes **after** the distinguishing digits measured 8.8 ms — no worse than one-byte names,
-/// because the comparison exits at the first differing byte — and the same padding written
-/// **before** them measured 17.8 ms. A ledger over entries cannot see that factor at all.
+/// A charge taken after the step it prices bounds nothing: the work is already spent by the time
+/// the counter can refuse it, so the ceiling is exceeded by whatever that step cost. The question
+/// a reader must ask of every charge here is therefore not "does this pass charge?" but "is the
+/// charge in front of the work it prices?" — and four sites answered the first question and not
+/// the second before al8n/smear#198's first review. [`Validator::spend`] carries the re-derived
+/// table.
 ///
-/// # 2^22, and what it is derived over
+/// # Bytes and not entries, and the difference is measurable rather than theoretical
 ///
-/// Absolute, never proportional: an attacker chooses the input, so a bound proportional to it is
-/// not a bound. The number is set where every honest document measured is orders below it and
-/// every disproportionate one is refused. Measured, in these units: the four executable fixtures in
-/// `smear/tests/fixtures/executables` spend 4, 54, 124 and 789 — `bench_10_huge_comprehensive`,
-/// 4,172 bytes, is the 789 — which is about a fifth of a unit per byte, so this ceiling admits
-/// something over twenty megabytes of document written that way. The shape that is *not* written
-/// that way is fragment reuse, where the units are the product and not the sum: fifty operations
-/// sharing one two-hundred-field fragment is 3,451 bytes and 20,651 units, six per byte. That is
-/// the shape the ceiling is for, and even there it admits about two hundred times what a real
-/// client sends. `validator_work.rs` crosses it at 1,600 operations over a 1,600-field fragment —
-/// 63 KB — in 42 ms.
+/// A GraphQL name has no length ceiling, every name comparison here is `[u8] == [u8]`, and *where*
+/// two names differ decides what that costs. At 2,000 variable definitions and 2,000 usages, names
+/// padded to 200 bytes **after** the distinguishing digits measured 8.8 ms — no worse than
+/// one-byte names, because the comparison exits at the first differing byte — and the same padding
+/// written **before** them measured 17.8 ms. A ledger over entries cannot see that factor at all.
 ///
-/// # No knob, deliberately
+/// # Why eight
 ///
-/// [`Budget`]'s two knobs price draft 5.3.2, whose unit — an expanded field row, a pair comparison
-/// — has been stable since it shipped. This unit is new, and this repository has already watched a
-/// ceiling outlive the unit it was chosen for: `graphql-proto`'s `DEFAULT_SELECTION_VISITS` was
-/// argued from "one unit per selection", the unit was widened to charge name comparisons, and the
-/// rationale stayed attached to a number it no longer described. A public knob is a promise about
-/// the unit as much as about the number, so this one stays inside the crate until the unit has
-/// stopped moving.
-const WORK_CEILING: u32 = 1 << 22;
-
-/// The charge for reading `len` bytes of a document-chosen name: one unit per eight bytes, plus
-/// one for the node they belong to.
-///
-/// Eight because that is roughly the word a comparison, a hash or a copy advances per step, and
-/// because it is the unit `graphql-proto`'s collection ledger already charges in — two ledgers
-/// counting different things in the same crate family would be two units to re-derive.
+/// Roughly the word a comparison, a hash or a copy advances per step, and it is the unit
+/// `graphql-proto`'s collection ledger already charges in — two ledgers counting different things
+/// in the same crate family would be two units to re-derive.
 #[inline]
-const fn units(len: usize) -> u32 {
+pub(crate) const fn units(len: usize) -> u32 {
   // `as` after the shift, so a name longer than `u32::MAX * 8` cannot wrap the charge down to
   // nothing on a 64-bit target. Nothing can allocate one; a bound that rests on that is not a
   // bound.
@@ -424,7 +457,9 @@ struct Validator<'a, 'd, S, K> {
   /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent, and the ceiling it is
   /// spending against.
   work: Work,
-  /// What is left of [`WORK_CEILING`]. Charged by every pass that is not draft 5.3.2's engine.
+  /// What is left of [`Budget::validation_work`](super::Budget::validation_work). Charged by
+  /// every pass that is not draft 5.3.2's engine, and pre-spent by the lossless door's projection
+  /// before this struct exists.
   left: u32,
   /// Whether the ceiling refused the document.
   ///
@@ -469,10 +504,49 @@ where
 
   // -- the validation-wide ledger ---------------------------------------------------------------
 
-  /// Charges `units` against [`WORK_CEILING`] **before** the step they price.
+  /// Charges `units` against [`Budget::validation_work`](super::Budget::validation_work)
+  /// **before** the step they price.
   ///
   /// `blame` is the span the refusal points at — the node whose examination could not be afforded,
   /// which is the narrowest true answer to "where did this document stop being validated".
+  ///
+  /// # Where every charge sits, relative to the work it prices
+  ///
+  /// The first version of this table asked "does this pass charge?". Every pass did, and four of
+  /// them charged *behind* work a caller sizes — which bounds nothing, because the work is spent
+  /// by the time the counter can refuse it. The question is where the charge sits, so that is what
+  /// the table records. A row that says "postpaid" is a defect, not a note.
+  ///
+  /// | pass | charge site | what it prices |
+  /// |---|---|---|
+  /// | projection (lossless door only) | `lossless.rs`, before `project_*` | one prepayment of `units(source.len())`, an upper bound on the AST it builds |
+  /// | `prep`, per definition | before the row is pushed | the row, and the fragment-name sort `index_fragments` runs next |
+  /// | `collect_definition_edges` | after the cursor bump, before the arm | the selection; a spread's name before `find_fragment` searches it |
+  /// | 5.2.2.1 operation names | in the collection loop, before the sort | every name the sort will compare |
+  /// | 5.5.1.2/5.5.1.3 declarations | before `check_type_condition` | the `Schema::sym` hash of the condition |
+  /// | 5.5.2.2 cycles | before the edge is read | one edge |
+  /// | 5.5.1.4 used | `mark_reachable`, before the group loop | every member of a duplicated name's group |
+  /// | 5.2.4.1 subscription roots | after the cursor bump, before `conditional_directive` | the selection, every directive on it, and every condition name it resolves |
+  /// | selection walk | after the cursor bump, before the arm | the selection; then the field, spread or inline-condition name before each is resolved |
+  /// | 5.7.x directives | `spend_names` at the head of `check_directives` | every directive name, ahead of 5.7.3's sort |
+  /// | 5.4.x arguments | `spend_names` at the head of `check_arguments` | every argument name, ahead of 5.4.2's sort |
+  /// | 5.4.3 presence half | before each declared argument's rescan | one rescan of the written list |
+  /// | 5.6.3/5.6.4 input objects | `spend_names` at the head of `check_input_object` | every field name, ahead of 5.6.3's sort and 5.6.4's rescan |
+  /// | value walk | top of the loop, before `resolve` | the descent `resolve` makes, which is the frame depth |
+  /// | scalar and enum literals | before the kind dispatch | the literal's own spelling, which `fits_i32`, `is_finite` and `has_enum_value` read |
+  /// | 5.8.1/5.8.2 definitions | in the collection loop, before the sort | every variable name, and the declared type's base name before `pack_type` |
+  /// | 5.8.3/5.8.5 usages | before the index search, and again before the marking | the search, and the run of definitions sharing the name |
+  /// | 5.8.4 used | — | reads bits; the definitions were charged when the index was built |
+  /// | 5.2.1.1, 5.2.3.1 | — | `O(1)` per operation, and the operations were charged at `prep` |
+  /// | 5.3.2 merge engine | its own ledger | [`Budget::merge_work`](super::Budget::merge_work), unchanged and not double-charged |
+  ///
+  /// Three rows deserve their reason stated rather than assumed. The **sorts** — 5.2.2.1, 5.4.2,
+  /// 5.6.3, 5.7.3, 5.8.1 and the fragment index — do `N log N` comparisons against `N` units of
+  /// prepayment; `log N` is at most thirty-two whatever the document does, so that is a bounded
+  /// constant multiple of the charge and not a second factor the client can grow. The **binary
+  /// searches** — `find_fragment`, the variable index — are the same argument one dimension
+  /// smaller. And **`Schema` lookups keyed by an already-charged name** are free by construction:
+  /// the schema is the server's, so its group sizes are not an input.
   #[inline]
   pub(super) fn spend(&mut self, units: u32, blame: SimpleSpan) -> ControlFlow<()> {
     match self.left.checked_sub(units) {
@@ -484,7 +558,9 @@ where
     }
   }
 
-  /// Refuses the document for reaching [`WORK_CEILING`], and abandons every remaining pass.
+  /// Refuses the document for reaching
+  /// [`Budget::validation_work`](super::Budget::validation_work), and abandons every remaining
+  /// pass.
   ///
   /// Always [`ControlFlow::Break`], including when the rule is filtered out and there is nothing
   /// to emit. That is the whole difference between a bound and a suggestion: the caller switching
@@ -498,8 +574,8 @@ where
     if !self.refused {
       self.refused = true;
       if self.on(Rule::ValidationWorkBudget) {
-        let diagnostic =
-          Diagnostic::new(Rule::ValidationWorkBudget, blame).context(Context::Count(WORK_CEILING));
+        let diagnostic = Diagnostic::new(Rule::ValidationWorkBudget, blame)
+          .context(Context::Count(self.budget.validation_work()));
         let _ = self.emit(diagnostic);
       }
     }
@@ -510,6 +586,47 @@ where
   #[inline]
   pub(super) fn spend_name(&mut self, name: &Name<S>) -> ControlFlow<()> {
     self.spend(units(name_bytes(name).len()), *name.as_span())
+  }
+
+  /// Charges a whole list of names before anything sorts, hashes or compares any of them.
+  ///
+  /// The prepayment shape. Three rules in this crate — 5.4.2, 5.6.3 and 5.7.3 — begin by *sorting*
+  /// a list of names the client wrote, and a per-item charge inside the loop that follows arrives
+  /// after `O(N log N)` comparisons have already happened.
+  pub(super) fn spend_names<'n, I>(&mut self, names: I) -> ControlFlow<()>
+  where
+    I: IntoIterator<Item = &'n Name<S>>,
+    S: 'n,
+  {
+    for name in names {
+      self.spend_name(name)?;
+    }
+    ControlFlow::Continue(())
+  }
+
+  /// Charges the base name of a type reference before [`Validator::pack_type`] hashes it.
+  ///
+  /// The walk to the base is bounded by [`MAX_WRAPPERS`] — that is what makes it safe to do
+  /// *before* the charge rather than after — and the name it finds is not bounded by anything.
+  /// Draft 5.8.5 calls `pack_type` once per **usage**, so a variable used `U` times had its
+  /// declared type's spelling hashed `U` times for nothing.
+  pub(super) fn spend_type(&mut self, ty: &Type<Name<S>>, blame: SimpleSpan) -> ControlFlow<()> {
+    let mut cursor = ty;
+    let mut depth = 0usize;
+    loop {
+      match cursor {
+        Type::Name(named) => return self.spend(units(name_bytes(named.name()).len()), blame),
+        Type::List(list) => {
+          if depth >= MAX_WRAPPERS as usize {
+            // Deeper than the packed representation admits, so `pack_type` will refuse before it
+            // reaches a name. One unit for the walk that got here.
+            return self.spend(1, blame);
+          }
+          depth += 1;
+          cursor = list.ty();
+        }
+      }
+    }
   }
 
   /// Emits a diagnostic naming a source spelling, at that spelling's own span.
@@ -870,6 +987,8 @@ where
         continue;
       };
       let condition = fragment.type_condition().name();
+      // `check_type_condition` resolves it through `Schema::sym`, which hashes every byte.
+      self.spend_name(condition)?;
       self.check_type_condition(condition)?;
     }
     ControlFlow::Continue(())
@@ -1087,7 +1206,7 @@ where
 
       // "{selection} must not provide the `@skip`/`@include` directive" — the whole reason this
       // collection exists is that it has no runtime variables to evaluate them with.
-      if let Some(directive) = self.conditional_directive(selection) {
+      if let Some(directive) = self.conditional_directive(selection)? {
         let diagnostic = Diagnostic::new(Rule::SingleRootField, *directive.as_span())
           .subject(directive.source().clone());
         self.emit(diagnostic)?;
@@ -1107,7 +1226,11 @@ where
         }
         Selection::InlineFragment(inline) => {
           let applies = match inline.type_condition() {
-            Some(condition) => self.condition_applies(condition.name(), root),
+            Some(condition) => {
+              // `condition_applies` resolves the name through `Schema::sym`.
+              self.spend_name(condition.name())?;
+              self.condition_applies(condition.name(), root)
+            }
             None => true,
           };
           if applies {
@@ -1119,6 +1242,9 @@ where
           }
         }
         Selection::FragmentSpread(spread) => {
+          // `find_fragment` binary-searches the name index and `condition_applies` below hashes
+          // the target's condition; both read bytes the document chose.
+          self.spend_name(spread.name())?;
           let Some(ordinal) = self.find_fragment(name_bytes(spread.name())) else {
             continue;
           };
@@ -1129,7 +1255,9 @@ where
           let Some(body) = fragment(document, target.definition) else {
             continue;
           };
-          if !self.condition_applies(body.type_condition().name(), root) {
+          let condition = body.type_condition().name();
+          self.spend_name(condition)?;
+          if !self.condition_applies(condition, root) {
             continue;
           }
           self
@@ -1160,16 +1288,29 @@ where
   }
 
   /// Returns the `@skip` or `@include` a selection carries, if it carries one.
-  fn conditional_directive(&self, selection: &'d Selection<S>) -> Option<&'d Name<S>> {
+  ///
+  /// `&mut self` and a [`ControlFlow`] because it **scans every directive on the selection**, and a
+  /// selection carries as many as the document writes. The subscription pass charged one flat unit
+  /// per selection and then came here, so `O` selections each carrying `D` directives spent `O`
+  /// units on `O · D` of work off `O + D` of syntax.
+  fn conditional_directive(
+    &mut self,
+    selection: &'d Selection<S>,
+  ) -> ControlFlow<(), Option<&'d Name<S>>> {
     let directives = match selection {
       Selection::Field(field) => field.directives(),
       Selection::FragmentSpread(spread) => spread.directives(),
       Selection::InlineFragment(inline) => inline.directives(),
-    }?;
-    directives.directives().iter().find_map(|directive| {
+    };
+    let Some(directives) = directives else {
+      return ControlFlow::Continue(None);
+    };
+    let directives = directives.directives();
+    self.spend_names(directives.iter().map(|directive| directive.name()))?;
+    ControlFlow::Continue(directives.iter().find_map(|directive| {
       let name = directive.name();
       matches!(name_bytes(name), b"skip" | b"include").then_some(name)
-    })
+    }))
   }
 
   /// `DoesFragmentTypeApply` against a known object type.
@@ -1238,10 +1379,11 @@ where
       let Some(body) = fragment(document, row.definition) else {
         continue;
       };
-      // The condition was already reported on, if it needed reporting, by the declaration pass.
-      let scope = self
-        .composite_of(body.type_condition().name())
-        .map_or(NONE, |id| id.get());
+      // The condition was already reported on, if it needed reporting, by the declaration pass —
+      // but resolving it still hashes it, so it is still charged.
+      let condition = body.type_condition().name();
+      self.spend_name(condition)?;
+      let scope = self.composite_of(condition).map_or(NONE, |id| id.get());
       self.begin_fragment(row.definition)?;
       self.walk_selections(Frame::root(row.definition, scope, Frame::CHECK))?;
     }
@@ -1329,6 +1471,7 @@ where
     for described in definitions {
       let definition = described.node();
       let variable = definition.variable();
+      self.spend_type(definition.ty(), *variable.span())?;
       let declared = self.pack_type(definition.ty());
 
       // 5.8.2 — objects, interfaces and unions cannot be variable types, and neither can a name

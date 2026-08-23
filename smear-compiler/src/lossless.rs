@@ -90,8 +90,12 @@ use smear_parser::graphql::lossless::{
 
 pub use smear_parser::lossless::project::Recovery;
 
+use tokora::SimpleSpan;
+
 use super::{
-  Budget, Invalid, RuleSet, Schema, SchemaErrors, Scratch, Sink, validate_executable_with,
+  Budget, Diagnostic, Invalid, Rule, RuleSet, Schema, SchemaErrors, Scratch, Sink,
+  diagnostic::Context,
+  executable::{units, validate_charged},
 };
 
 /// The verdict of a failed lossless validation.
@@ -259,6 +263,45 @@ where
 /// produces the document the rules read, so an empty [`RuleSet`] still costs it. What that buys
 /// is a caller who wants only the [`Recovery`]: `RuleSet::empty()` answers "how much of this
 /// parse has an AST image" and nothing else.
+///
+/// # The projection is charged, and it is charged before it runs
+///
+/// [`Budget::validation_work`](super::Budget::validation_work) opens **here**, not inside the
+/// validator, and the projection is the first thing to spend from it. That is the whole reason it
+/// is one ledger and not two: the projection allocates an entire AST before a rule exists to
+/// refuse anything, and a bound that starts after it has already lost.
+///
+/// The charge is [`units`] of `source.len()`, taken in one prepayment rather than incrementally.
+/// Incrementally would be better and is not available: `project_executable_document_recovered`
+/// lives in `smear-parser`, and threading a validation ledger into it would put a compiler concept
+/// in the parser. What makes the prepayment sound instead of merely convenient is that it is an
+/// **upper bound** obtainable in constant time — the projection builds at most one AST node per
+/// CST token and a token is at least one byte, so `source.len()` bounds the work with a constant
+/// factor, and `units` is what turns that into the same unit every rule spends.
+///
+/// It was the pass al8n/smear#198's table could not place, and "bounded by the document" was the
+/// wrong answer: the parser's own limits bound the CST's *shape* and not its *size*, and the size
+/// is the thing an adversary picks.
+///
+/// **This is the one place the two doors do not answer identically, and it is not a drift.** The
+/// module header's promise — the same rules, the same order, the same spans — is about the *rules*,
+/// and it holds: they are the same call. What differs is the resource, because this door does
+/// strictly more work than the syntactic one and is charged for it, so with
+/// [`Budget::validation_work`](super::Budget::validation_work) set low enough to refuse a document
+/// at all, this door refuses earlier — at the whole input's span, before a rule ran — where the
+/// syntactic door would have refused mid-walk at a node. At any budget that does not refuse, the
+/// two are diagnostic-for-diagnostic identical, which is what `tests/validator_lossless.rs`
+/// compares.
+///
+/// # What a refusal here looks like
+///
+/// The same thing every other refusal looks like: `Err`, with
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set, and
+/// [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget) in the sink when the rule set
+/// contains it. The [`Recovery`] reports `0` projected — which is exact — and `1` skipped, which on
+/// this one path is a **floor** rather than the usual ceiling, because counting the elements that
+/// were dropped is precisely the walk the refusal declined to make.
+/// [`Recovery::is_complete`] is false, which is the half a caller must not get wrong.
 pub fn validate_executable_lossless_with<'src, K>(
   schema: &Schema,
   parse: &Parse,
@@ -271,11 +314,43 @@ pub fn validate_executable_lossless_with<'src, K>(
 where
   K: Sink<&'src str>,
 {
+  let Some(left) = budget.validation_work().checked_sub(units(source.len())) else {
+    return Err(LosslessInvalid {
+      invalid: Invalid::refused(refuse_projection(source, budget, rules, sink)),
+      // Nothing was projected, and nothing counted what was not. See this function's header.
+      recovery: Recovery::new(0, 1),
+    });
+  };
   let (document, recovery) = project_executable_document_recovered(parse, source);
-  match validate_executable_with(schema, &document, scratch, budget, rules, sink) {
+  match validate_charged(schema, &document, scratch, budget, rules, sink, left) {
     Ok(()) => Ok(recovery),
     Err(invalid) => Err(LosslessInvalid { invalid, recovery }),
   }
+}
+
+/// Reports a projection the budget would not pay for, and returns how many diagnostics that was.
+///
+/// Zero when the rule is filtered out, which is the case the verdict has to survive: switching a
+/// bound's rule off switches off its *diagnostic*, never the refusal.
+fn refuse_projection<'src, K>(
+  source: &'src str,
+  budget: &Budget,
+  rules: RuleSet,
+  sink: &mut K,
+) -> u32
+where
+  K: Sink<&'src str>,
+{
+  if !rules.contains(Rule::ValidationWorkBudget) {
+    return 0;
+  }
+  // The whole input, because the whole input is what could not be afforded. There is no narrower
+  // node to point at: the nodes are what the projection would have built.
+  let span = SimpleSpan::new(0, source.len());
+  let diagnostic = Diagnostic::new(Rule::ValidationWorkBudget, span)
+    .context(Context::Count(budget.validation_work()));
+  let _ = sink.diagnostic(diagnostic);
+  1
 }
 
 // ---------------------------------------------------------------------------------------------

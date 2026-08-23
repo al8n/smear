@@ -167,16 +167,16 @@ fn sorted(rules: &[Rule]) -> Vec<Rule> {
 /// missing from the table. One entry, and the entry names what would delete it.
 const UNFIREABLE: &[(Rule, &str)] = &[(
   Rule::ValidationWorkBudget,
-  "an ABSOLUTE ceiling with no knob to lower, so unlike the two merge bounds it cannot be \
-   exercised by a `budget` override on a three-line document. The smallest shape that reaches it is \
-   about sixty kilobytes — operations times shared-fragment breadth is the densest unit-per-byte \
-   construction there is — and that shape trips `MergeWorkBudget` long before, so the fixture would \
-   also have to raise `merge_work` to `u32::MAX`, and its VALID twin would then grind through an \
-   unbounded merge of sixty kilobytes. Two such documents, run nine trivia forms deep by \
-   `validator_lossless.rs` and twice more by `validator_descriptions.rs`, is a large standing cost \
-   for one rule. `validator_work.rs` fires it instead, on a document it generates, and asserts the \
-   refusal, the wall clock and the rule-filtered-out verdict. This excuse is deleted the day the \
-   ceiling gains a `Budget` knob the way `merge_depth` and `merge_work` have one.",
+  "fireable, and deliberately not fixtured here. Every reader of this table runs each fixture \
+   through BOTH doors and compares them diagnostic for diagnostic, and this is the one rule the \
+   two doors cannot agree on at the boundary: the lossless door charges its projection before it \
+   projects, so at a budget low enough to make the syntactic door refuse mid-walk, the lossless \
+   door has already refused at the whole document\'s span. That is not a drift between two \
+   implementations of a rule — it is one door doing strictly more work and being charged for it — \
+   and a fixture whose two halves disagree by construction would be a differential asserting the \
+   opposite of what it exists to assert. `validator_work.rs` fires the rule through each door \
+   separately and pins both: the refusal, the wall clock, the rule-filtered-out verdict, and the \
+   `Recovery` a refused projection reports.",
 )];
 
 #[test]

@@ -82,6 +82,12 @@ where
   where
     D: DirectiveLike<S>,
   {
+    // Prepaid, and the position matters more than the amount. `check_directive_uniqueness` below
+    // **sorts** these names — `O(N log N)` comparisons over bytes the client chose — and the charge
+    // used to sit in the loop *after* it, so every one of those comparisons happened before a
+    // refusal was possible. A charge behind the work it prices is not a bound on that work.
+    self.spend_names(directives.iter().map(D::directive_name))?;
+
     // 5.7.3 — only definitions the schema knows can be known non-repeatable, so an undefined
     // directive written twice is 5.7.1's business twice over and not also this rule's.
     if check && self.on(Rule::DirectivesAreUniquePerLocation) {
@@ -90,7 +96,6 @@ where
 
     for directive in directives {
       let name = directive.directive_name();
-      self.spend_name(name)?;
       let definition = self
         .schema
         .sym(name_bytes(name))
@@ -195,6 +200,9 @@ where
   where
     A: ArgumentLike<S>,
   {
+    // Prepaid ahead of the sort below, for the reason `check_directives` states.
+    self.spend_names(arguments.iter().map(A::argument_name))?;
+
     // 5.4.2 — one argument set, one value per name.
     if check && self.on(Rule::ArgumentUniqueness) {
       let base = self.scratch.keys.len();
@@ -224,7 +232,6 @@ where
 
     for argument in arguments {
       let name = argument.argument_name();
-      self.spend_name(name)?;
       let sym = self.schema.sym(name_bytes(name));
       let definition = match (definitions, sym) {
         (Some(group), Some(sym)) => self.schema.input(group, sym).copied(),
@@ -339,6 +346,12 @@ where
 
     while self.scratch.values.len() > base {
       let depth = self.scratch.values.len();
+      // Charged in front of `resolve`, which descends the frame chain **from the root** and
+      // therefore costs the current depth — on every iteration, including the ones that only pop.
+      // One unit per iteration priced `O(nodes)` for `O(nodes · depth)` of work, so a literal
+      // nested `D` deep did `O(D²)` on `O(D)` of units. This charge subsumes the per-literal unit
+      // it replaces, since the depth is never less than one.
+      self.spend((depth - base) as u32, root.value_span())?;
       let frame = self.scratch.values[depth - 1];
       let Some(level) = resolve(root, &self.scratch.values[base..depth]) else {
         self.scratch.values.pop();
@@ -354,10 +367,6 @@ where
       }
       self.scratch.values[depth - 1].cursor += 1;
       let index = frame.cursor;
-      // One per literal examined. A literal's nesting and breadth are the document's, and this
-      // walk runs once per position the value sits in — which for a fragment shared by `O`
-      // operations is `O` times.
-      self.spend(1, root.value_span())?;
 
       let next = match frame.level {
         ValueLevel::List => {
@@ -486,6 +495,11 @@ where
 
     let base = expected.base_id();
     let definition = *self.schema.type_def(base);
+    // Charged before the two arms below read the literal's own spelling. `has_enum_value` hashes
+    // an enum name the client wrote, and `scalar_accepts` hands `fits_i32` and `is_finite` the
+    // digits — a literal has no length ceiling, so `1` followed by a million zeroes is a legal
+    // `IntValue` and used to be parsed for free.
+    self.spend(literal_units::<S, V>(value), value.value_span())?;
     match definition.kind() {
       TypeKind::InputObject => {
         let Some(fields) = value.as_object() else {
@@ -551,6 +565,11 @@ where
   where
     V: ValueLike<S>,
   {
+    // Prepaid ahead of the sort below, and ahead of 5.6.4's rescan further down, for the reason
+    // `check_directives` states. The per-field charge in `walk_value` prices the *schema lookup*
+    // one level down and arrives far too late to bound either of those.
+    self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
+
     // 5.6.3 — one value per field name.
     if self.on(Rule::InputObjectFieldUniqueness) {
       let base = self.scratch.keys.len();
@@ -753,6 +772,9 @@ where
       return ControlFlow::Continue(());
     };
     let definition = self.variables[index].node();
+    // `pack_type` hashes the declared type's base name, once per **usage**.
+    self.spend_type(definition.ty(), *name.as_span())?;
+    let definition = self.variables[index].node();
     let Some(declared) = self.pack_type(definition.ty()) else {
       // The declared type is not in the schema; 5.8.2 has already said so.
       return ControlFlow::Continue(());
@@ -825,6 +847,33 @@ fn level_frame(
     object,
     flags,
   }
+}
+
+/// The bytes a scalar or enum literal's own spelling occupies, as a charge.
+///
+/// Strings and booleans are absent on purpose: recognising one is a discriminant test that never
+/// reads the bytes. An integer, a float and an enum name are all read end to end by the check that
+/// follows, and all three are as long as the document says.
+fn literal_units<S, V>(value: &V) -> u32
+where
+  V: ValueLike<S>,
+  S: AsRef<[u8]>,
+{
+  let len = value
+    .as_int()
+    .map(|literal| literal.source().as_ref().len())
+    .or_else(|| {
+      value
+        .as_float()
+        .map(|literal| literal.source().as_ref().len())
+    })
+    .or_else(|| {
+      value
+        .as_enum()
+        .map(|literal| literal.source().as_ref().len())
+    })
+    .unwrap_or(0);
+  units(len)
 }
 
 /// Sorts a duplicate-scan segment by name, breaking ties on the source index so the order is

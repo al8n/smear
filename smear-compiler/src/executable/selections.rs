@@ -243,6 +243,11 @@ where
       return ControlFlow::Continue(None);
     };
     let condition = body.type_condition().name();
+    // The spread charge above pays for the **spread's** name. This is the fragment's *type
+    // condition*, a different spelling the document also chose, and `composite_of` resolves it
+    // through `Schema::sym`, which hashes every byte. `O` spreads of one fragment therefore read
+    // `O · L` bytes off `O + L` of syntax, and the charge for it used to be zero.
+    self.spend_name(condition)?;
     let target = self.composite_of(condition);
 
     if check && let Some(target) = target {
