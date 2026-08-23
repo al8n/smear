@@ -87,7 +87,24 @@ where
     // and the variable usages inside them. The prepayment below was unconditional, so an empty
     // rule set — or one asking only for 5.3.1 — could be handed a budget refusal for a long
     // directive spelling that no enabled rule was ever going to look at.
+    let local = check && (self.checks_directives || self.checks_arguments || self.checks_values);
     if !self.reaches_directives(check, D::HAS_VARIABLES) {
+      return ControlFlow::Continue(());
+    }
+
+    // Descent without resolution. Reached when the only reason to be here is to find variable
+    // leaves for draft 5.8.3 or 5.8.4, which read nothing above a leaf — so no directive name is
+    // charged, hashed or looked up on the way past it. See `Validator::resolves_positions`.
+    if !self.resolves_positions(local) {
+      for directive in directives {
+        self.check_arguments(
+          directive.directive_arguments(),
+          None,
+          None,
+          check,
+          *directive.directive_name().as_span(),
+        )?;
+      }
       return ControlFlow::Continue(());
     }
 
@@ -177,11 +194,12 @@ where
         == name_bytes(directives[later as usize].directive_name())
       {
         let repeat = &directives[later as usize];
+        let subject = self.subject(repeat.directive_name())?;
         let diagnostic = Diagnostic::new(
           Rule::DirectivesAreUniquePerLocation,
           repeat.directive_span(),
         )
-        .subject(repeat.directive_name().source().clone())
+        .subject(subject)
         .related(directives[earlier as usize].directive_span());
         self.emit(diagnostic)?;
       }
@@ -212,7 +230,18 @@ where
     // [`Validator::reaches_directives`] one level in, and for the same reason: the prepayment
     // below is unconditional, so without this an argument list would charge for its spellings
     // whether or not any rule that reads an argument, a value or a variable usage is enabled.
+    let local = check && (self.checks_arguments || self.checks_values);
     if !self.reaches_arguments(check, A::HAS_VARIABLES) {
+      return ControlFlow::Continue(());
+    }
+
+    // Descent without resolution, for the reason `check_directives` states. `None` as the expected
+    // type is exactly right rather than a shortcut: it is what the position resolves to when
+    // nothing resolves it, and `check_variable_usage` already answers 5.8.3 and 5.8.4 without one.
+    if !self.resolves_positions(local) {
+      for argument in arguments {
+        self.walk_value(argument.argument_value(), None, ValueLocation::PLAIN, check)?;
+      }
       return ControlFlow::Continue(());
     }
 
@@ -238,8 +267,9 @@ where
           == name_bytes(arguments[later as usize].argument_name())
         {
           let repeat = &arguments[later as usize];
+          let subject = self.subject(repeat.argument_name())?;
           let diagnostic = Diagnostic::new(Rule::ArgumentUniqueness, repeat.argument_span())
-            .subject(repeat.argument_name().source().clone())
+            .subject(subject)
             .related(arguments[earlier as usize].argument_span());
           self.emit(diagnostic)?;
         }
@@ -414,10 +444,12 @@ where
             continue;
           };
           let name = field.field_name();
-          self.spend_name(name)?;
           let definition = if frame.object == NONE {
+            // An unknown position resolves nothing, so there is nothing here to charge for. The
+            // charge sat above this branch and paid for a lookup only the other one makes.
             None
           } else {
+            self.spend_name(name)?;
             let object = TypeId::new(frame.object);
             self
               .schema
@@ -638,8 +670,9 @@ where
           == name_bytes(fields[later as usize].field_name())
         {
           let repeat = &fields[later as usize];
+          let subject = self.subject(repeat.field_name())?;
           let diagnostic = Diagnostic::new(Rule::InputObjectFieldUniqueness, repeat.field_span())
-            .subject(repeat.field_name().source().clone())
+            .subject(subject)
             .related(fields[earlier as usize].field_span());
           self.emit(diagnostic)?;
         }
@@ -657,10 +690,10 @@ where
         } else if fields[0].field_value().is_null() {
           // `check_input_object`'s prepayment is gated on 5.6.3 and 5.6.4, and this is 5.6.1's
           // report — so under `only(ValuesOfCorrectType)` the spelling reaches a clone before the
-          // descent one level down charges it. One field, charged in front of the copy.
-          self.spend_name(fields[0].field_name())?;
+          // descent one level down charges it. The helper is what pays for it.
+          let subject = self.subject(fields[0].field_name())?;
           let diagnostic = Diagnostic::new(Rule::ValuesOfCorrectType, fields[0].field_span())
-            .subject(fields[0].field_name().source().clone())
+            .subject(subject)
             .context(Context::Type(definition.name()));
           self.emit(diagnostic)?;
         }

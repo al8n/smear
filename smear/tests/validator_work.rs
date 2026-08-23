@@ -1699,3 +1699,128 @@ fn a_diagnostic_subject_is_charged_before_it_is_cloned() {
     long_cost - short
   );
 }
+
+// ---------------------------------------------------------------------------------------------
+// 11. where the charge lives
+// ---------------------------------------------------------------------------------------------
+
+/// The subject a diagnostic clones is charged by the code that clones it.
+///
+/// `report_name` copies the spelling it is handed, and every caller charged *something* first —
+/// twice a different string. `RuleSet::only(VariablesAreInputTypes)` is the case with no
+/// neighbour: it charges the declared **type**, the name index is not built because no rule reads
+/// it, and the variable's own spelling is therefore charged nowhere else at all. So a caller could
+/// hand an arbitrarily long declaration name to a copy priced by three bytes of `Dog`.
+///
+/// The repair is not the charge but its **address**: the callee pays, so a caller cannot pass the
+/// wrong subject and no new caller has to remember.
+#[test]
+fn a_cloned_subject_is_charged_by_the_code_that_clones_it() {
+  let schema = build(SCHEMA);
+  const VARS: usize = 200;
+  // `Dog` is an object type, so 5.8.2 fires on every one of these and clones its name.
+  let document = |pad: usize| {
+    let long = "v".repeat(pad);
+    let mut source = String::from("query q(");
+    for i in 0..VARS {
+      source.push_str(&std::format!("${long}{i}: Dog, "));
+    }
+    source.pop();
+    source.pop();
+    source.push_str(") { dog { name } }");
+    source
+  };
+
+  let rules = RuleSet::only(Rule::VariablesAreInputTypes);
+  let short = min_budget(&schema, &document(1), rules);
+  let long = min_budget(&schema, &document(2_000), rules);
+  println!("cloned subject: 1-byte names {short} units, 2,000-byte names {long} units");
+
+  assert!(
+    long - short >= (VARS as u32) * 250,
+    "{VARS} names of 2,000 bytes were cloned for {} units",
+    long - short
+  );
+}
+
+/// Finding a variable leaf is not resolving the names above it, and neither happens outside an
+/// operation.
+///
+/// Draft 5.8.3 asks whether a name was declared and 5.8.4 whether it was used; both are answered at
+/// the leaf. Only 5.8.5 reads anything above one, because it needs the position's expected type.
+/// One predicate gated descent and resolution together, so a `AllVariableUsesDefined`-only rule set
+/// charged and schema-resolved every ancestor spelling on the way down.
+///
+/// And the same predicate never mentioned scope: `check_variable_usage` discards every leaf outside
+/// an operation, so an unreached fragment was descended for nobody.
+#[test]
+fn descending_for_a_leaf_does_not_resolve_the_names_above_it() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::AllVariableUsesDefined);
+
+  // The argument name is undeclared either way, so nothing above the leaf resolves to anything —
+  // and the leaf is reached identically. Only the charge for the spelling changes.
+  let ancestor = |pad: usize| {
+    let long = "a".repeat(pad);
+    std::format!("query q($v: Boolean) {{ dog {{ isHouseTrained({long}x: $v) }} }}")
+  };
+  let short = min_budget(&schema, &ancestor(1), rules);
+  let long = min_budget(&schema, &ancestor(40_000), rules);
+  println!("ancestor names: 1-byte {short} units, 40,000-byte {long} units");
+  assert!(
+    long - short < 1_000,
+    "a 40,000-byte argument name cost {} units for a rule that reads no name above a leaf",
+    long - short
+  );
+
+  // An unreached fragment: `check_variable_usage` returns before doing anything outside an
+  // operation, so descending its value tree cannot produce a finding.
+  let orphan = |entries: usize| {
+    let list = "1 ".repeat(entries);
+    std::format!(
+      "{{ dog {{ name }} }} fragment Orphan on Dog {{ isHouseTrained(bogus: [{list}]) }}"
+    )
+  };
+  let small = min_budget(&schema, &orphan(1), rules);
+  let big = min_budget(&schema, &orphan(20_000), rules);
+  println!("unreached fragment: 1 entry {small} units, 20,000 entries {big} units");
+  assert!(
+    big - small < 1_000,
+    "a 20,000-entry literal in an unreached fragment cost {} units for a rule scoped to operations",
+    big - small
+  );
+}
+
+/// The variable-definition loop charges per definition, not per decision to enter it.
+///
+/// The gate says whether to loop; nothing was charging for going round it. A value-only rule set
+/// opens this loop — a default value is a value — and then finds nothing to do on a declaration
+/// with no default and no directives, so an arbitrarily long public-AST declaration list ran
+/// through it for a constant budget.
+#[test]
+fn the_variable_definition_loop_charges_per_definition() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::ValuesOfCorrectType);
+
+  // No defaults, no directives: every branch inside the loop declines, and the loop itself is the
+  // only work left.
+  let document = |vars: usize| {
+    let mut source = String::from("query q(");
+    for i in 0..vars {
+      source.push_str(&std::format!("$v{i}: Boolean, "));
+    }
+    source.pop();
+    source.pop();
+    source.push_str(") { dog { name } }");
+    source
+  };
+
+  let few = min_budget(&schema, &document(10), rules);
+  let many = min_budget(&schema, &document(10_000), rules);
+  println!("definition loop: 10 declarations {few} units, 10,000 declarations {many} units");
+  assert!(
+    many - few >= 9_000,
+    "9,990 more declarations cost {} units",
+    many - few
+  );
+}

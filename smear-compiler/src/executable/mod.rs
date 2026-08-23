@@ -50,6 +50,13 @@
 //!   it found sites the previous version could not see: a charge counting **selections** in front
 //!   of a comparison measured in **bytes**, and a charge gated on one of a list's two readers while
 //!   the other read it for free.
+//! - **A charge lives where the work happens, not where a caller remembered to put it.** Four
+//!   rounds sharpened *what* is charged; this one is about *where*. A charge separated from its
+//!   work by a **call boundary** depends on the caller naming the right subject — `report_name`
+//!   cloned whatever it was handed, and two callers handed it a different string than the one they
+//!   had charged. A charge separated by a **loop** pays at the entrance for work inside. So the
+//!   subject clone is now unobtainable without paying: [`Validator::subject`] is the only way to
+//!   get one, and the hand-written form is gone from the module.
 //! - **A gate is named after its readers, not after a rule family.** The charge went
 //!   *exists → in front of the work → in the right dimension → over the right population*, and a
 //!   gate has the same four steps: the last one is asking which rules actually **read** what the
@@ -399,6 +406,7 @@ where
     collects_usages: collects_usages(rules),
     resolves_variable_types: rules.contains(Rule::VariablesAreInputTypes),
     marks_usage: rules.contains(Rule::AllVariablesUsed),
+    reads_usage_positions: rules.contains(Rule::AllVariableUsagesAreAllowed),
     visits_variable_definitions: visits_variable_definitions(rules),
     variables: &[],
     in_operation: false,
@@ -660,6 +668,9 @@ struct Validator<'a, 'd, S, K> {
   resolves_variable_types: bool,
   /// Whether draft 5.8.4 is enabled, which is the **only** reader of `Scratch::used`.
   pub(super) marks_usage: bool,
+  /// Whether draft 5.8.5 is enabled, which is the **only** usage rule that reads a name above the
+  /// variable leaf.
+  reads_usage_positions: bool,
   /// [`visits_variable_definitions`] for this run's [`RuleSet`], resolved once.
   visits_variable_definitions: bool,
   /// [`collects_usages`] for this run's [`RuleSet`], resolved once.
@@ -864,7 +875,34 @@ where
   #[inline]
   fn reaches_directives(&self, check: bool, has_variables: bool) -> bool {
     (check && (self.checks_directives || self.checks_arguments || self.checks_values))
-      || (has_variables && self.collects_usages)
+      || self.descends_for_usages(has_variables)
+  }
+
+  /// Whether a **variable leaf** under here can still be read.
+  ///
+  /// Three conditions, and the middle one is a *scope* rather than a rule.
+  /// `check_variable_usage` discards every leaf outside an operation — the specification scopes
+  /// draft 5.8 to one — so a fragment nothing reached descends a variable-capable value tree for
+  /// nobody, and the predicate that decided to descend it did not mention `in_operation` at all.
+  #[inline]
+  fn descends_for_usages(&self, has_variables: bool) -> bool {
+    has_variables && self.in_operation && self.collects_usages
+  }
+
+  /// Whether a name on the path **down** to a variable leaf has a reader.
+  ///
+  /// Descending and *resolving* are different work. Draft 5.8.3 asks whether a name was declared
+  /// and 5.8.4 whether it was used, and both are answered at the leaf itself; only 5.8.5 reads
+  /// anything above it, because the position's expected type comes from resolving the argument,
+  /// field or input-object name the leaf sits under. One predicate gated both, so a
+  /// `AllVariableUsesDefined`-only rule set charged and schema-resolved every ancestor spelling on
+  /// the way to a leaf that needed none of them.
+  ///
+  /// `local` is the definition-local half the caller has already computed, since which rules those
+  /// are differs by one entry between a directive list and an argument list.
+  #[inline]
+  fn resolves_positions(&self, local: bool) -> bool {
+    local || (self.in_operation && self.reads_usage_positions)
   }
 
   /// Whether anything an **argument list** can reach is enabled for this visit.
@@ -873,13 +911,13 @@ where
   #[inline]
   fn reaches_arguments(&self, check: bool, has_variables: bool) -> bool {
     (check && (self.checks_arguments || self.checks_values))
-      || (has_variables && self.collects_usages)
+      || self.descends_for_usages(has_variables)
   }
 
   /// Whether anything a **value literal** can reach is enabled for this visit.
   #[inline]
   pub(super) fn walks_values(&self, check: bool, has_variables: bool) -> bool {
-    (check && self.checks_values) || (has_variables && self.collects_usages)
+    (check && self.checks_values) || self.descends_for_usages(has_variables)
   }
 
   /// Charges a whole list of names before anything sorts, hashes or compares any of them.
@@ -923,10 +961,42 @@ where
     }
   }
 
+  /// The spelling a diagnostic will carry, charged in front of the copy that produces it.
+  ///
+  /// **The only way to get one.** Every direct `Diagnostic::subject` call goes through here, so a
+  /// site that wants to name a spelling has to pay for it to obtain one — the charge cannot be
+  /// forgotten, put on the wrong string, or written by a caller who did not know the callee would
+  /// clone. Two sites had it on the wrong string and two more had it only after the copy before
+  /// al8n/smear#198; centralising is what stops the next one, since the hand-written form is no
+  /// longer reachable.
+  ///
+  /// What the charge covers, and what it does not, is on
+  /// [`Budget::validation_work`](super::Budget::validation_work): the name's bytes and the number
+  /// of copies, not whatever a caller's `S::clone` chooses to do.
+  #[inline]
+  fn subject(&mut self, name: &Name<S>) -> ControlFlow<(), S> {
+    self.spend_name(name)?;
+    ControlFlow::Continue(name.source().clone())
+  }
+
   /// Emits a diagnostic naming a source spelling, at that spelling's own span.
+  ///
+  /// **Charges the spelling it is about to clone, here, rather than trusting a caller to have
+  /// charged the right one.** Every caller does charge *something* before reaching this, and twice
+  /// that something was a different string: 5.2.4.1 charged a short response alias and cloned the
+  /// arbitrarily long reserved field name underneath it, and a `VariablesAreInputTypes`-only rule
+  /// set charged the declared type and cloned an unindexed variable name. A charge that is in
+  /// front, in the right dimension and over the right population still bounds nothing if it names
+  /// a different string than the work reads.
+  ///
+  /// This is the double charge the callers keep, and deliberately: theirs prices a *resolution* or
+  /// a *comparison* over the name they pass, and this prices the copy. See
+  /// [`Budget::validation_work`](super::Budget::validation_work) for what the copy's price does and
+  /// does not cover.
   fn report_name(&mut self, rule: Rule, name: &Name<S>, context: Context) -> ControlFlow<()> {
+    let subject = self.subject(name)?;
     let diagnostic = Diagnostic::new(rule, *name.as_span())
-      .subject(name.source().clone())
+      .subject(subject)
       .context(context);
     self.emit(diagnostic)
   }
@@ -1081,8 +1151,9 @@ where
           let Some(fragment) = fragment(document, row.definition) else {
             continue;
           };
+          let subject = self.subject(fragment.name())?;
           let diagnostic = Diagnostic::new(Rule::FragmentNameUniqueness, row.span)
-            .subject(fragment.name().source().clone())
+            .subject(subject)
             .related(related);
           self.emit(diagnostic)?;
         }
@@ -1165,8 +1236,9 @@ where
           self.spend_name(name)?;
           let to = self.find_fragment(name_bytes(name));
           if to.is_none() && self.on(Rule::FragmentSpreadTargetDefined) {
-            let diagnostic = Diagnostic::new(Rule::FragmentSpreadTargetDefined, *name.as_span())
-              .subject(name.source().clone());
+            let subject = self.subject(name)?;
+            let diagnostic =
+              Diagnostic::new(Rule::FragmentSpreadTargetDefined, *name.as_span()).subject(subject);
             self.emit(diagnostic)?;
           }
           self.scratch.edges.push(Edge {
@@ -1217,7 +1289,10 @@ where
           let diagnostic =
             Diagnostic::new(Rule::OperationTypeExistence, row.span).context(Context::Root(root));
           let diagnostic = match operation_name(document, row.definition) {
-            Some(name) => diagnostic.subject(name.source().clone()),
+            Some(name) => {
+              let subject = self.subject(name)?;
+              diagnostic.subject(subject)
+            }
             None => diagnostic,
           };
           self.emit(diagnostic)?;
@@ -1259,8 +1334,9 @@ where
         for slot in start + 1..end {
           let row = self.scratch.operations[self.scratch.keys[slot] as usize];
           if let Some(name) = operation_name(document, row.definition) {
+            let subject = self.subject(name)?;
             let diagnostic = Diagnostic::new(Rule::OperationNameUniqueness, row.span)
-              .subject(name.source().clone())
+              .subject(subject)
               .related(related);
             self.emit(diagnostic)?;
           }
@@ -1377,11 +1453,11 @@ where
           let Some(target) = fragment(self.document, subject.definition) else {
             continue;
           };
-          // The name is charged once at prep, and this can clone it once **per edge**. Charged
-          // again here, in front of the clone, because the population is edges and not fragments.
-          self.spend_name(target.name())?;
+          // Prep charges this name once per fragment and this clones it once per **edge**, so the
+          // helper's charge is the one that matches the population.
+          let named = self.subject(target.name())?;
           let diagnostic = Diagnostic::new(Rule::FragmentSpreadsMustNotFormCycles, edge.span)
-            .subject(target.name().source().clone())
+            .subject(named)
             .related(subject.span);
           self.emit(diagnostic)?;
           continue;
@@ -1441,8 +1517,8 @@ where
       let Some(target) = fragment(self.document, row.definition) else {
         continue;
       };
-      let diagnostic = Diagnostic::new(Rule::FragmentsMustBeUsed, row.span)
-        .subject(target.name().source().clone());
+      let subject = self.subject(target.name())?;
+      let diagnostic = Diagnostic::new(Rule::FragmentsMustBeUsed, row.span).subject(subject);
       self.emit(diagnostic)?;
     }
     ControlFlow::Continue(())
@@ -1538,8 +1614,9 @@ where
       // "{selection} must not provide the `@skip`/`@include` directive" — the whole reason this
       // collection exists is that it has no runtime variables to evaluate them with.
       if let Some(directive) = self.conditional_directive(selection)? {
-        let diagnostic = Diagnostic::new(Rule::SingleRootField, *directive.as_span())
-          .subject(directive.source().clone());
+        let subject = self.subject(directive)?;
+        let diagnostic =
+          Diagnostic::new(Rule::SingleRootField, *directive.as_span()).subject(subject);
         self.emit(diagnostic)?;
       }
 
@@ -1815,8 +1892,9 @@ where
         let first = definitions[earlier as usize].node().variable();
         let repeat = definitions[later as usize].node().variable();
         if name_bytes(first.name()) == name_bytes(repeat.name()) {
+          let subject = self.subject(repeat.name())?;
           let diagnostic = Diagnostic::new(Rule::VariableUniqueness, *repeat.span())
-            .subject(repeat.name().source().clone())
+            .subject(subject)
             .related(*first.span());
           self.emit(diagnostic)?;
         }
@@ -1835,6 +1913,12 @@ where
     for described in definitions {
       let definition = described.node();
       let variable = definition.variable();
+      // One per definition examined, and it belongs **here** rather than at the gate above. The
+      // gate decides whether to loop; nothing was charging for going round it, so a rule set that
+      // opened this loop and then found every branch inside it inapplicable — a value-only set over
+      // declarations with no defaults — walked an arbitrarily long public-AST declaration list for
+      // a constant budget.
+      self.spend(1, *variable.span())?;
       // `pack_type` hashes the declared type's base name, and exactly two things read what it
       // returns: draft 5.8.2's report, and the expected type a **default value** is walked
       // against. So the second reader is per-definition — a declaration with no default has only
@@ -1886,8 +1970,8 @@ where
         continue;
       }
       let variable = self.variables[index].node().variable();
-      let diagnostic = Diagnostic::new(Rule::AllVariablesUsed, *variable.span())
-        .subject(variable.name().source().clone());
+      let subject = self.subject(variable.name())?;
+      let diagnostic = Diagnostic::new(Rule::AllVariablesUsed, *variable.span()).subject(subject);
       self.emit(diagnostic)?;
     }
     ControlFlow::Continue(())
