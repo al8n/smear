@@ -93,22 +93,50 @@ impl Range32 {
 /// `2 * next_power_of_two(count)` slots; this cap is what keeps that product inside `u32`.
 pub const MAX_SYMBOLS: u32 = 1 << 30;
 
-/// FxHash-style multiply-fold over short ASCII keys.
+/// FxHash-style multiply-fold over short ASCII keys, finished with an avalanche step.
 ///
 /// Names are identifiers — a handful of bytes each — so an 8-byte-at-a-time fold with one
-/// multiply is all the mixing the index needs, and it costs no dependency.
+/// multiply is the whole of the compression, and it costs no dependency.
 ///
-/// # It is unkeyed, and every caller has to say why that is safe for its keys
+/// # The fold alone is not enough mixing, and *honest* names are what proved it
 ///
-/// The low bits of `v.wrapping_mul(K)` depend only on the low bits of `v`, and `K` is odd, so
-/// `v ≡ target · K⁻¹ (mod 2ᵐ)` inverts the fold for any bucket count `2ᵐ`. Colliding keys are
-/// therefore *constructible* rather than merely unlucky, and a table indexed by this hash degrades
-/// to a linear scan against an adversary who can choose the keys it holds.
+/// Bit `j` of `v · K` depends only on bits `0..=j` of `v`, so a multiply-fold pushes entropy
+/// **upward** and the bytes late in a key decide nothing about where it lands. A name is short
+/// enough to get one or two of those multiplies with a five-bit rotate between them, which is
+/// nowhere near enough to bring a late byte back down into the half a mask reads: 4,096 eight-byte
+/// names differing in four bytes at offset `at` occupied 2741, 2716, 1595, 488 and **32** of 4,096
+/// buckets for `at = 0, 1, 2, 3, 4`. No choice of mask recovers what the product never separated.
+///
+/// That is not an adversary, it is how generated documents are named. Over 4,096 **distinct**
+/// response keys — no collision search anywhere — the executor's table charged 1.89 units per key
+/// for `k0…k4095`, 15.83 for `user0000Name…`, 41.45 for `field0…` and 64.60 for `h00000000…`,
+/// against the one comparison per lookup an ideal hash gives. The finalizer brings all four to
+/// 0.49–0.53 at 2,523–2,608 buckets of 4,096, against the `4096 · (1 − 1/e) ≈ 2,589` an ideal hash
+/// occupies. It is splitmix64's, about five instructions. al8n/smear#172.
+///
+/// **The clustering is a property of a size range, not an asymptote**, which is worth saying
+/// because it is the shape an extrapolation gets wrong. Work grows quadratically while the bytes
+/// that distinguish a document's names sit above the fold's reach — `h{i:0>8}` measured ×3.95 then
+/// ×3.98 per doubling and fitted `n²/64` to within 1% at 4,096 and 8,192 keys — and then flattens,
+/// because a zero-padded decimal suffix widens leftward as the count grows and drags its own
+/// entropy into byte positions the multiply does mix. By 65,536 keys that scheme measures 3,113,305
+/// units against the 67,108,864 the same law predicts. The cost is real at the sizes documents are
+/// written at; a refusal boundary derived by extending it is not.
+///
+/// # It is still unkeyed, and every caller has to say why that is safe for its keys
+///
+/// The fold is invertible — `K` is odd, so `v ≡ target · K⁻¹ (mod 2ᵐ)` solves it — and the
+/// finalizer is a bijection, so their composition is one as well. Colliding keys stay
+/// *constructible* rather than merely unlucky: a search against the **finished** hash put 512 names
+/// in one bucket of 1,024 after 458,312 candidates. What the finalizer removes is the honest
+/// quadratic. The adversarial one it does not touch, and nothing here should be read as bounding
+/// it.
 ///
 /// [`NameIndex`] holds the **schema's** names, which the operator wrote, so nothing an adversary
 /// sends can lengthen a probe run. The execution module's tables hold the **document's**, which an
 /// adversary does choose — so they charge every entry a probe compares against a work budget, and a
-/// constructed pile-up spends that budget instead of the server's time.
+/// constructed pile-up spends that budget instead of the server's time. That charge is the bound,
+/// and it was the bound before this finalizer existed.
 #[inline]
 pub fn hash_bytes(bytes: &[u8]) -> u64 {
   const K: u64 = 0x517c_c1b7_2722_0a95;
@@ -121,12 +149,28 @@ pub fn hash_bytes(bytes: &[u8]) -> u64 {
   let mut tail = [0u8; 8];
   tail[..rest.len()].copy_from_slice(rest);
   let v = u64::from_le_bytes(tail) ^ ((rest.len() as u64) << 56);
-  (h.rotate_left(5) ^ v).wrapping_mul(K)
+  finalize((h.rotate_left(5) ^ v).wrapping_mul(K))
+}
+
+/// splitmix64's finalizer: the avalanche that lets every input bit reach every output bit.
+///
+/// A bijection on `u64`, so it maps no key onto another key — it only moves where a key lands. It
+/// is **not** a bijection on the bucket index, which is exactly why it repartitions where an
+/// xor-seed on the finished hash cannot: masking a power-of-two index after xor-with-a-constant is
+/// a relabelling, and measures the same occupancy for every constant. A seed meant to move anything
+/// has to enter the fold.
+#[inline]
+const fn finalize(mut hash: u64) -> u64 {
+  hash ^= hash >> 30;
+  hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+  hash ^= hash >> 27;
+  hash = hash.wrapping_mul(0x94d0_49bb_1331_11eb);
+  hash ^ (hash >> 31)
 }
 
 /// The bucket `hash` lands in, for a power-of-two table of `mask + 1` slots.
 ///
-/// # The high half, and the measurement that says why
+/// # The high half, and the measurement that used to say why
 ///
 /// A multiply-fold pushes entropy **upward**: bit `i` of `v · K` depends only on bits `0..=i` of
 /// `v`, so the low bits are the least mixed word in the product and masking them keeps whichever
@@ -136,6 +180,18 @@ pub fn hash_bytes(bytes: &[u8]) -> u64 {
 /// three thousand names: resolving a 4,096-link fragment chain compared 1.9 million entries, against
 /// the 8.4 million of the linear scan the index replaced. Shifting first costs one instruction and
 /// brings the same chain to 4,472 — about one comparison per lookup.
+///
+/// **That is history now, and saying so is the point.** [`hash_bytes`] ends in an avalanche step
+/// (al8n/smear#172), which spreads a key across all sixty-four bits, so *which* half a mask reads
+/// stopped deciding anything: over five ordinary naming schemes the finished hash measures
+/// 0.49–0.53 comparisons per key masking the high half and 0.50–0.53 masking the low one, at
+/// 2,523–2,608 and 2,566–2,601 buckets of 4,096. Masking the low half of the **unfinished** hash is
+/// what those numbers used to look like, and still does: 464.27 comparisons per key over `k0…k4095`
+/// at ten buckets of 4,096.
+///
+/// The shift stays because it costs one instruction and it is the half whose entropy does not
+/// depend on the finalizer being present — belt as well as braces, and the thing to fix if a caller
+/// ever needs the fold without it.
 ///
 /// It does not make [`hash_bytes`] keyed, and nothing here claims it does — a caller whose keys an
 /// adversary chooses still owes the argument that function's documentation asks for.

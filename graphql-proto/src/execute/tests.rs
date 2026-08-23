@@ -357,34 +357,93 @@ fn a_repeated_response_key_charges_one_comparison_each_time() {
   );
 }
 
-/// `n` *distinct* response keys stay linear, which is the whole of al8n/smear#141.
+/// `n` *distinct* response keys stay linear **however they are spelled**: al8n/smear#141 and
+/// al8n/smear#172 together.
 ///
 /// Distinct on purpose, and a fixture edited to repeat a key destroys the case. A repeated key
 /// interns once and then finds a one-entry table, so it measures like a fix whether or not
 /// anything was fixed — against all three scans at once.
+///
+/// # One spelling is not a case either, and that is the half #172 added
+///
+/// The version this replaced named its keys `k0 … k4095` and bounded the total by `3 * KEYS`. It
+/// passed, and it passed for a reason with nothing to do with the property under test: `k{i}` is
+/// the one ordinary spelling the unfinalized multiply-fold happened to scatter. Substituting
+/// `field{i}` — same count, same shape, a document a third larger — measured **169,785** against
+/// that same 12,288 ceiling. Honest input, no collision search, red by 13.8×.
+///
+/// So the pin is an absolute count and every row must meet it. A **ratio** cannot do this job,
+/// because the quantity it would divide by is the one that turned out to depend on the spelling:
+/// under the unfinalized hash a constructed collision set at this size was ×1081 the `k{i}` row and
+/// ×49 the `field{i}` one. A quotient inherits whichever denominator it was written against, and a
+/// denominator that grows with the defect hides it. Absolute counts do not move. Time ratios are
+/// worse still: five interleaved passes spread 35%, while these integer counts reproduce exactly.
+///
+/// The last row is the mechanism rather than a convention anybody writes: eight-byte names whose
+/// only varying bytes sit at offset four, where a multiply-fold's upward push leaves them invisible
+/// to every mask. It is the sharpest honest case there is — 4,096 of them occupied **32** buckets
+/// of 4,096, with no adversary in sight — so a repair that greens the four above it and not this
+/// one is a repair aimed at fixtures.
+///
+/// **The plant.** Delete the `finalize` call from `smear_schema::hash_bytes` and rows 2–5 all go
+/// red against the ceiling of 8,192, at 169,785, 264,600, 64,826 and 264,327 units — while row 1
+/// stays green at 7,760, which is the whole reason a second spelling had to be here.
 #[test]
-fn distinct_response_keys_are_linear() {
+fn distinct_response_keys_are_linear_however_they_are_spelled() {
   const KEYS: u32 = 4096;
 
-  let mut query = std::string::String::from("{");
-  for i in 0..KEYS {
-    query.push_str(&std::format!(" k{i}: a"));
-  }
-  query.push_str(" }");
+  /// One selection examined, draft §6.1's one definition, and the entries interning it compares.
+  ///
+  /// The last is what this gate is about, and it is under one per key: with the whole 64-bit hash
+  /// mixed, every row below costs about three quarters of a comparison per key — summed over every
+  /// table size the interner grows through, not just the last — for totals in the low seven
+  /// thousands. Two units per key is that with room, and still three orders of magnitude under the
+  /// scan.
+  const CEILING: u32 = 2 * KEYS;
 
-  let work = collection_work(ONE_FIELD, &query);
-  assert!(
-    work > KEYS,
-    "a successful or failing probe still compares something, so {KEYS} keys cannot cost only \
-     {work}; that total says the interner lookup is not charged"
-  );
-  assert!(
-    work <= 3 * KEYS,
-    "{work} units for {KEYS} distinct keys. Scanning the names instead of probing them costs \
-     about {} — the ceiling here is a linear multiple, so a quadratic lookup misses it by three \
-     orders of magnitude",
-    u64::from(KEYS) * u64::from(KEYS) / 2
-  );
+  /// A lookup that compares nothing costs `1 + KEYS`, so a floor above that catches a charge
+  /// deleted outright — which `work > KEYS` alone did not.
+  const FLOOR: u32 = KEYS + KEYS / 2;
+
+  const SCHEMES: [&str; 5] = [
+    "k{i}",
+    "field{i}",
+    "h{i:0>8}",
+    "user{i:0>4}Name",
+    "pppp{i:04x}",
+  ];
+
+  for (scheme, label) in SCHEMES.iter().enumerate() {
+    let mut query = std::string::String::from("{");
+    for index in 0..KEYS {
+      let key = match scheme {
+        0 => std::format!("k{index}"),
+        1 => std::format!("field{index}"),
+        2 => std::format!("h{index:0>8}"),
+        3 => std::format!("user{index:0>4}Name"),
+        _ => std::format!("pppp{index:04x}"),
+      };
+      query.push_str(&std::format!(" {key}: a"));
+    }
+    query.push_str(" }");
+
+    let work = collection_work(ONE_FIELD, &query);
+    assert!(
+      work > FLOOR,
+      "{work} units for {KEYS} distinct keys spelled {label}, under a floor of {FLOOR}. A probe \
+       that succeeds or fails still compares something, and {} is what interning them free of \
+       charge reads as",
+      KEYS + 1
+    );
+    assert!(
+      work <= CEILING,
+      "{work} units for {KEYS} distinct keys spelled {label}, against a ceiling of {CEILING}. \
+       Scanning the names instead of probing them costs about {}; a total between the two is the \
+       hash dropping an honest document's names into a handful of buckets, which is what the \
+       avalanche step in `smear_schema::hash_bytes` exists to stop",
+      u64::from(KEYS) * u64::from(KEYS) / 2
+    );
+  }
 }
 
 /// A flat fragment chain stays linear, which is the other half of the same defect.

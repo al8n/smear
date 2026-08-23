@@ -456,11 +456,33 @@ impl Names {
   }
 }
 
-/// FxHash-style multiply-fold over short keys.
+/// FxHash-style multiply-fold over short keys, finished with an avalanche step.
 ///
-/// The same shape the schema's own [`NameIndex`](super::schema::NameIndex) uses, and for the same
-/// reason: the keys are identifiers, so one multiply per eight bytes is all the mixing a probe
-/// table needs and it costs no dependency.
+/// The same shape `smear_schema::hash_bytes` has, and for the same reason: the keys are
+/// identifiers, so one multiply per eight bytes is all the compression a probe table needs and it
+/// costs no dependency.
+///
+/// # It is a *copy*, which is the whole reason this comment exists
+///
+/// al8n/smear#172 found the fold on its own mixing far too little for ordinary names — bit `j` of
+/// `v · K` depends only on bits `0..=j` of `v`, so a name's late bytes decide nothing about where
+/// it lands — and added splitmix64's finalizer to `smear-schema`'s copy. Nothing propagated here,
+/// because this is a private duplicate of that function rather than a call to it. A reader who
+/// assumes the shared dependency carried the repair gets the opposite of what is true.
+///
+/// This table was the **worse** of the two. `smear-schema` masks the hash's high half through
+/// `smear_schema::bucket`; `Names::intern` masks the low half, which is the least mixed word in the
+/// product. Measured over 4,096 names of the most ordinary spelling there is — `k0` to `k4095` —
+/// the unfinished hash masked low occupies **ten** buckets of 4,096 and costs 464.27 comparisons
+/// per interned name. Through the finalizer the same names cost 0.50 across 2,586 buckets. Hence
+/// the finalizer here too, and hence not simply calling the other crate's: a probe hash is an
+/// internal detail, and importing one would make it a compatibility surface.
+///
+/// It fixes what honest names cost. It does **not** bound what chosen ones do: the fold is
+/// invertible and the finalizer is a bijection, so a caller who interns document text still owes an
+/// argument that its probe runs are bounded by something other than the hash. `Names::intern`'s
+/// runs are not charged to `Budget` — draft 5.3.2's index charges `selections().len()` before it
+/// interns, which counts the names but not the entries finding one compares.
 #[inline]
 pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
   const K: u64 = 0x517c_c1b7_2722_0a95;
@@ -472,7 +494,19 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
   let mut tail = [0u8; 8];
   tail[..rest.len()].copy_from_slice(rest);
   let value = u64::from_le_bytes(tail) ^ ((rest.len() as u64) << 56);
-  (h.rotate_left(5) ^ value).wrapping_mul(K)
+  finalize((h.rotate_left(5) ^ value).wrapping_mul(K))
+}
+
+/// splitmix64's finalizer, so that every input bit reaches every output bit.
+///
+/// A bijection on `u64`, so it maps no key onto another — it only moves where a key lands.
+#[inline]
+const fn finalize(mut hash: u64) -> u64 {
+  hash ^= hash >> 30;
+  hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+  hash ^= hash >> 27;
+  hash = hash.wrapping_mul(0x94d0_49bb_1331_11eb);
+  hash ^ (hash >> 31)
 }
 
 /// Mixes one `u32` into a running hash.

@@ -583,11 +583,22 @@ pub struct Limits {
   /// field error, because §7.1.2 has no response for a failure raised before execution begins.
   ///
   /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
-  /// text the *document* chose, and the shared multiply-fold is unkeyed and invertible, so a client
-  /// can put every one of its names in one bucket deliberately. Charging each comparison first
-  /// means it spends this ceiling doing so, and the guarantee does not rest on the hash behaving.
-  /// In the ordinary case a lookup compares about one entry, so a document spends roughly twice
-  /// what it used to — against a default of sixteen million.
+  /// text the *document* chose, and the shared hash is unkeyed and invertible, so a client can put
+  /// every one of its names in one bucket deliberately. Charging each comparison first means it
+  /// spends this ceiling doing so, and the guarantee does not rest on the hash behaving.
+  ///
+  /// **What a lookup costs an honest document is the hash's business, and it was asserted before it
+  /// was measured (al8n/smear#172).** "About one entry, so roughly twice what it used to be" was
+  /// true of `k0…k4095` — 1.89 units per key — and false of every other ordinary spelling: 4,096
+  /// **distinct** keys spelled `user0000Name…` charged 15.83 each, `field0…` charged 41.45 and
+  /// `h00000000…` charged 64.60, growing quadratically, with no collision search anywhere. That was
+  /// [`hash_bytes`](smear_schema::hash_bytes)'s fold leaving a name's late bytes out of the bucket
+  /// index; its avalanche step closed it, and all four spellings now measure 1.74–1.79 units, within
+  /// 3% of one another, so the sentence is finally true of more than one fixture.
+  ///
+  /// None of that was ever the *bound* — a constructed pile-up spends this ceiling either way, and
+  /// the hash is still invertible. What it decides is whether the default below is a ceiling on
+  /// abuse or a lottery on how a client spells its aliases.
   ///
   /// **It is not "collection work" in the narrow sense, and the widening was a defect repair.**
   /// Every name the executor interns charges this, including the ones only a *diagnostic* wants: a
@@ -717,9 +728,44 @@ const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20
 /// positions first.
 const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
 
-/// Sixteen million selections examined, which no honest query approaches and no dishonest one
-/// passes: a document large enough to spend it has to *be* large, and the parser and the network
-/// have opinions about that long before this does.
+/// Sixteen million units of draft §6.3 collection work.
+///
+/// # The unit is not a selection any more, and this number was chosen when it was
+///
+/// al8n/smear#113 set `2^24` against a budget of one unit per selection *examined*, and against
+/// that unit the old sentence here — "a document large enough to spend it has to *be* large, and
+/// the parser and the network have opinions about that long before this does" — was arithmetic:
+/// selections cost bytes, so the ceiling was a ceiling on document size and the network reached it
+/// first. al8n/smear#143 widened the unit to charge every entry a name lookup compares, and left
+/// both the constant and that sentence alone. A comparison count is not linear in document size, so
+/// the argument stopped describing the thing it was attached to — which is the failure mode worth
+/// naming: **the unit moved and the rationale did not.**
+///
+/// # What the number means now, measured rather than argued (al8n/smear#172)
+///
+/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step, 4,096 distinct
+/// response keys cost 1.74–1.79 units each across every ordinary naming scheme tried — one
+/// selection plus about three quarters of a comparison, summed over every table size the interner
+/// grows through — and scale at exactly ×2.00 per doubling out to 65,536 keys. So this ceiling
+/// admits something over nine million response keys, and no honest document reaches it:
+/// [`max_response_slots`](Limits::max_response_slots) refuses at 2^20 positions first. Measured
+/// against `Limits::default()`, `k{i}`, `field{i}`, `h{i:0>8}` and
+/// `user{i:0>4}Name` documents are all served to 1,048,575 keys and all refused at 1,048,576 —
+/// which is the slot ceiling, not this one.
+///
+/// **Before the finalizer that boundary was a lottery on how a client spelled its aliases.** The
+/// same four schemes were served to 1,048,575, 968,252, 880,714 and 976,545 keys respectively: this
+/// ceiling bit first for three of the four, at a point set by which bytes of a name happened to
+/// distinguish it. Uniformity is what the finalizer bought here; the *bound* was never at stake,
+/// since a constructed pile-up spends this budget either way.
+///
+/// # Tightening it is a separate decision, and deliberately not taken here
+///
+/// A ceiling eight million keys past what any other ceiling admits is not doing much work, and
+/// lowering it is only safe now: with the fold unfinished, `2^19` refused an honestly named
+/// `h{i:0>8}` document at 5,777 keys — 75 kilobytes — which is a false refusal of legitimate input.
+/// But *what* it should be is a question about the population the default is derived over, and no
+/// measurement here answers it.
 const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
 
 /// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a

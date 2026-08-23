@@ -134,9 +134,11 @@ pub(super) struct Fault<'a> {
 ///
 /// So the unit is now *work*: one for a selection examined, one for every entry a name lookup
 /// compares, and one for every definition and fragment [`Fragments::build`] handles. Both indexes
-/// hash text an adversary writes, and [`hash_bytes`]'s multiply-fold is invertible, so a pile-up in
-/// one bucket is constructible rather than unlucky — charging makes that spend the client's budget
-/// instead of the server's time, and is why the bound does not rest on the hash behaving.
+/// hash text an adversary writes, and [`hash_bytes`] is invertible — an avalanche step over an
+/// invertible fold, both bijections — so a pile-up in one bucket is constructible rather than
+/// unlucky. Charging makes that spend the client's budget instead of the server's time, and is why
+/// the bound does not rest on the hash behaving. The avalanche step (al8n/smear#172) changed what
+/// an *honest* document pays and nothing at all about this.
 ///
 /// # Charged before the work, over the population as well as the lookup, and before the storage
 ///
@@ -188,8 +190,9 @@ pub(super) struct Fault<'a> {
 /// **The group lookup, which is not charged and is guarded by a capability instead.** It is a
 /// direct index with no loop, so there is nothing to charge — and, equally, nothing a counter could
 /// see if a scan came back: replace `keys[key as usize]` with a `position` over the groups and
-/// `spent()` reads exactly what it read before, so `distinct_response_keys_are_linear` passes over
-/// an uncharged quadratic. A charge cannot guard this one.
+/// `spent()` reads exactly what it read before, so
+/// `distinct_response_keys_are_linear_however_they_are_spelled` passes over an uncharged quadratic.
+/// A charge cannot guard this one.
 ///
 /// A **type** can, and this residual used to say otherwise — that hiding the vector was impossible
 /// because `expand` iterates it to commit the groups. It does, but not at the same time. The two
@@ -931,8 +934,9 @@ pub(super) struct Group {
 /// **No gate in this crate can see that.** The other two lookups are probe loops, so a scan charges
 /// [`Visits`] what it compares and both the upper and the lower bound in
 /// `a_repeated_response_key_charges_one_comparison_each_time`'s section move. This one has no loop
-/// to charge: `visits.spent()` reads the same either way, and `distinct_response_keys_are_linear`
-/// goes green over the quadratic. A counter cannot guard work that declines to count itself.
+/// to charge: `visits.spent()` reads the same either way, and
+/// `distinct_response_keys_are_linear_however_they_are_spelled` goes green over the quadratic. A
+/// counter cannot guard work that declines to count itself.
 ///
 /// # Why it is two types
 ///
