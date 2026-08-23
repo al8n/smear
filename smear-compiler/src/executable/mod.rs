@@ -54,7 +54,7 @@ use super::{
     DirectiveLocation, MAX_WRAPPERS, PackedType, RootOperation, Schema, Sym, TypeId, is_reserved,
   },
   scratch::{
-    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, clear_bit, get_bit, reset_bits,
+    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, clear_bit, get_bit, reset_bits,
     set_bit,
   },
 };
@@ -227,7 +227,7 @@ where
     in_operation: false,
     emitted: 0,
     stopped: false,
-    work: 0,
+    work: Work::new(budget.merge_work()),
     generation: 0,
     tripped: false,
     budget_tripped: false,
@@ -293,8 +293,9 @@ struct Validator<'a, 'd, S, K> {
   in_operation: bool,
   emitted: u32,
   stopped: bool,
-  /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent.
-  work: u32,
+  /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent, and the ceiling it is
+  /// spending against.
+  work: Work,
   /// Distinguishes one fragment expansion from the next without clearing a bitset per expansion.
   generation: u32,
   /// Whether a budget stopped the merge engine. Set even when the bound's own rule is switched

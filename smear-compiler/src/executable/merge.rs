@@ -90,7 +90,7 @@ impl Pass {
   }
 }
 
-/// The smallest probe table the memo builds.
+/// The smallest bucket table the memo builds.
 const MIN_MEMO_SLOTS: usize = 64;
 
 impl<'d, S, K> Validator<'_, 'd, S, K>
@@ -159,14 +159,14 @@ where
     // A freshly expanded range that duplicates a known one is released, so the range this call
     // produced may no longer be the one holding the rows — reusing it for the second pass would
     // read whatever the next expansion put there.
-    let (rows, done) = self.claim(rows, Pass::Shape);
+    let (rows, done) = self.claim(rows, Pass::Shape)?;
     if !done {
       self.run_pass(rows, Pass::Shape)?;
     }
     if self.tripped {
       return ControlFlow::Continue(());
     }
-    let (rows, done) = self.claim(rows, Pass::Parents);
+    let (rows, done) = self.claim(rows, Pass::Parents)?;
     if !done {
       self.run_pass(rows, Pass::Parents)?;
     }
@@ -176,10 +176,13 @@ where
   // -- the budget --------------------------------------------------------------------------------
 
   /// Charges `units` of work, returning whether the engine may continue.
+  ///
+  /// The ledger itself lives in [`Work`], because the tables in [`crate::scratch`] have loops the
+  /// *document* decides the length of and those loops must not be reachable without one — see
+  /// [`Names::intern`](crate::scratch::Names::intern).
   #[inline]
   fn charge(&mut self, units: u32) -> bool {
-    self.work = self.work.saturating_add(units);
-    self.work <= self.budget.merge_work()
+    self.work.take(units)
   }
 
   /// Refuses the document for exceeding a budget, and abandons the engine.
@@ -334,9 +337,20 @@ where
       match selection {
         Selection::Field(field) => {
           let name = field.name();
-          let name_id = self.scratch.names.intern(name_bytes(name));
+          // The interner charges per compared entry and refuses rather than walking a chain a
+          // client built; `selections().len()` above counts the names and not the comparisons
+          // finding one costs, which is the whole of al8n/smear#196.
+          let Some(name_id) = self.scratch.names.intern(name_bytes(name), &mut self.work) else {
+            return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+          };
           let response = match field.alias() {
-            Some(alias) => self.scratch.names.intern(name_bytes(alias.name())),
+            Some(alias) => {
+              let alias = name_bytes(alias.name());
+              let Some(id) = self.scratch.names.intern(alias, &mut self.work) else {
+                return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+              };
+              id
+            }
             None => name_id,
           };
           let ty = parent
@@ -476,13 +490,34 @@ where
 
   // -- the memo -------------------------------------------------------------------------------------
 
-  /// Claims a merged set for `pass`.
+  /// Claims a merged set for `pass`, or [`ControlFlow::Break`] when the budget refuses.
   ///
   /// Returns the **canonical** row range for this exact set of field occurrences, together with
   /// whether it has already been through this pass. A freshly expanded range that turns out to
   /// duplicate a known one is released rather than kept, so the arena holds one copy of each — and
   /// the caller must use the range that comes back, not the one it handed in.
-  fn claim(&mut self, rows: Range32, pass: Pass) -> (Range32, bool) {
+  ///
+  /// # It charges, for the same reason [`Names::intern`](crate::scratch::Names::intern) does
+  ///
+  /// [`hash_u32`] is the same unkeyed multiply-fold, read on its low half, and the key it folds is
+  /// a row-id sequence the *document*'s structure decides. That is a weaker handle than a name —
+  /// the ids are ordinals this walk assigns, not bytes a client writes — and it measures like an
+  /// ideal hash on every ordinary shape. Over 4,096 sets in 8,192 buckets, adjacent pairs and runs
+  /// of four and eight occupy 3,361, 3,260 and 3,223 against the `8192 · (1 − e^(−1/2)) ≈ 3,224` an
+  /// ideal hash occupies, and single-row sets occupy 4,096 — every one distinct, because one small
+  /// value times an odd constant is a bijection on exactly the low bits a mask reads.
+  /// `the_memo_hash_spreads_ordinary_row_sequences` is the canary.
+  /// **There is no honest defect here and none is claimed.**
+  ///
+  /// What there was is an *uncharged loop whose length a document decides*, which is the same
+  /// defect the interner had whether or not anybody can currently steer it. So the walk charges one
+  /// unit per entry it looks at, the contents comparison charges its own length, the relink is
+  /// charged from a count taken before it runs, and a refusal is a value the caller has to handle.
+  /// al8n/smear#196.
+  ///
+  /// The hash fold itself is not charged again: it walks exactly the rows [`expand`](Self::expand)
+  /// charged for one at a time as it pushed them, in the call that produced this range.
+  fn claim(&mut self, rows: Range32, pass: Pass) -> ControlFlow<(), (Range32, bool)> {
     let hash = {
       let mut state = 0xcbf2_9ce4_8422_2325u64 ^ u64::from(rows.len());
       for row in rows.slice(&self.scratch.merge_rows) {
@@ -491,55 +526,87 @@ where
       state
     };
 
-    if (self.scratch.merge_memo.len() + 1) * 4 >= self.scratch.merge_slots.len() * 3 {
-      self.grow_memo();
-    }
-    let mask = self.scratch.merge_slots.len() - 1;
-    let mut slot = (hash as usize) & mask;
-    loop {
-      let entry = self.scratch.merge_slots[slot];
-      if entry == NONE {
-        self.scratch.merge_slots[slot] = self.scratch.merge_memo.len() as u32;
-        self.scratch.merge_memo.push(MergeMemo {
-          hash,
-          rows,
-          flags: pass.bit(),
-        });
-        return (rows, false);
-      }
-      let known = self.scratch.merge_memo[entry as usize];
-      if known.hash == hash
-        && known.rows.len() == rows.len()
-        && known.rows.slice(&self.scratch.merge_rows) == rows.slice(&self.scratch.merge_rows)
-      {
-        if rows.end() as usize == self.scratch.merge_rows.len()
-          && known.rows.start() != rows.start()
-        {
-          self.scratch.merge_rows.truncate(rows.start() as usize);
+    if !self.scratch.merge_slots.is_empty() {
+      let mut entry = self.scratch.merge_slots[self.memo_bucket(hash)];
+      while entry != NONE {
+        if !self.charge(1) {
+          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+          return ControlFlow::Continue((rows, true));
         }
-        if known.flags & pass.bit() != 0 {
-          return (known.rows, true);
+        let known = self.scratch.merge_memo[entry as usize];
+        if known.hash == hash && known.rows.len() == rows.len() {
+          if !self.charge(rows.len()) {
+            self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+            return ControlFlow::Continue((rows, true));
+          }
+          if known.rows.slice(&self.scratch.merge_rows) == rows.slice(&self.scratch.merge_rows) {
+            if rows.end() as usize == self.scratch.merge_rows.len()
+              && known.rows.start() != rows.start()
+            {
+              self.scratch.merge_rows.truncate(rows.start() as usize);
+            }
+            if known.flags & pass.bit() != 0 {
+              return ControlFlow::Continue((known.rows, true));
+            }
+            self.scratch.merge_memo[entry as usize].flags |= pass.bit();
+            return ControlFlow::Continue((known.rows, false));
+          }
         }
-        self.scratch.merge_memo[entry as usize].flags |= pass.bit();
-        return (known.rows, false);
+        entry = known.next;
       }
-      slot = (slot + 1) & mask;
     }
+
+    // A miss appends, and an append past the load factor relinks every entry: one step each and no
+    // probe run, so the cost is known before it is paid.
+    let relink = if self.scratch.merge_memo.len() + 1 > self.scratch.merge_slots.len() {
+      self.scratch.merge_memo.len() as u32 + 1
+    } else {
+      0
+    };
+    if !self.charge(relink) {
+      self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+      return ControlFlow::Continue((rows, true));
+    }
+
+    // Nothing above this line mutated the memo, so a refusal leaves it exactly as it was.
+    let index = self.scratch.merge_memo.len() as u32;
+    self.scratch.merge_memo.push(MergeMemo {
+      hash,
+      rows,
+      next: NONE,
+      flags: pass.bit(),
+    });
+    if self.scratch.merge_memo.len() > self.scratch.merge_slots.len() {
+      self.relink_memo();
+    } else {
+      let bucket = self.memo_bucket(hash);
+      self.scratch.merge_memo[index as usize].next = self.scratch.merge_slots[bucket];
+      self.scratch.merge_slots[bucket] = index;
+    }
+    ControlFlow::Continue((rows, false))
   }
 
-  /// Doubles the memo's probe table and reinserts every entry.
-  fn grow_memo(&mut self) {
-    let next = (self.scratch.merge_slots.len() * 2).max(MIN_MEMO_SLOTS);
+  /// The bucket `hash` lands in. Never called with `merge_slots` empty.
+  #[inline]
+  fn memo_bucket(&self, hash: u64) -> usize {
+    (hash as usize) & (self.scratch.merge_slots.len() - 1)
+  }
+
+  /// Doubles the memo's bucket table and relinks every entry, one step each.
+  fn relink_memo(&mut self) {
+    let next = self
+      .scratch
+      .merge_slots
+      .len()
+      .max(MIN_MEMO_SLOTS)
+      .max(self.scratch.merge_memo.len().next_power_of_two());
     self.scratch.merge_slots.clear();
     self.scratch.merge_slots.resize(next, NONE);
     let mask = next - 1;
-    for index in 0..self.scratch.merge_memo.len() as u32 {
-      let hash = self.scratch.merge_memo[index as usize].hash;
-      let mut slot = (hash as usize) & mask;
-      while self.scratch.merge_slots[slot] != NONE {
-        slot = (slot + 1) & mask;
-      }
-      self.scratch.merge_slots[slot] = index;
+    for index in 0..self.scratch.merge_memo.len() {
+      let bucket = (self.scratch.merge_memo[index].hash as usize) & mask;
+      self.scratch.merge_memo[index].next = self.scratch.merge_slots[bucket];
+      self.scratch.merge_slots[bucket] = index as u32;
     }
   }
 
@@ -817,7 +884,7 @@ where
     let Some(rows) = expanded else {
       return ControlFlow::Continue(());
     };
-    let (rows, done) = self.claim(rows, pass);
+    let (rows, done) = self.claim(rows, pass)?;
     if !done {
       self.push_merge_frame(rows);
     }

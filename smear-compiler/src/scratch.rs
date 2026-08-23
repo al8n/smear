@@ -114,6 +114,51 @@ impl Default for Budget {
   }
 }
 
+/// A running work total and the ceiling it is charged against.
+///
+/// [`Budget`] is what a caller sets; this is what the engine spends against it. It exists as a type
+/// rather than a pair of fields on the walker because the tables in this module have loops whose
+/// length the **document** decides, and a loop like that must not be reachable without something to
+/// charge. [`Names::intern`] takes one, so there is no way into its chain walk that does not carry
+/// the ledger with it — the shape `graphql-proto` arrived at for the same reason, and the shape
+/// al8n/smear#196 found missing here.
+///
+/// Every method charges *before* the step it prices. A charge taken afterwards bounds nothing: the
+/// work is already spent by the time the counter can refuse it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Work {
+  spent: u32,
+  limit: u32,
+}
+
+impl Work {
+  /// A fresh ledger against `limit`.
+  #[inline]
+  pub(crate) const fn new(limit: u32) -> Self {
+    Self { spent: 0, limit }
+  }
+
+  /// Charges `units` and answers whether the engine may continue.
+  ///
+  /// Saturating, so a document large enough to overflow the counter refuses rather than wrapping
+  /// back under the ceiling.
+  #[inline]
+  pub(crate) fn take(&mut self, units: u32) -> bool {
+    self.spent = self.spent.saturating_add(units);
+    self.spent <= self.limit
+  }
+
+  /// What has been charged so far.
+  ///
+  /// Counted independently of any structure's own idea of what it did, which is what lets a test
+  /// say the charge and the work agree rather than say it of itself.
+  #[cfg(test)]
+  #[inline]
+  pub(crate) const fn spent(&self) -> u32 {
+    self.spent
+  }
+}
+
 /// The sentinel a `u32` field uses for "absent".
 pub(crate) const NONE: u32 = u32::MAX;
 
@@ -360,6 +405,8 @@ pub(crate) struct MergeMemo {
   pub(crate) hash: u64,
   /// The canonical row range for this content.
   pub(crate) rows: Range32,
+  /// The next entry in the same bucket; [`NONE`] ends the chain.
+  pub(crate) next: u32,
   /// Which passes have already run over it.
   pub(crate) flags: u8,
 }
@@ -371,19 +418,30 @@ pub(crate) struct MergeMemo {
 /// and reduced to `u32`s. The schema's own interner cannot serve: an alias is not a schema name,
 /// and two *different* names the schema does not know would both resolve to "absent" and read as
 /// equal.
+///
+/// # It chains rather than probes, and the reason is the budget and not the speed
+///
+/// An open-addressed table's *rehash* walks a probe run per entry, so its cost is decided by the
+/// same collisions the lookup is, and there is no amount that can be charged for it in advance. A
+/// chained table's relink is one step per name and no probe run at all, so [`Names::intern`] can
+/// charge for it *before* it happens and refuse instead of starting it. That is what makes the
+/// whole structure's construction bounded by [`Budget::merge_work`] rather than by the hash
+/// behaving, and it is the shape `graphql-proto`'s executor interner already had. al8n/smear#196.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Names {
   /// Every interned name's bytes, concatenated.
   bytes: Vec<u8>,
   /// Name id to its `(start, end)` range in [`Names::bytes`].
   ranges: Vec<(u32, u32)>,
-  /// Open-addressing probe slots, power-of-two, [`NONE`] when empty.
-  slots: Vec<u32>,
+  /// The next id in the same bucket, parallel to [`Names::ranges`]; [`NONE`] ends a chain.
+  chain: Vec<u32>,
+  /// Bucket heads, power-of-two, [`NONE`] when the bucket is empty.
+  heads: Vec<u32>,
 }
 
 impl Names {
-  /// The smallest probe table the interner builds.
-  const MIN_SLOTS: usize = 64;
+  /// The smallest bucket table the interner builds.
+  const MIN_BUCKETS: usize = 64;
 
   /// Creates an empty interner, allocating nothing.
   #[inline]
@@ -391,7 +449,8 @@ impl Names {
     Self {
       bytes: Vec::new(),
       ranges: Vec::new(),
-      slots: Vec::new(),
+      chain: Vec::new(),
+      heads: Vec::new(),
     }
   }
 
@@ -399,12 +458,13 @@ impl Names {
   pub(crate) fn reset(&mut self) {
     self.bytes.clear();
     self.ranges.clear();
-    self.slots.fill(NONE);
+    self.chain.clear();
+    self.heads.fill(NONE);
   }
 
   /// Returns how many rows the interner is holding capacity for.
   pub(crate) fn capacity(&self) -> usize {
-    self.bytes.capacity() + self.ranges.capacity() + self.slots.capacity()
+    self.bytes.capacity() + self.ranges.capacity() + self.chain.capacity() + self.heads.capacity()
   }
 
   /// Returns how many distinct names have been interned.
@@ -413,45 +473,97 @@ impl Names {
     self.ranges.len()
   }
 
-  /// Returns `key`'s id, interning it if this is the first time it has been seen.
-  pub(crate) fn intern(&mut self, key: &[u8]) -> u32 {
-    // Load factor 3/4. Checked before the probe so the loop below always finds an empty slot.
-    if (self.ranges.len() + 1) * 4 >= self.slots.len() * 3 {
-      self.grow();
-    }
-    let mask = self.slots.len() - 1;
-    let mut slot = (hash_bytes(key) as usize) & mask;
-    loop {
-      let id = self.slots[slot];
-      if id == NONE {
-        let start = self.bytes.len() as u32;
-        self.bytes.extend_from_slice(key);
-        let id = self.ranges.len() as u32;
-        self.ranges.push((start, self.bytes.len() as u32));
-        self.slots[slot] = id;
-        return id;
+  /// Returns `key`'s id, interning it if this is the first time it has been seen, or [`None`]
+  /// when `work` refuses.
+  ///
+  /// # The chain walk is charged, one unit per entry, before the entry is compared
+  ///
+  /// The keys are **response names and field names out of the executable document**, so a client
+  /// chooses every byte of them. [`hash_bytes`] is unkeyed and each of its rounds is invertible in
+  /// the word it folds, so a pile-up in one bucket is *constructible* rather than unlucky, and it
+  /// stays that way: a deterministic search over `q<decimal>` aliases reaches 512 valid names in
+  /// one bucket of 1,024 after 450,077 candidates, against the hash as it ships today.
+  ///
+  /// Against the version of this table that did not charge — open-addressed, and probing without a
+  /// ledger — those 512 names cost 130,816 insertion probes and 96,844 rehash probes: **227,660
+  /// steps against the 512 selections `fill_merge_set` had charged for**, which is what made
+  /// `merge_work` not a bound on CPU work at all. al8n/smear#196.
+  ///
+  /// A charge per compared entry makes that spend the client's budget instead of the server's
+  /// time, and it bounds the *chain* and not merely one walk: putting an `L`th name into a bucket
+  /// first walks the `L - 1` already there, so building a run of length `L` costs about `L²/2` and
+  /// an adversary reaches `√(2 · work)` and no further. It is the same bound, taken for the same
+  /// reason, that `graphql-proto`'s executor interner takes.
+  ///
+  /// **Before the work, not after it.** A charge taken after the walk it prices has already let
+  /// the walk happen; the counter notices a run it cannot un-spend. That is why the refusal is a
+  /// [`None`] the caller has to handle rather than a total read back afterwards, and why the
+  /// relink below is charged from a count taken *before* it runs.
+  pub(crate) fn intern(&mut self, key: &[u8], work: &mut Work) -> Option<u32> {
+    let hash = hash_bytes(key);
+    if !self.heads.is_empty() {
+      let mut id = self.heads[self.bucket(hash)];
+      while id != NONE {
+        if !work.take(1) {
+          return None;
+        }
+        let (start, end) = self.ranges[id as usize];
+        if &self.bytes[start as usize..end as usize] == key {
+          return Some(id);
+        }
+        id = self.chain[id as usize];
       }
-      let (start, end) = self.ranges[id as usize];
-      if &self.bytes[start as usize..end as usize] == key {
-        return id;
-      }
-      slot = (slot + 1) & mask;
     }
+
+    // A miss inserts, and an insert past the load factor relinks every name. Relinking is exactly
+    // one step per name — no probe run, which is the whole reason this table chains — so the cost
+    // is known before it is paid and is charged here rather than discovered inside the loop.
+    let relink = if self.ranges.len() + 1 > self.heads.len() {
+      self.ranges.len() as u32 + 1
+    } else {
+      0
+    };
+    if !work.take(relink) {
+      return None;
+    }
+
+    // Nothing above this line mutated anything, so a refusal leaves the interner exactly as it
+    // was: there is no half-built state for a later call to read.
+    let start = self.bytes.len() as u32;
+    self.bytes.extend_from_slice(key);
+    let id = self.ranges.len() as u32;
+    self.ranges.push((start, self.bytes.len() as u32));
+    self.chain.push(NONE);
+    if self.ranges.len() > self.heads.len() {
+      self.relink();
+    } else {
+      let bucket = self.bucket(hash);
+      self.chain[id as usize] = self.heads[bucket];
+      self.heads[bucket] = id;
+    }
+    Some(id)
   }
 
-  /// Doubles the probe table and reinserts every name.
-  fn grow(&mut self) {
-    let next = (self.slots.len() * 2).max(Self::MIN_SLOTS);
-    self.slots.clear();
-    self.slots.resize(next, NONE);
-    let mask = next - 1;
-    for id in 0..self.ranges.len() as u32 {
-      let (start, end) = self.ranges[id as usize];
-      let mut slot = (hash_bytes(&self.bytes[start as usize..end as usize]) as usize) & mask;
-      while self.slots[slot] != NONE {
-        slot = (slot + 1) & mask;
-      }
-      self.slots[slot] = id;
+  /// The bucket `hash` lands in. Never called with [`Names::heads`] empty.
+  #[inline]
+  fn bucket(&self, hash: u64) -> usize {
+    (hash as usize) & (self.heads.len() - 1)
+  }
+
+  /// Doubles the bucket table and relinks every name, one step each.
+  fn relink(&mut self) {
+    let next = self
+      .heads
+      .len()
+      .max(Self::MIN_BUCKETS)
+      .max(self.ranges.len().next_power_of_two());
+    self.heads.clear();
+    self.heads.resize(next, NONE);
+    for id in 0..self.ranges.len() {
+      let (start, end) = self.ranges[id];
+      let bucket = self.bucket(hash_bytes(&self.bytes[start as usize..end as usize]));
+      self.chain[id] = self.heads[bucket];
+      self.heads[bucket] = id as u32;
     }
   }
 }
@@ -471,18 +583,28 @@ impl Names {
 /// assumes the shared dependency carried the repair gets the opposite of what is true.
 ///
 /// This table was the **worse** of the two. `smear-schema` masks the hash's high half through
-/// `smear_schema::bucket`; `Names::intern` masks the low half, which is the least mixed word in the
+/// `smear_schema::bucket`; this one masks the low half, which is the least mixed word in the
 /// product. Measured over 4,096 names of the most ordinary spelling there is — `k0` to `k4095` —
 /// the unfinished hash masked low occupies **ten** buckets of 4,096 and costs 464.27 comparisons
 /// per interned name. Through the finalizer the same names cost 0.50 across 2,586 buckets. Hence
 /// the finalizer here too, and hence not simply calling the other crate's: a probe hash is an
 /// internal detail, and importing one would make it a compatibility surface.
 ///
-/// It fixes what honest names cost. It does **not** bound what chosen ones do: the fold is
-/// invertible and the finalizer is a bijection, so a caller who interns document text still owes an
-/// argument that its probe runs are bounded by something other than the hash. `Names::intern`'s
-/// runs are not charged to `Budget` — draft 5.3.2's index charges `selections().len()` before it
-/// interns, which counts the names but not the entries finding one compares.
+/// The `h ^= h >> 32` between rounds arrived the same way and for the same reason (al8n/smear#196):
+/// the multiply leaves a chunk's late bytes in the high bits, `rotate_left(5)` delivers exactly
+/// those bits to the low byte the *next* chunk's first byte occupies, and the two cancel — so
+/// `x00000009` and `x00000084` hashed identically, and 4,096 eight-digit base-36 aliases produced
+/// 1,660 hashes. Folding the high half down before the next round is what stops a difference from
+/// living in a window one input byte can erase. It costs nothing for the names under nine bytes
+/// that dominate here, because the loop it sits in does not run for them.
+///
+/// It fixes what honest names cost. It does **not** bound what chosen ones do: each round is
+/// invertible in the word it folds and the finalizer is a bijection, so a caller who interns
+/// document text still owes an argument that its probe runs are bounded by something other than the
+/// hash. [`Names::intern`] now makes that argument — it charges [`Work`] one unit per entry a chain
+/// walk compares, before comparing it — and until al8n/smear#196 it did not: draft 5.3.2's index
+/// charged `selections().len()` before interning, which counts the names but not the entries
+/// finding one compares.
 #[inline]
 pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
   const K: u64 = 0x517c_c1b7_2722_0a95;
@@ -490,6 +612,7 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
   let (chunks, rest) = bytes.as_chunks::<8>();
   for chunk in chunks {
     h = (h.rotate_left(5) ^ u64::from_le_bytes(*chunk)).wrapping_mul(K);
+    h ^= h >> 32;
   }
   let mut tail = [0u8; 8];
   tail[..rest.len()].copy_from_slice(rest);
@@ -605,7 +728,10 @@ pub struct Scratch {
   pub(crate) merge_stack: Vec<MergeFrame>,
   /// One entry per distinct merged field set met so far.
   pub(crate) merge_memo: Vec<MergeMemo>,
-  /// Open-addressing probe slots over [`Scratch::merge_memo`], [`NONE`] when empty.
+  /// Bucket heads over [`Scratch::merge_memo`], power-of-two, [`NONE`] when the bucket is empty.
+  ///
+  /// Chained for the reason [`Names`] is: a relink is one step per entry and no probe run, so the
+  /// walk that rebuilds it can be charged before it starts rather than discovered inside it.
   pub(crate) merge_slots: Vec<u32>,
   /// The value comparison's frame stack: `(index in the left value, index in the right, cursor)`.
   pub(crate) merge_compare: Vec<(u32, u32, u32)>,
@@ -780,7 +906,7 @@ pub(crate) fn clear_bit(words: &mut [u64], index: u32) {
 
 #[cfg(test)]
 mod tests {
-  use super::{Budget, Scratch, get_bit, reset_bits, set_bit};
+  use super::{Budget, Scratch, Work, get_bit, reset_bits, set_bit};
   use std::vec::Vec;
 
   #[test]
@@ -805,29 +931,39 @@ mod tests {
     assert_eq!(scratch.capacity(), capacity, "reset must not free");
   }
 
+  /// An interner with nothing to refuse it, for the cases that are about identity and not cost.
+  fn unbounded() -> Work {
+    Work::new(u32::MAX)
+  }
+
   #[test]
   fn the_interner_round_trips_and_survives_a_reset() {
     use super::Names;
 
+    let mut work = unbounded();
     let mut names = Names::new();
-    let a = names.intern(b"hero");
-    let b = names.intern(b"hero");
-    let c = names.intern(b"heroes");
+    let a = names.intern(b"hero", &mut work).expect("budget");
+    let b = names.intern(b"hero", &mut work).expect("budget");
+    let c = names.intern(b"heroes", &mut work).expect("budget");
     assert_eq!(a, b, "the same name must intern to the same id");
     assert_ne!(a, c, "a different name must not");
     assert_eq!(names.len(), 2);
 
-    // Past the initial probe table, so the growth path is on the measured path rather than a
+    // Past the initial bucket table, so the growth path is on the measured path rather than a
     // branch nothing takes.
     for index in 0..500u32 {
       let key = std::format!("field{index}");
-      assert_eq!(names.intern(key.as_bytes()), 2 + index);
+      assert_eq!(
+        names.intern(key.as_bytes(), &mut work),
+        Some(2 + index),
+        "growth lost an entry"
+      );
     }
     for index in 0..500u32 {
       let key = std::format!("field{index}");
       assert_eq!(
-        names.intern(key.as_bytes()),
-        2 + index,
+        names.intern(key.as_bytes(), &mut work),
+        Some(2 + index),
         "growth lost an entry"
       );
     }
@@ -838,7 +974,11 @@ mod tests {
     names.reset();
     assert_eq!(names.len(), 0);
     assert_eq!(names.capacity(), capacity, "reset must not free");
-    assert_eq!(names.intern(b"heroes"), 0, "ids restart after a reset");
+    assert_eq!(
+      names.intern(b"heroes", &mut work),
+      Some(0),
+      "ids restart after a reset"
+    );
   }
 
   /// Names are not text: a `&[u8]` document may spell one with bytes that are not UTF-8, and the
@@ -847,12 +987,192 @@ mod tests {
   fn the_interner_is_byte_keyed() {
     use super::Names;
 
+    let mut work = unbounded();
     let mut names = Names::new();
-    let a = names.intern(&[0xff, 0x00, b'a']);
-    let b = names.intern(&[0xff, 0x00, b'b']);
+    let a = names
+      .intern(&[0xff, 0x00, b'a'], &mut work)
+      .expect("budget");
+    let b = names
+      .intern(&[0xff, 0x00, b'b'], &mut work)
+      .expect("budget");
     assert_ne!(a, b);
-    assert_eq!(names.intern(&[0xff, 0x00, b'a']), a);
-    assert_eq!(names.intern(b""), 2, "the empty key is a key");
+    assert_eq!(names.intern(&[0xff, 0x00, b'a'], &mut work), Some(a));
+    assert_eq!(
+      names.intern(b"", &mut work),
+      Some(2),
+      "the empty key is a key"
+    );
+  }
+
+  /// `count` aliases that share one bucket of `mask + 1`, searched for against the **shipped**
+  /// hash.
+  ///
+  /// Derived rather than listed on purpose. A hard-coded set stops colliding the moment the hash
+  /// moves, and the test then goes green over exactly the work it exists to price — the defect's
+  /// signature here is *absence*, so the case has to be re-derived from whatever the hash currently
+  /// is. Every name is a valid draft §2.1.9 `Name`, so this is a document a client can send.
+  fn colliding_aliases(mask: u64, count: usize) -> Vec<std::string::String> {
+    let mut by_bucket: Vec<Vec<std::string::String>> = std::vec![Vec::new(); mask as usize + 1];
+    for candidate in 0u64..8_000_000 {
+      let name = std::format!("q{candidate}");
+      let at = (super::hash_bytes(name.as_bytes()) & mask) as usize;
+      by_bucket[at].push(name);
+      if by_bucket[at].len() == count {
+        let found = core::mem::take(&mut by_bucket[at]);
+        assert!(
+          found
+            .iter()
+            .all(|name| crate::schema::is_name(name.as_bytes())),
+          "the search must produce names a document can spell"
+        );
+        return found;
+      }
+    }
+    panic!("no bucket of {} reached {count} names", mask + 1);
+  }
+
+  /// A pile-up a client can construct costs what it compares, and the ledger stops it.
+  ///
+  /// # Why this is a gate and not a demonstration
+  ///
+  /// [`super::hash_bytes`] is unkeyed and each round is invertible in the word it folds, so a set
+  /// of names sharing one bucket is *constructible* rather than unlucky. Until al8n/smear#196 the
+  /// chain walk was uncharged, and 512 such aliases — the search below finds them in well under a
+  /// million candidates — cost **130,816 comparisons** against the 512 selections
+  /// `fill_merge_set` had charged for. `merge_work` was therefore not a bound on the work at all.
+  ///
+  /// **The plant.** Delete the `work.take(1)` from the chain walk and the first half of this test
+  /// reads 452 instead of 131,268 — the relinks alone — while the second half stops refusing and
+  /// interns all 512.
+  ///
+  /// The two-sided shape is what makes it a gate rather than a ceiling nobody can hit: the *same
+  /// count* of ordinary aliases passes the same ledger the constructed ones exhaust.
+  #[test]
+  fn a_constructed_pile_up_is_charged_and_refused() {
+    use super::Names;
+
+    /// 512 names live in 1,024 buckets, and a set sharing a bucket under the widest mask the table
+    /// reaches shares one under every narrower mask it grew through.
+    const RUN: usize = 512;
+    const MASK: u64 = 1023;
+    /// `0 + 1 + … + 511`: the `L`th name into a chain walks the `L - 1` already there.
+    const COMPARES: u32 = (RUN * (RUN - 1) / 2) as u32;
+    /// One step per name at each doubling: 1, then 65, 129 and 257.
+    const RELINKS: u32 = 1 + 65 + 129 + 257;
+
+    let names = colliding_aliases(MASK, RUN);
+
+    let mut work = unbounded();
+    let mut table = Names::new();
+    for (index, name) in names.iter().enumerate() {
+      assert_eq!(
+        table.intern(name.as_bytes(), &mut work),
+        Some(index as u32),
+        "a colliding name is still a distinct name"
+      );
+    }
+    assert_eq!(
+      work.spent(),
+      COMPARES + RELINKS,
+      "{RUN} names in one bucket compare {COMPARES} entries and relink {RELINKS} times; a total        of {RELINKS} says the walk is not charged at all"
+    );
+
+    // The ceiling an adversary reaches is `sqrt(2 * work)` and no further, so a budget well under
+    // the pile-up's cost stops partway through it.
+    const CEILING: u32 = 8192;
+    let mut work = Work::new(CEILING);
+    let mut table = Names::new();
+    let refused = names
+      .iter()
+      .position(|name| table.intern(name.as_bytes(), &mut work).is_none())
+      .expect("the ledger must refuse before the run is exhausted");
+    assert!(
+      refused < RUN,
+      "{refused} of {RUN} interned under a ceiling of {CEILING}"
+    );
+
+    // Same count, ordinary spelling, same ceiling: it serves. A bound that refused this too would
+    // be a bound on documents rather than on abuse.
+    let mut work = Work::new(CEILING);
+    let mut table = Names::new();
+    for index in 0..RUN {
+      let key = std::format!("q{index}");
+      assert!(
+        table.intern(key.as_bytes(), &mut work).is_some(),
+        "{RUN} ordinary aliases must fit a ceiling of {CEILING}; refused at {index}"
+      );
+    }
+  }
+
+  /// A refused intern leaves the interner exactly as it was.
+  ///
+  /// This is the property that decided the structure. An open-addressed table's rehash walks a
+  /// probe run per entry, so a budget can only stop it *inside* the walk — which leaves the slots
+  /// describing a prefix of the arena, and a later lookup then misses a name that is present. A
+  /// chained relink is one step per name, so its whole cost is charged before it starts and a
+  /// refusal happens with nothing yet moved.
+  #[test]
+  fn a_refused_intern_moves_nothing() {
+    use super::Names;
+
+    let mut work = Work::new(4);
+    let mut table = Names::new();
+    for index in 0..64u32 {
+      let key = std::format!("n{index}");
+      if table.intern(key.as_bytes(), &mut work).is_none() {
+        break;
+      }
+    }
+    let interned = table.len();
+
+    // Whatever it managed, every one of those names is still findable and still has its own id.
+    let mut work = unbounded();
+    for index in 0..interned as u32 {
+      let key = std::format!("n{index}");
+      assert_eq!(
+        table.intern(key.as_bytes(), &mut work),
+        Some(index),
+        "a refusal lost an entry the table had already taken"
+      );
+    }
+    assert_eq!(table.len(), interned, "a refusal left a half-written name");
+  }
+
+  /// [`hash_u32`] spreads the row-id sequences the merge memo keys on.
+  ///
+  /// `claim` charges its probe walk because the *loop* is one a document decides the length of, not
+  /// because the hash misbehaves — and this is the half of that sentence that can be checked. The
+  /// keys are ordinals the walk assigns, so the shapes below are the ones a document produces: one
+  /// row, two adjacent rows, and runs of four and eight.
+  ///
+  /// Anything at or near `8192 · (1 − e^(−1/2)) ≈ 3,224` is a hash behaving. This is a canary
+  /// rather than a bound: if it ever fires, the charge is still the bound and what has changed is
+  /// what an honest document pays.
+  #[test]
+  fn the_memo_hash_spreads_ordinary_row_sequences() {
+    use super::hash_u32;
+
+    const SETS: u32 = 4096;
+    const SLOTS: usize = 8192;
+    /// Two thirds of the 3,224 an ideal hash occupies.
+    const FLOOR: usize = 2149;
+
+    for run in [1u32, 2, 4, 8] {
+      let mut seen = std::vec![false; SLOTS];
+      for first in 0..SETS {
+        let mut state = 0xcbf2_9ce4_8422_2325u64 ^ u64::from(run);
+        for row in first..first + run {
+          state = hash_u32(state, row);
+        }
+        seen[(state as usize) & (SLOTS - 1)] = true;
+      }
+      let occupied = seen.iter().filter(|hit| **hit).count();
+      assert!(
+        occupied >= FLOOR,
+        "runs of {run}: {SETS} sets occupy {occupied} buckets of {SLOTS}, under a floor of {FLOOR} \
+         and against the 3,224 an ideal hash occupies"
+      );
+    }
   }
 
   #[test]

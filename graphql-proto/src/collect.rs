@@ -134,11 +134,13 @@ pub(super) struct Fault<'a> {
 ///
 /// So the unit is now *work*: one for a selection examined, one for every entry a name lookup
 /// compares, and one for every definition and fragment [`Fragments::build`] handles. Both indexes
-/// hash text an adversary writes, and [`hash_bytes`] is invertible — an avalanche step over an
-/// invertible fold, both bijections — so a pile-up in one bucket is constructible rather than
-/// unlucky. Charging makes that spend the client's budget instead of the server's time, and is why
-/// the bound does not rest on the hash behaving. The avalanche step (al8n/smear#172) changed what
-/// an *honest* document pays and nothing at all about this.
+/// hash text an adversary writes, and [`hash_bytes`] is unkeyed with every round invertible in the
+/// word it folds, so a pile-up in one bucket is constructible rather than unlucky. Charging makes
+/// that spend the client's budget instead of the server's time, and is why the bound does not rest
+/// on the hash behaving. The mixing al8n/smear#172 and al8n/smear#196 added changed what an
+/// *honest* document pays and nothing at all about this. (It is not a bijection over byte strings
+/// and no 64-bit hash is: `x00000009` and `x00000084` hashed alike until #196, which is a defect
+/// about honest cost and never was a claim about this bound.)
 ///
 /// # Charged before the work, over the population as well as the lookup, and before the storage
 ///

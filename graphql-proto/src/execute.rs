@@ -583,9 +583,10 @@ pub struct Limits {
   /// field error, because §7.1.2 has no response for a failure raised before execution begins.
   ///
   /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
-  /// text the *document* chose, and the shared hash is unkeyed and invertible, so a client can put
-  /// every one of its names in one bucket deliberately. Charging each comparison first means it
-  /// spends this ceiling doing so, and the guarantee does not rest on the hash behaving.
+  /// text the *document* chose, and the shared hash is unkeyed with every round invertible in the
+  /// word it folds, so a client can put every one of its names in one bucket deliberately. Charging
+  /// each comparison first means it spends this ceiling doing so, and the guarantee does not rest
+  /// on the hash behaving.
   ///
   /// **What a lookup costs an honest document is the hash's business, and it was asserted before it
   /// was measured (al8n/smear#172).** "About one entry, so roughly twice what it used to be" was
@@ -593,12 +594,21 @@ pub struct Limits {
   /// **distinct** keys spelled `user0000Name…` charged 15.83 each, `field0…` charged 41.45 and
   /// `h00000000…` charged 64.60, growing quadratically, with no collision search anywhere. That was
   /// [`hash_bytes`](smear_schema::hash_bytes)'s fold leaving a name's late bytes out of the bucket
-  /// index; its avalanche step closed it, and all four spellings now measure 1.74–1.79 units, within
-  /// 3% of one another, so the sentence is finally true of more than one fixture.
+  /// index.
+  ///
+  /// **Then the replacement claim was asserted over the same five fixtures (al8n/smear#196).** An
+  /// avalanche step at the end of the fold closed the half of it that short names showed, and left
+  /// open the half that names *longer than eight bytes* have: differences in two consecutive fold
+  /// inputs cancelled, so 4,096 aliases spelled `x` plus an eight-digit base-36 counter charged
+  /// **11,943** units here and base-63 charged **18,401** — again with no collision search, again
+  /// growing with the count. Mixing between the rounds is what closed that. Thirty-three families
+  /// crossing four radices against seven counter widths now measure 7,081 to 7,265 units for 4,096
+  /// keys — 1.73 to 1.77 each, every one within 3% of the others — so the sentence is finally true
+  /// of a population and not of a list.
   ///
   /// None of that was ever the *bound* — a constructed pile-up spends this ceiling either way, and
-  /// the hash is still invertible. What it decides is whether the default below is a ceiling on
-  /// abuse or a lottery on how a client spells its aliases.
+  /// the hash is still unkeyed. What it decides is whether the default below is a ceiling on abuse
+  /// or a lottery on how a client spells its aliases.
   ///
   /// **It is not "collection work" in the narrow sense, and the widening was a defect repair.**
   /// Every name the executor interns charges this, including the ones only a *diagnostic* wants: a
@@ -741,13 +751,18 @@ const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2
 /// the argument stopped describing the thing it was attached to — which is the failure mode worth
 /// naming: **the unit moved and the rationale did not.**
 ///
-/// # What the number means now, measured rather than argued (al8n/smear#172)
+/// # What the number means now, measured rather than argued (al8n/smear#172, al8n/smear#196)
 ///
-/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step, 4,096 distinct
-/// response keys cost 1.74–1.79 units each across every ordinary naming scheme tried — one
-/// selection plus about three quarters of a comparison, summed over every table size the interner
-/// grows through — and scale at exactly ×2.00 per doubling out to 65,536 keys. So this ceiling
-/// admits something over nine million response keys, and no honest document reaches it:
+/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step and its fold between
+/// rounds, 4,096 distinct response keys cost 1.73–1.77 units each — one selection plus about three
+/// quarters of a comparison, summed over every table size the interner grows through — across
+/// thirty-three families that cross the radix a counter is written in against the width it is
+/// padded to, which is what decides where a spelling's varying bytes sit relative to a chunk
+/// boundary. "Every ordinary naming scheme tried" is what the previous sentence said, and it was
+/// true of the five that were tried and false of the ones that were not; the axis is here so that
+/// the claim is about a population. They scale at ×1.99 to ×2.02 per doubling out to 65,536 keys,
+/// where `field{i}` measures 114,764 units and `h{i:0>8}` 114,496. So this ceiling admits something
+/// over nine million response keys, and no honest document reaches it:
 /// [`max_response_slots`](Limits::max_response_slots) refuses at 2^20 positions first. Measured
 /// against `Limits::default()`, `k{i}`, `field{i}`, `h{i:0>8}` and
 /// `user{i:0>4}Name` documents are all served to 1,048,575 keys and all refused at 1,048,576 —
