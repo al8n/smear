@@ -1268,11 +1268,11 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
 /// pinned:
 ///
 /// - `cst_default_error` — the `error(TokenErrors, …)` callback both dialects install for input no
-///   rule matches, four copies across GraphQL and GraphQLx, `str` and `slice`. `%` is the row, and
-///   the measurement that says it is needed: with the charge planted away from all four copies,
-///   `cargo test -p smear --features rowan` runs 506 tests and **this row is the only failure**,
-///   while `cargo test -p smear-lexer` stays green at 128. `%` x4000 under `max_tokens(100)` goes
-///   101 -> 4001 there, which is the fail-open #183 closed for `-`, `+` and `.`.
+///   rule matches. `%` is the row: `%` x4000 under `max_tokens(100)` goes 101 -> 4001 with the
+///   charge planted away, which is the fail-open #183 closed for `-`, `+` and `.`. This row runs
+///   the GraphQL `&str` parser, so what it reaches is **that** callback and no other; the charge
+///   is one shared line now and the four `the_graphql{,x}_{str,slice}_error_callback_charges_…`
+///   cells below are the pin on each copy of it.
 /// - `decrease_recursion_depth_and_increase_token` — the closing-bracket handler, `}`, `]`, `)`
 ///   and GraphQLx's `>`. `]` is the row. Unlike the callback this route was already covered
 ///   incidentally: planting its charge away also reds
@@ -1362,6 +1362,158 @@ fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
       "  {atom:?} x4000: max_tokens({CEILING}) -> {capped} diagnostics, no ceiling -> {uncapped}"
     );
   }
+}
+
+/// Drives one lossless lexer to exhaustion and counts the items it produced.
+///
+/// tokora's logos adapter **latches**: the one post-scan `check()` that trips returns its error
+/// as an item and every later `lex()` answers `None`. So this count is exactly the number of
+/// lexemes the ceiling permitted, plus the refusal itself — `max_tokens + 1` when the ceiling is
+/// reached, and the document's own lexeme count when it is not.
+///
+/// The ceiling is an `Option` for the reason [`Budgeted`]'s is: the property is a comparison
+/// between the capped and the uncapped reading of the same document, so one of the two lexes must
+/// have no ceiling at all.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+fn lex_items<'a, L>(src: &'a L::Source, max_tokens: Option<usize>) -> usize
+where
+  L: tokora::Lexer<'a, State = smear::lexer::limits::LosslessLimits>,
+{
+  let limits = smear::lexer::limits::LosslessLimits::default();
+  let limits = match max_tokens {
+    Some(max) => limits.with_max_tokens(max),
+    None => limits,
+  };
+  let mut lexer = L::with_state(src, limits);
+  let mut items = 0usize;
+  while lexer.lex().is_some() {
+    items += 1;
+  }
+  items
+}
+
+#[cfg(feature = "graphql")]
+fn gql_str_lexemes(src: &str, max_tokens: Option<usize>) -> usize {
+  lex_items::<smear::lexer::graphql::lossless::LosslessLexer<'_, &str>>(src, max_tokens)
+}
+
+#[cfg(feature = "graphql")]
+fn gql_slice_lexemes(src: &str, max_tokens: Option<usize>) -> usize {
+  lex_items::<smear::lexer::graphql::lossless::LosslessLexer<'_, &[u8]>>(src.as_bytes(), max_tokens)
+}
+
+#[cfg(feature = "graphqlx")]
+fn gqlx_str_lexemes(src: &str, max_tokens: Option<usize>) -> usize {
+  lex_items::<smear::lexer::graphqlx::lossless::LosslessLexer<'_, &str>>(src, max_tokens)
+}
+
+#[cfg(feature = "graphqlx")]
+fn gqlx_slice_lexemes(src: &str, max_tokens: Option<usize>) -> usize {
+  lex_items::<smear::lexer::graphqlx::lossless::LosslessLexer<'_, &[u8]>>(
+    src.as_bytes(),
+    max_tokens,
+  )
+}
+
+/// The `%` row above pins ONE copy of `cst_default_error`. The four cells below pin every copy.
+///
+/// # Why there are four `#[test]`s over this one body and not one `#[test]` over a table
+///
+/// Because the claim is per-copy, and so the *failure* has to be. The `%` row was added, and
+/// planted red, on the claim that it covered the callback. That plant removed the charge from
+/// **all four** copies at once, which establishes that the row is sensitive to something in that
+/// set and nothing at all about the other three — and the row is `#[cfg(feature = "graphql")]`
+/// and calls the GraphQL `&str` parser, so removing the charge from the GraphQL `[u8]` copy, or
+/// from either GraphQLx copy, left it green while that public lexer surface processed unmatched
+/// input with no regard for `max_tokens`. **A plant that removes N things at once proves
+/// sensitivity to the set, not to each member of it.**
+///
+/// A table inside one `#[test]` would not have fixed that. The first row to trip aborts the test,
+/// so a plant on the first copy says nothing about the other three either. Four `#[test]`s over
+/// one checker is what makes "this copy stopped charging and the other three did not" a reading
+/// the harness prints on its own.
+///
+/// # There is no `[u8]` parser door, and that is why these are lexer cells
+///
+/// `smear-parser` ships `parse_document{,_with_limits}` over `&str` and nothing else, in either
+/// dialect, so two of the four copies are unreachable from the parser API. They are not
+/// unreachable: `LosslessToken<&[u8]>` is public, `LosslessLexer<'_, &[u8]>` is the alias for
+/// lexing it, and `max_tokens` is configured through `Lexer::with_state` exactly as the parser
+/// doors configure it. Driving all four cells through the lexer keeps them like-for-like rather
+/// than pinning two doors at one layer and two at another.
+///
+/// # What the two numbers are
+///
+/// Neither is read off the implementation. `4 000` is the document's own lexeme count — `%` is a
+/// rule in neither dialect, so each one is one unmatched lexeme — and `CEILING + 1` is the unit
+/// `a_token_ceiling_stops_the_lex_one_lexeme_past_itself` establishes and this file's header
+/// derives: the charge lands before the check, so lexeme 101 takes the tally past 100 and
+/// tokora's post-scan `check()` latches on it.
+///
+/// # The four independent plants
+///
+/// The charge is one shared line in `smear-lexer`'s `handlers::cst_default_error` now, and
+/// removing it reds all four cells. Each copy was then planted **on its own**, by giving its
+/// wrapper the body of its non-charging sibling `default_error` — the exact drift the
+/// centralisation defends against — and each time the matching cell read 4 000 rather than 101
+/// while the other three stayed green.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+fn a_copy_of_the_error_callback_charges(door: &str, lex: fn(&str, Option<usize>) -> usize) {
+  const CEILING: usize = 100;
+  const ATOMS: usize = 4_000;
+
+  let src = "%".repeat(ATOMS);
+
+  let uncapped = lex(&src, None);
+  assert_eq!(
+    uncapped, ATOMS,
+    "{door}: {ATOMS} unmatched lexemes lexed to {uncapped} items with no ceiling, so the capped \
+     reading below would be compared against a document that is not the one it was measured on"
+  );
+
+  let capped = lex(&src, Some(CEILING));
+  assert_eq!(
+    capped,
+    CEILING + 1,
+    "{door}: {ATOMS} unmatched lexemes under max_tokens({CEILING}) lexed to {capped} items rather \
+     than {}. This copy of `cst_default_error` has stopped charging the tally — it is the \
+     `error(TokenErrors, …)` callback rather than a rule, so #183's rule census never covered it, \
+     and a copy that does not charge is a public lexer surface an untrusted document walks \
+     straight past its own `max_tokens`.",
+    CEILING + 1
+  );
+
+  println!(
+    "\n  {door:<10} x{ATOMS}: max_tokens({CEILING}) -> {capped} items, no ceiling -> {uncapped}"
+  );
+}
+
+/// `smear-lexer/src/graphql/handlers/str.rs`. See [`a_copy_of_the_error_callback_charges`].
+#[test]
+#[cfg(feature = "graphql")]
+fn the_graphql_str_error_callback_charges_the_token_ceiling() {
+  a_copy_of_the_error_callback_charges("gql str", gql_str_lexemes);
+}
+
+/// `smear-lexer/src/graphql/handlers/slice.rs`. See [`a_copy_of_the_error_callback_charges`].
+#[test]
+#[cfg(feature = "graphql")]
+fn the_graphql_slice_error_callback_charges_the_token_ceiling() {
+  a_copy_of_the_error_callback_charges("gql slice", gql_slice_lexemes);
+}
+
+/// `smear-lexer/src/graphqlx/handlers/str.rs`. See [`a_copy_of_the_error_callback_charges`].
+#[test]
+#[cfg(feature = "graphqlx")]
+fn the_graphqlx_str_error_callback_charges_the_token_ceiling() {
+  a_copy_of_the_error_callback_charges("gqlx str", gqlx_str_lexemes);
+}
+
+/// `smear-lexer/src/graphqlx/handlers/slice.rs`. See [`a_copy_of_the_error_callback_charges`].
+#[test]
+#[cfg(feature = "graphqlx")]
+fn the_graphqlx_slice_error_callback_charges_the_token_ceiling() {
+  a_copy_of_the_error_callback_charges("gqlx slice", gqlx_slice_lexemes);
 }
 
 /// The burnt twin of `lossless_document::a_resync_that_lands_on_a_definition_head_does_not_eat_it`.
