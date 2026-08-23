@@ -64,9 +64,10 @@ use values::ValueLocation;
 
 /// The verdict of a failed validation.
 ///
-/// Returned when at least one diagnostic was emitted. What the diagnostics *were* is the sink's
-/// business — this is only the count, and whether the sink asked to stop before the document had
-/// been fully examined.
+/// Returned when the document was refused: because at least one diagnostic was emitted, or because
+/// a [`Budget`] abandoned a rule partway through. What the diagnostics *were* is the sink's
+/// business — this is only the count, whether a budget refused, and whether the sink asked to stop
+/// before the document had been fully examined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Invalid {
   emitted: u32,
@@ -79,6 +80,12 @@ impl Invalid {
   ///
   /// This counts what the validator emitted, not what the sink kept: [`Ignore`](super::Ignore)
   /// discards everything and the count is still right.
+  ///
+  /// **Zero is a possible count on a verdict that is still `Err`**, and it means exactly one
+  /// thing: a budget refused the document with the bound's own rule outside the
+  /// [`RuleSet`](super::RuleSet), so there was nothing to emit. [`Invalid::budget_tripped`] is
+  /// true whenever that happens, and a caller that reports "no findings" without reading it would
+  /// be describing a check the engine abandoned.
   #[inline]
   pub const fn emitted(&self) -> u32 {
     self.emitted
@@ -97,9 +104,14 @@ impl Invalid {
   ///
   /// True when draft 5.3.2's merge engine reached
   /// [`Budget::merge_depth`](super::Budget::merge_depth) or
-  /// [`Budget::merge_work`](super::Budget::merge_work) — the diagnostic is
+  /// [`Budget::merge_work`](super::Budget::merge_work). With the bound's own rule in the
+  /// [`RuleSet`](super::RuleSet) the diagnostic is
   /// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
-  /// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) and says which.
+  /// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) and says which; **without it there is
+  /// no diagnostic and this flag is the whole of the report**, on a verdict whose
+  /// [`Invalid::emitted`] is zero. Filtering a bound's rule out switches off its diagnostic, not
+  /// the refusal: an engine that stopped and then answered `Ok` would be reporting a clean result
+  /// for a check it never finished. al8n/smear#196.
   ///
   /// When it is true the document is **invalid**, not "unvalidated": the engine refuses rather
   /// than passing what it could not finish examining. What it does *not* mean is that the rest of
@@ -113,6 +125,11 @@ impl Invalid {
 
 impl core::fmt::Display for Invalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    if self.emitted == 0 {
+      // The budget refused with its own rule filtered out. "0 validation errors" would read as the
+      // opposite of what happened.
+      return f.write_str("resource budget exceeded before the document was fully examined");
+    }
     let plural = if self.emitted == 1 { "" } else { "s" };
     write!(f, "{} validation error{plural}", self.emitted)?;
     if self.stopped {
@@ -230,16 +247,13 @@ where
     work: Work::new(budget.merge_work()),
     generation: 0,
     tripped: false,
-    budget_tripped: false,
     blame: SimpleSpan::const_new(0, 0),
   };
   let _ = validator.run();
-  let (emitted, stopped, budget) = (
-    validator.emitted,
-    validator.stopped,
-    validator.budget_tripped,
-  );
-  if emitted == 0 {
+  let (emitted, stopped, budget) = (validator.emitted, validator.stopped, validator.tripped);
+  // A budget refusal is a refusal whether or not it had a rule to emit. `Ok` here would be a clean
+  // verdict on a rule the engine abandoned partway through. al8n/smear#196.
+  if emitted == 0 && !budget {
     Ok(())
   } else {
     Err(Invalid {
@@ -298,11 +312,12 @@ struct Validator<'a, 'd, S, K> {
   work: Work,
   /// Distinguishes one fragment expansion from the next without clearing a bitset per expansion.
   generation: u32,
-  /// Whether a budget stopped the merge engine. Set even when the bound's own rule is switched
-  /// off: the bound holds either way, and only the diagnostic is optional.
+  /// Whether a budget stopped the merge engine, which is both what abandons the walk and what the
+  /// verdict reports. Set even when the bound's own rule is switched off: the bound holds either
+  /// way, and only the *diagnostic* is optional. It used to be two fields — one for the walk and
+  /// one for the verdict, the second set only when something was emitted — which is how a refused
+  /// document with its rule filtered out came back `Ok`. al8n/smear#196.
   tripped: bool,
-  /// Whether a budget diagnostic was actually emitted, which is what the verdict reports.
-  budget_tripped: bool,
   /// The definition to blame for a budget diagnostic — the one being merged when the bound hit.
   blame: SimpleSpan,
 }

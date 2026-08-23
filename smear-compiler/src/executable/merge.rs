@@ -50,9 +50,10 @@
 //!
 //! Absolute, never proportional to the input. Depth bounds the recursion; work bounds expanded
 //! rows, comparisons, partition rows and tree-resolution steps as one running total for the call.
-//! Reaching either one emits its own rule and abandons the engine — the document is refused, and
-//! [`Invalid::budget_tripped`](super::Invalid::budget_tripped) says why. It never passes the
-//! document unvalidated and it never panics.
+//! Reaching either one abandons the engine and refuses the document, and
+//! [`Invalid::budget_tripped`](super::Invalid::budget_tripped) says so — with the bound's own rule
+//! in the [`RuleSet`](crate::RuleSet) it also emits that rule, and without it the refusal is
+//! carried by the verdict alone. It never passes the document unvalidated and it never panics.
 
 use core::ops::ControlFlow;
 
@@ -88,6 +89,25 @@ impl Pass {
       Self::Parents => 2,
     }
   }
+}
+
+/// What [`claim`](Validator::claim) says about the row range it hands back.
+///
+/// Three states and not two. A budget refusal used to come back as the memo's `done` — the same
+/// value a set that has already been through this pass comes back as — so "the engine gave up" and
+/// "there is nothing left to do here" were spelled identically, and the only thing keeping the
+/// difference visible was that every caller happened to re-read `tripped` afterwards.
+/// al8n/smear#196.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Claim {
+  /// The set is this pass's to run, and the caller must run it.
+  Fresh,
+  /// The set has already been through this pass. Running it again would derive the same answer.
+  Done,
+  /// The budget refused before the claim was settled. Nothing about this set has been examined,
+  /// and the engine is abandoned: a caller that reads this as work already done is reporting a
+  /// result for a check that never ran.
+  Refused,
 }
 
 /// The smallest bucket table the memo builds.
@@ -159,15 +179,15 @@ where
     // A freshly expanded range that duplicates a known one is released, so the range this call
     // produced may no longer be the one holding the rows — reusing it for the second pass would
     // read whatever the next expansion put there.
-    let (rows, done) = self.claim(rows, Pass::Shape)?;
-    if !done {
+    let (rows, claim) = self.claim(rows, Pass::Shape)?;
+    if claim == Claim::Fresh {
       self.run_pass(rows, Pass::Shape)?;
     }
     if self.tripped {
       return ControlFlow::Continue(());
     }
-    let (rows, done) = self.claim(rows, Pass::Parents)?;
-    if !done {
+    let (rows, claim) = self.claim(rows, Pass::Parents)?;
+    if claim == Claim::Fresh {
       self.run_pass(rows, Pass::Parents)?;
     }
     ControlFlow::Continue(())
@@ -196,14 +216,16 @@ where
     }
     self.tripped = true;
     if !self.on(rule) {
-      // The caller switched this bound's own diagnostic off. The engine still stops — one that
-      // kept going would be the denial of service — but with nothing to emit there is nothing to
-      // make the document invalid either, so a document the bound refuses is reported on what was
-      // examined before it. Switching a bound's rule off is switching off the *refusal*, not the
-      // resource protection.
+      // The caller switched this bound's own diagnostic off, so there is nothing to emit and the
+      // document collects no finding here. It does not follow that the document is clean. The
+      // engine has abandoned draft 5.3.2 partway through, and every subtree it had not reached is
+      // unexamined — so the refusal is recorded whether or not anything was emitted, and the
+      // verdict is `Err` with a zero diagnostic count rather than an `Ok` that would report a
+      // clean result for a check that never ran. Switching a bound's rule off switches off the
+      // *diagnostic*; it switches off neither the resource protection nor the refusal.
+      // al8n/smear#196.
       return ControlFlow::Continue(());
     }
-    self.budget_tripped = true;
     let diagnostic = Diagnostic::new(rule, self.blame).context(Context::Count(limit));
     self.emit(diagnostic)
   }
@@ -490,12 +512,14 @@ where
 
   // -- the memo -------------------------------------------------------------------------------------
 
-  /// Claims a merged set for `pass`, or [`ControlFlow::Break`] when the budget refuses.
+  /// Claims a merged set for `pass`.
   ///
-  /// Returns the **canonical** row range for this exact set of field occurrences, together with
-  /// whether it has already been through this pass. A freshly expanded range that turns out to
-  /// duplicate a known one is released rather than kept, so the arena holds one copy of each — and
-  /// the caller must use the range that comes back, not the one it handed in.
+  /// Returns the **canonical** row range for this exact set of field occurrences, together with a
+  /// [`Claim`] saying whether the caller is to run it, whether it has already been through this
+  /// pass, or whether the budget refused before either could be established. A freshly expanded
+  /// range that turns out to duplicate a known one is released rather than kept, so the arena
+  /// holds one copy of each — and the caller must use the range that comes back, not the one it
+  /// handed in.
   ///
   /// # It charges, for the same reason [`Names::intern`](crate::scratch::Names::intern) does
   ///
@@ -517,7 +541,7 @@ where
   ///
   /// The hash fold itself is not charged again: it walks exactly the rows [`expand`](Self::expand)
   /// charged for one at a time as it pushed them, in the call that produced this range.
-  fn claim(&mut self, rows: Range32, pass: Pass) -> ControlFlow<(), (Range32, bool)> {
+  fn claim(&mut self, rows: Range32, pass: Pass) -> ControlFlow<(), (Range32, Claim)> {
     let hash = {
       let mut state = 0xcbf2_9ce4_8422_2325u64 ^ u64::from(rows.len());
       for row in rows.slice(&self.scratch.merge_rows) {
@@ -531,13 +555,13 @@ where
       while entry != NONE {
         if !self.charge(1) {
           self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-          return ControlFlow::Continue((rows, true));
+          return ControlFlow::Continue((rows, Claim::Refused));
         }
         let known = self.scratch.merge_memo[entry as usize];
         if known.hash == hash && known.rows.len() == rows.len() {
           if !self.charge(rows.len()) {
             self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-            return ControlFlow::Continue((rows, true));
+            return ControlFlow::Continue((rows, Claim::Refused));
           }
           if known.rows.slice(&self.scratch.merge_rows) == rows.slice(&self.scratch.merge_rows) {
             if rows.end() as usize == self.scratch.merge_rows.len()
@@ -546,10 +570,10 @@ where
               self.scratch.merge_rows.truncate(rows.start() as usize);
             }
             if known.flags & pass.bit() != 0 {
-              return ControlFlow::Continue((known.rows, true));
+              return ControlFlow::Continue((known.rows, Claim::Done));
             }
             self.scratch.merge_memo[entry as usize].flags |= pass.bit();
-            return ControlFlow::Continue((known.rows, false));
+            return ControlFlow::Continue((known.rows, Claim::Fresh));
           }
         }
         entry = known.next;
@@ -565,7 +589,7 @@ where
     };
     if !self.charge(relink) {
       self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-      return ControlFlow::Continue((rows, true));
+      return ControlFlow::Continue((rows, Claim::Refused));
     }
 
     // Nothing above this line mutated the memo, so a refusal leaves it exactly as it was.
@@ -583,7 +607,7 @@ where
       self.scratch.merge_memo[index as usize].next = self.scratch.merge_slots[bucket];
       self.scratch.merge_slots[bucket] = index;
     }
-    ControlFlow::Continue((rows, false))
+    ControlFlow::Continue((rows, Claim::Fresh))
   }
 
   /// The bucket `hash` lands in. Never called with `merge_slots` empty.
@@ -884,8 +908,8 @@ where
     let Some(rows) = expanded else {
       return ControlFlow::Continue(());
     };
-    let (rows, done) = self.claim(rows, pass)?;
-    if !done {
+    let (rows, claim) = self.claim(rows, pass)?;
+    if claim == Claim::Fresh {
       self.push_merge_frame(rows);
     }
     ControlFlow::Continue(())

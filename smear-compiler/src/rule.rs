@@ -141,9 +141,11 @@ pub enum Rule {
   /// path may not be. A document that reaches this is **refused** — never passed unvalidated —
   /// and the verdict carries [`Invalid::budget_tripped`](super::Invalid::budget_tripped).
   ///
-  /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *refusal*, not the bound: the
-  /// engine still stops, but with no diagnostic to emit the document is reported on whatever was
-  /// examined before it stopped. A caller who wants the protection wants this rule on.
+  /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *diagnostic*, not the refusal:
+  /// the engine still stops, and the document is still refused, but the verdict carries the
+  /// refusal alone — `Err` with [`Invalid::emitted`](super::Invalid::emitted) at zero and
+  /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) true. A caller who wants to be
+  /// *told which bound* wants this rule on. al8n/smear#196.
   ///
   /// The alternative, letting the working set's capacity be the bound, was rejected in design: an
   /// allocation failure has no rule identity and no span, and cannot distinguish "this document is

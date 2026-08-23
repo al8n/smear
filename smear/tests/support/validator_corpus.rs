@@ -462,7 +462,12 @@ pub const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::MergeWorkBudget,
     schema: None,
-    budget: Some(Budget::new(Budget::DEFAULT_MERGE_DEPTH, 24)),
+    // Calibrated, and it has to be re-calibrated whenever the merge engine's accounting moves.
+    // `{ dog { name } }` clears at 30 units and `{ dog { name nickname barkVolume } }` needs 56, so
+    // anything between separates the halves; 40 keeps a margin on each side. al8n/smear#196 gave
+    // the interner and the memo their own charges and left this at 24 — below the cost of the
+    // *valid* twin, which made the clean half of the corpus produce a finding.
+    budget: Some(Budget::new(Budget::DEFAULT_MERGE_DEPTH, 40)),
     invalid: "{ dog { name nickname barkVolume } }",
     fires: &[Rule::MergeWorkBudget],
     valid: "{ dog { name } }",

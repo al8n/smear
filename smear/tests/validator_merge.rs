@@ -564,41 +564,221 @@ fn the_budget_flag_pins_both_states() {
   });
 }
 
-/// Switching the bound's own rule off stops the *refusal*, not the engine.
+/// Switching the bound's own rule off stops the *diagnostic*, not the engine and not the refusal.
 ///
-/// The bound still holds — the work is not done — but with no diagnostic to emit there is nothing
-/// to make the document invalid, so it comes back `Ok` on what was examined. That is the honest
-/// reading of `RuleSet`: a rule that is off is not evaluated, and this rule's evaluation is the
-/// refusal. What a caller keeps by turning it off is the resource protection; what they give up is
-/// being told.
+/// The bound still holds — the work is not done — and the document is still refused. What a caller
+/// gives up by filtering the rule out is being told *which* bound stopped the engine; what they
+/// must not be given is an `Ok`, because draft 5.3.2 was abandoned partway through and every
+/// subtree past the trip is unexamined. `Invalid::budget_tripped` carries the refusal with no
+/// diagnostic attached, and `Invalid::emitted` is zero.
+///
+/// # The plant
+///
+/// Make `validate_executable_with` return `Ok` whenever nothing was emitted — which is what it did
+/// until al8n/smear#196 — and both halves below fail on their `expect_err`: a validator reporting a
+/// clean result for a check it gave up on.
 #[test]
-fn the_bound_holds_even_with_its_rule_disabled() {
+fn a_refusal_with_its_rule_filtered_out_is_still_a_refusal() {
   use smear::validator::{RuleSet, validate_executable_with};
 
   on_a_deep_stack(|| {
     let schema = build();
+    let budget = Budget::default();
+
+    // The depth bound, with `FieldSelectionMerging` itself switched on.
     let source = deep_query(200);
     let document = parse(&source);
     let mut scratch = Scratch::new();
     let rules = RuleSet::ALL.without(Rule::MergeDepthBudget);
+    assert!(rules.contains(Rule::FieldSelectionMerging));
 
     let start = Instant::now();
-    let verdict = validate_executable_with(
+    let invalid = validate_executable_with(
       &schema,
       &document,
       &mut scratch,
-      &Budget::default(),
+      &budget,
       rules,
       &mut Ignore,
-    );
+    )
+    .expect_err("the engine abandoned 5.3.2, so the document cannot be reported clean");
     let ms = start.elapsed().as_secs_f64() * 1e3;
-    println!("bound with the rule disabled: {ms:.3} ms");
+    println!("depth bound with the rule disabled: {ms:.3} ms");
+    assert!(invalid.budget_tripped(), "{invalid}");
+    assert_eq!(
+      invalid.emitted(),
+      0,
+      "the rule was filtered out; there was nothing to emit"
+    );
     assert!(
-      verdict.is_ok(),
-      "with nothing to emit there is nothing to refuse with"
+      invalid.to_string().contains("resource budget exceeded"),
+      "{invalid}"
     );
     assert!(ms < 500.0, "the bound stopped holding: {ms} ms");
+
+    // The work bound, the same way, with a collecting sink so the empty sink is observed rather
+    // than assumed.
+    let source = wide_query(20_000);
+    let document = parse(&source);
+    let rules = RuleSet::ALL.without(Rule::MergeWorkBudget);
+    assert!(rules.contains(Rule::FieldSelectionMerging));
+    let mut collected = Vec::new();
+    let mut sink = Collect::new(&mut collected);
+    let invalid =
+      validate_executable_with(&schema, &document, &mut scratch, &budget, rules, &mut sink)
+        .expect_err("the work bound refused; the merge rule was never finished");
+    assert!(invalid.budget_tripped(), "{invalid}");
+    assert_eq!(invalid.emitted(), 0);
+    assert!(
+      collected.is_empty(),
+      "{:?}",
+      collected.first().map(Diagnostic::rule)
+    );
+
+    // The control, and the reason this is not simply "any missing rule refuses": with draft 5.3.2
+    // and both of its bounds out of the set the engine never runs, so there is nothing to abandon
+    // and the same document under the same budget is clean.
+    let quiet = RuleSet::ALL
+      .without(Rule::FieldSelectionMerging)
+      .without(Rule::MergeWorkBudget)
+      .without(Rule::MergeDepthBudget);
+    assert!(
+      validate_executable_with(
+        &schema,
+        &document,
+        &mut scratch,
+        &budget,
+        quiet,
+        &mut Ignore
+      )
+      .is_ok(),
+      "a rule nobody asked to run cannot refuse a document"
+    );
   });
+}
+
+/// The same document, budget and rule set must get the same verdict on a reused working set as on
+/// a fresh one.
+///
+/// [`Scratch`] is the caller's, reused across requests by design. Its bucket tables used to be
+/// emptied with a `fill` that kept their *length*, and the length is what the interner and the
+/// merge memo charge their growth against — so a cold run paid relinks at 1, 65, 129 … and the
+/// identical run behind a larger request paid none. With a `merge_work` between the two totals the
+/// verdict flipped on history alone, which is a server answering one client differently because of
+/// what the last one sent.
+///
+/// # How this is measured
+///
+/// Not at a hand-picked limit, which would be a number to re-tune rather than a property. The
+/// smallest `merge_work` at which the subject comes back clean is binary-searched on each side,
+/// and the two are required to be equal — so the test names the defect's axis instead of one of
+/// its consequences.
+///
+/// **The plant.** Put the `fill(NONE)` back in `Names::reset` or `Scratch::reset` and the warm
+/// side settles lower than the cold one by exactly the relinks the warm run skipped.
+#[test]
+fn the_verdict_does_not_depend_on_what_the_last_request_left_behind() {
+  on_a_deep_stack(the_verdict_does_not_depend_on_history);
+}
+
+/// The body of [`the_verdict_does_not_depend_on_what_the_last_request_left_behind`], on a stack the
+/// nested fixtures fit: the merge memo only doubles its bucket table past 64 distinct sets, and 64
+/// distinct sets means 64 levels of response shape.
+fn the_verdict_does_not_depend_on_history() {
+  let schema = build();
+
+  // Wide enough to grow the interner's bucket table past two doublings, deep enough to grow the
+  // merge memo's past one, and clean under the default budget.
+  fn document_of(names: usize, depth: usize) -> String {
+    let mut source = String::from("{ dog {");
+    for index in 0..names {
+      source.push_str(&std::format!(" f{index}: name"));
+    }
+    source.push_str(" } ");
+    for _ in 0..depth {
+      source.push_str(" nest {");
+    }
+    source.push_str(" leaf ");
+    for _ in 0..depth {
+      source.push_str(" } ");
+    }
+    source.push('}');
+    source
+  }
+
+  let prelude = document_of(500, 120);
+  let subject = document_of(100, 70);
+  assert_eq!(fired(&schema, &prelude), [], "the prelude must be clean");
+  assert_eq!(fired(&schema, &subject), [], "the subject must be clean");
+
+  // The prelude really does leave a larger working set behind, so "warm" is not a word for
+  // "identical".
+  let mut scratch = Scratch::new();
+  let empty = scratch.capacity();
+  assert!(
+    validate_executable(
+      &schema,
+      &parse(&prelude),
+      &mut scratch,
+      &Budget::default(),
+      &mut Ignore
+    )
+    .is_ok()
+  );
+  assert!(
+    scratch.capacity() > empty,
+    "the prelude grew nothing: {empty} -> {}",
+    scratch.capacity()
+  );
+
+  /// The smallest `merge_work` at which `subject` comes back clean, with `warm_with` validated on
+  /// the same `Scratch` first when there is one.
+  fn least_work_that_clears(schema: &Schema, subject: &str, warm_with: Option<&str>) -> u32 {
+    let subject = parse(subject);
+    let prelude = warm_with.map(parse);
+    let clears = |limit: u32| {
+      let mut scratch = Scratch::new();
+      if let Some(prelude) = prelude.as_ref() {
+        assert!(
+          validate_executable(
+            schema,
+            prelude,
+            &mut scratch,
+            &Budget::default(),
+            &mut Ignore
+          )
+          .is_ok(),
+          "the prelude must finish, or it is not the state a real reuse leaves"
+        );
+      }
+      let budget = Budget::default().with_merge_work(limit);
+      validate_executable(schema, &subject, &mut scratch, &budget, &mut Ignore).is_ok()
+    };
+
+    let (mut lo, mut hi) = (0u32, Budget::default().merge_work());
+    assert!(clears(hi), "the subject does not clear the default budget");
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if clears(mid) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    // The search assumes the verdict is monotone in the limit; these two pin the boundary it
+    // found, so a non-monotone engine could not hide behind a bisection that happened to agree.
+    assert!(clears(lo));
+    assert!(lo > 0 && !clears(lo - 1), "{lo} is not a boundary");
+    lo
+  }
+
+  let cold = least_work_that_clears(&schema, &subject, None);
+  let warm = least_work_that_clears(&schema, &subject, Some(&prelude));
+  println!("least merge_work that clears the subject: cold {cold}, warm {warm}");
+  assert_eq!(
+    cold, warm,
+    "the same document needs {cold} units on a fresh working set and {warm} on a reused one"
+  );
 }
 
 /// Rule order is part of the resource posture: the classic all-pairs fragment bomb never reaches
