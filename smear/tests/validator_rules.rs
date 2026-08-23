@@ -163,9 +163,21 @@ fn sorted(rules: &[Rule]) -> Vec<Rule> {
 
 /// Rules with no fixture, each excused in writing.
 ///
-/// The list is empty and is expected to stay that way. It exists so that an excuse has to be
-/// written down rather than implied by a rule quietly missing from the table.
-const UNFIREABLE: &[(Rule, &str)] = &[];
+/// It exists so that an excuse has to be written down rather than implied by a rule quietly
+/// missing from the table. One entry, and the entry names what would delete it.
+const UNFIREABLE: &[(Rule, &str)] = &[(
+  Rule::ValidationWorkBudget,
+  "an ABSOLUTE ceiling with no knob to lower, so unlike the two merge bounds it cannot be \
+   exercised by a `budget` override on a three-line document. The smallest shape that reaches it is \
+   about sixty kilobytes — operations times shared-fragment breadth is the densest unit-per-byte \
+   construction there is — and that shape trips `MergeWorkBudget` long before, so the fixture would \
+   also have to raise `merge_work` to `u32::MAX`, and its VALID twin would then grind through an \
+   unbounded merge of sixty kilobytes. Two such documents, run nine trivia forms deep by \
+   `validator_lossless.rs` and twice more by `validator_descriptions.rs`, is a large standing cost \
+   for one rule. `validator_work.rs` fires it instead, on a document it generates, and asserts the \
+   refusal, the wall clock and the rule-filtered-out verdict. This excuse is deleted the day the \
+   ceiling gains a `Budget` knob the way `merge_depth` and `merge_work` have one.",
+)];
 
 #[test]
 fn liveness_floor() {

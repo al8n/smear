@@ -65,8 +65,8 @@ use values::ValueLocation;
 /// The verdict of a failed validation.
 ///
 /// Returned when the document was refused: because at least one diagnostic was emitted, or because
-/// a [`Budget`] abandoned a rule partway through. What the diagnostics *were* is the sink's
-/// business — this is only the count, whether a budget refused, and whether the sink asked to stop
+/// a resource bound abandoned a pass partway through. What the diagnostics *were* is the sink's
+/// business — this is only the count, whether a bound refused, and whether the sink asked to stop
 /// before the document had been fully examined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Invalid {
@@ -81,11 +81,11 @@ impl Invalid {
   /// This counts what the validator emitted, not what the sink kept: [`Ignore`](super::Ignore)
   /// discards everything and the count is still right.
   ///
-  /// **Zero is a possible count on a verdict that is still `Err`**, and it means exactly one
-  /// thing: a budget refused the document with the bound's own rule outside the
+  /// **Zero is a possible count on a verdict that is still `Err`**, and it means one thing: a
+  /// resource bound refused the document with that bound's own rule outside the
   /// [`RuleSet`](super::RuleSet), so there was nothing to emit. [`Invalid::budget_tripped`] is
-  /// true whenever that happens, and a caller that reports "no findings" without reading it would
-  /// be describing a check the engine abandoned.
+  /// true whenever that happens, and a caller that reported "no findings" without reading it would
+  /// be describing a check the validator abandoned.
   #[inline]
   pub const fn emitted(&self) -> u32 {
     self.emitted
@@ -125,6 +125,12 @@ impl Invalid {
   /// the refusal: an engine that stopped and then answered `Ok` would be reporting a clean result
   /// for a check it never finished. al8n/smear#196.
   ///
+  /// **And when any other pass reached this crate's absolute validation ceiling**, whose diagnostic
+  /// is [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget). That bound answers the
+  /// paragraph above identically — the refusal does not depend on its rule being enabled, only
+  /// being *told* which bound refused does — which is what makes this one flag rather than three.
+  /// al8n/smear#198.
+  ///
   /// When it is true the document is **invalid**, not "unvalidated": the engine refuses rather
   /// than passing what it could not finish examining. What it does *not* mean is that the rest of
   /// the document is clean — the merge engine stopped, so anything it had not reached is unknown,
@@ -138,7 +144,7 @@ impl Invalid {
 impl core::fmt::Display for Invalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     if self.emitted == 0 {
-      // The budget refused with its own rule filtered out. "0 validation errors" would read as the
+      // A bound refused with its own rule filtered out. "0 validation errors" would read as the
       // opposite of what happened.
       return f.write_str("resource budget exceeded before the document was fully examined");
     }
@@ -278,18 +284,22 @@ where
     scalars: Scalars::resolve(schema),
     variables: &[],
     in_operation: false,
+    variable_base: 0,
     emitted: 0,
     stopped: false,
     work: Work::new(budget.merge_work()),
+    left: WORK_CEILING,
+    refused: false,
     generation: 0,
     tripped: false,
     blame: SimpleSpan::const_new(0, 0),
   };
   let _ = validator.run();
-  let (emitted, stopped, budget) = (validator.emitted, validator.stopped, validator.tripped);
-  // A budget refusal is a refusal whether or not it had a rule to emit. `Ok` here would be a clean
-  // verdict on a rule the engine abandoned partway through. al8n/smear#196.
-  if emitted == 0 && !budget {
+  let refused = validator.refused || validator.tripped;
+  let (emitted, stopped, budget) = (validator.emitted, validator.stopped, refused);
+  // A refusal is a refusal whether or not it had a rule to emit. `Ok` here would be a clean
+  // verdict on a pass the validator abandoned partway through. al8n/smear#196, al8n/smear#198.
+  if emitted == 0 && !refused {
     Ok(())
   } else {
     Err(Invalid {
@@ -297,6 +307,66 @@ where
       stopped,
       budget,
     })
+  }
+}
+
+/// The absolute ceiling on validation work outside draft 5.3.2's merge engine.
+///
+/// # The unit
+///
+/// One per node examined, plus one per eight bytes of any **document-chosen** name a pass reads —
+/// [`units`] is the whole of it. Every charge is taken *before* the step it prices, because a
+/// charge taken afterwards bounds nothing: the work is already spent by the time the counter can
+/// refuse it.
+///
+/// Bytes and not entries, and the difference is measurable rather than theoretical. A GraphQL name
+/// has no length ceiling, every name comparison here is `[u8] == [u8]`, and *where* two names
+/// differ decides what that costs. At 2,000 variable definitions and 2,000 usages, names padded to
+/// 200 bytes **after** the distinguishing digits measured 8.8 ms — no worse than one-byte names,
+/// because the comparison exits at the first differing byte — and the same padding written
+/// **before** them measured 17.8 ms. A ledger over entries cannot see that factor at all.
+///
+/// # 2^22, and what it is derived over
+///
+/// Absolute, never proportional: an attacker chooses the input, so a bound proportional to it is
+/// not a bound. The number is set where every honest document measured is orders below it and
+/// every disproportionate one is refused. Measured, in these units: the four executable fixtures in
+/// `smear/tests/fixtures/executables` spend 4, 54, 124 and 789 — `bench_10_huge_comprehensive`,
+/// 4,172 bytes, is the 789 — which is about a fifth of a unit per byte, so this ceiling admits
+/// something over twenty megabytes of document written that way. The shape that is *not* written
+/// that way is fragment reuse, where the units are the product and not the sum: fifty operations
+/// sharing one two-hundred-field fragment is 3,451 bytes and 20,651 units, six per byte. That is
+/// the shape the ceiling is for, and even there it admits about two hundred times what a real
+/// client sends. `validator_work.rs` crosses it at 1,600 operations over a 1,600-field fragment —
+/// 63 KB — in 42 ms.
+///
+/// # No knob, deliberately
+///
+/// [`Budget`]'s two knobs price draft 5.3.2, whose unit — an expanded field row, a pair comparison
+/// — has been stable since it shipped. This unit is new, and this repository has already watched a
+/// ceiling outlive the unit it was chosen for: `graphql-proto`'s `DEFAULT_SELECTION_VISITS` was
+/// argued from "one unit per selection", the unit was widened to charge name comparisons, and the
+/// rationale stayed attached to a number it no longer described. A public knob is a promise about
+/// the unit as much as about the number, so this one stays inside the crate until the unit has
+/// stopped moving.
+const WORK_CEILING: u32 = 1 << 22;
+
+/// The charge for reading `len` bytes of a document-chosen name: one unit per eight bytes, plus
+/// one for the node they belong to.
+///
+/// Eight because that is roughly the word a comparison, a hash or a copy advances per step, and
+/// because it is the unit `graphql-proto`'s collection ledger already charges in — two ledgers
+/// counting different things in the same crate family would be two units to re-derive.
+#[inline]
+const fn units(len: usize) -> u32 {
+  // `as` after the shift, so a name longer than `u32::MAX * 8` cannot wrap the charge down to
+  // nothing on a 64-bit target. Nothing can allocate one; a bound that rests on that is not a
+  // bound.
+  let chunks = len >> 3;
+  if chunks >= u32::MAX as usize {
+    u32::MAX
+  } else {
+    chunks as u32 + 1
   }
 }
 
@@ -341,11 +411,25 @@ struct Validator<'a, 'd, S, K> {
   /// Whether a variable scope is in effect. Distinguishes "an operation with no variables" from
   /// "a fragment nothing reached", which is the difference between draft 5.8.3 firing and not.
   in_operation: bool,
+  /// Where the current operation's variable-name index starts in [`Scratch::keys`].
+  ///
+  /// The index is the ordinals of [`Validator::variables`] sorted by name with ties broken on the
+  /// ordinal, built once per operation by [`Validator::check_variable_definitions`] and read by
+  /// every usage. It outlives the pass that builds it, which is why it needs a recorded base:
+  /// every other user of `keys` pushes at the buffer's current length and truncates back, so a
+  /// prefix that stays put is safe.
+  variable_base: u32,
   emitted: u32,
   stopped: bool,
   /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent, and the ceiling it is
   /// spending against.
   work: Work,
+  /// What is left of [`WORK_CEILING`]. Charged by every pass that is not draft 5.3.2's engine.
+  left: u32,
+  /// Whether the ceiling refused the document.
+  ///
+  /// Separate from [`Validator::tripped`], which is the merge engine's; the verdict reads both.
+  refused: bool,
   /// Distinguishes one fragment expansion from the next without clearing a bitset per expansion.
   generation: u32,
   /// Whether a budget stopped the merge engine, which is both what abandons the walk and what the
@@ -381,6 +465,51 @@ where
         ControlFlow::Break(())
       }
     }
+  }
+
+  // -- the validation-wide ledger ---------------------------------------------------------------
+
+  /// Charges `units` against [`WORK_CEILING`] **before** the step they price.
+  ///
+  /// `blame` is the span the refusal points at — the node whose examination could not be afforded,
+  /// which is the narrowest true answer to "where did this document stop being validated".
+  #[inline]
+  pub(super) fn spend(&mut self, units: u32, blame: SimpleSpan) -> ControlFlow<()> {
+    match self.left.checked_sub(units) {
+      Some(left) => {
+        self.left = left;
+        ControlFlow::Continue(())
+      }
+      None => self.refuse(blame),
+    }
+  }
+
+  /// Refuses the document for reaching [`WORK_CEILING`], and abandons every remaining pass.
+  ///
+  /// Always [`ControlFlow::Break`], including when the rule is filtered out and there is nothing
+  /// to emit. That is the whole difference between a bound and a suggestion: the caller switching
+  /// the diagnostic off must not switch the *stopping* off with it.
+  ///
+  /// Idempotent in what it emits, for the reason the merge engine's own trip is: a collecting sink
+  /// does not stop the unwinding, and one refusal per remaining unit of work is noise.
+  #[cold]
+  fn refuse(&mut self, blame: SimpleSpan) -> ControlFlow<()> {
+    self.left = 0;
+    if !self.refused {
+      self.refused = true;
+      if self.on(Rule::ValidationWorkBudget) {
+        let diagnostic =
+          Diagnostic::new(Rule::ValidationWorkBudget, blame).context(Context::Count(WORK_CEILING));
+        let _ = self.emit(diagnostic);
+      }
+    }
+    ControlFlow::Break(())
+  }
+
+  /// Charges one node plus the bytes of the name it is identified by.
+  #[inline]
+  pub(super) fn spend_name(&mut self, name: &Name<S>) -> ControlFlow<()> {
+    self.spend(units(name_bytes(name).len()), *name.as_span())
   }
 
   /// Emits a diagnostic naming a source spelling, at that spelling's own span.
@@ -472,6 +601,11 @@ where
             // Query shorthand: an anonymous query, blamed at its own braces.
             OperationDefinition::Shorthand(set) => (RootOperation::Query, false, *set.span()),
           };
+          // The prep sweep is linear in the document, but it is also where the fragment index is
+          // sorted by name — `F log F` comparisons over bytes the client chose. The sort's log
+          // factor is at most thirty-two whatever the document does, which is a constant multiple
+          // of what is charged here and not a second factor.
+          self.spend(1, span)?;
           self.scratch.operations.push(OperationRow {
             definition: index,
             root: root.index() as u8,
@@ -481,6 +615,7 @@ where
           });
         }
         ExecutableDefinition::Fragment(fragment) => {
+          self.spend_name(fragment.name())?;
           self.scratch.fragments.push(FragmentRow {
             definition: index,
             span: *fragment.name().as_span(),
@@ -610,6 +745,9 @@ where
       match selection {
         Selection::FragmentSpread(spread) => {
           let name = spread.name();
+          // `find_fragment` binary-searches the name index, so this reads the spelling about
+          // `log F` times. Same constant multiple as the sort that built the index.
+          self.spend_name(name)?;
           let to = self.find_fragment(name_bytes(name));
           if to.is_none() && self.on(Rule::FragmentSpreadTargetDefined) {
             let diagnostic = Diagnostic::new(Rule::FragmentSpreadTargetDefined, *name.as_span())
@@ -622,6 +760,7 @@ where
           });
         }
         _ => {
+          self.spend(1, *selection.as_span())?;
           if let Some(child) = child_selection_set(selection) {
             self
               .scratch
@@ -662,6 +801,9 @@ where
       let base = self.scratch.keys.len();
       for index in 0..self.scratch.operations.len() {
         if self.scratch.operations[index].named {
+          let name = operation_name_bytes(document, &self.scratch.operations, index as u32);
+          let span = self.scratch.operations[index].span;
+          self.spend(units(name.len()), span)?;
           self.scratch.keys.push(index as u32);
         }
       }
@@ -786,6 +928,7 @@ where
           frame.edge += 1;
         }
         let edge = self.scratch.edges[top.edge as usize];
+        self.spend(1, edge.span)?;
         if edge.to == NONE {
           continue;
         }
@@ -825,14 +968,14 @@ where
       let edges = self.scratch.operations[index].edges;
       for slot in edges.start()..edges.end() {
         let to = self.scratch.edges[slot as usize].to;
-        self.mark_reachable(to);
+        self.mark_reachable(to)?;
       }
     }
     while let Some(frame) = self.scratch.graph.pop() {
       let edges = self.scratch.fragments[frame.fragment as usize].edges;
       for slot in edges.start()..edges.end() {
         let to = self.scratch.edges[slot as usize].to;
-        self.mark_reachable(to);
+        self.mark_reachable(to)?;
       }
     }
 
@@ -855,11 +998,20 @@ where
   }
 
   /// Marks a fragment and every same-named definition reachable, queueing the newly marked.
-  fn mark_reachable(&mut self, ordinal: u32) {
+  ///
+  /// The whole group, not one member, because reachability propagates across a duplicated name —
+  /// which is also the quadratic here: `E` spreads of one name shared by `G` definitions walk
+  /// `E · G` members off `O(E + G)` of syntax. 5.5.1.1 has already reported the duplication, but
+  /// the walk still happens, so it is charged.
+  fn mark_reachable(&mut self, ordinal: u32) -> ControlFlow<()> {
     if ordinal == NONE {
-      return;
+      return ControlFlow::Continue(());
     }
     let group = self.scratch.fragments[ordinal as usize].group;
+    self.spend(
+      group.end().saturating_sub(group.start()),
+      self.scratch.fragments[ordinal as usize].span,
+    )?;
     for slot in group.start()..group.end() {
       let member = self.scratch.order[slot as usize];
       if !set_bit(&mut self.scratch.reachable, member) {
@@ -869,6 +1021,7 @@ where
         });
       }
     }
+    ControlFlow::Continue(())
   }
 
   // -- 5. subscriptions ---------------------------------------------------------------------------
@@ -927,6 +1080,10 @@ where
       if let Some(top) = self.scratch.roots.last_mut() {
         top.cursor += 1;
       }
+      // The same shape as the per-operation walk, one rule narrower: this collection restarts for
+      // every subscription operation, so `O` subscriptions over one shared fragment of `S`
+      // selections is `O · S` from `O + S` of syntax.
+      self.spend(1, *selection.as_span())?;
 
       // "{selection} must not provide the `@skip`/`@include` directive" — the whole reason this
       // collection exists is that it has no runtime variables to evaluate them with.
@@ -1059,6 +1216,10 @@ where
 
       self.check_variables_used()?;
 
+      // The index is a persistent prefix of `keys` for exactly the length of this operation. Every
+      // other user of the buffer pushes at its current length and truncates back, so it survives
+      // the walk; this is where it stops.
+      self.scratch.keys.truncate(self.variable_base as usize);
       self.variables = &[];
       self.in_operation = false;
     }
@@ -1114,19 +1275,43 @@ where
     let definitions = self.variables;
     reset_bits(&mut self.scratch.used, definitions.len());
 
-    // 5.8.1 — one type per variable name, per operation.
+    // The operation's variable-name index, built once and read by every usage.
+    //
+    // It replaces the scan over *every* definition that each usage used to run: `U` usages against
+    // `V` definitions was `U · V` name comparisons before any ledger was consulted, and 4,000 of
+    // each measured 60 ms off 250 KB of syntax, against 0.33 ms for the same declarations with one
+    // usage. al8n/smear#198.
+    //
+    // Ordinals sorted by name with ties broken on the ordinal — the order draft 5.8.1 already
+    // needed, so this is one sort where there were two. **The tie-break is what keeps the marking
+    // semantics exactly as they were.** A name's definitions form a contiguous run ordered by
+    // ordinal, so the run's first element is the lowest-numbered definition of that name — the one
+    // a usage resolves against — and the run entire is what gets marked used. Every definition of
+    // a duplicated name is marked, not only the first: that duplication is 5.8.1's business, and
+    // calling the copy "never used" as well would report one mistake twice.
+    //
+    // Built whether or not 5.8.1 is enabled, and that is not a rule being evaluated when it is
+    // off: the marks feed 5.8.4 and the lookup feeds 5.8.3 and 5.8.5, and a binary search over
+    // this index is cheaper than the linear scan it replaces in every rule set, empty ones
+    // included.
+    let base = self.scratch.keys.len();
+    self.variable_base = base as u32;
+    for (index, described) in definitions.iter().enumerate() {
+      let variable = described.node().variable();
+      self.spend(units(name_bytes(variable.name()).len()), *variable.span())?;
+      self.scratch.keys.push(index as u32);
+    }
+    let end = self.scratch.keys.len();
+    self.scratch.keys[base..end].sort_unstable_by(|a, b| {
+      let left = name_bytes(definitions[*a as usize].node().variable().name());
+      let right = name_bytes(definitions[*b as usize].node().variable().name());
+      left.cmp(right).then(a.cmp(b))
+    });
+
+    // 5.8.1 — one type per variable name, per operation, off the adjacent pairs of that index.
     if self.on(Rule::VariableUniqueness) {
-      let base = self.scratch.keys.len();
-      for index in 0..definitions.len() {
-        self.scratch.keys.push(index as u32);
-      }
-      self.scratch.keys[base..].sort_unstable_by(|a, b| {
-        let left = name_bytes(definitions[*a as usize].node().variable().name());
-        let right = name_bytes(definitions[*b as usize].node().variable().name());
-        left.cmp(right).then(a.cmp(b))
-      });
       let mut slot = base + 1;
-      while slot < self.scratch.keys.len() {
+      while slot < end {
         let earlier = self.scratch.keys[slot - 1].min(self.scratch.keys[slot]);
         let later = self.scratch.keys[slot - 1].max(self.scratch.keys[slot]);
         let first = definitions[earlier as usize].node().variable();
@@ -1139,7 +1324,6 @@ where
         }
         slot += 1;
       }
-      self.scratch.keys.truncate(base);
     }
 
     for described in definitions {

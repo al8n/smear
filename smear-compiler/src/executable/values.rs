@@ -14,6 +14,7 @@ use smear_parser::graphql::ast::VariableValue;
 use super::{
   Diagnostic, Rule, TypeId, Validator,
   nodes::{ArgumentLike, DirectiveLike, ObjectFieldLike, ValueLike, name_bytes},
+  units,
 };
 use crate::{
   diagnostic::Context,
@@ -89,6 +90,7 @@ where
 
     for directive in directives {
       let name = directive.directive_name();
+      self.spend_name(name)?;
       let definition = self
         .schema
         .sym(name_bytes(name))
@@ -222,6 +224,7 @@ where
 
     for argument in arguments {
       let name = argument.argument_name();
+      self.spend_name(name)?;
       let sym = self.schema.sym(name_bytes(name));
       let definition = match (definitions, sym) {
         (Some(group), Some(sym)) => self.schema.input(group, sym).copied(),
@@ -271,15 +274,27 @@ where
     }
 
     // 5.4.3's presence half.
+    //
+    // A cross product, and the only one in this file whose factors are not both the document's:
+    // every *declared* required argument rescans every *written* one, so a field position costs
+    // `declared · written` name resolutions and a document repeating that position pays it again
+    // each time. `declared` is the schema's and bounded by it; `written` and the position count
+    // are the client's. It is charged per scan, before the scan, for the third factor's sake.
     if let Some(group) = definitions
       && check
       && self.on(Rule::RequiredArguments)
     {
-      let schema = self.schema;
-      for definition in schema.inputs(group) {
+      let written: u32 = arguments
+        .iter()
+        .map(|argument| units(name_bytes(argument.argument_name()).len()))
+        .fold(0u32, u32::saturating_add);
+      for index in 0..self.schema.inputs(group).len() {
+        let definition = self.schema.inputs(group)[index];
         if !definition.is_required() {
           continue;
         }
+        self.spend(written, blame)?;
+        let schema = self.schema;
         let supplied = arguments.iter().any(|argument| {
           schema.sym(name_bytes(argument.argument_name())) == Some(definition.name())
         });
@@ -339,6 +354,10 @@ where
       }
       self.scratch.values[depth - 1].cursor += 1;
       let index = frame.cursor;
+      // One per literal examined. A literal's nesting and breadth are the document's, and this
+      // walk runs once per position the value sits in — which for a fragment shared by `O`
+      // operations is `O` times.
+      self.spend(1, root.value_span())?;
 
       let next = match frame.level {
         ValueLevel::List => {
@@ -356,6 +375,7 @@ where
             continue;
           };
           let name = field.field_name();
+          self.spend_name(name)?;
           let definition = if frame.object == NONE {
             None
           } else {
@@ -576,13 +596,21 @@ where
       return ControlFlow::Continue(());
     }
 
-    // 5.6.4 — every required field is supplied.
+    // 5.6.4 — every required field is supplied. The same cross product 5.4.3's presence half is,
+    // and charged the same way and for the same reason.
     if self.on(Rule::InputObjectRequiredFields) {
-      let schema = self.schema;
-      for field_definition in schema.input_fields_of(object) {
+      let written: u32 = fields
+        .iter()
+        .map(|field| units(name_bytes(field.field_name()).len()))
+        .fold(0u32, u32::saturating_add);
+      let count = self.schema.input_fields_of(object).len();
+      for index in 0..count {
+        let field_definition = self.schema.input_fields_of(object)[index];
         if !field_definition.is_required() {
           continue;
         }
+        self.spend(written, value.value_span())?;
+        let schema = self.schema;
         let supplied = fields
           .iter()
           .any(|field| schema.sym(name_bytes(field.field_name())) == Some(field_definition.name()));
@@ -671,16 +699,46 @@ where
     }
     let name = variable.name();
     let bytes = name_bytes(name);
-    // Every definition of the name is marked used, not only the first. A duplicated variable is
-    // 5.8.1's business; calling the copy "never used" as well would report one mistake twice.
+    self.spend_name(name)?;
+
+    // The operation's variable-name index, built once by `check_variable_definitions`: ordinals
+    // sorted by name, ties broken on the ordinal. This used to be a scan over *every* definition
+    // at *every* usage — `U · V` name comparisons, quadratic in an operation's own size and
+    // outside any ledger.
+    //
+    // Two partition points rather than a `binary_search`, because what the rules need is the run's
+    // **bounds** and not a member of it: a `binary_search` over duplicates lands wherever it
+    // likes. The run is contiguous and ordered by ordinal, so `lo` is the lowest-numbered
+    // definition of the name — the one the scan's `first.get_or_insert` picked, and the one the
+    // type check below reads — and `lo..hi` is every definition of it, which is what gets marked.
+    // Every one of them, not only the first: a duplicated variable is 5.8.1's business, and
+    // calling the copy "never used" as well would report one mistake twice.
     let variables = self.variables;
-    let mut first = None;
-    for (index, definition) in variables.iter().enumerate() {
-      if name_bytes(definition.node().variable().name()) == bytes {
-        first.get_or_insert(index);
-        set_bit(&mut self.scratch.used, index as u32);
+    let base = self.variable_base as usize;
+    let end = base + variables.len();
+    let (lo, hi) = {
+      let index = &self.scratch.keys[base..end];
+      let named = |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
+      (
+        index.partition_point(|ordinal| named(ordinal) < bytes),
+        index.partition_point(|ordinal| named(ordinal) <= bytes),
+      )
+    };
+    // Charged before the marking, because the marking is the one part of this that a document
+    // still chooses the length of: `V` definitions of one name against `U` usages of it is the
+    // product the scan was, surviving in the run.
+    self.spend((hi - lo) as u32, *name.as_span())?;
+    let first = if lo < hi {
+      let scratch = &mut *self.scratch;
+      for slot in lo..hi {
+        let ordinal = scratch.keys[base + slot];
+        set_bit(&mut scratch.used, ordinal);
       }
-    }
+      Some(scratch.keys[base + lo] as usize)
+    } else {
+      None
+    };
+
     let Some(index) = first else {
       if self.on(Rule::AllVariableUsesDefined) {
         return self.report_name(Rule::AllVariableUsesDefined, name, Context::None);

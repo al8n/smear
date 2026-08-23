@@ -122,8 +122,12 @@ const DIAGNOSTIC_FLOOR: usize = 297;
 
 /// The smallest number of distinct rules the compared diagnostics are allowed to reach.
 ///
-/// The corpus holds one entry per rule and `validator_rules.rs` asserts that, so anything below
-/// `Rule::ALL.len()` means the differential lost coverage the liveness floor still claims.
+/// The corpus holds one entry per rule that HAS one, and `validator_rules.rs` asserts that against
+/// its `UNFIREABLE` excuse list, so anything below `Rule::ALL.len() - UNFIREABLE.len()` means the
+/// differential lost coverage the liveness floor still claims. The one excused rule is
+/// `ValidationWorkBudget`, an absolute ceiling no three-line fixture can reach; `validator_work.rs`
+/// covers it through the syntactic door only, which is a real gap in this differential and is
+/// recorded as one.
 const RULE_FLOOR: usize = 31;
 
 /// The smallest number of compared diagnostics whose span sits at a **discriminating** site —

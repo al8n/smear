@@ -72,6 +72,15 @@ where
       if let Some(top) = self.scratch.frames.last_mut() {
         top.cursor += 1;
       }
+      // One per selection examined.
+      //
+      // This is the walk that restarts for every operation, and `Frame::CHECK` does not make the
+      // repeats free: it suppresses a definition's repeated *diagnostics*, not its traversal, its
+      // field resolution, its argument and directive processing or the value walk under them. `O`
+      // operations spreading one fragment of `S` selections therefore do `O · S` of work off
+      // `O + S` of syntax, and until this charge existed nothing counted it — the merge engine's
+      // budget is the only other one, and it runs *after* this walk has already finished spending.
+      self.spend(1, *selection.as_span())?;
 
       match selection {
         Selection::Field(field) => {
@@ -115,6 +124,7 @@ where
   fn check_field(&mut self, field: &'d Field<S>, frame: Frame) -> ControlFlow<(), u32> {
     let check = frame.flags & Frame::CHECK != 0;
     let name = field.name();
+    self.spend_name(name)?;
 
     let definition = match frame.type_id() {
       Some(parent) => {
@@ -175,6 +185,7 @@ where
 
     if let Some(condition) = inline.type_condition() {
       let name = condition.name();
+      self.spend_name(name)?;
       let resolved = if check {
         self.check_type_condition(name)?
       } else {
@@ -213,6 +224,7 @@ where
     let check = frame.flags & Frame::CHECK != 0;
     let document = self.document;
     let name = spread.name();
+    self.spend_name(name)?;
 
     if let Some(directives) = spread.directives() {
       self.check_directives(

@@ -156,6 +156,28 @@ pub enum Rule {
   /// The companion to [`Rule::MergeDepthBudget`], and the one that actually caps the worst case:
   /// depth alone does not bound draft 5.3.2, breadth times fragment reuse does.
   MergeWorkBudget,
+  /// Validation outside draft 5.3.2 reached this crate's absolute work ceiling.
+  ///
+  /// The other two bounds are the merge engine's, and the merge engine runs **last**. Everything
+  /// before it — the prep sweep, the fragment graph, the subscription root collection, and the one
+  /// selection walk per operation that carries every per-node rule — used to run with no ledger at
+  /// all, so a document whose *syntax* is `O(n)` could make those passes do `O(n^2)` and spend it
+  /// before draft 5.3.2 was ever consulted. Neither merge knob sees that, and not because a rule
+  /// set switched them off: measured, a 129 KB document of 3,200 operations spreading one
+  /// 3,200-field fragment spent 189 ms in the walk with [`Rule::MergeWorkBudget`] enabled, and
+  /// tripped it afterwards on work that had already been done.
+  ///
+  /// Unlike the merge bounds this one has **no knob**. Its unit is one per node examined plus one
+  /// per eight bytes of any document-chosen name the pass reads, and a caller cannot be asked to
+  /// size a unit this crate may re-price; the ceiling is set where no honest document reaches it
+  /// and is raised, if ever, by this crate. al8n/smear#198.
+  ///
+  /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *diagnostic*, not the refusal:
+  /// the verdict is still `Err` with
+  /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set and nothing emitted. A
+  /// validator that abandoned a pass and then answered `Ok` would be spelling giving up the same
+  /// way it spells finishing.
+  ValidationWorkBudget,
 }
 
 impl Rule {
@@ -195,6 +217,7 @@ impl Rule {
     Self::AllVariableUsagesAreAllowed,
     Self::MergeDepthBudget,
     Self::MergeWorkBudget,
+    Self::ValidationWorkBudget,
   ];
 
   /// Returns the rule's bit position in a [`RuleSet`].
@@ -237,6 +260,7 @@ impl Rule {
       Self::AllVariableUsagesAreAllowed => 28,
       Self::MergeDepthBudget => 29,
       Self::MergeWorkBudget => 30,
+      Self::ValidationWorkBudget => 31,
     }
   }
 
@@ -278,6 +302,9 @@ impl Rule {
       // neighbourhood and a grep for a real section number never finds them.
       Self::MergeDepthBudget => "5.3.2/depth",
       Self::MergeWorkBudget => "5.3.2/work",
+      // Not a section either, and deliberately not spelled against one: this bound is over every
+      // §5 pass that is NOT draft 5.3.2, so naming any single section would misstate its scope.
+      Self::ValidationWorkBudget => "§5/work",
     }
   }
 
@@ -316,6 +343,7 @@ impl Rule {
       Self::AllVariableUsagesAreAllowed => "All Variable Usages Are Allowed",
       Self::MergeDepthBudget => "Merge Depth Budget Exceeded",
       Self::MergeWorkBudget => "Merge Work Budget Exceeded",
+      Self::ValidationWorkBudget => "Validation Work Ceiling Exceeded",
     }
   }
 
@@ -377,6 +405,7 @@ impl Rule {
       }
       Self::MergeDepthBudget => Code::new("smear::validation::merge-depth-budget"),
       Self::MergeWorkBudget => Code::new("smear::validation::merge-work-budget"),
+      Self::ValidationWorkBudget => Code::new("smear::validation::validation-work-budget"),
     }
   }
 
@@ -419,7 +448,8 @@ impl Rule {
       | Self::AllVariablesUsed
       | Self::AllVariableUsagesAreAllowed
       | Self::MergeDepthBudget
-      | Self::MergeWorkBudget => Severity::Error,
+      | Self::MergeWorkBudget
+      | Self::ValidationWorkBudget => Severity::Error,
     }
   }
 
@@ -485,6 +515,9 @@ impl Rule {
       Self::MergeWorkBudget => Some(
         "raise `Budget::merge_work`, or refuse the document: breadth times fragment reuse is what actually bounds draft 5.3.2.",
       ),
+      Self::ValidationWorkBudget => Some(
+        "there is no knob for this one: send a smaller document, or one that does not make a shared fragment be walked once per operation.",
+      ),
       Self::OperationNameUniqueness
       | Self::ArgumentNames
       | Self::ArgumentUniqueness
@@ -537,7 +570,8 @@ impl Rule {
       | Self::AllVariablesUsed
       | Self::AllVariableUsagesAreAllowed
       | Self::MergeDepthBudget
-      | Self::MergeWorkBudget => None,
+      | Self::MergeWorkBudget
+      | Self::ValidationWorkBudget => None,
     }
   }
 }
