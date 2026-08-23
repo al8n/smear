@@ -3661,7 +3661,7 @@ fn unsubscribing_releases_the_events_values() {
   );
 }
 
-/// The saturation value is refused, so the public maximum does not restore an unbounded byte pass.
+/// The poison amount is refused, so the public maximum does not restore an unbounded byte pass.
 ///
 /// # Arithmetic, because the input is thirty-two gibibytes
 ///
@@ -3679,37 +3679,22 @@ fn unsubscribing_releases_the_events_values() {
 /// is that finding, in the sibling ledger: the byte charges that made a poison necessary were added
 /// to both, and the poison to one. al8n/smear#196.
 ///
+/// This half is the *amount*, and it is target-independent: `Visits::take` takes a `u32`, so
+/// [`u32::MAX`] can be handed to it on any platform whatever a length could produce there. The
+/// length that produces it is a separate fixture, because not every platform has one.
+///
 /// **The plant.** Delete the `work == u32::MAX` arm from `Visits::take` and the first assertion
-/// reads `true` — the saturated charge accepted, and every larger name accepted with it.
+/// reads `true` — the poison accepted, and every saturated charge accepted with it.
 #[test]
-fn the_saturated_byte_charge_is_refused_at_the_largest_limit_too() {
-  use crate::collect::{Visits, byte_units};
-
-  /// The smallest length whose `byte_units` saturates: `len / 8 + 1 > u32::MAX`.
-  const SATURATING: usize = (u32::MAX as usize) * 8;
-
-  assert_eq!(
-    byte_units(SATURATING),
-    u32::MAX,
-    "the fixture is aimed at the saturation and this length no longer reaches it"
-  );
-  assert_eq!(
-    byte_units(SATURATING * 4),
-    u32::MAX,
-    "and four times the name costs the same, which is the whole reason the value is poison rather \
-     than a quantity"
-  );
+fn the_poison_charge_is_refused_at_the_largest_limit_too() {
+  use crate::collect::Visits;
 
   // The largest budget `Limits::max_selection_visits` accepts, which is where the defect lived.
   let mut visits = Visits::new(u32::MAX);
   assert!(
-    !visits.take_bytes(SATURATING),
-    "a saturated byte charge fits `checked_sub` exactly once at this limit, and admitting it is \
-     admitting a pass whose size the ledger has stopped tracking"
-  );
-  assert!(
     !visits.take(u32::MAX),
-    "the amount is refused however it is spelled"
+    "the poison fits `checked_sub` exactly once at this limit, and admitting it is admitting a \
+     pass whose size the ledger has stopped tracking"
   );
   assert_eq!(
     visits.spent(),
@@ -3737,6 +3722,72 @@ fn the_saturated_byte_charge_is_refused_at_the_largest_limit_too() {
   let mut visits = Visits::new(10);
   assert!(!visits.take(u32::MAX));
   assert!(visits.take(10), "and the refusal left the budget intact");
+}
+
+/// The length that produces the poison, on the targets whose `usize` can hold one.
+///
+/// # Why this half carries a `cfg` and the half above does not
+///
+/// The smallest saturating length is `(u32::MAX - 1) * 8`, about thirty-four billion bytes. A
+/// 32-bit `usize` tops out at 4,294,967,295 — **eight times smaller than the shortest name that
+/// could saturate** — so on that target `byte_units` cannot return [`u32::MAX`] at all, and the
+/// constant naming the boundary does not fit the type that would have to hold it. The sibling
+/// fixture below asserts exactly that, so this is not a portability workaround: it is two
+/// platforms, each pinned against its own arithmetic.
+///
+/// Deriving the constant in a wider integer and narrowing at the call site was the alternative and
+/// would have been worse — it manufactures a `usize` the target cannot have, and pins arithmetic
+/// no 32-bit build ever performs. A vacuous claim is better stated than simulated.
+/// al8n/smear#196.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn a_saturating_length_is_refused_at_the_largest_limit_too() {
+  use crate::collect::{Visits, byte_units};
+
+  /// The smallest length whose `byte_units` saturates: `len / 8 + 1 > u32::MAX`.
+  const SATURATING: usize = (u32::MAX as usize) * 8;
+
+  assert_eq!(
+    byte_units(SATURATING),
+    u32::MAX,
+    "the fixture is aimed at the saturation and this length no longer reaches it"
+  );
+  assert_eq!(
+    byte_units(SATURATING * 4),
+    u32::MAX,
+    "and four times the name costs the same, which is the whole reason the value is poison rather \
+     than a quantity"
+  );
+
+  let mut visits = Visits::new(u32::MAX);
+  assert!(
+    !visits.take_bytes(SATURATING),
+    "a saturated byte charge fits `checked_sub` exactly once at this limit, and admitting it is \
+     admitting a pass whose size the ledger has stopped tracking"
+  );
+  assert_eq!(visits.spent(), 0, "and it spends nothing on the way out");
+}
+
+/// On a narrower target there is no saturating length to refuse, and that is the reason for the
+/// `cfg` above rather than an excuse for it.
+///
+/// `byte_units` divides by eight before it adds one, so the widest value it can return is
+/// `usize::MAX / 8 + 1`. On a 32-bit target that is 536,870,912 — an eighth of [`u32::MAX`], and
+/// two orders of magnitude below the value the poison is about. The address space is smaller than
+/// the shortest name that could saturate, so the boundary is not merely untested there: it does
+/// not exist. al8n/smear#196.
+#[cfg(not(target_pointer_width = "64"))]
+#[test]
+fn a_narrower_target_has_no_saturating_length_at_all() {
+  use crate::collect::byte_units;
+
+  assert!(
+    byte_units(usize::MAX) < u32::MAX,
+    "the whole address space charges {} units, and the poison is {}; if these ever met, the \
+     fixture above would have to run here too",
+    byte_units(usize::MAX),
+    u32::MAX
+  );
 }
 
 /// A count charge in front of a byte pass does not pay for it: the fragment name is priced.

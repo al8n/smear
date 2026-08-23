@@ -653,6 +653,13 @@ impl Names {
     // it costs — the `u32` pair this replaced could refuse, and its refusal wore the same `None`
     // the ledger's does, so a document too large for the *arena* was reported against the *budget*.
     //
+    // The addition below cannot overflow either, and at every pointer width rather than only the
+    // one this happens to be built for: `self.bytes` and `key` are two allocations that are both
+    // live at this instant, so their lengths sum to at most the address space. That is a property
+    // of the machine and not of a ceiling somebody chose — which is exactly what the `u32` pair
+    // was not, and why widening these is width-*safe* and not merely width-shaped. 32-bit is a
+    // supported target here and `cross` builds this crate for four of them.
+    //
     // The id is still a `u32`, and its narrowing cannot be reached rather than being argued not to
     // be: interning a name charges at least two units — one pass to hash it, one to copy it — and
     // `Work::take` poisons at `u32::MAX`, so no `Budget` any caller can construct admits more than
