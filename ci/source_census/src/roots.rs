@@ -53,10 +53,10 @@ use proc_macro2::{Delimiter, Spacing, TokenStream, TokenTree};
 
 /// The directory the census reads.
 ///
-/// One crate, and that is not an assumption: both functions are `pub(crate)`, which
-/// [`Report::visibility`] checks, so no file outside this crate can hold a call at all. If either
-/// ever becomes `pub`, that check fails before the caller table is consulted — the boundary this
-/// root rests on is the thing that reddens.
+/// One crate, and that is not an assumption: both functions are `pub(crate)`, and the declaration
+/// each scan finds carries the spelling in [`Hit::visibility`], which is checked. So no file
+/// outside this crate can hold a call at all; if either ever becomes `pub`, that check fails
+/// beside the caller table — the boundary this root rests on is itself a thing that reddens.
 const ROOT: &str = "smear-parser/src";
 
 /// The two functions whose caller set is pinned.
