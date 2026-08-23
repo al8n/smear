@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use tokora::{Lexer, SimpleSpan, state::recursion_tracker::RecursionLimitExceeded};
 
 use crate::{
-  LitComplexInlineStr, LitInlineStr, LitPlainStr,
+  LitComplexInlineStr, LitInlineStr, LitPlainInlineStr,
   graphql::{
     error::{DecimalError, FloatError, LexerErrorData, LexerErrors},
     syntactic::{SyntacticLexer, SyntacticToken},
@@ -1323,14 +1323,14 @@ where
   let input: &[(&str, Token, usize)] = &[
     (
       r#""""#,
-      Token::from_inline_string_literal(LitPlainStr::new(r#""""#).into()),
+      Token::from_inline_string_literal(LitPlainInlineStr::new(r#""""#).into()),
       2,
     ),
     {
       const CASE: &str = r#""hello""#;
       (
         CASE,
-        Token::from_inline_string_literal(LitPlainStr::new(CASE).into()),
+        Token::from_inline_string_literal(LitPlainInlineStr::new(CASE).into()),
         CASE.len(),
       )
     },
@@ -1338,7 +1338,7 @@ where
       const CASE: &str = r#""hello world""#;
       (
         CASE,
-        Token::from_inline_string_literal(LitPlainStr::new(CASE).into()),
+        Token::from_inline_string_literal(LitPlainInlineStr::new(CASE).into()),
         CASE.len(),
       )
     },
@@ -1347,7 +1347,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(LitPlainStr::new(CASE).into()),
+        Token::from_inline_string_literal(LitPlainInlineStr::new(CASE).into()),
         CASE.len(),
       )
     },

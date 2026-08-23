@@ -5,7 +5,7 @@ use crate::limits::SyntacticLimits;
 use super::*;
 
 use crate::{
-  LitInlineStr, LitPlainStr,
+  LitInlineStr, LitPlainBlockStr, LitPlainInlineStr,
   graphql::{
     syntactic::SyntacticLexer,
     tests::{self, TestToken},
@@ -215,8 +215,8 @@ fn capability_traits_classify_tokens() {
   assert!(SyntacticToken::<&str>::LitInt("1").is_integer_literal());
   assert!(SyntacticToken::<&str>::LitFloat("1.5").is_float_literal());
 
-  let inline = SyntacticToken::LitInlineStr(LitPlainStr::new("\"hi\"").into());
-  let block = SyntacticToken::LitBlockStr(LitPlainStr::new("\"\"\"b\"\"\"").into());
+  let inline = SyntacticToken::LitInlineStr(LitPlainInlineStr::new("\"hi\"").into());
+  let block = SyntacticToken::LitBlockStr(LitPlainBlockStr::new("\"\"\"b\"\"\"").into());
   assert!(inline.is_inline_string_literal());
   assert!(!inline.is_multiline_string_literal());
   assert!(block.is_multiline_string_literal());
@@ -278,7 +278,7 @@ fn syntactic_token_kind_census() {
     Identifier => SyntacticToken::Identifier("x"),
     Float => SyntacticToken::LitFloat("1.0"),
     Int => SyntacticToken::LitInt("1"),
-    InlineString => SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
-    BlockString => SyntacticToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+    InlineString => SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new("\"s\""))),
+    BlockString => SyntacticToken::LitBlockStr(LitBlockStr::Plain(LitPlainBlockStr::new("\"\"\"b\"\"\""))),
   }
 }

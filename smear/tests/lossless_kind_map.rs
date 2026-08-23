@@ -9,12 +9,13 @@ use tokora::Lexer as _;
 /// Lex `src` and hand back its first token.
 ///
 /// **Why two of the 27 cases are not hand-built.** `LosslessToken::LitInlineStr` carries a
-/// `LitInlineStr<S>` and `LitBlockStr` a `LitBlockStr<S>`; both wrap a `LitPlainStr<S>` whose
-/// only constructor is `pub(crate)` **to `smear-lexer`** (`string_lexer/mod.rs:60`, the
-/// `variant_type!` macro). From another crate there is no door — the two `From` impls need a
-/// `LitPlainStr` to start from, and `TryFrom<LitInlineStr<&[u8]>>` needs a `LitInlineStr`. So the
-/// lexer is the constructor. Each call site asserts the variant it got back, which is what keeps
-/// this from silently testing a token other than the one it names.
+/// `LitInlineStr<S>` and `LitBlockStr` a `LitBlockStr<S>`; each wraps its own kind-tagged plain
+/// carrier — `LitPlainInlineStr<S>` and `LitPlainBlockStr<S>`, the two spellings of
+/// `LitPlainStr<S, Kind>` — whose only constructor is `pub(crate)` **to `smear-lexer`** (the
+/// `variant_type!` macro). From another crate there is no door — the two `From` impls need a plain
+/// carrier to start from, and `TryFrom<LitInlineStr<&[u8]>>` needs a `LitInlineStr`. So the lexer
+/// is the constructor. Each call site asserts the variant it got back, which is what keeps this
+/// from silently testing a token other than the one it names.
 fn lex_one(src: &'static str) -> T<&'static str> {
   let mut lexer = LosslessLexer::<'static, &'static str>::new(src);
   let Some(Ok(token)) = lexer.lex() else {
