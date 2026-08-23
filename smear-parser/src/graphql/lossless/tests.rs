@@ -315,7 +315,7 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
 /// tells to write a `MaybeTerminal` arm and the caller no in-tree parse is.
 ///
 /// So the cells drive [`root_turn`](crate::lossless::depth::root_turn) directly, which is
-/// public and is now the one place the five roots' arm lives.
+/// crate-private and is now the one place the six roots' arm lives.
 ///
 /// # The three cells, and what each one is alone on
 ///

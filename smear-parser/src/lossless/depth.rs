@@ -645,7 +645,7 @@ impl RootStop {
 
 /// Runs one document-root entry and says what its outcome means for the document.
 ///
-/// This is the one place the six root loops' catch arm lives. Each of them writes
+/// This is the one place the six root loops' catch arm lives. Five of them write
 ///
 /// ```text
 /// match depth::root_turn(inp, stop, one_entry::<Src, Ctx>) {
@@ -655,7 +655,8 @@ impl RootStop {
 /// }
 /// ```
 ///
-/// and nothing else.
+/// and nothing else. The sixth propagates both failure arms instead of resynchronising on the
+/// third — a dialect's own divergence, recorded where that root is defined (smear issue #168).
 ///
 /// # `stop` is written here, and only here
 ///
