@@ -292,3 +292,144 @@ fn the_lexer_already_rejects_what_only_from_str_radix_would_accept() {
     );
   }
 }
+
+/// The three ordinarily lexed values that cost [`LitInlineStr`] and [`LitBlockStr`] their ordering
+/// against a bare `str`/`[u8]`.
+///
+/// Derived `Ord` on an enum ranks the discriminant ahead of the fields, so `Plain < Complex`
+/// whatever the bytes say, while a cross-type impl answers on the source alone. Two relations, and
+/// [`PartialOrd`]'s requirements hold *across* implementations — so with `PartialOrd<str>` present
+/// a third value fell between them: `plain "z" < complex "a\n"` by discriminant, `complex "a\n" <
+/// "\"m\""` by bytes, and `plain "z" > "\"m\""` by bytes.
+///
+/// The impls are gone, so the break is no longer spellable — the `compile_fail` fences on the two
+/// enums pin that. What this pins is the half that remains reachable and would bring the question
+/// back: narrowing either enum's own `Ord` to source order is the other way to make the two
+/// relations agree, and it is the one that makes `Plain` and `Complex` over the same bytes compare
+/// equal in every `BTreeMap` and `sort`.
+#[test]
+fn a_literal_enum_orders_by_variant_before_bytes() {
+  let LitStr::Inline(plain) = LitStr::try_from("\"z\"").unwrap() else {
+    unreachable!()
+  };
+  let LitStr::Inline(complex) = LitStr::try_from("\"a\\n\"").unwrap() else {
+    unreachable!()
+  };
+  assert!(matches!(plain, LitInlineStr::Plain(_)));
+  assert!(matches!(complex, LitInlineStr::Complex(_)));
+  assert!(
+    plain < complex,
+    "derived `Ord` ranks `Plain` ahead of `Complex`"
+  );
+  assert!(
+    plain.as_str() > complex.as_str(),
+    "and the sources say the reverse, which is the disagreement"
+  );
+
+  let LitStr::Block(plain) = LitStr::try_from("\"\"\"z\"\"\"").unwrap() else {
+    unreachable!()
+  };
+  let LitStr::Block(complex) = LitStr::try_from("\"\"\"a\r\n\"\"\"").unwrap() else {
+    unreachable!()
+  };
+  assert!(matches!(plain, LitBlockStr::Plain(_)));
+  assert!(matches!(complex, LitBlockStr::Complex(_)));
+  assert!(
+    plain < complex,
+    "derived `Ord` ranks `Plain` ahead of `Complex`"
+  );
+  assert!(
+    plain.as_str() > complex.as_str(),
+    "and the sources say the reverse, which is the disagreement"
+  );
+}
+
+/// Walks every mixed triple over `carriers` and `probes`, in each of the three positions the probe
+/// can take, and fails on the first one that is not transitive.
+fn assert_mixed_transitive<C, P>(carriers: &[C], probes: &[&P])
+where
+  C: PartialOrd<C> + PartialOrd<P> + core::fmt::Debug,
+  P: ?Sized + PartialOrd<C> + core::fmt::Debug,
+{
+  for a in carriers {
+    for b in carriers {
+      for probe in probes {
+        let c: &P = probe;
+
+        if a < b && PartialOrd::lt(b, c) {
+          assert!(
+            PartialOrd::lt(a, c),
+            "{a:?} < {b:?} < {c:?}, but not {a:?} < {c:?}"
+          );
+        }
+        if PartialOrd::lt(a, c) && PartialOrd::lt(c, b) {
+          assert!(a < b, "{a:?} < {c:?} < {b:?}, but not {a:?} < {b:?}");
+        }
+        if PartialOrd::lt(c, a) && a < b {
+          assert!(
+            PartialOrd::lt(c, b),
+            "{c:?} < {a:?} < {b:?}, but not {c:?} < {b:?}"
+          );
+        }
+      }
+    }
+  }
+}
+
+/// Every mixed-type ordering a literal carrier still offers is part of one order.
+///
+/// The two complex carriers keep `PartialOrd<str>` and `PartialOrd<[u8]>` because their own
+/// ordering *is* source order: [`variant_type!`](super::variant_type) declares `source` first, so
+/// derived `Ord` compares it first and breaks ties on line facts the lexer computes from that same
+/// source — no two carriers it mints reach that tie-break with different answers. This walks the
+/// triples rather than asserting the layout, because the layout is the reason and the transitivity
+/// is the promise. Probes are chosen to fall on both sides of, and exactly on, the sources below.
+#[test]
+fn mixed_type_ordering_is_transitive() {
+  const COMPLEX_INLINE: [&str; 4] = [r#""a\n""#, r#""m\n""#, r#""z\n""#, r#""z\t\t""#];
+  const COMPLEX_BLOCK: [&str; 3] = [
+    "\"\"\"a\r\n\"\"\"",
+    "\"\"\"m\r\n\"\"\"",
+    "\"\"\"z\r\n\"\"\"",
+  ];
+  const STR_PROBES: [&str; 6] = ["", "\"", r#""a\n""#, "\"m\"", r#""z\n""#, "~"];
+
+  let inline_str: Vec<_> = COMPLEX_INLINE
+    .iter()
+    .map(|literal| match LitStr::try_from(*literal) {
+      Ok(LitStr::Inline(LitInlineStr::Complex(c))) => c,
+      other => panic!("`{literal}` is a complex inline literal: {other:?}"),
+    })
+    .collect();
+  let block_str: Vec<_> = COMPLEX_BLOCK
+    .iter()
+    .map(|literal| match LitStr::try_from(*literal) {
+      Ok(LitStr::Block(LitBlockStr::Complex(c))) => c,
+      other => panic!("`{literal}` is a complex block literal: {other:?}"),
+    })
+    .collect();
+
+  assert_mixed_transitive(&inline_str, &STR_PROBES);
+  assert_mixed_transitive(&block_str, &STR_PROBES);
+
+  // Lexed again through the byte door rather than converted, so the `[u8]` half is the byte
+  // lexer's own carriers and not a reslice of the `str` ones.
+  let inline_bytes: Vec<_> = COMPLEX_INLINE
+    .iter()
+    .map(|literal| match LitStr::try_from(literal.as_bytes()) {
+      Ok(LitStr::Inline(LitInlineStr::Complex(c))) => c,
+      other => panic!("`{literal}` is a complex inline literal: {other:?}"),
+    })
+    .collect();
+  let block_bytes: Vec<_> = COMPLEX_BLOCK
+    .iter()
+    .map(|literal| match LitStr::try_from(literal.as_bytes()) {
+      Ok(LitStr::Block(LitBlockStr::Complex(c))) => c,
+      other => panic!("`{literal}` is a complex block literal: {other:?}"),
+    })
+    .collect();
+  let byte_probes: Vec<&[u8]> = STR_PROBES.iter().map(|p| p.as_bytes()).collect();
+
+  assert_mixed_transitive(&inline_bytes, &byte_probes);
+  assert_mixed_transitive(&block_bytes, &byte_probes);
+}

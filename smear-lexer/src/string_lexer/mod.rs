@@ -162,6 +162,11 @@ macro_rules! variant_type {
   }
 }
 
+/// The doors every literal carrier has over the bare `str`/`[u8]`: equality both ways round, and
+/// the three one-way ways to reach the source spelling.
+///
+/// Cross-type **ordering** is deliberately not among them — it is [`impl_source_ordering`], and
+/// only two of the four carriers may have it. See that macro for which and why.
 macro_rules! impl_common_traits {
   ($name:ident::<&$lt:lifetime $ty:ty>::$fn:ident) => {
     impl PartialEq<$ty> for $name<&'_ $ty> {
@@ -175,20 +180,6 @@ macro_rules! impl_common_traits {
       #[inline(always)]
       fn eq(&self, other: &$name<&'_ $ty>) -> bool {
         other.eq(self)
-      }
-    }
-
-    impl PartialOrd<$ty> for $name<&'_ $ty> {
-      #[inline(always)]
-      fn partial_cmp(&self, other: &$ty) -> Option<core::cmp::Ordering> {
-        self.$fn().partial_cmp(other)
-      }
-    }
-
-    impl PartialOrd<$name<&'_ $ty>> for $ty {
-      #[inline(always)]
-      fn partial_cmp(&self, other: &$name<&'_ $ty>) -> Option<core::cmp::Ordering> {
-        other.partial_cmp(self).map(core::cmp::Ordering::reverse)
       }
     }
 
@@ -227,6 +218,55 @@ macro_rules! impl_common_traits {
       #[inline(always)]
       fn from(s: $name<&$lt $ty>) -> Self {
         s.$fn()
+      }
+    }
+  };
+}
+
+/// Ordering against the bare `str`/`[u8]`, both ways round, for the carriers whose **own**
+/// ordering is that same source order.
+///
+/// # Two of the four, and the third value is what decides it
+///
+/// `PartialOrd`'s requirements hold *across* implementations: with `A: PartialOrd<B>`,
+/// `B: PartialOrd<C>` and `A: PartialOrd<C>` all in scope, `a < b` and `b < c` must give `a < c`.
+/// A cross-type impl therefore cannot read the source alone while the type's own `Ord` reads
+/// something else — the two are then different relations, and no third value has to respect both.
+///
+/// A **struct** carrier is safe: `variant_type!` declares `source` first, so derived `Ord`
+/// compares the source first and breaks ties on the line facts — and the line facts are computed
+/// from the source, so no two carriers the lexer mints can reach that tie-break with different
+/// answers. Source order and derived order are one relation.
+///
+/// The **enums** are not, and this is the same disagreement [`LitInlineStr`] and [`LitBlockStr`]
+/// refuse `Borrow` over, one trait along. Derived `Ord` on an enum ranks the discriminant ahead of
+/// the fields, so `Plain < Complex` whatever the bytes say, while a cross-type impl would answer
+/// on bytes. Three ordinarily lexed values witnessed it, and none of them is forged:
+///
+/// | pair | route | answer |
+/// |---|---|---|
+/// | plain `"z"` vs complex `"a\n"` | derived, discriminant first | `Less` |
+/// | complex `"a\n"` vs the `str` `"\"m\""` | cross-type, source bytes | `Less` |
+/// | plain `"z"` vs the `str` `"\"m\""` | cross-type, source bytes | **`Greater`** |
+///
+/// Narrowing the enums' own `Ord` to source order was the other way to close it, and it is the
+/// way `db0ea56` already refused for `Borrow`: `Ord` has to stay consistent with `Eq`, so `Plain`
+/// and `Complex` carrying the same bytes — two different claims about them — would compare equal
+/// in every `BTreeMap` and `sort` over these. Removing the cross-type impl is the direction that
+/// costs a caller only `lit.as_str().cmp(other)`, which is what it meant anyway.
+macro_rules! impl_source_ordering {
+  ($name:ident::<&$lt:lifetime $ty:ty>::$fn:ident) => {
+    impl PartialOrd<$ty> for $name<&'_ $ty> {
+      #[inline(always)]
+      fn partial_cmp(&self, other: &$ty) -> Option<core::cmp::Ordering> {
+        self.$fn().partial_cmp(other)
+      }
+    }
+
+    impl PartialOrd<$name<&'_ $ty>> for $ty {
+      #[inline(always)]
+      fn partial_cmp(&self, other: &$name<&'_ $ty>) -> Option<core::cmp::Ordering> {
+        other.partial_cmp(self).map(core::cmp::Ordering::reverse)
       }
     }
   };

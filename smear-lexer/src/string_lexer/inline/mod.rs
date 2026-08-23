@@ -78,8 +78,54 @@ where
 /// back the source spelling, so a caller who wants that key writes it: `map.get(lit.as_str())` on
 /// a `HashMap<&str, _>`.
 ///
-/// Per this repository's convention the error code is checked only under a nightly
-/// `cargo test --doc`; on stable the assertion is that the snippet does not compile at all.
+/// # Not ordered against `str` or `[u8]` either
+///
+/// The same disagreement, one trait along, and this one needs no map to show itself.
+/// [`PartialOrd`]'s requirements hold **across** implementations — `a < b` and `b < c` drawn from
+/// two different impls still have to give `a < c` — so an impl reading the source alone cannot sit
+/// beside a derived `Ord` that reads something else first. This one does: derived `Ord` on an enum
+/// ranks the discriminant ahead of the fields, so `Plain < Complex` before a byte is compared.
+/// Three ordinarily lexed values witnessed the break, none of them forged:
+///
+/// | pair | route | answer |
+/// |---|---|---|
+/// | plain `"z"` vs complex `"a\n"` | derived, discriminant first | `Less` |
+/// | complex `"a\n"` vs the `str` `"\"m\""` | cross-type, source bytes | `Less` |
+/// | plain `"z"` vs the `str` `"\"m\""` | cross-type, source bytes | **`Greater`** |
+///
+/// The third value is any spelling that sorts between the two sources, and `"\"m\""` is one — the
+/// probe carries the literal's `"` delimiters because the source does. Narrowing the enum's own
+/// `Ord` to source order was the other way to close it, and it is the way this type has already
+/// refused once: `Ord` must stay consistent with `Eq`, so `Plain` and `Complex` carrying the same
+/// bytes — two different claims about them — would compare equal in every `BTreeMap` and `sort`.
+///
+/// So this type and [`LitBlockStr`](super::LitBlockStr) have no `PartialOrd<str>` and no
+/// `PartialOrd<[u8]>`. The refusal arrives the same way the `Borrow` one does, as a type mismatch
+/// against the derived `PartialOrd<Self>`:
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::LitStr;
+///
+/// let LitStr::Inline(lit) = LitStr::try_from("\"z\"").unwrap() else { unreachable!() };
+/// let _ = lit < *"\"m\"";
+/// ```
+///
+/// ```compile_fail,E0308
+/// use smear_lexer::LitStr;
+///
+/// let LitStr::Inline(lit) = LitStr::try_from(b"\"z\"".as_slice()).unwrap() else {
+///   unreachable!()
+/// };
+/// let _ = lit < *b"\"m\"".as_slice();
+/// ```
+///
+/// The complex carriers keep theirs: `variant_type!` declares `source` first, so their derived
+/// `Ord` compares the source first and breaks ties on line facts computed from that same source —
+/// one relation, with no gap for a third value to fall into. A caller who wants source order over
+/// a whole literal writes it, and says so: `lit.as_str().cmp(other)`.
+///
+/// Per this repository's convention the error codes are checked only under a nightly
+/// `cargo test --doc`; on stable the assertion is that the snippets do not compile at all.
 #[derive(
   Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant, Unwrap, TryUnwrap,
 )]
@@ -279,6 +325,12 @@ impl_common_traits!(LitInlineStr::<&'a str>::as_str);
 impl_common_traits!(LitInlineStr::<&'a [u8]>::as_bytes);
 impl_common_traits!(LitComplexInlineStr::<&'a str>::as_str);
 impl_common_traits!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
+
+// The complex carrier only. `LitInlineStr` is an enum, and its derived `Ord` ranks `Plain` ahead
+// of `Complex` before it reads a byte, so a source-ordered impl beside it would not be part of the
+// same order — see `impl_source_ordering`.
+impl_source_ordering!(LitComplexInlineStr::<&'a str>::as_str);
+impl_source_ordering!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
 
 /// Applies draft §2.9.1's escapes to an inline literal's body.
 ///
