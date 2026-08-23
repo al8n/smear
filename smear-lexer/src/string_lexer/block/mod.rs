@@ -200,8 +200,8 @@ fn block_body(raw: &str) -> &str {
 /// # Value, not spelling
 ///
 /// The same split as [`LitInlineStr`](super::LitInlineStr)'s conversion: `as_str`,
-/// [`Deref`](core::ops::Deref), [`AsRef`], [`Borrow`](core::borrow::Borrow) and
-/// `From<LitBlockStr<&str>> for &str` answer the **source spelling**, `"""` delimiters and all;
+/// [`Deref`](core::ops::Deref), [`AsRef`] and `From<LitBlockStr<&str>> for &str` answer the
+/// **source spelling**, `"""` delimiters and all;
 /// this one answers the cooked value. `Plain` used to answer the spelling too, which made the two
 /// variants disagree about what the conversion was for.
 ///

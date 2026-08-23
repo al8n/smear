@@ -192,17 +192,25 @@ macro_rules! impl_common_traits {
       }
     }
 
-    impl core::borrow::Borrow<$ty> for $name<&'_ $ty> {
-      #[inline(always)]
-      fn borrow(&self) -> &$ty {
-        self
-      }
-    }
-
+    // DELIBERATELY NO `Borrow<$ty>`. It is not an ergonomic synonym for `AsRef`: it promises
+    // that the borrowed value and the owned one are interchangeable as map keys, which requires
+    // `Hash`, `Eq` and `Ord` to agree between them. Every carrier here derives all three over
+    // more than the bytes `$fn` hands out — the enums mix in a discriminant, and the complex
+    // carriers mix in `required_capacity` — so `str`'s hash and this type's could not agree, and
+    // a `HashMap<LitInlineStr<&str>, V>` looked up through `&str` never hit. The impls were
+    // there and the promise was false.
+    //
+    // Making it true was the alternative and it costs more than it buys. `Hash` cannot narrow to
+    // the source alone while `Eq` and `Ord` still read the whole value, so all three would have
+    // to narrow together: two carriers making DIFFERENT claims about the same bytes would become
+    // equal, which is the pairing the type was just rebuilt to forbid, and derived `Ord`'s
+    // `Plain < Complex` would silently become source order in every `BTreeMap` and `sort` over
+    // these. `AsRef` carries no such contract, `Deref` gives `&*lit`, and `From<…> for &$ty` gives
+    // the owned reborrow, so nothing an in-tree caller does is lost.
     impl AsRef<$ty> for $name<&'_ $ty> {
       #[inline(always)]
       fn as_ref(&self) -> &$ty {
-        core::borrow::Borrow::borrow(self)
+        self.$fn()
       }
     }
 

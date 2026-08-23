@@ -78,7 +78,7 @@ fn every_other_escape_cooks_to_its_character() {
 ///
 /// `Plain` used to hand back the source *with* its delimiters while `Complex` handed back a cooked
 /// value, so one literal had two readings and nothing said which was intended. It is the value:
-/// `as_str`, `Deref`, `AsRef`, `Borrow` and `From<…> for &str` already answer the spelling, and a
+/// `as_str`, `Deref`, `AsRef` and `From<…> for &str` already answer the spelling, and a
 /// `Cow` return type only earns its keep if `Plain` is the *borrowed* case of the same answer.
 ///
 /// Every pair below spells one value two ways — once so the lexer calls it `Plain`, once so it
