@@ -50,9 +50,13 @@
 //!   than a graph;
 //! - a `use` that binds a watched *name* to something else (`use elsewhere::other as root_turn;`),
 //!   because every bare `root_turn(…)` under it is then a call of something else;
+//! - a rename whose **destination is not an identifier** — `use …::root_turn as $alias;` inside a
+//!   macro's transcriber, or `as [< … >]` inside a `paste!` — because the spelling it will bind
+//!   is not in these tokens, so nothing here says what a call through it looks like;
 //! - a `paste!` `[< … >]` or a `concat_idents!` that spells a watched name, or one whose pieces
 //!   the census cannot evaluate — an identifier assembled out of fragments is one no walk over
-//!   identifiers can recognise.
+//!   identifiers can recognise — and a `use` that renames `concat_idents` itself, which is the
+//!   one of the two the census recognises by its name.
 //!
 //! With those refused the coverage argument closes. A call has to *name* its function. The name is
 //! either the callee's own — which the ident walk sees bare, `r#`-escaped, path-qualified,
@@ -63,9 +67,22 @@
 //! is handed to the drain today — is neither a call nor an import, so it is unclassified, which is
 //! a finding too.
 //!
-//! What stays outside is a call that is not in the crate's tokens at all: a proc macro that
-//! synthesises `root_turn(…)` into its own output. No token census can see that one, and
-//! [`selftest`] does not claim it can.
+//! The other half of a rename is quiet, and on purpose. `use …::$from as turn;` renames whatever
+//! `$from` is handed, and the census does not refuse it — the tree writes exactly that, twice, for
+//! keywords. It does not have to: for the watched name to reach `$from`, some invocation has to
+//! *write* `root_turn` as a token, and an occurrence that is neither a call, a declaration nor an
+//! import is a finding. So the source side reddens at the invocation, while the destination side
+//! has nowhere else to redden — the new name is one nothing else in the crate ever writes — which
+//! is why one of the two is refused and the other is not.
+//!
+//! What stays outside is a call whose tokens this walk never reads. One kind is a proc macro that
+//! synthesises `root_turn(…)` into its own output; the other is a file the population does not
+//! contain — an `include!` of a path outside [`ROOT`] or of a generated one, or a `#[path]` module
+//! spelled with any other extension. Neither is refused: `scan` is handed a file's text and its
+//! display name, not its place on disk, so it cannot tell an `include!` the walk also reads as a
+//! file of its own from one nobody reads, and a refusal that cannot tell them apart would redden
+//! the ordinary `OUT_DIR` spelling. The tree holds none of the three today — no `include!`, no
+//! `#[path]`, and no file under [`ROOT`] that is not `.rs` — and [`selftest`] claims none of them.
 //!
 //! # What a change to [`DECLARED`] means
 //!
@@ -93,7 +110,7 @@ use proc_macro2::{Delimiter, Spacing, TokenStream, TokenTree};
 /// each scan finds carries the spelling in [`Hit::visibility`], which is checked. So no file
 /// outside this crate can hold a call at all; if either ever becomes `pub`, that check fails
 /// beside the caller table — the boundary this root rests on is itself a thing that reddens.
-const ROOT: &str = "smear-parser/src";
+pub(crate) const ROOT: &str = "smear-parser/src";
 
 /// The two functions whose caller set is pinned.
 const WATCHED: &[&str] = &["drain_unless_stopped", "root_turn"];
@@ -557,12 +574,68 @@ struct Bindings {
   refusals: Vec<String>,
 }
 
-/// One identifier a `use` names: what it says, what it renames to, and whether it is exported.
+/// One identifier a `use` names: what it says, what it binds it to, and whether it is exported.
 struct Named {
   spelling: String,
-  renamed_to: Option<String>,
+  bound: Bound,
   exported: bool,
   line: usize,
+}
+
+/// What a `use` binds one of its names to — every shape the tokens after that name can take.
+///
+/// Four answers and no fifth, and the fourth is the point. This was an `Option<String>` read off a
+/// match whose last arm was `_ => None`, and that arm answered two different questions with the
+/// same word: *there is no `as` here* and *there is an `as` and its destination is not a token I
+/// can read*. `use …::root_turn as $alias;` took the second answer and got the first, so the
+/// census recorded a plain import, bound no second spelling, and could not see `turn(…)` at all —
+/// the very invisible caller [`bindings`] exists to end, through the one branch that had no
+/// verdict of its own. [`Bound::Unreadable`] is that verdict.
+enum Bound {
+  /// No `as`: the name is bound under its own spelling.
+  Itself,
+  /// `as NEW`, `NEW` an identifier. The one hop this census follows.
+  Renamed(String),
+  /// `as _`, which binds the item under no name at all. Nothing can call what has no name, so
+  /// there is no second spelling here to follow and nothing to refuse.
+  Discarded,
+  /// `as` and then something that is not an identifier: a `$` metavariable, a `paste!`'s
+  /// `[< … >]`, a literal, or the end of the tokens. The name it will bind is not written here,
+  /// so this file cannot say what a call through it looks like. Carries what *is* written, so the
+  /// refusal can name it.
+  Unreadable(String),
+}
+
+/// What the tokens at `at` bind the name there to.
+///
+/// The `as` is read here and nowhere else, so every shape its destination can take is decided in
+/// one place and each has a name. `_` is recognised by its spelling rather than by its token kind,
+/// because which kind it is belongs to the lexer rather than to the language.
+fn bound(tokens: &[TokenTree], at: usize) -> Bound {
+  match tokens.get(at + 1) {
+    Some(TokenTree::Ident(keyword)) if keyword == "as" => {}
+    _ => return Bound::Itself,
+  }
+  match tokens.get(at + 2) {
+    Some(TokenTree::Ident(new)) if new != "_" => Bound::Renamed(new.to_string()),
+    Some(token) if token.to_string() == "_" => Bound::Discarded,
+    Some(token) => Bound::Unreadable(written(token, tokens.get(at + 3))),
+    None => Bound::Unreadable("nothing at all".to_string()),
+  }
+}
+
+/// A destination as it is written, so a refusal sends a reader to the right thing on the line.
+///
+/// A `$` metavariable is two tokens, and `$` on its own would name nothing. Quoted here rather
+/// than by the refusal, because the one destination that is not a token — the tokens simply
+/// ending — is a phrase and not a spelling.
+fn written(token: &TokenTree, next: Option<&TokenTree>) -> String {
+  match (token, next) {
+    (TokenTree::Punct(p), Some(TokenTree::Ident(name))) if p.as_char() == '$' => {
+      format!("`${name}`")
+    }
+    _ => format!("`{token}`"),
+  }
 }
 
 /// Every second spelling of a watched callee this file binds, and every one it will not follow.
@@ -574,13 +647,17 @@ fn bindings(file: &str, stream: &TokenStream) -> Bindings {
   let mut named = Vec::new();
   let mut pasted = Vec::new();
   collect(stream, false, false, &mut named, &mut pasted);
+  // Over the whole file rather than inside a recognised `paste!`: `[< … >]` is a syntax of its
+  // own, so it is read wherever it is written and renaming the macro that consumes it — `use
+  // paste::paste as glue;` — moves nothing out of view.
+  concatenations(stream, &mut pasted);
 
   let mut alias: BTreeMap<String, &'static str> = BTreeMap::new();
   let mut refusals = Vec::new();
 
   // The hop the census follows.
   for entry in &named {
-    let (Some(new), Some(callee)) = (entry.renamed_to.as_deref(), watched(&entry.spelling)) else {
+    let (Bound::Renamed(new), Some(callee)) = (&entry.bound, watched(&entry.spelling)) else {
       continue;
     };
     // Renaming one watched name onto the other is a rebinding, refused in the loop below.
@@ -603,36 +680,65 @@ fn bindings(file: &str, stream: &TokenStream) -> Bindings {
     }
   }
 
-  // Everything the hop does not reach.
+  // Everything the hop does not reach. Every arm is written out, because a `use` the census reads
+  // and says nothing about is exactly how the shape above got past it.
   for entry in &named {
     let spelled = bare(&entry.spelling);
-    if let Some(new) = entry.renamed_to.as_deref() {
-      if let Some(callee) = watched(new) {
-        refusals.push(format!(
-          "{file}:{}: `{spelled} as {new}` binds the watched name `{callee}` to something else, \
-           so a `{callee}(…)` written below it is not a call of the function this census watches",
-          entry.line
-        ));
-        continue;
-      }
-      if let Some(callee) = alias.get(spelled) {
-        refusals.push(format!(
-          "{file}:{}: `{spelled}` is already this file's name for `{callee}`, and renaming it \
-           again to `{new}` is a second hop — the census follows one",
-          entry.line
-        ));
-      }
-      continue;
-    }
-    if !entry.exported {
-      continue;
-    }
-    if let Some(callee) = alias.get(spelled) {
+    // A macro the census knows by its name is one a rename hides, whatever it is renamed to.
+    if spelled == READ_BY_NAME
+      && let Bound::Renamed(_) | Bound::Unreadable(_) = &entry.bound
+    {
       refusals.push(format!(
-        "{file}:{}: `{spelled}` is this file's name for `{callee}` and is re-exported under it, \
-         so a call written `{spelled}(…)` in another file is one this per-file scan cannot see",
+        "{file}:{}: `{READ_BY_NAME}` is renamed here, and the census recognises that macro by its \
+         name — an identifier it assembles under any other one is not a spelling this walk reads",
         entry.line
       ));
+    }
+    match &entry.bound {
+      Bound::Renamed(new) => {
+        if let Some(callee) = watched(new) {
+          refusals.push(format!(
+            "{file}:{}: `{spelled} as {new}` binds the watched name `{callee}` to something else, \
+             so a `{callee}(…)` written below it is not a call of the function this census watches",
+            entry.line
+          ));
+        } else if let Some(callee) = alias.get(spelled) {
+          refusals.push(format!(
+            "{file}:{}: `{spelled}` is already this file's name for `{callee}`, and renaming it \
+             again to `{new}` is a second hop — the census follows one",
+            entry.line
+          ));
+        }
+      }
+      // The destination is not an identifier, so the spelling it binds is not in this file. It is
+      // refused where the name being renamed is one the census watches — its own, or one this
+      // file has already made into a second name for it — because that is where a call the census
+      // would otherwise never see is being given a name it cannot read.
+      Bound::Unreadable(destination) => {
+        if let Some(callee) = watched(spelled).or_else(|| alias.get(spelled).copied()) {
+          refusals.push(format!(
+            "{file}:{}: the `as` after `{spelled}` is followed by {destination} rather than by an \
+             identifier, so the second spelling it gives `{callee}` is not written in this file \
+             and a call through it is one this scan cannot recognise",
+            entry.line
+          ));
+        }
+      }
+      // `as _` binds the item under no name, so no call can spell it and there is nothing here to
+      // follow or to refuse — including when it is exported, which exports no name either.
+      Bound::Discarded => {}
+      Bound::Itself => {
+        if entry.exported
+          && let Some(callee) = alias.get(spelled)
+        {
+          refusals.push(format!(
+            "{file}:{}: `{spelled}` is this file's name for `{callee}` and is re-exported under \
+             it, so a call written `{spelled}(…)` in another file is one this per-file scan \
+             cannot see",
+            entry.line
+          ));
+        }
+      }
     }
   }
 
@@ -654,7 +760,16 @@ fn bindings(file: &str, stream: &TokenStream) -> Bindings {
   Bindings { alias, refusals }
 }
 
-/// Reads what every `use` names and what every identifier-pasting macro assembles.
+/// The one identifier-assembling macro the census recognises by its name rather than by a syntax.
+///
+/// `paste!` marks what it builds — `[< … >]` is not Rust anywhere else — so [`concatenations`]
+/// reads it wherever it appears and never has to know which macro is going to consume it.
+/// `concat_idents!` has no such marker: its whole body is the identifier, and telling it from
+/// `matches!(a, b)` is the name and nothing else. So a `use` that renames it is refused, because
+/// that rename is itself a token this file reads.
+const READ_BY_NAME: &str = "concat_idents";
+
+/// Reads what every `use` names and what `concat_idents!` assembles.
 ///
 /// `in_use` and the export flag descend into groups the way [`walk`]'s own state does, so a rename
 /// written inside a `use` group, inside a nested module, or inside a macro body is read the same.
@@ -684,17 +799,11 @@ fn collect(
             exported = saw_pub;
             saw_pub = false;
           }
-          // The two ways a file spells an identifier it does not write. They have different
-          // syntax and so different readers: `paste!` concatenates inside `[< … >]`, anywhere in
-          // its body; `concat_idents!`'s whole body is the one identifier it builds.
-          "paste" => {
-            if let (true, Some(TokenTree::Group(body))) =
-              (is_bang(&tokens, i + 1), tokens.get(i + 2))
-            {
-              concatenations(&body.stream(), pasted);
-            }
-          }
-          "concat_idents" => {
+          // The other way a file spells an identifier it does not write. `paste!`'s `[< … >]` is
+          // read by [`concatenations`] over the whole file, because it is a syntax; this one has
+          // no syntax of its own — its whole body is the one identifier it builds — so it is read
+          // here, by its name, and a `use` that renames that name is refused.
+          READ_BY_NAME => {
             if let (true, Some(TokenTree::Group(body))) =
               (is_bang(&tokens, i + 1), tokens.get(i + 2))
             {
@@ -705,19 +814,11 @@ fn collect(
           _ => {}
         }
         if in_use && name != "use" {
-          let renamed_to = match (tokens.get(i + 1), tokens.get(i + 2)) {
-            (Some(TokenTree::Ident(keyword)), Some(TokenTree::Ident(new)))
-              // `as _` binds nothing that can be called, so it binds no spelling either.
-              if keyword == "as" && new != "_" =>
-            {
-              Some(new.to_string())
-            }
-            _ => None,
-          };
-          let renamed = renamed_to.is_some();
+          let bound = bound(&tokens, i);
+          let renamed = matches!(bound, Bound::Renamed(_));
           named.push(Named {
             spelling: name,
-            renamed_to,
+            bound,
             exported,
             line: ident.span().start().line,
           });
@@ -1247,6 +1348,69 @@ pub fn selftest() -> Result<usize, Vec<String>> {
       refuses: &[],
     },
     Case {
+      name: "a rename to a `$` metavariable is refused: the name it binds is not in this file",
+      source: r#"
+        macro_rules! bind {
+          ($alias:ident) => { use crate::lossless::depth::root_turn as $alias; };
+        }
+        bind!(turn);
+        fn drive() { turn(inp, stop, entry) }
+      "#,
+      want: &[("root_turn", "bind", Occurrence::Import)],
+      refuses: &["followed by `$alias`"],
+    },
+    Case {
+      name: "a rename to a name a paste assembles is the same refusal, at the same branch",
+      source: r#"
+        paste::paste! { use crate::lossless::depth::root_turn as [<tu rn>]; }
+        fn drive() { turn(inp, stop, entry) }
+      "#,
+      want: &[("root_turn", "", Occurrence::Import)],
+      refuses: &["followed by `[< tu rn >]`"],
+    },
+    Case {
+      name: "an `as` with nothing after it binds a spelling that is not there either",
+      source: r#"
+        macro_rules! bind {
+          () => { use crate::lossless::depth::root_turn as };
+        }
+      "#,
+      want: &[("root_turn", "bind", Occurrence::Import)],
+      refuses: &["followed by nothing at all"],
+    },
+    Case {
+      name: "a rename whose OLD name is a `$` metavariable is not refused, and reddens where the \
+             watched name is written instead",
+      source: r#"
+        macro_rules! bind {
+          ($from:ident) => { use crate::lossless::depth::$from as turn; };
+        }
+        bind!(root_turn);
+        fn drive() { turn(inp, stop, entry) }
+      "#,
+      want: &[("root_turn", "", Occurrence::Unclassified)],
+      refuses: &[],
+    },
+    Case {
+      name: "renaming `paste` moves nothing out of view, because `[< … >]` is read wherever it is \
+             written",
+      source: r#"
+        use paste::paste as glue;
+        fn drive() { glue! { [<root_ turn>](inp, stop, entry) } }
+      "#,
+      want: &[],
+      refuses: &["concatenation spells `root_turn`"],
+    },
+    Case {
+      name: "renaming the macro the census reads by its name is refused, whatever it assembles",
+      source: r#"
+        use core::concat_idents as glue;
+        fn drive() { glue!(root_, turn)(inp, stop, entry) }
+      "#,
+      want: &[],
+      refuses: &["recognises that macro by its name"],
+    },
+    Case {
       name: "a paste that spells a watched name is refused; one that spells something else is not",
       source: r#"
         fn drive() {
@@ -1348,9 +1512,14 @@ struct Spelling {
 
 /// The ways a name reaches a call site, which is the axis the nine pinned cases had one value of.
 ///
-/// A rename is followed because a single file can read it off its own tokens. The three that leave
-/// the file, and the one that assembles an identifier out of pieces, are refused — see [`bindings`]
-/// for why that direction and not more resolution.
+/// A rename is followed because a single file can read it off its own tokens. Three kinds are
+/// refused: the ones that leave the file, the ones that assemble an identifier out of pieces, and
+/// the ones whose new name is not written in the file at all — a `$` metavariable or a `[< … >]`
+/// after the `as`. See [`bindings`] for why that direction and not more resolution.
+///
+/// A row here is the shape of the axis: `use …::{callee} as $alias;` was invisible to the census
+/// and is a row, not a case, so it is crossed with every placement and both callees for the price
+/// of the four lines that write it.
 const SPELLINGS: &[Spelling] = &[
   Spelling {
     what: "a path, with nothing imported",
@@ -1440,6 +1609,38 @@ const SPELLINGS: &[Spelling] = &[
     what: "the watched name bound to something else",
     binding: "use crate::elsewhere::other as {callee};",
     call: "{callee}(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "a rename to a `$` metavariable",
+    binding: "macro_rules! bind {\n  ($alias:ident) => { use crate::lossless::depth::{callee} as \
+              $alias; };\n}\nbind!(turn);",
+    call: "turn(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "a rename to a name a paste assembles",
+    binding: "paste::paste! { use crate::lossless::depth::{callee} as [<tu rn>]; }",
+    call: "turn(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "a rename whose old name is a `$` metavariable",
+    binding: "macro_rules! bind {\n  ($from:ident) => { use crate::lossless::depth::$from as turn; \
+              };\n}\nbind!({callee});",
+    call: "turn(inp, stop, entry)",
+    followed: false,
+  },
+  Spelling {
+    what: "an identifier a renamed `paste` assembles",
+    binding: "use paste::paste as glue;",
+    call: "glue! { [<{head} {tail}>](inp, stop, entry) }",
+    followed: false,
+  },
+  Spelling {
+    what: "an identifier a renamed `concat_idents` assembles",
+    binding: "use core::concat_idents as glue;",
+    call: "glue!({head}, {tail})(inp, stop, entry)",
     followed: false,
   },
   Spelling {
