@@ -149,7 +149,7 @@ name: Miri
 # ── WHAT THIS MATRIX DOES NOT COVER, AND WHY IT IS STATED HERE ──────────────────────────────
 #
 # Of the 50 integration targets in `smear/tests/`, 46 are NOT built with anything in them by any
-# cell in this file, on any target, under either aliasing model, and 5 of the tests inside the
+# cell in this file, on any target, under either aliasing model, and 6 of the tests inside the
 # targets and libraries that ARE built are skipped. All of it is derived and all of it is printed
 # by `ci/miri_scope.py` at the end of every cell:
 #
@@ -162,7 +162,7 @@ name: Miri
 #       and these scripts do not pass. They are `core` + `alloc` rule engines with no `unsafe`
 #       reachable from them that the lib tests do not already interpret, so the cost of turning
 #       the features on is minutes per cell for nothing Miri can answer.
-#    5  individual tests, not targets, and not all of them in `smear/tests/`:
+#    6  individual tests, not targets, and not all of them in `smear/tests/`:
 #
 #       * the two corpus sweeps in each of `tests/syntactic_span_extent.rs` and
 #         `tests/syntactic_x_span_extent.rs`. These are why this workflow had never produced a
@@ -173,6 +173,17 @@ name: Miri
 #         square`, a LIB unit test and a COST gate: it asserts slot traversals and allocator calls
 #         at depth 1 024, which is a claim about the shape of the work, and an interpreter answers
 #         a different question out of MIR that the same file's shallow legs already cover.
+#       * `graphql-proto`'s `execute::tests::a_colliding_set_of_document_variables_cannot_outrun_
+#         the_budget`, another LIB unit test and another COST gate — and the one whose FIXTURE is
+#         what an interpreter cannot hold rather than whose assertion is slow. Finding 512 names
+#         in one bucket of 2 048 keeps every rejected candidate live, on the order of a million
+#         `String`s at once, and `i686-unknown-linux-gnu` answered `resource exhaustion: there are
+#         no more free addresses in the address space` — killing the whole `graphql-proto` lib
+#         binary, and with it every other test in it, which is how one gate rendered several cells
+#         of this matrix red. `-Zmiri-address-reuse-rate=1.0` is already on for that target and
+#         `ci/miri_sb.sh` records it as measured insufficient; nothing inside the call has been
+#         freed, so there is nothing for it to reuse. The three sibling gates that run the same
+#         search at half the mask still run here.
 #
 #       Each carries `#[cfg_attr(miri, ignore)]` with its own reason, and each file's header
 #       carries the measurement.
