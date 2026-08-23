@@ -50,6 +50,15 @@
 //!   it found sites the previous version could not see: a charge counting **selections** in front
 //!   of a comparison measured in **bytes**, and a charge gated on one of a list's two readers while
 //!   the other read it for free.
+//! - **Setup is work, and a per-operation walk is where it hides.** A ledger charges what a pass
+//!   examines; what a pass *prepares* has no row unless one is written for it. Every `reset_bits`,
+//!   `resize`, `fill` and `clear` on a document-sized buffer therefore owes two numbers — how large,
+//!   and how many times — and only two of the fourteen in this module were sized to the whole
+//!   document *and* performed per operation. Both were the same buffer, the per-walk "already
+//!   entered" set, in [`Validator::walk_operations`] and in
+//!   [`Validator::check_subscription_roots`]; [`Visited`](super::scratch::Visited)'s generation
+//!   stamp deletes both at once rather than pricing either, which is why it was preferred to the
+//!   charge. The rest are once per run, once per definition, or `O(1)` truncations of a stack.
 //! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
 //!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
 //!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a
@@ -1589,7 +1598,8 @@ where
   /// first response name seen is the only one it needs to keep.
   fn check_subscription_roots(&mut self, row: OperationRow, root: TypeId) -> ControlFlow<()> {
     let document = self.document;
-    reset_bits(&mut self.scratch.visited, self.scratch.fragments.len());
+    let fragments = self.scratch.fragments.len();
+    self.scratch.visited.begin(fragments);
     self.scratch.roots.clear();
     self
       .scratch
@@ -1674,7 +1684,7 @@ where
           let Some(ordinal) = self.find_fragment(name_bytes(spread.name())) else {
             continue;
           };
-          if set_bit(&mut self.scratch.visited, ordinal) {
+          if self.scratch.visited.visit(ordinal) {
             continue;
           }
           let target = self.scratch.fragments[ordinal as usize];
@@ -1778,7 +1788,8 @@ where
       }
 
       let scope = self.schema.root(root).map_or(NONE, |id| id.get());
-      reset_bits(&mut self.scratch.visited, self.scratch.fragments.len());
+      let fragments = self.scratch.fragments.len();
+      self.scratch.visited.begin(fragments);
       self.walk_selections(Frame::root(row.definition, scope, Frame::CHECK))?;
 
       self.check_variables_used()?;

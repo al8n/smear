@@ -1936,3 +1936,84 @@ fn a_schema_sized_scan_is_charged_per_position_that_reaches_it() {
     many - one
   );
 }
+
+// ---------------------------------------------------------------------------------------------
+// 13. setup is work
+// ---------------------------------------------------------------------------------------------
+
+/// Opening a walk costs the same whatever the document's fragment population is.
+///
+/// # This is a guard, not a witness, and the measurement says so
+///
+/// The "already entered" set was a bitset cleared at the top of every operation's walk and every
+/// subscription's root collection: `Θ(O · F / 64)` writes that the ledger never saw, because it
+/// charges what a pass *examines* and this is what a pass *prepares*. Generation stamps remove the
+/// clear rather than pricing it.
+///
+/// **The repair is not measurable at any size this suite can carry.** Measured on this machine,
+/// release, `O = F = n`, bitset against stamps: 1.32/1.44 ms at 2,000, 8.85/9.64 at 10,000,
+/// 33.64/32.30 at 30,000, 85.35/78.78 at 60,000 — indistinguishable, and the sign flips with
+/// ordering noise. The arithmetic says why: at `n = 60,000` the clear is 56 million `u64` writes
+/// over a buffer that stays in cache, about 7 ms of an 85 ms run, while a per-operation walk costs
+/// microseconds against that buffer's nanoseconds. The quadratic term overtakes the linear one at
+/// roughly two million fragments — a sixty-megabyte document, which is a legitimate input and not a
+/// test fixture.
+///
+/// So this asserts the **property** — opening a walk is `O(1)` in the fragment population — and
+/// would fail if a later change put document-sized setup back at the top of a per-operation walk
+/// with a constant big enough to see. It does not distinguish `ad7fed3` from its successor, and
+/// nothing in this suite does. Fourth time on this branch that a repair has arrived without a
+/// witness; recording the failed measurement is what stops it reading as one.
+#[test]
+fn opening_a_walk_does_not_scale_with_the_fragment_population() {
+  let schema = build(SCHEMA);
+  let rules = without_merge();
+  let budget = Budget::default();
+
+  // `n` operations and `n` distinct fragments, each operation spreading exactly one. The walk is
+  // tiny; the population is not.
+  let queries = |n: usize| {
+    let mut source = String::new();
+    for i in 0..n {
+      source.push_str(&std::format!("query q{i} {{ dog {{ ...f{i} }} }} "));
+    }
+    for i in 0..n {
+      source.push_str(&std::format!("fragment f{i} on Dog {{ name }} "));
+    }
+    source
+  };
+  // The same shape through draft 5.2.4.1's root collection, which carried the identical clear.
+  let subscriptions = |n: usize| {
+    let mut source = String::new();
+    for i in 0..n {
+      source.push_str(&std::format!("subscription s{i} {{ ...f{i} }} "));
+    }
+    for i in 0..n {
+      source.push_str(&std::format!(
+        "fragment f{i} on Subscription {{ newMessage {{ body }} }} "
+      ));
+    }
+    source
+  };
+
+  for (label, build_source) in [
+    ("operation walk", &queries as &dyn Fn(usize) -> String),
+    ("subscription roots", &subscriptions),
+  ] {
+    let small = best_of(3, || run(&schema, &build_source(2_000), &budget, rules));
+    let large = best_of(3, || run(&schema, &build_source(20_000), &budget, rules));
+    let ratio = large.ms / small.ms;
+    println!(
+      "{label}: 2,000 pairs {:.3} ms, 20,000 pairs {:.3} ms (ratio {ratio:.2})",
+      small.ms, large.ms
+    );
+    assert!(!large.refused, "the document is valid and was refused");
+
+    // Ten times the document. Linear-plus-sorting measures about sixteen; the threshold is set
+    // where a document-sized clear with a *visible* constant would land and honest growth does not.
+    assert!(
+      ratio < 30.0,
+      "{label}: ten times the document cost {ratio:.2} times the work"
+    );
+  }
+}

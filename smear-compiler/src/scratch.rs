@@ -978,8 +978,8 @@ pub struct Scratch {
   pub(crate) keys: Vec<u32>,
   /// Fragment ordinals reachable from some operation (draft 5.5.1.4).
   pub(crate) reachable: Vec<u64>,
-  /// Fragment ordinals already entered during the current walk.
-  pub(crate) visited: Vec<u64>,
+  /// Fragment ordinals already entered during the current walk. See [`Visited`].
+  pub(crate) visited: Visited,
   /// Fragment ordinals on the current fragment-graph search path (draft 5.5.2.2).
   pub(crate) on_path: Vec<u64>,
   /// Fragment ordinals whose fragment-graph search has finished.
@@ -1085,7 +1085,7 @@ impl Scratch {
       graph: Vec::new(),
       keys: Vec::new(),
       reachable: Vec::new(),
-      visited: Vec::new(),
+      visited: Visited::new(),
       on_path: Vec::new(),
       done: Vec::new(),
       checked: Vec::new(),
@@ -1129,7 +1129,10 @@ impl Scratch {
     self.graph.clear();
     self.keys.clear();
     self.reachable.clear();
-    self.visited.clear();
+    // Not cleared, and that is the point of the type: a mark is only current for one generation,
+    // and retiring the generation makes every mark stale in `O(1)`. `Scratch::reset` clears without
+    // freeing; this is that idea one step further, with nothing left to clear.
+    self.visited.retire();
     self.on_path.clear();
     self.done.clear();
     self.checked.clear();
@@ -1210,6 +1213,112 @@ pub(crate) fn reset_bits(words: &mut Vec<u64>, bits: usize) {
   let needed = bits.div_ceil(64);
   words.clear();
   words.resize(needed, 0);
+}
+
+/// The per-walk "already entered" set over fragment ordinals, as generation **stamps**.
+///
+/// # Why not a bitset
+///
+/// It was one, and clearing it was `O(F / 64)` writes at the top of **every** operation's walk and
+/// every subscription's root collection. `O` operations against `F` fragments is `Θ(O · F / 64)` of
+/// zeroing that no ledger saw, because the ledger charges what a pass *examines* and this is what a
+/// pass *prepares* — a class no audit on this branch had a row for until al8n/smear#198's ninth
+/// round. A valid document pairing many operations with many distinct fragments could spend
+/// gigabytes on it while staying under the ceiling.
+///
+/// Pricing it was the alternative. Stamping removes it instead: a walk advances a counter, and a
+/// mark from an earlier walk is stale because its number is. There is no clear to charge for, no
+/// gate to get wrong, and nothing left at this site for a later round to find one level in — which
+/// is the move that has actually ended things on this branch, from `Ledger::Off` to
+/// `Option<Recovery>`.
+///
+/// Draft 5.3.2's engine already does this, one axis over: `Validator::generation` distinguishes one
+/// fragment *expansion* from the next without clearing a bitset per expansion. This is the same
+/// technique at the operation boundary rather than the expansion boundary.
+///
+/// # What it costs
+///
+/// Four bytes per fragment instead of one bit. In this buffer's own company that is not a new
+/// order of cost: `Scratch::fragments` already holds a `FragmentRow` per fragment, several times
+/// wider, and every other document-sized table here is `u32`-keyed.
+///
+/// # The objection that sinks generation counters elsewhere does not exist here
+///
+/// A generation outside a rollback set can miscount an operation that was undone — a stamp survives
+/// while the state it described is rewound, and a later walk reads it as current. This counter
+/// lives in a [`Scratch`] the validator owns for the length of one call, and validation has no
+/// checkpoint, no speculation and no rollback: a walk either finishes or the whole run is abandoned
+/// through [`ControlFlow::Break`](core::ops::ControlFlow::Break). There is nothing to rewind past.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Visited {
+  /// The generation that last entered each fragment, indexed by ordinal.
+  stamps: Vec<u32>,
+  /// The generation the current walk is in. Zero before the first walk, and no stamp is ever
+  /// written as zero, so a freshly grown entry reads as "not entered".
+  current: u32,
+}
+
+impl Visited {
+  /// An empty set.
+  pub(crate) const fn new() -> Self {
+    Self {
+      stamps: Vec::new(),
+      current: 0,
+    }
+  }
+
+  /// Opens a walk over `fragments` ordinals, retiring every mark from the previous one.
+  ///
+  /// `O(1)` for a buffer that is already wide enough, which after the first walk of a run it is.
+  /// Growth is amortised and bounded by the document's fragment count, which the prep sweep has
+  /// already charged one name at a time.
+  pub(crate) fn begin(&mut self, fragments: usize) {
+    self.advance();
+    if self.stamps.len() < fragments {
+      self.stamps.resize(fragments, 0);
+    }
+  }
+
+  /// Retires every mark without touching the buffer.
+  pub(crate) fn retire(&mut self) {
+    self.advance();
+  }
+
+  /// Marks `ordinal` entered, answering whether it already was.
+  ///
+  /// The answer for an ordinal outside the table is `true` — "already entered", so do not enter —
+  /// which is what the bitset this replaces answered when the word was out of range.
+  #[inline]
+  pub(crate) fn visit(&mut self, ordinal: u32) -> bool {
+    match self.stamps.get_mut(ordinal as usize) {
+      Some(slot) if *slot == self.current => true,
+      Some(slot) => {
+        *slot = self.current;
+        false
+      }
+      None => true,
+    }
+  }
+
+  /// Entries the buffer has reserved room for.
+  pub(crate) fn capacity(&self) -> usize {
+    self.stamps.capacity()
+  }
+
+  /// Moves to the next generation, emptying the table if the counter has run out of them.
+  ///
+  /// Four billion walks on one [`Scratch`] is not reachable by any document the ledger admits, and
+  /// the wrap is handled anyway: correctness that rests on a number being big enough is the defect
+  /// this repository has now written under four different names.
+  fn advance(&mut self) {
+    self.current = match self.current.checked_add(1) {
+      Some(next) => next,
+      None => {
+        self.stamps.clear();
+        1
+      }
+    };
+  }
 }
 
 /// Returns whether bit `index` is set.

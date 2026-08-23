@@ -24,7 +24,7 @@ use super::{
 use crate::{
   diagnostic::Context,
   schema::{DirectiveLocation, Schema},
-  scratch::{Frame, NONE, get_bit, set_bit},
+  scratch::{Frame, NONE, get_bit},
 };
 
 /// Locates a selection set by descending from a definition along the frame chain.
@@ -261,7 +261,7 @@ where
     if !self.in_operation {
       return ControlFlow::Continue(None);
     }
-    if set_bit(&mut self.scratch.visited, ordinal) {
+    if self.scratch.visited.visit(ordinal) {
       // Already expanded during this operation's walk. The specification's transitive inclusion
       // is a set, so a second expansion could only repeat what the first one said — and on a
       // cyclic graph it would not terminate.
