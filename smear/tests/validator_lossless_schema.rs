@@ -101,7 +101,7 @@ use smear::{
     lossless::parse_type_system_document,
     syntactic::{GraphqlLexer, type_system_document},
   },
-  validator::{Recovery, Schema, SchemaError, SchemaErrorKind, validate_schema_lossless},
+  validator::{Recovery, Refusal, Schema, SchemaError, SchemaErrorKind, validate_schema_lossless},
 };
 
 // The two corpora, shared with `validator_schema.rs` (which owns the census that keeps the §3 half
@@ -242,8 +242,14 @@ fn lossless(sdl: &str) -> (Answer, Recovery) {
   match validate_schema_lossless(&parse, sdl) {
     Ok((schema, recovery)) => (Answer::of(Ok(schema)), recovery),
     Err(refused) => {
-      let recovery = refused.recovery();
-      let errors = refused.errors().errors().to_vec();
+      let recovery = refused
+        .recovery()
+        .expect("the pair matches, so the build was asked");
+      let errors = refused
+        .errors()
+        .expect("the pair matches, so the build was asked")
+        .errors()
+        .to_vec();
       assert!(
         !errors.is_empty(),
         "the lossless door returned `Err` with no refusals in it\n---\n{sdl}"
@@ -251,7 +257,10 @@ fn lossless(sdl: &str) -> (Answer, Recovery) {
       // The `Err` arm's own accessors agree with each other, so a caller reading either one is
       // reading the same verdict.
       assert_eq!(
-        refused.errors().len(),
+        refused
+          .errors()
+          .expect("the pair matches, so the build was asked")
+          .len(),
         errors.len(),
         "the refusal list and its length disagree\n---\n{sdl}"
       );
@@ -989,10 +998,24 @@ fn nothing_projected_is_visible_in_the_recovery() {
   assert!(parse.has_errors());
 
   let refused = validate_schema_lossless(&parse, sdl).expect_err("an empty document is no schema");
-  assert_eq!(refused.recovery().projected(), 0);
-  assert!(!refused.recovery().is_complete());
   assert_eq!(
-    refused.errors().kinds(),
+    refused
+      .recovery()
+      .expect("the pair matches, so the build was asked")
+      .projected(),
+    0
+  );
+  assert!(
+    !refused
+      .recovery()
+      .expect("the pair matches, so the build was asked")
+      .is_complete()
+  );
+  assert_eq!(
+    refused
+      .errors()
+      .expect("the pair matches, so the build was asked")
+      .kinds(),
     [SchemaErrorKind::MissingQueryRootOperationType]
   );
 }
@@ -1015,21 +1038,54 @@ fn executable_syntax_is_skipped_not_fatal() {
   );
 }
 
-/// The `(parse, source)` pair is verified, not trusted.
+/// The `(parse, source)` pair is verified as a **whole root**, and the SDL door verifies it too.
+///
+/// The executable door got this check first, and this one was cleared out of that sweep — "no
+/// `Budget`, so out of scope". True of the ledger question and silent about this one: a `source`
+/// that is the parse's text **plus trailing SDL** projects every stale definition, reports a
+/// complete recovery, and lets `Schema::build` answer `Ok` for the prefix while the appended
+/// definitions are silently absent. A schema built from part of its own SDL.
+///
+/// Both doors now call the same `matches_source`, and so does the recovering projector itself, so a
+/// consumer using it directly cannot be handed a stale prefix either. al8n/smear#198.
 #[test]
-fn a_mismatched_source_projects_nothing() {
-  let sdl = "type Query { ok: Int }";
-  let other = "type Query { no: Int }";
-  let parse = parse_type_system_document(sdl);
-  assert!(!parse.has_errors());
+fn a_mismatched_pair_builds_nothing_and_says_so() {
+  let check = |parsed: &str, given: &str| {
+    let parse = parse_type_system_document(parsed);
+    assert!(!parse.has_errors());
+    let refused = validate_schema_lossless(&parse, given)
+      .err()
+      .unwrap_or_else(|| panic!("a parse of {parsed:?} against {given:?} built a schema"));
+    assert_eq!(
+      refused.refusal(),
+      Some(Refusal::SourceMismatch),
+      "{refused}"
+    );
+    // The build was never asked, so there are no §3 refusals to read — and no empty list standing
+    // in for them either.
+    assert_eq!(refused.errors(), None);
+    assert_eq!(refused.recovery(), None);
+    assert_eq!(
+      refused.to_string(),
+      "the parse and the source are not the same document, so nothing was built"
+    );
+  };
 
-  let refused =
-    validate_schema_lossless(&parse, other).expect_err("nothing projected is not a schema");
-  assert_eq!(
-    refused.recovery().projected(),
-    0,
-    "the tree was projected against text it was not parsed from"
+  // Same length, different bytes: caught before this change too, by each definition's own check.
+  check("type Query { ok: Int }", "type Query { no: Int }");
+
+  // **The prefix.** Every definition of the parse matches the source at its own range, so the
+  // per-definition check sees nothing wrong — and `type Extra` is never built from.
+  check(
+    "type Query { ok: Int }",
+    "type Query { ok: Int } type Extra { n: Int }",
   );
+
+  // And the pair that matches still builds, so the check has not simply refused everything.
+  let sdl = "type Query { ok: Int }";
+  let (_schema, recovery) = validate_schema_lossless(&parse_type_system_document(sdl), sdl)
+    .expect("a matching pair builds");
+  assert!(recovery.is_complete());
 }
 
 /// The fail-fast projection refuses the SDL root's other half, and the recovering one skips it.
@@ -1052,6 +1108,18 @@ fn a_mixed_parse_is_not_an_sdl_parse() {
   // And through the door, the recovering walk falls back to the tree's own root, where the one
   // child is a `Document` node with no SDL image — so it is skipped rather than mis-read.
   let refused = validate_schema_lossless(&mixed, sdl).expect_err("nothing projected is no schema");
-  assert_eq!(refused.recovery().projected(), 0);
-  assert!(refused.recovery().skipped() > 0);
+  assert_eq!(
+    refused
+      .recovery()
+      .expect("the pair matches, so the build was asked")
+      .projected(),
+    0
+  );
+  assert!(
+    refused
+      .recovery()
+      .expect("the pair matches, so the build was asked")
+      .skipped()
+      > 0
+  );
 }

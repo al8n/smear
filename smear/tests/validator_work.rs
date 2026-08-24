@@ -384,17 +384,25 @@ fn a_variable_index_replaces_the_scan_at_every_usage() {
   let budget = Budget::default();
   let rules = without_merge();
 
-  // Best of five. A single sample of a millisecond-scale run is mostly scheduler noise, and a
-  // ratio of two noisy samples is twice that; the minimum is the one statistic here that a busy
-  // machine can only move in one direction.
-  let small = best_of(5, || run(&schema, &variable_bomb(2_000), &budget, rules));
-  let large = best_of(5, || run(&schema, &variable_bomb(8_000), &budget, rules));
-  let control = best_of(5, || run(&schema, &variable_control(8_000), &budget, rules));
-
-  let ratio = large.ms / small.ms;
+  // Best of five, **interleaved**. A single sample of a millisecond-scale run is mostly scheduler
+  // noise and a ratio of two noisy samples is twice that, so the minimum is the one statistic a
+  // busy machine can only move in one direction — but measuring all five smalls and then all five
+  // larges lets a burst of load land on one side of the ratio and not the other. This suite runs
+  // eighty-five test binaries in parallel, and that is exactly what happened: 4.2 in isolation,
+  // 8.7 under the full run, against a threshold of 8. Alternating puts any burst on both sides.
+  let (mut small_ms, mut large_ms, mut control_ms) = (f64::MAX, f64::MAX, f64::MAX);
+  let mut large = run(&schema, &variable_bomb(8_000), &budget, rules);
+  for _ in 0..5 {
+    small_ms = small_ms.min(run(&schema, &variable_bomb(2_000), &budget, rules).ms);
+    let round = run(&schema, &variable_bomb(8_000), &budget, rules);
+    large_ms = large_ms.min(round.ms);
+    large = round;
+    control_ms = control_ms.min(run(&schema, &variable_control(8_000), &budget, rules).ms);
+  }
+  let ratio = large_ms / small_ms;
   println!(
-    "variable bomb: n=2000 {:.3} ms, n=8000 {:.3} ms (ratio {ratio:.2}), control {:.3} ms",
-    small.ms, large.ms, control.ms
+    "variable bomb: n=2000 {small_ms:.3} ms, n=8000 {large_ms:.3} ms (ratio {ratio:.2}), \
+     control {control_ms:.3} ms"
   );
 
   // The usages are the term. Neither document is refused: they are honest in size, and what was
@@ -413,9 +421,8 @@ fn a_variable_index_replaces_the_scan_at_every_usage() {
     100.0
   };
   assert!(
-    large.ms < ceiling,
-    "8,000 usages against 8,000 definitions took {:.3} ms",
-    large.ms
+    large_ms < ceiling,
+    "8,000 usages against 8,000 definitions took {large_ms:.3} ms"
   );
 }
 
@@ -2487,33 +2494,50 @@ fn a_singleton_sort_is_not_charged_for_comparing() {
   );
 }
 
-/// Draft 5.3.2's conflict subject is charged before it is cloned.
+/// Draft 5.3.2's conflict subject is charged before it is cloned — **to draft 5.3.2's ledger**.
 ///
-/// The last direct `source().clone()` in the crate, in a file this branch was fenced out of until
-/// the rebase onto al8n/smear#196 put it in reach. The response name a conflict names is an
-/// **alias**, which the selection walk never charges — it charges the field's own spelling.
+/// The last direct `source().clone()` in the crate, and centralising it through
+/// `Validator::subject` got the charge right and the ledger wrong. 5.3.2's contract assigns its
+/// work to `merge_work` and reserves `validation_work` for every other pass, so debiting the
+/// validation ledger here meant a tight `validation_work` could replace a real merge-conflict
+/// diagnostic with a resource refusal while `merge_work` still had room — and, with the validation
+/// bound switched off, that the copy was accounted nowhere.
+///
+/// Both directions are pinned: the merge ledger pays for the alias, and the validation ledger does
+/// not.
 #[test]
-fn a_merge_conflict_subject_is_charged_before_it_is_cloned() {
+fn a_merge_conflict_subject_is_charged_to_the_merge_ledger() {
   let schema = build(SCHEMA);
-  let rules = RuleSet::only(Rule::FieldSelectionMerging);
-  // One conflict, whose subject is the alias. Merge budget raised so this measures the validation
-  // ledger and not draft 5.3.2's own.
-  let budget = Budget::default().with_merge_work(u32::MAX - 1);
+  let rules = RuleSet::only(Rule::FieldSelectionMerging).with(Rule::MergeWorkBudget);
   let document = |pad: usize| {
     let alias = "a".repeat(pad);
     std::format!("{{ dog {{ {alias}x: name {alias}x: nickname }} }}")
   };
 
-  let refused = |source: &str, work: u32| {
-    let b = budget.with_validation_work(work);
-    run(&schema, source, &b, rules).refused
-  };
-  let min = |source: &str| {
+  // The merge ledger pays. `min_merge_work` keys on 5.3.2's own bound firing.
+  let short = min_merge_work(&schema, &document(1), rules);
+  let long = min_merge_work(&schema, &document(20_000), rules);
+  println!("merge ledger: 1-byte alias {short} units, 20,000-byte {long} units");
+  assert!(
+    long - short >= 2_000,
+    "a 20,000-byte alias was cloned into a conflict diagnostic for {} merge units",
+    long - short
+  );
+
+  // And the validation ledger does not. Merge work raised so 5.3.2 finishes and the only question
+  // is what `validation_work` was asked to pay for.
+  let validation = |source: &str| {
+    let refused = |work: u32| {
+      let budget = Budget::default()
+        .with_merge_work(u32::MAX - 1)
+        .with_validation_work(work);
+      run(&schema, source, &budget, rules).refused
+    };
+    assert!(!refused(u32::MAX - 1));
     let (mut lo, mut hi) = (0u32, u32::MAX - 1);
-    assert!(!refused(source, u32::MAX - 1));
     while lo < hi {
       let mid = lo + (hi - lo) / 2;
-      if refused(source, mid) {
+      if refused(mid) {
         lo = mid + 1;
       } else {
         hi = mid;
@@ -2521,13 +2545,12 @@ fn a_merge_conflict_subject_is_charged_before_it_is_cloned() {
     }
     lo
   };
-
-  let short = min(&document(1));
-  let long = min(&document(20_000));
-  println!("merge conflict subject: 1-byte alias {short} units, 20,000-byte {long} units");
+  let short = validation(&document(1));
+  let long = validation(&document(20_000));
+  println!("validation ledger: 1-byte alias {short} units, 20,000-byte {long} units");
   assert!(
-    long - short >= 2_000,
-    "a 20,000-byte alias was cloned into a conflict diagnostic for {} units",
+    long - short < 500,
+    "the validation ledger paid {} units for a copy that belongs to draft 5.3.2",
     long - short
   );
 }

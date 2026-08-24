@@ -161,8 +161,8 @@ use super::{
     is_reserved,
   },
   scratch::{
-    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, clear_bit, get_bit, reset_bits,
-    set_bit,
+    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, byte_units, clear_bit, get_bit,
+    reset_bits, set_bit,
   },
 };
 
@@ -179,7 +179,39 @@ use values::ValueLocation;
 pub struct Invalid {
   emitted: u32,
   stopped: bool,
-  budget: bool,
+  refusal: Option<Refusal>,
+}
+
+/// Why a validation abandoned a document, when one did.
+///
+/// # Why this is a type and not a combination of flags
+///
+/// An [`Invalid`] with [`Invalid::emitted`] zero is a verdict that examined less than the whole
+/// document, and there is more than one way to reach it. The contract used to say there was exactly
+/// one, and named it — and then a second arrived and the sentence did not notice. Asking a caller
+/// to tell two refusals apart by reading three booleans in the right combination is the shape this
+/// crate has already replaced three times: an `Option` carrying two kinds of abandonment, a
+/// [`u32::MAX`] carrying "off", and a zero-and-one [`Recovery`](super::Recovery) carrying "never
+/// ran". Each became a type, and each stopped needing prose to be read correctly.
+///
+/// It is `#[non_exhaustive]` for the reason the flags were not: a fourth way to refuse should cost
+/// a `match` arm at the call sites that care, not a sweep of every published sentence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Refusal {
+  /// A [`Budget`] bound abandoned a pass.
+  ///
+  /// [`Invalid::emitted`] is zero when that bound's own rule was outside the
+  /// [`RuleSet`](super::RuleSet), and non-zero when it was in it or when other rules had already
+  /// fired. The document is **invalid**, not "unvalidated": the validator refuses rather than
+  /// passing what it could not finish examining.
+  Budget,
+  /// The lossless door was handed a `parse` and a `source` that do not describe one document.
+  ///
+  /// Nothing was projected and nothing was validated, so [`Invalid::emitted`] is always zero and
+  /// [`LosslessInvalid::recovery`](super::LosslessInvalid::recovery) is always `None`. Not a
+  /// resource problem, which is why it is not [`Refusal::Budget`].
+  SourceMismatch,
 }
 
 impl Invalid {
@@ -244,7 +276,17 @@ impl Invalid {
   /// exactly as [`Invalid::stopped`] means for the sink.
   #[inline]
   pub const fn budget_tripped(&self) -> bool {
-    self.budget
+    matches!(self.refusal, Some(Refusal::Budget))
+  }
+
+  /// Returns why validation abandoned the document, when it did.
+  ///
+  /// `None` means it did not: every finding came from a rule that ran to completion, and
+  /// [`Invalid::emitted`] is non-zero. `Some` is the single place a caller reads to learn that part
+  /// of the document was never examined and why — see [`Refusal`].
+  #[inline]
+  pub const fn refusal(&self) -> Option<Refusal> {
+    self.refusal
   }
 }
 
@@ -267,7 +309,7 @@ impl Invalid {
     Self {
       emitted,
       stopped,
-      budget: true,
+      refusal: Some(Refusal::Budget),
     }
   }
 
@@ -281,7 +323,7 @@ impl Invalid {
     Self {
       emitted: 0,
       stopped: false,
-      budget: false,
+      refusal: Some(Refusal::SourceMismatch),
     }
   }
 }
@@ -289,14 +331,17 @@ impl Invalid {
 impl core::fmt::Display for Invalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     if self.emitted == 0 {
-      // Two ways to be `Err` with nothing emitted, and "0 validation errors" would read as the
-      // opposite of what happened for either. `budget` separates them: a bound that refused with
-      // its own rule filtered out, or a lossless `(parse, source)` pair that does not describe one
-      // document.
-      return f.write_str(if self.budget {
-        "resource budget exceeded before the document was fully examined"
-      } else {
-        "the parse and the source are not the same document, so nothing was validated"
+      // Every way to be `Err` with nothing emitted, matched rather than inferred. "0 validation
+      // errors" would read as the opposite of what happened for all of them.
+      return f.write_str(match self.refusal {
+        Some(Refusal::Budget) => "resource budget exceeded before the document was fully examined",
+        Some(Refusal::SourceMismatch) => {
+          "the parse and the source are not the same document, so nothing was validated"
+        }
+        // Unreachable: `validate_charged` answers `Ok` for a zero count with no refusal, so this
+        // combination is not constructed. Rendered rather than asserted — a `Display` that panics
+        // is a worse answer than a vague one.
+        None => "validation examined less than the whole document",
       });
     }
     let plural = if self.emitted == 1 { "" } else { "s" };
@@ -304,8 +349,10 @@ impl core::fmt::Display for Invalid {
     if self.stopped {
       f.write_str(" (validation stopped early)")?;
     }
-    if self.budget {
-      f.write_str(" (resource budget exceeded)")?;
+    match self.refusal {
+      Some(Refusal::Budget) => f.write_str(" (resource budget exceeded)")?,
+      Some(Refusal::SourceMismatch) => f.write_str(" (the parse and the source disagree)")?,
+      None => {}
     }
     Ok(())
   }
@@ -492,13 +539,14 @@ where
   // consult half of it.
   let tripped = validator.tripped;
   let (emitted, stopped) = (validator.emitted, validator.stopped);
+  let refusal = tripped.then_some(Refusal::Budget);
   if emitted == 0 && !tripped {
     Ok(())
   } else {
     Err(Invalid {
       emitted,
       stopped,
-      budget: tripped,
+      refusal,
     })
   }
 }
@@ -585,6 +633,21 @@ pub(crate) const fn units(len: usize) -> u32 {
   } else {
     chunks as u32 + 1
   }
+}
+
+/// Which of this crate's two ledgers pays for a diagnostic subject's copy.
+///
+/// [`Validator::subject`] is the only door to a subject and it charges before it copies; this says
+/// *where*. Draft 5.3.2 spends [`Budget::merge_work`](super::Budget::merge_work) and every other
+/// pass spends [`Budget::validation_work`](super::Budget::validation_work), and a door serving both
+/// has to be told which — an enum rather than a boolean, so a third ledger cannot arrive as a
+/// silent `false`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Charged {
+  /// Every draft §5 pass outside 5.3.2.
+  Validation,
+  /// Draft 5.3.2's engine.
+  Merge,
 }
 
 /// Whether draft 5.3.2's engine runs.
@@ -1026,6 +1089,20 @@ where
 
   /// The spelling a diagnostic will carry, charged in front of the copy that produces it.
   ///
+  /// **The ledger is a parameter, because this crate has two and the door serves both.** Draft
+  /// 5.3.2's public contract assigns its work to
+  /// [`Budget::merge_work`](super::Budget::merge_work) and reserves
+  /// [`Budget::validation_work`](super::Budget::validation_work) for every other pass. Centralising
+  /// the clone charge here was right about *charging* and silent about *which ledger*, so a merge
+  /// conflict's subject debited the validation one: a tight `validation_work` could replace a real
+  /// draft 5.3.2 diagnostic with a resource refusal while `merge_work` still had room, and with the
+  /// validation bound switched off the copy was not accounted anywhere. Both directions are
+  /// defects and the first is the worse one.
+  ///
+  /// Every caller answers the same question — *which ledger owns the pass this subject belongs
+  /// to?* — and there are fifteen of them: fourteen draft §5 passes outside 5.3.2, and
+  /// `merge::report_merge`.
+  ///
   /// **The only way to get one.** Every direct `Diagnostic::subject` call goes through here, so a
   /// site that wants to name a spelling has to pay for it to obtain one — the charge cannot be
   /// forgotten, put on the wrong string, or written by a caller who did not know the callee would
@@ -1037,8 +1114,26 @@ where
   /// [`Budget::validation_work`](super::Budget::validation_work): the name's bytes and the number
   /// of copies, not whatever a caller's `S::clone` chooses to do.
   #[inline]
-  fn subject(&mut self, name: &Name<S>) -> ControlFlow<(), S> {
-    self.spend_name(name)?;
+  fn subject_v(&mut self, name: &Name<S>) -> ControlFlow<(), S> {
+    self.subject(name, Charged::Validation)
+  }
+
+  /// [`Validator::subject_v`]'s general form: the ledger is named at the call site.
+  fn subject(&mut self, name: &Name<S>, ledger: Charged) -> ControlFlow<(), S> {
+    match ledger {
+      Charged::Validation => {
+        self.spend_name(name)?;
+      }
+      Charged::Merge => {
+        if !self.charge(byte_units(name_bytes(name).len())) {
+          let limit = self.budget.merge_work();
+          self.trip(Rule::MergeWorkBudget, limit)?;
+          // The bound refused, so there is no subject to hand back and no report to make: `trip`
+          // has recorded the refusal and the engine unwinds from here.
+          return ControlFlow::Break(());
+        }
+      }
+    }
     ControlFlow::Continue(name.source().clone())
   }
 
@@ -1057,7 +1152,7 @@ where
   /// [`Budget::validation_work`](super::Budget::validation_work) for what the copy's price does and
   /// does not cover.
   fn report_name(&mut self, rule: Rule, name: &Name<S>, context: Context) -> ControlFlow<()> {
-    let subject = self.subject(name)?;
+    let subject = self.subject_v(name)?;
     let diagnostic = Diagnostic::new(rule, *name.as_span())
       .subject(subject)
       .context(context);
@@ -1214,7 +1309,7 @@ where
           let Some(fragment) = fragment(document, row.definition) else {
             continue;
           };
-          let subject = self.subject(fragment.name())?;
+          let subject = self.subject_v(fragment.name())?;
           let diagnostic = Diagnostic::new(Rule::FragmentNameUniqueness, row.span)
             .subject(subject)
             .related(related);
@@ -1303,7 +1398,7 @@ where
           }
           let to = self.find_fragment(name_bytes(name));
           if to.is_none() && self.on(Rule::FragmentSpreadTargetDefined) {
-            let subject = self.subject(name)?;
+            let subject = self.subject_v(name)?;
             let diagnostic =
               Diagnostic::new(Rule::FragmentSpreadTargetDefined, *name.as_span()).subject(subject);
             self.emit(diagnostic)?;
@@ -1374,7 +1469,7 @@ where
             Diagnostic::new(Rule::OperationTypeExistence, row.span).context(Context::Root(root));
           let diagnostic = match operation_name(document, row.definition) {
             Some(name) => {
-              let subject = self.subject(name)?;
+              let subject = self.subject_v(name)?;
               diagnostic.subject(subject)
             }
             None => diagnostic,
@@ -1418,7 +1513,7 @@ where
         for slot in start + 1..end {
           let row = self.scratch.operations[self.scratch.keys[slot] as usize];
           if let Some(name) = operation_name(document, row.definition) {
-            let subject = self.subject(name)?;
+            let subject = self.subject_v(name)?;
             let diagnostic = Diagnostic::new(Rule::OperationNameUniqueness, row.span)
               .subject(subject)
               .related(related);
@@ -1539,7 +1634,7 @@ where
           };
           // Prep charges this name once per fragment and this clones it once per **edge**, so the
           // helper's charge is the one that matches the population.
-          let named = self.subject(target.name())?;
+          let named = self.subject_v(target.name())?;
           let diagnostic = Diagnostic::new(Rule::FragmentSpreadsMustNotFormCycles, edge.span)
             .subject(named)
             .related(subject.span);
@@ -1601,7 +1696,7 @@ where
       let Some(target) = fragment(self.document, row.definition) else {
         continue;
       };
-      let subject = self.subject(target.name())?;
+      let subject = self.subject_v(target.name())?;
       let diagnostic = Diagnostic::new(Rule::FragmentsMustBeUsed, row.span).subject(subject);
       self.emit(diagnostic)?;
     }
@@ -1699,7 +1794,7 @@ where
       // "{selection} must not provide the `@skip`/`@include` directive" — the whole reason this
       // collection exists is that it has no runtime variables to evaluate them with.
       if let Some(directive) = self.conditional_directive(selection)? {
-        let subject = self.subject(directive)?;
+        let subject = self.subject_v(directive)?;
         let diagnostic =
           Diagnostic::new(Rule::SingleRootField, *directive.as_span()).subject(subject);
         self.emit(diagnostic)?;
@@ -2031,7 +2126,7 @@ where
         let first = definitions[earlier as usize].node().variable();
         let repeat = definitions[later as usize].node().variable();
         if name_bytes(first.name()) == name_bytes(repeat.name()) {
-          let subject = self.subject(repeat.name())?;
+          let subject = self.subject_v(repeat.name())?;
           let diagnostic = Diagnostic::new(Rule::VariableUniqueness, *repeat.span())
             .subject(subject)
             .related(*first.span());
@@ -2109,7 +2204,7 @@ where
         continue;
       }
       let variable = self.variables[index].node().variable();
-      let subject = self.subject(variable.name())?;
+      let subject = self.subject_v(variable.name())?;
       let diagnostic = Diagnostic::new(Rule::AllVariablesUsed, *variable.span()).subject(subject);
       self.emit(diagnostic)?;
     }

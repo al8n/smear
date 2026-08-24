@@ -60,7 +60,7 @@ use core::ops::ControlFlow;
 use smear_parser::graphql::ast::{Field, InputValue, Selection, SelectionSet};
 
 use super::{
-  Diagnostic, Rule, Validator,
+  Charged, Diagnostic, Rule, Validator,
   nodes::{
     ValueLike, child_selection_set, fragment, name_bytes, response_name, root_selection_set,
   },
@@ -235,7 +235,7 @@ where
   /// *document* decides the length of and those loops must not be reachable without one — see
   /// [`Names::intern`](crate::scratch::Names::intern).
   #[inline]
-  fn charge(&mut self, units: u32) -> bool {
+  pub(super) fn charge(&mut self, units: u32) -> bool {
     self.work.take(units)
   }
 
@@ -244,7 +244,7 @@ where
   /// Idempotent. The engine gives up at the first trip, but the caller's sink may have said to
   /// keep going, and every loop that unwinds afterwards would otherwise report the same refusal
   /// again — one budget diagnostic per remaining unit of work is noise, not information.
-  fn trip(&mut self, rule: Rule, limit: u32) -> ControlFlow<()> {
+  pub(super) fn trip(&mut self, rule: Rule, limit: u32) -> ControlFlow<()> {
     if self.tripped {
       return ControlFlow::Continue(());
     }
@@ -1369,7 +1369,9 @@ where
     // branch was fenced out of. The rebase onto al8n/smear#196 is what put it in reach — the same
     // shape as the two the sweep did find, and reachable here once per reported conflict.
     let subject = match self.resolve_merge_field(other)? {
-      Some(field) => Some(self.subject(response_name(field))?),
+      // Draft 5.3.2's own ledger, because this is draft 5.3.2's pass. The door is shared; the
+      // ledger is not.
+      Some(field) => Some(self.subject(response_name(field), Charged::Merge)?),
       None => None,
     };
     let mut diagnostic = Diagnostic::new(Rule::FieldSelectionMerging, b.span)

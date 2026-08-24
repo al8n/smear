@@ -171,7 +171,7 @@ mod scratch;
 mod sink;
 
 pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
-pub use executable::{Invalid, validate_executable, validate_executable_with};
+pub use executable::{Invalid, Refusal, validate_executable, validate_executable_with};
 
 #[cfg(feature = "rowan")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rowan")))]

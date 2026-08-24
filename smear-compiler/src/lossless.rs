@@ -85,7 +85,8 @@
 //! [`Schema::build`]: super::Schema::build
 
 use smear_parser::graphql::lossless::{
-  Parse, project_executable_document_recovered, project_type_system_document_recovered,
+  Parse, matches_source, project_executable_document_recovered,
+  project_type_system_document_recovered,
 };
 
 pub use smear_parser::lossless::project::Recovery;
@@ -93,7 +94,7 @@ pub use smear_parser::lossless::project::Recovery;
 use tokora::SimpleSpan;
 
 use super::{
-  Budget, Diagnostic, Invalid, Rule, RuleSet, Schema, SchemaErrors, Scratch, Sink,
+  Budget, Diagnostic, Invalid, Refusal, Rule, RuleSet, Schema, SchemaErrors, Scratch, Sink,
   diagnostic::Context,
   executable::{Ledger, units, validate_charged},
 };
@@ -395,7 +396,7 @@ where
   // `max(source.len(), parse.green().text_len())`. It sits *after* that charge and *before* the
   // projection, which is the only placement that neither validates a stale AST nor does unpriced
   // work to avoid it.
-  if parse.syntax().text() != source {
+  if !matches_source(parse, source) {
     return Err(LosslessInvalid {
       invalid: Invalid::unexamined(),
       recovery: None,
@@ -453,16 +454,48 @@ where
 /// so the two facts a caller needs, *what was wrong* and *how much of the document was looked at*,
 /// arrive together whichever way the result went.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LosslessSchemaErrors {
-  errors: SchemaErrors,
-  recovery: Recovery,
+#[non_exhaustive]
+pub enum LosslessSchemaErrors {
+  /// The `parse` and the `source` do not describe one document, so nothing was projected and
+  /// [`Schema::build`](super::Schema::build) was never asked.
+  ///
+  /// A separate state rather than an empty error list beside a flag: the §3 refusals a caller would
+  /// otherwise read here — "no `Query` root", and so on — would be true of the empty document this
+  /// door declined to build from, and false of anything the caller wrote.
+  SourceMismatch,
+  /// The projected document is not a schema, exactly as
+  /// [`Schema::build`](super::Schema::build) reports it.
+  Refused {
+    /// Why the build refused.
+    errors: SchemaErrors,
+    /// How much of the parse had an AST image.
+    recovery: Recovery,
+  },
 }
 
 impl LosslessSchemaErrors {
   /// Returns why the build refused, exactly as [`Schema::build`](super::Schema::build) reports it.
+  ///
+  /// `None` when the build was never asked — see [`LosslessSchemaErrors::SourceMismatch`].
   #[inline]
-  pub const fn errors(&self) -> &SchemaErrors {
-    &self.errors
+  pub const fn errors(&self) -> Option<&SchemaErrors> {
+    match self {
+      Self::Refused { errors, .. } => Some(errors),
+      _ => None,
+    }
+  }
+
+  /// Returns why this door refused, when the reason was not the schema itself.
+  ///
+  /// [`Invalid::refusal`](super::Invalid::refusal)'s twin for the SDL side, and the same reason for
+  /// existing: a caller should read one value to learn *which* refusal this is, not infer it from
+  /// which accessors happen to answer.
+  #[inline]
+  pub const fn refusal(&self) -> Option<Refusal> {
+    match self {
+      Self::SourceMismatch => Some(Refusal::SourceMismatch),
+      _ => None,
+    }
   }
 
   /// Returns how much of the parse had an AST image.
@@ -471,31 +504,54 @@ impl LosslessSchemaErrors {
   /// definition that was dropped rather than of one the author wrote — see
   /// [`validate_schema_lossless`].
   #[inline]
-  pub const fn recovery(&self) -> Recovery {
-    self.recovery
+  pub const fn recovery(&self) -> Option<Recovery> {
+    match self {
+      Self::Refused { recovery, .. } => Some(*recovery),
+      _ => None,
+    }
   }
 
   /// Consumes this verdict and returns the refusals alone.
   #[inline]
-  pub fn into_errors(self) -> SchemaErrors {
-    self.errors
+  pub fn into_errors(self) -> Option<SchemaErrors> {
+    match self {
+      Self::Refused { errors, .. } => Some(errors),
+      _ => None,
+    }
   }
 }
 
-impl From<LosslessSchemaErrors> for SchemaErrors {
+/// The refusals alone, when there were any.
+///
+/// `From` and not `TryFrom` would have to invent a [`SchemaErrors`] for
+/// [`LosslessSchemaErrors::SourceMismatch`], where the build was never asked and there is nothing
+/// to invent one from.
+impl TryFrom<LosslessSchemaErrors> for SchemaErrors {
+  type Error = LosslessSchemaErrors;
+
   #[inline]
-  fn from(value: LosslessSchemaErrors) -> Self {
-    value.errors
+  fn try_from(value: LosslessSchemaErrors) -> Result<Self, Self::Error> {
+    match value {
+      LosslessSchemaErrors::Refused { errors, .. } => Ok(errors),
+      other => Err(other),
+    }
   }
 }
 
 impl core::fmt::Display for LosslessSchemaErrors {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    core::fmt::Display::fmt(&self.errors, f)?;
-    if !self.recovery.is_complete() {
-      write!(f, "\n  ({} skipped by recovery)", self.recovery.skipped())?;
+    match self {
+      Self::SourceMismatch => {
+        f.write_str("the parse and the source are not the same document, so nothing was built")
+      }
+      Self::Refused { errors, recovery } => {
+        core::fmt::Display::fmt(errors, f)?;
+        if !recovery.is_complete() {
+          write!(f, "\n  ({} skipped by recovery)", recovery.skipped())?;
+        }
+        Ok(())
+      }
     }
-    Ok(())
   }
 }
 
@@ -567,11 +623,13 @@ impl core::error::Error for LosslessSchemaErrors {}
 ///
 /// let refused = validate_schema_lossless(&parse, source).expect_err("`Nope` is not a type");
 ///
-/// assert_eq!(refused.errors().kinds(), [SchemaErrorKind::UndefinedType]);
-/// assert_eq!(refused.recovery().projected(), 2);
-/// assert!(!refused.recovery().is_complete());
+/// let errors = refused.errors().expect("the pair matches, so the build was asked");
+/// assert_eq!(errors.kinds(), [SchemaErrorKind::UndefinedType]);
+/// let recovery = refused.recovery().expect("the pair matches, so the build was asked");
+/// assert_eq!(recovery.projected(), 2);
+/// assert!(!recovery.is_complete());
 ///
-/// let error = &refused.errors().errors()[0];
+/// let error = &errors.errors()[0];
 /// // The same bytes the syntactic door would have blamed.
 /// let span = error.span();
 /// assert_eq!(&source[span.start()..span.end()], "Nope");
@@ -581,9 +639,21 @@ pub fn validate_schema_lossless(
   parse: &Parse,
   source: &str,
 ) -> Result<(Schema, Recovery), LosslessSchemaErrors> {
+  // The same whole-root verification the executable door makes, for the same reason and through
+  // the same shared function.
+  //
+  // This door was cleared in al8n/smear#198's third-round sweep — "out of scope by API shape: it
+  // takes no `Budget`". That was right about the *ledger* question and had nothing to say about
+  // this one, and nothing re-read the clearance when the question changed. Without it, a `source`
+  // that is the parse's text plus trailing SDL projected every stale definition, reported a
+  // complete recovery, and let `Schema::build` answer `Ok` for the prefix while the appended
+  // definitions were silently absent.
+  if !matches_source(parse, source) {
+    return Err(LosslessSchemaErrors::SourceMismatch);
+  }
   let (document, recovery) = project_type_system_document_recovered(parse, source);
   match Schema::build(&document) {
     Ok(schema) => Ok((schema, recovery)),
-    Err(errors) => Err(LosslessSchemaErrors { errors, recovery }),
+    Err(errors) => Err(LosslessSchemaErrors::Refused { errors, recovery }),
   }
 }

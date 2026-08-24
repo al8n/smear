@@ -284,7 +284,7 @@ pub use runner::{
 // could see and nothing about a dialect — so it is re-exported here rather than copied.
 pub use crate::lossless::project::Recovery;
 pub use project::{
-  ProjectError, ProjectErrorKind, project, project_executable_document,
+  ProjectError, ProjectErrorKind, matches_source, project, project_executable_document,
   project_executable_document_recovered, project_type_system_document,
   project_type_system_document_recovered,
 };

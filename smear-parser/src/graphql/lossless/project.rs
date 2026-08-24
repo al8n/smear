@@ -396,6 +396,27 @@ impl super::ast::TypeSystemDocument {
 /// monomorphises once per root and nothing here becomes a shape a caller can dispatch through.
 ///
 /// Answers the surviving definitions, their span, and the tally.
+/// Whether `parse` and `source` describe the same bytes, over the **whole root**.
+///
+/// The recovering projection's precondition, and the one thing it cannot establish definition by
+/// definition. Each definition it projects is verified against `source` at that definition's own
+/// range, which refuses a pair whose bytes differ — and says nothing at all about a `source` that
+/// *begins* with the parse's text and then adds to it. There every definition matches, nothing is
+/// skipped, the [`Recovery`] reports complete, and whatever the caller appended is silently absent
+/// from the AST. A consumer that validated or built from that result would be answering about a
+/// prefix while believing it had the document.
+///
+/// `SyntaxText`'s comparison walks the green tokens against the slice and allocates nothing, so
+/// this is `O(tokens)` against a projection that allocates an entire AST.
+///
+/// It is public because the check belongs to whoever holds the pair. Both of `smear-compiler`'s
+/// lossless doors call it to report the mismatch in their own vocabulary, and the recovering
+/// projections below call it so that a consumer using them **directly** — with no validator and no
+/// door in front — cannot be handed a stale prefix either. al8n/smear#198.
+pub fn matches_source(parse: &Parse, source: &str) -> bool {
+  parse.syntax().text() == source
+}
+
 fn recovered_top_level<'src, T>(
   parse: &Parse,
   root_of: fn(Node<'_>) -> Option<Node<'_>>,
@@ -404,6 +425,15 @@ fn recovered_top_level<'src, T>(
 ) -> (SimpleSpan, Vec<T>, Recovery) {
   let root = parse_root(parse);
   let container = root_of(root).unwrap_or(root);
+
+  // Established once, over the whole root, before a single element is projected. See
+  // [`matches_source`]: a per-definition check cannot see a prefix, and a prefix is the mismatch
+  // that projects cleanly.
+  //
+  // A pair that does not match projects **nothing** and counts every top-level element as skipped
+  // — an exact count, because this loop walks them anyway. So the answer is never a complete
+  // recovery over part of a document, whoever is asking.
+  let matches = matches_source(parse, source);
 
   let mut definitions = Vec::new();
   let mut skipped = 0u32;
@@ -417,13 +447,18 @@ fn recovered_top_level<'src, T>(
       // run: a bound on what was lost, which is what `Recovery::skipped` promises.
       NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
       NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => match entry_of(child, source) {
-        Ok((entry, piece)) => {
-          extent.cover(piece);
-          definitions.push(entry);
+      NodeOrToken::Node(child) => {
+        match matches
+          .then(|| entry_of(child, source))
+          .and_then(Result::ok)
+        {
+          Some((entry, piece)) => {
+            extent.cover(piece);
+            definitions.push(entry);
+          }
+          None => skipped = skipped.saturating_add(1),
         }
-        Err(_) => skipped = skipped.saturating_add(1),
-      },
+      }
     }
   }
 

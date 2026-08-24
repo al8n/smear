@@ -194,7 +194,7 @@ where
         == name_bytes(directives[later as usize].directive_name())
       {
         let repeat = &directives[later as usize];
-        let subject = self.subject(repeat.directive_name())?;
+        let subject = self.subject_v(repeat.directive_name())?;
         let diagnostic = Diagnostic::new(
           Rule::DirectivesAreUniquePerLocation,
           repeat.directive_span(),
@@ -268,7 +268,7 @@ where
           == name_bytes(arguments[later as usize].argument_name())
         {
           let repeat = &arguments[later as usize];
-          let subject = self.subject(repeat.argument_name())?;
+          let subject = self.subject_v(repeat.argument_name())?;
           let diagnostic = Diagnostic::new(Rule::ArgumentUniqueness, repeat.argument_span())
             .subject(subject)
             .related(arguments[earlier as usize].argument_span());
@@ -694,7 +694,7 @@ where
           == name_bytes(fields[later as usize].field_name())
         {
           let repeat = &fields[later as usize];
-          let subject = self.subject(repeat.field_name())?;
+          let subject = self.subject_v(repeat.field_name())?;
           let diagnostic = Diagnostic::new(Rule::InputObjectFieldUniqueness, repeat.field_span())
             .subject(subject)
             .related(fields[earlier as usize].field_span());
@@ -715,7 +715,7 @@ where
           // `check_input_object`'s prepayment is gated on 5.6.3 and 5.6.4, and this is 5.6.1's
           // report — so under `only(ValuesOfCorrectType)` the spelling reaches a clone before the
           // descent one level down charges it. The helper is what pays for it.
-          let subject = self.subject(fields[0].field_name())?;
+          let subject = self.subject_v(fields[0].field_name())?;
           let diagnostic = Diagnostic::new(Rule::ValuesOfCorrectType, fields[0].field_span())
             .subject(subject)
             .context(Context::Type(definition.name()));
