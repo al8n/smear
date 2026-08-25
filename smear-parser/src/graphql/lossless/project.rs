@@ -161,6 +161,44 @@ type Token<'g> = crate::lossless::project::Token<'g, GraphQLLang>;
 
 type Out<T> = Result<T, ProjectError>;
 
+impl Unverified {
+  /// The reason a [`ProjectError`] from a whole-root verification names.
+  ///
+  /// The two are established by one walk and were collapsed into one name at this boundary — the
+  /// third time on al8n/smear#198 that two abandonments with different remedies met a channel that
+  /// could carry one. The others were an arena refusal wearing the budget's `None` and a stale pair
+  /// wearing the budget's refusal; this one is a shape wearing a mismatch.
+  ///
+  /// # Why the constructor is here and the type is in the substrate
+  ///
+  /// [`Unverified`] is what a dialect-free verification answers, so it belongs to the substrate.
+  /// *Building* one out of a [`ProjectError`] is something only a projection door does, and the
+  /// only doors that exist are this module's two — [`Verified::new`] and
+  /// [`recovered_top_level`]. A `pub(crate)` item in the substrate with no in-crate caller is
+  /// `dead_code` under `-Dwarnings` whenever the crate is built with no dialect at all, which is
+  /// what `lossless-coverage` and `cargo hack --each-feature` do.
+  ///
+  /// The first repair for that was a `#[cfg(feature = "graphql")]` on the item where it stood,
+  /// and it was the wrong one: `tests/lossless_isolation.rs` pins every dialect-facing gate in the
+  /// substrate at `any(feature = "graphql", feature = "graphqlx")` precisely so that a generic
+  /// layer cannot acquire a favourite dialect, and the narrower gate is that drift by definition.
+  /// The `dead_code` denial was not noise to silence — it was the substrate reporting that the
+  /// item had no business living there. Moving it to the dialect that reads it discharges both:
+  /// the gate comes from `pub mod graphql`, which already carries one, and the substrate goes back
+  /// to naming no dialect at all.
+  ///
+  /// A GraphQLx projection door, when there is one, writes its own — over its own `SyntaxKind`,
+  /// with its own `ProjectErrorKind`. That is a second three-line `match` rather than a shared
+  /// generic one, and it is the right trade: the alternative puts a `pub(crate)` item back in the
+  /// substrate whose liveness depends on which dialects are compiled.
+  pub(crate) fn of(error: &ProjectError) -> Self {
+    match error.kind() {
+      ProjectErrorKind::TooDeep { limit } => Self::TooDeep { limit: *limit },
+      _ => Self::SourceMismatch,
+    }
+  }
+}
+
 /// Project a lossless parse to the AST the syntactic parser produces for `source`.
 ///
 /// The root this reads is the mixed [`Document`](SyntaxKind::Document) that
