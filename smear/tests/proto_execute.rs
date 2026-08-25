@@ -30,8 +30,8 @@ use smear::{
   },
   proto::{
     ArgumentSource, Ceiling, Executor, Extensions, Kind, Leaf, Limits, Node, ReqId,
-    RequestErrorResult, Response, ResponseStream, SetExtensionsError, SourceEventError, StartError,
-    Values,
+    RequestErrorResult, Resource, Response, ResponseStream, SetExtensionsError, SourceEventError,
+    StartError, Values,
   },
   validator::{Budget, First, Schema, Scratch, validate_executable},
 };
@@ -2619,7 +2619,7 @@ fn a_list_past_the_budget_is_a_field_error() {
   );
 
   assert_eq!(errors.len(), 1, "one error, at the position that ran out");
-  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(errors[0].0, Kind::ExecutorBudget);
   assert_eq!(
     errors[0].1,
     "Cannot complete field Query.nullable: the response would exceed the executor's limit of 3 \
@@ -2641,7 +2641,7 @@ fn a_list_past_the_budget_propagates_through_non_null() {
   );
 
   assert_eq!(errors.len(), 1);
-  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(errors[0].0, Kind::ExecutorBudget);
   assert_eq!(
     data, "null",
     "`[String!]!` cannot hold the null, so draft §6.4.4 takes `data` with it"
@@ -2664,7 +2664,7 @@ fn a_length_past_u32_is_refused_rather_than_narrowed() {
   );
 
   assert_eq!(errors.len(), 1);
-  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(errors[0].0, Kind::ExecutorBudget);
   assert_eq!(data, r#"{"nullable":null}"#);
 }
 
@@ -2687,7 +2687,7 @@ fn nesting_cannot_multiply_past_the_budget() {
   assert!(
     errors
       .iter()
-      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+      .any(|(kind, ..)| *kind == Kind::ExecutorBudget),
     "4 x 50 positions cannot fit in 16, whatever any single list's length is"
   );
 }
@@ -2714,7 +2714,7 @@ fn an_object_wider_than_the_budget_is_refused() {
   assert!(
     errors
       .iter()
-      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+      .any(|(kind, ..)| *kind == Kind::ExecutorBudget),
     "the object could not be assembled within the ceiling"
   );
 }
@@ -2786,7 +2786,7 @@ fn merged_selections_are_charged_against_their_own_ceiling() {
   assert!(
     errors
       .iter()
-      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+      .any(|(kind, ..)| *kind == Kind::ExecutorBudget),
     "4 rows x 8 selections cannot be recorded in 16 entries, though 4 rows fit in 64 positions"
   );
   assert!(
@@ -2819,7 +2819,7 @@ fn the_position_ceiling_alone_does_not_bound_the_metadata() {
   assert!(
     errors
       .iter()
-      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+      .any(|(kind, ..)| *kind == Kind::ExecutorBudget),
     "8 rows x 16 selections is 128 entries and the ceiling is 24, whatever the position budget says"
   );
 }
@@ -2989,7 +2989,7 @@ fn collection_that_appends_nothing_is_still_charged() {
   assert!(
     errors
       .iter()
-      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+      .any(|(kind, ..)| *kind == Kind::ExecutorBudget),
     "{LINKS} spreads cannot be walked within {WALK} visits, though they append two entries in \
      total: {errors:?}"
   );
@@ -3120,7 +3120,7 @@ fn a_refused_request_is_refused_again_on_the_same_executor() {
     first
       .1
       .iter()
-      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+      .any(|(kind, ..)| *kind == Kind::ExecutorBudget),
     "the fixture only says anything if the first run is refused: {first:?}"
   );
   assert!(
@@ -3283,7 +3283,7 @@ fn a_typename_on_an_abstract_type_does_need_the_interner() {
   assert!(
     errors
       .iter()
-      .any(|(kind, ..)| *kind == Kind::ResponseBudget),
+      .any(|(kind, ..)| *kind == Kind::ExecutorBudget),
     "`__typename`'s value is the stored name, so running out is the correct answer: {errors:?}"
   );
 }
@@ -3333,6 +3333,138 @@ fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
     errors[0].1.contains("20 interned bytes"),
     "and names the ceiling that actually refused: {}",
     errors[0].1
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// The classification and the resource say the same thing
+// ------------------------------------------------------------------------------------------
+
+/// Every executor refusal names one ceiling, and names the same one twice.
+///
+/// `Kind::ExecutorBudget` is a category — the executor refused, rather than the document or the
+/// driver being at fault — and it folds six `Raw` variants spending four different `Limits`
+/// fields. While it was called `ResponseBudget` its published contract named two of them, so a
+/// driver branching on the kind was routed by a sentence that had stopped being true four variants
+/// ago; the rendered message named the right knob the whole time. Two surfaces, one fact,
+/// disagreeing.
+///
+/// `Error::resource` is the repair, and this is the agreement: for every refusal the fixtures
+/// below can produce, the ceiling the type names is the ceiling the message names. The oracle is
+/// the *message* on purpose — the message is the surface that was already right, and the finding
+/// was that the classification had drifted away from it.
+#[test]
+fn an_executor_refusal_names_the_same_ceiling_as_its_message() {
+  /// The unit each ceiling's message counts in, one phrase per `Resource`. The wildcard is
+  /// `#[non_exhaustive]`'s and not a shrug: it panics, so a ceiling added without a phrase here
+  /// fails this test rather than passing it by falling through.
+  fn units(resource: Resource) -> &'static str {
+    match resource {
+      Resource::ResponseSlots => "positions",
+      Resource::ResponseMetadata => "metadata entries",
+      Resource::SelectionVisits => "selection visits",
+      Resource::InternedBytes => "interned bytes",
+      _ => unreachable!("a ceiling with no unit in its message"),
+    }
+  }
+
+  fn refusals(sdl: &str, query: &str, root: J, limits: Limits) -> Vec<(Resource, String)> {
+    execute_bounded(sdl, query, root, Vec::new(), limits, |response| {
+      response
+        .errors()
+        .filter(|error| error.kind() == Kind::ExecutorBudget)
+        .map(|error| {
+          (
+            error
+              .resource()
+              .expect("an executor refusal names the ceiling it ran out of"),
+            error.to_string(),
+          )
+        })
+        .collect()
+    })
+  }
+
+  let mut seen: Vec<Resource> = Vec::new();
+  let mut check = |label: &str, found: Vec<(Resource, String)>| {
+    assert!(!found.is_empty(), "{label}: nothing was refused");
+    for (resource, message) in found {
+      assert!(
+        message.contains(units(resource)),
+        "{label}: `resource()` says {resource:?} and the message says something else: {message}"
+      );
+      if !seen.contains(&resource) {
+        seen.push(resource);
+      }
+    }
+  };
+
+  check(
+    "positions",
+    refusals(
+      BUDGET_SDL,
+      "{ nullable }",
+      obj(vec![("nullable", J::Phantom(1000))]),
+      budget(3),
+    ),
+  );
+  check(
+    "metadata entries",
+    refusals(
+      MERGED_SDL,
+      &merged_query(8),
+      obj(vec![("rows", J::Phantom(4))]),
+      Limits {
+        max_response_slots: NonZeroU32::new(64).expect("not zero"),
+        max_response_metadata: NonZeroU32::new(16).expect("not zero"),
+        ..Limits::default()
+      },
+    ),
+  );
+  check(
+    "interned bytes",
+    refusals(
+      "type Query { rows: [Row] } type Row { averylongfieldname: String }",
+      "{ rows { averylongfieldname } }",
+      obj(vec![("rows", J::Phantom(4))]),
+      Limits {
+        max_interned_bytes: NonZeroU32::new(8).expect("not zero"),
+        ..Limits::default()
+      },
+    ),
+  );
+
+  // Draft §6.4.1's argument scan, which is the variant that made this a finding: it spends
+  // `max_selection_visits` and used to be classified as a *response* budget. The ceiling is found
+  // rather than written down, because the exact unit at which coercion rather than collection
+  // refuses is an implementation detail a constant here would pin by accident.
+  let argument_sdl = "type Query { f(a: String b: String c: String): String }";
+  let argument_query = "{ f(a: \"vvvvvvvv\" b: \"vvvvvvvv\" c: \"vvvvvvvv\") }";
+  let arguments = (1..96u32)
+    .find_map(|limit| {
+      let found = refusals(
+        argument_sdl,
+        argument_query,
+        obj(vec![("f", J::Str("ok".to_owned()))]),
+        Limits {
+          max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
+          ..Limits::default()
+        },
+      );
+      found
+        .iter()
+        .any(|(_, message)| message.contains("arguments written here"))
+        .then_some(found)
+    })
+    .expect("some visit ceiling refuses draft §6.4.1's scan");
+  check("written arguments", arguments);
+
+  seen.sort_unstable_by_key(|resource| resource.field());
+  assert_eq!(
+    seen.len(),
+    4,
+    "the fixtures reach every ceiling this kind folds, or the agreement is only claimed for some \
+     of them: {seen:?}"
   );
 }
 
@@ -3470,7 +3602,7 @@ fn a_runtime_type_lookup_the_budget_refuses_is_not_an_impossible_type() {
   assert_eq!(errors.len(), 1, "{errors:?}");
   assert_eq!(
     errors[0].0,
-    Kind::ResponseBudget,
+    Kind::ExecutorBudget,
     "the executor stopped looking; nothing was established about the driver's type: {errors:?}"
   );
   assert!(
@@ -4162,7 +4294,7 @@ fn a_name_storage_refusal_on_an_alias_points_at_the_alias() {
   );
 
   assert_eq!(located.len(), 1);
-  assert_eq!(located[0].0, Kind::ResponseBudget);
+  assert_eq!(located[0].0, Kind::ExecutorBudget);
   assert_eq!(located[0].1.len(), 1);
   let (start, end) = located[0].1[0];
   assert_eq!(
@@ -4269,7 +4401,7 @@ fn a_refused_list_takes_its_elements_errors_with_it() {
     1,
     "the element's error went back with the element that no longer exists: {errors:?}"
   );
-  assert_eq!(errors[0].0, Kind::ResponseBudget);
+  assert_eq!(errors[0].0, Kind::ExecutorBudget);
   assert_eq!(
     errors[0].2, "bad",
     "and the surviving error is the refusal, at the list"

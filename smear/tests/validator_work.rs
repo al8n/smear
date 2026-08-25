@@ -53,7 +53,8 @@ use smear::{
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   validator::{
-    Budget, Collect, Diagnostic, Rule, RuleSet, Schema, Scratch, validate_executable_with,
+    Budget, Collect, Diagnostic, Rule, RuleSet, Schema, Scratch, schema::MAX_FIELD_ARGUMENTS,
+    validate_executable_with,
   },
 };
 
@@ -2005,15 +2006,21 @@ fn the_verdict_does_not_depend_on_operation_order() {
 /// spending, and with no written arguments a required one spends zero.
 #[test]
 fn a_schema_sized_scan_is_charged_per_position_that_reaches_it() {
-  const DECLARED: usize = 200;
+  // The two groups are not the same width, and the difference is the point of the ceiling:
+  // `MAX_FIELD_ARGUMENTS` holds a declared ARGUMENT list at sixty-four, and nothing holds an input
+  // object's fields. Written as the constant rather than as sixty-four so that moving the ceiling
+  // moves this fixture, instead of turning it into a schema that will not build — which is what
+  // two hundred arguments became the day the ceiling landed. al8n/smear#198.
+  const ARGUMENTS: usize = MAX_FIELD_ARGUMENTS as usize;
+  const FIELDS: usize = 200;
   const POSITIONS: usize = 200;
 
   // Every argument optional and every input field optional, so the loops scan the whole group and
   // reach no `spend` inside it.
-  let args = (0..DECLARED)
+  let args = (0..ARGUMENTS)
     .map(|i| std::format!("a{i}: Int, "))
     .collect::<String>();
-  let fields = (0..DECLARED)
+  let fields = (0..FIELDS)
     .map(|i| std::format!("f{i}: Int "))
     .collect::<String>();
   let sdl = std::format!(
@@ -2038,8 +2045,8 @@ fn a_schema_sized_scan_is_charged_per_position_that_reaches_it() {
   let many = min_budget(&schema, &positions("manyArgs", POSITIONS), rules);
   println!("argument group: 1 position {one} units, {POSITIONS} positions {many} units");
   assert!(
-    many - one >= ((POSITIONS - 1) * DECLARED) as u32,
-    "{POSITIONS} positions over a {DECLARED}-argument group cost {} units",
+    many - one >= ((POSITIONS - 1) * ARGUMENTS) as u32,
+    "{POSITIONS} positions over a {ARGUMENTS}-argument group cost {} units",
     many - one
   );
 
@@ -2049,8 +2056,8 @@ fn a_schema_sized_scan_is_charged_per_position_that_reaches_it() {
   let many = min_budget(&schema, &positions("withWide(opts: {})", POSITIONS), rules);
   println!("input-field group: 1 position {one} units, {POSITIONS} positions {many} units");
   assert!(
-    many - one >= ((POSITIONS - 1) * DECLARED) as u32,
-    "{POSITIONS} literals over a {DECLARED}-field group cost {} units",
+    many - one >= ((POSITIONS - 1) * FIELDS) as u32,
+    "{POSITIONS} literals over a {FIELDS}-field group cost {} units",
     many - one
   );
 }
@@ -2445,7 +2452,10 @@ fn the_conditional_directive_scan_pays_one_unit_per_directive() {
 /// case for the worst one. Found by the taken-branch audit.
 #[test]
 fn the_required_argument_scan_stops_where_it_matches() {
-  const OTHERS: usize = 200;
+  // `need` plus `OTHERS` is the whole declared list, which `MAX_FIELD_ARGUMENTS` holds at
+  // sixty-four; derived for the reason the fixture above gives. Sixty-three names of two hundred
+  // bytes is still far more than the assertion below needs to see. al8n/smear#198.
+  const OTHERS: usize = MAX_FIELD_ARGUMENTS as usize - 1;
   let pad = "a".repeat(200);
   let declared = (0..OTHERS)
     .map(|i| std::format!("{pad}{i}: Int, "))

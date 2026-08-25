@@ -298,14 +298,27 @@ pub enum Kind {
   /// this one is raised at the enclosing object and nulls that. At the root selection set there is
   /// no enclosing field at all and the error's path is empty.
   DirectiveCondition,
-  /// The response reached one of [`Limits`](super::Limits)'s two response ceilings — positions
-  /// ([`max_response_slots`](super::Limits::max_response_slots)) or merged selections
-  /// ([`max_response_metadata`](super::Limits::max_response_metadata)). Not a draft §6 failure.
+  /// The executor refused the position: one of the ceilings [`Limits`](super::Limits) accumulates
+  /// had no room, or the work the operation was allowed had been spent. Not a draft §6 failure.
   ///
-  /// One kind for both, because a driver's remedy is identical: ask for less, or raise the ceiling
-  /// that the message names. Two kinds would ask a caller to distinguish cases it would handle the
-  /// same way; one message would name the wrong knob half the time, which is why the *messages*
-  /// differ and the classification does not.
+  /// One kind for all of them, because a driver's remedy is the same shape: ask for less, or raise
+  /// the ceiling. *Which* ceiling is a typed answer rather than a wider sentence —
+  /// [`Error::resource`](super::Error::resource) names it, and the message names it with its value.
+  ///
+  /// # It used to be called `ResponseBudget`, and that was the defect
+  ///
+  /// The published contract said "one of the two **response** ceilings", positions or merged
+  /// selections, while the code had folded four more refusals into it: the collection walk, the
+  /// runtime-type lookup and draft §6.4.1's argument scan all spend
+  /// [`max_selection_visits`](super::Limits::max_selection_visits), and a name that will not fit
+  /// spends [`max_interned_bytes`](super::Limits::max_interned_bytes). Neither is a response
+  /// ceiling. So a driver branching on this was sent to the wrong resource by a contract naming
+  /// two of the six, while the rendered message named the right one — the classification and the
+  /// prose disagreeing about the same fact.
+  ///
+  /// Repaired by making the kind honest about what it is (the executor refusing, whatever it ran
+  /// out of) and putting the distinction it used to imply into a **type** a caller can read, which
+  /// is what a folded distinction needs to survive a boundary. al8n/smear#198.
   ///
   /// The only kind here that is the *executor's* refusal rather than a fault in the document or in
   /// the driver's answer, and the only one whose path names where execution stopped rather than
@@ -315,7 +328,7 @@ pub enum Kind {
   /// It is a field error and not a refusal of the whole request because draft §7.1.2 reserves the
   /// request-error shape — a response with no `data` key — for a failure raised before execution
   /// begins. By the time a list is being completed, resolvers have already answered.
-  ResponseBudget,
+  ExecutorBudget,
   /// A field's response key is not a name, so no response can carry it (draft §2.1.9, §7.1.2).
   ///
   /// Not reachable from a document the lexer produced: draft §2.1.9's `Name` is
@@ -330,7 +343,106 @@ pub enum Kind {
   ResponseKeyUnreadable,
 }
 
+/// Which of the ceilings an [`Executor`](super::Executor) accumulates against refused a position.
+///
+/// The typed half of [`Kind::ExecutorBudget`], which is the category. Every variant is one
+/// [`Limits`](super::Limits) field and [`Resource::field`] spells that field's name, so a driver
+/// reports the knob it wants raised without parsing a message.
+///
+/// Deliberately **not** [`Ceiling`](super::Ceiling), which answers the same question for
+/// [`Extensions`](super::Extensions). That type says exactly the two things an extension insert can
+/// be refused by, and widening it to also say `SelectionVisits` would hand a
+/// [`Full`](super::Full) a type claiming more than it can ever hold — which is the trade
+/// [`Kind::ExecutorBudget`]'s own history is the lesson in, run the other way.
+///
+/// # What a caller does with it
+///
+/// The remedies are not interchangeable, which is why one kind is not enough on its own.
+/// [`ResponseSlots`](Resource::ResponseSlots) and
+/// [`ResponseMetadata`](Resource::ResponseMetadata) are about how much *response* was asked for,
+/// so a smaller page or a narrower selection moves them.
+/// [`SelectionVisits`](Resource::SelectionVisits) is about the *work* collecting and coercing took,
+/// so a shorter page does not move it and re-sending the same document never will.
+/// [`InternedBytes`](Resource::InternedBytes) is about the names — response keys and runtime type
+/// names — which neither of the other two remedies touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Resource {
+  /// [`Limits::max_response_slots`](super::Limits::max_response_slots) has no room for another
+  /// response position.
+  ResponseSlots,
+  /// [`Limits::max_response_metadata`](super::Limits::max_response_metadata) has no room for
+  /// another merged selection or location span.
+  ResponseMetadata,
+  /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits) is spent: the
+  /// collection walk, the name-table comparisons, the runtime-type lookups and draft §6.4.1's
+  /// argument scan are charged against it, and work already done is never refunded.
+  SelectionVisits,
+  /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes) has no room for a name.
+  InternedBytes,
+}
+
+impl Resource {
+  /// Returns the [`Limits`](super::Limits) field that refused.
+  ///
+  /// The same accessor [`Ceiling::field`](super::Ceiling::field) is, for the same reason: the
+  /// machine-readable part a code would otherwise have had to carry.
+  #[inline]
+  pub const fn field(self) -> &'static str {
+    match self {
+      Self::ResponseSlots => "max_response_slots",
+      Self::ResponseMetadata => "max_response_metadata",
+      Self::SelectionVisits => "max_selection_visits",
+      Self::InternedBytes => "max_interned_bytes",
+    }
+  }
+}
+
+impl fmt::Display for Resource {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(
+      f,
+      "`Limits::{}` had no room for this position",
+      self.field()
+    )
+  }
+}
+
 impl Raw {
+  /// Which ceiling this refusal ran out of, for the refusals that are one.
+  ///
+  /// Its own fold rather than something derived from [`Raw::kind`], because the two answer
+  /// different questions and one of them is *many-to-one*: every ceiling arm below maps to
+  /// [`Kind::ExecutorBudget`], so no arm of `kind` could be inverted to recover this. Neither fold
+  /// has a wildcard, and `Raw` is this crate's own, so a variant added later is refused by the
+  /// compiler in both of them until someone says what it is and what it ran out of.
+  #[inline]
+  const fn resource(&self) -> Option<Resource> {
+    match self {
+      Self::ResponseBudget { .. } => Some(Resource::ResponseSlots),
+      Self::SelectionBudget { .. } | Self::MetadataBudget { .. } => {
+        Some(Resource::ResponseMetadata)
+      }
+      Self::ArgumentBudget { .. }
+      | Self::CollectionBudget { .. }
+      | Self::RuntimeTypeBudget { .. } => Some(Resource::SelectionVisits),
+      Self::NameStorage { .. } => Some(Resource::InternedBytes),
+      Self::Resolver { .. }
+      | Self::ResolverUnstorable { .. }
+      | Self::NullInNonNull { .. }
+      | Self::NotAList { .. }
+      | Self::LeafCoercion { .. }
+      | Self::AbstractUnresolved { .. }
+      | Self::AbstractNotPossible { .. }
+      | Self::AbstractNotPossibleUnnamed { .. }
+      | Self::ArgumentMissing { .. }
+      | Self::ArgumentNull { .. }
+      | Self::ArgumentVariableMissing { .. }
+      | Self::DirectiveCondition { .. }
+      | Self::ResponseKeyUnreadable => None,
+    }
+  }
+
   #[inline]
   pub(super) const fn kind(&self) -> Kind {
     match self {
@@ -352,7 +464,7 @@ impl Raw {
       | Self::CollectionBudget { .. }
       | Self::MetadataBudget { .. }
       | Self::NameStorage { .. }
-      | Self::RuntimeTypeBudget { .. } => Kind::ResponseBudget,
+      | Self::RuntimeTypeBudget { .. } => Kind::ExecutorBudget,
       Self::ResponseKeyUnreadable => Kind::ResponseKeyUnreadable,
       Self::ResolverUnstorable { .. } => Kind::Resolver,
     }
@@ -374,6 +486,18 @@ impl<'r, V> Error<'r, V> {
   #[inline]
   pub const fn kind(&self) -> Kind {
     self.row.raw.kind()
+  }
+
+  /// Returns which ceiling refused, for a [`Kind::ExecutorBudget`] error, and `None` for every
+  /// other kind.
+  ///
+  /// The distinction [`kind`](Error::kind) folds. One classification is right for the branch a
+  /// driver writes — an executor refusal is not a fault in the document or in a resolved value —
+  /// and wrong for the remedy, because the four ceilings are moved by different things. See
+  /// [`Resource`].
+  #[inline]
+  pub const fn resource(&self) -> Option<Resource> {
+    self.row.raw.resource()
   }
 
   /// Returns the draft §7.1.2 response path of the field the error happened at.

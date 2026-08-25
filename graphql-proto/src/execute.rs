@@ -531,7 +531,7 @@ pub struct Limits {
   ///
   /// A position is one node of the response: the root, a field of an object, or an element of a
   /// list. Reaching the ceiling is a draft §7.1.2 **field error** at the position that could not be
-  /// completed ([`Kind::ResponseBudget`](super::Kind::ResponseBudget)), so draft §6.4.4 nulls that
+  /// completed ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)), so draft §6.4.4 nulls that
   /// position and propagates from it exactly as it does for any other field error.
   ///
   /// A field error is the only shape available, and it is also the right one. The alternative —
@@ -576,7 +576,7 @@ pub struct Limits {
   /// on their product, for the reason the type's own documentation gives at length.
   ///
   /// Reaching it is the same field error as reaching the position ceiling
-  /// ([`Kind::ResponseBudget`](super::Kind::ResponseBudget)) and for the same reasons: it is raised
+  /// ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)) and for the same reasons: it is raised
   /// once execution is under way, so §7.1.2 leaves no other shape, and it names the object whose
   /// selection set could not be recorded rather than diagnosing what made the response expensive.
   ///

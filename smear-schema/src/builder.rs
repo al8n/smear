@@ -41,6 +41,7 @@ use smear_parser::graphql::{
   syntactic::{GraphqlLexer, type_system_document},
 };
 
+use self::declared::{Args, ArgsMut, Declared};
 use super::{
   builtin,
   error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
@@ -219,6 +220,20 @@ enum DirectivesOf {
   InputField { ty: usize, field: usize },
   EnumValue { ty: usize, value: usize },
   DirectiveArgument { directive: usize, arg: usize },
+}
+
+/// What one declared argument list's three §3.6.1 rules are called.
+///
+/// A field's arguments and a directive definition's are the same three rules read twice, under six
+/// names: draft §3.6.1(2.1) uniqueness, (2.2) the reserved prefix and (2.4.2) "must be an input
+/// type". The caller supplies the names its half of the specification uses, and they travel as one
+/// value for the reason [`Blame`] does — three parameters that are always passed together are one
+/// parameter.
+#[derive(Debug, Clone, Copy)]
+struct ArgumentRules {
+  duplicate: SchemaErrorKind,
+  reserved: SchemaErrorKind,
+  not_input: SchemaErrorKind,
 }
 
 /// What a failing literal is reported as, in symbols rather than in text.
@@ -451,11 +466,107 @@ impl RawInput {
   }
 }
 
+/// The declared argument list and the ceiling that decides who may read it.
+///
+/// A module of its own — inside this file, whose every other item is a sibling — because Rust's
+/// privacy is per module and the whole mechanism is the private field. `Declared`'s `Vec` is
+/// unreachable from the rest of `builder.rs`, so [`Declared::read`] is the only way to a
+/// `&[RawInput]` and there is no second way for a consumer to find.
+mod declared {
+  use super::RawInput;
+
+  /// A *declared* argument list — a field's or a directive definition's — held behind the ceiling
+  /// that decides whether reading it is bounded work.
+  ///
+  /// # What a reader cannot do
+  ///
+  /// There is no accessor that hands over the list. [`Declared::read`] answers with [`Args`],
+  /// whose two arms have to be destructured, and the over-limit arm carries nothing. A consumer
+  /// written next year by someone who has never heard of `MAX_FIELD_ARGUMENTS` cannot scan an
+  /// over-limit list by forgetting to check for one: forgetting does not compile.
+  ///
+  /// # Why the ceilings were not enough on their own
+  ///
+  /// Each of the two ceilings was first written as a `continue` in front of the one walk that had
+  /// been measured, and review then found the next consumer — twice, at two walks that were never
+  /// on that path. Every directive *usage* re-scanned the oversized declared list once per written
+  /// argument, `Θ(declared × written)`; interface conformance scanned both sides of an
+  /// over-limit field, `Θ(own × interface)`. A guard in front of one caller bounds one caller.
+  /// The list is what every caller has in common, so the guard belongs on the list, and the next
+  /// consumer meets it without anyone having remembered to put it there.
+  ///
+  /// # Why the list is not truncated instead
+  ///
+  /// Cutting an over-limit list down to `CEILING` would bound every scan with no gate at all, and
+  /// it would **invent** diagnostics: an interface field whose arguments are cut to sixty-four
+  /// reports `MissingInterfaceFieldArgument` for arguments the document genuinely wrote. A refusal
+  /// has to suppress the work downstream of it without inventing findings downstream of it, so
+  /// what an over-limit list holds is exactly what was written, and what changes is who may look.
+  ///
+  /// # What the skipped work costs
+  ///
+  /// Nothing a caller can observe. `SchemaBuilder::finish` returns `Err` for any recorded error,
+  /// so a schema carrying `TooManyFieldArguments` or `TooManyDirectiveArguments` is never handed
+  /// out; every diagnostic a refused list suppresses is one about a document that is refused
+  /// already, for a reason the refusal names. al8n/smear#198.
+  #[derive(Debug, Clone)]
+  pub(super) struct Declared<const CEILING: u32> {
+    args: Vec<RawInput>,
+  }
+
+  /// What a [`Declared`] list answers when a reader asks for its arguments.
+  pub(super) enum Args<'a> {
+    /// At or below the ceiling: the scan the reader is about to do is the one the ceiling bounds.
+    Bounded(&'a [RawInput]),
+    /// Past it, and recorded as such. No list here, on purpose — the reader's very next line is
+    /// where the decision to skip has to be written.
+    Refused,
+  }
+
+  /// [`Args`] for the one pass that resolves the arguments in place.
+  pub(super) enum ArgsMut<'a> {
+    /// At or below the ceiling.
+    Bounded(&'a mut [RawInput]),
+    /// Past it.
+    Refused,
+  }
+
+  impl<const CEILING: u32> Declared<CEILING> {
+    /// Whether this is a list the ceiling refuses. The refusal site asks; no other reader has to,
+    /// because [`Declared::read`] asks on its behalf.
+    pub(super) fn over_ceiling(&self) -> bool {
+      self.args.len() > CEILING as usize
+    }
+
+    /// The arguments, if the ceiling admits them.
+    pub(super) fn read(&self) -> Args<'_> {
+      match self.over_ceiling() {
+        false => Args::Bounded(&self.args),
+        true => Args::Refused,
+      }
+    }
+
+    /// The arguments to resolve in place, if the ceiling admits them.
+    pub(super) fn read_mut(&mut self) -> ArgsMut<'_> {
+      match self.over_ceiling() {
+        false => ArgsMut::Bounded(&mut self.args),
+        true => ArgsMut::Refused,
+      }
+    }
+  }
+
+  impl<const CEILING: u32> From<Vec<RawInput>> for Declared<CEILING> {
+    fn from(args: Vec<RawInput>) -> Self {
+      Self { args }
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 struct RawField {
   name: Located,
   ty: RawTypeRef,
-  args: Vec<RawInput>,
+  args: Declared<MAX_FIELD_ARGUMENTS>,
   directives: Vec<RawDirectiveUse>,
 }
 
@@ -504,7 +615,7 @@ impl RawType {
 #[derive(Debug, Clone)]
 struct RawDirectiveDef {
   name: Located,
-  args: Vec<RawInput>,
+  args: Declared<MAX_DIRECTIVE_ARGUMENTS>,
   locations: DirectiveLocations,
   repeatable: bool,
   built_in: bool,
@@ -605,10 +716,15 @@ impl<'a> Model<'a> {
     }
   }
 
-  fn arguments(&self, at: ArgumentsOf) -> &'a [RawInput] {
+  /// One declared argument list, through the ceiling that decides whether it may be walked.
+  ///
+  /// The only reader of either list in this file, now that `SchemaBuilder` has no accessor of its
+  /// own: a `&mut self` pass reaches it through [`SchemaBuilder::split`], which is what the read
+  /// and write halves were separated for. See [`Declared`].
+  fn arguments(&self, at: ArgumentsOf) -> Args<'a> {
     match at {
-      ArgumentsOf::Field { ty, field } => &self.types[ty].fields[field].args,
-      ArgumentsOf::Directive { index } => &self.directives[index].args,
+      ArgumentsOf::Field { ty, field } => self.types[ty].fields[field].args.read(),
+      ArgumentsOf::Directive { index } => self.directives[index].args.read(),
     }
   }
 
@@ -617,13 +733,24 @@ impl<'a> Model<'a> {
       DirectivesOf::Schema => self.schema_directives,
       DirectivesOf::Type { ty } => &self.types[ty].directives,
       DirectivesOf::Field { ty, field } => &self.types[ty].fields[field].directives,
+      // The two argument arms are the only ones whose list is behind a ceiling, and their
+      // `Refused` arm is unreachable: an `arg` position exists only because the loop that minted
+      // it read the same list through the gate and stopped when the gate refused. An empty list
+      // is what an unreachable arm should degrade to here — no directive to check, so nothing
+      // reported — rather than a diagnostic invented about a list nobody may look at.
       DirectivesOf::FieldArgument { ty, field, arg } => {
-        &self.types[ty].fields[field].args[arg].directives
+        match self.types[ty].fields[field].args.read() {
+          Args::Bounded(args) => &args[arg].directives,
+          Args::Refused => &[],
+        }
       }
       DirectivesOf::InputField { ty, field } => &self.types[ty].input_fields[field].directives,
       DirectivesOf::EnumValue { ty, value } => &self.types[ty].enum_values[value].directives,
       DirectivesOf::DirectiveArgument { directive, arg } => {
-        &self.directives[directive].args[arg].directives
+        match self.directives[directive].args.read() {
+          Args::Bounded(args) => &args[arg].directives,
+          Args::Refused => &[],
+        }
       }
     }
   }
@@ -653,6 +780,17 @@ fn render_owner(interner: &Interner, at: Coordinate) -> String {
     Some(directive) => directive_coordinate(&path, interner.text(directive)),
     None => path,
   }
+}
+
+/// Whether `@deprecated` is applied in this directive list.
+///
+/// A free function over the arena rather than a method, because both halves of
+/// [`SchemaBuilder::split`] ask it: the read half while walking a list it is holding, and the
+/// `&mut self` passes while walking one they re-address.
+fn is_deprecated(interner: &Interner, directives: &[RawDirectiveUse]) -> bool {
+  directives
+    .iter()
+    .any(|used| interner.text(used.name.sym) == DEPRECATED)
 }
 
 fn push_owned(
@@ -1035,7 +1173,7 @@ impl SchemaBuilder {
     self.set_directive_index(name.sym, index);
     self.directives.push(RawDirectiveDef {
       name,
-      args,
+      args: args.into(),
       locations,
       repeatable,
       built_in,
@@ -1242,7 +1380,7 @@ impl SchemaBuilder {
         RawField {
           name,
           ty,
-          args,
+          args: args.into(),
           directives,
         }
       })
@@ -1722,15 +1860,21 @@ impl SchemaBuilder {
           &mut unresolved,
           &mut too_deep,
         );
-        for arg in 0..self.types[index].fields[field].args.len() {
-          let path = path.then(self.types[index].fields[field].args[arg].name.sym);
-          Self::resolve_one(
-            &self.type_of_sym,
-            &mut self.types[index].fields[field].args[arg].ty,
-            path,
-            &mut unresolved,
-            &mut too_deep,
-          );
+        // A refused list is not resolved, for the reason no later pass reads one: the field is
+        // already refused, `finish` will not hand the schema out, and an `UndefinedType` naming
+        // an argument of a field nobody may declare is a diagnostic about the wrong defect. See
+        // [`Declared`].
+        if let ArgsMut::Bounded(args) = self.types[index].fields[field].args.read_mut() {
+          for arg in args {
+            let path = path.then(arg.name.sym);
+            Self::resolve_one(
+              &self.type_of_sym,
+              &mut arg.ty,
+              path,
+              &mut unresolved,
+              &mut too_deep,
+            );
+          }
         }
       }
 
@@ -1748,15 +1892,17 @@ impl SchemaBuilder {
 
     for index in 0..self.directives.len() {
       let owner = Coordinate::named(self.directives[index].name.sym);
-      for arg in 0..self.directives[index].args.len() {
-        let path = owner.then(self.directives[index].args[arg].name.sym);
-        Self::resolve_one(
-          &self.type_of_sym,
-          &mut self.directives[index].args[arg].ty,
-          path,
-          &mut unresolved,
-          &mut too_deep,
-        );
+      if let ArgsMut::Bounded(args) = self.directives[index].args.read_mut() {
+        for arg in args {
+          let path = owner.then(arg.name.sym);
+          Self::resolve_one(
+            &self.type_of_sym,
+            &mut arg.ty,
+            path,
+            &mut unresolved,
+            &mut too_deep,
+          );
+        }
       }
     }
 
@@ -1881,13 +2027,6 @@ impl SchemaBuilder {
       .any(|used| self.text(used.name.sym) == name)
   }
 
-  /// Whether `@deprecated` is applied in this directive list.
-  fn is_deprecated(&self, directives: &[RawDirectiveUse]) -> bool {
-    directives
-      .iter()
-      .any(|used| self.text(used.name.sym) == DEPRECATED)
-  }
-
   fn validate_fields(&mut self, index: usize, owner: Coordinate) {
     if self.types[index].fields.is_empty() {
       let at = self.types[index].name;
@@ -1944,102 +2083,105 @@ impl SchemaBuilder {
       // billing a request for the service's own design-time width. So the deployment's factor is
       // bounded where the deployment writes it. See `MAX_FIELD_ARGUMENTS`. al8n/smear#198.
       //
-      // Before the argument walk below, and INSTEAD of it. Ordering alone was the first shape of
-      // this check and it settled only the diagnostics: a field a thousand arguments wide would
-      // otherwise report a thousand argument diagnostics ahead of the one that says why the field
-      // itself is refused. But the refused field still paid `validate_arguments`, whose duplicate
-      // scan compares each argument against every argument before it — `Θ(declared²)` — so the
-      // ceiling stood in front of the work it names without gating it, and an oversized list
-      // bought the whole scan on its way to being refused. A bound whose own refusal path is
-      // unbounded bounds nothing an adversary has to respect. Not performing the argument checks
-      // is the same argument the ordering was already making, carried to its conclusion: the
-      // arguments are not why the field is refused, and a field that will not build has no
-      // argument diagnostics worth the walk. al8n/smear#198.
-      let declared = self.types[index].fields[field].args.len();
-      if declared > MAX_FIELD_ARGUMENTS as usize {
+      // The refusal is RECORDED here and ENFORCED by [`Declared`], and that split is what
+      // distinguishes this from the two shapes that came before it. Ordering the check in front of
+      // the argument walk settled only the diagnostics — a field a thousand arguments wide would
+      // otherwise report a thousand argument diagnostics ahead of the one saying why the field is
+      // refused. Adding a `continue` bounded the one walk the check stood in front of. Review then
+      // found two more walks it did not stand in front of at all: a directive usage's scan of its
+      // definition's declared list, and interface conformance's scan of both sides of a field.
+      // A guard in front of one caller bounds one caller.
+      //
+      // So there is no `continue` here any more. Below this line the list is reached only through
+      // `Declared::read`, which hands an over-limit list to nobody — this pass included, and a
+      // pass written next year included, without either having been told about the ceiling.
+      if self.types[index].fields[field].args.over_ceiling() {
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_owned(SchemaErrorKind::TooManyFieldArguments, &name, owner, at);
-        continue;
       }
 
       let built_in = self.types[index].built_in;
-      self.validate_arguments(
+      let (model, errors) = self.split();
+      Self::validate_arguments(
+        model,
+        errors,
         ArgumentsOf::Field { ty: index, field },
         path,
         built_in,
-        SchemaErrorKind::DuplicateArgumentName,
-        SchemaErrorKind::ReservedArgumentName,
-        SchemaErrorKind::ArgumentTypeNotInputType,
+        ArgumentRules {
+          duplicate: SchemaErrorKind::DuplicateArgumentName,
+          reserved: SchemaErrorKind::ReservedArgumentName,
+          not_input: SchemaErrorKind::ArgumentTypeNotInputType,
+        },
       );
     }
   }
 
-  /// One input-value list, addressed rather than borrowed.
+  /// One declared argument list, against the §3.6.1 rules that read the arguments themselves.
   ///
-  /// `&self.types[…].args` cannot be held across a `self.push*`, and the list is walked far more
-  /// often than it is reported on — every argument of every field of every type, built-ins
-  /// included — so it is re-addressed per item rather than copied once per list. See [`Model`].
-  fn arguments(&self, at: ArgumentsOf) -> &[RawInput] {
-    match at {
-      ArgumentsOf::Field { ty, field } => &self.types[ty].fields[field].args,
-      ArgumentsOf::Directive { index } => &self.directives[index].args,
-    }
-  }
-
+  /// Over a [`Model`] and the error list rather than `&mut self`, which is what lets the gated
+  /// list be read **once** and held for the whole walk: every rule below reports through `errors`,
+  /// the half [`SchemaBuilder::split`] keeps disjoint from the half the list lives in. The shape
+  /// this replaces re-addressed the list at each of seven reads, because a `&self.types[…].args`
+  /// could not survive a `self.push*` — and each of those reads would now be a separate encounter
+  /// with the gate, saying seven times what the first `let` says once.
   fn validate_arguments(
-    &mut self,
+    model: Model<'_>,
+    errors: &mut Vec<SchemaError>,
     args: ArgumentsOf,
     owner: Coordinate,
     built_in: bool,
-    duplicate: SchemaErrorKind,
-    reserved: SchemaErrorKind,
-    not_input: SchemaErrorKind,
+    rules: ArgumentRules,
   ) {
-    // Both callers refuse past their ceiling before reaching here, so this list is never wider
-    // than sixty-four and `Duplicates` is always the scan the previous round decided to keep.
-    // Written through the shared type all the same: a copy of the shape kept because a ceiling
-    // happens to hold this one list today is the copy the next ceiling change re-opens.
-    let mut seen = Duplicates::over(self.arguments(args).len(), |at| {
-      self.arguments(args)[at].name.sym
-    });
-    for index in 0..self.arguments(args).len() {
-      let arg = &self.arguments(args)[index];
-      let at = arg.name;
-      let ty = arg.ty;
-      let required = arg.is_required();
+    // The gate, and the whole of the bound on this pass. Its caller records the refusal; nothing
+    // here needs to know that, because a refused list hands out no arguments to walk. `Duplicates`
+    // is the scan the previous round kept, and this is the one §3 list a ceiling holds at
+    // sixty-four — written through the shared type all the same, because a copy of the shape kept
+    // because a ceiling happens to hold this one list today is the copy the next ceiling change
+    // re-opens.
+    let Args::Bounded(declared) = model.arguments(args) else {
+      return;
+    };
+
+    let mut seen = Duplicates::over(declared.len(), |at| declared[at].name.sym);
+    for (index, argument) in declared.iter().enumerate() {
+      let at = argument.name;
+      let ty = argument.ty;
+      let required = argument.is_required();
 
       if let Some(earlier) = seen.first(index, at.sym) {
-        let first = self.arguments(args)[earlier].name.span;
-        let name = self.text(at.sym).to_owned();
-        let owner = self.owner(owner);
-        self.push_related(duplicate, &name, Some(owner), at, first);
+        let first = declared[earlier].name.span;
+        let name = model.text(at.sym).to_owned();
+        let owner = model.owner(owner);
+        push_related(errors, rules.duplicate, &name, Some(owner), at, first);
       }
 
-      if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
-        let name = self.text(at.sym).to_owned();
-        let owner = self.owner(owner);
-        self.push_owned(reserved, &name, owner, at);
+      if !built_in && is_reserved(model.text(at.sym).as_bytes()) {
+        let name = model.text(at.sym).to_owned();
+        let owner = model.owner(owner);
+        push_owned(errors, rules.reserved, &name, owner, at);
       }
 
       let base = ty.packed.base_id();
-      if base != UNRESOLVED && !self.types[base.get() as usize].kind.is_input() {
-        let subject = self
-          .text(self.types[base.get() as usize].name.sym)
+      if base != UNRESOLVED && !model.types[base.get() as usize].kind.is_input() {
+        let subject = model
+          .text(model.types[base.get() as usize].name.sym)
           .to_owned();
-        let path = self.owner(owner.then(at.sym));
+        let path = model.owner(owner.then(at.sym));
         let mut where_ = at;
         where_.span = ty.span;
-        self.push_owned(not_input, &subject, path, where_);
+        push_owned(errors, rules.not_input, &subject, path, where_);
       }
 
       // Draft §3.6.1(2.4.4.1): "if argument type is Non-Null and a default value is not defined,
       // the `@deprecated` directive must not be applied to this argument" — which is exactly
       // `is_required`.
-      if required && self.is_deprecated(&self.arguments(args)[index].directives) {
-        let name = self.text(at.sym).to_owned();
-        let owner = self.owner(owner);
-        self.push_owned(
+      if required && is_deprecated(model.interner, &argument.directives) {
+        let name = model.text(at.sym).to_owned();
+        let owner = model.owner(owner);
+        push_owned(
+          errors,
           SchemaErrorKind::DeprecatedRequiredArgument,
           &name,
           owner,
@@ -2050,12 +2192,7 @@ impl SchemaBuilder {
       // Draft §3.6.1(2.4.5): "if the argument has a default value it must be compatible with
       // `argumentType` as per the coercion rules for that type" — the same coercion procedure a
       // directive argument's *supplied* value goes through, so the two cannot answer differently.
-      if self.arguments(args)[index].default_value.is_some() {
-        let (model, errors) = self.split();
-        let default = model.arguments(args)[index]
-          .default_value
-          .as_ref()
-          .expect("just observed to be present");
+      if let Some(default) = argument.default_value.as_ref() {
         Self::check_const_value(
           model,
           errors,
@@ -2235,7 +2372,12 @@ impl SchemaBuilder {
       }
 
       // Draft §3.10.1(2.4.1), the input-field twin of §3.6.1(2.4.4.1).
-      if required && self.is_deprecated(&self.types[index].input_fields[position].directives) {
+      if required
+        && is_deprecated(
+          &self.interner,
+          &self.types[index].input_fields[position].directives,
+        )
+      {
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_owned(
@@ -2299,27 +2441,30 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::ReservedDirectiveName, &name, at);
       }
 
-      // The second population of the same list, refused the same way and before the same walk.
-      // A directive definition's arguments go through `validate_arguments` exactly as a field's
-      // do, so they carry the same `Θ(declared²)` duplicate scan; and the width is read again at
-      // every usage a document writes, which is the product `MAX_DIRECTIVE_ARGUMENTS` states.
-      // The field ceiling did not reach here — one constant enforced at one site — so bounding
-      // only the field path would have left the identical walk open on a list written by the
-      // same party for the same kind of reason. al8n/smear#198.
-      let declared = self.directives[index].args.len();
-      if declared > MAX_DIRECTIVE_ARGUMENTS as usize {
+      // The second population of the same list, refused the same way and enforced by the same
+      // gate. A directive definition's arguments go through `validate_arguments` exactly as a
+      // field's do; and the width is read again at every usage a document writes, which is the
+      // product `MAX_DIRECTIVE_ARGUMENTS` states and the scan review found second. The field
+      // ceiling did not reach here — one constant enforced at one site — which is the shape
+      // [`Declared`] retires: the ceiling now travels with the list rather than with the site.
+      // al8n/smear#198.
+      if self.directives[index].args.over_ceiling() {
         let name = self.text(at.sym).to_owned();
         self.push(SchemaErrorKind::TooManyDirectiveArguments, &name, at);
-        continue;
       }
 
-      self.validate_arguments(
+      let (model, errors) = self.split();
+      Self::validate_arguments(
+        model,
+        errors,
         ArgumentsOf::Directive { index },
         Coordinate::named(at.sym),
         built_in,
-        SchemaErrorKind::DuplicateDirectiveArgumentName,
-        SchemaErrorKind::ReservedDirectiveArgumentName,
-        SchemaErrorKind::DirectiveArgumentTypeNotInputType,
+        ArgumentRules {
+          duplicate: SchemaErrorKind::DuplicateDirectiveArgumentName,
+          reserved: SchemaErrorKind::ReservedDirectiveArgumentName,
+          not_input: SchemaErrorKind::DirectiveArgumentTypeNotInputType,
+        },
       );
     }
   }
@@ -2348,14 +2493,19 @@ impl SchemaBuilder {
         let path = owner.then(model.types[ty].fields[field].name.sym);
         Self::check_directive_uses(model, errors, DirectivesOf::Field { ty, field }, path);
 
-        for arg in 0..model.types[ty].fields[field].args.len() {
-          let path = path.then(model.types[ty].fields[field].args[arg].name.sym);
-          Self::check_directive_uses(
-            model,
-            errors,
-            DirectivesOf::FieldArgument { ty, field, arg },
-            path,
-          );
+        // The gate decides whether this field's arguments are visited at all, which is also
+        // what makes `DirectivesOf::FieldArgument`'s own refused arm unreachable: an `arg`
+        // position exists only for a list admitted here.
+        if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Field { ty, field }) {
+          for (arg, argument) in declared.iter().enumerate() {
+            let path = path.then(argument.name.sym);
+            Self::check_directive_uses(
+              model,
+              errors,
+              DirectivesOf::FieldArgument { ty, field, arg },
+              path,
+            );
+          }
         }
       }
 
@@ -2372,14 +2522,17 @@ impl SchemaBuilder {
 
     for directive in 0..model.directives.len() {
       let owner = Coordinate::named(model.directives[directive].name.sym);
-      for arg in 0..model.directives[directive].args.len() {
-        let path = owner.then(model.directives[directive].args[arg].name.sym);
-        Self::check_directive_uses(
-          model,
-          errors,
-          DirectivesOf::DirectiveArgument { directive, arg },
-          path,
-        );
+      if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: directive })
+      {
+        for (arg, argument) in declared.iter().enumerate() {
+          let path = owner.then(argument.name.sym);
+          Self::check_directive_uses(
+            model,
+            errors,
+            DirectivesOf::DirectiveArgument { directive, arg },
+            path,
+          );
+        }
       }
     }
   }
@@ -2468,12 +2621,12 @@ impl SchemaBuilder {
     // Rendered only where one is reported. `check_directive_arguments` runs for every well-formed
     // usage too, and a supergraph has thousands of them.
     let coordinate = owner.at_directive(used.name.sym);
-    let declared = &model.directives[definition].args;
 
     // Draft 5.4.2's SDL twin. Unlike the repeatability rule above, this one needs nothing from the
     // definition — an argument written twice is a mistake whether or not the directive declares it
     // — so it is checked for every written argument, including one that is about to be reported
-    // as undefined.
+    // as undefined. It is above the gate for that same reason: it reads the usage, which no
+    // ceiling holds, and `Duplicates` is what bounds it.
     let mut seen = Duplicates::over(used.args.len(), |at| used.args[at].name.sym);
     for (position, argument) in used.args.iter().enumerate() {
       if let Some(earlier) = seen.first(position, argument.name.sym) {
@@ -2489,6 +2642,15 @@ impl SchemaBuilder {
         );
       }
     }
+
+    // Everything below reads the DEFINITION's declared list once per written argument, and that
+    // is the `Θ(declared × written)` review found here: a definition past its ceiling is refused
+    // at build, and every usage of it then re-scanned the oversized list anyway. The refusal is
+    // recorded where the definition is validated; this is the reader being told, by the list.
+    let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: definition })
+    else {
+      return;
+    };
 
     for argument in &used.args {
       let Some(expected) = declared.iter().find(|d| d.name.sym == argument.name.sym) else {
@@ -2807,7 +2969,8 @@ impl SchemaBuilder {
           // `IsValidImplementation` 2.6: "if `field` is deprecated then `implementedField` must
           // also be deprecated". The span is the implementing field, which is where the edit goes;
           // `related` points at the interface field, which is the other half of the obligation.
-          if self.is_deprecated(&own.directives) && !self.is_deprecated(&interface_field.directives)
+          if is_deprecated(&self.interner, &own.directives)
+            && !is_deprecated(&self.interner, &interface_field.directives)
           {
             self.push_related(
               SchemaErrorKind::InterfaceFieldNotDeprecated,
@@ -2818,10 +2981,22 @@ impl SchemaBuilder {
             );
           }
 
-          for interface_arg in &interface_field.args {
+          // Draft `IsValidImplementation` 2.4 and 2.5 read both argument lists, and each loop
+          // scans the other list once per entry — `Θ(own × interface)`, which is the third
+          // consumer review found walking a list a ceiling had already refused. Both sides are
+          // asked, and it has to be both: a refused list is not an empty one, so pairing a
+          // refused side against a live one would report every argument of the live side as
+          // missing from a list nobody may look at. That is exactly the diagnostic truncating an
+          // over-limit list would have invented, reached from the other direction.
+          let (Args::Bounded(interface_args), Args::Bounded(own_args)) =
+            (interface_field.args.read(), own.args.read())
+          else {
+            continue;
+          };
+
+          for interface_arg in interface_args {
             let arg_name = self.text(interface_arg.name.sym).to_owned();
-            match own
-              .args
+            match own_args
               .iter()
               .find(|a| a.name.sym == interface_arg.name.sym)
             {
@@ -2849,9 +3024,8 @@ impl SchemaBuilder {
             }
           }
 
-          for own_arg in &own.args {
-            let declared_by_interface = interface_field
-              .args
+          for own_arg in own_args {
+            let declared_by_interface = interface_args
               .iter()
               .any(|a| a.name.sym == own_arg.name.sym);
             if declared_by_interface {
@@ -3178,10 +3352,14 @@ impl SchemaBuilder {
       let mut pending_types: Vec<usize> = Vec::new();
 
       // Seed with what the definition itself names: the directives applied to its arguments, and
-      // the types those arguments accept.
-      for arg in &self.directives[start].args {
-        self.push_directive_uses(&arg.directives, &mut pending_directives);
-        self.push_type(arg.ty.packed.base_id(), &mut pending_types);
+      // the types those arguments accept — unless the ceiling holds that list, in which case the
+      // walk seeds nothing. A cycle through a directive that will not build is a second diagnostic
+      // about a schema the first one has already refused.
+      if let Args::Bounded(args) = self.directives[start].args.read() {
+        for arg in args {
+          self.push_directive_uses(&arg.directives, &mut pending_directives);
+          self.push_type(arg.ty.packed.base_id(), &mut pending_types);
+        }
       }
 
       let mut found = false;
@@ -3195,9 +3373,11 @@ impl SchemaBuilder {
             continue;
           }
           seen_directives[next] = true;
-          for arg in &self.directives[next].args {
-            self.push_directive_uses(&arg.directives, &mut pending_directives);
-            self.push_type(arg.ty.packed.base_id(), &mut pending_types);
+          if let Args::Bounded(args) = self.directives[next].args.read() {
+            for arg in args {
+              self.push_directive_uses(&arg.directives, &mut pending_directives);
+              self.push_type(arg.ty.packed.base_id(), &mut pending_types);
+            }
           }
           continue;
         }
@@ -3345,9 +3525,23 @@ impl SchemaBuilder {
         TypeKind::Object | TypeKind::Interface | TypeKind::Union => {
           let mut rows: Vec<FieldDef> = Vec::with_capacity(raw.fields.len() + 3);
           for field in &raw.fields {
+            // Unreachable, and reported rather than assumed. `finish` returns `Err` for any
+            // recorded error and an over-limit list records one, so flattening never meets a
+            // refused list. What the arm must not do is degrade quietly: an empty argument range
+            // is a schema that silently drops arguments the document wrote, which is the one
+            // outcome worse than the refusal this returns.
+            let Args::Bounded(declared) = field.args.read() else {
+              return Err(SchemaErrors::new(vec![
+                SchemaError::new(
+                  SchemaErrorKind::TooManyFieldArguments,
+                  interner.text(field.name.sym),
+                  field.name.span,
+                )
+                .in_document(field.name.document),
+              ]));
+            };
             let args_start = inputs.len() as u32;
-            let mut args: Vec<InputValueDef> = field
-              .args
+            let mut args: Vec<InputValueDef> = declared
               .iter()
               .map(|arg| InputValueDef::new(arg.name.sym, arg.ty.packed, arg.default))
               .collect();
@@ -3471,9 +3665,20 @@ impl SchemaBuilder {
 
     let mut directives: Vec<DirectiveDef> = Vec::with_capacity(raw_directives.len());
     for raw in &raw_directives {
+      // Unreachable for the reason the field arm above states, and refused rather than emptied
+      // for the same one.
+      let Args::Bounded(declared) = raw.args.read() else {
+        return Err(SchemaErrors::new(vec![
+          SchemaError::new(
+            SchemaErrorKind::TooManyDirectiveArguments,
+            interner.text(raw.name.sym),
+            raw.name.span,
+          )
+          .in_document(raw.name.document),
+        ]));
+      };
       let args_start = inputs.len() as u32;
-      let mut args: Vec<InputValueDef> = raw
-        .args
+      let mut args: Vec<InputValueDef> = declared
         .iter()
         .map(|arg| InputValueDef::new(arg.name.sym, arg.ty.packed, arg.default))
         .collect();
