@@ -99,3 +99,89 @@ fn executable_selection_and_import_nodes_keep_their_span_type() {
   assert_eq!(operation.as_str(), "query");
   assert_eq!(operation.into_span(), CustomSpan(7));
 }
+
+/// How deep the two release gates below build, which is an order of magnitude past where the
+/// generated glue died on [`RELEASE_STACK`].
+///
+/// Measured at `9f584d6` on `aarch64-apple-darwin`, release, on a 256 KiB thread: a type chain
+/// aborted at 8 602 levels. The stack is sized here rather than inherited because the boundary is
+/// a property of it — the same binary on an 8 MiB main thread reached 250 937, so a fixture sized
+/// against libtest's thread would stop being a probe the day the runner's stack changed.
+#[cfg(feature = "std")]
+const RELEASE_DEPTH: usize = 100_000;
+
+/// The stack the two release gates below are built and released on.
+#[cfg(feature = "std")]
+const RELEASE_STACK: usize = 256 * 1024;
+
+/// Builds and releases a fixture on a stack this file sizes.
+///
+/// A regression aborts the process, which no assertion can soften; the thread is what makes the
+/// abort reachable at a depth these fixtures can afford, not what contains it.
+#[cfg(feature = "std")]
+fn on_a_small_stack(fixture: impl FnOnce() + Send + 'static) {
+  ::std::thread::Builder::new()
+    .stack_size(RELEASE_STACK)
+    .spawn(fixture)
+    .expect("a fixture thread")
+    .join()
+    .expect("the fixture thread returned");
+}
+
+/// Releasing a set type 100 000 deep, which the generated `Drop` glue aborted the process over.
+///
+/// This gate and the map one below live here rather than in `smear/tests/ast_release.rs` — where
+/// the rest of the family's are — because [`SetType`](crate::ty::SetType) and
+/// [`MapType`](crate::ty::MapType) are re-exported by neither dialect, so these two arms cannot be
+/// built from outside this crate at all. The list arm and the generic-argument arm can be, and are
+/// pinned there.
+#[cfg(feature = "std")]
+#[test]
+fn a_deep_set_type_is_released() {
+  on_a_small_stack(|| {
+    let leaf = || {
+      super::Type::Path(super::DefinitionTypePath::new(
+        CustomSpan(0),
+        path(0, "Leaf"),
+        None,
+        false,
+      ))
+    };
+    let mut ty = leaf();
+    for _ in 0..RELEASE_DEPTH {
+      ty = super::Type::Set(super::Nest::new(crate::ty::SetType::new(
+        CustomSpan(0),
+        ty,
+        false,
+      )));
+    }
+    drop(ty);
+  });
+}
+
+/// A map nests through **two** slots, so this one is a tree rather than a chain: each level's key
+/// is a leaf and its value carries the rest. The worklist is what makes the difference invisible.
+#[cfg(feature = "std")]
+#[test]
+fn a_deep_map_type_is_released() {
+  on_a_small_stack(|| {
+    let leaf = || {
+      super::Type::Path(super::DefinitionTypePath::new(
+        CustomSpan(0),
+        path(0, "Leaf"),
+        None,
+        false,
+      ))
+    };
+    let mut ty = leaf();
+    for _ in 0..RELEASE_DEPTH {
+      ty = super::Type::Map(super::Nest::new(crate::ty::MapType::new(
+        CustomSpan(0),
+        leaf(),
+        ty,
+        false,
+      )));
+    }
+    drop(ty);
+  });
+}

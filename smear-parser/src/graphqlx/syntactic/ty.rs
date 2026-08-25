@@ -6,7 +6,7 @@
 //!
 //! See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 
-use std::{boxed::Box, vec::Vec};
+use std::vec::Vec;
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
@@ -14,7 +14,7 @@ use tokora::{
   parser::Action,
   span::Spanned,
   try_parse_input::ParseAttempt,
-  utils::typenum::U1,
+  utils::{IntoComponents, typenum::U1},
 };
 
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
@@ -27,7 +27,7 @@ use crate::{
   combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start, try_bang, try_fat_arrow},
   graphqlx::{
     GraphQLx,
-    ast::{DefinitionTypePath, Type, TypeGenerics},
+    ast::{DefinitionTypePath, Nest, Type, TypeGenerics},
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
 };
@@ -249,13 +249,22 @@ where
   let span = extent_since(inp, node_start);
   Ok(match core {
     TypeCore::Path(path, generics) => {
+      // A path's arguments are the fourth way a GraphQLx type nests, so the list that closes the
+      // cycle is the one `Nested` releases. Every other carrier that holds an argument list holds
+      // a flat one, which is why the conversion is here rather than in `try_type_generics`.
+      let generics = generics.map(|generics| {
+        let (span, params) = generics.into_components();
+        TypeGenerics::new(span, params.into())
+      });
       Type::Path(DefinitionTypePath::new(span, path, generics, required))
     }
     TypeCore::List(element) => {
-      Type::List(Box::new(crate::ty::ListType::new(span, element, required)))
+      Type::List(Nest::new(crate::ty::ListType::new(span, element, required)))
     }
-    TypeCore::Set(element) => Type::Set(Box::new(crate::ty::SetType::new(span, element, required))),
-    TypeCore::Map(key, value) => Type::Map(Box::new(crate::ty::MapType::new(
+    TypeCore::Set(element) => {
+      Type::Set(Nest::new(crate::ty::SetType::new(span, element, required)))
+    }
+    TypeCore::Map(key, value) => Type::Map(Nest::new(crate::ty::MapType::new(
       span, key, value, required,
     ))),
   })

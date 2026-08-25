@@ -61,16 +61,30 @@
 //!
 //! # What makes it expressible at all
 //!
-//! **Every recursive position the grammar forms sits behind a container** — a list's elements, a
-//! set's members, an object's fields, a map's entries. That is what gives the release a type to
-//! hang a `Drop` on, and a `Vec` it can take by [`core::mem::take`] with nothing to put back. That
-//! sentence has to name the grammar, and the next section is why.
+//! **Every recursive position the value grammar forms sits behind a container** — a list's
+//! elements, a set's members, an object's fields, a map's entries. That is what gives the release a
+//! type to hang a `Drop` on, and a `Vec` it can take by [`core::mem::take`] with nothing to put
+//! back. That sentence has to name the grammar, and the next section is why.
 //!
-//! A recursion through a *single* owned value has no such door. `ty::Type`'s
-//! `List(Box<ListType<Self>>)` is the example in this workspace: there is no container in that
-//! cycle, so there is no type in it whose `Drop` could be written without also making the `Type`
-//! enum itself undroppable-by-move. That recursion wants a representation change rather than this
-//! instrument, and it is not repaired here.
+//! The *type* grammar does not have that property, which is why this module exports two shapes
+//! rather than one. `graphql::ast::Type` nests through a single owned `Box`, and `graphqlx`'s
+//! nests through three of them plus a generic-argument container; [`Nest`] covers the owned-pointer
+//! positions and [`Nested`] covers the container ones, over one worklist and one [`Nestable`].
+//!
+//! A recursion through a *single* owned value has no such door, and [`Nest`] is the answer to it:
+//! `ty::Type`'s `List(Box<ListType<Self>>)` is the shape, there is no container in that cycle, and
+//! a `Drop` written on the `Type` enum could not be written at all. Not merely at the price of
+//! `E0509` — it is *unexpressible in safe code*, and the reason is worth stating because it is the
+//! same fact from the other side. `Drop::drop` is handed `&mut self`, and unlinking that chain
+//! means taking the `Box` out of the `List` arm; taking anything out of a `&mut` place requires a
+//! value to leave behind, and every `Type<Name>` needs either a `Name` or another `Type` to build.
+//! There is nothing to put back. A `Vec` has `core::mem::take`; a `Box` has no equivalent, which is
+//! what the sentence above means by *door*.
+//!
+//! So the single-child cycle gets a container-shaped thing of its own. [`Nest`] holds
+//! `Option<P>`, which is a slot [`Option::take`] empties for free, and it carries the same
+//! relocated [`Drop`] for exactly the same reason: the enum keeps every derive, every by-value
+//! `unwrap_*`, and an `IntoSpan` that still matches itself apart.
 //!
 //! # What the guarantee ranges over, and where it stops
 //!
@@ -191,7 +205,7 @@
 
 use core::{fmt, ops::Deref, slice};
 
-use std::vec::Vec;
+use std::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
 
 mod sealed {
   /// Closes [`Nestable`](super::Nestable) to this crate.
@@ -513,5 +527,305 @@ impl<T: Nestable> tokora::container::Container<T> for Nested<T> {
   #[inline]
   fn max_capacity(&self) -> usize {
     usize::MAX
+  }
+}
+
+/// The owned pointer a [`Nest`] holds, and the two operations the release needs from it.
+///
+/// Sealed through the same private trait this module seals [`Nestable`] with. Implemented for
+/// [`Box`], [`Rc`] and [`Arc`], which are the three the `ty!` macro in `graphql::ast::ty`
+/// instantiates its enums over; `graphqlx`'s type enum uses the [`Box`] impl for all three of its
+/// pointer arms.
+///
+/// [`into_pointee`](Self::into_pointee) is `Option` rather than `T` because two of the three are
+/// *shared*: an [`Rc`] or [`Arc`] with another owner left has nothing to unlink, and answering
+/// `None` is how the release says so. That is not a weakening — a shared pointer's own [`Drop`]
+/// does not descend either, so the level below it is not this release's to reach until the last
+/// owner goes, and the last owner runs this loop.
+pub trait NestPtr: Sized + Sealed {
+  /// What the pointer owns.
+  type Pointee: Nestable;
+
+  /// Puts a value behind the pointer.
+  fn nest(value: Self::Pointee) -> Self;
+
+  /// The pointee, borrowed.
+  fn pointee(&self) -> &Self::Pointee;
+
+  /// Consumes the pointer and returns the pointee, or `None` when another owner remains.
+  fn into_pointee(self) -> Option<Self::Pointee>;
+}
+
+impl<T: Nestable> Sealed for Box<T> {}
+
+impl<T: Nestable> NestPtr for Box<T> {
+  type Pointee = T;
+
+  #[inline]
+  fn nest(value: T) -> Self {
+    Self::new(value)
+  }
+
+  #[inline]
+  fn pointee(&self) -> &T {
+    self
+  }
+
+  /// Always `Some`: a `Box` is the sole owner by construction.
+  #[inline]
+  fn into_pointee(self) -> Option<T> {
+    Some(*self)
+  }
+}
+
+/// A pointer whose pointee can always be taken back, because nothing else can own it.
+///
+/// [`Box`] and nothing else. [`Rc`] and [`Arc`] are excluded by what they are: their
+/// [`NestPtr::into_pointee`] answers `None` when another owner remains, and no bound can rule that
+/// out. What this buys is a *total* [`Nest::into_sole`] — the graphqlx type enum's `IntoSpan`
+/// reaches a span by consuming the arm's pointee, and this is what lets it do so without an
+/// `Option` it would have to answer for.
+pub trait SoleNestPtr: NestPtr {
+  /// Consumes the pointer and returns the pointee.
+  fn into_sole_pointee(self) -> Self::Pointee;
+}
+
+impl<T: Nestable> SoleNestPtr for Box<T> {
+  #[inline]
+  fn into_sole_pointee(self) -> T {
+    *self
+  }
+}
+
+impl<T: Nestable> Sealed for Rc<T> {}
+
+impl<T: Nestable> NestPtr for Rc<T> {
+  type Pointee = T;
+
+  #[inline]
+  fn nest(value: T) -> Self {
+    Self::new(value)
+  }
+
+  #[inline]
+  fn pointee(&self) -> &T {
+    self
+  }
+
+  #[inline]
+  fn into_pointee(self) -> Option<T> {
+    Self::into_inner(self)
+  }
+}
+
+impl<T: Nestable> Sealed for Arc<T> {}
+
+impl<T: Nestable> NestPtr for Arc<T> {
+  type Pointee = T;
+
+  #[inline]
+  fn nest(value: T) -> Self {
+    Self::new(value)
+  }
+
+  #[inline]
+  fn pointee(&self) -> &T {
+    self
+  }
+
+  #[inline]
+  fn into_pointee(self) -> Option<T> {
+    Self::into_inner(self)
+  }
+}
+
+/// An owned pointer whose release is a loop rather than a descent.
+///
+/// [`Nested`]'s counterpart for the positions that own **one** child instead of a container of
+/// them: `Type`'s list element in both dialects, and GraphQLx's set element and map key and value.
+/// It answers as the pointer it wraps does — it derefs to the pointee, and clones, compares,
+/// hashes and prints exactly as `Box<T>`, `Rc<T>` or `Arc<T>` would, refcount semantics included —
+/// and what it adds is the [`Drop`] that keeps a type nested through this crate's own carriers from
+/// taking the process with it.
+///
+/// It is not the pointer's whole surface: there is no `DerefMut`, no `AsMut`, and no way to reach
+/// the pointer itself. [`into_inner`](Self::into_inner) hands the pointee back, which is what the
+/// release itself uses.
+///
+/// There is deliberately no `From<P::Pointee>` either, and that one is the language's rather than a
+/// choice: `P::Pointee` is an associated type a caller could resolve to `Nest<P>` itself, so the
+/// impl overlaps `core`'s reflexive `From<T> for T` and `E0119` refuses it. [`new`](Self::new) is
+/// the constructor, and each enum's own `From<ListType<Self>>` is the one a consumer reaches for.
+///
+/// # Why the enum's arm holds this instead of the pointer
+///
+/// Because the arm is where the release has to be installed, and it cannot be installed on the
+/// enum. `E0509` is the usual reason given, and it is real — a `Drop` on the enum costs every
+/// by-value `unwrap_*` and `try_unwrap_*` `derive_more` generates and an `IntoSpan` that reaches a
+/// span by matching itself apart. But for *this* shape there is a harder reason underneath it, and
+/// the module header states it: the enum-side `Drop` is not merely expensive, it is unwritable.
+/// Unlinking a chain from `&mut self` means taking the pointer out of the arm, taking out of a
+/// `&mut` place needs a value to leave behind, and no `Type` can be built without a name or another
+/// `Type`. `Option<P>` is the slot that makes the take free, and it is exactly one word of nothing:
+/// `Option<Box<T>>`, `Option<Rc<T>>` and `Option<Arc<T>>` are all niche-optimised to the pointer's
+/// own size.
+///
+/// # What the worklist costs
+///
+/// The same thing [`Nested`]'s does, for the same reason, with one difference worth naming: this
+/// one's `pending` is *not* empty for a leaf, because a `Nest` that exists at all owns a child.
+/// A one-level nest pushes one element onto a `Vec` that has not allocated yet, so it pays exactly
+/// one allocation where the derived glue paid none. A chain of *n* pays that one allocation and
+/// then amortised pushes, and a tree pays a worklist proportional to its widest frontier, bounded
+/// by the tree already resident.
+///
+/// It grows through `Vec`'s infallible `push`, and the same sentence in [`Nested`]'s header applies
+/// unchanged: a `Drop` has no return value and no caller to tell, so a refusal is not available to
+/// it. What is bought is a failure that needs the allocator exhausted by a request proportional to
+/// a tree already in memory, in place of one that arrives at a fixed depth on every machine.
+///
+/// # What the release covers, and what it does not
+///
+/// Every recursive position the *type* carriers form themselves, at any depth, in both dialects.
+/// It does not cover a node reached through a payload parameter — a caller's `Name` or `S` or
+/// `Span` that owns a node builds a cycle running through an arm [`Nestable::into_children`]
+/// correctly releases as a leaf. That is `al8n/smear#176`, it predates both containers, and
+/// [`Nested`]'s own documentation derives which parameters are a way in.
+pub struct Nest<P: NestPtr> {
+  /// `Some` for the whole observable life of the value.
+  ///
+  /// [`into_inner`](Self::into_inner) and [`drop`](Self::drop) are the only writers, both take
+  /// `self` or `&mut self` at the end of it, and neither hands out a borrow afterwards.
+  inner: Option<P>,
+}
+
+impl<P: NestPtr> Nest<P> {
+  /// Puts a value behind a fresh pointer.
+  #[inline]
+  pub fn new(value: P::Pointee) -> Self {
+    Self {
+      inner: Some(P::nest(value)),
+    }
+  }
+
+  /// The pointee, borrowed.
+  #[inline]
+  pub fn get(&self) -> &P::Pointee {
+    match self.inner.as_ref() {
+      Some(ptr) => ptr.pointee(),
+      // Unreachable: the field is written exactly twice, by `into_inner` and by `drop`, and both
+      // consume the value they emptied.
+      None => unreachable!("a live `Nest` always holds its pointer"),
+    }
+  }
+
+  /// Consumes this pointer and returns the pointee, or `None` when another owner remains.
+  ///
+  /// Takes rather than moves the field out: this type implements [`Drop`], which is `E0509`'s
+  /// trigger, and taking is what an `Option` supports for free. What is left behind is the empty
+  /// slot the release then finds nothing in.
+  #[inline]
+  #[must_use]
+  pub fn into_inner(mut self) -> Option<P::Pointee> {
+    self.inner.take().and_then(NestPtr::into_pointee)
+  }
+}
+
+impl<P: SoleNestPtr> Nest<P> {
+  /// Consumes this pointer and returns the pointee.
+  ///
+  /// The infallible [`into_inner`](Self::into_inner), available where the pointer's own type says
+  /// there can be no second owner.
+  #[inline]
+  #[must_use]
+  pub fn into_sole(mut self) -> P::Pointee {
+    match self.inner.take() {
+      Some(ptr) => ptr.into_sole_pointee(),
+      // Unreachable for the reason `get` states: the slot is emptied only by a method that
+      // consumes the value it emptied.
+      None => unreachable!("a live `Nest` always holds its pointer"),
+    }
+  }
+}
+
+impl<P: NestPtr> Drop for Nest<P> {
+  fn drop(&mut self) {
+    // Empty when the slot was already taken by `into_inner`, and empty when the pointer is shared
+    // — `Vec::new` has not allocated at either exit.
+    let Some(ptr) = self.inner.take() else {
+      return;
+    };
+    let Some(pointee) = ptr.into_pointee() else {
+      return;
+    };
+    let mut pending: Vec<<P::Pointee as Nestable>::Node> = Vec::new();
+    pointee.into_children(&mut pending);
+    while let Some(node) = pending.pop() {
+      node.into_children(&mut pending);
+      // `node` is consumed by the call, and every `Nest` it released instead of pushing was one
+      // whose own slot the call had already emptied — so the re-entry into this `drop` finds
+      // `None` and returns. That is the one frame this loop ever spends on the tree these types
+      // form.
+    }
+  }
+}
+
+impl<P: NestPtr> Deref for Nest<P> {
+  type Target = P::Pointee;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    self.get()
+  }
+}
+
+impl<P: NestPtr> AsRef<P::Pointee> for Nest<P> {
+  #[inline]
+  fn as_ref(&self) -> &P::Pointee {
+    self.get()
+  }
+}
+
+impl<P: NestPtr + Clone> Clone for Nest<P> {
+  /// The pointer's own clone: deep for a [`Box`], a refcount bump for an [`Rc`] or an [`Arc`],
+  /// which is what the arm did before this type stood in it.
+  #[inline]
+  fn clone(&self) -> Self {
+    Self {
+      inner: self.inner.clone(),
+    }
+  }
+}
+
+impl<P: NestPtr> fmt::Debug for Nest<P>
+where
+  P::Pointee: fmt::Debug,
+{
+  /// The pointee, as the pointer prints it — this wrapper is not part of what a type *is*.
+  #[inline]
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fmt::Debug::fmt(self.get(), f)
+  }
+}
+
+impl<P: NestPtr> PartialEq for Nest<P>
+where
+  P::Pointee: PartialEq,
+{
+  #[inline]
+  fn eq(&self, other: &Self) -> bool {
+    self.get() == other.get()
+  }
+}
+
+impl<P: NestPtr> Eq for Nest<P> where P::Pointee: Eq {}
+
+impl<P: NestPtr> core::hash::Hash for Nest<P>
+where
+  P::Pointee: core::hash::Hash,
+{
+  #[inline]
+  fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+    self.get().hash(state);
   }
 }

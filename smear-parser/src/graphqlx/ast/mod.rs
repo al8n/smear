@@ -10,7 +10,10 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use crate::{graphqlx::GraphQLx, value::Sealed};
+use crate::{
+  graphqlx::GraphQLx,
+  value::{Nestable, Nested, Sealed},
+};
 
 /// GraphQLx argument AST aliases.
 pub mod argument;
@@ -52,7 +55,7 @@ pub type DefaultVec<T> = Vec<T>;
 /// `S` or in `Span` — see [`Nested`]'s own documentation, which states the difference.
 /// [`Nestable`] is sealed, which fixes who may implement it and says nothing about what a payload
 /// may be.
-pub use crate::value::{Nestable, Nested};
+pub use crate::value::{Nest, NestPtr, SoleNestPtr};
 
 /// A GraphQLx name.
 #[allow(type_alias_bounds)]
@@ -372,18 +375,44 @@ impl<S, Span> Nestable for ConstInputValue<S, Span> {
 }
 
 /// Generic type arguments used by a GraphQLx type path.
+///
+/// `Container` is a plain `Vec` here and [`Nested`] inside [`DefinitionTypePath`], which is the
+/// one of the two that closes a cycle — see that alias.
 pub type TypeGenerics<S, Span = SimpleSpan, Container = DefaultVec<Type<S, Span>>> =
   crate::ty::TypeGenerics<Type<S, Span>, Span, Container>;
 
 /// A path type, its optional generic type arguments, and a non-null modifier.
+///
+/// `TypeContainer` is [`Nested`], and this is this dialect's *fourth* route into [`Type`]: a path's
+/// arguments are types, so `A<B<C<…>>>` nests without passing through any of the three pointer
+/// arms. [`Nest`] cannot see that cycle — there is no owned pointer in it — so the container is
+/// what stands in it, exactly as it does for the value collections.
 pub type DefinitionTypePath<
   S,
   Span = SimpleSpan,
   PathContainer = DefaultVec<Name<S, Span>>,
-  TypeContainer = DefaultVec<Type<S, Span>>,
+  TypeContainer = Nested<Type<S, Span>>,
 > = crate::ty::DefinitionTypePath<Name<S, Span>, Type<S, Span>, Span, PathContainer, TypeContainer>;
 
 /// A recursive GraphQLx type reference.
+///
+/// # This enum declares no `Drop`, and that is load-bearing
+///
+/// Releasing a deeply nested one used to abort the process, one native frame per level, and no
+/// parse was needed to build one: every carrier's constructor is public, so a caller can grow the
+/// nesting in a loop and merely leaving scope was enough. The repair is [`Nest`] in the three
+/// pointer arms and [`Nested`] in [`TypeGenerics`] — **not** a `Drop` on this enum, which `E0509`
+/// would have charged every by-value `unwrap_*` and `try_unwrap_*` for, and which for a
+/// single-owned-child cycle could not have been written at all. [`Nest`]'s own documentation
+/// derives why.
+///
+/// This dialect nests four ways where vanilla GraphQL nests one, and all four are covered:
+/// [`Nestable`] below is the walk, and it matches without a wildcard arm so a fifth is a compile
+/// error here rather than a silent return to recursing.
+///
+/// `Drop` is one of four generated impls that descend one frame per level. The derived `Debug` and
+/// `Clone` still do; this removes the only one that fires without a call being made. See
+/// `value/nesting.rs`'s header, which measures the other two on the value enums.
 #[derive(
   Debug,
   Clone,
@@ -398,11 +427,90 @@ pub enum Type<S, Span = SimpleSpan> {
   /// A namespaced path with optional generic arguments.
   Path(DefinitionTypePath<S, Span>),
   /// A list type (`[T]`).
-  List(Box<crate::ty::ListType<Self, Span>>),
+  List(Nest<Box<crate::ty::ListType<Self, Span>>>),
   /// A set type (`<T>`).
-  Set(Box<crate::ty::SetType<Self, Span>>),
+  Set(Nest<Box<crate::ty::SetType<Self, Span>>>),
   /// A map type (`<K => V>`).
-  Map(Box<crate::ty::MapType<Self, Self, Span>>),
+  Map(Nest<Box<crate::ty::MapType<Self, Self, Span>>>),
+}
+
+impl<S, Span> Sealed for Type<S, Span> {}
+
+impl<S, Span> Nestable for Type<S, Span> {
+  type Node = Self;
+
+  #[inline]
+  fn into_children(self, pending: &mut Vec<Self>) {
+    match self {
+      // A path holds no type EXCEPT through its generic arguments, which is the arm a reading of
+      // the three pointer variants alone would miss.
+      Self::Path(path) => {
+        let (_, _, generics, _) = path.into_components();
+        if let Some(generics) = generics {
+          pending.extend(generics.into_params().into_vec());
+        }
+      }
+      // `None` only when a pointer is shared and another owner remains, which is the one case with
+      // nothing below it to unlink yet.
+      Self::List(nest) => {
+        if let Some(list) = nest.into_inner() {
+          pending.push(list.into_components().1);
+        }
+      }
+      Self::Set(nest) => {
+        if let Some(set) = nest.into_inner() {
+          pending.push(set.into_components().1);
+        }
+      }
+      // A map's KEY is a type too, and it nests exactly as the value does.
+      Self::Map(nest) => {
+        if let Some(map) = nest.into_inner() {
+          let (_, key, value, _) = map.into_components();
+          pending.push(key);
+          pending.push(value);
+        }
+      }
+    }
+  }
+}
+
+impl<S, Span> Sealed for crate::ty::ListType<Type<S, Span>, Span> {}
+
+/// The pointee side of the walk: a list carrier is `(span, element, required)`.
+impl<S, Span> Nestable for crate::ty::ListType<Type<S, Span>, Span> {
+  type Node = Type<S, Span>;
+
+  #[inline]
+  fn into_children(self, pending: &mut Vec<Type<S, Span>>) {
+    pending.push(self.into_components().1);
+  }
+}
+
+impl<S, Span> Sealed for crate::ty::SetType<Type<S, Span>, Span> {}
+
+/// The pointee side of the walk: a set carrier is `(span, element, required)`.
+impl<S, Span> Nestable for crate::ty::SetType<Type<S, Span>, Span> {
+  type Node = Type<S, Span>;
+
+  #[inline]
+  fn into_children(self, pending: &mut Vec<Type<S, Span>>) {
+    pending.push(self.into_components().1);
+  }
+}
+
+impl<S, Span> Sealed for crate::ty::MapType<Type<S, Span>, Type<S, Span>, Span> {}
+
+/// The pointee side of the walk: a map carrier is `(span, key, value, required)`, and both the key
+/// and the value are types.
+impl<S, Span> Nestable for crate::ty::MapType<Type<S, Span>, Type<S, Span>, Span> {
+  type Node = Type<S, Span>;
+
+  #[inline]
+  fn into_children(self, pending: &mut Vec<Type<S, Span>>) {
+    let (_, key, value, _) = self.into_components();
+    pending.push(key);
+    pending.push(value);
+  }
 }
 
 impl<S, Span> Type<S, Span> {
@@ -441,9 +549,12 @@ impl<S, Span> IntoSpan<Span> for Type<S, Span> {
   fn into_span(self) -> Span {
     match self {
       Self::Path(value) => value.into_span(),
-      Self::List(value) => value.into_span(),
-      Self::Set(value) => value.into_span(),
-      Self::Map(value) => value.into_span(),
+      // `into_sole` rather than a deref: the span is owned and `Span` carries no `Copy` bound in
+      // this dialect, so the pointee has to come back out. `Box` is the sole owner, which is what
+      // makes that infallible.
+      Self::List(value) => value.into_sole().into_span(),
+      Self::Set(value) => value.into_sole().into_span(),
+      Self::Map(value) => value.into_sole().into_span(),
     }
   }
 }

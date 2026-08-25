@@ -993,7 +993,8 @@ fn nested_selection_document_ending_in(
       None,
       None,
       None,
-    ))],
+    ))]
+    .into(),
   );
   for _ in 0..depth {
     set = SelectionSet::new(
@@ -1005,7 +1006,8 @@ fn nested_selection_document_ending_in(
         None,
         None,
         Some(set),
-      ))],
+      ))]
+      .into(),
     );
   }
   document(SelectionSet::new(
@@ -1017,7 +1019,8 @@ fn nested_selection_document_ending_in(
       None,
       None,
       Some(set),
-    ))],
+    ))]
+    .into(),
   ))
 }
 
@@ -1043,7 +1046,8 @@ fn nested_value_document(depth: usize) -> ExecutableDocument<&'static str> {
       )),
       None,
       None,
-    ))],
+    ))]
+    .into(),
   ))
 }
 

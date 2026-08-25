@@ -8,9 +8,13 @@ use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
+use std::vec::Vec;
+
 use super::{Arguments, Directives, FragmentName, Name};
+use crate::value::{Nestable, Nested, Sealed};
 
 /// A field alias in a GraphQL selection (`Name :`).
 pub type Alias<S> = crate::selection::Alias<Name<S>>;
@@ -26,7 +30,14 @@ pub type InlineFragment<S> =
   crate::selection::InlineFragment<TypeCondition<S>, Directives<S>, SelectionSet<S>>;
 
 /// A selection set containing one or more selections.
-pub type SelectionSet<S> = crate::selection::SelectionSet<Selection<S>>;
+///
+/// The container is [`Nested`] rather than a `Vec`, and that is where the release of a deeply
+/// nested selection lives: an [`InlineFragment`] owns another `SelectionSet` and a [`Field`] owns
+/// an optional one, so a caller who grows the chain in a loop — every constructor these carriers
+/// need is public — built something whose `Drop` glue descended one native frame per level and
+/// aborted the process on the way out. [`Nested`]'s own documentation states the mechanism and
+/// what it does and does not cover.
+pub type SelectionSet<S> = crate::selection::SelectionSet<Selection<S>, Span, Nested<Selection<S>>>;
 
 /// A GraphQL selection.
 ///
@@ -48,6 +59,39 @@ pub enum Selection<S> {
   FragmentSpread(FragmentSpread<S>),
   /// An inline fragment.
   InlineFragment(InlineFragment<S>),
+}
+
+impl<S> Sealed for Selection<S> {}
+
+/// How the release reaches a selection's children.
+///
+/// The recursive positions are the two selection sets — a field's optional one and an inline
+/// fragment's required one — and they are the only children pushed. Everything else an arm owns is
+/// released here, which the loop's invariant requires to be a leaf: a name, a type condition, an
+/// argument list and a directive list hold *values* and never a selection, and a value's own
+/// release is already the iterative one [`Nested`] installs on the value carriers. What they can
+/// still own is a node a caller stored in `S`, which no implementation of this trait can push —
+/// see [`Nested`]'s documentation and `al8n/smear#176`.
+impl<S> Nestable for Selection<S> {
+  type Node = Self;
+
+  #[inline]
+  fn into_children(self, pending: &mut Vec<Self>) {
+    match self {
+      Self::Field(field) => {
+        let (_, _, _, _, _, selection_set) = field.into_components();
+        if let Some(selection_set) = selection_set {
+          pending.extend(selection_set.into_selections().into_vec());
+        }
+      }
+      // A spread names a fragment; the selections it stands for are the fragment definition's.
+      Self::FragmentSpread(_) => {}
+      Self::InlineFragment(fragment) => {
+        let (_, _, _, selection_set) = fragment.into_components();
+        pending.extend(selection_set.into_selections().into_vec());
+      }
+    }
+  }
 }
 
 impl<S> Selection<S> {

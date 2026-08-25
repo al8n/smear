@@ -1,12 +1,24 @@
-use std::{boxed::Box, rc::Rc, sync::Arc};
+use std::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
+use crate::value::{Nestable, Sealed};
+
 pub use crate::ty::{ListType, NamedType};
+
+/// The pointer the `List` arm holds its element behind, and the two traits that decide what may
+/// stand in it.
+///
+/// Re-exported here because [`Nest`] is the payload type of a public variant, so it reaches a
+/// consumer's `match` whether or not they name it. It derefs to the [`ListType`] the arm used to
+/// hold directly, which is why nothing that reads one had to change; what it adds is the iterative
+/// release. Both traits are sealed.
+pub use crate::value::{Nest, NestPtr, SoleNestPtr};
 
 macro_rules! ty {
   ($(
@@ -16,6 +28,31 @@ macro_rules! ty {
     paste::paste! {
       $(
         $(#[$meta])*
+        ///
+        /// # This enum declares no `Drop`, and that is load-bearing
+        ///
+        /// Releasing a deeply nested one used to abort the process, one native frame per level, and
+        /// no parse was needed to build one: `From<ListType<Self>>` is public, so a caller can
+        /// grow the chain in a loop and merely leaving scope was enough. The repair is [`Nest`],
+        /// the pointer the `List` arm holds its element behind — **not** a `Drop` on this enum,
+        /// which `E0509` would have charged every by-value `unwrap_*` and `try_unwrap_*` for, and
+        /// which for this shape could not have been written at all. `Nest`'s own documentation
+        /// derives why. Everything `derive_more` generated before is generated now.
+        ///
+        /// [`Nestable`] below is how the release reaches this enum's child. It reaches every
+        /// child the *grammar* can put in a recursive position; it does not reach a node a caller
+        /// stored in `Name`, for which see [`Nested`](crate::value::Nested)'s own documentation and
+        /// `al8n/smear#176`.
+        ///
+        /// # What it does not repair
+        ///
+        /// `Drop` is one of four generated impls that descend one frame per level; the derived
+        /// `Debug`, `Clone` and `PartialEq` still do. **This removes the only one of the four that
+        /// fires without a call being made** — release happens to whoever holds the value, on scope
+        /// exit, on unwind, in a caller's teardown of a collection, and it can be neither caught nor
+        /// refused. The other three are chosen calls, they are on the same footing as the value
+        /// enums' — see `value/nesting.rs`'s header, which measures theirs — and repairing them
+        /// lands on this same pointer rather than on this enum.
         #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
         #[unwrap(ref, ref_mut)]
         #[try_unwrap(ref, ref_mut)]
@@ -24,13 +61,49 @@ macro_rules! ty {
           Name(NamedType<Name>),
 
           /// A list type containing elements of another type.
-          List($ty<ListType<Self>>),
+          List(Nest<$ty<ListType<Self>>>),
+        }
+
+        impl<Name> Sealed for $name<Name> {}
+
+        impl<Name> Nestable for $name<Name> {
+          type Node = Self;
+
+          #[inline]
+          fn into_children(self, pending: &mut Vec<Self>) {
+            match self {
+              // Holds no type of this crate's own. What it does hold is `Name` — at the crate's own
+              // instantiation a source-slice name, and at a caller's whatever the caller chose,
+              // including a node this loop cannot reach (al8n/smear#176).
+              Self::Name(_) => {}
+              // `None` only when the pointer is shared and another owner remains, which is the one
+              // case with nothing below it to unlink yet.
+              Self::List(nest) => {
+                if let Some(list) = nest.into_inner() {
+                  pending.push(list.into_components().1);
+                }
+              }
+            }
+          }
+        }
+
+        impl<Name> Sealed for ListType<$name<Name>> {}
+
+        /// The pointee side of the same walk: a list carrier is `(span, element, required)` and
+        /// only the element holds a type.
+        impl<Name> Nestable for ListType<$name<Name>> {
+          type Node = $name<Name>;
+
+          #[inline]
+          fn into_children(self, pending: &mut Vec<$name<Name>>) {
+            pending.push(self.into_components().1);
+          }
         }
 
         impl<Name> From<ListType<Self>> for $name<Name> {
           #[inline]
           fn from(ty: ListType<Self>) -> Self {
-            Self::List(<$ty<ListType<Self>>>::new(ty))
+            Self::List(Nest::new(ty))
           }
         }
 
