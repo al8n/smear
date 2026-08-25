@@ -85,11 +85,10 @@
 //! [`Schema::build`]: super::Schema::build
 
 use smear_parser::graphql::lossless::{
-  Parse, matches_source, project_executable_document_recovered,
-  project_type_system_document_recovered,
+  Parse, project_executable_document_verified, project_type_system_document_recovered,
 };
 
-pub use smear_parser::lossless::project::Recovery;
+pub use smear_parser::{graphql::lossless::Verified, lossless::project::Recovery};
 
 use tokora::SimpleSpan;
 
@@ -371,39 +370,52 @@ pub fn validate_executable_lossless_with<'src, K>(
 where
   K: Sink<&'src str>,
 {
-  // **The whole comparison first**, not merely its cheap half.
+  // Verifies, then delegates. The verification is `O(tokens)` and it runs **before the ledger is
+  // opened**, which is the price of taking an unverified pair: a caller who needs the ceiling to be
+  // absolute constructs a [`Verified`] itself and calls
+  // [`validate_executable_lossless_verified_with`], where nothing input-linear precedes the charge.
   //
-  // The prepayment below used to sit above this. A caller holding a stale pair and a finite
-  // `validation_work` too small for `max(parse, source)` was told `Refusal::Budget` — and possibly
-  // handed a `ValidationWorkBudget` diagnostic — for a pair that is not a resource problem at all.
-  // That is a wrong causal verdict, and the kind that costs a caller something: the remedy it names
-  // is raising a limit or retrying, and neither can help.
+  // Two properties are asked of this door and they cannot both hold here:
   //
-  // al8n/smear#198's twentieth round put the **length** compare above the prepayment and called the
-  // question dissolved, because pricing over `max(parse, source)` needs two numbers and there is no
-  // maximum left once the lengths must agree. True of unequal lengths, and the twenty-first round
-  // is the other half of its own case: a pair of equal length and different content still reached
-  // the prepayment and still got the budget's answer. A dissolution that covers one branch of a
-  // two-branch case is a repair, not a dissolution.
+  // - a **mismatch outranks a budget refusal**, because a stale pair is not a resource problem and
+  //   the remedy that answer names — raise the limit, retry — cannot work; and
+  // - the **ceiling is absolute**, because no input-linear work may run outside the ledger.
   //
-  // So the whole of `matches_source` runs first, and the prepayment prices only what it exists to
-  // price: the **projection**. What that costs on a matching pair is one extra pass over the green
-  // root before the ledger is consulted — `O(tokens)`, no allocation, and strictly cheaper than the
-  // projection it guards, which walks the same tree and builds an entire AST out of it. The pair
-  // that pays it is the pair that was going to be projected anyway.
-  //
-  // The one case that is measurably worse is a *matching* pair refused by the budget: that call was
-  // `O(1)` and is now `O(tokens)`. It is bounded by the parse the caller already materialised, once
-  // per call, with nothing allocated — the same dimension the prepayment itself prices — and it
-  // buys the verdict being right for every mismatched pair regardless of budget.
-  if !matches_source(parse, source) {
-    return Err(LosslessInvalid {
-      invalid: Invalid::unexamined(),
-      recovery: None,
-    });
-  }
-  let size = source.len();
-  let Some(left) = Ledger::open(budget).take(units(size)) else {
+  // Deciding the first needs the comparison *finished*; honouring the second needs it *stoppable*.
+  // That is a property of the arguments rather than of the ordering, so no rearrangement of this
+  // function satisfies both — which is why [`Verified`] exists rather than the check simply having
+  // been moved again. This signature chooses the first, and says so. al8n/smear#198.
+  let pair = Verified::new(parse, source).map_err(|_| LosslessInvalid {
+    invalid: Invalid::unexamined(),
+    recovery: None,
+  })?;
+  validate_executable_lossless_verified_with(schema, pair, scratch, budget, rules, sink)
+}
+
+/// [`validate_executable_lossless_with`] for a pair that already carries its verification.
+///
+/// **The bounded door.** Nothing input-linear runs before the ledger opens: the pair's own
+/// verification was paid for by whoever constructed the [`Verified`], and the prepayment below
+/// prices the one thing left, the projection. A caller validating the same pair repeatedly — a
+/// cached parse, a watch loop — verifies once and is bounded on every call after it.
+///
+/// The projection is infallible here for the same reason this door has no mismatch state: a
+/// [`Verified`] is the proof that the fallible form's error half exists to report.
+pub fn validate_executable_lossless_verified_with<'src, K>(
+  schema: &Schema,
+  pair: Verified<'_, 'src>,
+  scratch: &mut Scratch,
+  budget: &Budget,
+  rules: RuleSet,
+  sink: &mut K,
+) -> Result<Recovery, LosslessInvalid>
+where
+  K: Sink<&'src str>,
+{
+  let source = pair.source();
+  // The pair's two halves are the same length by construction, so there is no maximum to take: the
+  // twentieth round's "priced over both inputs" question does not exist for a verified pair.
+  let Some(left) = Ledger::open(budget).take(units(source.len())) else {
     let (emitted, stopped) = refuse_projection(source, budget, rules, sink);
     return Err(LosslessInvalid {
       invalid: Invalid::refused(emitted, stopped),
@@ -411,38 +423,7 @@ where
       recovery: None,
     });
   };
-  // The pair is verified as a **whole root**, byte for byte, before anything is projected — by the
-  // projector, which answers [`SourceMismatch`] instead of an AST.
-  //
-  // The projector verifies each *definition* it projects against the source at that definition's
-  // own range, and al8n/smear#198's third round took that to mean a mismatched pair answers itself
-  // — a bad definition is refused and counted into [`Recovery`], so the caller is told. That is
-  // true of every mismatch the projector **sees**. It is not true of a `source` that begins with
-  // the parse's text and then adds to it: every projected definition matches, nothing is skipped,
-  // [`Recovery::is_complete`] reports `true`, and the operations the caller appended are never
-  // looked at. A clean verdict on a document nobody validated, which is worse than either answer
-  // this could give instead.
-  //
-  // The check belongs to the projector rather than to this door because this door is not the only
-  // caller: one holding no validator and no door projects the same pair directly, and a guard this
-  // door performs is a guard that caller never gets — al8n/smear#198's fourteenth round, where the
-  // door was right and the API it called was not.
-  //
-  // It is still *this* door's charge. The comparison walks the parse's **green** root against the
-  // source, so it is `O(tokens)` and allocates nothing — bounded by, and already paid for by, the
-  // prepayment above, which prices `max(source.len(), parse.green().text_len())`. Moving the work
-  // behind a call boundary did not move the charge: the prepayment still sits in front of it.
-  //
-  // Both halves of that sentence were false for one round. The check was written as
-  // `parse.syntax().text() == source`, which materialises rowan's red cursor and allocates one
-  // node's worth of cursor data per element as the comparison walks past it — on every call of this
-  // door. `matches_source` routes through `verify_source` now, which is the function the fourteenth
-  // round's own diagnosis had already named as the reason the fail-fast doors were safe.
-  let (document, recovery) =
-    project_executable_document_recovered(parse, source).map_err(|_| LosslessInvalid {
-      invalid: Invalid::unexamined(),
-      recovery: None,
-    })?;
+  let (document, recovery) = project_executable_document_verified(pair);
   match validate_charged(schema, &document, scratch, budget, rules, sink, left) {
     Ok(()) => Ok(recovery),
     Err(invalid) => Err(LosslessInvalid {

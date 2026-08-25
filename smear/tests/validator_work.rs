@@ -3381,3 +3381,312 @@ fn every_compare_what_was_written_rule_fires_without_a_resolved_position() {
     );
   }
 }
+
+/// Draft 5.6.3 is syntactic, so it reaches every object literal a request can write — including
+/// the ones a **custom scalar** swallows.
+///
+/// # The boundary that was recorded instead of tested
+///
+/// The twenty-first round put 5.6.3 at two of `visit_value`'s exits and wrote down why it stopped
+/// there: *"an object literal in a position that resolves to a scalar or enum is not descended,
+/// because 5.6.1 has already said the literal cannot be there."* That sentence is false exactly
+/// where it matters. A **custom scalar accepts every literal** — it is the one position where
+/// `ValuesOfCorrectType` deliberately says nothing — so `withJson(payload: { a: 1, a: 2 })` was
+/// answered `Ok` under `RuleSet::ALL` for a document draft §5.6.3 refuses.
+///
+/// The repair is not a third call site. 5.6.3's subject is the literal, so it is asked above the
+/// expected-type dispatch, and a container literal at a position nothing can type is descended for
+/// the two readers that exist down there — 5.6.3 and the variable rules.
+#[test]
+fn a_custom_scalar_does_not_swallow_an_object_literal() {
+  let schema = build(SCHEMA);
+  let budget = Budget::default();
+
+  // Directly in the scalar position, and nested one list deep inside it. Both are objects the
+  // request wrote; neither is a position the schema has an opinion about.
+  for source in [
+    "{ dog { withJson(payload: { a: 1, a: 2 }) } }",
+    "{ dog { withJson(payload: [{ a: 1, a: 2 }]) } }",
+    "{ dog { withJson(payload: { outer: { a: 1, a: 2 } }) } }",
+  ] {
+    for rules in [
+      RuleSet::ALL,
+      RuleSet::only(Rule::InputObjectFieldUniqueness),
+    ] {
+      let fired = run(&schema, source, &budget, rules);
+      assert!(
+        fired.rules().contains(&Rule::InputObjectFieldUniqueness),
+        "5.6.3 did not fire on {source:?}: {:?}",
+        fired.diagnostics
+      );
+    }
+  }
+
+  // And the same descent carries the variable rules, which had the same hole for the same reason:
+  // a usage inside a custom scalar's literal is still a usage draft 5.8 scopes to the operation.
+  let undefined = run(
+    &schema,
+    "query q { dog { withJson(payload: { a: $nope }) } }",
+    &budget,
+    RuleSet::only(Rule::AllVariableUsesDefined),
+  );
+  assert_eq!(
+    undefined.rules(),
+    [Rule::AllVariableUsesDefined],
+    "a variable inside a custom scalar literal was never collected: {:?}",
+    undefined.diagnostics
+  );
+
+  // The other direction: a literal the schema *can* type is unaffected, and a clean one stays
+  // clean under every rule set.
+  let clean = run(
+    &schema,
+    "{ dog { withJson(payload: { a: 1, b: 2 }) withOpts(opts: { need: 1, a: 2 }) } }",
+    &budget,
+    RuleSet::ALL,
+  );
+  assert_eq!(clean.rules(), [], "{:?}", clean.diagnostics);
+}
+
+/// A second fragment of a duplicated name is merged, because no spread could ever have entered it.
+///
+/// # One bitset, two readers, two meanings
+///
+/// `Scratch::reachable` is draft 5.5.1.4's, and `mark_reachable` marks **every** definition sharing
+/// a reached name on purpose: one duplicated fragment name reports 5.5.1.1 and the copy is not also
+/// called unused. Draft 5.3.2's final loop read the same bit as *"this definition was already
+/// merged from an operation"* — and merge expansion enters only `order[group.start()]`, because
+/// `find_fragment` resolves a spread to a group's first definition and nothing else can be spread.
+/// So a second `fragment F` was marked reached, never merged from anywhere, and skipped: its
+/// conflicts unreported, and `RuleSet::only(FieldSelectionMerging)` answering `Ok`.
+///
+/// Pre-existing. `9f584d6` carries this loop byte for byte and `mark_reachable`'s group-wide
+/// marking with it; this branch added a charge to the latter and changed neither's meaning.
+#[test]
+fn a_shadowed_fragment_is_still_merged() {
+  let schema = build(SCHEMA);
+  let budget = Budget::default();
+  let rules = RuleSet::only(Rule::FieldSelectionMerging);
+
+  // The first `F` is spread and clean; the second is a duplicate name the spread cannot reach, and
+  // it conflicts with itself. 5.5.1.1 would report the duplication; it is off, which is what makes
+  // the merge verdict the only thing under test.
+  let source = "{ dog { ...F } }\n\
+     fragment F on Dog { name }\n\
+     fragment F on Dog { x: name x: nickname }\n";
+  let fired = run(&schema, source, &budget, rules);
+  assert_eq!(
+    fired.rules(),
+    [Rule::FieldSelectionMerging],
+    "the shadowed fragment's conflict was never reported: {:?}",
+    fired.diagnostics
+  );
+
+  // And the skip it replaced is still doing its job: a fragment a spread *did* enter is merged once
+  // from the operation, not a second time from this loop.
+  let once = run(
+    &schema,
+    "{ dog { ...G } }\nfragment G on Dog { x: name x: nickname }\n",
+    &budget,
+    rules,
+  );
+  assert_eq!(
+    once.emitted, 1,
+    "a reached fragment was merged twice: {:?}",
+    once.diagnostics
+  );
+
+  // The clean twin, so the row above is not passing on a rule that fires for any duplicate name.
+  let clean = run(
+    &schema,
+    "{ dog { ...F } }\nfragment F on Dog { name }\nfragment F on Dog { nickname }\n",
+    &budget,
+    rules,
+  );
+  assert_eq!(clean.rules(), [], "{:?}", clean.diagnostics);
+}
+
+/// The `n <= 1` companion travels with all six compare-what-was-written rules — on the **charge**
+/// side as well as the reporting side.
+///
+/// The twenty-first round delivered the six-rule set and said the companion travelled with all of
+/// them. It travelled with five. Draft 5.5.1.1's prepayment sat in `prep`, one fragment name at a
+/// time, where the count is not yet known — so a single fragment's spelling was charged to be
+/// sorted against itself and grouped against nothing. The companion had been verified where each
+/// rule *reports* and not where each rule *prepays*, which is the same split that produced it.
+///
+/// One row per rule: a document with exactly one of the thing the rule compares, at a one-byte
+/// spelling and at a four-kilobyte one. Nothing compares anything, so nothing may read a byte.
+#[test]
+fn every_uniqueness_prepayment_has_its_singleton_companion() {
+  let schema = build(SCHEMA);
+  let long = 4_000usize;
+
+  /// A rule, and how to write a document holding exactly one of the thing it compares.
+  type Singleton = (&'static str, Rule, fn(&str) -> String);
+
+  let cases: [Singleton; 6] = [
+    (
+      "5.2.2.1 operation name",
+      Rule::OperationNameUniqueness,
+      |n| std::format!("query q{n} {{ dog {{ name }} }}"),
+    ),
+    ("5.5.1.1 fragment name", Rule::FragmentNameUniqueness, |n| {
+      std::format!("{{ dog {{ name }} }} fragment f{n} on Dog {{ name }}")
+    }),
+    ("5.8.1 variable name", Rule::VariableUniqueness, |n| {
+      std::format!("query q($v{n}: Int) {{ dog {{ name }} }}")
+    }),
+    (
+      "5.7.3 directive name",
+      Rule::DirectivesAreUniquePerLocation,
+      |_| "{ dog { name @onFragDef } }".to_owned(),
+    ),
+    ("5.4.2 argument name", Rule::ArgumentUniqueness, |n| {
+      std::format!("{{ dog {{ nope(a{n}: 1) }} }}")
+    }),
+    (
+      "5.6.3 input field name",
+      Rule::InputObjectFieldUniqueness,
+      |n| std::format!("{{ dog {{ withOpts(opts: {{ a{n}: 1 }}) }} }}"),
+    ),
+  ];
+
+  for (what, rule, document) in cases {
+    let rules = RuleSet::only(rule);
+    let short = min_budget(&schema, &document(""), rules);
+    let padded = "x".repeat(long);
+    let wide = min_budget(&schema, &document(&padded), rules);
+    println!("{what}: 1-byte {short} units, {long}-byte {wide}");
+    assert!(
+      wide.abs_diff(short) < 100,
+      "{what}: a {long}-byte spelling cost {} units with nothing to compare it against",
+      wide.abs_diff(short)
+    );
+  }
+}
+
+/// A verified pair makes the ceiling absolute: at `validation_work = 0` the bounded door does no
+/// work the input can grow.
+///
+/// # The two properties, and why a type was needed
+///
+/// A lossless door is asked for both of these, and a door handed an **unverified** pair cannot have
+/// both:
+///
+/// - a **source mismatch outranks a budget refusal** — a stale pair is not a resource problem, and
+///   the remedy the budget's answer names cannot help; and
+/// - the **ceiling is absolute** — no input-linear work runs outside the ledger.
+///
+/// Deciding the first needs the `O(tokens)` comparison *finished*; honouring the second needs it
+/// *stoppable*. That is a property of the arguments, not of the ordering, so the twenty-first
+/// round's repair and the twenty-second round's finding could not both be satisfied by moving the
+/// check again. `Verified` moves it out of the bounded call instead: checked once by whoever
+/// constructs the pair, and every call after that is under the ledger from its first instruction.
+///
+/// # The instrument
+///
+/// A ratio between two input sizes on the **same** door, so no absolute timing threshold is
+/// involved and a slow machine does not decide the verdict. The two sizes are measured interleaved,
+/// so a load burst lands on both. At a budget of zero the verified door refuses in `O(1)`; the
+/// unverified one scans the pair first.
+#[cfg(feature = "rowan")]
+#[test]
+fn a_verified_pair_is_bounded_from_the_first_instruction() {
+  use smear::{
+    parser::graphql::lossless::{Verified, parse_executable_document},
+    validator::{validate_executable_lossless_verified_with, validate_executable_lossless_with},
+  };
+
+  let schema = build(SCHEMA);
+  let small = fragment_bomb(2, 40);
+  let large = fragment_bomb(2, 40_000);
+  let small_parse = parse_executable_document(&small);
+  let large_parse = parse_executable_document(&large);
+  assert!(
+    large.len() > small.len() * 100,
+    "the two inputs have to differ enough for a ratio to mean anything"
+  );
+
+  let budget = Budget::default().with_validation_work(0);
+  let reps = if cfg!(debug_assertions) { 20 } else { 200 };
+
+  // Warm both paths so neither reading includes a first-call cost.
+  for _ in 0..5 {
+    let mut scratch = Scratch::new();
+    let mut sink = smear::validator::Ignore;
+    let _ = validate_executable_lossless_with(
+      &schema,
+      &large_parse,
+      &large,
+      &mut scratch,
+      &budget,
+      RuleSet::ALL,
+      &mut sink,
+    );
+  }
+
+  let mut unverified = [0.0f64; 2];
+  let mut verified = [0.0f64; 2];
+  let inputs = [
+    (&small_parse, small.as_str()),
+    (&large_parse, large.as_str()),
+  ];
+  // Interleaved: one repetition of every cell before the second repetition of any of them.
+  for _ in 0..reps {
+    for (slot, (parse, source)) in inputs.iter().enumerate() {
+      let mut scratch = Scratch::new();
+      let mut sink = smear::validator::Ignore;
+      let start = Instant::now();
+      let _ = validate_executable_lossless_with(
+        &schema,
+        parse,
+        source,
+        &mut scratch,
+        &budget,
+        RuleSet::ALL,
+        &mut sink,
+      );
+      unverified[slot] += start.elapsed().as_secs_f64();
+
+      let pair = Verified::new(parse, source).expect("the pair matches");
+      let start = Instant::now();
+      let _ = validate_executable_lossless_verified_with(
+        &schema,
+        pair,
+        &mut scratch,
+        &budget,
+        RuleSet::ALL,
+        &mut sink,
+      );
+      verified[slot] += start.elapsed().as_secs_f64();
+    }
+  }
+
+  let growth = unverified[1] / unverified[0];
+  let saved = unverified[1] / verified[1];
+  println!(
+    "at validation_work = 0 over {} B and {} B: the unverified door grows {growth:.1}x with its \
+     input, and on the large one the verified door is {saved:.1}x faster",
+    small.len(),
+    large.len()
+  );
+
+  // The premise: the unverified door really does scale with the input it was handed, which is the
+  // finding. A thousandfold size difference against a fourfold threshold.
+  assert!(
+    growth > 4.0,
+    "the unverified door did not scale with its input ({growth:.1}x), so the comparison below is \
+     not measuring anything"
+  );
+  // And the claim, read on the **large** input where both readings are big enough to survive a
+  // parallel test run: refusing without reading the pair is an order of magnitude cheaper than
+  // reading it first. A ratio of two small numbers is what a loaded machine perturbs, so this is
+  // deliberately not `verified[1] / verified[0]`.
+  assert!(
+    saved > 10.0,
+    "the verified door was only {saved:.1}x cheaper than the unverified one on a {} B input it \
+     was supposed to refuse before reading",
+    large.len()
+  );
+}

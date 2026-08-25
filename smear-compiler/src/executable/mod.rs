@@ -317,16 +317,33 @@
 //! | 5.4.2 `ArgumentUniqueness` | one list's argument names | the rule, and `arguments.len() > 1` — and *not* on the argument definitions, which may be `None` |
 //! | 5.6.3 `InputObjectFieldUniqueness` | one object literal's field names | the rule, and `fields.len() > 1` — **and it used to be gated on a resolved position** |
 //!
-//! 5.6.3 was the odd one out. `visit_value` reaches an object literal at a position nothing
-//! resolved — an unknown argument, an unknown field — descends it for variable usages, and used to
-//! return without asking, because the rule lived inside `check_input_object` and that function needs
-//! the object *type* for its other two rules. It is `check_object_field_uniqueness` now, which takes
-//! the field list and nothing else.
+//! 5.6.3 was the odd one out, and it took two rounds to place. The twenty-first put
+//! `check_object_field_uniqueness` at two of `visit_value`'s exits — the unknown-position arm and
+//! the `InputObject` arm — and recorded a boundary for the rest: *"an object literal in a position
+//! that resolves to a scalar or enum is not descended, because 5.6.1 has already said the literal
+//! cannot be there."*
 //!
-//! The boundary the set stops at, recorded so it is not mistaken for the same defect: an object
-//! literal in a position that resolves to a **scalar or enum** is not descended at all. Draft 5.6.1
-//! has already said the literal cannot be there, and a second finding about the inside of a value
-//! that has no meaning is not a better answer. That is a deliberate line, not a missing reach.
+//! **That sentence is false where it matters, and the boundary should have been tested rather than
+//! written down.** A *custom* scalar accepts every literal — it is the one position where 5.6.1
+//! deliberately says nothing — so `withJson(payload: { a: 1, a: 2 })` was answered `Ok` under
+//! `RuleSet::ALL` for a document draft §5.6.3 refuses. The question that would have found it is the
+//! one the review asked: *can a caller construct a case where 5.6.1 does not fire and the descent
+//! is still skipped?*
+//!
+//! The repair is not a third call site. **5.6.3 is syntactic, so it belongs above the dispatch**,
+//! and it is asked of every literal `visit_value` sees before any expected type is consulted — and
+//! a container literal at a position nothing can type is now descended for the two readers that
+//! exist down there, 5.6.3 and the variable rules, so a nested `[{ a: 1, a: 1 }]` inside a custom
+//! scalar is reached too. Which also takes the rule out of
+//! [`reads_value_positions`](reads_value_positions): it is not a reader of a resolved position at
+//! all any more.
+//!
+//! Re-read against the other five, the general form is: **a syntactic rule sitting inside a typed
+//! arm is this defect**, wherever it appears. The other five are not in typed arms. 5.4.2 and 5.7.3
+//! sit below a `resolves_positions` gate, which is a different thing — that gate *names them*, so a
+//! rule set holding only one of them takes the resolving path for exactly that reason, and the
+//! descent-only arm still carries the inner `check_arguments` call that reports 5.4.2 on a
+//! directive's arguments.
 //!
 //! The fourteenth round's own report identified `verify_source` as the reason the fail-fast
 //! projections never had the prefix defect — *"they open with `verify_source` over the whole green
@@ -982,6 +999,23 @@ const fn checks_values(rules: RuleSet) -> bool {
     || rules.contains(Rule::InputObjectRequiredFields)
 }
 
+/// Whether any enabled rule reads a **value's expected type**.
+///
+/// [`checks_values`] minus [`Rule::InputObjectFieldUniqueness`], for the reason
+/// [`reads_argument_positions`] is [`checks_arguments`] minus [`Rule::ArgumentUniqueness`]: 5.6.3
+/// compares the field names one literal *wrote* against each other and never asks the schema what
+/// they mean. It is asked above `visit_value`'s expected-type dispatch, so it is not a reader of a
+/// resolved position at all.
+///
+/// The split is between two questions the family predicate was answering at once. [`checks_values`]
+/// says *is this walk worth making* — and 5.6.3 needs the walk, so it stays there. This one says
+/// *does anything read what the walk resolves*, and 5.6.3 does not. al8n/smear#198.
+const fn reads_value_positions(rules: RuleSet) -> bool {
+  rules.contains(Rule::ValuesOfCorrectType)
+    || rules.contains(Rule::InputObjectFieldNames)
+    || rules.contains(Rule::InputObjectRequiredFields)
+}
+
 /// Whether any enabled rule reads an **argument's declared type**.
 ///
 /// [`checks_arguments`] minus [`Rule::ArgumentUniqueness`], which is the odd one out and the reason
@@ -991,7 +1025,7 @@ const fn checks_values(rules: RuleSet) -> bool {
 const fn reads_argument_positions(rules: RuleSet) -> bool {
   rules.contains(Rule::ArgumentNames)
     || rules.contains(Rule::RequiredArguments)
-    || checks_values(rules)
+    || reads_value_positions(rules)
 }
 
 /// Whether any enabled rule reads a **selection level's resolved type**.
@@ -1577,7 +1611,10 @@ where
           });
         }
         ExecutableDefinition::Fragment(fragment) => {
-          self.spend_name(fragment.name())?;
+          // One unit for the row, as the operation arm above takes. The **name's bytes** are
+          // `index_fragments`' charge and are taken there, where the length that decides whether
+          // anything reads them is known. See that function.
+          self.spend(1, *fragment.name().as_span())?;
           self.scratch.fragments.push(FragmentRow {
             definition: index,
             span: *fragment.name().as_span(),
@@ -1596,6 +1633,30 @@ where
   fn index_fragments(&mut self) -> ControlFlow<()> {
     let document = self.document;
     let count = self.scratch.fragments.len() as u32;
+
+    // Prepaid for the **sort and the grouping**, and gated on there being two of something to
+    // compare — the `n <= 1` companion every compare-what-was-written rule carries, which draft
+    // 5.5.1.1's was delivered without.
+    //
+    // It used to sit in `prep`, one name at a time, where the count is not yet known. For a single
+    // fragment the sort compares nothing and the grouping loop's inner scan never runs, so the
+    // spelling was charged for nobody — a 32 KiB fragment name in a one-fragment document cost four
+    // thousand units to be sorted against itself.
+    //
+    // The other reader of a stored fragment name is `find_fragment`'s comparator, and it needs no
+    // charge here at any count: `[u8]::cmp` stops at the first differing byte, so a comparison that
+    // reads `L` bytes of the stored name required the *spread* to share an `L`-byte prefix — and
+    // the spread's own spelling is charged in front of the search. al8n/smear#198's twenty-second
+    // round.
+    if count > 1 {
+      for ordinal in 0..count {
+        let row = self.scratch.fragments[ordinal as usize];
+        if let Some(body) = fragment(document, row.definition) {
+          self.spend_name(body.name())?;
+        }
+      }
+    }
+
     {
       let scratch = &mut *self.scratch;
       scratch.order.extend(0..count);

@@ -284,6 +284,23 @@ pub fn project_executable_document_recovered<'src>(
   Ok((ExecutableDocument::new(span, definitions), recovery))
 }
 
+/// [`project_executable_document_recovered`] for a pair that already carries its verification.
+///
+/// Infallible: a [`Verified`] is the proof the fallible form's error half exists to report, so
+/// there is no error half left. See [`Verified`] for why the type exists rather than the check
+/// simply being moved.
+pub fn project_executable_document_verified<'src>(
+  pair: Verified<'_, 'src>,
+) -> (ExecutableDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level_verified(
+    pair.parse(),
+    K::ExecutableDocument,
+    recoverable_entry,
+    pair.source(),
+  );
+  (ExecutableDocument::new(span, definitions), recovery)
+}
+
 impl super::ast::ExecutableDocument {
   /// Project this executable-document node to the AST the syntactic parser produces for `source`.
   ///
@@ -389,6 +406,21 @@ pub fn project_type_system_document_recovered<'src>(
   Ok((TypeSystemDocument::new(span, definitions), recovery))
 }
 
+/// [`project_type_system_document_recovered`] for a pair that already carries its verification.
+///
+/// [`project_executable_document_verified`]'s mirror at the SDL root.
+pub fn project_type_system_document_verified<'src>(
+  pair: Verified<'_, 'src>,
+) -> (TypeSystemDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level_verified(
+    pair.parse(),
+    K::TypeSystemDocument,
+    recoverable_type_system_entry,
+    pair.source(),
+  );
+  (TypeSystemDocument::new(span, definitions), recovery)
+}
+
 impl super::ast::TypeSystemDocument {
   /// Project this type-system-document node to the AST the syntactic parser produces for `source`.
   ///
@@ -399,6 +431,70 @@ impl super::ast::TypeSystemDocument {
     let node = Node::of(self.syntax());
     open_node(node, source)?;
     type_system_document(node, source)
+  }
+}
+
+/// A parse and the source it was produced from, **verified once**.
+///
+/// # Why this is a type
+///
+/// Two properties a lossless door is asked for, which cannot both hold when the door is handed an
+/// unverified pair:
+///
+/// - a **source mismatch outranks a budget refusal**, because a stale pair is not a resource
+///   problem and telling a caller to raise a limit names a remedy that cannot work; and
+/// - the **ceiling is absolute**, because no input-linear work may run outside the ledger.
+///
+/// Deciding the first requires *finishing* the comparison; honouring the second requires being able
+/// to stop before finishing it. Whichever runs first, the other loses — and that is a property of
+/// the arguments, not of the ordering, so no rearrangement inside such a door satisfies both.
+///
+/// Moving the verification out of the bounded call is the only shape that does. A `Verified` is
+/// checked by whoever constructs it, once, and every door that takes one has nothing left to
+/// verify: it opens its ledger first and everything it then does is under it.
+/// [`project_executable_document_verified`] and its twin are infallible for the same reason — the
+/// only thing their fallible forms can answer with is the check this value already carries.
+/// al8n/smear#198.
+#[derive(Clone, Copy)]
+pub struct Verified<'p, 'src> {
+  parse: &'p Parse,
+  source: &'src str,
+}
+
+impl core::fmt::Debug for Verified<'_, '_> {
+  /// The source, and that the pair is verified. `Parse` is not `Debug` — a green tree has no useful
+  /// rendering — so the half that can be shown is.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("Verified")
+      .field("source", &self.source)
+      .finish_non_exhaustive()
+  }
+}
+
+impl<'p, 'src> Verified<'p, 'src> {
+  /// Verifies that `source` is the whole text `parse` was produced from.
+  ///
+  /// `O(tokens)` over the borrowed green root and allocation-free — see [`matches_source`], which
+  /// is the same comparison. This is where a caller pays for it, and paying for it here is what
+  /// lets a validation of this pair be bounded.
+  pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, SourceMismatch> {
+    if matches_source(parse, source) {
+      Ok(Self { parse, source })
+    } else {
+      Err(SourceMismatch)
+    }
+  }
+
+  /// The parse half of the pair.
+  #[inline]
+  pub const fn parse(&self) -> &'p Parse {
+    self.parse
+  }
+
+  /// The source half of the pair.
+  #[inline]
+  pub const fn source(&self) -> &'src str {
+    self.source
   }
 }
 
@@ -480,7 +576,23 @@ fn recovered_top_level<'src, T>(
   if !matches_source(parse, source) {
     return Err(SourceMismatch);
   }
+  Ok(recovered_top_level_verified(
+    parse, root_kind, entry_of, source,
+  ))
+}
 
+/// [`recovered_top_level`] for a pair whose verification is already established.
+///
+/// Infallible, because the only thing the fallible form can answer with is the check a
+/// [`Verified`] already carries. Splitting it is what lets a **bounded** caller exist at all: the
+/// check is `O(tokens)`, so a door that verifies inside its own call has an input-linear walk in
+/// front of its ledger, and one that takes a verified pair does not. al8n/smear#198.
+fn recovered_top_level_verified<'src, T>(
+  parse: &Parse,
+  root_kind: SyntaxKind,
+  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
+  source: &'src str,
+) -> (SimpleSpan, Vec<T>, Recovery) {
   let root = parse_root(parse);
   let container = child_node(root, root_kind).unwrap_or(root);
 
@@ -524,7 +636,7 @@ fn recovered_top_level<'src, T>(
     }
   };
   let recovery = Recovery::new(definitions.len() as u32, skipped);
-  Ok((span, definitions, recovery))
+  (span, definitions, recovery)
 }
 
 /// The [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node under a parse's root.

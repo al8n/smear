@@ -559,6 +559,33 @@ where
     ControlFlow::Continue(())
   }
 
+  /// The level to descend into for a container literal sitting in a position **no rule can type**.
+  ///
+  /// A custom scalar accepts every literal, so `withJson(payload: [{ a: 1, a: 1 }])` is a legal
+  /// thing to write and the object inside it is still an object the document wrote. Draft 5.6.3 is
+  /// over *every* input-object value in the document and draft 5.8 is over every variable in it;
+  /// neither asks what position the value sits in. The scalar and enum arms answered
+  /// `Continue(None)` — no frame, no descent — so nothing under a custom scalar was ever visited.
+  ///
+  /// Gated on the two readers that exist for such a descent, because there is nothing else down
+  /// there to find: with 5.6.3 off and no usage rule, walking into a literal the schema has no
+  /// opinion about produces nothing. al8n/smear#198's twenty-second round.
+  fn untyped_descent<V>(&self, value: &'d V) -> Option<ValueFrame>
+  where
+    V: ValueLike<S>,
+  {
+    if !self.on(Rule::InputObjectFieldUniqueness) && !self.descends_for_usages(V::HAS_VARIABLES) {
+      return None;
+    }
+    if value.as_list().is_some() {
+      return Some(level_frame(ValueLevel::List, None, NONE, 0));
+    }
+    if value.as_object().is_some() {
+      return Some(level_frame(ValueLevel::Object, None, NONE, 0));
+    }
+    None
+  }
+
   /// Checks one value in place, and returns the level to descend into when it is a container.
   fn visit_value<V>(
     &mut self,
@@ -580,16 +607,33 @@ where
       return ControlFlow::Continue(None);
     }
 
+    // **Draft 5.6.3, above every dispatch.** It is a syntactic rule — the same field name written
+    // twice in one literal — so its subject is the literal, not the position the literal sits in,
+    // and asking it here is the only placement that reaches every object a request can write.
+    //
+    // The twenty-first round put it at two of `visit_value`'s exits instead: the unknown-position
+    // arm and the `InputObject` arm. The boundary that justified stopping there was *"an object
+    // literal in a position that resolves to a scalar or enum is not descended, because 5.6.1 has
+    // already said the literal cannot be there"* — and that sentence is false exactly where it
+    // matters. **A custom scalar accepts every literal**, so 5.6.1 says nothing about
+    // `withJson(payload: { a: 1, a: 2 })`, nothing descends it, and `RuleSet::ALL` answered `Ok`
+    // for a document draft §5.6.3 refuses. A recorded boundary that was never tested.
+    // al8n/smear#198's twenty-second round.
+    //
+    // Above the dispatch also means 5.6.3 stops being a reader of a resolved position at all, which
+    // is why it leaves [`reads_value_positions`](super::reads_value_positions). It still belongs to
+    // [`checks_values`](super::checks_values), because that predicate answers *is this walk worth
+    // making* and this rule needs the walk.
+    if check && let Some(fields) = value.as_object() {
+      self.check_object_field_uniqueness(fields)?;
+    }
+
     let Some(expected) = expected else {
-      // Unknown position: descend to find variable usages — and ask the one rule that does not
-      // need a position to answer. See `check_object_field_uniqueness`.
+      // Unknown position: descend to find variable usages. 5.6.3 was already asked above.
       if value.as_list().is_some() {
         return ControlFlow::Continue(Some(level_frame(ValueLevel::List, None, NONE, 0)));
       }
-      if let Some(fields) = value.as_object() {
-        if check {
-          self.check_object_field_uniqueness(fields)?;
-        }
+      if value.as_object().is_some() {
         return ControlFlow::Continue(Some(level_frame(ValueLevel::Object, None, NONE, 0)));
       }
       return ControlFlow::Continue(None);
@@ -674,13 +718,13 @@ where
             self.report_value(value, Context::Expected(expected))?;
           }
         }
-        ControlFlow::Continue(None)
+        ControlFlow::Continue(self.untyped_descent(value))
       }
       TypeKind::Scalar => {
         if coerces && !self.scalar_accepts(value, definition.name(), value.value_span())? {
           self.report_value(value, Context::Expected(expected))?;
         }
-        ControlFlow::Continue(None)
+        ControlFlow::Continue(self.untyped_descent(value))
       }
       // An object, interface or union in an input position. `Schema::build` refuses an argument
       // or input field declared that way, so this is unreachable from a built schema; refusing
@@ -689,7 +733,7 @@ where
         if coerces {
           self.report_value(value, Context::Expected(expected))?;
         }
-        ControlFlow::Continue(None)
+        ControlFlow::Continue(self.untyped_descent(value))
       }
     }
   }
@@ -761,8 +805,6 @@ where
   where
     V: ValueLike<S>,
   {
-    self.check_object_field_uniqueness(fields)?;
-
     let definition = *self.schema.type_def(object);
     if definition.is_one_of() {
       // 5.6.1's OneOf half: exactly one field, and it is not `null`.

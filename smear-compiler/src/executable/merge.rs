@@ -186,10 +186,24 @@ where
       if self.tripped {
         return ControlFlow::Continue(());
       }
-      if get_bit(&self.scratch.reachable, ordinal as u32) {
+      let row = self.scratch.fragments[ordinal];
+      // **Reached, as this engine means it.** `Scratch::reachable` is draft 5.5.1.4's bitset and it
+      // answers a different question: `mark_reachable` marks *every* definition sharing a reached
+      // name, deliberately, so one duplicated fragment name reports 5.5.1.1 and is not also called
+      // unused. Merge expansion enters only `order[group.start()]` — `find_fragment` resolves a
+      // spread to the group's first definition and nothing else can be spread — so a second
+      // `fragment F` was marked reached, never merged from any operation, and skipped here. Its
+      // conflicts went unreported and `RuleSet::only(FieldSelectionMerging)` answered `Ok`.
+      //
+      // One bitset with two readers that mean different things by it, which is this branch's oldest
+      // shape. The engine asks its own question instead of borrowing 5.5.1.4's, in `O(1)` and with
+      // no second set to keep in agreement: a definition is skipped only if a spread could have
+      // entered *it*. Pre-existing — `9f584d6` has this loop byte for byte and `mark_reachable`'s
+      // group-wide marking with it. al8n/smear#198's twenty-second round.
+      let entered = self.scratch.order[row.group.start() as usize] == ordinal as u32;
+      if entered && get_bit(&self.scratch.reachable, ordinal as u32) {
         continue;
       }
-      let row = self.scratch.fragments[ordinal];
       let root = self.scratch.merge_roots[row.definition as usize];
       self.blame = row.span;
       self.merge_from(root)?;

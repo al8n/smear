@@ -176,8 +176,9 @@ pub use executable::{Invalid, Refusal, validate_executable, validate_executable_
 #[cfg(feature = "rowan")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rowan")))]
 pub use lossless::{
-  LosslessInvalid, LosslessSchemaErrors, Recovery, validate_executable_lossless,
-  validate_executable_lossless_with, validate_schema_lossless,
+  LosslessInvalid, LosslessSchemaErrors, Recovery, Verified, validate_executable_lossless,
+  validate_executable_lossless_verified_with, validate_executable_lossless_with,
+  validate_schema_lossless,
 };
 pub use rule::{Rule, RuleSet};
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
