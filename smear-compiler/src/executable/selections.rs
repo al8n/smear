@@ -192,7 +192,7 @@ where
     // unresolved position *is*, and it is the same answer `check_directives`' descent-only arm
     // gives for an expected type. The children are still traversed.
     let definition = match frame.type_id() {
-      Some(parent) if self.resolves_positions(check) => {
+      Some(parent) if self.resolves_positions(check && self.reads_field_positions) => {
         self.spend_name(name)?;
         let found = self
           .schema
@@ -256,7 +256,10 @@ where
       // 5.5.1.2, 5.5.1.3 and 5.5.2.3 need and it implies this, so no report is lost — and the
       // level that skips answers [`NONE`], which is what an unresolved position is. Its directives
       // below are still walked, because a usage inside one is exactly what put this walk here.
-      if self.resolves_positions(check) {
+      // 5.5.1.2 and 5.5.1.3 are consumers here that a field position does not have — they report
+      // *about* the condition — so they join the set rather than riding on `check`.
+      let local = check && (self.reads_field_positions || self.reports_type_conditions);
+      if self.resolves_positions(local) {
         self.spend_name(name)?;
         let resolved = if check {
           self.check_type_condition(name)?
@@ -366,7 +369,7 @@ where
     // expected types. With neither, an entry propagates `NONE`, which is what an unresolved
     // position is and not a shortcut.
     let reads_target = self.reaches_spread_target(check);
-    let needs_scope = entering && self.resolves_positions(enter);
+    let needs_scope = entering && self.resolves_positions(enter && self.reads_field_positions);
 
     let scope = if reads_target || needs_scope {
       let condition = body.type_condition().name();

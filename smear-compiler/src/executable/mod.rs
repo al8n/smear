@@ -241,6 +241,44 @@
 //! The distinction the last row turns on is the one to keep: work that **computes** the check is
 //! not work performed ahead of it. A memo cannot answer without hashing its key. A spread can
 //! answer `Visited::visit` without resolving anything.
+
+//! ## Crossed with: where a constant-time discriminator exists, what runs before it?
+//!
+//! Not a sixth list — the same population, one question further in. A check that costs two integer
+//! loads and a check that costs a walk are both "checks", and the twentieth round found the cheap
+//! one placed under the expensive one twice.
+//!
+//! | discriminator | costs | what ran before it |
+//! |---|---|---|
+//! | length, in `verify_source` | two loads | the lossless door's `units(max(parse, source))` prepayment — **now below it** |
+//! | `len() > 1`, for 5.4.2 and 5.7.3 | one compare | the whole resolving path, including `spend_names` over every spelling — **now below it** |
+//! | a rule-set bit, for a resolved position | one mask | the field, condition and spread resolutions on every first visit — **now below them** |
+//! | `Visited::visit` | one stamp compare | the target condition's hash (nineteenth round) |
+//! | `is_empty()`, before `find_fragment` | one compare | nothing; the spread-name charge is already under it |
+//! | `len() > 1`, for 5.6.3 and the variable index | one compare | nothing; both gates predate this |
+//! | a stored hash and length, in `Names::intern` | two compares | nothing — a bucket collision is rejected "without touching a byte" |
+//! | `known.hash == hash && rows.len()`, in the memo | two compares | nothing; the contents comparison is under both |
+//! | `wrappers()`, in `same_response_shape` | one compare | nothing; no type is looked up until it passes |
+//! | `target == parent`, in 5.5.2.3 | one compare | nothing, since the eleventh round put it above the charge as well as the scan |
+//!
+//! And the inverse, recorded so a later sweep does not "repair" it. **A discriminator that cannot
+//! be answered without the expensive step is not an instance.**
+//!
+//! - `Claim::Done` needs the memo's hash, and hashing the key *is* the lookup.
+//! - [`Recovery::is_complete`](smear_parser::graphql::lossless::Recovery::is_complete) needs the
+//!   walk: what was skipped is not knowable from a length.
+//! - `condition_applies` needs `Schema::sym`; there is no cheaper answer than hashing the name, and
+//!   the one unit a directive charged before examining it is already the floor.
+//! - `find_fragment` is a binary search, and emptiness is the only constant-time thing to ask about
+//!   it — which it does ask.
+//! - [`merges`] and `walks_values` **are** the discriminators; nothing precedes them.
+//!
+//! One thing the first row dissolved rather than reordered. The second round's finding was that the
+//! projection prepayment must be priced over *both* inputs, because `parse` and `source` are two
+//! parameters and pricing from one meant spending on the other. Once the lengths must agree before
+//! anything is priced, there is no maximum left to take: the two inputs are one number, and the
+//! defect that needed `max(..)` cannot be constructed. A cheap gate placed correctly can retire a
+//! question rather than answer it.
 //!
 //! # And a fifth way a repair goes wrong
 //!
@@ -692,6 +730,9 @@ where
     checks_directives: checks_directives(rules),
     checks_arguments: checks_arguments(rules),
     checks_values: checks_values(rules),
+    reads_argument_positions: reads_argument_positions(rules),
+    reads_field_positions: reads_field_positions(rules),
+    reports_type_conditions: reports_type_conditions(rules),
     collects_usages: collects_usages(rules),
     resolves_variable_types: rules.contains(Rule::VariablesAreInputTypes),
     marks_usage: rules.contains(Rule::AllVariablesUsed),
@@ -904,6 +945,38 @@ const fn checks_values(rules: RuleSet) -> bool {
     || rules.contains(Rule::InputObjectRequiredFields)
 }
 
+/// Whether any enabled rule reads an **argument's declared type**.
+///
+/// [`checks_arguments`] minus [`Rule::ArgumentUniqueness`], which is the odd one out and the reason
+/// this exists: 5.4.2 compares the spellings a request *wrote* against each other and never asks
+/// the schema what they mean. A rule set holding only that one needs no resolution — and needs no
+/// comparison either on a list of fewer than two, which is why its callers pair this with a length.
+const fn reads_argument_positions(rules: RuleSet) -> bool {
+  rules.contains(Rule::ArgumentNames)
+    || rules.contains(Rule::RequiredArguments)
+    || checks_values(rules)
+}
+
+/// Whether any enabled rule reads a **selection level's resolved type**.
+///
+/// The definition-local half of [`Validator::resolves_positions`] for the three selection-walk
+/// callers, and the correction to what they were given first. al8n/smear#198's nineteenth round
+/// handed that predicate `Frame::CHECK`, which says *this is the definition's first visit* — a
+/// **when**, not a **who**. `RuleSet::EMPTY` and `only(AllVariableUsesDefined)` both set it, and
+/// both then charged and hashed every field name and type condition on that first visit for
+/// nobody. A reader predicate fed visit state is not a reader predicate.
+///
+/// The consumers, all of them: 5.3.1 and 5.3.3 read a field's definition directly; 5.5.2.3 reads
+/// the *level's* type as the parent of a spread beneath it; and everything in
+/// [`reads_argument_positions`] reaches its own answer through `definition.args()`, so a level that
+/// does not resolve cannot supply one.
+const fn reads_field_positions(rules: RuleSet) -> bool {
+  rules.contains(Rule::FieldSelections)
+    || rules.contains(Rule::LeafFieldSelections)
+    || rules.contains(Rule::FragmentSpreadIsPossible)
+    || reads_argument_positions(rules)
+}
+
 /// Whether the variable rules that read a usage's position are enabled.
 ///
 /// **A property of an operation.** The same fragment is valid under one operation's variables and
@@ -957,6 +1030,12 @@ struct Validator<'a, 'd, S, K> {
   checks_arguments: bool,
   /// [`checks_values`] for this run's [`RuleSet`], resolved once.
   checks_values: bool,
+  /// [`reads_argument_positions`] for this run's [`RuleSet`], resolved once.
+  reads_argument_positions: bool,
+  /// [`reads_field_positions`] for this run's [`RuleSet`], resolved once.
+  reads_field_positions: bool,
+  /// [`reports_type_conditions`] for this run's [`RuleSet`], resolved once.
+  reports_type_conditions: bool,
   /// Whether draft 5.8.2 is enabled, which is one of the two readers of a variable's packed type.
   resolves_variable_types: bool,
   /// Whether draft 5.8.4 is enabled, which is the **only** reader of `Scratch::used`.
@@ -2222,10 +2301,17 @@ where
         continue;
       };
       // The condition was already reported on, if it needed reporting, by the declaration pass —
-      // but resolving it still hashes it, so it is still charged.
+      // but resolving it still hashes it, so it is charged, and only when the scope it produces has
+      // a reader. `in_operation` is false here, so this is the definition-local half alone: the
+      // sibling of the three selection-walk sites, named in the same finding so it does not become
+      // the next one. al8n/smear#198.
       let condition = body.type_condition().name();
-      self.spend_name(condition)?;
-      let scope = self.composite_of(condition).map_or(NONE, |id| id.get());
+      let scope = if self.reads_field_positions {
+        self.spend_name(condition)?;
+        self.composite_of(condition).map_or(NONE, |id| id.get())
+      } else {
+        NONE
+      };
       self.begin_fragment(row.definition, true)?;
       self.walk_selections(Frame::root(row.definition, scope, Frame::CHECK))?;
     }

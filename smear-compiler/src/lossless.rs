@@ -370,7 +370,29 @@ pub fn validate_executable_lossless_with<'src, K>(
 where
   K: Sink<&'src str>,
 {
-  let size = source.len().max(usize::from(parse.green().text_len()));
+  // **The lengths first.** They are two integer loads and they are the whole answer whenever they
+  // differ: a parse and a source of different sizes are not the same document, and no amount of
+  // budget makes them one.
+  //
+  // The prepayment below used to sit above this. A caller holding a stale pair and a finite
+  // `validation_work` too small for `max(parse, source)` was told `Refusal::Budget` — and possibly
+  // handed a `ValidationWorkBudget` diagnostic — for a pair that `verify_source` would have refused
+  // on its first comparison without walking a single token. That is a wrong causal verdict, and the
+  // kind that costs a caller something: the remedy it names is raising a limit or retrying, and
+  // neither can help. al8n/smear#198's twentieth round, and the same class as #196's arena refusal
+  // wearing the budget's `None` — except that here the two abandonments already had different
+  // names and the *ordering* handed out the wrong one.
+  //
+  // Round 14's own diagnosis named this gate: the fail-fast doors were safe because `verify_source`
+  // "compares lengths first, so an extended source is refused before a byte is walked". This door
+  // now asks the same question before it prices anything.
+  let size = usize::from(parse.green().text_len());
+  if size != source.len() {
+    return Err(LosslessInvalid {
+      invalid: Invalid::unexamined(),
+      recovery: None,
+    });
+  }
   let Some(left) = Ledger::open(budget).take(units(size)) else {
     let (emitted, stopped) = refuse_projection(source, budget, rules, sink);
     return Err(LosslessInvalid {

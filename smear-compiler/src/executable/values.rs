@@ -87,7 +87,16 @@ where
     // and the variable usages inside them. The prepayment below was unconditional, so an empty
     // rule set — or one asking only for 5.3.1 — could be handed a budget refusal for a long
     // directive spelling that no enabled rule was ever going to look at.
-    let local = check && (self.checks_directives || self.checks_arguments || self.checks_values);
+    // Per consumer, not per family. 5.7.1 and 5.7.2 read a directive's *definition* at any length;
+    // 5.7.3 compares the spellings a request wrote against each other and reads no definition at
+    // all — and compares nothing on a list of fewer than two, which is the `n <= 1` shape one
+    // dimension over from the loop inventory. `check_arguments` below makes the same distinction
+    // for itself, so a rule set holding only 5.4.2 still gets 5.4.2 through the descent-only arm.
+    let local = check
+      && (self.reads_argument_positions
+        || self.on(Rule::DirectivesAreDefined)
+        || self.on(Rule::DirectivesAreInValidLocations)
+        || (self.on(Rule::DirectivesAreUniquePerLocation) && directives.len() > 1));
     if !self.reaches_directives(check, D::HAS_VARIABLES) {
       return ControlFlow::Continue(());
     }
@@ -248,7 +257,12 @@ where
     // [`Validator::reaches_directives`] one level in, and for the same reason: the prepayment
     // below is unconditional, so without this an argument list would charge for its spellings
     // whether or not any rule that reads an argument, a value or a variable usage is enabled.
-    let local = check && (self.checks_arguments || self.checks_values);
+    // The same split one level in: 5.4.1 and 5.4.3 read an argument's declared type, 5.4.2 reads
+    // only the spellings beside it — and reads nothing at all when there are fewer than two of
+    // them, which is the case `only(ArgumentUniqueness)` used to charge every name for.
+    let local = check
+      && (self.reads_argument_positions
+        || (self.on(Rule::ArgumentUniqueness) && arguments.len() > 1));
     if !self.reaches_arguments(check, A::HAS_VARIABLES) {
       return ControlFlow::Continue(());
     }

@@ -1157,15 +1157,28 @@ fn a_disabled_coercion_rule_does_not_read_the_literal() {
   );
 }
 
-/// The projection prepayment is priced over **both** inputs, because they are two parameters.
+/// The prepayment prices the pair it is about to project, and a pair it will not project is not a
+/// resource problem.
 ///
-/// `parse` and `source` are separate arguments and nothing pairs them. Pricing from `source.len()`
-/// alone meant a tree of `N` top-level definitions handed in beside an empty source paid **one
-/// unit** — and the recovering projector then visited all `N` CST children, rejected each on a
-/// source mismatch, and returned `Ok`. The bound was priced from one input and spent on the other.
+/// # Two rounds in one test
+///
+/// The second round's half: `parse` and `source` are separate arguments and nothing pairs them, so
+/// pricing from `source.len()` alone meant a tree of `N` top-level definitions handed in beside an
+/// empty source paid **one unit** — and the recovering projector then visited all `N` CST children
+/// and returned `Ok`. The prepayment was priced from one input and spent on the other.
+///
+/// The twentieth round's half: pricing it over `max(parse, source)` fixed the number and left the
+/// **verdict** wrong. A caller holding a stale pair and a budget too small for that maximum was
+/// told `Refusal::Budget`, with a `ValidationWorkBudget` diagnostic to match — for a pair whose
+/// lengths already disagreed. The remedy that answer names is raising a limit or retrying, and
+/// neither can help. `verify_source` compares lengths first, which is the reason the fail-fast
+/// doors were safe; this door now asks the same question before it prices anything.
+///
+/// So the mismatch is answered as a mismatch **at every budget**, and the prepayment is measured
+/// where it still exists — on a pair the door will actually project.
 #[cfg(feature = "rowan")]
 #[test]
-fn the_projection_is_priced_over_both_inputs() {
+fn the_projection_prepayment_prices_the_pair_it_projects() {
   use smear::{
     parser::graphql::lossless::parse_executable_document,
     validator::validate_executable_lossless_with,
@@ -1175,28 +1188,55 @@ fn the_projection_is_priced_over_both_inputs() {
   let parsed = fragment_bomb(4_000, 4_000);
   let parse = parse_executable_document(&parsed);
 
-  // The mismatch: a large parse, an empty source. `units(0)` is one.
-  let budget = Budget::default().with_validation_work(16);
-  let mut scratch = Scratch::new();
-  let mut collected = Vec::new();
-  let mut sink = Collect::new(&mut collected);
-  let verdict = validate_executable_lossless_with(
-    &schema,
-    &parse,
-    "",
-    &mut scratch,
-    &budget,
-    RuleSet::ALL,
-    &mut sink,
-  );
+  let door = |source: &str, work: u32| {
+    let budget = Budget::default().with_validation_work(work);
+    let mut scratch = Scratch::new();
+    let mut collected = Vec::new();
+    let mut sink = Collect::new(&mut collected);
+    let verdict = validate_executable_lossless_with(
+      &schema,
+      &parse,
+      source,
+      &mut scratch,
+      &budget,
+      RuleSet::ALL,
+      &mut sink,
+    );
+    let invalid = verdict.err().map(|refused| {
+      (
+        refused.invalid().budget_tripped(),
+        refused.recovery().is_some(),
+        collected.iter().map(Diagnostic::rule).collect::<Vec<_>>(),
+      )
+    });
+    invalid.expect("a 160 KB parse came back Ok")
+  };
 
-  let invalid = verdict.expect_err("a 160 KB parse beside an empty source came back Ok");
-  assert!(invalid.invalid().budget_tripped());
-  assert_eq!(invalid.recovery(), None);
-  assert_eq!(
-    collected.iter().map(Diagnostic::rule).collect::<Vec<_>>(),
-    [Rule::ValidationWorkBudget]
+  // A large parse beside an empty source, at a budget far too small for either — and at one that
+  // could pay for both. Same answer: not the same document, and not a resource problem.
+  for work in [16, u32::MAX - 1] {
+    let (tripped, recovered, rules) = door("", work);
+    assert!(
+      !tripped,
+      "a length mismatch was reported as budget exhaustion at validation_work {work}"
+    );
+    assert!(!recovered, "nothing was projected, so there is no recovery");
+    assert_eq!(
+      rules,
+      [],
+      "a mismatch emits nothing at validation_work {work}"
+    );
+  }
+
+  // And the prepayment is still there, on the pair the door does project: the same 160 KB, matched,
+  // refuses at a budget that cannot cover it and says so as a budget.
+  let (tripped, recovered, rules) = door(&parsed, 16);
+  assert!(
+    tripped,
+    "the prepayment over a matching pair stopped existing"
   );
+  assert!(!recovered, "nothing was projected, so there is no recovery");
+  assert_eq!(rules, [Rule::ValidationWorkBudget]);
 }
 
 /// A refused projection reports a count of what it did not look at, and the sink's answer.
@@ -3102,9 +3142,12 @@ fn a_bare_directive_list_is_charged_for_walking_past_it() {
 #[test]
 fn a_spelling_is_resolved_only_where_its_answer_is_read() {
   let schema = build(SCHEMA);
-  // `collects_usages` on and `reads_usage_positions` off: the repeated descent, which is the
-  // configuration in which neither a field's definition nor a level's scope has a reader.
-  let rules = RuleSet::only(Rule::AllVariableUsesDefined);
+  // A position reader **and** a usage rule: 5.3.1 is what makes the first visit resolve at all, and
+  // `collects_usages` is what makes the body be walked again per operation. `reads_usage_positions`
+  // stays off, so those later walks have nobody to resolve for. That pairing is the subject — with
+  // no position reader at all the resolution does not happen even once, which is round 20's repair
+  // and is measured on its own at the end of this test.
+  let rules = RuleSet::only(Rule::FieldSelections).with(Rule::AllVariableUsesDefined);
 
   // **The field name.** Unknown to the schema and long, so what is measured is the charge and the
   // hash on the way to a lookup that answers nothing. 5.3.1 would report it; it is off.
@@ -3167,5 +3210,66 @@ fn a_spelling_is_resolved_only_where_its_answer_is_read() {
     interaction.abs() < 500,
     "a {long}-byte type condition cost {interaction} more units at {many} spreads than at {few}, \
      so it is still resolved before the check that refuses the entry"
+  );
+
+  // **And with no position reader, not even once.** `Frame::CHECK` says *first visit*, which is a
+  // when and not a who: al8n/smear#198's nineteenth round handed it to `resolves_positions` as the
+  // definition-local half, so `RuleSet::EMPTY` and a usage-only set both resolved every spelling on
+  // that first visit for nobody. The twentieth named the consumers instead.
+  for usage_only in [
+    RuleSet::EMPTY,
+    RuleSet::only(Rule::AllVariableUsesDefined),
+    RuleSet::only(Rule::ArgumentUniqueness),
+  ] {
+    let at = |len: usize| min_budget(&schema, &fields(few, len), usage_only);
+    let (short_name, long_name) = (at(short), at(long));
+    println!("min_budget ({usage_only:?}): 1-byte {short_name}, {long}-byte {long_name}");
+    assert!(
+      long_name.abs_diff(short_name) < 100,
+      "a {long}-byte field name cost {} units under a rule set that reads no position",
+      long_name.abs_diff(short_name)
+    );
+  }
+
+  // **And the `n <= 1` half of the same sentence.** Draft 5.4.2 reads no schema position at all —
+  // it compares the spellings a request wrote against each other — so what it needs is not a
+  // resolution but a *second element*. `only(ArgumentUniqueness)` charged every argument name
+  // through the resolving path's prepayment whether or not there was anything to compare it with.
+  let only_5_4_2 = RuleSet::only(Rule::ArgumentUniqueness);
+  let arguments = |count: usize, len: usize| {
+    let spelling = "z".repeat(len);
+    let mut source = String::from("{ dog { isHouseTrained(");
+    for _ in 0..count {
+      source.push_str(&std::format!("{spelling}: true "));
+    }
+    source.push_str(") } }");
+    source
+  };
+  let at = |count: usize, len: usize| min_budget(&schema, &arguments(count, len), only_5_4_2);
+  let (one_short, one_long) = (at(1, 1), at(1, long));
+  let (two_short, two_long) = (at(2, 1), at(2, long));
+  println!(
+    "min_budget (5.4.2 only): one argument {one_short}/{one_long}, two {two_short}/{two_long} \
+     (1/{long}-byte name)"
+  );
+  assert!(
+    one_long.abs_diff(one_short) < 100,
+    "a {long}-byte argument name cost {} units on a list 5.4.2 cannot compare",
+    one_long.abs_diff(one_short)
+  );
+  // The other direction, which is what keeps this from being a skip: with something to compare, the
+  // spelling is read and paid for — and the rule still reports.
+  assert!(
+    two_long > two_short + 400,
+    "two {long}-byte argument names cost only {} more units than two short ones, so 5.4.2 is not \
+     reading them",
+    two_long - two_short
+  );
+  let reported = run(&schema, &arguments(2, 8), &Budget::default(), only_5_4_2);
+  assert_eq!(
+    reported.rules(),
+    [Rule::ArgumentUniqueness],
+    "the gate skipped the comparison rather than the resolution: {:?}",
+    reported.diagnostics
   );
 }
