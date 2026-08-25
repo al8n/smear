@@ -70,11 +70,14 @@ where
   type Node = Key::Node;
 
   #[inline]
-  fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
-    // Both halves are `Nestable`, so both reach the worklist. `Span` carries no bound and is
-    // released here, on the same terms as `ObjectField`'s unbounded slots (al8n/smear#176).
-    self.key.into_children(pending);
-    self.value.into_children(pending);
+  fn into_children(self, worklist: &mut crate::value::Worklist<Self::Node>) {
+    // Both halves are `Nestable`, so both forward to the same worklist. That an entry can forward
+    // *twice* is one of the two things a sink buys over a returned answer — two halves that each
+    // hand over a container have no single answer that does not pour one into the other — and
+    // `value/nesting.rs`'s header measures the other. `Span` carries no bound and is released
+    // here, on the same terms as `ObjectField`'s unbounded slots (al8n/smear#176).
+    self.key.into_children(worklist);
+    self.value.into_children(worklist);
   }
 }
 

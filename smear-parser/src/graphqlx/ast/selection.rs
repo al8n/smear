@@ -4,9 +4,11 @@ use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
-use super::{Arguments, DefaultVec, Directives, FragmentTypePath, Name, Type, TypePath};
+use super::{Arguments, Directives, FragmentTypePath, Name, Nested, Type, TypePath};
+use crate::value::{Absent, NestNode, Nestable, Sealed, Worklist};
 
 /// A GraphQLx field alias (`Name :`).
 pub type Alias<S, Span = SimpleSpan> = crate::selection::Alias<Name<S, Span>, Span>;
@@ -29,7 +31,14 @@ pub type InlineFragment<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   >;
 
 /// A GraphQLx selection set containing one or more selections.
-pub type SelectionSet<S, Span = SimpleSpan, Container = DefaultVec<Selection<S, Span>>> =
+///
+/// The container defaults to [`Nested`] rather than a `Vec`, and that is where the release of a
+/// deeply nested selection lives: an [`InlineFragment`] owns another `SelectionSet` and a [`Field`]
+/// owns an optional one, so a caller who grows the chain in a loop — every constructor these
+/// carriers need is public — built something whose `Drop` glue descended one native frame per level
+/// and aborted the process on the way out. [`Nested`]'s own documentation states the mechanism and
+/// what it does and does not cover.
+pub type SelectionSet<S, Span = SimpleSpan, Container = Nested<Selection<S, Span>>> =
   crate::selection::SelectionSet<Selection<S, Span>, Span, Container>;
 
 /// A GraphQLx selection.
@@ -44,6 +53,50 @@ pub enum Selection<S, Span = SimpleSpan> {
   FragmentSpread(FragmentSpread<S, Span>),
   /// An inline fragment.
   InlineFragment(InlineFragment<S, Span>),
+}
+
+impl<S, Span> Sealed for Selection<S, Span> {}
+
+/// How the release reaches a selection's children.
+///
+/// The recursive positions are the two selection sets — a field's optional one and an inline
+/// fragment's required one — and they are the only children pushed. Everything else an arm owns is
+/// released here, which the loop's invariant requires to be a leaf: a name, a type condition, an
+/// argument list and a directive list hold *values* and *types*, never a selection, and both of
+/// those already carry their own iterative release. What they can still own is a node a caller
+/// stored in `S` or in `Span`, which no implementation of this trait can push — see [`Nested`]'s
+/// documentation and `al8n/smear#176`.
+///
+/// The match has no wildcard arm even though this enum is `#[non_exhaustive]`, which it can do
+/// because the impl is inside the defining crate: a fourth variant is a compile error here rather
+/// than a silent return to recursing.
+impl<S, Span> Nestable for Selection<S, Span> {
+  type Node = Self;
+
+  #[inline]
+  fn into_children(self, worklist: &mut Worklist<Self>) {
+    match self {
+      Self::Field(field) => {
+        let (_, _, _, _, _, selection_set) = field.into_components();
+        if let Some(selection_set) = selection_set {
+          worklist.adopt(selection_set.into_selections().into_vec());
+        }
+      }
+      // A spread names a fragment; the selections it stands for are the fragment definition's.
+      Self::FragmentSpread(_) => {}
+      Self::InlineFragment(fragment) => {
+        let (_, _, _, selection_set) = fragment.into_components();
+        worklist.adopt(selection_set.into_selections().into_vec());
+      }
+    }
+  }
+}
+
+/// A selection's children are selections, and a selection set holds them directly. Neither carrier
+/// lane exists here: an object field and a map entry are *value* carriers.
+impl<S, Span> NestNode for Selection<S, Span> {
+  type Field = Absent<Self>;
+  type Entry = Absent<Self>;
 }
 
 impl<S, Span> Selection<S, Span> {

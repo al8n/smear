@@ -54,8 +54,8 @@ mod value;
 /// The default container type used for AST collections (lists, objects).
 pub type DefaultVec<T> = Vec<T>;
 
-/// The container the value carriers hold their children in, and the trait that lets it take one
-/// apart.
+/// The container the value and selection carriers hold their children in, and the trait that lets
+/// it take one apart.
 ///
 /// Re-exported here because it is the default `Container` argument of every value alias below, so
 /// it reaches a consumer's signatures whether or not they name it. [`Nested`] is a `Vec` in every
@@ -64,4 +64,12 @@ pub type DefaultVec<T> = Vec<T>;
 /// ranges over every recursive position the grammar forms, and not over a node a caller stored in
 /// `S` — see [`Nested`]'s own documentation, which states the difference. [`Nestable`] is sealed,
 /// which fixes who may implement it and says nothing about what a payload may be.
-pub use crate::value::{Nestable, Nested};
+///
+/// It is the default container of the selection aliases too, for the same reason and against the
+/// same defect: an inline fragment owns a nested selection set and a field owns an optional one.
+///
+/// [`Worklist`], [`NestNode`] and [`Absent`] travel with them because they are in
+/// [`Nestable`]'s own signature: the trait hands its children to a [`Worklist`], and its `Node` is
+/// bounded by [`NestNode`], whose two carrier lanes a node without them fills with [`Absent`]. A
+/// trait nobody outside this crate can implement is still one a consumer reads.
+pub use crate::value::{Absent, NestNode, Nestable, Nested, Worklist};

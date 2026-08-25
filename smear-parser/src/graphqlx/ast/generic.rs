@@ -71,6 +71,13 @@ pub type ExecutableDefinitionHeader<ImplementationGenerics, Name, Span = SimpleS
   crate::generic::ExecutableDefinitionHeader<ImplementationGenerics, Name, Span>;
 
 /// A namespaced GraphQLx path with optional recursive generic type arguments.
+///
+/// `TypeContainer` is a plain `Vec`, unlike the one inside
+/// [`DefinitionTypePath`](super::DefinitionTypePath), and the difference is which of the two is on
+/// a recursion. A [`Type`] holds a `DefinitionTypePath`, so *its* argument list closes a cycle and
+/// carries the release. Nothing reachable from a `Type` holds one of these, so dropping this one
+/// drops a flat list of types, each of which carries its own release; a container here would buy
+/// nothing and would put a `Nestable` bound on every carrier generic over `Ty`.
 pub type TypePath<
   S,
   Span = SimpleSpan,
