@@ -173,7 +173,7 @@ fn document(selections: Vec<Selection<&'static [u8]>>) -> ExecutableDocument<&'s
       None,
       ExecutableDefinition::Operation(OperationDefinition::Shorthand(SelectionSet::new(
         span(),
-        selections,
+        selections.into(),
       ))),
     )],
   )

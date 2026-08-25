@@ -67,12 +67,13 @@ impl<Name, Value: crate::value::Nestable, Span> crate::value::Nestable
   type Node = Value::Node;
 
   #[inline]
-  fn into_children(self, pending: &mut std::vec::Vec<Self::Node>) {
-    // `Value` is the only `Nestable` slot, so it is the only one the worklist can take. `Name` and
-    // `Span` carry no bound and are released here: at the crate's own arguments a name node and a
-    // span, at a caller's whatever the caller chose — including a node no loop can reach from here
+  fn into_children(self, worklist: &mut crate::value::Worklist<Self::Node>) {
+    // `Value` is the only `Nestable` slot, so it is the only one the walk can take, and a field
+    // forwards to it rather than costing the worklist an entry of its own. `Name` and `Span` carry
+    // no bound and are released here: at the crate's own arguments a name node and a span, at a
+    // caller's whatever the caller chose — including a node no loop can reach from here
     // (al8n/smear#176).
-    self.value.into_children(pending);
+    self.value.into_children(worklist);
   }
 }
 

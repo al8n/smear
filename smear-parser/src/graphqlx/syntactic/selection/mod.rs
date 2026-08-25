@@ -6,8 +6,6 @@
 //! field *tail* is fused the same way, on `field_after_name`'s
 //! one-classification-per-position rule.
 
-use std::vec::Vec;
-
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
@@ -647,7 +645,9 @@ selection_parser!(
       .repeated_while::<_, U1>(decide_selection_set_tail::<Src, Ctx>)
       .at_least(1)
       .delimited_by_braces()
-      .collect_with(Vec::new())
+      // `Nested`, by way of `Default`, exactly as the value productions collect theirs: the
+      // container is where a selection set's release lives.
+      .collect_with(Default::default())
       .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| SelectionSet::new(span, data))

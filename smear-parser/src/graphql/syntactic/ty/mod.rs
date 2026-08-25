@@ -7,8 +7,6 @@
 //!
 //! See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 
-use std::boxed::Box;
-
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
   Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
@@ -121,7 +119,7 @@ where
       let required = matches!(bang, ParseAttempt::Accept(_));
       match core {
         TypeCore::Name(name) => Type::Name(NamedType::new(span, name, required)),
-        TypeCore::List(inner) => Type::List(Box::new(ListType::new(span, inner, required))),
+        TypeCore::List(inner) => ListType::new(span, inner, required).into(),
       }
     },
   )

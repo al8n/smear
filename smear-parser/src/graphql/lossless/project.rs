@@ -89,7 +89,7 @@
 //!   `tests/lossless_project.rs` compares against the parser, so a "fix" here would be a
 //!   divergence.
 
-use std::{boxed::Box, vec::Vec};
+use std::vec::Vec;
 
 use rowan::{NodeOrToken, TextRange, TextSize};
 use tokora::SimpleSpan;
@@ -1430,7 +1430,10 @@ fn selection_set<'src>(
     }
   }
   let extent = extent.range(node, "a token")?;
-  Ok((SelectionSet::new(to_span(extent), selections), extent))
+  Ok((
+    SelectionSet::new(to_span(extent), selections.into()),
+    extent,
+  ))
 }
 
 fn field<'src>(node: Node<'_>, source: &'src str) -> Out<(Field<&'src str>, TextRange)> {
@@ -1604,7 +1607,7 @@ fn ty<'src>(node: Node<'_>, source: &'src str) -> Out<(Type<Name<&'src str>>, Te
     K::ListType => {
       let (element, extent) = list_element(node, source)?;
       Ok((
-        Type::List(Box::new(ListType::new(to_span(extent), element, false))),
+        ListType::new(to_span(extent), element, false).into(),
         extent,
       ))
     }
@@ -1666,10 +1669,7 @@ fn non_null_type<'src>(
     K::ListType => {
       let element = extent.keep(list_element(inner, source)?);
       let extent = extent.range(node, "a token")?;
-      Ok((
-        Type::List(Box::new(ListType::new(to_span(extent), element, true))),
-        extent,
-      ))
+      Ok((ListType::new(to_span(extent), element, true).into(), extent))
     }
     // `T!!` has no production, so a nested `NonNullType` is not a shape the AST can hold.
     found => Err(unexpected(node, found, inner.text_range())),

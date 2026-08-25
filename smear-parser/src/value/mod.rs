@@ -31,7 +31,7 @@ pub use string::*;
 pub use variable::*;
 
 pub(crate) use nesting::Sealed;
-pub use nesting::{Nestable, Nested};
+pub use nesting::{Absent, Nest, NestNode, NestPtr, Nestable, Nested, SoleNestPtr, Worklist};
 
 mod boolean_value;
 mod default_input_value;
