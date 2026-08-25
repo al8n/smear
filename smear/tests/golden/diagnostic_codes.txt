@@ -103,6 +103,7 @@ SchemaErrorKind::RootOperationTypeNotObject = smear::schema::root-operation-type
 SchemaErrorKind::SelfImplementingInterface = smear::schema::self-implementing-interface
 SchemaErrorKind::SelfReferentialDirective = smear::schema::self-referential-directive
 SchemaErrorKind::SharedRootOperationType = smear::schema::shared-root-operation-type
+SchemaErrorKind::TooManyDirectiveArguments = smear::schema::too-many-directive-arguments
 SchemaErrorKind::TooManyFieldArguments = smear::schema::too-many-field-arguments
 SchemaErrorKind::TooManyNames = smear::schema::too-many-names
 SchemaErrorKind::TypeReferenceTooDeep = smear::schema::type-reference-too-deep

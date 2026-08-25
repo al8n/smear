@@ -514,9 +514,9 @@ impl core::fmt::Debug for Verified<'_, '_> {
 impl<'p, 'src> Verified<'p, 'src> {
   /// Verifies that `source` is the whole text `parse` was produced from.
   ///
-  /// `O(tokens)` over the borrowed green root and allocation-free — see [`matches_source`], which
-  /// is the same comparison. This is where a caller pays for it, and paying for it here is what
-  /// lets a validation of this pair be bounded.
+  /// `O(tokens)` over the borrowed green root and allocation-free — see [`verify_parse`], which
+  /// is the same comparison and answers the same [`Unverified`]. This is where a caller pays for
+  /// it, and paying for it here is what lets a validation of this pair be bounded.
   pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, Unverified> {
     // Counted by the same walk that verifies, so the proof and the price are established together
     // and cost one pass between them. See [`Verified::projection_cost`].
@@ -565,7 +565,8 @@ impl<'p, 'src> Verified<'p, 'src> {
   }
 }
 
-/// Whether `parse` and `source` describe the same bytes, over the **whole root**.
+/// That `parse` and `source` describe the same bytes, over the **whole root** — or the reason the
+/// pair is refused.
 ///
 /// The recovering projection's precondition, and the one thing it cannot establish definition by
 /// definition. Each definition it projects is verified against `source` at that definition's own
@@ -603,8 +604,30 @@ impl<'p, 'src> Verified<'p, 'src> {
 /// answer without projecting. Nothing has to call it to be safe: the recovering projections make
 /// the check themselves and answer [`Unverified`], so a consumer using them **directly** —
 /// with no validator and no door in front — cannot be handed a stale prefix either. al8n/smear#198.
-pub fn matches_source(parse: &Parse, source: &str) -> bool {
-  verify_source::<SyntaxKind>(parse.green(), source).is_ok()
+///
+/// # Why this is not a `bool`, and why the walk was not made conclusive instead
+///
+/// It was `matches_source`, returning `verify_source(..).is_ok()`, and that boolean was a lie
+/// about a pair it had no room to describe. [`verify_source`] refuses for two reasons and only
+/// one of them is *these are not the same document*: a tree deeper than
+/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) is refused for its **shape**,
+/// whatever its bytes say, so `.is_ok()` reported a parse whose every byte matches its source as
+/// stale. The two refusals have opposite remedies — a stale pair is re-parsed, and re-parsing a
+/// tree too deep to descend produces the same tree — so the boolean sent a caller to the one
+/// action that cannot work.
+///
+/// The other repair was to make the comparison iterative, so that [`Unverified::TooDeep`] could
+/// not arise here at all and the boolean became conclusive rather than merely wider. It does not
+/// survive being tried, for two reasons and either one is enough. A green node holds no parent
+/// pointer, so an iterative preorder needs an explicit stack as deep as the tree — an `O(depth)`
+/// heap allocation over a tree a caller minted, which trades a refusal this crate can name for an
+/// allocation nobody can refuse. And the third state is a property of the **pair** rather than of
+/// this walk: [`Verified::new`] answers for the same pair through [`verify_source_counted`], which
+/// is recursive and refuses, so a conclusive `Ok` here would be followed by a `TooDeep` at the door
+/// this exists to predict. Erasing a distinction in one of the two places that answer for a pair is
+/// how the two come to disagree. al8n/smear#198.
+pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
+  verify_source::<SyntaxKind>(parse.green(), source).map_err(|refusal| Unverified::of(&refusal))
 }
 
 /// The recovering top-level walk, shared by both single-half roots.
@@ -635,14 +658,15 @@ fn recovered_top_level<'src, T>(
   source: &'src str,
 ) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
   // Established once, over the whole root, before a single element is projected, and **returned**
-  // rather than folded into the tally. See [`matches_source`] for why a per-definition check
+  // rather than folded into the tally. See [`verify_parse`] for why a per-definition check
   // cannot see a prefix, and [`Unverified`] for why the answer is not a [`Recovery`]: a
   // mismatched pair used to project nothing and count every top-level element as skipped, which is
   // a true statement about a parse that *has* elements and an empty one about a parse that does
   // not — and `Recovery::is_complete` answers `true` at zero skipped.
-  // `verify_source` rather than `matches_source`: the two reasons a pair can be refused are
-  // established by one walk, and the predicate's `bool` is where the distinction used to be thrown
-  // away. al8n/smear#198.
+  // `verify_source` rather than `verify_parse`: this walk wants the `ProjectError` to build its
+  // own `Unverified` from, and `verify_parse` has already made that conversion. The two carry the
+  // same two reasons — which is the point, and is what the predicate's `bool` used to throw away.
+  // al8n/smear#198.
   if let Err(refusal) = verify_source::<SyntaxKind>(parse.green(), source) {
     return Err(Unverified::of(&refusal));
   }

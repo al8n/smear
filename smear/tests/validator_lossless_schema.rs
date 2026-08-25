@@ -1046,7 +1046,7 @@ fn executable_syntax_is_skipped_not_fatal() {
 /// complete recovery, and lets `Schema::build` answer `Ok` for the prefix while the appended
 /// definitions are silently absent. A schema built from part of its own SDL.
 ///
-/// Both doors now call the same `matches_source`, and so does the recovering projector itself, so a
+/// Both doors now make the same whole-root check, and so does the recovering projector itself, so a
 /// consumer using it directly cannot be handed a stale prefix either. al8n/smear#198.
 #[test]
 fn a_mismatched_pair_builds_nothing_and_says_so() {

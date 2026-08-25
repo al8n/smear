@@ -601,17 +601,17 @@ fn read_the_whole_contract(subject: &dyn Diagnose, sink: &mut StackBuffer<512>) 
 /// # The gate that was not looking
 ///
 /// Everything above measures `validate_executable` — the syntactic door. The **lossless** door was
-/// never in this file's population, which is why `matches_source` could spend one rowan cursor
+/// never in this file's population, which is why `verify_parse` could spend one rowan cursor
 /// allocation per element on every call for a round without any gate noticing: same diagnostics,
 /// same verdicts, only the allocator sees it. That is the shape
 /// `a_warm_schema_build_allocates_only_for_the_schema` exists against, one door over.
 ///
-/// The subject is `matches_source` itself rather than the door, because the door legitimately
+/// The subject is `verify_parse` itself rather than the door, because the door legitimately
 /// allocates — it projects an AST — while this helper is public, holds no budget, and must not.
 #[cfg(all(feature = "graphql", feature = "rowan"))]
 #[test]
 fn the_whole_root_check_allocates_nothing() {
-  use smear::parser::graphql::lossless::{matches_source, parse_executable_document};
+  use smear::parser::graphql::lossless::{parse_executable_document, verify_parse};
 
   // Token-dense on purpose: the cost is one cursor per element the comparison walks past, so the
   // reading has to be taken where there are many elements.
@@ -624,7 +624,7 @@ fn the_whole_root_check_allocates_nothing() {
 
   let _ = allocations(|| {});
   let checked = allocations(|| {
-    assert!(std::hint::black_box(matches_source(&parse, &source)));
+    assert!(std::hint::black_box(verify_parse(&parse, &source)).is_ok());
   });
   assert_eq!(
     checked, 0,

@@ -347,17 +347,17 @@ pub const EXEMPTIONS: &[Exemption] = &[
   },
   Exemption {
     module: "smear::parser::graphql::lossless::project",
-    entry: "matches_source",
+    entry: "verify_parse",
     param: "source",
     kind: Kind::Tracked,
     issue: Some(121),
-    reason: "The predicate a caller runs to find out whether `Verified::new` will succeed, over \
-             the same pair and the same comparison, and it borrows nothing back — so unlike the \
-             entry above, nothing in its own signature forces the type. It is recorded rather \
-             than widened because widening it alone would let a caller prove a pair over \
-             `&[u8]` and then be unable to build the `Verified` the proof exists for. It widens \
-             when the door it predicts widens, on al8n/smear#121, and it is stale here the day \
-             that happens.",
+    reason: "The check a caller runs to find out whether `Verified::new` will succeed, over the \
+             same pair and the same comparison and answering the same `Unverified`, and it \
+             borrows nothing back — so unlike the entry above, nothing in its own signature \
+             forces the type. It is recorded rather than widened because widening it alone would \
+             let a caller prove a pair over `&[u8]` and then be unable to build the `Verified` \
+             the proof exists for. It widens when the door it predicts widens, on \
+             al8n/smear#121, and it is stale here the day that happens.",
   },
   Exemption {
     module: "smear::parser::lossless::project",

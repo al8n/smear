@@ -612,6 +612,26 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::TooManyFieldArguments],
   ),
   (
+    SchemaErrorKind::TooManyDirectiveArguments,
+    // Sixty-five again, against a `MAX_DIRECTIVE_ARGUMENTS` of sixty-four, and written out for
+    // the two reasons the field fixture above is written out. The list is the same one: the two
+    // ceilings are separate numbers over the same shape, so a fixture that used a shorter list
+    // here would stop being a differential the day one of them moved.
+    concat!(
+      "type Query { ok: Int } directive @wide(",
+      "a0: Int a1: Int a2: Int a3: Int a4: Int a5: Int a6: Int a7: Int a8: Int a9: Int",
+      " a10: Int a11: Int a12: Int a13: Int a14: Int a15: Int a16: Int a17: Int a18: Int",
+      " a19: Int a20: Int a21: Int a22: Int a23: Int a24: Int a25: Int a26: Int a27: Int",
+      " a28: Int a29: Int a30: Int a31: Int a32: Int a33: Int a34: Int a35: Int a36: Int",
+      " a37: Int a38: Int a39: Int a40: Int a41: Int a42: Int a43: Int a44: Int a45: Int",
+      " a46: Int a47: Int a48: Int a49: Int a50: Int a51: Int a52: Int a53: Int a54: Int",
+      " a55: Int a56: Int a57: Int a58: Int a59: Int a60: Int a61: Int a62: Int a63: Int",
+      " a64: Int",
+      ") on FIELD",
+    ),
+    &[SchemaErrorKind::TooManyDirectiveArguments],
+  ),
+  (
     SchemaErrorKind::DeprecatedRequiredArgument,
     "type Query { ok(a: Int! @deprecated): Int }",
     &[SchemaErrorKind::DeprecatedRequiredArgument],

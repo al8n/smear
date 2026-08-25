@@ -1176,7 +1176,7 @@ fn a_disabled_coercion_rule_does_not_read_the_literal() {
 ///
 /// The twenty-first round is the other half of that: a length compare answers an unequal pair and
 /// says nothing about an **equal-length** one, so that branch still reached the prepayment and
-/// still got the budget's answer. The whole of `matches_source` runs above the charge now, and the
+/// still got the budget's answer. The whole of `verify_parse` runs above the charge now, and the
 /// charge prices only the projection.
 ///
 /// So the mismatch is answered as a mismatch **at every budget and at every shape**, and the

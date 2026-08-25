@@ -70,10 +70,10 @@ use smear::parser::{
     error::GraphqlErrors,
     kinds::{GraphQLLang, SyntaxKind as K},
     lossless::{
-      ProjectErrorKind, Recovery, SyntaxNode, ast::Document as DocumentNode, matches_source,
+      ProjectErrorKind, Recovery, SyntaxNode, Unverified, ast::Document as DocumentNode,
       parse_document, parse_executable_document, parse_type_system_document, project,
       project_executable_document, project_executable_document_recovered,
-      project_type_system_document, project_type_system_document_recovered,
+      project_type_system_document, project_type_system_document_recovered, verify_parse,
     },
     syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
@@ -1226,7 +1226,7 @@ fn the_invalid_half_is_a_census_rather_than_a_wall_of_refusals() {
 /// cannot obtain an AST it can mistake for the whole document.
 ///
 /// The door check used to live at the door. `validate_executable_lossless` and
-/// `validate_schema_lossless` each called `matches_source` themselves, which is airtight for a
+/// `validate_schema_lossless` each called `verify_parse` themselves, which is airtight for a
 /// caller that goes through them and says nothing about the caller that does not: these two
 /// projections are `pub`, and projecting a pair is the whole reason they exist.
 ///
@@ -1267,9 +1267,11 @@ fn the_recovering_projector_refuses_a_pair_it_is_not_a_projection_of() {
       assert!(recovery.is_complete(), "{what}: complete at zero skipped");
     }
 
-    assert!(
-      !matches_source(&parse, source),
-      "{what}: the pair under test has to be a mismatched one"
+    assert_eq!(
+      verify_parse(&parse, source),
+      Err(Unverified::SourceMismatch),
+      "{what}: the pair under test has to be a mismatched one, and mismatched for its BYTES — a \
+       shape refusal here would be a different test wearing this one's name"
     );
     let refused = project_executable_document_recovered(&parse, source)
       .map(|(projected, recovery)| (projected.definitions().len(), recovery));
@@ -1298,9 +1300,11 @@ fn the_recovering_projector_refuses_a_pair_it_is_not_a_projection_of() {
       assert!(recovery.is_complete(), "{what}: complete at zero skipped");
     }
 
-    assert!(
-      !matches_source(&parse, source),
-      "{what}: the pair under test has to be a mismatched one"
+    assert_eq!(
+      verify_parse(&parse, source),
+      Err(Unverified::SourceMismatch),
+      "{what}: the pair under test has to be a mismatched one, and mismatched for its BYTES — a \
+       shape refusal here would be a different test wearing this one's name"
     );
     let refused = project_type_system_document_recovered(&parse, source)
       .map(|(projected, recovery)| (projected.definitions().len(), recovery));
@@ -1500,7 +1504,6 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
   // because of its shape, which tells a caller to re-parse the one thing that is not wrong. The
   // third collapse of this class on al8n/smear#198, after an arena refusal wearing the budget's
   // `None` and a stale pair wearing the budget's refusal.
-  use smear::parser::graphql::lossless::Unverified;
   assert_ne!(
     Unverified::SourceMismatch.to_string(),
     Unverified::TooDeep {

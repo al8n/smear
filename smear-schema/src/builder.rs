@@ -47,8 +47,8 @@ use super::{
   literal::{BuiltInScalar, LiteralShape},
   repr::{
     DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
-    MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, NameIndex, PackedType, Range32, RootOperation, Schema, Sym,
-    TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_reserved,
+    MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, NameIndex, PackedType, Range32,
+    RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_reserved,
   },
 };
 
@@ -1831,14 +1831,23 @@ impl SchemaBuilder {
       // billing a request for the service's own design-time width. So the deployment's factor is
       // bounded where the deployment writes it. See `MAX_FIELD_ARGUMENTS`. al8n/smear#198.
       //
-      // Before the argument walk below rather than after: a field a thousand arguments wide would
+      // Before the argument walk below, and INSTEAD of it. Ordering alone was the first shape of
+      // this check and it settled only the diagnostics: a field a thousand arguments wide would
       // otherwise report a thousand argument diagnostics ahead of the one that says why the field
-      // itself is refused.
+      // itself is refused. But the refused field still paid `validate_arguments`, whose duplicate
+      // scan compares each argument against every argument before it — `Θ(declared²)` — so the
+      // ceiling stood in front of the work it names without gating it, and an oversized list
+      // bought the whole scan on its way to being refused. A bound whose own refusal path is
+      // unbounded bounds nothing an adversary has to respect. Not performing the argument checks
+      // is the same argument the ordering was already making, carried to its conclusion: the
+      // arguments are not why the field is refused, and a field that will not build has no
+      // argument diagnostics worth the walk. al8n/smear#198.
       let declared = self.types[index].fields[field].args.len();
       if declared > MAX_FIELD_ARGUMENTS as usize {
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_owned(SchemaErrorKind::TooManyFieldArguments, &name, owner, at);
+        continue;
       }
 
       let built_in = self.types[index].built_in;
@@ -2164,6 +2173,20 @@ impl SchemaBuilder {
       if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
         let name = self.text(at.sym).to_owned();
         self.push(SchemaErrorKind::ReservedDirectiveName, &name, at);
+      }
+
+      // The second population of the same list, refused the same way and before the same walk.
+      // A directive definition's arguments go through `validate_arguments` exactly as a field's
+      // do, so they carry the same `Θ(declared²)` duplicate scan; and the width is read again at
+      // every usage a document writes, which is the product `MAX_DIRECTIVE_ARGUMENTS` states.
+      // The field ceiling did not reach here — one constant enforced at one site — so bounding
+      // only the field path would have left the identical walk open on a list written by the
+      // same party for the same kind of reason. al8n/smear#198.
+      let declared = self.directives[index].args.len();
+      if declared > MAX_DIRECTIVE_ARGUMENTS as usize {
+        let name = self.text(at.sym).to_owned();
+        self.push(SchemaErrorKind::TooManyDirectiveArguments, &name, at);
+        continue;
       }
 
       self.validate_arguments(

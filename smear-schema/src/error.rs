@@ -233,6 +233,18 @@ pub enum SchemaErrorKind {
   ReservedDirectiveArgumentName,
   /// A directive argument's type is an output type (draft §3.13.1).
   DirectiveArgumentTypeNotInputType,
+  /// A directive definition declares more arguments than
+  /// [`MAX_DIRECTIVE_ARGUMENTS`](super::MAX_DIRECTIVE_ARGUMENTS).
+  ///
+  /// A capacity limit of this implementation, and the directive twin of
+  /// [`TooManyFieldArguments`](Self::TooManyFieldArguments) rather than the same rule read twice.
+  /// The field ceiling bounds draft §6.4.1's coercion, which no directive definition is put
+  /// through; this one bounds draft 5.4.3's presence scan, which walks every argument the named
+  /// definition declares at every usage a document writes. Both are `count × declared` with the
+  /// count the client's and the width the deployment's, and both are answered where the
+  /// deployment writes the width. The constant's own documentation has the measurement, the
+  /// reason it is a separate number, and the rewrite a wider directive takes.
+  TooManyDirectiveArguments,
   /// A directive definition refers to itself, directly or through the types it names
   /// (draft §3.13.1).
   SelfReferentialDirective,
@@ -358,6 +370,7 @@ impl SchemaErrorKind {
     Self::DuplicateDirectiveArgumentName,
     Self::ReservedDirectiveArgumentName,
     Self::DirectiveArgumentTypeNotInputType,
+    Self::TooManyDirectiveArguments,
     Self::SelfReferentialDirective,
     Self::UndefinedDirective,
     Self::UnsupportedDirectiveLocation,
@@ -445,6 +458,7 @@ impl SchemaErrorKind {
         "directive argument name is reserved for introspection"
       }
       Self::DirectiveArgumentTypeNotInputType => "directive argument type is not an input type",
+      Self::TooManyDirectiveArguments => "directive declares too many arguments",
       Self::SelfReferentialDirective => "directive definition refers to itself",
       Self::UndefinedDirective => "undefined directive",
       Self::UnsupportedDirectiveLocation => "directive is not allowed here",
@@ -556,6 +570,7 @@ impl SchemaErrorKind {
       Self::DirectiveArgumentTypeNotInputType => {
         Code::new("smear::schema::directive-argument-type-not-input-type")
       }
+      Self::TooManyDirectiveArguments => Code::new("smear::schema::too-many-directive-arguments"),
       Self::SelfReferentialDirective => Code::new("smear::schema::self-referential-directive"),
       Self::UndefinedDirective => Code::new("smear::schema::undefined-directive"),
       Self::UnsupportedDirectiveLocation => {
@@ -645,6 +660,7 @@ impl SchemaErrorKind {
       | Self::DuplicateDirectiveArgumentName
       | Self::ReservedDirectiveArgumentName
       | Self::DirectiveArgumentTypeNotInputType
+      | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation
@@ -781,6 +797,9 @@ impl SchemaErrorKind {
       Self::DirectiveArgumentTypeNotInputType => {
         Some("a directive argument's type must be a scalar, enum or input object.")
       }
+      Self::TooManyDirectiveArguments => Some(
+        "every usage rescans the whole declared list, so it is bounded at the schema; gather the arguments into one input object.",
+      ),
       Self::SelfReferentialDirective => Some(
         "a directive may not appear on its own definition, nor on any type that definition names.",
       ),
@@ -893,6 +912,7 @@ impl SchemaErrorKind {
       | Self::ReservedDirectiveName
       | Self::ReservedDirectiveArgumentName
       | Self::DirectiveArgumentTypeNotInputType
+      | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation

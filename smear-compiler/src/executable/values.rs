@@ -373,6 +373,15 @@ where
     // `declared · written` name resolutions and a document repeating that position pays it again
     // each time. `declared` is the schema's and bounded by it; `written` and the position count
     // are the client's. It is charged per scan, before the scan, for the third factor's sake.
+    //
+    // "Bounded by it" is a claim about **two** groups, because this function is reached from
+    // `check_arguments`'s field caller and from `check_directives` — and for a round it held for
+    // only one of them: `smear_schema::MAX_FIELD_ARGUMENTS` was enforced at a single site, the
+    // field path, so a directive definition's declared list was unbounded here and the charge
+    // below was the only thing standing in front of it. A charge is not a bound, it is a bill,
+    // and this one bills the request for a width the deployment wrote.
+    // `smear_schema::MAX_DIRECTIVE_ARGUMENTS` closes the other group at the same place and for
+    // the same reason. al8n/smear#198.
     if let Some(group) = definitions
       && check
       && self.on(Rule::RequiredArguments)
