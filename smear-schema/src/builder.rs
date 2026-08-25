@@ -232,6 +232,118 @@ struct Blame {
   document: u32,
 }
 
+/// The width at or below which a list finds its duplicates by scanning the names before them.
+///
+/// Sixty-four because that is where this crate has already measured the scan's quadratic term to
+/// sit below the per-list overhead around it — the widest permitted argument list built in 0.060
+/// ms, and one sixty-four-argument list was *cheaper* than sixty-four one-argument lists — and
+/// because it is [`MAX_FIELD_ARGUMENTS`], so a declared argument list, which a ceiling already
+/// holds at that width, never builds an index it could not need. al8n/smear#198.
+const NARROW_LIST: usize = 64;
+
+/// Which earlier position of a name list wrote the name at a given position.
+///
+/// # The shape this replaces
+///
+/// Every duplicate-name rule in draft §3 asks "was this name already written in this list", and
+/// the obvious way to answer it is to keep the names written so far and scan them:
+/// `seen.iter().find(|(sym, _)| *sym == name)`. That was written eight times in this file, and
+/// **one** of the eight has a ceiling on it — [`MAX_FIELD_ARGUMENTS`] and
+/// [`MAX_DIRECTIVE_ARGUMENTS`] hold a *declared* argument list at sixty-four. Nothing bounds a
+/// type's fields, its `implements` list, a union's members, an enum's values, an input object's
+/// fields, the directives written at one location, or the arguments written at one usage, so on
+/// each of those seven the scan is `Θ(list²)` over a width the document chooses.
+///
+/// A ceiling is the wrong instrument there, and it is the argument that chose one for the
+/// argument lists read the other way round: four-figure enum-value and field lists are ordinary
+/// in real schemas, so a number that refuses them refuses valid input. What is wrong is not the
+/// width, it is the cost per unit of width. Measured on `type Query` with N one-argument fields,
+/// `Schema::build` alone with the parse outside the clock: 0.639 ms at 1 k, 3.749 at 4 k, 44.128
+/// at 16 k and **585.305 at 64 k** — top-step exponent 1.86, against 127.577 ms for a control
+/// spreading the same declarations over N types with every list length one. al8n/smear#198.
+///
+/// # Sorted pairs, and why `first` is still the first
+///
+/// [`Duplicates::Index`] pairs every position with the name written there and sorts once. Sorting
+/// the *pair* orders equal names by ascending position, so the head of each run is the first
+/// occurrence rather than merely one of them, and the answer read back at position `p` is the
+/// same position the trail would have been holding when the walk reached `p`. That is what keeps
+/// the diagnostic still: [`SchemaBuilder::push_related`] relates a duplicate to the span of the
+/// **first** occurrence, and these rules report in source order, so an index that resolved `first`
+/// by whatever the sort put in front would move a blessed diagnostic while looking like a cost
+/// change.
+///
+/// # What it is not
+///
+/// **Not a hash map.** A `HashMap<Sym, u32>` per list allocates and hashes where an integer sort
+/// does neither, and the finished [`Schema`] deliberately holds no hash map at all — see
+/// [`Interner`], which is the one in the workspace and exists only while building.
+///
+/// **Not a table indexed by [`Sym`].** That is the shape `type_of_sym` and `directive_of_sym`
+/// already have here, it is `O(1)` rather than `O(list log list)`, and it does not survive the
+/// nesting: a field list is walked *around* its arguments' lists and a directive list around each
+/// usage's arguments, so one slot per symbol shared across a nested pair has the inner list erase
+/// the outer's record of the same name. A value per list is reentrant because there is nothing to
+/// share.
+///
+/// **Not more memory.** The trail it replaces recorded `(Sym, SimpleSpan)`, twenty-four bytes per
+/// name; this is eight bytes per position while the index is built and four while it is read. A
+/// position is a `u32` because everything this crate addresses is — [`Sym`] itself, [`Range32`],
+/// the flat tables `flatten` builds — so the width is the representation's and not a new one.
+enum Duplicates {
+  /// The names written so far and the position that wrote each, scanned in order.
+  Trail(Vec<(Sym, u32)>),
+  /// One entry per position: the position that first wrote that position's name, which is the
+  /// position itself when this is the first.
+  Index(Vec<u32>),
+}
+
+impl Duplicates {
+  /// Resolves one list, `name` addressing it by position.
+  ///
+  /// The accessor is read at most once per position and only on the wide path; a narrow list
+  /// never calls it.
+  fn over(len: usize, name: impl Fn(usize) -> Sym) -> Self {
+    if len <= NARROW_LIST {
+      return Self::Trail(Vec::with_capacity(len));
+    }
+
+    let mut order: Vec<(Sym, u32)> = (0..len).map(|at| (name(at), at as u32)).collect();
+    order.sort_unstable();
+
+    let mut first = vec![0u32; len];
+    let mut head = order[0];
+    first[head.1 as usize] = head.1;
+    for &entry in &order[1..] {
+      if entry.0 != head.0 {
+        head = entry;
+      }
+      first[entry.1 as usize] = head.1;
+    }
+    Self::Index(first)
+  }
+
+  /// Answers the earlier position that wrote `name`, or records this one as its first.
+  ///
+  /// Call it once per position, in source order, and only where the rule actually applies — a
+  /// repeatable directive is not recorded, exactly as the trail did not record one.
+  fn first(&mut self, position: usize, name: Sym) -> Option<usize> {
+    match self {
+      Self::Trail(trail) => match trail.iter().find(|(written, _)| *written == name) {
+        Some(&(_, at)) => Some(at as usize),
+        None => {
+          trail.push((name, position as u32));
+          None
+        }
+      },
+      Self::Index(first) => {
+        let at = first[position] as usize;
+        (at != position).then_some(at)
+      }
+    }
+  }
+}
+
 /// A type reference whose base has been interned but not yet resolved.
 #[derive(Debug, Clone, Copy)]
 struct RawTypeRef {
@@ -1784,12 +1896,15 @@ impl SchemaBuilder {
       return;
     }
 
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].fields.len(), |at| {
+      self.types[index].fields[at].name.sym
+    });
     for field in 0..self.types[index].fields.len() {
       let at = self.types[index].fields[field].name;
       let path = owner.then(at.sym);
 
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
+      if let Some(earlier) = seen.first(field, at.sym) {
+        let first = self.types[index].fields[earlier].name.span;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -1799,8 +1914,6 @@ impl SchemaBuilder {
           at,
           first,
         );
-      } else {
-        seen.push((at.sym, at.span));
       }
 
       if !self.types[index].built_in && is_reserved(self.text(at.sym).as_bytes()) {
@@ -1883,19 +1996,24 @@ impl SchemaBuilder {
     reserved: SchemaErrorKind,
     not_input: SchemaErrorKind,
   ) {
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    // Both callers refuse past their ceiling before reaching here, so this list is never wider
+    // than sixty-four and `Duplicates` is always the scan the previous round decided to keep.
+    // Written through the shared type all the same: a copy of the shape kept because a ceiling
+    // happens to hold this one list today is the copy the next ceiling change re-opens.
+    let mut seen = Duplicates::over(self.arguments(args).len(), |at| {
+      self.arguments(args)[at].name.sym
+    });
     for index in 0..self.arguments(args).len() {
       let arg = &self.arguments(args)[index];
       let at = arg.name;
       let ty = arg.ty;
       let required = arg.is_required();
 
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
+      if let Some(earlier) = seen.first(index, at.sym) {
+        let first = self.arguments(args)[earlier].name.span;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(duplicate, &name, Some(owner), at, first);
-      } else {
-        seen.push((at.sym, at.span));
       }
 
       if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
@@ -1955,10 +2073,13 @@ impl SchemaBuilder {
   }
 
   fn validate_implements(&mut self, index: usize, owner: Coordinate) {
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].implements.len(), |at| {
+      self.types[index].implements[at].sym
+    });
     for position in 0..self.types[index].implements.len() {
       let declared = self.types[index].implements[position];
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == declared.sym).copied() {
+      if let Some(earlier) = seen.first(position, declared.sym) {
+        let first = self.types[index].implements[earlier].span;
         let name = self.text(declared.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -1970,7 +2091,6 @@ impl SchemaBuilder {
         );
         continue;
       }
-      seen.push((declared.sym, declared.span));
 
       let kind = match self.type_index(declared.sym) {
         None => Some(SchemaErrorKind::UndefinedImplementsInterface),
@@ -1994,10 +2114,13 @@ impl SchemaBuilder {
       self.push(SchemaErrorKind::EmptyUnionMembers, &subject, at);
       return;
     }
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].members.len(), |at| {
+      self.types[index].members[at].sym
+    });
     for position in 0..self.types[index].members.len() {
       let member = self.types[index].members[position];
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == member.sym).copied() {
+      if let Some(earlier) = seen.first(position, member.sym) {
+        let first = self.types[index].members[earlier].span;
         let name = self.text(member.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -2009,7 +2132,6 @@ impl SchemaBuilder {
         );
         continue;
       }
-      seen.push((member.sym, member.span));
 
       let kind = match self.type_index(member.sym) {
         None => Some(SchemaErrorKind::UndefinedUnionMember),
@@ -2034,10 +2156,13 @@ impl SchemaBuilder {
       return;
     }
     let built_in = self.types[index].built_in;
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].enum_values.len(), |at| {
+      self.types[index].enum_values[at].name.sym
+    });
     for position in 0..self.types[index].enum_values.len() {
       let value = self.types[index].enum_values[position].name;
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == value.sym).copied() {
+      if let Some(earlier) = seen.first(position, value.sym) {
+        let first = self.types[index].enum_values[earlier].name.span;
         let name = self.text(value.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -2047,8 +2172,6 @@ impl SchemaBuilder {
           value,
           first,
         );
-      } else {
-        seen.push((value.sym, value.span));
       }
       if !built_in && is_reserved(self.text(value.sym).as_bytes()) {
         let name = self.text(value.sym).to_owned();
@@ -2066,7 +2189,9 @@ impl SchemaBuilder {
       return;
     }
     let built_in = self.types[index].built_in;
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].input_fields.len(), |at| {
+      self.types[index].input_fields[at].name.sym
+    });
     for position in 0..self.types[index].input_fields.len() {
       let field = &self.types[index].input_fields[position];
       let at = field.name;
@@ -2074,7 +2199,8 @@ impl SchemaBuilder {
       let required = field.is_required();
       let has_default = field.default.is_present();
 
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
+      if let Some(earlier) = seen.first(position, at.sym) {
+        let first = self.types[index].input_fields[earlier].name.span;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -2084,8 +2210,6 @@ impl SchemaBuilder {
           at,
           first,
         );
-      } else {
-        seen.push((at.sym, at.span));
       }
 
       if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
@@ -2275,7 +2399,9 @@ impl SchemaBuilder {
   ) {
     // Only a definition the schema knows can be known non-repeatable, so an undefined directive
     // written twice is the undefined-directive mistake twice over and not also this one.
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(model.directive_uses(at).len(), |position| {
+      model.directive_uses(at)[position].name.sym
+    });
 
     for index in 0..model.directive_uses(at).len() {
       let used = &model.directive_uses(at)[index];
@@ -2291,21 +2417,21 @@ impl SchemaBuilder {
         continue;
       };
 
-      if !model.directives[definition].repeatable {
-        match seen.iter().find(|(sym, _)| *sym == used.name.sym).copied() {
-          Some((_, first)) => {
-            let name = model.text(used.name.sym).to_owned();
-            push_related(
-              errors,
-              SchemaErrorKind::DuplicateDirectiveUse,
-              &name,
-              Some(model.owner(owner)),
-              used.name,
-              first,
-            );
-          }
-          None => seen.push((used.name.sym, used.name.span)),
-        }
+      // The `&&` is what keeps a repeatable directive out of the record, exactly as the `match`
+      // arm it replaced did: `Duplicates::first` is asked only where the rule applies.
+      if !model.directives[definition].repeatable
+        && let Some(earlier) = seen.first(index, used.name.sym)
+      {
+        let first = model.directive_uses(at)[earlier].name.span;
+        let name = model.text(used.name.sym).to_owned();
+        push_related(
+          errors,
+          SchemaErrorKind::DuplicateDirectiveUse,
+          &name,
+          Some(model.owner(owner)),
+          used.name,
+          first,
+        );
       }
 
       // The whole of the location rule: one shift and one `AND` against the word the definition
@@ -2348,25 +2474,19 @@ impl SchemaBuilder {
     // definition — an argument written twice is a mistake whether or not the directive declares it
     // — so it is checked for every written argument, including one that is about to be reported
     // as undefined.
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::with_capacity(used.args.len());
-    for argument in &used.args {
-      match seen
-        .iter()
-        .find(|(sym, _)| *sym == argument.name.sym)
-        .copied()
-      {
-        Some((_, first)) => {
-          let name = model.text(argument.name.sym).to_owned();
-          push_related(
-            errors,
-            SchemaErrorKind::DuplicateDirectiveArgumentUse,
-            &name,
-            Some(model.owner(coordinate)),
-            argument.name,
-            first,
-          );
-        }
-        None => seen.push((argument.name.sym, argument.name.span)),
+    let mut seen = Duplicates::over(used.args.len(), |at| used.args[at].name.sym);
+    for (position, argument) in used.args.iter().enumerate() {
+      if let Some(earlier) = seen.first(position, argument.name.sym) {
+        let first = used.args[earlier].name.span;
+        let name = model.text(argument.name.sym).to_owned();
+        push_related(
+          errors,
+          SchemaErrorKind::DuplicateDirectiveArgumentUse,
+          &name,
+          Some(model.owner(coordinate)),
+          argument.name,
+          first,
+        );
       }
     }
 

@@ -1040,6 +1040,89 @@ type Query @onObject(b: 1, b: 2) { ok: Int }";
   );
 }
 
+/// A duplicate reads the same on both sides of the width that changes how it is found.
+///
+/// The duplicate scan has two representations and the list's width alone chooses between them: a
+/// narrow list is scanned, a wide one resolves its repeats through a sorted index. That boundary
+/// is invisible from out here and has to stay that way — same kind, same count, same span, and
+/// the same *related* span, which is the FIRST occurrence and not the nearest earlier one.
+/// Nothing else in this suite reaches the wide representation: every other fixture is a handful
+/// of lines. al8n/smear#198.
+#[test]
+fn a_duplicate_reads_the_same_at_every_list_width() {
+  fn fixture(filler: usize) -> String {
+    let mut sdl = String::from("type Query {\n  dup: Int\n");
+    for i in 0..filler {
+      sdl.push_str(&format!("  f{i}: Int\n"));
+    }
+    sdl.push_str("  dup: Int\n}\n");
+    sdl
+  }
+
+  // 62 fillers is a list of 64 and 63 is a list of 65, which is the boundary itself.
+  for filler in [0, 1, 62, 63, 64, 500] {
+    let sdl = fixture(filler);
+    let errors = refused(&sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::DuplicateFieldName],
+      "filler {filler}"
+    );
+    assert_eq!(
+      errors.len(),
+      1,
+      "one diagnostic per repeat, filler {filler}"
+    );
+
+    let error = &errors.errors()[0];
+    let first = sdl.find("dup").expect("the first occurrence is written");
+    assert_eq!(
+      error.related(),
+      Some(SimpleSpan::const_new(first, first + 3)),
+      "the related span is the first occurrence, filler {filler}"
+    );
+    let second = sdl.rfind("dup").expect("the second occurrence is written");
+    let span = error.span();
+    assert_eq!(
+      (span.start(), span.end()),
+      (second, second + 3),
+      "the diagnostic is at the repeat, filler {filler}"
+    );
+  }
+}
+
+/// A wide list relates every repeat to the first occurrence and reports them in source order.
+///
+/// The index that finds them is built by sorting, and a sorted order is not the document's: an
+/// index that answered out of the sort would relate a repeat to whichever member of its group
+/// came first *there*, and would emit the groups by name. Both are checked here because both are
+/// invisible in a fixture narrow enough to be scanned.
+#[test]
+fn a_wide_list_relates_each_repeat_to_the_first_in_source_order() {
+  let mut sdl = String::from("type Query {\n  alpha: Int\n  beta: Int\n");
+  for i in 0..200 {
+    sdl.push_str(&format!("  f{i}: Int\n"));
+  }
+  sdl.push_str("  beta: Int\n  alpha: Int\n  alpha: Int\n}\n");
+
+  let errors = refused(&sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateFieldName]);
+  assert_eq!(errors.len(), 3, "one diagnostic per repeat, not per group");
+
+  let alpha = sdl.find("alpha").expect("`alpha` is written");
+  let beta = sdl.find("beta").expect("`beta` is written");
+  let related: Vec<_> = errors
+    .errors()
+    .iter()
+    .map(|error| error.related().map(|span| span.start()))
+    .collect();
+  assert_eq!(
+    related,
+    vec![Some(beta), Some(alpha), Some(alpha)],
+    "every repeat relates to the first occurrence, and the repeats arrive in source order"
+  );
+}
+
 /// A nested literal is blamed where it is written, not on the argument that contains it.
 #[test]
 fn a_nested_bad_literal_is_blamed_in_place() {
