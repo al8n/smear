@@ -595,3 +595,54 @@ fn read_the_whole_contract(subject: &dyn Diagnose, sink: &mut StackBuffer<512>) 
   write!(sink, "{subject}").expect("the message fits the buffer");
   black_box(sink.len());
 }
+
+/// The lossless door's whole-root check allocates nothing, and the red tree is what it used to be.
+///
+/// # The gate that was not looking
+///
+/// Everything above measures `validate_executable` — the syntactic door. The **lossless** door was
+/// never in this file's population, which is why `matches_source` could spend one rowan cursor
+/// allocation per element on every call for a round without any gate noticing: same diagnostics,
+/// same verdicts, only the allocator sees it. That is the shape
+/// `a_warm_schema_build_allocates_only_for_the_schema` exists against, one door over.
+///
+/// The subject is `matches_source` itself rather than the door, because the door legitimately
+/// allocates — it projects an AST — while this helper is public, holds no budget, and must not.
+#[cfg(all(feature = "graphql", feature = "rowan"))]
+#[test]
+fn the_whole_root_check_allocates_nothing() {
+  use smear::parser::graphql::lossless::{matches_source, parse_executable_document};
+
+  // Token-dense on purpose: the cost is one cursor per element the comparison walks past, so the
+  // reading has to be taken where there are many elements.
+  let mut source = String::from("{ hero {");
+  for index in 0..2_000 {
+    source.push_str(&std::format!(" f{index}: name"));
+  }
+  source.push_str(" } }");
+  let parse = parse_executable_document(&source);
+
+  let _ = allocations(|| {});
+  let checked = allocations(|| {
+    assert!(std::hint::black_box(matches_source(&parse, &source)));
+  });
+  assert_eq!(
+    checked, 0,
+    "the whole-root check allocated {checked} times for a comparison over borrowed green nodes"
+  );
+
+  // Discrimination, and the defect itself: the same answer read off the **red** tree, which is what
+  // `parse.syntax().text() == source` does — materialise the root cursor, then allocate and drop a
+  // node's worth of cursor data for each element the walk passes. A zero above is a reading rather
+  // than a blind gate because this is not zero.
+  let red = allocations(|| {
+    assert!(std::hint::black_box(
+      parse.syntax().text() == source.as_str()
+    ));
+  });
+  println!("whole-root check: green {checked} allocations, red {red}");
+  assert!(
+    red > 2_000,
+    "the red-cursor comparison allocated only {red} times, so it is not the contrast this claims"
+  );
+}

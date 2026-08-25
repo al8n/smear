@@ -217,6 +217,50 @@
 //!   the variable index and 5.6.3's — where the ungated case runs at most one iteration. That gate
 //!   is the eleventh round's singleton repair, and this is the check that it did not open the same
 //!   hole one dimension down.
+
+//! # The sixth crossing: is anything performed before the check that says it is unnecessary?
+//!
+//! A gate is a claim about *whether* work is needed. What sits **above** it is work done before
+//! that claim was made, and al8n/smear#198's nineteenth round found the shape twice in one
+//! function. One line per check that can decide work away.
+//!
+//! | check | what it decides | what ran ahead of it |
+//! |---|---|---|
+//! | `Visited::visit`, at a spread | whether *this* spread expands the body | the target condition's charge and its `Schema::sym` hash — **now below it** |
+//! | `resolves_positions`, in `check_field` | whether a field name has a reader | the name's own charge — **now inside the arm that reads it** |
+//! | `resolves_positions`, in `check_inline_fragment` | whether a condition has a reader | the same charge — **same repair** |
+//! | `Visited::visit`, in [`Validator::check_subscription_roots`] | the same decision, other walk | nothing: it already asked before charging the condition |
+//! | the `checked` bit | whether definition-local rules run | the row and body lookups, which are how the definition is named at all |
+//! | `enters_body` | whether an entry is on the table | the spread's own name and directives, which are read at the site whether or not the body is entered |
+//! | `reaches_spread_target` | whether 5.5.2.3 runs | nothing; it is computed above the resolution it gates |
+//! | `resolves_positions`, in both descent-only arms | whether ancestors are resolved | nothing; it is the arm's own condition |
+//! | the `n <= 1` sort gates | whether a prepayment is owed | nothing; `len()` is `O(1)` |
+//! | `walks_values`, `merges` | whether a pass runs at all | nothing; each is its function's first statement |
+//! | `Claim::Done`, in the merge memo | whether a pass has already run | the hash fold and the chain walk — which *are* the lookup, not work ahead of it, and both charged |
+//!
+//! The distinction the last row turns on is the one to keep: work that **computes** the check is
+//! not work performed ahead of it. A memo cannot answer without hashing its key. A spread can
+//! answer `Visited::visit` without resolving anything.
+//!
+//! # And a fifth way a repair goes wrong
+//!
+//! The catalogue above is about *what* is charged, allocated, repeated or gated. This one is about
+//! the repair itself, and it cost a round:
+//!
+//! - a **charge** whose reader has moved is a prepayment for nobody;
+//! - a **gate** that skips more than its reader needs is a missing diagnostic;
+//! - an **allocation** ahead of its charge is a buffer nobody paid for;
+//! - a **repeat** introduced for one reader is a cost every other configuration pays;
+//! - and a **diagnosis can name the right function and the repair still not call it.**
+//!
+//! The fourteenth round's own report identified `verify_source` as the reason the fail-fast
+//! projections never had the prefix defect — *"they open with `verify_source` over the whole green
+//! root, whose first comparison is of lengths"* — and then wrote a second whole-root check beside
+//! it, `parse.syntax().text() == source`, which materialises rowan's red cursor and allocates one
+//! node's worth of cursor data per element it walks past. Measured at zero against fourteen
+//! thousand for a fourteen-kilobyte document. The diagnosis was right and the repair did not use
+//! it; `smear/tests/validator_allocation.rs` now has the lossless door in its population, which is
+//! the gate that was not looking.
 //! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
 //!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
 //!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a

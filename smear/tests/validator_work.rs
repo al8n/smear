@@ -3086,3 +3086,86 @@ fn a_bare_directive_list_is_charged_for_walking_past_it() {
      operations than at {few}, against the {expected} the walk performs"
   );
 }
+
+/// A name is resolved only where its answer is read, and never before the check that says the
+/// entry does nothing.
+///
+/// Two errors sharing one gate, and the ordering one is the sharper. `Visited::visit` decides
+/// whether *this* spread expands the body at all; the target condition was charged and hashed
+/// **before** it, so a duplicate spread paid a `Schema::sym` pass over a document-chosen spelling
+/// for an entry that then did not happen. The same gate was missing on the selection walk itself:
+/// a repeated descent resolved every field name and inline condition it walked past, for readers
+/// that do not exist on a repeat.
+///
+/// Both are read as interactions, and both must come out flat: what one more byte of a spelling
+/// costs at 200 operations must be what it costs at 20, because the resolution happens once.
+#[test]
+fn a_spelling_is_resolved_only_where_its_answer_is_read() {
+  let schema = build(SCHEMA);
+  // `collects_usages` on and `reads_usage_positions` off: the repeated descent, which is the
+  // configuration in which neither a field's definition nor a level's scope has a reader.
+  let rules = RuleSet::only(Rule::AllVariableUsesDefined);
+
+  // **The field name.** Unknown to the schema and long, so what is measured is the charge and the
+  // hash on the way to a lookup that answers nothing. 5.3.1 would report it; it is off.
+  let fields = |ops: usize, len: usize| {
+    let mut source = String::new();
+    for index in 0..ops {
+      source.push_str(&std::format!("query q{index} {{ dog {{ ...F }} }}\n"));
+    }
+    source.push_str(&std::format!(
+      "fragment F on Dog {{ {} }}\n",
+      "n".repeat(len)
+    ));
+    source
+  };
+  let at = |ops: usize, len: usize| min_budget(&schema, &fields(ops, len), rules);
+  let (few, many) = (20usize, 200usize);
+  let (short, long) = (1usize, 4_000usize);
+  let (a, b) = (at(few, short), at(few, long));
+  let (c, d) = (at(many, short), at(many, long));
+  let interaction = (d as i64 - c as i64) - (b as i64 - a as i64);
+  println!(
+    "min_budget: {few} ops {a}/{b}, {many} ops {c}/{d} (1/{long}-byte field name) -> \
+     ops x spelling interaction {interaction}"
+  );
+  assert!(
+    b > a + 400 && c > a + 100,
+    "the spelling and the operation count must each cost units on their own: {a}, {b}, {c}"
+  );
+  assert!(
+    interaction.abs() < 500,
+    "a {long}-byte field name cost {interaction} more units at {many} operations than at {few}, \
+     so a repeated descent is still resolving it"
+  );
+
+  // **The type condition, at a duplicate spread.** Every spread after the first is refused entry by
+  // `Visited::visit`; the resolution used to happen in front of that check.
+  let spreads = |count: usize, len: usize| {
+    let condition = std::format!("T{}", "y".repeat(len));
+    let mut source = String::from("query q { dog {");
+    for _ in 0..count {
+      source.push_str(" ...F");
+    }
+    source.push_str(" } }\n");
+    source.push_str(&std::format!("fragment F on {condition} {{ name }}\n"));
+    source
+  };
+  let at = |count: usize, len: usize| min_budget(&schema, &spreads(count, len), rules);
+  let (a, b) = (at(few, short), at(few, long));
+  let (c, d) = (at(many, short), at(many, long));
+  let interaction = (d as i64 - c as i64) - (b as i64 - a as i64);
+  println!(
+    "min_budget: {few} spreads {a}/{b}, {many} spreads {c}/{d} (1/{long}-byte condition) -> \
+     spreads x spelling interaction {interaction}"
+  );
+  assert!(
+    b > a + 400 && c > a + 100,
+    "the spelling and the spread count must each cost units on their own: {a}, {b}, {c}"
+  );
+  assert!(
+    interaction.abs() < 500,
+    "a {long}-byte type condition cost {interaction} more units at {many} spreads than at {few}, \
+     so it is still resolved before the check that refuses the entry"
+  );
+}

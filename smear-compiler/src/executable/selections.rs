@@ -175,10 +175,25 @@ where
   fn check_field(&mut self, field: &'d Field<S>, frame: Frame) -> ControlFlow<(), u32> {
     let check = frame.flags & Frame::CHECK != 0;
     let name = field.name();
-    self.spend_name(name)?;
 
+    // Resolved — and therefore charged — only when something reads the answer, which is
+    // [`resolves_positions`](Validator::resolves_positions) one tree up from the value walk it was
+    // written for. Two readers: draft 5.3.1 and 5.3.3, which are definition-local and ask with
+    // `check`; and draft 5.8.5, which reaches an argument's *expected type* through this
+    // definition and is a property of an operation.
+    //
+    // Neither exists on a **repeated** descent, and a repeated descent is the expensive one: a
+    // fragment spread by `O` operations with `collects_usages` on walks its body `O` times with
+    // `check` false, and the charge here is the spelling's own length. One 32 KiB field name over
+    // 1,024 operations is 4,195,328 units off about sixty kilobytes of syntax — past the default
+    // ceiling, for a name nothing was going to hash. al8n/smear#198's nineteenth round.
+    //
+    // The scope such a level answers with is [`NONE`], which is not a shortcut: it is what an
+    // unresolved position *is*, and it is the same answer `check_directives`' descent-only arm
+    // gives for an expected type. The children are still traversed.
     let definition = match frame.type_id() {
-      Some(parent) => {
+      Some(parent) if self.resolves_positions(check) => {
+        self.spend_name(name)?;
         let found = self
           .schema
           .sym(name_bytes(name))
@@ -190,7 +205,7 @@ where
         }
         found
       }
-      None => None,
+      _ => None,
     };
 
     let mut scope = NONE;
@@ -236,22 +251,31 @@ where
 
     if let Some(condition) = inline.type_condition() {
       let name = condition.name();
-      self.spend_name(name)?;
-      let resolved = if check {
-        self.check_type_condition(name)?
+      // The same gate `check_field` takes, and for the same two readers: a condition narrows the
+      // scope, so a level whose scope nobody reads has nothing to resolve. `check` true is what
+      // 5.5.1.2, 5.5.1.3 and 5.5.2.3 need and it implies this, so no report is lost — and the
+      // level that skips answers [`NONE`], which is what an unresolved position is. Its directives
+      // below are still walked, because a usage inside one is exactly what put this walk here.
+      if self.resolves_positions(check) {
+        self.spend_name(name)?;
+        let resolved = if check {
+          self.check_type_condition(name)?
+        } else {
+          self.composite_of(name)
+        };
+        scope = match resolved {
+          Some(id) => {
+            // No `if check` here: `check_spread_possible` reads the same flag off the same frame
+            // through `reaches_spread_target`, and a second copy of the condition is the thing
+            // that predicate exists to prevent.
+            self.check_spread_possible(name, id, frame)?;
+            id.get()
+          }
+          None => NONE,
+        };
       } else {
-        self.composite_of(name)
-      };
-      scope = match resolved {
-        Some(id) => {
-          // No `if check` here: `check_spread_possible` reads the same flag off the same frame
-          // through `reaches_spread_target`, and a second copy of the condition is the thing that
-          // predicate exists to prevent.
-          self.check_spread_possible(name, id, frame)?;
-          id.get()
-        }
-        None => NONE,
-      };
+        scope = NONE;
+      }
     }
 
     if let Some(directives) = inline.directives() {
@@ -324,40 +348,47 @@ where
     let enter = !get_bit(&self.scratch.checked, row.definition);
     let enters_body = self.in_operation && (enter || self.collects_usages);
 
-    // The condition's own resolution has two readers and they are asked separately, because the
-    // spread-site rule fires at **every** spread while the body is entered at some of them. Reading
-    // it costs a `Schema::sym` hash over a spelling the document chose, charged since the
-    // fourteenth round — so a skipped entry that resolved anyway would leave a byte cost on a path
-    // that does nothing.
+    // **Asked before anything is resolved.** `enters_body` decides whether an entry is on the
+    // table; `Visited::visit` decides whether *this* one does anything, because the
+    // specification's transitive inclusion is a set — a second expansion in the same walk could
+    // only repeat what the first one said, and on a cyclic graph it would not terminate. The
+    // condition's resolution used to sit between the two, so a duplicate spread paid a
+    // `Schema::sym` hash over a document-chosen spelling for an entry that then did not happen:
+    // work performed in front of the check that establishes it is unnecessary.
+    //
+    // `&&` short-circuits, and that is load-bearing: `visit` **marks**, so it must not be asked
+    // where no entry was on the table.
+    let entering = enters_body && !self.scratch.visited.visit(ordinal);
+
+    // Two readers of the target's type, asked separately because they are reached differently: the
+    // spread-site rule fires at **every** spread, while the entered level's scope is read only by
+    // the rules that read a level's scope at all — 5.3.1 and 5.3.3 under `check`, and 5.8.5's
+    // expected types. With neither, an entry propagates `NONE`, which is what an unresolved
+    // position is and not a shortcut.
     let reads_target = self.reaches_spread_target(check);
-    if !enters_body && !reads_target {
-      return ControlFlow::Continue(None);
-    }
+    let needs_scope = entering && self.resolves_positions(enter);
 
-    let condition = body.type_condition().name();
-    // The spread charge above pays for the **spread's** name. This is the fragment's *type
-    // condition*, a different spelling the document also chose, and `composite_of` resolves it
-    // through `Schema::sym`, which hashes every byte. `O` spreads of one fragment therefore read
-    // `O · L` bytes off `O + L` of syntax, and the charge for it used to be zero.
-    self.spend_name(condition)?;
-    let target = self.composite_of(condition);
+    let scope = if reads_target || needs_scope {
+      let condition = body.type_condition().name();
+      // The spread charge above pays for the **spread's** name. This is the fragment's *type
+      // condition*, a different spelling the document also chose, and `composite_of` resolves it
+      // through `Schema::sym`, which hashes every byte. `O` spreads of one fragment therefore read
+      // `O · L` bytes off `O + L` of syntax, and the charge for it used to be zero.
+      self.spend_name(condition)?;
+      let target = self.composite_of(condition);
+      if reads_target && let Some(target) = target {
+        self.check_spread_possible(name, target, frame)?;
+      }
+      target.map_or(NONE, |id| id.get())
+    } else {
+      NONE
+    };
 
-    if reads_target && let Some(target) = target {
-      self.check_spread_possible(name, target, frame)?;
-    }
-
-    if !enters_body {
-      return ControlFlow::Continue(None);
-    }
-    if self.scratch.visited.visit(ordinal) {
-      // Already expanded during this operation's walk. The specification's transitive inclusion
-      // is a set, so a second expansion could only repeat what the first one said — and on a
-      // cyclic graph it would not terminate.
+    if !entering {
       return ControlFlow::Continue(None);
     }
 
     self.begin_fragment(row.definition, enter)?;
-    let scope = target.map_or(NONE, |id| id.get());
     let flags = if enter { Frame::CHECK } else { 0 };
     ControlFlow::Continue(Some((
       Frame::root(row.definition, scope, flags),

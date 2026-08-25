@@ -412,8 +412,23 @@ impl super::ast::TypeSystemDocument {
 /// from the AST. A consumer that validated or built from that result would be answering about a
 /// prefix while believing it had the document.
 ///
-/// `SyntaxText`'s comparison walks the green tokens against the slice and allocates nothing, so
-/// this is `O(tokens)` against a projection that allocates an entire AST.
+/// [`verify_source`] over the parse's **green** root, which is the same comparison the fail-fast
+/// doors make and the reason they were safe. It is `O(tokens)`, it reads no `Parse` state beyond a
+/// borrow, and it allocates nothing.
+///
+/// This was `parse.syntax().text() == source` for one round, and that sentence was written about it
+/// too — wrongly. [`Parse::syntax`](crate::lossless::Parse::syntax) *materialises rowan's red
+/// cursor*: it clones the `Arc` and allocates the root's cursor data, and `SyntaxText`'s equality
+/// then walks descendants through red nodes and tokens that are allocated and dropped as the walk
+/// passes them. A token-dense parse therefore made `Θ(elements)` transient allocations here, on
+/// every recovered projection and every lossless validation, and this helper is public and holds no
+/// budget. al8n/smear#198's nineteenth round.
+///
+/// The failure is worth recording where the mechanism is, because the fix is a function the crate
+/// already had and the round that introduced the defect is the round that **named** it: the
+/// fourteenth round's own diagnosis said the fail-fast doors never had the prefix defect precisely
+/// because they open with [`verify_source`] over the whole green root — and then wrote a second
+/// whole-root check beside it instead of calling that one.
 ///
 /// The fail-fast doors never needed it: [`project_executable_document`] and its SDL twin open with
 /// [`verify_source`] over the whole green root, and that check compares *lengths* first, so an
@@ -426,7 +441,7 @@ impl super::ast::TypeSystemDocument {
 /// the check themselves and answer [`SourceMismatch`], so a consumer using them **directly** —
 /// with no validator and no door in front — cannot be handed a stale prefix either. al8n/smear#198.
 pub fn matches_source(parse: &Parse, source: &str) -> bool {
-  parse.syntax().text() == source
+  verify_source::<SyntaxKind>(parse.green(), source).is_ok()
 }
 
 /// The recovering top-level walk, shared by both single-half roots.

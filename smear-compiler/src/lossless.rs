@@ -396,10 +396,16 @@ where
   // door performs is a guard that caller never gets — al8n/smear#198's fourteenth round, where the
   // door was right and the API it called was not.
   //
-  // It is still *this* door's charge. `SyntaxText`'s comparison walks the green tokens against the
-  // source and allocates nothing, so it is `O(tokens)` — bounded by, and already paid for by, the
+  // It is still *this* door's charge. The comparison walks the parse's **green** root against the
+  // source, so it is `O(tokens)` and allocates nothing — bounded by, and already paid for by, the
   // prepayment above, which prices `max(source.len(), parse.green().text_len())`. Moving the work
   // behind a call boundary did not move the charge: the prepayment still sits in front of it.
+  //
+  // Both halves of that sentence were false for one round. The check was written as
+  // `parse.syntax().text() == source`, which materialises rowan's red cursor and allocates one
+  // node's worth of cursor data per element as the comparison walks past it — on every call of this
+  // door. `matches_source` routes through `verify_source` now, which is the function the fourteenth
+  // round's own diagnosis had already named as the reason the fail-fast doors were safe.
   let (document, recovery) =
     project_executable_document_recovered(parse, source).map_err(|_| LosslessInvalid {
       invalid: Invalid::unexamined(),
