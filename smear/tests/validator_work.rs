@@ -2554,3 +2554,147 @@ fn a_merge_conflict_subject_is_charged_to_the_merge_ledger() {
     long - short
   );
 }
+
+/// Draft 5.3.2's own setup is charged **before** it runs, and a `merge_work` of zero buys nothing.
+///
+/// The one bypass the campaign found in the merge ledger rather than the validation one, and it was
+/// on trunk the whole time: `build_merge_index` resized two document-sized tables, created a
+/// `MergeSet` and a todo row per operation and per fragment, and hashed every fragment's type
+/// condition through `Schema::sym` — all of it above the first `charge(1)`. So the smallest budget
+/// a caller can name still bought `O(definitions + fragments + condition bytes)` of work and
+/// allocation before the refusal. al8n/smear#198.
+///
+/// # The instrument
+///
+/// `Scratch::capacity` is the working set's own count of the rows it is holding, and the two runs
+/// below differ in exactly one thing: whether draft 5.3.2's engine is activated. Everything else —
+/// the prep sweep, the fragment graph, `check_fragments_used`'s reachability bitset, which is gated
+/// on `FragmentsMustBeUsed` and stays on in both — fills identically. So a difference in the
+/// working set *is* the merge engine's setup, and equality is the claim that a refused engine
+/// allocated nothing.
+#[test]
+fn a_zero_merge_budget_refuses_before_the_first_allocation() {
+  let schema = build(SCHEMA);
+  let mut source = String::from("{ dog { name } }\n");
+  for index in 0..400 {
+    source.push_str(&std::format!("fragment f{index} on Dog {{ name }}\n"));
+  }
+  let document = parse(&source);
+
+  let measure = |rules: RuleSet, merge_work: u32| {
+    let mut scratch = Scratch::new();
+    let mut sink = smear::validator::Ignore;
+    let budget = Budget::default().with_merge_work(merge_work);
+    let verdict =
+      validate_executable_with(&schema, &document, &mut scratch, &budget, rules, &mut sink);
+    (verdict.is_err(), scratch.capacity())
+  };
+
+  // The baseline: the same document with the engine switched off at all three of its activators,
+  // so every table but the merge engine's is filled exactly as it is in the run below.
+  let off = RuleSet::ALL
+    .without(Rule::FieldSelectionMerging)
+    .without(Rule::MergeDepthBudget)
+    .without(Rule::MergeWorkBudget);
+  let (_, baseline) = measure(off, u32::MAX - 1);
+
+  // And the subject: the engine on, with nothing to spend.
+  let (refused, at_zero) = measure(RuleSet::ALL, 0);
+  assert!(refused, "a zero merge budget must refuse the document");
+  assert_eq!(
+    at_zero,
+    baseline,
+    "a refused merge engine grew the working set by {} rows",
+    at_zero.saturating_sub(baseline)
+  );
+
+  // The premise: the setup this is measuring the absence of is worth measuring. With room to run,
+  // the same engine over the same document builds a table hundreds of rows wide.
+  let (_, ran) = measure(RuleSet::ALL, u32::MAX - 1);
+  assert!(
+    ran > baseline + 400,
+    "the engine that ran grew the working set by only {}, so the zero-budget equality above is \
+     not evidence of anything",
+    ran - baseline
+  );
+}
+
+/// A fragment's type condition is charged **in its own bytes**, to the merge ledger.
+///
+/// The third of `build_merge_index`'s three charges, and the one that is not a count.
+/// `composite_of` resolves the condition through `Schema::sym`, which hashes every byte of a
+/// spelling the *document* chose, while a row charge prices a name of any length at one unit. The
+/// same repair reached `check_fragment_spread` on the validation side in an earlier round of
+/// al8n/smear#198 and stopped at the ledger boundary, because the merge engine was somebody else's
+/// file.
+///
+/// The condition names a type the schema does not define, which is what keeps this measuring the
+/// *hash* rather than a lookup that succeeded: an unknown name is hashed end to end and then found
+/// to be absent.
+#[test]
+fn a_fragment_type_condition_is_charged_in_bytes_to_the_merge_ledger() {
+  let schema = build(SCHEMA);
+  // 5.5.1.2 is off, so an unresolvable condition emits nothing and the only thing under test is
+  // what reading it cost.
+  let rules = RuleSet::only(Rule::FieldSelectionMerging).with(Rule::MergeWorkBudget);
+  let document = |pad: usize| {
+    let condition = "T".repeat(pad);
+    std::format!("{{ dog {{ name }} }}\nfragment f on {condition} {{ name }}")
+  };
+
+  let short = min_merge_work(&schema, &document(1), rules);
+  let long = min_merge_work(&schema, &document(20_000), rules);
+  println!("merge ledger: 1-byte condition {short} units, 20,000-byte {long} units");
+  assert!(
+    long - short >= 2_000,
+    "a 20,000-byte type condition was hashed for {} merge units",
+    long - short
+  );
+}
+
+/// The two spellings `fill_merge_set` reads are charged in bytes too — the sibling sweep of the
+/// charge above.
+///
+/// `build_merge_index` is where the type condition of a fragment *definition* is resolved.
+/// `fill_merge_set` is where the other two document-chosen spellings on the merge path are read:
+/// an **inline fragment's** condition, through the same `composite_of`, and a **spread's** name,
+/// through `find_fragment`'s comparator, which compares whole names. Both sat behind
+/// `charge(selections().len())` — one unit for the selection, nothing for the spelling — which is
+/// the same defect the finding named, at the two places the same round's sweep reaches.
+///
+/// The spread charge is gated on a non-empty fragment table, because a binary search over an empty
+/// index returns without a comparison; that is the `n = 0` half of the same audit, and the gate is
+/// the one `check_fragment_spread` already takes on the validation side.
+#[test]
+fn the_spellings_fill_merge_set_reads_are_charged_in_bytes() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::FieldSelectionMerging).with(Rule::MergeWorkBudget);
+
+  // An inline fragment's condition, resolved through `composite_of` exactly as a definition's is.
+  let inline = |pad: usize| {
+    let condition = "T".repeat(pad);
+    std::format!("{{ dog {{ ... on {condition} {{ name }} }} }}")
+  };
+  let short = min_merge_work(&schema, &inline(1), rules);
+  let long = min_merge_work(&schema, &inline(20_000), rules);
+  println!("merge ledger: 1-byte inline condition {short} units, 20,000-byte {long} units");
+  assert!(
+    long - short >= 2_000,
+    "a 20,000-byte inline condition was hashed for {} merge units",
+    long - short
+  );
+
+  // A spread's name, compared whole by `find_fragment`'s comparator.
+  let spread = |pad: usize| {
+    let name = std::format!("f{}", "x".repeat(pad));
+    std::format!("{{ dog {{ ...{name} }} }}\nfragment {name} on Dog {{ name }}")
+  };
+  let short = min_merge_work(&schema, &spread(1), rules);
+  let long = min_merge_work(&schema, &spread(20_000), rules);
+  println!("merge ledger: 1-byte spread name {short} units, 20,000-byte {long} units");
+  assert!(
+    long - short >= 2_000,
+    "a 20,000-byte spread name was searched for {} merge units",
+    long - short
+  );
+}

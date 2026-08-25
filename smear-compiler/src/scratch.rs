@@ -905,6 +905,25 @@ pub(crate) const fn byte_units(len: usize) -> u32 {
   }
 }
 
+/// One unit per element of a population, saturating at [`u32::MAX`].
+///
+/// [`byte_units`]'s counting twin, and the unit the merge engine already charges its loops in —
+/// one a queued set, one a selection, one a compared member. It exists as a function for the
+/// saturation: an `as u32` on a `usize` count *truncates*, so a population no ledger could cover
+/// would wrap into one it can and be charged a few units for it. The counts here are document
+/// definitions and fragment rows, which no in-memory document reaches — the same thing was true of
+/// [`Work::take`]'s overflow until [`take_bytes`](Work::take_bytes) made it reachable, and the
+/// lesson recorded there was to write the saturating form rather than the argument for why the
+/// wrapping one is safe today. al8n/smear#198.
+#[inline]
+pub(crate) const fn count_units(count: usize) -> u32 {
+  if count > u32::MAX as usize {
+    u32::MAX
+  } else {
+    count as u32
+  }
+}
+
 /// Mixes one `u32` into a running hash.
 #[inline]
 pub(crate) fn hash_u32(state: u64, value: u32) -> u64 {

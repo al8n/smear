@@ -69,8 +69,8 @@ use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{
-    MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units, get_bit,
-    hash_bytes, hash_u32,
+    MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units,
+    count_units, get_bit, hash_bytes, hash_u32,
   },
 };
 
@@ -267,21 +267,63 @@ where
   // -- the index build ----------------------------------------------------------------------------
 
   /// Records every selection set, field occurrence and spread in the document, as integers.
+  ///
+  /// # The setup is charged, and this is where it was not
+  ///
+  /// Everything below the todo loop was written under one charge — `charge(1)` per queued set —
+  /// and everything *above* it under none. Two document-sized `resize`s, a row per operation, a
+  /// row per fragment, and a `Schema::sym` hash over each fragment's type condition all ran before
+  /// the first unit was taken, so a [`Budget::merge_work`](crate::Budget::merge_work) of **zero**
+  /// still bought `O(definitions + fragments + condition bytes)` of work and allocation before the
+  /// refusal. al8n/smear#198.
+  ///
+  /// It could not be answered by widening
+  /// [`Budget::validation_work`](crate::Budget::validation_work) over it. The two ledgers are
+  /// separate because a caller may raise or disable that one while relying on this one to cap
+  /// draft 5.3.2, and a bound a caller can switch off is not a bound on the pass it was kept for.
+  ///
+  /// Three charges, and they are three *dimensions* rather than three copies of one:
+  ///
+  /// | charge | sits | dimension |
+  /// |---|---|---|
+  /// | the two tables | before either `resize` | one per element written |
+  /// | the operation rows | at the loop's entrance | one per row |
+  /// | the fragment rows | at the loop's entrance | one per row |
+  /// | a fragment's type condition | before `composite_of` reads it | bytes |
+  ///
+  /// The last one is the [`check_fragment_spread`](Validator::check_fragment_spread) repair
+  /// arriving at its merge twin: `composite_of` resolves through
+  /// [`Schema::sym`](crate::schema::Schema::sym), which hashes every byte of a spelling the
+  /// *document* chose, and one unit a row prices a name of any length at one unit.
   fn build_merge_index(&mut self) -> ControlFlow<()> {
     let document = self.document;
     let total = document.definitions().len();
+    let operations = self.scratch.operations.len();
+    let fragments = self.scratch.fragments.len();
 
+    // The two `clear`s stay in front of the charge and the two `resize`s go behind it. `clear` on
+    // a `Vec<u32>` is `O(1)` — no drop glue, no allocation, just a length — so it is not work a
+    // ledger has anything to say about, and doing it unconditionally is what makes a refusal here
+    // leave the tables **empty** rather than holding the previous document's rows. The `resize`s
+    // are the work: one `u32` written per definition and per fragment.
+    //
+    // Saturating rather than `as`, so a count no ledger could cover refuses instead of truncating
+    // into one it can.
     self.scratch.merge_roots.clear();
-    self.scratch.merge_roots.resize(total, NONE);
     self.scratch.merge_seen.clear();
-    self
-      .scratch
-      .merge_seen
-      .resize(self.scratch.fragments.len(), 0);
+    let tables = count_units(total).saturating_add(count_units(fragments));
+    if !self.charge(tables) {
+      return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+    }
+    self.scratch.merge_roots.resize(total, NONE);
+    self.scratch.merge_seen.resize(fragments, 0);
 
     // Every definition's own selection set exists before anything is filled, so that a spread can
     // name its target's root even when the target is defined later in the document.
-    for index in 0..self.scratch.operations.len() {
+    if !self.charge(count_units(operations)) {
+      return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+    }
+    for index in 0..operations {
       let row = self.scratch.operations[index];
       let scope = self
         .schema
@@ -290,14 +332,21 @@ where
       let set = self.new_merge_set(row.definition, NONE, NONE, scope);
       self.scratch.merge_roots[row.definition as usize] = set;
     }
-    for ordinal in 0..self.scratch.fragments.len() {
+    if !self.charge(count_units(fragments)) {
+      return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+    }
+    for ordinal in 0..fragments {
       let row = self.scratch.fragments[ordinal];
       let Some(body) = fragment(document, row.definition) else {
         continue;
       };
-      let scope = self
-        .composite_of(body.type_condition().name())
-        .map_or(NONE, |id| id.get());
+      // The row charge above prices the row. This is the condition's own *spelling*, which
+      // `composite_of` hands to `Schema::sym` to hash, and its length is the document's to choose.
+      let condition = body.type_condition().name();
+      if !self.charge(byte_units(name_bytes(condition).len())) {
+        return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+      }
+      let scope = self.composite_of(condition).map_or(NONE, |id| id.get());
       let set = self.new_merge_set(row.definition, NONE, NONE, scope);
       self.scratch.merge_roots[row.definition as usize] = set;
     }
@@ -450,9 +499,17 @@ where
           // what drops its fields out of the common-parent partition below: nothing is known about
           // what they could be encountered with. 5.5.1.2 has already said so.
           let scope = match inline.type_condition() {
-            Some(condition) => self
-              .composite_of(condition.name())
-              .map_or(NONE, |id| id.get()),
+            Some(condition) => {
+              // `selections().len()` above counts this inline fragment as one. The condition's
+              // *spelling* is a second dimension the document chose, and `composite_of` hands it
+              // to `Schema::sym` to hash end to end — the same charge the fragment loop in
+              // `build_merge_index` takes, at the other place a type condition is resolved.
+              let condition = condition.name();
+              if !self.charge(byte_units(name_bytes(condition).len())) {
+                return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+              }
+              self.composite_of(condition).map_or(NONE, |id| id.get())
+            }
             None => row.scope,
           };
           let child = self.new_merge_set(row.definition, set, index, scope);
@@ -462,7 +519,15 @@ where
           });
         }
         Selection::FragmentSpread(spread) => {
-          let Some(ordinal) = self.find_fragment(name_bytes(spread.name())) else {
+          let name = name_bytes(spread.name());
+          // `find_fragment` is a binary search whose comparator reads whole names, so the spelling
+          // is charged in front of it — and only when there is something to compare against. On an
+          // empty fragment table the search returns without a single comparison, which is the same
+          // `n = 0` gate `check_fragment_spread` takes.
+          if !self.scratch.fragments.is_empty() && !self.charge(byte_units(name.len())) {
+            return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+          }
+          let Some(ordinal) = self.find_fragment(name) else {
             continue;
           };
           let target = self.scratch.fragments[ordinal as usize].definition;

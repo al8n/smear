@@ -878,6 +878,26 @@ where
   ///   named is unfinished, and a row whose gate is "none" is a claim that the work is the
   ///   traversal itself rather than a rule's.
   ///
+  /// # A clearance has to say which question it answers
+  ///
+  /// The three facts are asked of every row this table *has*. They cannot be asked of a row that
+  /// was cleared, and a clearance is where the last two defects of al8n/smear#198 lived.
+  ///
+  /// The `5.3.2 merge engine` row below says "its own ledger". That answers **which ledger pays**.
+  /// It does not answer **whether that ledger's own setup is charged**, and an initialisation
+  /// sweep that read the row wrote *"not mine — safe"*: two different claims in one column, of
+  /// which only the first had been established. `build_merge_index` then sat at a
+  /// [`Budget::merge_work`](super::Budget::merge_work) of **zero** doing
+  /// `O(definitions + fragments + condition bytes)` of work and allocation before its first
+  /// charge — through the eight rounds of the branch that wrote it and thirteen of the branch that
+  /// read it. The same shape one axis over cleared the sibling lossless door as "out of scope by
+  /// API shape: it takes no `Budget`", which was true of the ledger question and silent about the
+  /// whole-root question that actually mattered.
+  ///
+  /// **A clearance must record which question it answers, and "out of scope" is not an answer to
+  /// "is it bounded".** Each deferral row below therefore names where the answer was checked, and
+  /// the merge engine's own three-fact accounting is on `build_merge_index` in [`merge`].
+  ///
   /// | charge | sits | dimension | gate |
   /// |---|---|---|---|
   /// | projection (lossless door only) | before `project_*` | bytes of `max(source, parse text)` | none — it is the door |
@@ -913,7 +933,7 @@ where
   /// | 5.8.5 usage type | before `pack_type` | bytes | `AllVariableUsagesAreAllowed` |
   /// | 5.8.4 | — | reads bits | charged when the index was built |
   /// | 5.2.1.1, 5.2.3.1 | — | `O(1)` per operation | charged at prep |
-  /// | 5.3.2 merge engine | its own ledger | [`Budget::merge_work`](super::Budget::merge_work) | [`merges`] |
+  /// | 5.3.2 merge engine | its own ledger, `build_merge_index` first | [`Budget::merge_work`](super::Budget::merge_work) | [`merges`] |
   /// | 5.3.2 conflict subject | before the clone | bytes | `FieldSelectionMerging` |
   /// | 5.5.2.3 possible objects | before **each word** the intersection reads | words | `FragmentSpreadIsPossible` && the types differ |
   /// | projection + whole-root check (lossless) | before both | bytes of `max(source, parse text)` | none — it is the door |
