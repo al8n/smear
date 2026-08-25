@@ -75,13 +75,54 @@
 //!   every other has a sort, a hash, a search or a scan behind it.
 //! - **Setup is work, and a per-operation walk is where it hides.** A ledger charges what a pass
 //!   examines; what a pass *prepares* has no row unless one is written for it. Every `reset_bits`,
-//!   `resize`, `fill` and `clear` on a document-sized buffer therefore owes two numbers — how large,
-//!   and how many times — and only two of the fourteen in this module were sized to the whole
-//!   document *and* performed per operation. Both were the same buffer, the per-walk "already
-//!   entered" set, in [`Validator::walk_operations`] and in
-//!   [`Validator::check_subscription_roots`]; [`Visited`](super::scratch::Visited)'s generation
+//!   `resize`, `fill` and `clear` on a document-sized buffer therefore owes **three** numbers — how
+//!   large, how many times, and **whether the allocation sits behind a charge that prices it**.
+//!
+//!   It owed two for five rounds, and the third is the one that was missing. Only two of the
+//!   fourteen sites here were sized to the whole document *and* performed per operation: the
+//!   per-walk "already entered" set, in [`Validator::walk_operations`] and in
+//!   [`Validator::check_subscription_roots`]. [`Visited`](super::scratch::Visited)'s generation
 //!   stamp deletes both at once rather than pricing either, which is why it was preferred to the
-//!   charge. The rest are once per run, once per definition, or `O(1)` truncations of a stack.
+//!   charge. But draft 5.8.4's marks bitset answered *both* questions well — sized to the
+//!   operation's own declaration list, once per operation — and was reset **before** the first
+//!   charge that could refuse it, so a spent ledger still bought `V / 64` words of allocation and
+//!   zeroing. Size and frequency are not an answer about ordering, and a row that gives them has
+//!   not cleared the site. al8n/smear#198.
+//!
+//! # Every allocation whose size a caller decides
+//!
+//! Enumerated rather than audited, because three audits asked a question and missed a site the
+//! question did not cover. The list is the artifact; the question is not.
+//!
+//! | site | sized by | behind which charge |
+//! |---|---|---|
+//! | `prep`'s `order.extend(0..count)` | fragments | prep, ≥ 1 unit per fragment, taken above it |
+//! | `check_fragment_cycles`' two `reset_bits` | fragments / 64 | ” — over-prepaid 64× |
+//! | `check_fragments_used`' `reset_bits` | fragments / 64 | ” — same |
+//! | `begin_fragment`'s `grow_bits` | one fragment ordinal | ” — and it only ever grows |
+//! | `check_variable_definitions`' `used.resize` | the operation's variables / 64 | **its own**, `count_units`, taken here |
+//! | `Visited::begin`'s `stamps.resize` | fragments | prep — and it only ever grows |
+//! | `Names::intern`'s `bytes.extend_from_slice` | the key | `Work::take_bytes`, taken above it |
+//! | `Names::relink`'s `heads.resize` | names, ×2 + a 64 floor | `Work::take(id + 1)`, taken above it |
+//! | `build_merge_index`'s two `resize`s | definitions + fragments | **its own**, `count_units` |
+//! | `relink_memo`'s `merge_slots.resize` | memo entries, ×2 + a 64 floor | `charge(len + 1)` in `claim` |
+//! | `Validator::index`'s `merge_buckets.resize` | the bucket width | `charge(width)`, saturating |
+//!
+//! Three things the table is saying. **Prepaid is an answer**, and the commonest one: a buffer
+//! sized to a population the ledger has already been charged for, one unit at a time, needs no
+//! charge of its own — and adding one would be an over-charge, which this module treats as a wrong
+//! answer too. **The charged sites all read alike**: `clear`, then the true count, then
+//! [`count_units`](super::scratch::count_units) — which saturates into a refusal rather than
+//! truncating into a budget it fits — then the `resize`. And **a refusal leaves the buffer empty**,
+//! never at the previous document's width, because the `clear` is unconditional and `O(1)` while
+//! only the `resize` is work.
+//!
+//! Everything else that grows is one element per node already charged (`push` inside a loop with
+//! its charge at the entrance), an `O(1)` `truncate` of a stack of integers, or a sort — `N log N`
+//! comparisons against `N` units, a bounded constant multiple. The parser's projection has no
+//! bulk-sizing site at all: every allocation there is one element per green node, and the lossless
+//! door prepays `units(max(source.len(), parse.green().text_len()))` in front of the whole
+//! projection.
 //! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
 //!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
 //!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a
@@ -161,8 +202,8 @@ use super::{
     is_reserved,
   },
   scratch::{
-    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, byte_units, clear_bit, get_bit,
-    reset_bits, set_bit,
+    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, byte_units, clear_bit,
+    count_units, get_bit, reset_bits, set_bit,
   },
 };
 
@@ -897,6 +938,14 @@ where
   /// **A clearance must record which question it answers, and "out of scope" is not an answer to
   /// "is it bounded".** Each deferral row below therefore names where the answer was checked, and
   /// the merge engine's own three-fact accounting is on `build_merge_index` in [`merge`].
+  ///
+  /// The same sentence has a second half, because the next round found the same shape with no
+  /// ownership boundary to blame — draft 5.8.4's marks bitset, in this file, cleared by the
+  /// initialisation audit as *"the operation's own variable count | per operation | safe"*. Both
+  /// facts were true and neither was about ordering. **A clearance is scoped to the question the
+  /// audit was asking, and an audit that asks size and frequency has said nothing about when the
+  /// allocation happens relative to the charge.** Which is why the module header now carries an
+  /// enumerated list of the sites rather than a fourth question to ask about them.
   ///
   /// | charge | sits | dimension | gate |
   /// |---|---|---|---|
@@ -2079,11 +2128,31 @@ where
   /// appear.
   fn check_variable_definitions(&mut self) -> ControlFlow<()> {
     let definitions = self.variables;
-    // Sized by the operation's own declaration list, so it is caller-sized — and read by draft
-    // 5.8.4 and nothing else. Clearing it for a rule set that never looks is work in front of every
-    // gate this function has.
+    // Read by draft 5.8.4 and nothing else, so it is gated — clearing it for a rule set that never
+    // looks is work in front of every gate this function has.
+    //
+    // And **sized by the operation's own declaration list**, which is where `reset_bits` stopped
+    // being safe here. The other three bitsets in this module are sized to the document's
+    // *fragment* count, and the prep sweep charges at least one unit per fragment before any of
+    // them is reset, so `count / 64` words of zeroing sit behind `count` units already taken. Prep
+    // charges per **definition**, not per variable: one operation declaring `V` variables is one
+    // definition, so this buffer's `V / 64` words sat behind a single unit, and a `validation_work`
+    // already spent to its last unit still bought the allocation and the zeroing before the next
+    // `spend` could refuse. al8n/smear#198.
+    //
+    // The repair is `build_merge_index`'s, move for move, because it is the same defect: `clear`
+    // first — `O(1)` on a `Vec<u64>`, no drop glue, no allocation, and it is what leaves the table
+    // **empty** rather than the previous operation's width on a refusal — then the true word count,
+    // then the charge in `count_units`, which saturates into a refusal rather than truncating into
+    // a budget it fits, and only then the `resize` that does the writing.
     if self.marks_usage {
-      reset_bits(&mut self.scratch.used, definitions.len());
+      self.scratch.used.clear();
+      if let Some(first) = definitions.first() {
+        let words = definitions.len().div_ceil(64);
+        let variable = first.node().variable();
+        self.spend(count_units(words), *variable.span())?;
+        self.scratch.used.resize(words, 0);
+      }
     }
 
     // The operation's variable-name index, built once and read by every usage.

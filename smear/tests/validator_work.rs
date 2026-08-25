@@ -2698,3 +2698,74 @@ fn the_spellings_fill_merge_set_reads_are_charged_in_bytes() {
     long - short
   );
 }
+
+/// Draft 5.8.4's marks bitset is sized behind its charge, so a starved ledger allocates nothing
+/// for it.
+///
+/// Round 14's finding on the validation side, one file over, and the reviewer's recommendation was
+/// the merge-side repair verbatim: clear, saturating count, charge, resize. The two sites are the
+/// same four moves for the same reason.
+///
+/// # Why the other three bitsets in the module were not this
+///
+/// `on_path`, `done` and `reachable` are sized to the document's **fragment** count, and the prep
+/// sweep charges at least one unit per fragment before any of them is reset — so `count / 64` words
+/// of zeroing sit behind `count` units already taken, over-prepaid by a factor of 64. Prep charges
+/// per **definition**. One operation declaring `V` variables is one definition, so `used`'s `V / 64`
+/// words sat behind a single unit.
+///
+/// # The instrument
+///
+/// At a `validation_work` too small to reach the end of either document, the working set must not
+/// depend on `V`: the ledger died at the same number of units in both runs, so everything charged
+/// grew by the same amount, and a difference is something that was *not* charged. The two counts
+/// are ten times apart, so the old sizing shows up as roughly nine hundred words.
+#[test]
+fn the_variable_marks_bitset_is_sized_behind_its_charge() {
+  let schema = build(SCHEMA);
+  // 5.8.4 alone: `marks_usage` is on, which is what reaches the bitset at all.
+  let rules = RuleSet::only(Rule::AllVariablesUsed);
+  let document = |count: usize| {
+    let mut source = String::from("query q(");
+    for index in 0..count {
+      source.push_str(&std::format!("$v{index}: Int "));
+    }
+    source.push_str(") { dog { name } }");
+    source
+  };
+  let small = document(6_400);
+  let large = document(64_000);
+
+  let capacity = |source: &str, work: u32| {
+    let parsed = parse(source);
+    let mut scratch = Scratch::new();
+    let mut sink = smear::validator::Ignore;
+    let budget = Budget::default().with_validation_work(work);
+    let verdict =
+      validate_executable_with(&schema, &parsed, &mut scratch, &budget, rules, &mut sink);
+    (verdict.is_err(), scratch.capacity())
+  };
+
+  // Starved: both runs refuse, and the one that refuses must not have sized a table on the way.
+  let (small_refused, starved_small) = capacity(&small, 100);
+  let (large_refused, starved_large) = capacity(&large, 100);
+  assert!(
+    small_refused && large_refused,
+    "both starved runs must refuse for this to be measuring a refusal"
+  );
+  assert_eq!(
+    starved_small, starved_large,
+    "a refused run sized a table by its variable count: {starved_small} against {starved_large}"
+  );
+
+  // The premise: `V` is a dimension the working set does grow in when there is budget for it, so
+  // the equality above is a statement about the refusal and not about the documents.
+  let (_, ran_small) = capacity(&small, u32::MAX - 1);
+  let (_, ran_large) = capacity(&large, u32::MAX - 1);
+  assert!(
+    ran_large > ran_small + 40_000,
+    "the two documents differ by only {} rows when both are fully validated, so the starved \
+     comparison above discriminates nothing",
+    ran_large - ran_small
+  );
+}
