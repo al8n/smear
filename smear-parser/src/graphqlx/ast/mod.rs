@@ -10,10 +10,7 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use crate::{
-  graphqlx::GraphQLx,
-  value::{Nestable, Nested, Sealed},
-};
+use crate::{graphqlx::GraphQLx, value::Sealed};
 
 /// GraphQLx argument AST aliases.
 pub mod argument;
@@ -44,18 +41,24 @@ pub use type_system::*;
 /// The default collection container used by GraphQLx AST collections.
 pub type DefaultVec<T> = Vec<T>;
 
-/// The container the value carriers hold their children in, and the trait that lets it take one
-/// apart.
+/// The two shapes the carriers hold their nesting children in, and the traits that decide what may
+/// stand in each.
 ///
-/// Re-exported here because it is the default `Container` argument of every value alias below, so
-/// it reaches a consumer's signatures whether or not they name it. [`Nested`] is a `Vec` in every
-/// respect a consumer can observe; what it adds is the iterative release that keeps a value nested
-/// through these carriers from aborting the process on the way out, however deep it is. That
-/// ranges over every recursive position the grammar forms, and not over a node a caller stored in
-/// `S` or in `Span` — see [`Nested`]'s own documentation, which states the difference.
-/// [`Nestable`] is sealed, which fixes who may implement it and says nothing about what a payload
-/// may be.
-pub use crate::value::{Nest, NestPtr, SoleNestPtr};
+/// Re-exported here because both reach a consumer's signatures whether or not they name them.
+/// [`Nested`] is the default `Container` argument of every value alias below, of
+/// [`SelectionSet`] and of [`DefinitionTypePath`]'s type arguments;
+/// [`Nest`] is the payload type of three public [`Type`] variants, so it reaches a consumer's
+/// `match` as well. [`Nested`] is a `Vec` in every respect a consumer can observe and [`Nest`]
+/// answers as the pointer it wraps does; what each adds is the iterative release that keeps a
+/// value, a selection or a type nested through these carriers from aborting the process on the way
+/// out, however deep it is. That ranges over every recursive position the grammar forms, and not
+/// over a node a caller stored in `S` or in `Span` — see [`Nested`]'s own documentation, which
+/// states the difference. [`Nestable`], [`NestPtr`] and [`SoleNestPtr`] are all sealed, which fixes
+/// who may implement them and says nothing about what a payload may be.
+///
+/// All five are exported, and the list is not decorative: a consumer who builds this crate with
+/// `graphqlx` and without `graphql` has this module as their only door onto them.
+pub use crate::value::{Nest, NestPtr, Nestable, Nested, SoleNestPtr};
 
 /// A GraphQLx name.
 #[allow(type_alias_bounds)]
@@ -410,9 +413,12 @@ pub type DefinitionTypePath<
 /// [`Nestable`] below is the walk, and it matches without a wildcard arm so a fifth is a compile
 /// error here rather than a silent return to recursing.
 ///
-/// `Drop` is one of four generated impls that descend one frame per level. The derived `Debug` and
-/// `Clone` still do; this removes the only one that fires without a call being made. See
-/// `value/nesting.rs`'s header, which measures the other two on the value enums.
+/// `Drop` is one of three generated impls that descend one frame per level on this enum — there is
+/// no derived `PartialEq` here, unlike the vanilla dialect's — and the derived `Debug` and `Clone`
+/// still do. This removes the only one of the three that fires without a call being made. What
+/// standing a [`Nest`] in an arm costs the other two was measured on `graphql::ast::Type`, whose
+/// arm has the same shape; `value/nesting.rs`'s header has the table, and the short version is
+/// nothing in a release build and a stated charge in a debug one.
 #[derive(
   Debug,
   Clone,

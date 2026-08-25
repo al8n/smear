@@ -50,9 +50,15 @@ macro_rules! ty {
         /// `Debug`, `Clone` and `PartialEq` still do. **This removes the only one of the four that
         /// fires without a call being made** — release happens to whoever holds the value, on scope
         /// exit, on unwind, in a caller's teardown of a collection, and it can be neither caught nor
-        /// refused. The other three are chosen calls, they are on the same footing as the value
-        /// enums' — see `value/nesting.rs`'s header, which measures theirs — and repairing them
-        /// lands on this same pointer rather than on this enum.
+        /// refused. The other three are chosen calls, and repairing them would land on this same
+        /// pointer rather than on this enum.
+        ///
+        /// What standing [`Nest`] in the arm cost those three was measured on the [`Box`] member of
+        /// this family in both profiles — the other two clone by refcount and so have no deep
+        /// `Clone` to charge — and `value/nesting.rs`'s header has the table: **nothing in
+        /// release**, where the forwarding impls inline away and `==` is not bounded by a stack at
+        /// all, and in a debug build an unchanged `{:?}` ceiling against about 6% off `clone` and
+        /// 17% off `==`.
         #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
         #[unwrap(ref, ref_mut)]
         #[try_unwrap(ref, ref_mut)]

@@ -50,16 +50,32 @@
 //! tests spawn, the same binary aborted at 8 602 and 2 157. Sizing the stack is what makes
 //! [`DEPTH`] a fixed multiple of the boundary instead of a bet on the runner — and it keeps the
 //! fixtures cheap, since a release that no longer recurses does not care how deep they are.
+//!
+//! # Why the dialect gate is per fixture and not on the file
+//!
+//! Two CI rows build this package with **one dialect at a time**, and in each of them the other
+//! dialect's `ast` module does not exist. A `#![cfg(all(feature = "graphql", feature =
+//! "graphqlx"))]` header would satisfy both of those rows — by compiling a test binary holding
+//! **zero** tests, which exits 0 and pins nothing. So the file's own gate stays at `parser` and
+//! each fixture carries the dialect it actually names: seven run under `graphql` alone, two under
+//! `graphqlx` alone, and ten with both. The tenth is `a_deep_graphqlx_list_type_is_released`,
+//! which is the one fixture that genuinely needs the pair — and it is not linked here, because a
+//! single-dialect row is a build in which that item does not exist. Its own documentation says
+//! why it needs both.
 
 #![cfg(feature = "parser")]
 #![allow(missing_docs)]
 
-use std::{rc::Rc, sync::Arc, vec::Vec};
+use std::vec::Vec;
 
-use smear::{
-  lexer::tokora::SimpleSpan,
-  parser::{graphql::ast as g, graphqlx::ast as x},
-};
+#[cfg(feature = "graphql")]
+use std::{rc::Rc, sync::Arc};
+
+use smear::lexer::tokora::SimpleSpan;
+#[cfg(feature = "graphql")]
+use smear::parser::graphql::ast as g;
+#[cfg(feature = "graphqlx")]
+use smear::parser::graphqlx::ast as x;
 
 /// Forty-six times the depth at which the shallower of the two aborted on [`STACK`], and twelve
 /// times the deeper one's.
@@ -96,6 +112,7 @@ fn release<T>(owner: T) {
   drop(owner);
 }
 
+#[cfg(feature = "graphql")]
 #[test]
 fn a_deep_box_type_is_released() {
   on_a_small_stack(|| {
@@ -111,6 +128,7 @@ fn a_deep_box_type_is_released() {
   });
 }
 
+#[cfg(feature = "graphql")]
 #[test]
 fn a_deep_rc_type_is_released() {
   on_a_small_stack(|| {
@@ -132,6 +150,7 @@ fn a_deep_rc_type_is_released() {
 /// clone afterwards is the last owner and runs the loop. Both halves have to survive, and the
 /// order is the point — a release that descended on a *shared* pointer would be wrong as well as
 /// deep.
+#[cfg(feature = "graphql")]
 #[test]
 fn a_deep_arc_type_is_released_through_its_last_owner() {
   on_a_small_stack(|| {
@@ -155,6 +174,7 @@ fn a_deep_arc_type_is_released_through_its_last_owner() {
 /// dialect — so a consumer with both features on can build this arm. `SetType` and `MapType` are
 /// re-exported by neither, so their arms cannot be built outside the crate at all and their
 /// release is pinned in `smear-parser`'s own `graphqlx::ast` tests instead.
+#[cfg(all(feature = "graphql", feature = "graphqlx"))]
 #[test]
 fn a_deep_graphqlx_list_type_is_released() {
   on_a_small_stack(|| {
@@ -169,6 +189,7 @@ fn a_deep_graphqlx_list_type_is_released() {
 /// The fourth route, and the one no reading of the three pointer arms finds: a path's generic
 /// arguments are types, so `A<A<A<…>>>` nests without a `Box` anywhere in the cycle. Every
 /// constructor it needs is public.
+#[cfg(feature = "graphqlx")]
 #[test]
 fn a_deep_graphqlx_generic_argument_type_is_released() {
   on_a_small_stack(|| {
@@ -185,6 +206,7 @@ fn a_deep_graphqlx_generic_argument_type_is_released() {
   });
 }
 
+#[cfg(feature = "graphqlx")]
 fn graphqlx_leaf() -> x::Type<&'static str> {
   x::Type::Path(x::DefinitionTypePath::new(
     span(),
@@ -195,6 +217,7 @@ fn graphqlx_leaf() -> x::Type<&'static str> {
 }
 
 /// A field's optional nested set, which is how a query nests.
+#[cfg(feature = "graphql")]
 #[test]
 fn a_deep_field_selection_set_is_released() {
   on_a_small_stack(|| {
@@ -230,6 +253,7 @@ fn a_deep_field_selection_set_is_released() {
 
 /// An inline fragment's **required** nested set, which is the arm smear issue #61 was raised on and
 /// the one a `None` in the field arm would let a repair miss.
+#[cfg(feature = "graphql")]
 #[test]
 fn a_deep_inline_fragment_selection_set_is_released() {
   on_a_small_stack(|| {
@@ -261,6 +285,7 @@ fn a_deep_inline_fragment_selection_set_is_released() {
   });
 }
 
+#[cfg(feature = "graphqlx")]
 #[test]
 fn a_deep_graphqlx_selection_set_is_released() {
   on_a_small_stack(|| {
@@ -298,6 +323,7 @@ fn a_deep_graphqlx_selection_set_is_released() {
 /// early is correct: a level with another owner has nothing below it to unlink yet. The clone is
 /// taken level by level as the chain grows, so every level really is shared, and both owners are
 /// then released.
+#[cfg(feature = "graphql")]
 #[test]
 fn a_deep_rc_type_shared_at_every_level_is_released() {
   on_a_small_stack(|| {
@@ -317,6 +343,7 @@ fn a_deep_rc_type_shared_at_every_level_is_released() {
 }
 
 /// Keeps the pointer types named in a test file that is about how they are released.
+#[cfg(feature = "graphql")]
 #[test]
 fn the_three_pointer_families_are_distinct_types() {
   let boxed: g::Type<g::Name<&str>> = g::ListType::new(

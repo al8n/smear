@@ -172,14 +172,69 @@
 //! than on the enums — [`Nested`]'s own `Debug` and `Clone` can walk a subtree iteratively without
 //! any derive noticing — so this is where they get cheaper to fix, not harder.
 //!
+//! ## The same charge on [`Nest`], measured in both profiles rather than one
+//!
+//! The pointer wrapper adds a forwarding frame to the same chosen calls, and on
+//! `graphql::ast::Type` it was measured instead of inferred: one child process per depth on an
+//! 8 MiB thread, `aarch64-apple-darwin`, bisected to the last level at which the child still
+//! returned, three runs a cell and every cell stable to the level.
+//!
+//! | | base, debug | here, debug | base, release | here, release |
+//! |---|---|---|---|---|
+//! | `Type::clone` | 16 932 | 15 906 (**-6%**) | 131 253 | 131 253 (**0**) |
+//! | `Type == Type` | 34 994 | 29 162 (**-17%**) | > 67 108 864 | > 67 108 864 (**0**) |
+//! | `Type` `{:?}` | 12 495 | 12 495 (**0**) | 15 438 | 15 438 (**0**) |
+//!
+//! **In release there is no charge at all, on any of the three.** The forwarding impls are inlined
+//! away, and `==` is not bounded by a stack in either build: 67 108 864 levels returned on both
+//! sides, which 8 MiB cannot hold at a *tenth* of a byte per level, so that recursion is not on
+//! the stack at all once the optimiser has it. The percentages above are a debug-build charge and
+//! nothing else, and they are what a `cargo test` run sees.
+//!
+//! What narrowed all three is `#[inline(always)]` rather than `#[inline]` on [`Nest`]'s forwarding
+//! `clone`, `fmt`, `eq`, `hash`, `as_ref` and `deref`: rustc's MIR inliner honours it at
+//! opt-level 0, where a plain `#[inline]` is a hint to a pass that is not running. Without it the
+//! debug column reads 14 581 / 27 627 / 12 204. The `clone` row then took a second frame off by
+//! writing [`Option::clone`] out as the match it is — 14 997 to 15 906 — for the reason that impl
+//! records.
+//!
+//! **[`Nest::get`] is deliberately not `#[inline(always)]`, and that is a measurement rather than
+//! an oversight.** It is the one of the seven with a branch and an `unreachable!` in its body, so
+//! inlining it does not remove a frame — it grows every frame that is itself paid once per level.
+//! With `inline(always)` on `get` as well, `==` fell to 24 996 and `{:?}` to 11 927: worse than
+//! this table, and worse than doing nothing at all.
+//!
+//! ### Why only `clone` got the second repair
+//!
+//! The question was put to all six forwarding impls and the answer is that **`clone` is the only
+//! one whose `Option` access costs anything.** `Option::clone` builds its `Some` *around* the
+//! inner clone, so its frame is live for the whole recursion beneath it — one per level. `fmt`,
+//! `eq`, `hash`, `as_ref` and `deref` reach the pointee through [`Nest::get`], which hands back a
+//! reference and returns; its frame and `Option::as_ref`'s are both popped *before* the recursive
+//! call is made, so neither is on the stack per level. That the `{:?}` row already sits exactly on
+//! its base is the same fact read off the table.
+//!
+//! It was tested rather than argued. Rewriting `eq`, `fmt` and `hash` to match `self.inner`
+//! directly — no `get`, no `Option` method — made both measurable rows **worse**: `==` fell to
+//! 26 245 and `{:?}` to 12 204. The extra match arms grow the frame the derived impl pays once per
+//! level, and they buy back a frame that was never per-level to begin with. It is the `get`
+//! result above, from the other direction: what costs on this stack is the size of the frame that
+//! recurses, not the number of calls made and returned from before it does.
+//!
 //! # What the worklist costs
 //!
 //! The worklist allocates nothing for a leaf: a leaf is released the moment it is reached rather
 //! than being put on it, so a list of a million scalars never grows `pending` past its initial
 //! `Vec::new`, which does not allocate. **What it costs is a call, not an allocation** — every
 //! element pays one call into [`Nestable::into_children`] to find out that it is a leaf. A tree of
-//! *n* container nodes pays that same call plus a worklist proportional to its widest frontier of
-//! containers, bounded by the tree that is already resident.
+//! *n* container nodes pays that same call plus a worklist that peaks at **one depth-first
+//! frontier** — the unvisited children of every node on the path down to the node in hand.
+//!
+//! That is a bound on the *tree*, not on its depth, and the difference is the whole of what
+//! [`Nested::drop`]'s own documentation derives: a maximally branching tree still puts O(live
+//! nodes) on the worklist, `Vec::push` still aborts the process when the allocator refuses, and a
+//! `Drop` still cannot refuse back. What it is not is the sum over every top-level element, which
+//! is what a sequential drain would make it and which the parser's nesting ceiling does not reach.
 //!
 //! Two independent harnesses priced that call on `aarch64-apple-darwin`, release, with `#[inline]`
 //! on all six impls. **They disagree, and the band they span is the claim** — neither end of it is:
@@ -359,6 +414,53 @@ impl<T: Nestable> Nested<T> {
 }
 
 impl<T: Nestable> Drop for Nested<T> {
+  /// A depth-first walk: one element is taken apart and its subtree drained to nothing before the
+  /// next element is touched at all.
+  ///
+  /// # Why the two loops are nested rather than sequential
+  ///
+  /// Taking every element apart first and popping afterwards releases the same tree — and puts one
+  /// entry on the worklist per *top-level element* before a single one comes off. **Width is not
+  /// what the parser's nesting ceiling bounds.** `{ f1 { x } … fN { x } }` nests two levels and is
+  /// N wide, and N is the caller's: a document that ceiling admits carries any number of siblings.
+  /// Measured on `aarch64-apple-darwin`, release, on a selection set of exactly that shape at
+  /// N = 100 000, peak `pending` was **100 000** entries sequential and **1** interleaved.
+  ///
+  /// # What the peak follows, which is not depth
+  ///
+  /// It is the walk's **frontier**: the unvisited children of every node on the path from the
+  /// element in hand down to the node being taken apart. A node with a wide fan-out still puts its
+  /// whole fan-out on the worklist, so `{ f { a1 … aN } }` peaks at N either way — measured at
+  /// 100 000 for N = 100 000. The honest bound is **O(live nodes)** for a maximally branching
+  /// tree, smaller than the tree only because a leaf is released where it is reached rather than
+  /// pushed.
+  ///
+  /// A peak that followed *depth* is not reachable through [`Nestable::into_children`] at all: it
+  /// pushes rather than yielding, so a depth-bounded walk needs a stack of owned iterators, and
+  /// that stack is itself a `Vec` that grows to the depth. It would trade a width worst case for a
+  /// depth worst case and remove neither the allocation nor what follows from it.
+  ///
+  /// **`Vec::push` aborts the process when the allocator refuses, and a `Drop` cannot refuse
+  /// back** — it has no return value and no caller to tell it to. What the interleave buys is not
+  /// the removal of that surface but its size: a request proportional to one frontier of a tree
+  /// already in memory, in place of one proportional to the sum over every top-level element.
+  ///
+  /// # What the interleave costs
+  ///
+  /// Nothing measurable on a leaf-only container, and it is *cheaper* once the elements nest. A
+  /// leaf-only container never puts anything on `pending`, so the inner loop is one length compare
+  /// per element. Measured against the sequential shape in the same build on
+  /// `aarch64-apple-darwin`, release, 1 000 000 `Null` leaves, best of eleven releases and five
+  /// interleaved runs a side: **3.218–3.226 ns** per element sequential against
+  /// **3.219–3.224 ns** interleaved, which is the two shapes reading as one number. On 1 000 000
+  /// elements that each nest one level the same instrument reads **30.6–30.8 ns** sequential
+  /// against **22.8–23.0 ns** interleaved, about **26% cheaper**, because the worklist that had
+  /// grown to a million entries now never leaves its first allocation.
+  ///
+  /// That instrument compares the two loop shapes and nothing else, so it does not restate the
+  /// module header's band against the derived glue — it says which loop that band was read on. The
+  /// leaf-only end is unmoved by the interleave; the nesting end was read sequentially and the
+  /// interleave only lowers it.
   fn drop(&mut self) {
     // Empty until an element with a nesting child is met, and `Vec::new` does not allocate — a
     // container of scalars allocates nothing here. It is not released for free, though: every
@@ -369,13 +471,15 @@ impl<T: Nestable> Drop for Nested<T> {
     let mut pending: Vec<T::Node> = Vec::new();
     for element in core::mem::take(&mut self.values) {
       element.into_children(&mut pending);
-    }
-    while let Some(node) = pending.pop() {
-      node.into_children(&mut pending);
-      // `node` is consumed by the call, and whatever it released instead of pushing held no node of
-      // this crate's own. That is the one frame this loop ever spends on the tree these types form;
-      // what a caller instantiated a payload parameter with is released inside it, and the module
-      // header says why that is a bound this container cannot place.
+      // Drained to nothing before the next element is touched, which is what keeps the peak at one
+      // frontier instead of the sum over the whole container.
+      while let Some(node) = pending.pop() {
+        node.into_children(&mut pending);
+        // `node` is consumed by the call, and whatever it released instead of pushing held no node
+        // of this crate's own. That is the one frame this loop ever spends on the tree these types
+        // form; what a caller instantiated a payload parameter with is released inside it, and the
+        // module header says why that is a bound this container cannot place.
+      }
     }
   }
 }
@@ -676,8 +780,14 @@ impl<T: Nestable> NestPtr for Arc<T> {
 /// one's `pending` is *not* empty for a leaf, because a `Nest` that exists at all owns a child.
 /// A one-level nest pushes one element onto a `Vec` that has not allocated yet, so it pays exactly
 /// one allocation where the derived glue paid none. A chain of *n* pays that one allocation and
-/// then amortised pushes, and a tree pays a worklist proportional to its widest frontier, bounded
-/// by the tree already resident.
+/// then amortised pushes, and a tree pays a worklist that peaks at one depth-first frontier.
+///
+/// **There is no sequential drain here to interleave away**, which is why this release is written
+/// as one loop and [`Nested`]'s as two. A `Nest` owns exactly one pointee, so what precedes the
+/// loop is a single [`Nestable::into_children`] call — the loop body, run once. [`Nested`] owns a
+/// container, and taking every element of it apart before popping any is what would make the peak
+/// the sum over the container rather than one frontier; that container is the only place the
+/// distinction exists.
 ///
 /// It grows through `Vec`'s infallible `push`, and the same sentence in [`Nested`]'s header applies
 /// unchanged: a `Drop` has no return value and no caller to tell, so a refusal is not available to
@@ -709,6 +819,11 @@ impl<P: NestPtr> Nest<P> {
   }
 
   /// The pointee, borrowed.
+  ///
+  /// `#[inline]` and **not** `#[inline(always)]`, unlike the forwarding impls below, because this
+  /// is the one body among them with a branch in it. At opt-level 0 inlining it does not remove a
+  /// frame from the recursions that pass through it — it grows theirs, and theirs is paid once per
+  /// level. The module header has the measurement that decided it.
   #[inline]
   pub fn get(&self) -> &P::Pointee {
     match self.inner.as_ref() {
@@ -770,17 +885,27 @@ impl<P: NestPtr> Drop for Nest<P> {
   }
 }
 
+/// `#[inline(always)]` on this and on the five forwarding impls below it, and that is a stack
+/// measurement rather than a speed one.
+///
+/// `Clone`, `Debug` and `PartialEq` on a type enum stay recursive by design — they are calls
+/// somebody makes, unlike the release — so what this wrapper must not do is take levels off the
+/// depth at which they abort. At opt-level 0 a plain `#[inline]` is a hint to a pass that is not
+/// running, so each forward was a native frame per level; `inline(always)` is honoured by rustc's
+/// MIR inliner there. It gave `Type`'s `{:?}` ceiling back in full and about a fifth of the other
+/// two. In release it changes nothing, because nothing was left to inline. The module header has
+/// the four columns.
 impl<P: NestPtr> Deref for Nest<P> {
   type Target = P::Pointee;
 
-  #[inline]
+  #[inline(always)]
   fn deref(&self) -> &Self::Target {
     self.get()
   }
 }
 
 impl<P: NestPtr> AsRef<P::Pointee> for Nest<P> {
-  #[inline]
+  #[inline(always)]
   fn as_ref(&self) -> &P::Pointee {
     self.get()
   }
@@ -789,10 +914,34 @@ impl<P: NestPtr> AsRef<P::Pointee> for Nest<P> {
 impl<P: NestPtr + Clone> Clone for Nest<P> {
   /// The pointer's own clone: deep for a [`Box`], a refcount bump for an [`Rc`] or an [`Arc`],
   /// which is what the arm did before this type stood in it.
-  #[inline]
+  ///
+  /// Written out rather than delegated to [`Option::clone`], which is the same three lines, for a
+  /// reason that is entirely about the stack. `Option::clone` builds its `Some` **around** the
+  /// inner clone, so at opt-level 0 its frame is live for the whole of the recursion below it —
+  /// one more native frame per level of a chain, on the impl whose ceiling is the lowest of the
+  /// three. Measured on `aarch64-apple-darwin`, one child process per depth on an 8 MiB thread:
+  /// `graphql::ast::Type::clone` aborted at **14 997** levels through `Option::clone` and at
+  /// **15 906** written out, against a `9f584d6` base of 16 932 — the residual charge for standing
+  /// this type in the arm falls from 11.4% to 6.1%. In release the two are the same code.
+  ///
+  /// The `allow` below buys those 5.3 percentage points of ceiling, so it is a measurement rather
+  /// than a style preference. The lint's own suggestion is measurably the worst of the three:
+  /// `self.inner.as_ref().map(P::clone)` aborts at **14 186**, because `Option::map`'s frame is
+  /// live across the recursion exactly as `Option::clone`'s is and the call it takes is another
+  /// one on top.
+  #[allow(
+    clippy::manual_map,
+    reason = "Option::map's frame is live across the recursion at opt-level 0 and costs one more \
+              than Option::clone's: measured, Type::clone aborts at 15 906 levels written out, \
+              14 997 through Option::clone and 14 186 through the suggested map"
+  )]
+  #[inline(always)]
   fn clone(&self) -> Self {
     Self {
-      inner: self.inner.clone(),
+      inner: match self.inner.as_ref() {
+        Some(ptr) => Some(ptr.clone()),
+        None => None,
+      },
     }
   }
 }
@@ -802,7 +951,7 @@ where
   P::Pointee: fmt::Debug,
 {
   /// The pointee, as the pointer prints it — this wrapper is not part of what a type *is*.
-  #[inline]
+  #[inline(always)]
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     fmt::Debug::fmt(self.get(), f)
   }
@@ -812,7 +961,7 @@ impl<P: NestPtr> PartialEq for Nest<P>
 where
   P::Pointee: PartialEq,
 {
-  #[inline]
+  #[inline(always)]
   fn eq(&self, other: &Self) -> bool {
     self.get() == other.get()
   }
@@ -824,7 +973,7 @@ impl<P: NestPtr> core::hash::Hash for Nest<P>
 where
   P::Pointee: core::hash::Hash,
 {
-  #[inline]
+  #[inline(always)]
   fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
     self.get().hash(state);
   }
