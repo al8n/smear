@@ -3433,6 +3433,48 @@ where
     }
 
     let written = node.arguments().map(|list| list.arguments()).unwrap_or(&[]);
+
+    // **The written list, charged once, in front of the scan that reads it `count` times.**
+    //
+    // Draft §6.4.1 step 5 iterates every argument the *schema* declares and asks whether the
+    // request supplied it, so the loop below is `declared × written` name comparisons at this
+    // position — and it was free in both factors. Measured before the charge: a field with
+    // thirty-two declared arguments, thirty-two written at each of eight positions, performed 8,192
+    // name comparisons for **zero** units, and taking `written` from zero to thirty-two moved the
+    // ledger not at all.
+    //
+    // Only the caller's factor is charged, and that is the whole design. `declared` is the
+    // service's own design-time number, so pricing it here would refuse a caller whose *document is
+    // small* because the schema is wide — measured against the shipped defaults, one unit per
+    // declared argument per position refuses a full-occupancy response at about eleven declared
+    // arguments, `max_response_slots` of `2^20` against `max_selection_visits` of `2^24` with the
+    // ~4.6 units a position already costs. Charging `written` instead refuses only a caller whose
+    // document actually grew: the same full response needs about eleven arguments written at
+    // *every one* of a million positions to reach the ceiling, which is tens of megabytes of
+    // request.
+    //
+    // What is left uncharged is `declared` — bounded, because the total comparison count is now
+    // `declared × (charged units)` and `declared` is a property of the schema rather than of the
+    // request. That is this crate's standing argument about schema-sized groups, and it is true
+    // here *because* the other factor is no longer free. al8n/smear#198.
+    for argument in written {
+      if !self
+        .visits
+        .take_bytes(argument.name().source().as_ref().len())
+      {
+        let limit = self.visits.limit();
+        self.fail(
+          slot,
+          Raw::ArgumentBudget {
+            parent: parent_type,
+            field: field_sym,
+            limit,
+          },
+        );
+        return false;
+      }
+    }
+
     for index in 0..count {
       let argument = self.schema.inputs(args)[index];
       let name_bytes = self.schema.name_bytes(argument.name());

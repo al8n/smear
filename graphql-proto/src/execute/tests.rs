@@ -4059,3 +4059,79 @@ fn a_name_the_arena_refuses_is_not_charged_for_its_copy() {
     "an insertion that happens is charged for the hash and for the copy"
   );
 }
+
+/// Draft §6.4.1 step 5's scan pays for what the **request** wrote.
+///
+/// # The product, and which factor was free
+///
+/// Step 5 iterates every argument the *schema* declares and asks, for each, whether the request
+/// supplied it — `written.iter().find(..)` — so the scan is `declared × written` name comparisons
+/// at every position. Both factors were free. Measured before the charge: thirty-two declared,
+/// thirty-two written, eight positions — 8,192 name comparisons for **zero** units, and taking
+/// `written` from zero to thirty-two moved the ledger not at all.
+///
+/// # Why only the caller's factor is charged
+///
+/// `declared` is the service's own design-time number. Pricing it would refuse a caller whose
+/// document is *small* because the schema is *wide*: against the shipped defaults — `2^20` response
+/// slots, `2^24` selection visits, and the ~4.6 units a position already costs — one unit per
+/// declared argument per position refuses a full-occupancy response at about **eleven** declared
+/// arguments. That is a false refusal of a legitimate response, and it is why al8n/smear#198's
+/// first round deferred this rather than patching it.
+///
+/// Charging `written` refuses only a caller whose document grew: the same response needs eleven
+/// arguments written at *every one* of a million positions, which is tens of megabytes of request.
+/// And what stays uncharged is bounded — the comparison total is now `declared × (charged units)`,
+/// a schema constant times the ledger, rather than a product with a free factor in it.
+#[test]
+fn the_written_arguments_are_charged_and_the_declared_ones_are_not() {
+  fn visits(declared: usize, written: usize, positions: usize) -> u32 {
+    let mut sdl = String::from("type Query { f(");
+    for index in 0..declared {
+      sdl.push_str(&std::format!("a{index}: String "));
+    }
+    sdl.push_str("): String }\n");
+    let mut query = String::from("{ ");
+    for position in 0..positions {
+      query.push_str(&std::format!("x{position}: f("));
+      for index in 0..written {
+        query.push_str(&std::format!("a{index}: \"v\" "));
+      }
+      query.push_str(") ");
+    }
+    query.push('}');
+    let (schema, document) = compile_against(&sdl, &query);
+    let mut space = Space;
+    let mut executor = Executor::new(&schema, &document);
+    executor
+      .start(&mut space, None, Value::Obj)
+      .expect("the operation resolves");
+    while let Some(request) = executor.poll_resolve(&mut space) {
+      let id = request.id();
+      executor.handle_resolved(&mut space, id, Value::Text);
+    }
+    executor.charges().visits
+  }
+
+  // Written moves the ledger, and in proportion to the positions it was written at.
+  let (bare, loaded) = (visits(32, 0, 8), visits(32, 32, 8));
+  let wide = visits(32, 32, 64);
+  println!("visits: 0 written {bare}, 32 written {loaded}, 32 written x 64 positions {wide}");
+  assert!(
+    loaded > bare + 200,
+    "thirty-two written arguments at eight positions cost {} units",
+    loaded - bare
+  );
+  assert!(
+    wide - visits(32, 0, 64) > (loaded - bare) * 4,
+    "the written charge does not scale with the positions it is written at"
+  );
+
+  // And the schema's own width does not. A caller whose document is unchanged pays the same
+  // whether the field declares four arguments or thirty-two.
+  let (narrow, broad) = (visits(4, 0, 8), visits(32, 0, 8));
+  assert_eq!(
+    narrow, broad,
+    "the schema's declared-argument count reached the request's ledger"
+  );
+}

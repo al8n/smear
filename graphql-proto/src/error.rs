@@ -124,6 +124,19 @@ pub(super) enum Raw {
     field: Sym,
     limit: u32,
   },
+  /// Not a specification failure: reading this position's written arguments would have taken the
+  /// operation past [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
+  ///
+  /// Draft §6.4.1 step 5 iterates every argument the *schema* declares and asks, for each, whether
+  /// the request supplied it — so the scan is `declared × written` name comparisons at every
+  /// position. `declared` is the service's own design-time number and `written` is the caller's,
+  /// and only the caller's is charged: that makes the total a bounded multiple of the ledger rather
+  /// than a product with a free factor in it. al8n/smear#198.
+  ArgumentBudget {
+    parent: TypeId,
+    field: Sym,
+    limit: u32,
+  },
   /// Not a specification failure: recording this object's response metadata would have taken it
   /// past [`Limits::max_response_metadata`](super::Limits::max_response_metadata).
   SelectionBudget {
@@ -331,6 +344,7 @@ impl Raw {
       Self::ArgumentVariableMissing { .. } => Kind::ArgumentVariableMissing,
       Self::DirectiveCondition { .. } => Kind::DirectiveCondition,
       Self::ResponseBudget { .. }
+      | Self::ArgumentBudget { .. }
       | Self::SelectionBudget { .. }
       | Self::CollectionBudget { .. }
       | Self::MetadataBudget { .. }
@@ -599,6 +613,18 @@ impl<V> fmt::Display for Error<'_, V> {
         write!(
           f,
           ": the response would exceed the executor's limit of {limit} positions."
+        )
+      }
+      Raw::ArgumentBudget {
+        parent,
+        field,
+        limit,
+      } => {
+        position(f, parent, field)?;
+        write!(
+          f,
+          ": reading the arguments written here would exceed the executor's limit of {limit} \
+           selection visits."
         )
       }
       Raw::SelectionBudget {
