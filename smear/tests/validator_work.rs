@@ -3000,3 +3000,89 @@ fn the_skipped_repeat_still_reports_a_nested_definition() {
   assert_eq!(unreached.rules(), [Rule::FieldSelections]);
   assert_eq!(unreached.emitted, 1, "{:?}", unreached.diagnostics);
 }
+
+/// The descent-only path pays for the list it walks past.
+///
+/// The seventh round removed the *name* charge from both descent-only arms, and that was right:
+/// nothing on that path reads a spelling, so pricing one is a refusal for bytes nobody looks at.
+/// What went with it was the charge on the **iteration**, which was never part of that finding. A
+/// bare directive costs `O(1)` there and the list length is the document's, so `O` operations over
+/// one fragment's `D` bare directives ran `Theta(O * D)` of it while the ledger saw only the
+/// surrounding constant.
+///
+/// It compounds with round 17's gate rather than being caught by it: `collects_usages` is exactly
+/// what puts this walk on this path, so the repeat is *correct*, the work is real, and nothing
+/// priced it. That is a bypass — unbounded CPU with no `Refusal::Budget` — not an over-charge.
+///
+/// The same 2x2, read the other way round. The two repairs before this one had to drive an
+/// interaction to zero; this one has to produce it, because `Theta(O * D)` of work charged
+/// `Theta(O * D)` units is the honest answer.
+#[test]
+fn a_bare_directive_list_is_charged_for_walking_past_it() {
+  let schema = build(SCHEMA);
+  // 5.8.3 alone: `collects_usages` is on, so the fragment body is revisited per operation, and
+  // `reads_usage_positions` is off, so nothing above a variable leaf is resolved. That pair is the
+  // descent-only arm.
+  let rules = RuleSet::only(Rule::AllVariableUsesDefined);
+  let document = |ops: usize, directives: usize| {
+    let mut source = String::new();
+    for index in 0..ops {
+      source.push_str(&std::format!("query q{index} {{ dog {{ ...F }} }}\n"));
+    }
+    source.push_str("fragment F on Dog");
+    for _ in 0..directives {
+      source.push_str(" @onFragDef");
+    }
+    source.push_str(" { name }\n");
+    source
+  };
+  let at = |ops: usize, directives: usize| min_budget(&schema, &document(ops, directives), rules);
+
+  let (few, many) = (20usize, 200usize);
+  let (bare, loaded) = (0usize, 400usize);
+  let (a, b) = (at(few, bare), at(few, loaded));
+  let (c, d) = (at(many, bare), at(many, loaded));
+  let interaction = (d as i64 - c as i64) - (b as i64 - a as i64);
+  println!(
+    "min_budget: {few} ops {a}/{b}, {many} ops {c}/{d} (0/{loaded} bare directives) -> \
+     ops x directives interaction {interaction}"
+  );
+
+  // One unit per directive per operation is what the walk performs and what the ledger must see.
+  // The threshold is half of it, so neither an extra unit somewhere nor a missing one decides this.
+  let expected = ((many - few) * (loaded - bare)) as i64;
+  assert!(
+    interaction >= expected / 2,
+    "walking past {loaded} bare directives cost only {interaction} more units at {many} \
+     operations than at {few}, against the {expected} the walk performs"
+  );
+
+  // The **argument** list's arm, which is the same code shape one level in and had the same gap.
+  // 5.4.2 would report the repeats; it is off here, which is what makes them free to write and
+  // pointless to evaluate — the property the finding turns on.
+  let arguments = |ops: usize, count: usize| {
+    let mut source = String::new();
+    for index in 0..ops {
+      source.push_str(&std::format!("query q{index} {{ dog {{ ...F }} }}\n"));
+    }
+    source.push_str("fragment F on Dog { isHouseTrained(");
+    for _ in 0..count {
+      source.push_str("atOtherHomes: true ");
+    }
+    source.push_str(") }\n");
+    source
+  };
+  let at = |ops: usize, count: usize| min_budget(&schema, &arguments(ops, count), rules);
+  let (a, b) = (at(few, bare), at(few, loaded));
+  let (c, d) = (at(many, bare), at(many, loaded));
+  let interaction = (d as i64 - c as i64) - (b as i64 - a as i64);
+  println!(
+    "min_budget: {few} ops {a}/{b}, {many} ops {c}/{d} (0/{loaded} repeated arguments) -> \
+     ops x arguments interaction {interaction}"
+  );
+  assert!(
+    interaction >= expected / 2,
+    "walking past {loaded} repeated arguments cost only {interaction} more units at {many} \
+     operations than at {few}, against the {expected} the walk performs"
+  );
+}

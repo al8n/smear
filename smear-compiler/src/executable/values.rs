@@ -19,7 +19,7 @@ use super::{
 use crate::{
   diagnostic::Context,
   schema::{DirectiveLocation, PackedType, Range32, Sym, TypeKind},
-  scratch::{NONE, ValueFrame, ValueLevel, set_bit},
+  scratch::{NONE, ValueFrame, ValueLevel, count_units, set_bit},
 };
 
 /// The position a value sits in, as the two bits draft 5.8.5 asks about.
@@ -95,7 +95,25 @@ where
     // Descent without resolution. Reached when the only reason to be here is to find variable
     // leaves for draft 5.8.3 or 5.8.4, which read nothing above a leaf — so no directive name is
     // charged, hashed or looked up on the way past it. See `Validator::resolves_positions`.
+    //
+    // **One unit per directive, in front of the walk past them.** The seventh round removed the
+    // *name* charge here, and that was right: nothing on this path reads a spelling, so pricing one
+    // is a refusal for bytes nobody looks at. What went with it was the charge on the **iteration**,
+    // which was never part of that finding. A directive with no arguments costs `O(1)` here and the
+    // list length is the document's, so `O` operations over one fragment's `D` bare directives ran
+    // `Θ(O · D)` of it while the ledger saw only the surrounding constant — and the repeat is
+    // *correct*, because `collects_usages` is exactly what puts this walk on this path, so the work
+    // is real and nothing priced it. al8n/smear#198's eighteenth round.
+    //
+    // Not an over-charge, and round 17's lesson does not reach it: `Θ(O · D)` of work charged
+    // `Θ(O · D)` units is honest. An empty list charges nothing, which is the `n = 0` half.
     if !self.resolves_positions(local) {
+      if let Some(first) = directives.first() {
+        self.spend(
+          count_units(directives.len()),
+          *first.directive_name().as_span(),
+        )?;
+      }
       for directive in directives {
         self.check_arguments(
           directive.directive_arguments(),
@@ -235,10 +253,15 @@ where
       return ControlFlow::Continue(());
     }
 
-    // Descent without resolution, for the reason `check_directives` states. `None` as the expected
-    // type is exactly right rather than a shortcut: it is what the position resolves to when
-    // nothing resolves it, and `check_variable_usage` already answers 5.8.3 and 5.8.4 without one.
+    // Descent without resolution, for the reason `check_directives` states — including the charge on
+    // the iteration, which is this list's own length and priced here for the same reason and by the
+    // same unit. `None` as the expected type is exactly right rather than a shortcut: it is what
+    // the position resolves to when nothing resolves it, and `check_variable_usage` already answers
+    // 5.8.3 and 5.8.4 without one.
     if !self.resolves_positions(local) {
+      if !arguments.is_empty() {
+        self.spend(count_units(arguments.len()), blame)?;
+      }
       for argument in arguments {
         self.walk_value(argument.argument_value(), None, ValueLocation::PLAIN, check)?;
       }

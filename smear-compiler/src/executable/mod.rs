@@ -156,13 +156,13 @@
 //! priced wrongly nor allocated. A repeat is introduced because some reader needs the second pass,
 //! and the question is whether it is gated on that reader or on the family the reader belongs to.
 //!
-//! | traversal | repeats over | the reader | gate |
-//! |---|---|---|---|
-//! | a spread's fragment body | operations | operation-local variable usages | [`collects_usages`] — **was ungated** |
-//! | `begin_fragment`'s directives | operations | the same usages, on the definition's own directives | `reaches_directives`, which reduces to `descends_for_usages` |
-//! | [`Validator::check_subscription_roots`] | subscription operations | 5.2.4.1's collection, which *is* per operation | `SingleRootField` |
-//! | draft 5.3.2's expansion | operations, then unreached fragments | the merge engine | [`merges`], and its memo answers a repeated expansion from the first one |
-//! | [`Validator::walk_unreached_fragments`] | nothing — once per unchecked fragment | definition-local rules | the `checked` bit, which the entry sets |
+//! | traversal | repeats over | the reader | gate | the iteration's own charge |
+//! |---|---|---|---|---|
+//! | a spread's fragment body | operations | operation-local variable usages | [`collects_usages`] — **was ungated** | one unit at the top of `walk_selections` |
+//! | `begin_fragment`'s directives | operations | the same usages, on the definition's own directives | `reaches_directives`, which reduces to `descends_for_usages` | one per directive — **was nothing** |
+//! | [`Validator::check_subscription_roots`] | subscription operations | 5.2.4.1's collection, which *is* per operation | `SingleRootField` | one unit at the top of its walk |
+//! | draft 5.3.2's expansion | operations, then unreached fragments | the merge engine | [`merges`], and its memo answers a repeated expansion from the first one | `fields + kids` per set, one per queued set |
+//! | [`Validator::walk_unreached_fragments`] | nothing — once per unchecked fragment | definition-local rules | the `checked` bit, which the entry sets | prepaid: prep charges a unit a fragment |
 //!
 //! The first row is al8n/smear#198's seventeenth round. The eighth round made a fragment's body
 //! walk repeat per operation, which was the right repair for the reader that needed it: a fragment
@@ -181,6 +181,42 @@
 //!
 //! **A repeat must be gated on the reader it was introduced for**, in the same place and by the
 //! same predicate — never on the family that reader belongs to, and never not at all.
+
+//! # The fifth crossing: is the repeat's own iteration priced?
+//!
+//! The column above is al8n/smear#198's eighteenth round, and it is the question the traversal list
+//! did not ask. `begin_fragment`'s directive list reached `check_directives`' **descent-only** arm —
+//! the path taken when the only reason to be here is to find variable leaves — and that arm walked
+//! the whole list with no charge at all. `check_arguments` had the identical arm and the identical
+//! gap. `O` operations over one fragment's `D` bare directives ran `Θ(O · D)` while the ledger saw
+//! only the surrounding constant, and here the repeat is *correct*: `collects_usages` is what puts
+//! the walk on that path, so the work is real and nothing priced it. A bypass, not an over-charge.
+//!
+//! The shape it came from is worth naming, because it is how a repair makes one: the seventh round
+//! removed the **name** charge from those arms and was right to — nothing there reads a spelling,
+//! so pricing one refuses a document for bytes nobody looks at. The charge on the **iteration**
+//! went with it, and that was never part of the finding. *A charge removed as an over-charge takes
+//! the iteration's price with it unless the iteration is charged separately.*
+//!
+//! So the inventory this time is over **loops**: every one in this module and in `values.rs` and
+//! `selections.rs` whose trip count a caller decides. There are thirty-four, and after the two
+//! repairs each is in one of four states.
+//!
+//! - **Charged per iteration**, at the top and before the step: both selection walks, the
+//!   subscription walk, the value walk's depth, 5.5.2.3's per-word intersection,
+//!   `conditional_directive`'s per-directive unit, the variable-definition loop, and both
+//!   descent-only arms — which now charge the list once, in front of it, in `count_units`.
+//! - **Prepaid over the same population**: everything the prep sweep sized — the fragment index and
+//!   its grouping, the operation loops, the cycle and reachability walks, `walk_unreached_fragments`
+//!   — plus the uniqueness scans, which run over a `keys` range no longer than a list `spend_names`
+//!   already paid for, and 5.8.4's unused report, whose population the variable index charged a
+//!   unit at a time because `AllVariablesUsed` is what guarantees the index was built.
+//! - **Bounded by a constant the document cannot move**: `pack_type`'s wrapper loop, at
+//!   `MAX_WRAPPERS`.
+//! - **Bounded at `n <= 1`**: the two key-pushing loops whose prepayment is gated on `len > 1` —
+//!   the variable index and 5.6.3's — where the ungated case runs at most one iteration. That gate
+//!   is the eleventh round's singleton repair, and this is the check that it did not open the same
+//!   hole one dimension down.
 //! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
 //!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
 //!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a
