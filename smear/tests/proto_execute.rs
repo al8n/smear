@@ -6148,18 +6148,27 @@ fn request_error_result(
 /// than against a transcribed string: the wording is prose that may be improved, and what has to
 /// hold is that the entry is this error's and not a neighbour's.
 ///
-/// **Ten of `StartError`'s eleven variants, and the eleventh is unreachable from here rather than
-/// omitted.** `NoQueryRoot` needs a schema with no query root, and `Schema::build` refuses one —
+/// **Eleven of `StartError`'s twelve variants, and the twelfth is unreachable from here rather
+/// than omitted.** `NoQueryRoot` needs a schema with no query root, and `Schema::build` refuses one —
 /// `MissingQueryRootOperationType`, observed — so there is no built `Schema` that can produce it
 /// and no `Executor` to raise it. That is what `StartError`'s own header means by `start` being
 /// total over the schemas it is handed: the variant exists for a schema representation this crate
 /// does not construct, not for a request a client can send.
 ///
-/// The four draft §6.2.3.1 rows are the ones a reader should check against the enum first, because
+/// The five draft §6.2.3.1 rows are the ones a reader should check against the enum first, because
 /// they are the newest and because three of them are refusals of a *document* draft §5.2.3.1 would
 /// also have refused — reachable here only because `start` is total over what it is handed. The
 /// fourth, `SourceFieldArguments`, is reachable with a validated document: which variables a
 /// request supplies is not a property §5 can see.
+///
+/// **The fifth is the same door telling the truth about who is at fault.** A subscription that is
+/// valid in every way, and whose written arguments simply met `max_selection_visits`, used to be
+/// reported as `SourceFieldArguments` — "the source field has an argument the request does not
+/// satisfy" — because `coerce_arguments` answered a `bool` and the reset discarded the row that
+/// knew better. `SourceFieldArgumentBudget` is that case, carrying the ceiling, and the pair of
+/// rows below is the evidence they are told apart: the same schema and the same document, refused
+/// once for a variable the request did not supply and once for a budget of eight, which is the one
+/// value between the collection refusal at seven and the accepted subscription at nine.
 ///
 /// `OperationLookupRefused` is draft §6.1's own walk meeting `max_selection_visits`, which is the
 /// row al8n/smear#144 added: the lookup is charged per definition it reads, so a ceiling below the
@@ -6237,6 +6246,20 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
       None,
       Limits::default(),
       StartError::SourceFieldArguments,
+    ),
+    (
+      chat,
+      // The same field, written the same way, and nothing about it unsatisfied: draft §6.4.1's
+      // charge for the bytes of `roomId` is what has no room. Seven refuses the collection above
+      // it and nine serves the subscription, so this window is one unit wide and it is the whole
+      // distinction — a resource refusal that used to arrive as a specification failure.
+      "subscription { newMessage(roomId: \"1\") }",
+      None,
+      Limits {
+        max_selection_visits: NonZeroU32::new(8).expect("eight is not zero"),
+        ..Limits::default()
+      },
+      StartError::SourceFieldArgumentBudget { limit: 8 },
     ),
     (
       both,

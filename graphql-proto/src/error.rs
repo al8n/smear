@@ -129,9 +129,12 @@ pub(super) enum Raw {
   ///
   /// Draft §6.4.1 step 5 iterates every argument the *schema* declares and asks, for each, whether
   /// the request supplied it — so the scan is `declared × written` name comparisons at every
-  /// position. `declared` is the service's own design-time number and `written` is the caller's,
-  /// and only the caller's is charged: that makes the total a bounded multiple of the ledger rather
-  /// than a product with a free factor in it. al8n/smear#198.
+  /// position. The two factors belong to different parties and are bounded in different places:
+  /// `written` is the caller's and is charged against this ceiling, which is what raises this; and
+  /// `declared` is the deployment's, bounded at schema build by
+  /// [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than billed to a request
+  /// that did not choose it. Charging `written` alone was published as bounding the product, and
+  /// it does not — the product is zero at zero written and the scan is not. al8n/smear#198.
   ArgumentBudget {
     parent: TypeId,
     field: Sym,

@@ -33,7 +33,8 @@ mod ty;
 pub use location::{DirectiveLocation, DirectiveLocations};
 pub use name::{MAX_SYMBOLS, NameIndex, Range32, Sym, is_name, is_reserved};
 pub use table::{
-  DirectiveDef, FieldDef, InputValueDef, RootOperation, TypeDef, TypeFlags, TypeRef,
+  DirectiveDef, FieldDef, InputValueDef, MAX_FIELD_ARGUMENTS, RootOperation, TypeDef, TypeFlags,
+  TypeRef,
 };
 pub use ty::{DefaultKind, MAX_WRAPPERS, PackedType, TypeId, TypeKind};
 

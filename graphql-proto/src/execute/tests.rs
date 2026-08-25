@@ -16,7 +16,7 @@ use smear_parser::{
   },
   lexer::tokora::{Parse as _, Parser},
 };
-use smear_schema::Schema;
+use smear_schema::{MAX_FIELD_ARGUMENTS, Schema};
 
 use crate::{Extensions, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError, Values};
 
@@ -4128,10 +4128,131 @@ fn the_written_arguments_are_charged_and_the_declared_ones_are_not() {
   );
 
   // And the schema's own width does not. A caller whose document is unchanged pays the same
-  // whether the field declares four arguments or thirty-two.
+  // whether the field declares four arguments or thirty-two. That is the *design* rather than a
+  // gap, and it is only a design because the other factor is bounded elsewhere — see
+  // `the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger`, which is the half this
+  // case cannot see.
   let (narrow, broad) = (visits(4, 0, 8), visits(32, 0, 8));
   assert_eq!(
     narrow, broad,
     "the schema's declared-argument count reached the request's ledger"
+  );
+}
+
+/// Draft §6.4.1's scan is `positions × declared`, and its two factors are bounded in two places.
+///
+/// # The hole this closes, and why the ledger could not see it
+///
+/// `the_written_arguments_are_charged_and_the_declared_ones_are_not` pins that a request writing
+/// the same arguments pays the same whatever the schema declares, and the comment that shipped
+/// beside the charge said the remainder was bounded anyway, "because the total comparison count is
+/// now `declared × (charged units)`". **That product is zero when the request writes no arguments,
+/// and the work is not.** A small selection beneath a large resolved list runs the declared-argument
+/// loop once per element for nothing: `{ bulk { f } }` over a driver list of 4,096 elements
+/// measured **20,484 units at every one** of declared = 1, 4, 16, 64, 256, 1,024 and 4,096 — one
+/// ledger reading across a 106× spread in wall time, 431 µs to 45.7 ms. An exemption argued in the
+/// "is it bounded" column whose evidence vanishes at an endpoint is not an exemption.
+///
+/// # Which of the two repairs was taken, and what decided it
+///
+/// Charging a unit per declared iteration puts the charge in the work's own dimension, and makes
+/// the *request* pay for the *service's* design-time width: measured against the shipped defaults,
+/// `2^20` positions at ~2.5 units each leaves room for about **thirteen** declared arguments before
+/// a full-occupancy response is refused, and public schemas write ten-argument fields. Keeping it
+/// non-refusing would mean `max_selection_visits` around `2^27` — an eightfold loosening of the
+/// ceiling whose job is bounding constructed hash pile-ups — or `max_response_slots` down near
+/// `2^18`. Both pay for a schema-side quantity out of a client-side budget.
+///
+/// So the deployment's factor is bounded where the deployment writes it, once, at schema build.
+/// The request's ledger keeps its meaning exactly, and the product closes because the *other*
+/// factor is metered: positions cost this same ceiling on the way in — five units per element,
+/// exactly linear, the third assertion below — and `max_response_slots` refuses past `2^20` of
+/// them. What would reverse the choice is a position that costs nothing: if one could be created
+/// without spending a ceiling, a schema-side constant would leave `unbounded × 64` and only a
+/// charge in this ledger would close it.
+///
+/// # The differential
+///
+/// The first two assertions pass at `6c06ba6` as well — they are the shape of the hole, not the
+/// repair. The last two are the repair: at `6c06ba6` a field of any width builds, so a fixture that
+/// performs `positions × declared` work for zero units can be written at any `declared` a test
+/// cares to type. It cannot any more.
+#[test]
+fn the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger() {
+  fn sdl(declared: usize) -> String {
+    let mut sdl = String::from("type Query { bulk: [Cell] }\ntype Cell { f(");
+    for index in 0..declared {
+      sdl.push_str(&std::format!("a{index}: String "));
+    }
+    sdl.push_str("): String }\n");
+    sdl
+  }
+
+  fn build(sdl: &str) -> Result<Schema, smear_schema::SchemaErrors> {
+    let document = Parser::with_parser::<
+      GraphqlLexer<'_, str>,
+      TypeSystemDocument<&str>,
+      GraphqlErrors<&str>,
+      _,
+      GraphQL,
+    >(type_system_document)
+    .parse_str(sdl)
+    .expect("the SDL parses");
+    Schema::build(&document)
+  }
+
+  /// One `{ bulk { f } }` over a driver list of `elements`, with no argument written anywhere.
+  fn visits(declared: usize, elements: usize) -> u32 {
+    let (schema, document) = compile_against(&sdl(declared), "{ bulk { f } }");
+    let mut space = Space;
+    let mut executor = Executor::new(&schema, &document);
+    executor
+      .start(&mut space, None, Value::Obj)
+      .expect("the operation resolves");
+    while let Some(request) = executor.poll_resolve(&mut space) {
+      let id = request.id();
+      let value = if request.name() == "bulk" {
+        Value::List(elements)
+      } else {
+        Value::Text
+      };
+      executor.handle_resolved(&mut space, id, value);
+    }
+    executor.charges().visits
+  }
+
+  const ELEMENTS: usize = 512;
+  const WIDEST: usize = MAX_FIELD_ARGUMENTS as usize;
+
+  // The hole. Identical ledger, `ELEMENTS × WIDEST` iterations apart.
+  let (one, widest) = (visits(1, ELEMENTS), visits(WIDEST, ELEMENTS));
+  assert_eq!(
+    one, widest,
+    "a request writing no arguments is charged for the schema's width"
+  );
+
+  // And the *other* factor is metered, which is what makes a schema-side constant enough. Read
+  // across three sizes rather than against zero: an empty list interns no response key for `f`, so
+  // the zero point sits one unit off the line every non-empty size is on.
+  let (half, doubled) = (visits(1, ELEMENTS / 2), visits(1, ELEMENTS * 2));
+  assert_eq!(
+    doubled - one,
+    (one - half) * 2,
+    "positions are not charged in proportion to their number, so bounding the declared factor \
+     alone would leave `unbounded × 64`"
+  );
+  assert!(
+    one > half,
+    "positions cost this ceiling nothing at all, which is the one measurement that would make a \
+     schema-side constant the wrong repair"
+  );
+
+  // The differential. The widest field a schema may declare builds; one argument more does not.
+  build(&sdl(WIDEST)).expect("a field at the ceiling is a schema");
+  let refused = build(&sdl(WIDEST + 1)).expect_err("a field past the ceiling is not a schema");
+  assert!(
+    refused.contains_kind(smear_schema::SchemaErrorKind::TooManyFieldArguments),
+    "a field past `MAX_FIELD_ARGUMENTS` was refused for some other reason: {:?}",
+    refused.kinds()
   );
 }

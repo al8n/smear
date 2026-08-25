@@ -163,6 +163,48 @@ impl TypeDef {
   }
 }
 
+/// How many arguments one field definition may declare.
+///
+/// # It is a bound on a product execution cannot close
+///
+/// Not a rule of the specification — draft §3.6.1 sets no ceiling on an
+/// `ArgumentsDefinition` — and not a packing limit either, which is what separates it from
+/// [`MAX_WRAPPERS`](super::MAX_WRAPPERS): nothing in the representation stops the group being
+/// longer. It is here because draft §6.4.1 `CoerceArgumentValues` iterates **every** declared
+/// argument at **every runtime position** of the field, and only one of those two factors can be
+/// bounded at execution time.
+///
+/// The position count is the driver's, and an executor meters it: `graphql-proto` refuses past
+/// `max_response_slots` positions, and every position is charged against `max_selection_visits`
+/// on its way in. The declared count is the *deployment's*, written once in SDL, and charging a
+/// request for it makes the caller pay for the service's design-time width — measured against
+/// that crate's shipped defaults, one unit per declared argument per position refuses a
+/// full-occupancy response at about **thirteen** declared arguments, which refuses ordinary
+/// input. So the factor that belongs to the deployment is bounded where the deployment states it,
+/// once, and from then on the scan is `positions × MAX_FIELD_ARGUMENTS` with both factors bounded.
+///
+/// # Why sixty-four, and what a schema past it does instead
+///
+/// Six times the widest field in the public schemas this was checked against — GitHub's
+/// `User.repositories` declares ten, Shopify's `products` eight, PostGraphile's generated
+/// connections eight — and it holds the worst case to a small constant multiple of what the
+/// response already costs: measured, one declared-argument iteration is about 2.7 ns against
+/// about 55 ns for the position itself, so sixty-four of them is roughly three times the
+/// position's own cost and an unbounded group is unbounded.
+///
+/// A schema that genuinely wants more says it the way GraphQL already asks for it: one argument
+/// of an input object type. An executor hands an input object literal to the driver whole — draft
+/// §6.4.1 step 5.j's coercion of a literal's *contents* is the driver's — so an input object's
+/// fields are never iterated per position, and no API surface is lost by moving there.
+///
+/// The refusal is `SchemaErrorKind::TooManyFieldArguments` — named rather than linked, because
+/// this module is also compiled standalone by `smear-noatomic`, which has no `build` feature and
+/// so no error vocabulary to resolve the link against. It is raised for interface fields as well
+/// as object fields. Draft §3.7 makes an interface
+/// field's argument list a lower bound on every implementing field's, so an interface field past
+/// this ceiling is one no object type could implement without being refused itself.
+pub const MAX_FIELD_ARGUMENTS: u32 = 64;
+
 /// A field definition on an object or interface type.
 #[derive(Debug, Clone, Copy)]
 pub struct FieldDef {

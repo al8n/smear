@@ -47,8 +47,8 @@ use super::{
   literal::{BuiltInScalar, LiteralShape},
   repr::{
     DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
-    MAX_SYMBOLS, NameIndex, PackedType, Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags,
-    TypeId, TypeKind, is_name, is_reserved,
+    MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, NameIndex, PackedType, Range32, RootOperation, Schema, Sym,
+    TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_reserved,
   },
 };
 
@@ -1823,6 +1823,22 @@ impl SchemaBuilder {
           path,
           where_,
         );
+      }
+
+      // Draft §6.4.1 `CoerceArgumentValues` iterates this whole list at every runtime position of
+      // the field, so `positions × declared` is a product an executor meets once per response. It
+      // can charge the positions — they are the driver's — and it cannot charge `declared` without
+      // billing a request for the service's own design-time width. So the deployment's factor is
+      // bounded where the deployment writes it. See `MAX_FIELD_ARGUMENTS`. al8n/smear#198.
+      //
+      // Before the argument walk below rather than after: a field a thousand arguments wide would
+      // otherwise report a thousand argument diagnostics ahead of the one that says why the field
+      // itself is refused.
+      let declared = self.types[index].fields[field].args.len();
+      if declared > MAX_FIELD_ARGUMENTS as usize {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(SchemaErrorKind::TooManyFieldArguments, &name, owner, at);
       }
 
       let built_in = self.types[index].built_in;
