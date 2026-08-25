@@ -3284,27 +3284,52 @@ impl SchemaBuilder {
   /// `a_deep_defaulted_input_chain_does_not_recurse` is twenty thousand links long and takes
   /// **41.5 s** with the skip removed against **under one second** with it — measured, not
   /// estimated. It is the standing guard on this and on the iterative shape both.
+  ///
+  /// # Over the split, and the factor here is not a count of fields
+  ///
+  /// Every literal this walk descends into belongs to a field it is *not* reporting on, and the
+  /// shape that stood here bought its way past `&mut self` with `clone` three times over: the
+  /// field's own default, the entry a map node supplies for a declared field, and the work entry
+  /// again as it is consumed. Each is a deep copy of a [`RawValue`] tree, which the document
+  /// alone bounds — the sentence [`SchemaBuilder::validate_interface_implementations`] was
+  /// repaired under, and this is the rest of the set it covers.
+  ///
+  /// What multiplies it here is not a field count. A level's work list holds one entry per (map
+  /// node, field) pair, so a literal unwrapping to `M` map nodes asks each of the target's fields
+  /// `M` times and the copies are made per ask, not per field. `input Outer { o: [Mid] = [{} {}
+  /// …] }` in front of a single `Mid.m` whose own default is one large literal is therefore
+  /// `Θ(M × literal)`: one field, one default, on a document `Schema::build` **accepts**. Fitted
+  /// at 1.99 in the exponent over 1k–64k and **29.6 s** at the top of that ladder, against 1.01
+  /// and **5.6 ms** with the work list holding `&RawValue`. No ceiling stands in front of either
+  /// factor, so no ceiling could have closed it.
+  ///
+  /// The walk therefore reads through [`Model`] and reports through the error list, borrowed
+  /// apart. The frames, their order, the spans and the settling are the ones that were here;
+  /// only the ownership moved. al8n/smear#198.
   fn validate_input_object_default_cycles(&mut self) {
     /// One level of `InputObjectDefaultValueHasCycle`: an input object, and the work its
     /// `defaultValue` produced.
-    struct Frame {
+    struct Frame<'a> {
       /// The field of the enclosing object whose *own* default this frame descended into, if that
       /// is why it exists. Popped off the path when the frame retires.
       pushed: Option<usize>,
       /// `(field index in `object`, the value the caller supplied for it)`, one entry per
       /// (map node, field) pair — which is exactly the draft's "for each field in inputObject",
       /// run once per map node the level's value unwraps to.
-      work: Vec<(usize, Option<RawValue>)>,
+      ///
+      /// Borrowed out of the model rather than owned; the header says why.
+      work: Vec<(usize, Option<&'a RawValue>)>,
       cursor: usize,
       /// The object whose fields `work` indexes, so a frame can name the field it blames.
       object: usize,
     }
 
-    let count = self.types.len();
+    let (model, errors) = self.split();
+    let count = model.types.len();
     // A dense id per input field, so path membership is a bit rather than a search.
     let mut field_base: Vec<usize> = vec![0; count + 1];
     for index in 0..count {
-      field_base[index + 1] = field_base[index] + self.types[index].input_fields.len();
+      field_base[index + 1] = field_base[index] + model.types[index].input_fields.len();
     }
     let total_fields = field_base[count];
 
@@ -3314,14 +3339,14 @@ impl SchemaBuilder {
     let mut on_path = vec![false; total_fields];
 
     for start in 0..count {
-      if self.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
+      if model.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
         continue;
       }
       // The draft's top-level call: `defaultValue` is an empty map, so every field is asked, and
       // none of them is supplied a value.
       let mut stack = vec![Frame {
         pushed: None,
-        work: (0..self.types[start].input_fields.len())
+        work: (0..model.types[start].input_fields.len())
           .map(|field| (field, None))
           .collect(),
         cursor: 0,
@@ -3330,7 +3355,7 @@ impl SchemaBuilder {
 
       let mut found: Option<(usize, usize)> = None;
       while let Some(frame) = stack.last_mut() {
-        let Some((field_index, supplied)) = frame.work.get(frame.cursor).cloned() else {
+        let Some(&(field_index, supplied)) = frame.work.get(frame.cursor) else {
           if let Some(id) = frame.pushed {
             on_path[id] = false;
           }
@@ -3343,13 +3368,13 @@ impl SchemaBuilder {
 
         // `InputFieldDefaultValueHasCycle`. A field whose named type is not an input object can
         // hold no cycle, whatever its default says.
-        let field = &self.types[object].input_fields[field_index];
+        let field = &model.types[object].input_fields[field_index];
         let base = field.ty.packed.base_id();
         if base == UNRESOLVED {
           continue;
         }
         let target = base.get() as usize;
-        if self.types[target].kind != TypeKind::InputObject {
+        if model.types[target].kind != TypeKind::InputObject {
           continue;
         }
 
@@ -3358,7 +3383,7 @@ impl SchemaBuilder {
           // and `visited` does not grow.
           Some(value) => (value, None),
           None => {
-            let Some(default) = field.default_value.clone() else {
+            let Some(default) = field.default_value.as_ref() else {
               continue;
             };
             let id = field_base[object] + field_index;
@@ -3371,16 +3396,16 @@ impl SchemaBuilder {
           }
         };
 
-        let declared = &self.types[target].input_fields;
+        let declared = &model.types[target].input_fields;
         let mut maps: Vec<&[RawObjectField]> = Vec::new();
-        map_nodes(&descend_into, &mut maps);
+        map_nodes(descend_into, &mut maps);
         let mut work = Vec::new();
         for map in &maps {
           for (index, declared_field) in declared.iter().enumerate() {
             let supplied = map
               .iter()
               .find(|entry| entry.name.sym == declared_field.name.sym)
-              .map(|entry| entry.value.clone());
+              .map(|entry| &entry.value);
             work.push((index, supplied));
           }
         }
@@ -3409,10 +3434,11 @@ impl SchemaBuilder {
         implicated[frame.object] = true;
       }
       implicated[object] = true;
-      let owner = self.text(self.types[object].name.sym).to_owned();
-      let at = self.types[object].input_fields[field_index].name;
-      let name = self.text(at.sym).to_owned();
-      self.push_owned(
+      let owner = model.text(model.types[object].name.sym).to_owned();
+      let at = model.types[object].input_fields[field_index].name;
+      let name = model.text(at.sym).to_owned();
+      push_owned(
+        errors,
         SchemaErrorKind::InputObjectDefaultValueCycle,
         &name,
         owner,
