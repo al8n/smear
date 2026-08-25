@@ -1467,13 +1467,47 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
     "{holes}"
   );
 
-  // The extent pair has no error channel, so its ceiling is a **stand-in** rather than a refusal:
-  // past it the node's own range covers what its token extent would have. What is pinned is that
-  // it answers at all.
-  assert!(
-    node_extent(node, |kind| matches!(kind, K::Space | K::Comment)).is_none()
-      || node_extent(node, |_| false).is_some(),
-    "`node_extent` did not terminate on a tree past the ceiling"
+  // The extent pair refuses too. It used to manufacture the node's own range instead, recorded as
+  // "a superset — imprecise rather than wrong": but these functions promise `None` when a run holds
+  // no non-trivia token, and this tree holds none at all, so `Some(..)` was a different answer to a
+  // different question rather than a wider one.
+  let extent = node_extent(node, |kind| matches!(kind, K::Space | K::Comment))
+    .expect_err("`node_extent` manufactured an extent for a tree past the ceiling");
+  assert_eq!(
+    *extent.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{extent}"
+  );
+  // And the shallow twin still answers exactly: an all-trivia run is `None`, not a range.
+  let mut shallow = Tree::new();
+  shallow.open(K::Root);
+  shallow.token(K::Space, " ").token(K::Comment, "# c");
+  shallow.close();
+  let shallow = shallow.finish();
+  assert_eq!(
+    node_extent(
+      smear::parser::lossless::project::Node::of(&shallow),
+      |kind| matches!(kind, K::Space | K::Comment)
+    ),
+    Ok(None),
+    "an all-trivia run has no token extent"
+  );
+
+  // **The two refusals have different names all the way out.** A pair whose bytes agree exactly —
+  // this tree holds no token, so its text is `""` — used to be reported as a source mismatch purely
+  // because of its shape, which tells a caller to re-parse the one thing that is not wrong. The
+  // third collapse of this class on al8n/smear#198, after an arena refusal wearing the budget's
+  // `None` and a stale pair wearing the budget's refusal.
+  use smear::parser::graphql::lossless::Unverified;
+  assert_ne!(
+    Unverified::SourceMismatch.to_string(),
+    Unverified::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    }
+    .to_string(),
+    "the two reasons render as one sentence"
   );
 
   // The ceiling is not in the way of anything real: the deepest green tree in this repository's

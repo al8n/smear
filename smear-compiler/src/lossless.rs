@@ -89,7 +89,10 @@ use smear_parser::graphql::lossless::{
   Parse, project_executable_document_verified, project_type_system_document_recovered,
 };
 
-pub use smear_parser::{graphql::lossless::Verified, lossless::project::Recovery};
+pub use smear_parser::{
+  graphql::lossless::{Unverified, Verified},
+  lossless::project::Recovery,
+};
 
 use tokora::SimpleSpan;
 
@@ -413,8 +416,14 @@ where
   // That is a property of the arguments rather than of the ordering, so no rearrangement of this
   // function satisfies both — which is why [`Verified`] exists rather than the check simply having
   // been moved again. This signature chooses the first, and says so. al8n/smear#198.
-  let pair = Verified::new(parse, source).map_err(|_| LosslessInvalid {
-    invalid: Invalid::unexamined(),
+  let pair = Verified::new(parse, source).map_err(|refusal| LosslessInvalid {
+    // The two reasons a pair can be refused have different remedies — re-parse the source, or stop
+    // handing this door a tree nothing will descend — so they arrive under different names. The
+    // third time on al8n/smear#198 that a channel carrying one name met two abandonments.
+    invalid: match refusal {
+      Unverified::TooDeep { .. } => Invalid::too_deep(),
+      _ => Invalid::unexamined(),
+    },
     recovery: None,
   })?;
   validate_executable_lossless_verified_with(schema, pair, scratch, budget, rules, sink)
@@ -526,6 +535,13 @@ pub enum LosslessSchemaErrors {
   /// otherwise read here — "no `Query` root", and so on — would be true of the empty document this
   /// door declined to build from, and false of anything the caller wrote.
   SourceMismatch,
+  /// The `parse` nests deeper than a projection will descend, so nothing was projected and
+  /// [`Schema::build`](super::Schema::build) was never asked.
+  ///
+  /// Distinct from [`LosslessSchemaErrors::SourceMismatch`] because the remedies are: the bytes may
+  /// agree exactly here, and telling a caller to re-parse them names the one thing that is not
+  /// wrong. al8n/smear#198.
+  TooDeep,
   /// The projected document is not a schema, exactly as
   /// [`Schema::build`](super::Schema::build) reports it.
   Refused {
@@ -557,6 +573,7 @@ impl LosslessSchemaErrors {
   pub const fn refusal(&self) -> Option<Refusal> {
     match self {
       Self::SourceMismatch => Some(Refusal::SourceMismatch),
+      Self::TooDeep => Some(Refusal::TooDeep),
       _ => None,
     }
   }
@@ -606,6 +623,9 @@ impl core::fmt::Display for LosslessSchemaErrors {
     match self {
       Self::SourceMismatch => {
         f.write_str("the parse and the source are not the same document, so nothing was built")
+      }
+      Self::TooDeep => {
+        f.write_str("the parse nests deeper than a projection will descend, so nothing was built")
       }
       Self::Refused { errors, recovery } => {
         core::fmt::Display::fmt(errors, f)?;
@@ -714,8 +734,11 @@ pub fn validate_schema_lossless(
   // Neither door spells the check itself any more: the twelfth round asked for it "in the shared
   // recovering-projection API" precisely so a door cannot be written without it, and the
   // fourteenth showed a caller that has no door at all.
-  let (document, recovery) = project_type_system_document_recovered(parse, source)
-    .map_err(|_| LosslessSchemaErrors::SourceMismatch)?;
+  let (document, recovery) =
+    project_type_system_document_recovered(parse, source).map_err(|refusal| match refusal {
+      Unverified::TooDeep { .. } => LosslessSchemaErrors::TooDeep,
+      _ => LosslessSchemaErrors::SourceMismatch,
+    })?;
   match Schema::build(&document) {
     Ok(schema) => Ok((schema, recovery)),
     Err(errors) => Err(LosslessSchemaErrors::Refused { errors, recovery }),

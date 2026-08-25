@@ -501,6 +501,13 @@ pub enum Refusal {
   /// [`LosslessInvalid::recovery`](super::LosslessInvalid::recovery) is always `None`. Not a
   /// resource problem, which is why it is not [`Refusal::Budget`].
   SourceMismatch,
+  /// The lossless door was handed a parse that nests deeper than a projection will descend.
+  ///
+  /// Nothing about the **bytes** is wrong — they may agree exactly — so this is not
+  /// [`Refusal::SourceMismatch`], and nothing about the *budget* is either: no ceiling a caller
+  /// can raise admits it, because what it bounds is native stack frames. The one abandonment on
+  /// this list whose remedy is neither "re-parse" nor "raise a limit". al8n/smear#198.
+  TooDeep,
 }
 
 impl Invalid {
@@ -612,6 +619,15 @@ impl Invalid {
   /// separates them: a `parse` and a `source` that disagree are not a resource problem, so this
   /// reports `false` there and zero emitted. Nothing was validated either way, and a caller who
   /// reads only the `Result` learns that from the `Err` alone.
+  pub(crate) const fn too_deep() -> Self {
+    Self {
+      emitted: 0,
+      stopped: false,
+      refusal: Some(Refusal::TooDeep),
+    }
+  }
+
+  /// The lossless door's other pre-projection refusal: a pair whose bytes disagree.
   pub(crate) const fn unexamined() -> Self {
     Self {
       emitted: 0,
@@ -631,6 +647,9 @@ impl core::fmt::Display for Invalid {
         Some(Refusal::SourceMismatch) => {
           "the parse and the source are not the same document, so nothing was validated"
         }
+        Some(Refusal::TooDeep) => {
+          "the parse nests deeper than a projection will descend, so nothing was validated"
+        }
         // Unreachable: `validate_charged` answers `Ok` for a zero count with no refusal, so this
         // combination is not constructed. Rendered rather than asserted — a `Display` that panics
         // is a worse answer than a vague one.
@@ -645,6 +664,7 @@ impl core::fmt::Display for Invalid {
     match self.refusal {
       Some(Refusal::Budget) => f.write_str(" (resource budget exceeded)")?,
       Some(Refusal::SourceMismatch) => f.write_str(" (the parse and the source disagree)")?,
+      Some(Refusal::TooDeep) => f.write_str(" (the parse is too deeply nested)")?,
       None => {}
     }
     Ok(())

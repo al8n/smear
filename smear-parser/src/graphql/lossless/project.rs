@@ -125,7 +125,7 @@ use crate::{
     syntactic::definition::classify_location,
   },
   lossless::project::{
-    Recovery, SourceMismatch, node_extent, reject_holes, to_range, to_span, verify_source,
+    Recovery, Unverified, node_extent, reject_holes, to_range, to_span, verify_source,
     verify_source_at, verify_source_counted,
   },
 };
@@ -278,7 +278,7 @@ pub fn project_executable_document<'src>(
 pub fn project_executable_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
-) -> Result<(ExecutableDocument<&'src str>, Recovery), SourceMismatch> {
+) -> Result<(ExecutableDocument<&'src str>, Recovery), Unverified> {
   let (span, definitions, recovery) =
     recovered_top_level(parse, K::ExecutableDocument, recoverable_entry, source)?;
   Ok((ExecutableDocument::new(span, definitions), recovery))
@@ -396,7 +396,7 @@ pub fn project_type_system_document<'src>(
 pub fn project_type_system_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
-) -> Result<(TypeSystemDocument<&'src str>, Recovery), SourceMismatch> {
+) -> Result<(TypeSystemDocument<&'src str>, Recovery), Unverified> {
   let (span, definitions, recovery) = recovered_top_level(
     parse,
     K::TypeSystemDocument,
@@ -479,7 +479,7 @@ impl<'p, 'src> Verified<'p, 'src> {
   /// `O(tokens)` over the borrowed green root and allocation-free — see [`matches_source`], which
   /// is the same comparison. This is where a caller pays for it, and paying for it here is what
   /// lets a validation of this pair be bounded.
-  pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, SourceMismatch> {
+  pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, Unverified> {
     // Counted by the same walk that verifies, so the proof and the price are established together
     // and cost one pass between them. See [`Verified::projection_cost`].
     match verify_source_counted::<SyntaxKind>(parse.green(), source) {
@@ -488,7 +488,9 @@ impl<'p, 'src> Verified<'p, 'src> {
         source,
         elements,
       }),
-      Err(_) => Err(SourceMismatch),
+      // The counted walk distinguishes a byte divergence from a shape refusal; this used to answer
+      // one name for both, so a pair whose bytes agree exactly was reported as stale.
+      Err(refusal) => Err(Unverified::of(&refusal)),
     }
   }
 
@@ -561,7 +563,7 @@ impl<'p, 'src> Verified<'p, 'src> {
 ///
 /// It is public because the check belongs to whoever holds the pair, and a caller may want the
 /// answer without projecting. Nothing has to call it to be safe: the recovering projections make
-/// the check themselves and answer [`SourceMismatch`], so a consumer using them **directly** —
+/// the check themselves and answer [`Unverified`], so a consumer using them **directly** —
 /// with no validator and no door in front — cannot be handed a stale prefix either. al8n/smear#198.
 pub fn matches_source(parse: &Parse, source: &str) -> bool {
   verify_source::<SyntaxKind>(parse.green(), source).is_ok()
@@ -583,25 +585,28 @@ pub fn matches_source(parse: &Parse, source: &str) -> bool {
 /// document node instead of within it, and `"%"` parses to exactly that — `ExecutableDocument@0..0`
 /// with `Gap@0..1` as its sibling. Iterating the document node's children saw nothing, counted
 /// nothing, and answered a complete [`Recovery`] over a document whose every byte had no AST
-/// image. Which is [`SourceMismatch`]'s defect one level down: state derived from a population
+/// image. Which is [`Unverified`]'s defect one level down: state derived from a population
 /// that can be empty while the thing it describes is not.
 ///
-/// Answers the surviving definitions, their span, and the tally — or [`SourceMismatch`],
+/// Answers the surviving definitions, their span, and the tally — or [`Unverified`],
 /// which is none of those three and so is not spelled as a value of any of them.
 fn recovered_top_level<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
   entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
   source: &'src str,
-) -> Result<(SimpleSpan, Vec<T>, Recovery), SourceMismatch> {
+) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
   // Established once, over the whole root, before a single element is projected, and **returned**
   // rather than folded into the tally. See [`matches_source`] for why a per-definition check
-  // cannot see a prefix, and [`SourceMismatch`] for why the answer is not a [`Recovery`]: a
+  // cannot see a prefix, and [`Unverified`] for why the answer is not a [`Recovery`]: a
   // mismatched pair used to project nothing and count every top-level element as skipped, which is
   // a true statement about a parse that *has* elements and an empty one about a parse that does
   // not — and `Recovery::is_complete` answers `true` at zero skipped.
-  if !matches_source(parse, source) {
-    return Err(SourceMismatch);
+  // `verify_source` rather than `matches_source`: the two reasons a pair can be refused are
+  // established by one walk, and the predicate's `bool` is where the distinction used to be thrown
+  // away. al8n/smear#198.
+  if let Err(refusal) = verify_source::<SyntaxKind>(parse.green(), source) {
+    return Err(Unverified::of(&refusal));
   }
   Ok(recovered_top_level_verified(
     parse, root_kind, entry_of, source,
@@ -804,7 +809,19 @@ const fn is_trivia(kind: SyntaxKind) -> bool {
 /// is the node's span. `None` — no non-trivia token anywhere under the node — is a finding rather
 /// than a fallback to the node's own range, which is why [`range`](Self::range) is fallible.
 #[derive(Debug, Clone, Copy, Default)]
-struct Extent(Option<TextRange>);
+struct Extent {
+  /// The cover of every non-trivia token folded in so far.
+  range: Option<TextRange>,
+  /// Set when [`Extent::unread`]'s descent hit
+  /// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH).
+  ///
+  /// The fold has no error channel — it is a `&mut self` accumulator threaded through
+  /// thirty-five call sites — so the refusal is **carried** rather than returned, and
+  /// [`Extent::range`] is where it becomes one. That reader already answers `Out<TextRange>`, so
+  /// nothing above it changes shape; what it must not do is answer a range it cannot establish.
+  /// al8n/smear#198.
+  too_deep: bool,
+}
 
 impl Extent {
   /// Widen to include `piece`.
@@ -814,7 +831,7 @@ impl Extent {
   /// is exactly the class `tests/support/span_extent.rs` exists to catch.
   #[inline]
   fn cover(&mut self, piece: TextRange) {
-    self.0 = Some(match self.0 {
+    self.range = Some(match self.range {
       Some(seen) => seen.cover(piece),
       None => piece,
     });
@@ -834,8 +851,13 @@ impl Extent {
   /// AST, but its bytes are part of the parent's, and nothing else has walked it.
   #[inline]
   fn unread(&mut self, child: Node<'_>) {
-    if let Some(piece) = node_extent(child, is_trivia) {
-      self.cover(piece);
+    match node_extent(child, is_trivia) {
+      Ok(Some(piece)) => self.cover(piece),
+      Ok(None) => {}
+      // The subtree is deeper than a walk will descend, so its extent is not knowable — and an
+      // all-trivia subtree's honest answer is `None`, which makes a manufactured range a different
+      // answer rather than a wider one. Carried to `Extent::range`.
+      Err(_) => self.too_deep = true,
     }
   }
 
@@ -858,12 +880,20 @@ impl Extent {
 
   #[inline]
   const fn get(self) -> Option<TextRange> {
-    self.0
+    self.range
   }
 
   #[inline]
   fn range(self, node: Node<'_>, wanted: &'static str) -> Out<TextRange> {
-    self.0.ok_or_else(|| missing(node, wanted))
+    if self.too_deep {
+      return Err(ProjectError::new(
+        ProjectErrorKind::TooDeep {
+          limit: crate::lossless::project::MAX_GREEN_DEPTH,
+        },
+        to_range(node.text_range()),
+      ));
+    }
+    self.range.ok_or_else(|| missing(node, wanted))
   }
 
   #[inline]

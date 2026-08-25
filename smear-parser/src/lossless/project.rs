@@ -353,15 +353,51 @@ impl fmt::Display for Recovery {
 /// caller cannot read past without deciding what to do about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub struct SourceMismatch;
+pub enum Unverified {
+  /// The parse and the source do not describe one document.
+  ///
+  /// A caller's remedy is to re-parse the source, or to stop holding a stale pair. Nothing about
+  /// the resources it would take is at stake.
+  SourceMismatch,
+  /// The tree nests deeper than a projection will descend.
+  ///
+  /// Nothing about the *bytes* is wrong — they may agree exactly — so reporting this as a mismatch
+  /// tells the caller to fix the one thing that is not the problem. See
+  /// [`MAX_GREEN_DEPTH`].
+  TooDeep {
+    /// The limit that was reached.
+    limit: usize,
+  },
+}
 
-impl fmt::Display for SourceMismatch {
+impl fmt::Display for Unverified {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.write_str("the parse and the source are not the same document")
+    match self {
+      Self::SourceMismatch => f.write_str("the parse and the source are not the same document"),
+      Self::TooDeep { limit } => write!(
+        f,
+        "the parse nests deeper than the {limit} levels a projection will descend"
+      ),
+    }
   }
 }
 
-impl core::error::Error for SourceMismatch {}
+impl Unverified {
+  /// The reason a [`ProjectError`] from a whole-root verification names.
+  ///
+  /// The two are established by one walk and were collapsed into one name at this boundary — the
+  /// third time on al8n/smear#198 that two abandonments with different remedies met a channel that
+  /// could carry one. The others were an arena refusal wearing the budget's `None` and a stale pair
+  /// wearing the budget's refusal; this one is a shape wearing a mismatch.
+  pub(crate) fn of<K>(error: &ProjectError<K>) -> Self {
+    match error.kind() {
+      ProjectErrorKind::TooDeep { limit } => Self::TooDeep { limit: *limit },
+      _ => Self::SourceMismatch,
+    }
+  }
+}
+
+impl core::error::Error for Unverified {}
 
 /// [`TextRange`] as the AST's span type.
 #[inline]
@@ -618,8 +654,8 @@ impl<L> FusedIterator for Children<'_, L> {}
 pub fn node_extent<L: Language>(
   node: Node<'_, L>,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
-) -> Option<TextRange> {
-  extent_of_bounded(node.children(), is_trivia, MAX_GREEN_DEPTH)
+) -> Result<Option<TextRange>, ProjectError<L::Kind>> {
+  extent_of(node.children(), is_trivia)
 }
 
 /// The token extent of a run of elements, descending into every node it contains.
@@ -630,7 +666,7 @@ pub fn node_extent<L: Language>(
 pub fn extent_of<'g, L: Language, I>(
   elements: I,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
-) -> Option<TextRange>
+) -> Result<Option<TextRange>, ProjectError<L::Kind>>
 where
   I: IntoIterator<Item = Element<'g, L>>,
 {
@@ -644,15 +680,21 @@ where
 /// one, which is what a general claim recorded without enumerating its members looks like when the
 /// artifact *is* the enumeration.
 ///
-/// It has no error channel, so the ceiling is not a refusal here: past it the node's own
-/// [`TextRange`] stands in for its token extent. That is a **superset** — an extent is a cover, and
-/// covering the node's trivia as well is imprecise rather than wrong — and it is reachable only on a
-/// tree far deeper than any parser produces. See [`MAX_GREEN_DEPTH`].
+/// # The ceiling is a refusal here, and the first version of it was not
+///
+/// It was a **stand-in**: past the ceiling the node's own [`TextRange`] took the place of its token
+/// extent, recorded as "a superset — imprecise rather than wrong". That reasoning was about the
+/// wrong axis. These functions promise `None` when a run holds **no non-trivia token**, and an
+/// all-trivia subtree past the ceiling then answered `Some` — not a wider range, a different answer
+/// to a different question, on a promise the signature makes explicitly.
+///
+/// An approximate success is worse than a new channel, so the two public forms return
+/// [`ProjectErrorKind::TooDeep`] and say nothing they cannot establish. al8n/smear#198.
 fn extent_of_bounded<'g, L: Language, I>(
   elements: I,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
   left: usize,
-) -> Option<TextRange>
+) -> Result<Option<TextRange>, ProjectError<L::Kind>>
 where
   I: IntoIterator<Item = Element<'g, L>>,
 {
@@ -666,8 +708,15 @@ where
         Some(token.text_range())
       }
       NodeOrToken::Node(node) => match left.checked_sub(1) {
-        Some(left) => extent_of_bounded(node.children(), is_trivia, left),
-        None => Some(node.text_range()),
+        Some(left) => extent_of_bounded(node.children(), is_trivia, left)?,
+        None => {
+          return Err(ProjectError::new(
+            ProjectErrorKind::TooDeep {
+              limit: MAX_GREEN_DEPTH,
+            },
+            to_range(node.text_range()),
+          ));
+        }
       },
     };
     if let Some(piece) = piece {
@@ -680,7 +729,7 @@ where
       });
     }
   }
-  extent
+  Ok(extent)
 }
 
 /// The source text under `token`, checked against the token's own text.
