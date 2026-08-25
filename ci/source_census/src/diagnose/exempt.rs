@@ -502,6 +502,20 @@ pub const EXEMPTIONS: &[Exemption] = &[
              `Code` namespace has to make and cannot make before it exists.",
   },
   Exemption {
+    path: "smear::parser::graphql::lossless::Unverified",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "What a whole-root verification answers, and it is `ProjectError` above with the two \
+             outcomes separated — a stale pair from a tree too deep to descend — so it belongs to \
+             the same family and the same phase E. It also carries strictly LESS than the entry \
+             it is built from: `ProjectError` has a byte range, and this deliberately has none, \
+             because 'these are not the same document' is not a fact about a position in either \
+             of them. `Diagnose::primary` returns a `Location`, so answering the contract here \
+             means inventing one, and phase E is where what a caller-mistake refusal points at \
+             gets decided rather than guessed. Recorded, not accepted.",
+  },
+  Exemption {
     path: "smear::parser::lossless::runner::Diagnostic",
     kind: Kind::Tracked,
     element: None,

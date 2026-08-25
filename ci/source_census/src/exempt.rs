@@ -332,6 +332,48 @@ pub const EXEMPTIONS: &[Exemption] = &[
     reason: LOSSLESS_PROJECTION,
   },
   Exemption {
+    module: "smear::parser::graphql::lossless::project",
+    entry: "Verified::new",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "The proof half of the same door the eight `project*` entries above are the walk half \
+             of, and this parameter is the one they narrow: `Verified` STORES it, and `project` \
+             re-slices what is stored to build a `Document<&'src str>`. So the AST's source type \
+             is this signature's, exactly as `LOSSLESS_PROJECTION` says, and widening it means \
+             widening the projection's output — which is al8n/smear#121's question and not a \
+             change to one parameter. The verification underneath it needs no UTF-8; the door \
+             does, because of what it hands back.",
+  },
+  Exemption {
+    module: "smear::parser::graphql::lossless::project",
+    entry: "matches_source",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "The predicate a caller runs to find out whether `Verified::new` will succeed, over \
+             the same pair and the same comparison, and it borrows nothing back — so unlike the \
+             entry above, nothing in its own signature forces the type. It is recorded rather \
+             than widened because widening it alone would let a caller prove a pair over \
+             `&[u8]` and then be unable to build the `Verified` the proof exists for. It widens \
+             when the door it predicts widens, on al8n/smear#121, and it is stale here the day \
+             that happens.",
+  },
+  Exemption {
+    module: "smear::parser::lossless::project",
+    entry: "verify_source_counted",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "`verify_source` with the element count the same walk already establishes, added by \
+             al8n/smear#198 so a consumer can price a projection by what it will visit instead of \
+             by `source.len()`, which does not bound it. Its comparison is byte-wise like its two \
+             siblings', so the `&str` is not forced here either — and widening this one alone \
+             would buy a caller nothing, because the count exists to price `project`, which takes \
+             `&'src str`. Four shapes of one door check, recorded together, and widened together \
+             when al8n/smear#121 settles where the projection's source type binds.",
+  },
+  Exemption {
     module: "smear::parser::lossless::project",
     entry: "verify_slice",
     param: "source",
@@ -350,10 +392,15 @@ pub const EXEMPTIONS: &[Exemption] = &[
     kind: Kind::Tracked,
     issue: Some(121),
     reason: "The whole-tree form of `verify_slice`, and the one every projection door above \
-             actually calls since al8n/smear#127 hoisted the check out of the per-token path. It \
-             compares `source` against the green tree's own token text, which rowan stores as \
-             `&str`, so it narrows for `verify_slice`'s reason at the door rather than at a \
-             token — and it reaches al8n/smear#121's conclusion by the same route.",
+             actually calls since al8n/smear#127 hoisted the check out of the per-token path. \
+             **Not** for `verify_slice`'s reason, which this entry used to claim: that one \
+             compares two `&str`s and hands a `&'src str` back, while this walks the GREEN tree \
+             and compares `token.text().as_bytes()` against `source.as_bytes()`, so nothing in \
+             its body needs UTF-8 at all. What the `&str` carries is the door's promise — that a \
+             caller who has run this may slice `source` by any range in the tree and land on a \
+             character boundary — which is what the projections downstream do to build an AST \
+             borrowing it. So al8n/smear#121's question here is where the projection's source \
+             type binds, not where rowan's does.",
   },
   Exemption {
     module: "smear::parser::lossless::project",
@@ -362,9 +409,11 @@ pub const EXEMPTIONS: &[Exemption] = &[
     kind: Kind::Tracked,
     issue: Some(121),
     reason: "`verify_source` for a subtree, which the compositional `to_ast` doors and the \
-             recovering door's per-definition check call. Recorded separately because widening \
-             one and not the other would leave half the projection's doors narrow under a table \
-             that had stopped naming them.",
+             recovering door's per-definition check call. Its walk is `verify_source`'s and \
+             compares bytes for the same reason, so it narrows for the same one: the promise the \
+             door makes about slicing, not the comparison it performs. Recorded separately \
+             because widening one and not the other would leave half the projection's doors \
+             narrow under a table that had stopped naming them.",
   },
   // ── §6 execution, the driver's value trait — al8n/smear#139, DECIDED ─────────────────────────
   Exemption {
