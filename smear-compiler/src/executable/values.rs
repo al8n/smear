@@ -581,11 +581,15 @@ where
     }
 
     let Some(expected) = expected else {
-      // Unknown position: descend only to find variable usages.
+      // Unknown position: descend to find variable usages — and ask the one rule that does not
+      // need a position to answer. See `check_object_field_uniqueness`.
       if value.as_list().is_some() {
         return ControlFlow::Continue(Some(level_frame(ValueLevel::List, None, NONE, 0)));
       }
-      if value.as_object().is_some() {
+      if let Some(fields) = value.as_object() {
+        if check {
+          self.check_object_field_uniqueness(fields)?;
+        }
         return ControlFlow::Continue(Some(level_frame(ValueLevel::Object, None, NONE, 0)));
       }
       return ControlFlow::Continue(None);
@@ -690,6 +694,62 @@ where
     }
   }
 
+  /// Draft 5.6.3, over an object literal's own field spellings.
+  ///
+  /// # It needs no resolved position, and it used to be behind one
+  ///
+  /// 5.6.3 compares the names a request **wrote** against each other. It never asks the schema what
+  /// they mean, so an object literal at a position nothing resolved still has the property the rule
+  /// is about — and the walk reached exactly such literals through `visit_value`'s unknown-position
+  /// arm, descended them for variable usages, and never asked. A rule silently not firing, which is
+  /// the direction a budget test cannot see at all.
+  ///
+  /// It is the twin of a carve-out made one round earlier and not enumerated:
+  /// [`reads_argument_positions`](super::reads_argument_positions) excludes
+  /// [`Rule::ArgumentUniqueness`] on precisely this reasoning, and
+  /// [`Rule::InputObjectFieldUniqueness`] is the same sentence about object fields.
+  /// al8n/smear#198's twenty-first round.
+  ///
+  /// The prepayment is for the **sort**, and for nothing else any more: 5.6.4's scan charges each
+  /// spelling as it resolves it. A sort of one field compares nothing — the duplicate scan that
+  /// reads its output starts at `base + 1` — so the charge is paired with a length, which is the
+  /// same `n <= 1` companion every compare-what-was-written rule carries.
+  fn check_object_field_uniqueness<F>(&mut self, fields: &'d [F]) -> ControlFlow<()>
+  where
+    F: ObjectFieldLike<S>,
+  {
+    if !self.on(Rule::InputObjectFieldUniqueness) || fields.len() < 2 {
+      return ControlFlow::Continue(());
+    }
+    self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
+
+    let base = self.scratch.keys.len();
+    for index in 0..fields.len() {
+      self.scratch.keys.push(index as u32);
+    }
+    sort_keys(&mut self.scratch.keys[base..], |index| {
+      name_bytes(fields[index as usize].field_name())
+    });
+    let mut slot = base + 1;
+    while slot < self.scratch.keys.len() {
+      let earlier = self.scratch.keys[slot - 1].min(self.scratch.keys[slot]);
+      let later = self.scratch.keys[slot - 1].max(self.scratch.keys[slot]);
+      if name_bytes(fields[earlier as usize].field_name())
+        == name_bytes(fields[later as usize].field_name())
+      {
+        let repeat = &fields[later as usize];
+        let subject = self.subject_v(repeat.field_name())?;
+        let diagnostic = Diagnostic::new(Rule::InputObjectFieldUniqueness, repeat.field_span())
+          .subject(subject)
+          .related(fields[earlier as usize].field_span());
+        self.emit(diagnostic)?;
+      }
+      slot += 1;
+    }
+    self.scratch.keys.truncate(base);
+    ControlFlow::Continue(())
+  }
+
   /// Draft 5.6.3, 5.6.4 and the OneOf literal rules, at an object level.
   fn check_input_object<V>(
     &mut self,
@@ -701,46 +761,7 @@ where
   where
     V: ValueLike<S>,
   {
-    // Prepaid for 5.6.3's **sort**, and for nothing else any more.
-    //
-    // It was widened to 5.6.4 as well, because that rule walked this same list to size a per-scan
-    // charge and none of that walk was paid for. That fold is gone: 5.6.4's scan now charges each
-    // spelling as it resolves it, so the head prepayment's only remaining reader is the sort — the
-    // "prepayment whose reader has moved" shape, created by the repair that moved it.
-    //
-    // And a sort of one field compares nothing, as the duplicate scan that reads its output starts
-    // at `base + 1`. al8n/smear#198.
-    if self.on(Rule::InputObjectFieldUniqueness) && fields.len() > 1 {
-      self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
-    }
-
-    // 5.6.3 — one value per field name.
-    if self.on(Rule::InputObjectFieldUniqueness) {
-      let base = self.scratch.keys.len();
-      for index in 0..fields.len() {
-        self.scratch.keys.push(index as u32);
-      }
-      sort_keys(&mut self.scratch.keys[base..], |index| {
-        name_bytes(fields[index as usize].field_name())
-      });
-      let mut slot = base + 1;
-      while slot < self.scratch.keys.len() {
-        let earlier = self.scratch.keys[slot - 1].min(self.scratch.keys[slot]);
-        let later = self.scratch.keys[slot - 1].max(self.scratch.keys[slot]);
-        if name_bytes(fields[earlier as usize].field_name())
-          == name_bytes(fields[later as usize].field_name())
-        {
-          let repeat = &fields[later as usize];
-          let subject = self.subject_v(repeat.field_name())?;
-          let diagnostic = Diagnostic::new(Rule::InputObjectFieldUniqueness, repeat.field_span())
-            .subject(subject)
-            .related(fields[earlier as usize].field_span());
-          self.emit(diagnostic)?;
-        }
-        slot += 1;
-      }
-      self.scratch.keys.truncate(base);
-    }
+    self.check_object_field_uniqueness(fields)?;
 
     let definition = *self.schema.type_def(object);
     if definition.is_one_of() {

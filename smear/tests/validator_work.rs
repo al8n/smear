@@ -1174,8 +1174,13 @@ fn a_disabled_coercion_rule_does_not_read_the_literal() {
 /// neither can help. `verify_source` compares lengths first, which is the reason the fail-fast
 /// doors were safe; this door now asks the same question before it prices anything.
 ///
-/// So the mismatch is answered as a mismatch **at every budget**, and the prepayment is measured
-/// where it still exists — on a pair the door will actually project.
+/// The twenty-first round is the other half of that: a length compare answers an unequal pair and
+/// says nothing about an **equal-length** one, so that branch still reached the prepayment and
+/// still got the budget's answer. The whole of `matches_source` runs above the charge now, and the
+/// charge prices only the projection.
+///
+/// So the mismatch is answered as a mismatch **at every budget and at every shape**, and the
+/// prepayment is measured where it still exists — on a pair the door will actually project.
 #[cfg(feature = "rowan")]
 #[test]
 fn the_projection_prepayment_prices_the_pair_it_projects() {
@@ -1212,20 +1217,40 @@ fn the_projection_prepayment_prices_the_pair_it_projects() {
     invalid.expect("a 160 KB parse came back Ok")
   };
 
-  // A large parse beside an empty source, at a budget far too small for either — and at one that
-  // could pay for both. Same answer: not the same document, and not a resource problem.
-  for work in [16, u32::MAX - 1] {
-    let (tripped, recovered, rules) = door("", work);
-    assert!(
-      !tripped,
-      "a length mismatch was reported as budget exhaustion at validation_work {work}"
-    );
-    assert!(!recovered, "nothing was projected, so there is no recovery");
-    assert_eq!(
-      rules,
-      [],
-      "a mismatch emits nothing at validation_work {work}"
-    );
+  // Two mismatches, and the second one is why the twentieth round's dissolution was half of one.
+  // A **different length** is answered by `verify_source`'s first comparison; an **equal** length
+  // with different content needs the walk, and putting only the length compare above the
+  // prepayment left that branch still paying the budget's answer. Both, at a budget far too small
+  // for either and at one that could pay for both.
+  let same_length = {
+    let mut swapped = parsed.clone();
+    // One byte, so the lengths are identical and only the content differs.
+    let at = swapped
+      .find("f0: name")
+      .expect("the bomb has a first field");
+    swapped.replace_range(at..at + 1, "g");
+    swapped
+  };
+  assert_eq!(
+    same_length.len(),
+    parsed.len(),
+    "the twin must be the same length"
+  );
+  for source in ["", same_length.as_str()] {
+    let shape = if source.is_empty() {
+      "a length mismatch"
+    } else {
+      "an equal-length mismatch"
+    };
+    for work in [16, u32::MAX - 1] {
+      let (tripped, recovered, rules) = door(source, work);
+      assert!(
+        !tripped,
+        "{shape} was reported as budget exhaustion at validation_work {work}"
+      );
+      assert!(!recovered, "nothing was projected, so there is no recovery");
+      assert_eq!(rules, [], "{shape} emits nothing at validation_work {work}");
+    }
   }
 
   // And the prepayment is still there, on the pair the door does project: the same 160 KB, matched,
@@ -3272,4 +3297,87 @@ fn a_spelling_is_resolved_only_where_its_answer_is_read() {
     "the gate skipped the comparison rather than the resolution: {:?}",
     reported.diagnostics
   );
+}
+
+/// Every rule that compares the spellings a request **wrote** fires without a resolved position.
+///
+/// # The set, not the fix
+///
+/// Six rules in draft §5 ask whether the same name was written twice, and none of them asks the
+/// schema what the name means: 5.2.2.1 over operation names, 5.5.1.1 over fragment names, 5.8.1
+/// over variable names, 5.7.3 over a location's directives, 5.4.2 over an argument list, and 5.6.3
+/// over an object literal's fields. The twentieth round carved 5.4.2 out of
+/// `reads_argument_positions` on exactly that reasoning — *"it compares the spellings a request
+/// wrote against each other and never asks the schema what they mean"* — and did not enumerate the
+/// set the sentence is true of. 5.6.3 is the same sentence about object fields, and it sat behind a
+/// resolved position: `visit_value` reached an object literal at an unknown position, descended it
+/// for variable usages, and never asked. A rule silently not firing, which is the direction no
+/// budget test can see.
+///
+/// Each row below puts its rule's subject where **nothing resolves** — an unknown field, an unknown
+/// argument — so a gate that requires a position shows up as an empty diagnostic list.
+///
+/// The `n <= 1` companion travels with them and is the second column: a comparison over one element
+/// compares nothing, so each rule's charge is paired with a length, and each row's second document
+/// is the singleton that must stay silent and cost nothing.
+#[test]
+fn every_compare_what_was_written_rule_fires_without_a_resolved_position() {
+  let schema = build(SCHEMA);
+  let budget = Budget::default();
+
+  // `(rule, a document whose subject sits at an unresolved position, the singleton twin)`.
+  let cases: [(Rule, &str, &str); 6] = [
+    (
+      Rule::OperationNameUniqueness,
+      "query q { dog { name } } query q { dog { name } }",
+      "query q { dog { name } }",
+    ),
+    (
+      Rule::FragmentNameUniqueness,
+      "{ dog { ...F } } fragment F on Dog { name } fragment F on Dog { name }",
+      "{ dog { ...F } } fragment F on Dog { name }",
+    ),
+    (
+      Rule::VariableUniqueness,
+      "query q($v: Int, $v: Int) { dog { name } }",
+      "query q($v: Int) { dog { name } }",
+    ),
+    // The field is unknown, so its scope is `NONE` — the directive list is still the request's own.
+    (
+      Rule::DirectivesAreUniquePerLocation,
+      "{ dog { nope @onFragDef @onFragDef } }",
+      "{ dog { nope @onFragDef } }",
+    ),
+    // Unknown field again: `check_arguments` is handed no definitions at all.
+    (
+      Rule::ArgumentUniqueness,
+      "{ dog { nope(a: 1, a: 2) } }",
+      "{ dog { nope(a: 1) } }",
+    ),
+    // The **unknown argument**, so the literal's expected type is `None`. This is the one that was
+    // behind a resolution.
+    (
+      Rule::InputObjectFieldUniqueness,
+      "{ dog { withOpts(nope: { a: 1, a: 2 }) } }",
+      "{ dog { withOpts(nope: { a: 1 }) } }",
+    ),
+  ];
+
+  for (rule, repeated, singleton) in cases {
+    let rules = RuleSet::only(rule);
+    let fired = run(&schema, repeated, &budget, rules);
+    assert_eq!(
+      fired.rules(),
+      [rule],
+      "{rule:?} did not fire on {repeated:?}: {:?}",
+      fired.diagnostics
+    );
+    let quiet = run(&schema, singleton, &budget, rules);
+    assert_eq!(
+      quiet.rules(),
+      [],
+      "{rule:?} fired on a document with nothing to compare: {:?}",
+      quiet.diagnostics
+    );
+  }
 }

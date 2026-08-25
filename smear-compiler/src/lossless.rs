@@ -85,7 +85,8 @@
 //! [`Schema::build`]: super::Schema::build
 
 use smear_parser::graphql::lossless::{
-  Parse, project_executable_document_recovered, project_type_system_document_recovered,
+  Parse, matches_source, project_executable_document_recovered,
+  project_type_system_document_recovered,
 };
 
 pub use smear_parser::lossless::project::Recovery;
@@ -370,29 +371,38 @@ pub fn validate_executable_lossless_with<'src, K>(
 where
   K: Sink<&'src str>,
 {
-  // **The lengths first.** They are two integer loads and they are the whole answer whenever they
-  // differ: a parse and a source of different sizes are not the same document, and no amount of
-  // budget makes them one.
+  // **The whole comparison first**, not merely its cheap half.
   //
   // The prepayment below used to sit above this. A caller holding a stale pair and a finite
   // `validation_work` too small for `max(parse, source)` was told `Refusal::Budget` — and possibly
-  // handed a `ValidationWorkBudget` diagnostic — for a pair that `verify_source` would have refused
-  // on its first comparison without walking a single token. That is a wrong causal verdict, and the
-  // kind that costs a caller something: the remedy it names is raising a limit or retrying, and
-  // neither can help. al8n/smear#198's twentieth round, and the same class as #196's arena refusal
-  // wearing the budget's `None` — except that here the two abandonments already had different
-  // names and the *ordering* handed out the wrong one.
+  // handed a `ValidationWorkBudget` diagnostic — for a pair that is not a resource problem at all.
+  // That is a wrong causal verdict, and the kind that costs a caller something: the remedy it names
+  // is raising a limit or retrying, and neither can help.
   //
-  // Round 14's own diagnosis named this gate: the fail-fast doors were safe because `verify_source`
-  // "compares lengths first, so an extended source is refused before a byte is walked". This door
-  // now asks the same question before it prices anything.
-  let size = usize::from(parse.green().text_len());
-  if size != source.len() {
+  // al8n/smear#198's twentieth round put the **length** compare above the prepayment and called the
+  // question dissolved, because pricing over `max(parse, source)` needs two numbers and there is no
+  // maximum left once the lengths must agree. True of unequal lengths, and the twenty-first round
+  // is the other half of its own case: a pair of equal length and different content still reached
+  // the prepayment and still got the budget's answer. A dissolution that covers one branch of a
+  // two-branch case is a repair, not a dissolution.
+  //
+  // So the whole of `matches_source` runs first, and the prepayment prices only what it exists to
+  // price: the **projection**. What that costs on a matching pair is one extra pass over the green
+  // root before the ledger is consulted — `O(tokens)`, no allocation, and strictly cheaper than the
+  // projection it guards, which walks the same tree and builds an entire AST out of it. The pair
+  // that pays it is the pair that was going to be projected anyway.
+  //
+  // The one case that is measurably worse is a *matching* pair refused by the budget: that call was
+  // `O(1)` and is now `O(tokens)`. It is bounded by the parse the caller already materialised, once
+  // per call, with nothing allocated — the same dimension the prepayment itself prices — and it
+  // buys the verdict being right for every mismatched pair regardless of budget.
+  if !matches_source(parse, source) {
     return Err(LosslessInvalid {
       invalid: Invalid::unexamined(),
       recovery: None,
     });
   }
+  let size = source.len();
   let Some(left) = Ledger::open(budget).take(units(size)) else {
     let (emitted, stopped) = refuse_projection(source, budget, rules, sink);
     return Err(LosslessInvalid {

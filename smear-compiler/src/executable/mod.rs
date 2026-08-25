@@ -289,7 +289,44 @@
 //! - a **gate** that skips more than its reader needs is a missing diagnostic;
 //! - an **allocation** ahead of its charge is a buffer nobody paid for;
 //! - a **repeat** introduced for one reader is a cost every other configuration pays;
-//! - and a **diagnosis can name the right function and the repair still not call it.**
+//! - a **diagnosis can name the right function and the repair still not call it**;
+//! - and a **repair's own reasoning can be applied to one instance of a set it did not
+//!   enumerate.**
+//!
+//! The last one is the twenty-first round, and it is about *where* rather than *what*. Three rounds
+//! running the finding was the sibling of the previous repair: `verify_source` named as the reason
+//! the fail-fast doors were safe and then reimplemented beside it; a consumer set computed for two
+//! callers of `resolves_positions` and not the third; and a carve-out written for draft 5.4.2 whose
+//! sentence is true of five other rules. Each repair was right about its instance and silent about
+//! its set. **The deliverable of a repair whose justification is a general sentence is the
+//! enumeration of what that sentence covers.**
+//!
+//! # The rules that compare what a request wrote
+//!
+//! The enumeration the twentieth round owed. Six rules in draft §5 ask whether the same name was
+//! written twice; none of them asks the schema what the name means, so none needs a resolved
+//! position — and each compares nothing at all on fewer than two elements, so each carries the same
+//! `n <= 1` companion.
+//!
+//! | rule | compares | gated on |
+//! |---|---|---|
+//! | 5.2.2.1 `OperationNameUniqueness` | operation names, over the prep rows | the rule, and `named > 1` |
+//! | 5.5.1.1 `FragmentNameUniqueness` | fragment names, over the sorted index | the rule, and a group wider than one |
+//! | 5.8.1 `VariableUniqueness` | an operation's variable names | the rule, and `definitions.len() > 1` |
+//! | 5.7.3 `DirectivesAreUniquePerLocation` | one location's directive names | the rule, and `directives.len() > 1` — and *not* on the level's type |
+//! | 5.4.2 `ArgumentUniqueness` | one list's argument names | the rule, and `arguments.len() > 1` — and *not* on the argument definitions, which may be `None` |
+//! | 5.6.3 `InputObjectFieldUniqueness` | one object literal's field names | the rule, and `fields.len() > 1` — **and it used to be gated on a resolved position** |
+//!
+//! 5.6.3 was the odd one out. `visit_value` reaches an object literal at a position nothing
+//! resolved — an unknown argument, an unknown field — descends it for variable usages, and used to
+//! return without asking, because the rule lived inside `check_input_object` and that function needs
+//! the object *type* for its other two rules. It is `check_object_field_uniqueness` now, which takes
+//! the field list and nothing else.
+//!
+//! The boundary the set stops at, recorded so it is not mistaken for the same defect: an object
+//! literal in a position that resolves to a **scalar or enum** is not descended at all. Draft 5.6.1
+//! has already said the literal cannot be there, and a second finding about the inside of a value
+//! that has no meaning is not a better answer. That is a deliberate line, not a missing reach.
 //!
 //! The fourteenth round's own report identified `verify_source` as the reason the fail-fast
 //! projections never had the prefix defect — *"they open with `verify_source` over the whole green
