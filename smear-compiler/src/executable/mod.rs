@@ -149,6 +149,38 @@
 //!
 //! `descend`'s `merge_stack.len() >= merge_depth()` is not on the list: it is a **limit**, which
 //! refuses a depth rather than buying one, and nothing is debited for it.
+
+//! # Every traversal that repeats, and the reader the repeat is for
+//!
+//! The third enumeration, over the thing the first two do not cover: work **performed**, neither
+//! priced wrongly nor allocated. A repeat is introduced because some reader needs the second pass,
+//! and the question is whether it is gated on that reader or on the family the reader belongs to.
+//!
+//! | traversal | repeats over | the reader | gate |
+//! |---|---|---|---|
+//! | a spread's fragment body | operations | operation-local variable usages | [`collects_usages`] — **was ungated** |
+//! | `begin_fragment`'s directives | operations | the same usages, on the definition's own directives | `reaches_directives`, which reduces to `descends_for_usages` |
+//! | [`Validator::check_subscription_roots`] | subscription operations | 5.2.4.1's collection, which *is* per operation | `SingleRootField` |
+//! | draft 5.3.2's expansion | operations, then unreached fragments | the merge engine | [`merges`], and its memo answers a repeated expansion from the first one |
+//! | [`Validator::walk_unreached_fragments`] | nothing — once per unchecked fragment | definition-local rules | the `checked` bit, which the entry sets |
+//!
+//! The first row is al8n/smear#198's seventeenth round. The eighth round made a fragment's body
+//! walk repeat per operation, which was the right repair for the reader that needed it: a fragment
+//! definition's directives are the non-constant family, the usages in them are operation-local, and
+//! without the repeat the verdict depended on the order the operations were written in. The repeat
+//! was then performed for **every** rule set, including the ones with no usage rule at all, where
+//! the walk carries `check = false` and every reader below it reduces to `descends_for_usages` —
+//! `Θ(O · W)` of examination off `O(O + W)` of syntax, for conclusions nothing could act on.
+//!
+//! Which is the pattern the four enumerations share, and the reason there are four:
+//!
+//! - a **charge** whose reader has moved is a prepayment for nobody (round 6);
+//! - a **gate** that skips more than its reader needs is a missing diagnostic (the skip audit);
+//! - an **allocation** ahead of its charge is a buffer nobody paid for (round 15);
+//! - and a **repeat** introduced for one reader is a cost every other configuration pays.
+//!
+//! **A repeat must be gated on the reader it was introduced for**, in the same place and by the
+//! same predicate — never on the family that reader belongs to, and never not at all.
 //! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
 //!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
 //!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a

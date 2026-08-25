@@ -244,9 +244,10 @@ where
       };
       scope = match resolved {
         Some(id) => {
-          if check {
-            self.check_spread_possible(name, id, frame)?;
-          }
+          // No `if check` here: `check_spread_possible` reads the same flag off the same frame
+          // through `reaches_spread_target`, and a second copy of the condition is the thing that
+          // predicate exists to prevent.
+          self.check_spread_possible(name, id, frame)?;
           id.get()
         }
         None => NONE,
@@ -297,6 +298,42 @@ where
     let Some(body) = fragment(document, row.definition) else {
       return ControlFlow::Continue(None);
     };
+    // Every operation's expansion, not only the first — **when there is an operation-local reader
+    // for the repeat**. `enter` is the definition-local half: the directive rules over the
+    // definition's own directives, reported once however many operations reach it. The usages those
+    // directives can carry are operation-local, so al8n/smear#198's eighth round made the walk
+    // repeat, which fixed a verdict that depended on the order the operations were written in.
+    //
+    // It was not gated on that reader being present. With `collects_usages` false there is no
+    // operation-local usage to collect, and a repeat then carries `flags = 0`: `check` is false at
+    // every level of the body, and with `check` false every reader downstream reduces to
+    // [`descends_for_usages`](Validator::descends_for_usages), which is `collects_usages` again. So
+    // `O` operations sharing one `W`-field fragment spent `Θ(O · W)` units off `O(O + W)` of syntax
+    // to reach conclusions no rule set could act on, and a valid document under
+    // `RuleSet::only(FieldSelections)` could be answered [`Refusal::Budget`](crate::Refusal::Budget)
+    // at the default ceiling. Round 6's discipline — *gate on the readers, not on the family* —
+    // applied to a traversal rather than to a charge. al8n/smear#198's seventeenth round.
+    //
+    // **Why the gate is not wider than this.** The one thing a `flags = 0` walk still produces is
+    // the `checked` bit of a *nested* fragment it reaches. It cannot produce a new one here: this
+    // definition's bit is set only by the entry that returns its body with `Frame::CHECK`, so
+    // everything reachable from it was reached by that walk. And it does not have to be right about
+    // that, because [`walk_unreached_fragments`](Validator::walk_unreached_fragments) enumerates
+    // **every** fragment afterwards and enters the ones no walk checked — a backstop over the whole
+    // population, not an argument about reachability.
+    let enter = !get_bit(&self.scratch.checked, row.definition);
+    let enters_body = self.in_operation && (enter || self.collects_usages);
+
+    // The condition's own resolution has two readers and they are asked separately, because the
+    // spread-site rule fires at **every** spread while the body is entered at some of them. Reading
+    // it costs a `Schema::sym` hash over a spelling the document chose, charged since the
+    // fourteenth round — so a skipped entry that resolved anyway would leave a byte cost on a path
+    // that does nothing.
+    let reads_target = self.reaches_spread_target(check);
+    if !enters_body && !reads_target {
+      return ControlFlow::Continue(None);
+    }
+
     let condition = body.type_condition().name();
     // The spread charge above pays for the **spread's** name. This is the fragment's *type
     // condition*, a different spelling the document also chose, and `composite_of` resolves it
@@ -305,11 +342,11 @@ where
     self.spend_name(condition)?;
     let target = self.composite_of(condition);
 
-    if check && let Some(target) = target {
+    if reads_target && let Some(target) = target {
       self.check_spread_possible(name, target, frame)?;
     }
 
-    if !self.in_operation {
+    if !enters_body {
       return ControlFlow::Continue(None);
     }
     if self.scratch.visited.visit(ordinal) {
@@ -319,11 +356,6 @@ where
       return ControlFlow::Continue(None);
     }
 
-    // Every operation's expansion, not only the first. `enter` is the definition-local half — the
-    // directive rules over the definition's own directives, deduplicated — and the usages those
-    // directives can carry are operation-local, so they have to be collected again each time. See
-    // `Validator::begin_fragment`.
-    let enter = !get_bit(&self.scratch.checked, row.definition);
     self.begin_fragment(row.definition, enter)?;
     let scope = target.map_or(NONE, |id| id.get());
     let flags = if enter { Frame::CHECK } else { 0 };
@@ -333,6 +365,20 @@ where
     )))
   }
 
+  /// Whether draft 5.5.2.3 will read a spread's **target type** at this site.
+  ///
+  /// A named predicate rather than a condition written twice, for the reason
+  /// [`merges`](super::merges) is one: it has a **producer** as well as a consumer.
+  /// `check_fragment_spread` asks it to decide whether resolving the target's condition — a
+  /// `Schema::sym` hash over a document-chosen spelling — has anybody to answer for, and
+  /// [`check_spread_possible`](Self::check_spread_possible) asks it again to decide whether to run.
+  /// A hand-written copy on the producer is how a caller and a callee come to disagree about which
+  /// rules reach a site.
+  #[inline]
+  fn reaches_spread_target(&self, check: bool) -> bool {
+    check && self.on(Rule::FragmentSpreadIsPossible)
+  }
+
   /// Draft 5.5.2.3, all four subsections, as one bitset intersection.
   fn check_spread_possible(
     &mut self,
@@ -340,7 +386,7 @@ where
     target: TypeId,
     frame: Frame,
   ) -> ControlFlow<()> {
-    if !self.on(Rule::FragmentSpreadIsPossible) {
+    if !self.reaches_spread_target(frame.flags & Frame::CHECK != 0) {
       return ControlFlow::Continue(());
     }
     let Some(parent) = frame.type_id() else {

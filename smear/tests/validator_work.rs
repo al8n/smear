@@ -744,6 +744,16 @@ fn the_ceiling_is_a_knob_a_caller_can_raise() {
 /// A resource bound is a rule *and* a bound, and an empty set reaches only the rule. What makes a
 /// validator that cannot refuse is the **budget**, and this pins both halves of that sentence so
 /// the documentation cannot drift back.
+///
+/// # The budget is named here rather than defaulted, and that is a result
+///
+/// This used to refuse the same document at `Budget::default()`, because an empty rule set still
+/// re-walked a shared fragment once per operation: `1,600 × 1,600` selections examined for a rule
+/// set that could act on none of them. al8n/smear#198's seventeenth round gates the repeat on the
+/// reader it was introduced for, and the same 63 KB now costs **27,206** units under `EMPTY` rather
+/// than more than the `1 << 22` ceiling — so the witness for "the bound is not a rule" has to name
+/// a budget instead of relying on a cost the repair removed. The contract is unchanged and so is
+/// what this pins; only the number the document reaches is.
 #[test]
 fn an_empty_rule_set_is_not_a_promise_of_ok() {
   let schema = build(SCHEMA);
@@ -751,7 +761,8 @@ fn an_empty_rule_set_is_not_a_promise_of_ok() {
 
   // No rule is evaluated, nothing is emitted — and the document is still refused, because the
   // bound is not a rule the set can remove.
-  let quiet = run(&schema, &source, &Budget::default(), RuleSet::EMPTY);
+  let starved = Budget::default().with_validation_work(1_000);
+  let quiet = run(&schema, &source, &starved, RuleSet::EMPTY);
   assert!(quiet.refused);
   assert_eq!(quiet.emitted, 0);
   assert_eq!(quiet.diagnostics, []);
@@ -2894,4 +2905,98 @@ fn the_subscription_root_walk_is_charged_for_its_suffix_too() {
     "widening the last fragment cost {interaction} more units behind a {deep}-link chain than \
      behind a {shallow}-link one, so `resolve_roots` is still charged for the whole stack"
   );
+}
+
+/// A shared fragment costs `O(operations + fields)`, not `Theta(operations x fields)`, when no
+/// operation-local rule reads the repeat.
+///
+/// The honest-case cost of round 8's correctness fix. Repeating a fragment's walk per operation is
+/// right for the reader it was introduced for — a fragment definition's own directives are the
+/// non-constant family and the usages in them are operation-local — but it was not gated on that
+/// reader being present. With `collects_usages` false the repeat carries `flags = 0`, every reader
+/// below it reduces to `descends_for_usages`, and the walk reaches conclusions nothing can act on.
+///
+/// Measured as the same 2x2 the depth repair used, so no constant has to be guessed: what one more
+/// field in the fragment costs at 400 operations, minus what it costs at 20. Only the **product**
+/// was wrong, and it is the only thing that cancels here.
+#[test]
+fn a_shared_fragment_is_not_re_walked_for_a_rule_set_that_cannot_read_it() {
+  let schema = build(SCHEMA);
+  // No usage rule, so `collects_usages` is false and the repeat has no reader. `FieldSelections`
+  // is definition-local: it fires once per fragment however many operations spread it.
+  let rules = RuleSet::only(Rule::FieldSelections);
+  let at = |ops: usize, fields: usize| min_budget(&schema, &fragment_bomb(ops, fields), rules);
+
+  let (few, many) = (20usize, 400usize);
+  let (narrow, wide) = (50usize, 500usize);
+  let (a, b) = (at(few, narrow), at(few, wide));
+  let (c, d) = (at(many, narrow), at(many, wide));
+  let interaction = (d as i64 - c as i64) - (b as i64 - a as i64);
+  println!(
+    "min_budget: {few} ops {a}/{b}, {many} ops {c}/{d} (narrow/wide fragment) -> ops x fields \
+     interaction {interaction}"
+  );
+
+  // The premise: both dimensions cost units on their own, so the cancellation is doing something.
+  assert!(
+    b > a + 400 && c > a + 300,
+    "operations and fields must each cost units on their own: {a}, {b}, {c}"
+  );
+  assert!(
+    interaction.abs() < 500,
+    "widening the fragment cost {interaction} more units at {many} operations than at {few}, so \
+     the body is still being re-walked for a rule set that cannot read it"
+  );
+}
+
+/// The gate does not lose a definition-local diagnostic, including one inside a *nested* fragment.
+///
+/// The constraint that matters more than the saving. Skipping the repeat is only sound because the
+/// walk carries `flags = 0` — and the one thing such a walk still produces is the `checked` bit of a
+/// fragment it reaches through a nested spread. Two independent reasons it cannot be lost: a
+/// definition's bit is set only by the entry that returns its body with `Frame::CHECK`, so
+/// everything reachable from it was reached by that walk; and `walk_unreached_fragments` afterwards
+/// enumerates **every** fragment and enters the ones nothing checked, which is a backstop over the
+/// whole population rather than an argument about reachability.
+///
+/// The fragments are written first so their spans do not move when an operation is added: the
+/// assertion is that the diagnostic lists are **identical**, not merely the same length.
+#[test]
+fn the_skipped_repeat_still_reports_a_nested_definition() {
+  let schema = build(SCHEMA);
+  let budget = Budget::default();
+  let rules = RuleSet::only(Rule::FieldSelections);
+  let fragments = "fragment A on Dog { name ...B }\nfragment B on Dog { nope }\n";
+  let a = "query a { dog { ...A } }";
+  let b = "query b { dog { ...A } }";
+
+  let one = run(&schema, &std::format!("{fragments}{a}"), &budget, rules);
+  let two = run(&schema, &std::format!("{fragments}{a} {b}"), &budget, rules);
+  let swapped = run(&schema, &std::format!("{fragments}{b} {a}"), &budget, rules);
+  println!(
+    "nested report: one {:?}, two {:?}",
+    one.rules(),
+    two.rules()
+  );
+
+  assert_eq!(one.rules(), [Rule::FieldSelections]);
+  assert_eq!(one.emitted, 1, "{:?}", one.diagnostics);
+  assert_eq!(
+    one.diagnostics, two.diagnostics,
+    "a second operation over the same fragments changed the report"
+  );
+  assert_eq!(
+    one.diagnostics, swapped.diagnostics,
+    "the order of the operations changed the report"
+  );
+
+  // And the backstop on its own: a fragment nothing spreads is still checked.
+  let unreached = run(
+    &schema,
+    &std::format!("{fragments}{{ dog {{ name }} }}"),
+    &budget,
+    rules,
+  );
+  assert_eq!(unreached.rules(), [Rule::FieldSelections]);
+  assert_eq!(unreached.emitted, 1, "{:?}", unreached.diagnostics);
 }
