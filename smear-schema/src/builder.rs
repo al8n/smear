@@ -495,13 +495,45 @@ mod declared {
   /// The list is what every caller has in common, so the guard belongs on the list, and the next
   /// consumer meets it without anyone having remembered to put it there.
   ///
+  /// # And what no reader can reach, because it is no longer here
+  ///
+  /// A gate on the read is still a gate on *readers*. `Declared` derives [`Clone`], and a derived
+  /// `Clone` copies the private field without asking [`Declared::read`] anything — so interface
+  /// conformance, which copies a whole `RawField` once per implementor *before* it reaches the
+  /// gate, performed `Θ(implementors × declared)` deep [`RawInput`] clones over a document of size
+  /// `O(implementors + declared)` and only then refused the schema. The ceiling kept the
+  /// diagnostics and lost the resource.
+  ///
+  /// So the refusal is a *state* rather than a comparison, decided in `Declared::from` and holding
+  /// nothing: `args` is `None`, and the `Vec` is dropped at the moment the length is first known.
+  /// There is no payload for `Clone` to copy, none for `Debug` to format, and none for a `Deref`,
+  /// a serialiser or an iterator adaptor written later to reach. The guarantee stops depending on
+  /// every reader remembering, on every derive having been audited, and on this module's boundary
+  /// holding against traits nobody has written yet.
+  ///
+  /// # Why at construction, and not later
+  ///
+  /// Both construction sites — [`SchemaBuilder::fields`](super::SchemaBuilder::fields) and
+  /// [`SchemaBuilder::directive_definition`](super::SchemaBuilder::directive_definition) — hand
+  /// over a list that is already whole, and nothing appends to one afterwards:
+  /// [`apply_extensions`](super::SchemaBuilder::apply_extensions) extends a type's *fields*,
+  /// never an existing field's arguments. The length at `from` is final, so refusing there means
+  /// no phase ever holds an over-limit payload, rather than one phase dropping what the phases
+  /// before it carried.
+  ///
+  /// Neither ceiling diagnostic needs anything from the payload to survive it. Both are built from
+  /// the *owner's* [`Located`](super::Located) — the field's name, the directive's name — which
+  /// lives beside this list and not in it, and neither message renders a count. Nothing had to be
+  /// captured on the way past.
+  ///
   /// # Why the list is not truncated instead
   ///
   /// Cutting an over-limit list down to `CEILING` would bound every scan with no gate at all, and
   /// it would **invent** diagnostics: an interface field whose arguments are cut to sixty-four
-  /// reports `MissingInterfaceFieldArgument` for arguments the document genuinely wrote. A refusal
-  /// has to suppress the work downstream of it without inventing findings downstream of it, so
-  /// what an over-limit list holds is exactly what was written, and what changes is who may look.
+  /// reports `MissingInterfaceFieldArgument` for arguments the document genuinely wrote. Dropping
+  /// the list whole is not that, and [`Args::Refused`] is the difference: a refused list answers
+  /// `Refused` and never "empty", so every consumer skips the entire check exactly as it did while
+  /// the payload was still there, and no diagnostic moves.
   ///
   /// # What the skipped work costs
   ///
@@ -511,7 +543,10 @@ mod declared {
   /// already, for a reason the refusal names. al8n/smear#198.
   #[derive(Debug, Clone)]
   pub(super) struct Declared<const CEILING: u32> {
-    args: Vec<RawInput>,
+    /// The declared arguments, or `None` — the ceiling refused this list and the arguments were
+    /// dropped where that was decided. The two states are not "long" and "short" but "may be read"
+    /// and "does not exist", which is why a field declaring no arguments at all is `Some(&[])`.
+    args: Option<Vec<RawInput>>,
   }
 
   /// What a [`Declared`] list answers when a reader asks for its arguments.
@@ -532,32 +567,44 @@ mod declared {
   }
 
   impl<const CEILING: u32> Declared<CEILING> {
-    /// Whether this is a list the ceiling refuses. The refusal site asks; no other reader has to,
-    /// because [`Declared::read`] asks on its behalf.
-    pub(super) fn over_ceiling(&self) -> bool {
-      self.args.len() > CEILING as usize
+    /// Whether the ceiling refused this list — which is what the refusal site records the
+    /// diagnostic for. No other reader has to ask, because [`Declared::read`] asks on its behalf.
+    ///
+    /// A length comparison answered the same question one round ago and cannot answer it now:
+    /// there is no length left to compare, which is the whole of the repair.
+    pub(super) fn refused(&self) -> bool {
+      self.args.is_none()
     }
 
     /// The arguments, if the ceiling admits them.
     pub(super) fn read(&self) -> Args<'_> {
-      match self.over_ceiling() {
-        false => Args::Bounded(&self.args),
-        true => Args::Refused,
+      match &self.args {
+        Some(args) => Args::Bounded(args),
+        None => Args::Refused,
       }
     }
 
     /// The arguments to resolve in place, if the ceiling admits them.
     pub(super) fn read_mut(&mut self) -> ArgsMut<'_> {
-      match self.over_ceiling() {
-        false => ArgsMut::Bounded(&mut self.args),
-        true => ArgsMut::Refused,
+      match &mut self.args {
+        Some(args) => ArgsMut::Bounded(args),
+        None => ArgsMut::Refused,
       }
     }
   }
 
+  /// Where the ceiling is applied, and the only way a `Vec<RawInput>` becomes a `Declared`.
+  ///
+  /// The over-limit arm drops `args` instead of storing it. The copy a derived `Clone` would make,
+  /// the walk a reader would have done, and the bytes the list would have occupied for the rest of
+  /// the build are then work that does not exist, rather than work every consumer is trusted to
+  /// decline.
   impl<const CEILING: u32> From<Vec<RawInput>> for Declared<CEILING> {
     fn from(args: Vec<RawInput>) -> Self {
-      Self { args }
+      match args.len() > CEILING as usize {
+        false => Self { args: Some(args) },
+        true => Self { args: None },
+      }
     }
   }
 }
@@ -694,6 +741,8 @@ const _: () = {
 struct Model<'a> {
   types: &'a [RawType],
   directives: &'a [RawDirectiveDef],
+  /// `Sym` to an index into `types`; `u32::MAX` for "not a type".
+  type_of_sym: &'a [u32],
   /// `Sym` to an index into `directives`; `u32::MAX` for "not a directive".
   directive_of_sym: &'a [u32],
   schema_directives: &'a [RawDirectiveUse],
@@ -709,11 +758,59 @@ impl<'a> Model<'a> {
     render_owner(self.interner, at)
   }
 
+  fn type_index(&self, sym: Sym) -> Option<usize> {
+    index_of(self.type_of_sym, sym)
+  }
+
   fn directive_index(&self, sym: Sym) -> Option<usize> {
-    match self.directive_of_sym.get(sym.get() as usize) {
-      Some(&index) if index != u32::MAX => Some(index as usize),
-      _ => None,
+    index_of(self.directive_of_sym, sym)
+  }
+
+  /// Draft's `IsValidImplementationFieldType`.
+  fn is_valid_implementation_type(&self, field: PackedType, implemented: PackedType) -> bool {
+    if field.is_non_null() {
+      return self.is_valid_implementation_type(field.nullable(), implemented.nullable());
     }
+    if let (Some(item), Some(implemented_item)) = (field.list_item(), implemented.list_item()) {
+      return self.is_valid_implementation_type(item, implemented_item);
+    }
+    if field == implemented {
+      return true;
+    }
+    if field.wrappers() != implemented.wrappers() {
+      return false;
+    }
+    self.is_sub_type(field.base_id(), implemented.base_id())
+  }
+
+  /// Whether `candidate` is one of `abstract_type`'s possible types, in the draft's wider sense:
+  /// union membership, or the interface closure — which, unlike the runtime possible-object
+  /// bitsets, includes interfaces implementing interfaces.
+  fn is_sub_type(&self, candidate: TypeId, abstract_type: TypeId) -> bool {
+    if candidate == UNRESOLVED || abstract_type == UNRESOLVED {
+      return false;
+    }
+    let target = &self.types[abstract_type.get() as usize];
+    match target.kind {
+      TypeKind::Union => target
+        .members
+        .iter()
+        .any(|member| self.type_index(member.sym) == Some(candidate.get() as usize)),
+      TypeKind::Interface => self.types[candidate.get() as usize]
+        .closure
+        .contains(&abstract_type.get()),
+      _ => false,
+    }
+  }
+
+  fn render_type(&self, packed: PackedType) -> String {
+    struct Rendered<'a>(PackedType, &'a str);
+    impl core::fmt::Display for Rendered<'_> {
+      fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.write(f, self.1)
+      }
+    }
+    Rendered(packed, self.text(packed.base())).to_string()
   }
 
   /// One declared argument list, through the ceiling that decides whether it may be walked.
@@ -779,6 +876,19 @@ fn render_owner(interner: &Interner, at: Coordinate) -> String {
   match at.directive {
     Some(directive) => directive_coordinate(&path, interner.text(directive)),
     None => path,
+  }
+}
+
+/// A `Sym` to the index of what it names, over a table that spells "nothing" as `u32::MAX`.
+///
+/// One body and four callers: [`SchemaBuilder`] and [`Model`] each ask it about types and about
+/// directives. Written once because two halves of the same builder answering the same question
+/// differently is a defect no test would name — and because the fourth copy of a four-line
+/// predicate is where that starts.
+fn index_of(table: &[u32], sym: Sym) -> Option<usize> {
+  match table.get(sym.get() as usize) {
+    Some(&index) if index != u32::MAX => Some(index as usize),
+    _ => None,
   }
 }
 
@@ -945,6 +1055,7 @@ impl SchemaBuilder {
       Model {
         types: &self.types,
         directives: &self.directives,
+        type_of_sym: &self.type_of_sym,
         directive_of_sym: &self.directive_of_sym,
         schema_directives: &self.schema_directives,
         interner: &self.interner,
@@ -1041,10 +1152,7 @@ impl SchemaBuilder {
   }
 
   fn type_index(&self, sym: Sym) -> Option<usize> {
-    match self.type_of_sym.get(sym.get() as usize) {
-      Some(&index) if index != u32::MAX => Some(index as usize),
-      _ => None,
-    }
+    index_of(&self.type_of_sym, sym)
   }
 
   fn set_type_index(&mut self, sym: Sym, index: u32) {
@@ -1056,10 +1164,7 @@ impl SchemaBuilder {
   }
 
   fn directive_index(&self, sym: Sym) -> Option<usize> {
-    match self.directive_of_sym.get(sym.get() as usize) {
-      Some(&index) if index != u32::MAX => Some(index as usize),
-      _ => None,
-    }
+    index_of(&self.directive_of_sym, sym)
   }
 
   fn set_directive_index(&mut self, sym: Sym, index: u32) {
@@ -2095,7 +2200,11 @@ impl SchemaBuilder {
       // So there is no `continue` here any more. Below this line the list is reached only through
       // `Declared::read`, which hands an over-limit list to nobody — this pass included, and a
       // pass written next year included, without either having been told about the ceiling.
-      if self.types[index].fields[field].args.over_ceiling() {
+      //
+      // And the list is gone by the time this asks. `Declared::from` decided the refusal and
+      // dropped the arguments; what survives to here is the state, plus the field's own name and
+      // span, which is all either half of this diagnostic ever read.
+      if self.types[index].fields[field].args.refused() {
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_owned(SchemaErrorKind::TooManyFieldArguments, &name, owner, at);
@@ -2446,9 +2555,9 @@ impl SchemaBuilder {
       // field's do; and the width is read again at every usage a document writes, which is the
       // product `MAX_DIRECTIVE_ARGUMENTS` states and the scan review found second. The field
       // ceiling did not reach here — one constant enforced at one site — which is the shape
-      // [`Declared`] retires: the ceiling now travels with the list rather than with the site.
-      // al8n/smear#198.
-      if self.directives[index].args.over_ceiling() {
+      // [`Declared`] retires: the ceiling now travels with the list rather than with the site,
+      // and past it the list is not carried at all. al8n/smear#198.
+      if self.directives[index].args.refused() {
         let name = self.text(at.sym).to_owned();
         self.push(SchemaErrorKind::TooManyDirectiveArguments, &name, at);
       }
@@ -2891,43 +3000,69 @@ impl SchemaBuilder {
   }
 
   /// Draft §3.6.1/§3.7.1: transitivity, covariance of field types, invariance of argument types.
+  ///
+  /// # Over the split, and this pass is what [`Model`] was separated for
+  ///
+  /// Every list this reads belongs to a type it is *not* reporting on — the interface's fields,
+  /// the interface's closure — and `self.push_*` cannot be called while one of them is borrowed.
+  /// The shape that stood here bought its way past that with `clone`, once per implementor, and
+  /// the copies were deep: a [`RawField`] owns its directives, and every [`RawInput`] under it
+  /// owns its own directives and its default literal, each an arbitrarily large tree.
+  ///
+  /// Two products came out of that, and only one of them is the ceiling's.
+  ///
+  /// - `Θ(implementors × declared arguments)`, from cloning an interface field whose argument
+  ///   list a ceiling had *already* refused. [`Declared`] now drops a refused list where the
+  ///   refusal is decided, so there is nothing left of it to copy.
+  /// - `Θ(implementors × literal size)`, from cloning the default literals and directive
+  ///   arguments of a field whose declared list is perfectly legal. **No ceiling bounds this
+  ///   one**: *one* argument under the limit, carrying one large default, is enough — so neither
+  ///   this ceiling nor a wider one could have closed it. Fitted at 2.00 in the exponent over
+  ///   1k–64k and 85 s at the top of that ladder, on a document `Schema::build` **accepts**.
+  ///
+  /// So the copies are gone rather than bounded: the pass reads through [`Model`] and reports
+  /// through the error list, the two halves borrowed apart. Nothing about which diagnostic is
+  /// reported, in what order, or with which span depends on that — the loops below are the ones
+  /// that were here, reading `&model.types[…]` where they read a copy. al8n/smear#198.
   fn validate_interface_implementations(&mut self) {
-    for index in 0..self.types.len() {
+    let (model, errors) = self.split();
+    for index in 0..model.types.len() {
       if !matches!(
-        self.types[index].kind,
+        model.types[index].kind,
         TypeKind::Object | TypeKind::Interface
       ) {
         continue;
       }
       // Nothing below has anything to say about a type that implements nothing, and every
-      // introspection type is one — so the owner name and the copy of the list are built after
-      // the question is asked rather than before it.
-      if self.types[index].implements.is_empty() {
+      // introspection type is one — so the owner name is rendered after the question is asked
+      // rather than before it.
+      if model.types[index].implements.is_empty() {
         continue;
       }
-      let owner = self.text(self.types[index].name.sym).to_owned();
-      let declared: Vec<Located> = self.types[index].implements.clone();
+      let owner = model.text(model.types[index].name.sym).to_owned();
+      let declared: &[Located] = &model.types[index].implements;
 
-      for entry in &declared {
-        let Some(interface) = self.type_index(entry.sym) else {
+      for entry in declared {
+        let Some(interface) = model.type_index(entry.sym) else {
           continue;
         };
-        if self.types[interface].kind != TypeKind::Interface {
+        if model.types[interface].kind != TypeKind::Interface {
           continue;
         }
 
         // Transitivity: every interface the interface implements must also be declared here.
-        let required: Vec<u32> = self.types[interface].closure.clone();
-        for needed in required {
+        let required: &[u32] = &model.types[interface].closure;
+        for &needed in required {
           if needed as usize == index {
             continue;
           }
           let is_declared = declared
             .iter()
-            .any(|d| self.type_index(d.sym) == Some(needed as usize));
+            .any(|d| model.type_index(d.sym) == Some(needed as usize));
           if !is_declared {
-            let subject = self.text(self.types[needed as usize].name.sym).to_owned();
-            self.push_owned(
+            let subject = model.text(model.types[needed as usize].name.sym).to_owned();
+            push_owned(
+              errors,
               SchemaErrorKind::MissingTransitiveInterface,
               &subject,
               owner.clone(),
@@ -2937,15 +3072,16 @@ impl SchemaBuilder {
         }
 
         // Field coverage, covariance, and argument invariance.
-        let interface_fields = self.types[interface].fields.clone();
-        for interface_field in &interface_fields {
-          let field_name = self.text(interface_field.name.sym).to_owned();
-          let Some(position) = self.types[index]
+        let interface_fields: &[RawField] = &model.types[interface].fields;
+        for interface_field in interface_fields {
+          let field_name = model.text(interface_field.name.sym).to_owned();
+          let Some(position) = model.types[index]
             .fields
             .iter()
             .position(|f| f.name.sym == interface_field.name.sym)
           else {
-            self.push_owned(
+            push_owned(
+              errors,
               SchemaErrorKind::MissingInterfaceField,
               &field_name,
               owner.clone(),
@@ -2953,12 +3089,13 @@ impl SchemaBuilder {
             );
             continue;
           };
-          let own = self.types[index].fields[position].clone();
+          let own: &RawField = &model.types[index].fields[position];
 
-          if !self.is_valid_implementation_type(own.ty.packed, interface_field.ty.packed) {
+          if !model.is_valid_implementation_type(own.ty.packed, interface_field.ty.packed) {
             let path = owner_path(&[&owner, &field_name]);
-            let expected = self.render_type(interface_field.ty.packed);
-            self.push_owned(
+            let expected = model.render_type(interface_field.ty.packed);
+            push_owned(
+              errors,
               SchemaErrorKind::InvalidInterfaceFieldType,
               &expected,
               path,
@@ -2969,10 +3106,11 @@ impl SchemaBuilder {
           // `IsValidImplementation` 2.6: "if `field` is deprecated then `implementedField` must
           // also be deprecated". The span is the implementing field, which is where the edit goes;
           // `related` points at the interface field, which is the other half of the obligation.
-          if is_deprecated(&self.interner, &own.directives)
-            && !is_deprecated(&self.interner, &interface_field.directives)
+          if is_deprecated(model.interner, &own.directives)
+            && !is_deprecated(model.interner, &interface_field.directives)
           {
-            self.push_related(
+            push_related(
+              errors,
               SchemaErrorKind::InterfaceFieldNotDeprecated,
               &field_name,
               Some(owner.clone()),
@@ -2995,14 +3133,15 @@ impl SchemaBuilder {
           };
 
           for interface_arg in interface_args {
-            let arg_name = self.text(interface_arg.name.sym).to_owned();
+            let arg_name = model.text(interface_arg.name.sym).to_owned();
             match own_args
               .iter()
               .find(|a| a.name.sym == interface_arg.name.sym)
             {
               None => {
                 let path = owner_path(&[&owner, &field_name]);
-                self.push_owned(
+                push_owned(
+                  errors,
                   SchemaErrorKind::MissingInterfaceFieldArgument,
                   &arg_name,
                   path,
@@ -3012,8 +3151,9 @@ impl SchemaBuilder {
               Some(own_arg) => {
                 if own_arg.ty.packed != interface_arg.ty.packed {
                   let path = owner_path(&[&owner, &field_name, &arg_name]);
-                  let expected = self.render_type(interface_arg.ty.packed);
-                  self.push_owned(
+                  let expected = model.render_type(interface_arg.ty.packed);
+                  push_owned(
+                    errors,
                     SchemaErrorKind::InvalidInterfaceFieldArgumentType,
                     &expected,
                     path,
@@ -3032,9 +3172,10 @@ impl SchemaBuilder {
               continue;
             }
             if own_arg.ty.packed.is_non_null() && !own_arg.default.is_present() {
-              let arg_name = self.text(own_arg.name.sym).to_owned();
+              let arg_name = model.text(own_arg.name.sym).to_owned();
               let path = owner_path(&[&owner, &field_name]);
-              self.push_owned(
+              push_owned(
+                errors,
                 SchemaErrorKind::UnexpectedRequiredArgument,
                 &arg_name,
                 path,
@@ -3045,53 +3186,6 @@ impl SchemaBuilder {
         }
       }
     }
-  }
-
-  /// Draft's `IsValidImplementationFieldType`.
-  fn is_valid_implementation_type(&self, field: PackedType, implemented: PackedType) -> bool {
-    if field.is_non_null() {
-      return self.is_valid_implementation_type(field.nullable(), implemented.nullable());
-    }
-    if let (Some(item), Some(implemented_item)) = (field.list_item(), implemented.list_item()) {
-      return self.is_valid_implementation_type(item, implemented_item);
-    }
-    if field == implemented {
-      return true;
-    }
-    if field.wrappers() != implemented.wrappers() {
-      return false;
-    }
-    self.is_sub_type(field.base_id(), implemented.base_id())
-  }
-
-  /// Whether `candidate` is one of `abstract_type`'s possible types, in the draft's wider sense:
-  /// union membership, or the interface closure — which, unlike the runtime possible-object
-  /// bitsets, includes interfaces implementing interfaces.
-  fn is_sub_type(&self, candidate: TypeId, abstract_type: TypeId) -> bool {
-    if candidate == UNRESOLVED || abstract_type == UNRESOLVED {
-      return false;
-    }
-    let target = &self.types[abstract_type.get() as usize];
-    match target.kind {
-      TypeKind::Union => target
-        .members
-        .iter()
-        .any(|member| self.type_index(member.sym) == Some(candidate.get() as usize)),
-      TypeKind::Interface => self.types[candidate.get() as usize]
-        .closure
-        .contains(&abstract_type.get()),
-      _ => false,
-    }
-  }
-
-  fn render_type(&self, packed: PackedType) -> String {
-    struct Rendered<'a>(PackedType, &'a str);
-    impl core::fmt::Display for Rendered<'_> {
-      fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.0.write(f, self.1)
-      }
-    }
-    Rendered(packed, self.text(packed.base())).to_string()
   }
 
   /// Draft §3.10.1: an input-object cycle must have at least one nullable or list link.
