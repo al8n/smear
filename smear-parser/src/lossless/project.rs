@@ -209,8 +209,10 @@ impl<K: fmt::Debug> core::error::Error for ProjectError<K> {}
 ///   the document as a whole (an undefined fragment spread, an unused fragment) cannot tell a
 ///   definition that was never written from one that was dropped.
 ///
-/// [`is_complete`](Self::is_complete) is the one-call form of that question, and it is the only
-/// state in which the recovering answer and the fail-fast one are the same value.
+/// [`is_complete`](Self::is_complete) is the one-call form of that question. It is a statement
+/// about **loss**, not about validity: it is the only state in which the AST covers the whole
+/// document, and a fail-fast projection of the same parse can still refuse it — a document that is
+/// empty, or nothing but trivia, lost nothing and has no definition either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Recovery {
   projected: u32,
@@ -244,8 +246,14 @@ impl Recovery {
 
   /// Returns whether every top-level element had an AST image.
   ///
-  /// When it is true the recovering projection produced exactly what the fail-fast one would
-  /// have, and anything read off the result is a statement about the whole document.
+  /// When it is true, anything read off the result is a statement about the whole document rather
+  /// than about a surviving part of it — which is the question a consumer of a recovering
+  /// projection has to answer before it reads anything else.
+  ///
+  /// It does not say the fail-fast projection would have succeeded. That door additionally refuses
+  /// a document with no definition in it, and an empty or trivia-only parse loses nothing while
+  /// having nothing: complete, with [`projected`](Self::projected) zero. The two answers coincide
+  /// everywhere else.
   #[inline]
   pub const fn is_complete(&self) -> bool {
     self.skipped == 0
@@ -258,6 +266,32 @@ impl fmt::Display for Recovery {
     write!(f, "{projected} projected, {skipped} skipped")
   }
 }
+
+/// The `(parse, source)` pair handed to a recovering projection does not describe one document.
+///
+/// # Why this is a type and not a [`Recovery`] with nothing projected
+///
+/// It was one, briefly. A mismatched pair projected nothing and reported every top-level element
+/// as skipped, which reads as "the whole document was dropped" and is true — **unless the parse has
+/// no top-level elements to report**. An empty or trivia-only parse handed a different, non-empty
+/// source counted zero skipped, and [`Recovery::is_complete`] answers `true` at zero: an empty AST
+/// marked complete, over source nothing examined.
+///
+/// A count cannot carry a state. `skipped` answers *how much of this parse had no AST image*, and
+/// "these are not the same document" is not a quantity of anything — at every size, including none.
+/// So the mismatch leaves [`Recovery`] entirely and becomes the error half of a [`Result`], which a
+/// caller cannot read past without deciding what to do about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct SourceMismatch;
+
+impl fmt::Display for SourceMismatch {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str("the parse and the source are not the same document")
+  }
+}
+
+impl core::error::Error for SourceMismatch {}
 
 /// [`TextRange`] as the AST's span type.
 #[inline]

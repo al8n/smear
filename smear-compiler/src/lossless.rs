@@ -85,8 +85,7 @@
 //! [`Schema::build`]: super::Schema::build
 
 use smear_parser::graphql::lossless::{
-  Parse, matches_source, project_executable_document_recovered,
-  project_type_system_document_recovered,
+  Parse, project_executable_document_recovered, project_type_system_document_recovered,
 };
 
 pub use smear_parser::lossless::project::Recovery;
@@ -380,7 +379,8 @@ where
       recovery: None,
     });
   };
-  // The pair is verified as a **whole root**, byte for byte, before anything is projected.
+  // The pair is verified as a **whole root**, byte for byte, before anything is projected — by the
+  // projector, which answers [`SourceMismatch`] instead of an AST.
   //
   // The projector verifies each *definition* it projects against the source at that definition's
   // own range, and al8n/smear#198's third round took that to mean a mismatched pair answers itself
@@ -391,19 +391,20 @@ where
   // looked at. A clean verdict on a document nobody validated, which is worse than either answer
   // this could give instead.
   //
-  // `SyntaxText`'s comparison walks the green tokens against the source and allocates nothing, so
-  // this is `O(tokens)` — bounded by, and already paid for by, the prepayment above, which prices
-  // `max(source.len(), parse.green().text_len())`. It sits *after* that charge and *before* the
-  // projection, which is the only placement that neither validates a stale AST nor does unpriced
-  // work to avoid it.
-  if !matches_source(parse, source) {
-    return Err(LosslessInvalid {
+  // The check belongs to the projector rather than to this door because this door is not the only
+  // caller: one holding no validator and no door projects the same pair directly, and a guard this
+  // door performs is a guard that caller never gets — al8n/smear#198's fourteenth round, where the
+  // door was right and the API it called was not.
+  //
+  // It is still *this* door's charge. `SyntaxText`'s comparison walks the green tokens against the
+  // source and allocates nothing, so it is `O(tokens)` — bounded by, and already paid for by, the
+  // prepayment above, which prices `max(source.len(), parse.green().text_len())`. Moving the work
+  // behind a call boundary did not move the charge: the prepayment still sits in front of it.
+  let (document, recovery) =
+    project_executable_document_recovered(parse, source).map_err(|_| LosslessInvalid {
       invalid: Invalid::unexamined(),
       recovery: None,
-    });
-  }
-
-  let (document, recovery) = project_executable_document_recovered(parse, source);
+    })?;
   match validate_charged(schema, &document, scratch, budget, rules, sink, left) {
     Ok(()) => Ok(recovery),
     Err(invalid) => Err(LosslessInvalid {
@@ -639,8 +640,7 @@ pub fn validate_schema_lossless(
   parse: &Parse,
   source: &str,
 ) -> Result<(Schema, Recovery), LosslessSchemaErrors> {
-  // The same whole-root verification the executable door makes, for the same reason and through
-  // the same shared function.
+  // The same whole-root verification the executable door gets, from the same shared projector.
   //
   // This door was cleared in al8n/smear#198's third-round sweep — "out of scope by API shape: it
   // takes no `Budget`". That was right about the *ledger* question and had nothing to say about
@@ -648,10 +648,12 @@ pub fn validate_schema_lossless(
   // that is the parse's text plus trailing SDL projected every stale definition, reported a
   // complete recovery, and let `Schema::build` answer `Ok` for the prefix while the appended
   // definitions were silently absent.
-  if !matches_source(parse, source) {
-    return Err(LosslessSchemaErrors::SourceMismatch);
-  }
-  let (document, recovery) = project_type_system_document_recovered(parse, source);
+  //
+  // Neither door spells the check itself any more: the twelfth round asked for it "in the shared
+  // recovering-projection API" precisely so a door cannot be written without it, and the
+  // fourteenth showed a caller that has no door at all.
+  let (document, recovery) = project_type_system_document_recovered(parse, source)
+    .map_err(|_| LosslessSchemaErrors::SourceMismatch)?;
   match Schema::build(&document) {
     Ok(schema) => Ok((schema, recovery)),
     Err(errors) => Err(LosslessSchemaErrors::Refused { errors, recovery }),

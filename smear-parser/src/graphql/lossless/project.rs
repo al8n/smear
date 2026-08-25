@@ -125,7 +125,8 @@ use crate::{
     syntactic::definition::classify_location,
   },
   lossless::project::{
-    Recovery, node_extent, reject_holes, to_range, to_span, verify_source, verify_source_at,
+    Recovery, SourceMismatch, node_extent, reject_holes, to_range, to_span, verify_source,
+    verify_source_at,
   },
 };
 
@@ -241,11 +242,14 @@ pub fn project_executable_document<'src>(
 ///
 /// # What counts as a top-level element
 ///
-/// The definitions of the [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node when the
-/// parse has one — and the children of the tree's [`Root`](SyntaxKind::Root) when it does not.
-/// The second case is not hypothetical: the lost-node recovery class drops a failed document
-/// production's children straight under the root, so `"{ a }\nquery Bad("` has no document node
-/// at all and its one good operation is reachable only this way.
+/// Every child of the tree's [`Root`](SyntaxKind::Root), with the
+/// [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node stepped *through* rather than
+/// descended into as the whole population. Both halves of that are load-bearing. The lost-node
+/// recovery class drops a failed document production's children straight under the root, so
+/// `"{ a }\nquery Bad("` has no document node at all and its one good operation is reachable only
+/// from the root; and a gap tile can land beside an *empty* document node, so `"%"` has one
+/// top-level element and it is not the document node's child. Reading only the document node's
+/// children answered a complete [`Recovery`] for that second shape.
 ///
 /// ```
 /// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
@@ -258,19 +262,26 @@ pub fn project_executable_document<'src>(
 /// let parse = parse_executable_document(source);
 /// assert!(parse.has_errors());
 ///
-/// let (ast, recovery) = project_executable_document_recovered(&parse, source);
+/// let (ast, recovery) =
+///   project_executable_document_recovered(&parse, source).expect("one document");
 /// assert_eq!(ast.definitions().len(), 1);
 /// assert_eq!(recovery.projected(), 1);
 /// assert!(!recovery.is_complete());
+///
+/// // A `source` the parse does not describe is refused rather than projected — including one that
+/// // merely *extends* the parse's text, where every definition would have matched at its own
+/// // range and the recovery would have read as complete.
+/// let longer = format!("{source} query More {{ hero {{ name }} }}");
+/// assert!(project_executable_document_recovered(&parse, &longer).is_err());
 /// # }
 /// ```
 pub fn project_executable_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
-) -> (ExecutableDocument<&'src str>, Recovery) {
+) -> Result<(ExecutableDocument<&'src str>, Recovery), SourceMismatch> {
   let (span, definitions, recovery) =
-    recovered_top_level(parse, executable_root, recoverable_entry, source);
-  (ExecutableDocument::new(span, definitions), recovery)
+    recovered_top_level(parse, K::ExecutableDocument, recoverable_entry, source)?;
+  Ok((ExecutableDocument::new(span, definitions), recovery))
 }
 
 impl super::ast::ExecutableDocument {
@@ -354,23 +365,28 @@ pub fn project_type_system_document<'src>(
 /// let parse = parse_type_system_document(source);
 /// assert!(parse.has_errors());
 ///
-/// let (ast, recovery) = project_type_system_document_recovered(&parse, source);
+/// let (ast, recovery) =
+///   project_type_system_document_recovered(&parse, source).expect("one document");
 /// assert_eq!(ast.definitions().len(), 1);
 /// assert_eq!(recovery.projected(), 1);
 /// assert!(!recovery.is_complete());
+///
+/// // And a `source` the parse does not describe is refused rather than projected.
+/// let longer = format!("{source} type Extra {{ n: Int }}");
+/// assert!(project_type_system_document_recovered(&parse, &longer).is_err());
 /// # }
 /// ```
 pub fn project_type_system_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
-) -> (TypeSystemDocument<&'src str>, Recovery) {
+) -> Result<(TypeSystemDocument<&'src str>, Recovery), SourceMismatch> {
   let (span, definitions, recovery) = recovered_top_level(
     parse,
-    type_system_root,
+    K::TypeSystemDocument,
     recoverable_type_system_entry,
     source,
-  );
-  (TypeSystemDocument::new(span, definitions), recovery)
+  )?;
+  Ok((TypeSystemDocument::new(span, definitions), recovery))
 }
 
 impl super::ast::TypeSystemDocument {
@@ -386,16 +402,6 @@ impl super::ast::TypeSystemDocument {
   }
 }
 
-/// The recovering top-level walk, shared by both single-half roots.
-///
-/// One implementation rather than one per root, because what it computes is [`Recovery`], and
-/// `Recovery`'s documented meaning — *`skipped` is a bound on what was lost, counted per element*
-/// — has to be one statement about both doors rather than two statements that happen to agree
-/// today. The root lookup and the per-definition projection are the only things that differ, so
-/// they are the arguments; they are `fn` pointers rather than generic parameters so this
-/// monomorphises once per root and nothing here becomes a shape a caller can dispatch through.
-///
-/// Answers the surviving definitions, their span, and the tally.
 /// Whether `parse` and `source` describe the same bytes, over the **whole root**.
 ///
 /// The recovering projection's precondition, and the one thing it cannot establish definition by
@@ -409,31 +415,59 @@ impl super::ast::TypeSystemDocument {
 /// `SyntaxText`'s comparison walks the green tokens against the slice and allocates nothing, so
 /// this is `O(tokens)` against a projection that allocates an entire AST.
 ///
-/// It is public because the check belongs to whoever holds the pair. Both of `smear-compiler`'s
-/// lossless doors call it to report the mismatch in their own vocabulary, and the recovering
-/// projections below call it so that a consumer using them **directly** — with no validator and no
-/// door in front — cannot be handed a stale prefix either. al8n/smear#198.
+/// The fail-fast doors never needed it: [`project_executable_document`] and its SDL twin open with
+/// [`verify_source`] over the whole green root, and that check compares *lengths* first, so an
+/// extended source is refused before a byte is walked. The recovering door was written from the
+/// **compositional** check instead — [`verify_source_at`], run once per definition — and that is
+/// the check with nothing to say about bytes no definition covers.
+///
+/// It is public because the check belongs to whoever holds the pair, and a caller may want the
+/// answer without projecting. Nothing has to call it to be safe: the recovering projections make
+/// the check themselves and answer [`SourceMismatch`], so a consumer using them **directly** —
+/// with no validator and no door in front — cannot be handed a stale prefix either. al8n/smear#198.
 pub fn matches_source(parse: &Parse, source: &str) -> bool {
   parse.syntax().text() == source
 }
 
+/// The recovering top-level walk, shared by both single-half roots.
+///
+/// One implementation rather than one per root, because what it computes is [`Recovery`], and
+/// `Recovery`'s documented meaning — *`skipped` is a bound on what was lost, counted per element*
+/// — has to be one statement about both doors rather than two statements that happen to agree
+/// today. The root's kind and the per-definition projection are the only things that differ, so
+/// they are the arguments; `entry_of` is a `fn` pointer rather than a generic parameter so this
+/// monomorphises once per root and nothing here becomes a shape a caller can dispatch through.
+///
+/// # Every element of the root, not every element of the document node
+///
+/// The walk starts at the **root** and steps *through* the document node rather than starting
+/// inside it. The two are not the same population: the parser can leave a gap tile beside the
+/// document node instead of within it, and `"%"` parses to exactly that — `ExecutableDocument@0..0`
+/// with `Gap@0..1` as its sibling. Iterating the document node's children saw nothing, counted
+/// nothing, and answered a complete [`Recovery`] over a document whose every byte had no AST
+/// image. Which is [`SourceMismatch`]'s defect one level down: state derived from a population
+/// that can be empty while the thing it describes is not.
+///
+/// Answers the surviving definitions, their span, and the tally — or [`SourceMismatch`],
+/// which is none of those three and so is not spelled as a value of any of them.
 fn recovered_top_level<'src, T>(
   parse: &Parse,
-  root_of: fn(Node<'_>) -> Option<Node<'_>>,
+  root_kind: SyntaxKind,
   entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
   source: &'src str,
-) -> (SimpleSpan, Vec<T>, Recovery) {
-  let root = parse_root(parse);
-  let container = root_of(root).unwrap_or(root);
+) -> Result<(SimpleSpan, Vec<T>, Recovery), SourceMismatch> {
+  // Established once, over the whole root, before a single element is projected, and **returned**
+  // rather than folded into the tally. See [`matches_source`] for why a per-definition check
+  // cannot see a prefix, and [`SourceMismatch`] for why the answer is not a [`Recovery`]: a
+  // mismatched pair used to project nothing and count every top-level element as skipped, which is
+  // a true statement about a parse that *has* elements and an empty one about a parse that does
+  // not — and `Recovery::is_complete` answers `true` at zero skipped.
+  if !matches_source(parse, source) {
+    return Err(SourceMismatch);
+  }
 
-  // Established once, over the whole root, before a single element is projected. See
-  // [`matches_source`]: a per-definition check cannot see a prefix, and a prefix is the mismatch
-  // that projects cleanly.
-  //
-  // A pair that does not match projects **nothing** and counts every top-level element as skipped
-  // — an exact count, because this loop walks them anyway. So the answer is never a complete
-  // recovery over part of a document, whoever is asking.
-  let matches = matches_source(parse, source);
+  let root = parse_root(parse);
+  let container = child_node(root, root_kind).unwrap_or(root);
 
   let mut definitions = Vec::new();
   let mut skipped = 0u32;
@@ -441,24 +475,27 @@ fn recovered_top_level<'src, T>(
   // not of the bytes that were dropped: an AST span is an extent of the tokens its node covers,
   // and a skipped region is not one of them.
   let mut extent = Extent::default();
-  for element in container.children() {
-    match element {
-      // Rubble the parser could not attach to a definition. Counted per token rather than per
-      // run: a bound on what was lost, which is what `Recovery::skipped` promises.
-      NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
-      NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => {
-        match matches
-          .then(|| entry_of(child, source))
-          .and_then(Result::ok)
-        {
-          Some((entry, piece)) => {
-            extent.cover(piece);
-            definitions.push(entry);
-          }
-          None => skipped = skipped.saturating_add(1),
-        }
+  let mut take = |element: NodeOrToken<Node<'_>, Token<'_>>| match element {
+    // Rubble the parser could not attach to a definition. Counted per token rather than per run:
+    // a bound on what was lost, which is what `Recovery::skipped` promises.
+    NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
+    NodeOrToken::Token(_) => {}
+    NodeOrToken::Node(child) => match entry_of(child, source) {
+      Ok((entry, piece)) => {
+        extent.cover(piece);
+        definitions.push(entry);
       }
+      Err(_) => skipped = skipped.saturating_add(1),
+    },
+  };
+  for element in root.children() {
+    match element {
+      // The document node is stepped *through*: its children are the definitions. Everything else
+      // under the root is a top-level element in its own right — the lost-node class puts a failed
+      // production's children there, and the lexer's gap tiles land there when the document node
+      // came out empty.
+      NodeOrToken::Node(child) if child.kind() == root_kind => child.children().for_each(&mut take),
+      other => take(other),
     }
   }
 
@@ -472,7 +509,7 @@ fn recovered_top_level<'src, T>(
     }
   };
   let recovery = Recovery::new(definitions.len() as u32, skipped);
-  (span, definitions, recovery)
+  Ok((span, definitions, recovery))
 }
 
 /// The [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node under a parse's root.

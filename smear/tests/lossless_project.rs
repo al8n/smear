@@ -70,10 +70,10 @@ use smear::parser::{
     error::GraphqlErrors,
     kinds::{GraphQLLang, SyntaxKind as K},
     lossless::{
-      ProjectErrorKind, SyntaxNode, ast::Document as DocumentNode, parse_document,
-      parse_executable_document, parse_type_system_document, project, project_executable_document,
-      project_executable_document_recovered, project_type_system_document,
-      project_type_system_document_recovered,
+      ProjectErrorKind, Recovery, SyntaxNode, ast::Document as DocumentNode, matches_source,
+      parse_document, parse_executable_document, parse_type_system_document, project,
+      project_executable_document, project_executable_document_recovered,
+      project_type_system_document, project_type_system_document_recovered,
     },
     syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
@@ -320,7 +320,8 @@ fn the_executable_projection_equals_the_parse_over_the_shared_corpus() {
          same bytes"
       );
 
-      let (recovered, recovery) = project_executable_document_recovered(&parse, &source);
+      let (recovered, recovery) = project_executable_document_recovered(&parse, &source)
+        .expect("the pair is the same document");
       assert!(
         recovery.is_complete(),
         "{name} ({form}): the recovering door dropped {} element(s) of a clean parse",
@@ -411,7 +412,8 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
          same bytes"
       );
 
-      let (recovered, recovery) = project_type_system_document_recovered(&parse, &source);
+      let (recovered, recovery) = project_type_system_document_recovered(&parse, &source)
+        .expect("the pair is the same document");
       assert!(
         recovery.is_complete(),
         "{name} ({form}): the recovering door dropped {} element(s) of a clean parse",
@@ -1218,4 +1220,171 @@ fn the_invalid_half_is_a_census_rather_than_a_wall_of_refusals() {
     projected.contains(&"invalid_unterminated_brace.graphql"),
     "the unclosed-brace class is the pinned shape-faithful survivor; it now refuses: {projected:?}"
   );
+}
+
+/// A **direct** consumer of the recovering projector — no validator, no `smear-compiler` door —
+/// cannot obtain an AST it can mistake for the whole document.
+///
+/// The door check used to live at the door. `validate_executable_lossless` and
+/// `validate_schema_lossless` each called `matches_source` themselves, which is airtight for a
+/// caller that goes through them and says nothing about the caller that does not: these two
+/// projections are `pub`, and projecting a pair is the whole reason they exist.
+///
+/// # Why `skipped` could not carry it
+///
+/// The first repair encoded the mismatch as "project nothing, count every top-level element as
+/// skipped". That is a true statement about a parse that *has* top-level elements. `skipped` is
+/// derived from the elements the container holds, so a parse holding none — empty, or trivia only
+/// — counts zero, and `Recovery::is_complete` is `skipped == 0`.
+///
+/// Each empty witness below is measured **twice**: once against its own text, where the answer is
+/// `Recovery::new(0, 0)` and complete, and once against a different source. Those two `Recovery`
+/// values were the same value. A count cannot carry a state, so the state left `Recovery`
+/// entirely and became the error half of a `Result`, which is the only difference the two cases
+/// have left.
+#[test]
+fn the_recovering_projector_refuses_a_pair_it_is_not_a_projection_of() {
+  // `(what, parse text, a source that is not it)`. The first of each pair is the extension — the
+  // shape a per-definition check cannot see, since every definition matches at its own range —
+  // and the second is the parse with nothing for a tally to count.
+  let executable = [
+    (
+      "an extended source",
+      "{ hero { name } }",
+      "{ hero { name } }\nquery More { hero { id } }",
+    ),
+    ("an empty parse", "", "{ hero { name } }"),
+  ];
+  for (what, text, source) in executable {
+    let parse = parse_executable_document(text);
+    let (ast, recovery) = project_executable_document_recovered(&parse, text)
+      .expect("a parse projects against its own text");
+    if text.is_empty() {
+      // The premise: this is the value the count-shaped encoding of a mismatch would also have
+      // produced, so nothing downstream could tell the two apart.
+      assert_eq!(ast.definitions().len(), 0);
+      assert_eq!(recovery, Recovery::new(0, 0));
+      assert!(recovery.is_complete(), "{what}: complete at zero skipped");
+    }
+
+    assert!(
+      !matches_source(&parse, source),
+      "{what}: the pair under test has to be a mismatched one"
+    );
+    let refused = project_executable_document_recovered(&parse, source)
+      .map(|(projected, recovery)| (projected.definitions().len(), recovery));
+    assert_eq!(
+      refused.map_err(|mismatch| mismatch.to_string()),
+      Err("the parse and the source are not the same document".to_owned()),
+      "{what}: a direct consumer was handed an AST for a source this parse does not describe"
+    );
+  }
+
+  let type_system = [
+    (
+      "an extended source",
+      "type T { f: Int }",
+      "type T { f: Int }\ntype U { g: Int }",
+    ),
+    ("a trivia-only parse", "# nothing\n", "type T { f: Int }"),
+  ];
+  for (what, text, source) in type_system {
+    let parse = parse_type_system_document(text);
+    let (ast, recovery) = project_type_system_document_recovered(&parse, text)
+      .expect("a parse projects against its own text");
+    if what == "a trivia-only parse" {
+      assert_eq!(ast.definitions().len(), 0);
+      assert_eq!(recovery, Recovery::new(0, 0));
+      assert!(recovery.is_complete(), "{what}: complete at zero skipped");
+    }
+
+    assert!(
+      !matches_source(&parse, source),
+      "{what}: the pair under test has to be a mismatched one"
+    );
+    let refused = project_type_system_document_recovered(&parse, source)
+      .map(|(projected, recovery)| (projected.definitions().len(), recovery));
+    assert_eq!(
+      refused.map_err(|mismatch| mismatch.to_string()),
+      Err("the parse and the source are not the same document".to_owned()),
+      "{what}: a direct consumer was handed an AST for a source this parse does not describe"
+    );
+  }
+}
+
+/// Rubble the parser leaves **beside** the document node is a top-level element, and counting only
+/// the document node's children reported it as nothing lost.
+///
+/// The same defect as the mismatch above, one level down, and found by sweeping for it: state
+/// derived from a population that can be empty while the thing it describes is not. `skipped` was
+/// counted over `ExecutableDocument`'s children, and a lexer gap tile does not always land there —
+/// `"%"` parses to `Root[ExecutableDocument@0..0, Gap@0..1]`, where that population is empty and
+/// the whole document sits outside it. Zero skipped, `is_complete()`, an empty AST over a source
+/// with nothing in it that has an AST image.
+///
+/// The walk now starts at the root and steps *through* the document node, so both populations are
+/// one population. The controls below are the two shapes that were already right: a gap *inside*
+/// the document node, which must still count once rather than twice, and a parse with no document
+/// node at all, whose children were already the root's.
+#[test]
+fn a_gap_beside_the_document_node_is_counted() {
+  // The premise, measured rather than asserted from the shape of the source: the document node is
+  // empty, so the population the walk used to iterate has nothing in it, and the root holds a
+  // non-trivia element the document node does not.
+  let parse = parse_executable_document("%");
+  let root = SyntaxNode::new_root(parse.green().clone());
+  let document = root
+    .children()
+    .find(|child| child.kind() == K::ExecutableDocument)
+    .expect("the parse has a document node");
+  assert_eq!(
+    document.children_with_tokens().count(),
+    0,
+    "the premise is a document node with an empty child population"
+  );
+  assert_eq!(
+    root
+      .children_with_tokens()
+      .filter(|element| element.kind() == K::Gap)
+      .count(),
+    1,
+    "the premise is one gap tile beside that document node"
+  );
+
+  for (what, src, projected, skipped) in [
+    ("a gap beside an empty document node", "%", 0, 1),
+    ("an unterminated string beside one", "\"unterminated", 0, 1),
+    // Controls. The first was already counted — inside the document node — and must not be counted
+    // twice now that the walk reaches both. The second has no document node, so the walk's
+    // fallback population was already the root's children and nothing about it changed.
+    ("a gap inside the document node", "{ a } %", 1, 1),
+    ("no document node at all", "{ a }\nquery Bad(", 1, 3),
+    // And the honest complete: trivia has no AST image at any position, so a document that is only
+    // trivia lost nothing. `projected() == 0` is what tells a consumer there is nothing here.
+    ("only trivia", "# nothing\n", 0, 0),
+    ("nothing at all", "", 0, 0),
+  ] {
+    let parse = parse_executable_document(src);
+    let (ast, recovery) = project_executable_document_recovered(&parse, src)
+      .expect("a parse projects against its own text");
+    assert_eq!(
+      (ast.definitions().len(), recovery),
+      (projected, Recovery::new(projected as u32, skipped)),
+      "{what}"
+    );
+    assert_eq!(
+      recovery.is_complete(),
+      skipped == 0,
+      "{what}: completeness is the tally's own answer"
+    );
+  }
+
+  // The SDL door is the same walk with a different root kind, so it is the same defect and the
+  // same repair; a gate that proved it of one root would be proving it of half the code.
+  let parse = parse_type_system_document("%");
+  let (ast, recovery) = project_type_system_document_recovered(&parse, "%")
+    .expect("a parse projects against its own text");
+  assert_eq!(ast.definitions().len(), 0);
+  assert_eq!(recovery, Recovery::new(0, 1));
+  assert!(!recovery.is_complete());
 }
