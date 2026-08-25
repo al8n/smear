@@ -24,7 +24,7 @@ use super::{
 use crate::{
   diagnostic::Context,
   schema::DirectiveLocation,
-  scratch::{Frame, NONE, get_bit},
+  scratch::{Frame, NONE, get_bit, push_frame},
 };
 
 /// Locates a selection set by descending from a definition along the frame chain.
@@ -34,15 +34,37 @@ use crate::{
 /// needing to know.
 pub(super) fn resolve<'d, S>(
   document: &'d ExecutableDocument<S>,
-  frames: &[Frame],
+  suffix: &[Frame],
 ) -> Option<&'d SelectionSet<S>> {
-  let start = frames.iter().rposition(Frame::is_definition_root)?;
-  let mut set = root_selection_set(document, frames[start].definition)?;
-  for frame in &frames[start + 1..] {
+  let (root, rest) = suffix.split_first()?;
+  let mut set = root_selection_set(document, root.definition)?;
+  for frame in rest {
     let selection = set.selections().get(frame.child as usize)?;
     set = child_selection_set(selection)?;
   }
   Some(set)
+}
+
+/// The part of a selection stack a [`resolve`] descends: the suffix beginning at the nearest
+/// definition root.
+///
+/// The stack itself is longer, and that is the whole of al8n/smear#198's sixteenth round. This used
+/// to be found by scanning backwards for the root — `O(suffix)` on its own, so a resolution walked
+/// the suffix twice and the obvious number to charge was the length of the *stack*. It is read off
+/// the top frame now, in `O(1)`, and the scan is gone rather than repriced.
+///
+/// Its two callers charge `suffix_of(..).len()` and then resolve `suffix_of(..)`, which is
+/// [`walk_value`](Validator::walk_value)'s shape one tree up: that walk has always charged
+/// `depth - base` and resolved `values[base..depth]`, so its quantity and its slice are the same
+/// expression and cannot drift apart. These two had a quantity in one place and a slice computed in
+/// another, and they disagreed.
+pub(super) fn suffix_of(frames: &[Frame]) -> &[Frame] {
+  match frames.last() {
+    Some(top) => frames
+      .get(top.definition_root() as usize..)
+      .unwrap_or_default(),
+    None => &[],
+  }
 }
 
 impl<'d, S, K> Validator<'_, 'd, S, K>
@@ -55,7 +77,7 @@ where
   pub(super) fn walk_selections(&mut self, root: Frame) -> ControlFlow<()> {
     let document = self.document;
     self.scratch.frames.clear();
-    self.scratch.frames.push(root);
+    push_frame(&mut self.scratch.frames, root);
     let mut current = root_selection_set(document, root.definition);
     // The definition's own selection set, as the span a refusal in this walk points at. The same
     // choice `walk_value` makes for the same reason: the descent charged below is a property of
@@ -88,28 +110,24 @@ where
         Selection::Field(field) => {
           let scope = self.check_field(field, frame)?;
           if let Some(child) = field.selection_set() {
-            self.scratch.frames.push(Frame::child(
-              frame.definition,
-              frame.cursor,
-              scope,
-              frame.flags,
-            ));
+            push_frame(
+              &mut self.scratch.frames,
+              Frame::child(frame.definition, frame.cursor, scope, frame.flags),
+            );
             current = Some(child);
           }
         }
         Selection::InlineFragment(inline) => {
           let scope = self.check_inline_fragment(inline, frame)?;
-          self.scratch.frames.push(Frame::child(
-            frame.definition,
-            frame.cursor,
-            scope,
-            frame.flags,
-          ));
+          push_frame(
+            &mut self.scratch.frames,
+            Frame::child(frame.definition, frame.cursor, scope, frame.flags),
+          );
           current = Some(inline.selection_set());
         }
         Selection::FragmentSpread(spread) => {
           if let Some(entered) = self.check_fragment_spread(spread, frame)? {
-            self.scratch.frames.push(entered.0);
+            push_frame(&mut self.scratch.frames, entered.0);
             current = Some(entered.1);
           }
         }
@@ -120,15 +138,33 @@ where
 
   /// [`resolve`] over the selection stack, charged for the descent it makes.
   ///
-  /// It scans the stack for the definition root and then descends it again, so it costs the depth —
-  /// and it is called only after a pop, which is why the charge lives here rather than at the top
-  /// of the loop that sometimes calls it.
+  /// Called only after a pop, which is why the charge lives here rather than at the top of the loop
+  /// that sometimes calls it — al8n/smear#198's eleventh round moved it onto the arm that resolves.
+  ///
+  /// # The quantity is the suffix, not the stack
+  ///
+  /// The arm was right and the number was not. `resolve` starts at the **nearest definition root**,
+  /// so what it walks is `len − root`, and a stack is not one definition deep: an operation that
+  /// reaches a fragment at depth `D` gives every level of that fragment body a resolution of its
+  /// own, each `O(1)` and each billed `D`. `Θ(D · W)` charged for `Θ(W)` performed, and at
+  /// `D = 128` about thirty-two thousand such levels exhaust the default ceiling and answer
+  /// [`Refusal::Budget`](crate::Refusal::Budget) for a document with nothing wrong with it — under
+  /// any rule set, with no merge engine involved.
+  ///
+  /// A depth is a population like any other, and the question the list, group and bitset audits ask
+  /// of a population is whether the quantity is the part traversed or the whole. This one was the
+  /// whole.
   pub(super) fn resolve_frames(
     &mut self,
     blame: SimpleSpan,
   ) -> ControlFlow<(), Option<&'d SelectionSet<S>>> {
-    self.spend(self.scratch.frames.len() as u32, blame)?;
-    ControlFlow::Continue(resolve(self.document, &self.scratch.frames))
+    // Charged for the slice that is then resolved, not for a number computed beside it: both lines
+    // ask `suffix_of` for the same answer, so there is no second place for the quantity to be
+    // wrong. `O(1)`, and in front of the descent — the alternative was one unit per step while
+    // scanning back for the root, and a per-step charge is sound only when the step it prices has
+    // not been read yet. There is no ordering to get right if there is no scan.
+    self.spend(suffix_of(&self.scratch.frames).len() as u32, blame)?;
+    ControlFlow::Continue(resolve(self.document, suffix_of(&self.scratch.frames)))
   }
 
   /// Draft 5.3.1 and 5.3.3, plus the field's arguments and directives.

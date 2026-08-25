@@ -123,6 +123,32 @@
 //! bulk-sizing site at all: every allocation there is one element per green node, and the lossless
 //! door prepays `units(max(source.len(), parse.green().text_len()))` in front of the whole
 //! projection.
+
+//! # Every charge whose quantity is a depth
+//!
+//! The list above is the model, and this is the same enumeration over the other population an
+//! audit can get wrong by asking about the wrong part of it. A depth **is** a population: the
+//! question a list, a group or a bitset gets — *is the quantity the part traversed, or the whole?*
+//! — is the same question, and two of these five answered "the whole".
+//!
+//! | charge | quantity | the part it walks |
+//! |---|---|---|
+//! | `resolve_frames` | `suffix_of(frames).len()` | the suffix — **was the whole stack** |
+//! | [`Validator::resolve_roots`] | `suffix_of(roots).len()` | the suffix — **was the whole stack** |
+//! | `walk_value` | `depth - base` | the slice it then resolves, written once |
+//! | `resolve_merge_set` | `merge_path.len() + 1` | exact, and it cannot be otherwise |
+//! | `same_value` | `merge_compare.len()` | exact; two descents a unit, a bounded constant |
+//!
+//! The two that were wrong share a stack that **spans definitions**: a fragment spread pushes a
+//! definition-root frame, so a resolution starts partway up and the levels below it are not walked.
+//! The two merge-engine rows cannot have the defect at all — a merge set's parent chain never
+//! crosses a definition, so its stack *is* its suffix — and `walk_value` never had it because its
+//! charge and its slice are the same expression, `values[base..depth]`. These two had the quantity
+//! in one place and the slice computed in another, and that is where they disagreed; both callers
+//! now charge `suffix_of(..).len()` and resolve `suffix_of(..)`.
+//!
+//! `descend`'s `merge_stack.len() >= merge_depth()` is not on the list: it is a **limit**, which
+//! refuses a depth rather than buying one, and nothing is debited for it.
 //! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
 //!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
 //!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a
@@ -203,7 +229,7 @@ use super::{
   },
   scratch::{
     Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, byte_units, clear_bit,
-    count_units, get_bit, reset_bits, set_bit,
+    count_units, get_bit, push_frame, reset_bits, set_bit,
   },
 };
 
@@ -1434,7 +1460,7 @@ where
   fn collect_definition_edges(&mut self, index: u32) -> ControlFlow<()> {
     let document = self.document;
     self.scratch.frames.clear();
-    self.scratch.frames.push(Frame::root(index, NONE, 0));
+    push_frame(&mut self.scratch.frames, Frame::root(index, NONE, 0));
     let mut current = root_selection_set(document, index);
     let blame = current.map_or(SimpleSpan::const_new(0, 0), |set| *set.span());
     while let Some(frame) = self.scratch.frames.last().copied() {
@@ -1479,10 +1505,10 @@ where
         }
         _ => {
           if let Some(child) = child_selection_set(selection) {
-            self
-              .scratch
-              .frames
-              .push(Frame::child(index, frame.cursor, NONE, 0));
+            push_frame(
+              &mut self.scratch.frames,
+              Frame::child(index, frame.cursor, NONE, 0),
+            );
             current = Some(child);
           }
         }
@@ -1828,10 +1854,10 @@ where
     let fragments = self.scratch.fragments.len();
     self.scratch.visited.begin(fragments);
     self.scratch.roots.clear();
-    self
-      .scratch
-      .roots
-      .push(Frame::root(row.definition, NONE, 0));
+    push_frame(
+      &mut self.scratch.roots,
+      Frame::root(row.definition, NONE, 0),
+    );
     let mut current = root_selection_set(document, row.definition);
 
     // The rule only asks whether the collected map is a set of one, so the first response name
@@ -1900,10 +1926,10 @@ where
             None => true,
           };
           if applies {
-            self
-              .scratch
-              .roots
-              .push(Frame::child(frame.definition, frame.cursor, NONE, 0));
+            push_frame(
+              &mut self.scratch.roots,
+              Frame::child(frame.definition, frame.cursor, NONE, 0),
+            );
             current = Some(inline.selection_set());
           }
         }
@@ -1929,10 +1955,10 @@ where
           if !self.condition_applies(condition, root) {
             continue;
           }
-          self
-            .scratch
-            .roots
-            .push(Frame::root(target.definition, NONE, 0));
+          push_frame(
+            &mut self.scratch.roots,
+            Frame::root(target.definition, NONE, 0),
+          );
           current = Some(body.selection_set());
         }
       }
@@ -1958,14 +1984,24 @@ where
 
   /// [`selections::resolve`] over the subscription root stack, charged for the descent it makes.
   ///
-  /// [`Validator::resolve_frames`]'s twin over the other stack, and for the same reason: the
-  /// descent costs the depth and happens only after a pop.
+  /// [`Validator::resolve_frames`]'s twin over the other stack, and for the same reason — including
+  /// the reason its number was wrong. This stack enters a fragment body through
+  /// [`Frame::root`](crate::scratch::Frame::root) exactly as the selection stack does, so a
+  /// subscription whose root fields sit inside a fragment reached at depth `D` billed `D` for each
+  /// `O(1)` resolution in it. Named in the same finding, repaired in the same way, and through the
+  /// same helper rather than a second copy of the arithmetic. al8n/smear#198.
   fn resolve_roots(
     &mut self,
     blame: SimpleSpan,
   ) -> ControlFlow<(), Option<&'d smear_parser::graphql::ast::SelectionSet<S>>> {
-    self.spend(self.scratch.roots.len() as u32, blame)?;
-    ControlFlow::Continue(selections::resolve(self.document, &self.scratch.roots))
+    self.spend(
+      selections::suffix_of(&self.scratch.roots).len() as u32,
+      blame,
+    )?;
+    ControlFlow::Continue(selections::resolve(
+      self.document,
+      selections::suffix_of(&self.scratch.roots),
+    ))
   }
 
   /// Returns the `@skip` or `@include` a selection carries, if it carries one.

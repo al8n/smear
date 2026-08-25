@@ -359,6 +359,20 @@ pub(crate) struct Frame {
   pub(crate) cursor: u32,
   /// The type this level's selections are written against, or [`NONE`] when it did not resolve.
   pub(crate) ty: u32,
+  /// Where this level's **definition root** sits in the stack it is on.
+  ///
+  /// A coordinate is resolved by descending from the nearest root below it, so this is the index
+  /// the descent starts at — and `stack length − this` is the length of the part a resolution
+  /// actually walks. Both were previously found by scanning the stack backwards, which made the
+  /// *scan* cost the suffix as well and made the natural charge the whole stack: a fragment
+  /// entered at depth `D` billed `D` for the `O(1)` resolution of each of its own shallow levels,
+  /// `Θ(D · W)` charged against `Θ(W)` performed, and a refusal for a valid document out of it.
+  /// al8n/smear#198.
+  ///
+  /// Private, and [`NONE`] until [`push_frame`] fills it: it is a statement about a position in a
+  /// stack, so it is meaningless on a frame that is not on one, and nothing outside this module can
+  /// write a value that disagrees with where the frame actually landed.
+  root: u32,
   /// See the `frame` flag constants.
   pub(crate) flags: u8,
 }
@@ -378,6 +392,7 @@ impl Frame {
       child: NONE,
       cursor: 0,
       ty,
+      root: NONE,
       flags,
     }
   }
@@ -390,6 +405,7 @@ impl Frame {
       child,
       cursor: 0,
       ty,
+      root: NONE,
       flags,
     }
   }
@@ -398,6 +414,14 @@ impl Frame {
   #[inline]
   pub(crate) const fn is_definition_root(&self) -> bool {
     self.child == NONE
+  }
+
+  /// Where the definition root this level descends from sits in its stack.
+  ///
+  /// Only meaningful for a frame that is on one — see the field.
+  #[inline]
+  pub(crate) const fn definition_root(&self) -> u32 {
+    self.root
   }
 
   /// Returns the level's type, or `None` when it did not resolve.
@@ -409,6 +433,26 @@ impl Frame {
       Some(TypeId::new(self.ty))
     }
   }
+}
+
+/// Pushes a level onto a selection stack, recording where its definition root sits.
+///
+/// The **only** way a [`Frame`] reaches a stack, and the reason [`Frame::root`](Frame::root) — the
+/// field, not the constructor — is private. The value is derived rather than passed: a frame that
+/// begins a definition roots at its own position, and one that continues a level roots wherever
+/// the level below it does. There is no third case and no argument a caller can get wrong.
+///
+/// `O(1)`, and it replaces the backwards scan `selections::resolve` used to make for the same
+/// answer. That is what makes the charge in front of a resolution exact rather
+/// than merely conservative: the quantity is now the suffix the descent walks, and the descent is
+/// all the walking there is.
+pub(crate) fn push_frame(frames: &mut std::vec::Vec<Frame>, mut frame: Frame) {
+  frame.root = if frame.is_definition_root() {
+    frames.len() as u32
+  } else {
+    frames.last().map_or(0, Frame::definition_root)
+  };
+  frames.push(frame);
 }
 
 /// What a value-walk level is descending through.

@@ -2769,3 +2769,129 @@ fn the_variable_marks_bitset_is_sized_behind_its_charge() {
     ran_large - ran_small
   );
 }
+
+/// A resolution is charged for the suffix it descends, not for the whole stack under it.
+///
+/// The eleventh round moved this charge off the top of the walk loop and onto the two arms that
+/// pop — right arm, right dimension, wrong quantity. `resolve` starts at the **nearest definition
+/// root**, and a stack is not one definition deep: an operation that reaches a fragment at depth
+/// `D` gives every level of that fragment body an `O(1)` resolution of its own, and each one was
+/// billed `D`. `Θ(D · W)` charged against `Θ(W)` performed — an over-charge, so nothing hostile
+/// gets through, and a valid document gets `Refusal::Budget` instead of its verdict.
+///
+/// # A 2x2, because the defect is an interaction and nothing else here is
+///
+/// Depth costs units on its own — there are more levels to walk — and so does width. Only the
+/// **product** was wrong. So the plant measures the interaction rather than either main effect:
+///
+/// ```text
+/// (deep_wide - deep_narrow) - (shallow_wide - shallow_narrow)
+/// ```
+///
+/// What one extra fragment level costs at depth 100, minus what it costs at depth 1. The two main
+/// effects cancel, whatever they are, and what is left is the `D · W` term. It was about 18,000
+/// units; it is now about zero, and no constant in this test had to be guessed to say so.
+#[test]
+fn a_resolution_is_charged_for_the_suffix_it_walks() {
+  let schema = build(SCHEMA);
+  // No merge engine, and no rule that reads a spelling: what is left is the traversal.
+  let rules = RuleSet::only(Rule::FieldSelections);
+  // Depth is built out of a **fragment chain**, not out of braces: the lexer caps brace nesting at
+  // twenty-four, and a spread pushes a definition-root frame without opening one. Each link adds
+  // two frames — the fragment's root and the `nest` level inside it — so the stack under the wide
+  // fragment is about twice the chain's length, which is the `D` the charge was reading.
+  let document = |links: usize, width: usize| {
+    let mut source = String::from("{ nest { ...f0 } }\n");
+    for link in 0..links {
+      let next = link + 1;
+      source.push_str(&std::format!(
+        "fragment f{link} on Nest {{ nest {{ ...f{next} }} }}\n"
+      ));
+    }
+    source.push_str(&std::format!("fragment f{links} on Nest {{"));
+    for _ in 0..width {
+      source.push_str(" nest { leaf }");
+    }
+    source.push_str("}\n");
+    source
+  };
+
+  let (shallow, deep) = (1usize, 60usize);
+  let (narrow, wide) = (20usize, 200usize);
+  let at = |d: usize, w: usize| min_budget(&schema, &document(d, w), rules);
+  let (a, b) = (at(shallow, narrow), at(shallow, wide));
+  let (c, d) = (at(deep, narrow), at(deep, wide));
+  let interaction = (d as i64 - c as i64) - (b as i64 - a as i64);
+  println!(
+    "min_budget: {shallow}-link {a}/{b}, {deep}-link {c}/{d} (narrow/wide) -> depth x width \
+     interaction {interaction}"
+  );
+
+  // The premise: both main effects are real, so the cancellation is doing something.
+  assert!(
+    b > a + 100 && c > a + 100,
+    "width and depth must each cost units on their own: {a}, {b}, {c}"
+  );
+  // And the product is not. The `99 * 180` term the old quantity produced was about 18,000 units;
+  // what is left is the handful of units the extra levels themselves cost.
+  assert!(
+    interaction.abs() < 500,
+    "widening the last fragment cost {interaction} more units behind a {deep}-link chain than \
+     behind a {shallow}-link one, so a resolution is still charged for the stack under its \
+     definition root"
+  );
+}
+
+/// The subscription root walk is the same repair, on the stack the finding named alongside it.
+///
+/// `resolve_roots` is `resolve_frames`' twin over `Scratch::roots`, and it had the twin defect:
+/// draft 5.2.4.1's collection enters a fragment body through a definition-root frame exactly as the
+/// selection walk does, so a subscription whose root fields sit behind a chain of spreads billed
+/// the whole chain for each `O(1)` resolution inside the last one. Both now go through
+/// `selections::suffix_of` rather than through two copies of the arithmetic.
+///
+/// The same 2x2 as its twin, over the other pass. Depth is a chain of spreads on `Subscription`;
+/// width is inline fragments in the last one, each of which pushes a level and pops it. Every root
+/// field collected is `newMessage`, so the document stays valid — this measures a walk that
+/// finishes, not one that reports.
+#[test]
+fn the_subscription_root_walk_is_charged_for_its_suffix_too() {
+  let schema = build(SCHEMA);
+  let rules = RuleSet::only(Rule::SingleRootField);
+  let document = |links: usize, width: usize| {
+    let mut source = String::from("subscription s { ...s0 }\n");
+    for link in 0..links {
+      let next = link + 1;
+      source.push_str(&std::format!(
+        "fragment s{link} on Subscription {{ ...s{next} }}\n"
+      ));
+    }
+    source.push_str(&std::format!("fragment s{links} on Subscription {{"));
+    for _ in 0..width {
+      source.push_str(" ... on Subscription { newMessage }");
+    }
+    source.push_str("}\n");
+    source
+  };
+
+  let (shallow, deep) = (1usize, 60usize);
+  let (narrow, wide) = (20usize, 200usize);
+  let at = |d: usize, w: usize| min_budget(&schema, &document(d, w), rules);
+  let (a, b) = (at(shallow, narrow), at(shallow, wide));
+  let (c, d) = (at(deep, narrow), at(deep, wide));
+  let interaction = (d as i64 - c as i64) - (b as i64 - a as i64);
+  println!(
+    "min_budget (roots): {shallow}-link {a}/{b}, {deep}-link {c}/{d} (narrow/wide) -> \
+     interaction {interaction}"
+  );
+
+  assert!(
+    b > a + 100 && c > a + 100,
+    "width and depth must each cost units on their own: {a}, {b}, {c}"
+  );
+  assert!(
+    interaction.abs() < 500,
+    "widening the last fragment cost {interaction} more units behind a {deep}-link chain than \
+     behind a {shallow}-link one, so `resolve_roots` is still charged for the whole stack"
+  );
+}
