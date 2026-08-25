@@ -98,14 +98,13 @@ use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
-  utils::IntoComponents,
 };
 
 use super::{
   BooleanValue as AstBooleanValue, EnumValue as AstEnumValue, Name, NullValue as AstNullValue,
   StringValue as AstStringValue, VariableValue as AstVariableValue,
 };
-use crate::value::{Nestable, Nested, Sealed};
+use crate::value::{Absent, NestNode, Nestable, Nested, Sealed, Worklist};
 
 /// A GraphQL integer literal, materialised as `I`.
 pub type IntValue<I, Span = SimpleSpan> = super::IntValue<I, Span>;
@@ -157,16 +156,23 @@ pub enum InputValue<S, I> {
 
 impl<S, I> Sealed for InputValue<S, I> {}
 
+impl<S, I> NestNode for InputValue<S, I> {
+  type Field = ObjectField<S, I>;
+  /// GraphQL has no map literal; GraphQLx's [`InputValue`](crate::graphqlx::ast::InputValue) is
+  /// the enum that fills this lane.
+  type Entry = Absent<Self>;
+}
+
 impl<S, I> Nestable for InputValue<S, I> {
   type Node = Self;
 
   #[inline]
-  fn into_children(self, pending: &mut std::vec::Vec<Self>) {
+  fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
-      // These arms hold no `InputValue`, so they are released here rather than put on the
-      // worklist. What they do hold is `S` and `I` — at the crate's own arguments a source slice
-      // and an integer, at a caller's whatever the caller chose, including a node this loop cannot
-      // reach (al8n/smear#176; `I` has no public constructor to reach it through today).
+      // These arms hold no `InputValue`, so they are released here rather than reaching the walk.
+      // What they do hold is `S` and `I` — at the crate's own arguments a source slice and an
+      // integer, at a caller's whatever the caller chose, including a node this loop cannot reach
+      // (al8n/smear#176; `I` has no public constructor to reach it through today).
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -174,15 +180,11 @@ impl<S, I> Nestable for InputValue<S, I> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => pending.extend(list.into_values()),
-      // A field is `(span, name, value)` and only the value holds an `InputValue`; the name holds
-      // `S` and is released here, on the same terms as the arms above.
-      Self::Object(object) => pending.extend(
-        object
-          .into_fields()
-          .into_iter()
-          .map(|field| field.into_components().2),
-      ),
+      Self::List(list) => worklist.adopt(list.into_values().into_vec()),
+      // A field is `(span, name, value)` and only the value holds an `InputValue`. The container
+      // is handed over as it stands rather than projected onto its values: projecting is a copy of
+      // every element, which is what adoption exists to remove.
+      Self::Object(object) => worklist.adopt_fields(object.into_fields().into_vec()),
     }
   }
 }
@@ -250,11 +252,16 @@ pub enum ConstInputValue<S, I> {
 
 impl<S, I> Sealed for ConstInputValue<S, I> {}
 
+impl<S, I> NestNode for ConstInputValue<S, I> {
+  type Field = ConstObjectField<S, I>;
+  type Entry = Absent<Self>;
+}
+
 impl<S, I> Nestable for ConstInputValue<S, I> {
   type Node = Self;
 
   #[inline]
-  fn into_children(self, pending: &mut std::vec::Vec<Self>) {
+  fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       Self::Boolean(_)
       | Self::String(_)
@@ -262,13 +269,8 @@ impl<S, I> Nestable for ConstInputValue<S, I> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => pending.extend(list.into_values()),
-      Self::Object(object) => pending.extend(
-        object
-          .into_fields()
-          .into_iter()
-          .map(|field| field.into_components().2),
-      ),
+      Self::List(list) => worklist.adopt(list.into_values().into_vec()),
+      Self::Object(object) => worklist.adopt_fields(object.into_fields().into_vec()),
     }
   }
 }

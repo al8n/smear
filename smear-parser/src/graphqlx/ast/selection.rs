@@ -1,7 +1,5 @@
 //! GraphQLx selection and field AST aliases.
 
-use std::vec::Vec;
-
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
@@ -10,7 +8,7 @@ use tokora::{
 };
 
 use super::{Arguments, Directives, FragmentTypePath, Name, Nested, Type, TypePath};
-use crate::value::{Nestable, Sealed};
+use crate::value::{Absent, NestNode, Nestable, Sealed, Worklist};
 
 /// A GraphQLx field alias (`Name :`).
 pub type Alias<S, Span = SimpleSpan> = crate::selection::Alias<Name<S, Span>, Span>;
@@ -76,22 +74,29 @@ impl<S, Span> Nestable for Selection<S, Span> {
   type Node = Self;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Self>) {
+  fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       Self::Field(field) => {
         let (_, _, _, _, _, selection_set) = field.into_components();
         if let Some(selection_set) = selection_set {
-          pending.extend(selection_set.into_selections().into_vec());
+          worklist.adopt(selection_set.into_selections().into_vec());
         }
       }
       // A spread names a fragment; the selections it stands for are the fragment definition's.
       Self::FragmentSpread(_) => {}
       Self::InlineFragment(fragment) => {
         let (_, _, _, selection_set) = fragment.into_components();
-        pending.extend(selection_set.into_selections().into_vec());
+        worklist.adopt(selection_set.into_selections().into_vec());
       }
     }
   }
+}
+
+/// A selection's children are selections, and a selection set holds them directly. Neither carrier
+/// lane exists here: an object field and a map entry are *value* carriers.
+impl<S, Span> NestNode for Selection<S, Span> {
+  type Field = Absent<Self>;
+  type Entry = Absent<Self>;
 }
 
 impl<S, Span> Selection<S, Span> {

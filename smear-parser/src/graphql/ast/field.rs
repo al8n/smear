@@ -11,10 +11,8 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use std::vec::Vec;
-
 use super::{Arguments, Directives, FragmentName, Name};
-use crate::value::{Nestable, Nested, Sealed};
+use crate::value::{Absent, NestNode, Nestable, Nested, Sealed, Worklist};
 
 /// A field alias in a GraphQL selection (`Name :`).
 pub type Alias<S> = crate::selection::Alias<Name<S>>;
@@ -76,22 +74,29 @@ impl<S> Nestable for Selection<S> {
   type Node = Self;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Self>) {
+  fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       Self::Field(field) => {
         let (_, _, _, _, _, selection_set) = field.into_components();
         if let Some(selection_set) = selection_set {
-          pending.extend(selection_set.into_selections().into_vec());
+          worklist.adopt(selection_set.into_selections().into_vec());
         }
       }
       // A spread names a fragment; the selections it stands for are the fragment definition's.
       Self::FragmentSpread(_) => {}
       Self::InlineFragment(fragment) => {
         let (_, _, _, selection_set) = fragment.into_components();
-        pending.extend(selection_set.into_selections().into_vec());
+        worklist.adopt(selection_set.into_selections().into_vec());
       }
     }
   }
+}
+
+/// A selection's children are selections, and a selection set holds them directly. Neither carrier
+/// lane exists here: an object field and a map entry are *value* carriers.
+impl<S> NestNode for Selection<S> {
+  type Field = Absent<Self>;
+  type Entry = Absent<Self>;
 }
 
 impl<S> Selection<S> {

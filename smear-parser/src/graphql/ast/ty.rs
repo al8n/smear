@@ -1,4 +1,4 @@
-use std::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
+use std::{boxed::Box, rc::Rc, sync::Arc};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
@@ -7,7 +7,7 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use crate::value::{Nestable, Sealed};
+use crate::value::{Absent, NestNode, Nestable, Sealed, Worklist};
 
 pub use crate::ty::{ListType, NamedType};
 
@@ -72,21 +72,31 @@ macro_rules! ty {
 
         impl<Name> Sealed for $name<Name> {}
 
+        /// A type's children are types, so neither carrier lane exists on this enum: an object
+        /// field and a map entry are *value* carriers, and this dialect's type grammar has no map
+        /// at all.
+        impl<Name> NestNode for $name<Name> {
+          type Field = Absent<Self>;
+          type Entry = Absent<Self>;
+        }
+
         impl<Name> Nestable for $name<Name> {
           type Node = Self;
 
           #[inline]
-          fn into_children(self, pending: &mut Vec<Self>) {
+          fn into_children(self, worklist: &mut Worklist<Self>) {
             match self {
               // Holds no type of this crate's own. What it does hold is `Name` — at the crate's own
               // instantiation a source-slice name, and at a caller's whatever the caller chose,
               // including a node this loop cannot reach (al8n/smear#176).
               Self::Name(_) => {}
-              // `None` only when the pointer is shared and another owner remains, which is the one
-              // case with nothing below it to unlink yet.
+              // Nothing is handed over only when the pointer is shared and another owner remains,
+              // which is the one case with nothing below it to unlink yet. A chain of these arms
+              // runs through the worklist's register, so releasing one allocates nothing at any
+              // depth.
               Self::List(nest) => {
                 if let Some(list) = nest.into_inner() {
-                  pending.push(list.into_components().1);
+                  worklist.push(list.into_components().1);
                 }
               }
             }
@@ -101,8 +111,8 @@ macro_rules! ty {
           type Node = $name<Name>;
 
           #[inline]
-          fn into_children(self, pending: &mut Vec<$name<Name>>) {
-            pending.push(self.into_components().1);
+          fn into_children(self, worklist: &mut Worklist<$name<Name>>) {
+            worklist.push(self.into_components().1);
           }
         }
 

@@ -56,9 +56,12 @@ pub type DefaultVec<T> = Vec<T>;
 /// states the difference. [`Nestable`], [`NestPtr`] and [`SoleNestPtr`] are all sealed, which fixes
 /// who may implement them and says nothing about what a payload may be.
 ///
-/// All five are exported, and the list is not decorative: a consumer who builds this crate with
-/// `graphqlx` and without `graphql` has this module as their only door onto them.
-pub use crate::value::{Nest, NestPtr, Nestable, Nested, SoleNestPtr};
+/// All eight are exported, and the list is not decorative: a consumer who builds this crate with
+/// `graphqlx` and without `graphql` has this module as their only door onto them. The last three
+/// are in [`Nestable`]'s own signature — it hands its children to a [`Worklist`], its `Node` is
+/// bounded by [`NestNode`], and a node whose grammar has no object or map carrier fills those two
+/// lanes with [`Absent`].
+pub use crate::value::{Absent, Nest, NestNode, NestPtr, Nestable, Nested, SoleNestPtr, Worklist};
 
 /// A GraphQLx name.
 #[allow(type_alias_bounds)]
@@ -243,11 +246,16 @@ impl<S, Span> IntoSpan<Span> for InputValue<S, Span> {
 
 impl<S, Span> Sealed for InputValue<S, Span> {}
 
+impl<S, Span> NestNode for InputValue<S, Span> {
+  type Field = ObjectField<S, Span>;
+  type Entry = MapEntry<S, Span>;
+}
+
 impl<S, Span> Nestable for InputValue<S, Span> {
   type Node = Self;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Self>) {
+  fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // These arms hold no value of this enum, so they are released here. They do hold `S` and
       // `Span`, and at a caller's arguments either can own a node this loop cannot reach
@@ -259,20 +267,14 @@ impl<S, Span> Nestable for InputValue<S, Span> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => pending.extend(list.into_values()),
-      Self::Set(set) => pending.extend(set.into_values()),
+      Self::List(list) => worklist.adopt(list.into_values().into_vec()),
+      Self::Set(set) => worklist.adopt(set.into_values().into_vec()),
       // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
-      // place in either dialect where a single child slot yields two subtrees.
-      Self::Map(map) => pending.extend(map.into_entries().into_iter().flat_map(|entry| {
-        let (_, key, value) = entry.into_components();
-        [key, value]
-      })),
-      Self::Object(object) => pending.extend(
-        object
-          .into_fields()
-          .into_iter()
-          .map(|field| field.into_components().2),
-      ),
+      // place in either dialect where a single child slot yields two subtrees. The container of
+      // entries is handed over as it stands and each entry forwards its own two halves when the
+      // walk reaches it, in place of flattening all 2N of them into the worklist up front.
+      Self::Map(map) => worklist.adopt_entries(map.into_entries().into_vec()),
+      Self::Object(object) => worklist.adopt_fields(object.into_fields().into_vec()),
     }
   }
 }
@@ -344,11 +346,16 @@ impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
 
 impl<S, Span> Sealed for ConstInputValue<S, Span> {}
 
+impl<S, Span> NestNode for ConstInputValue<S, Span> {
+  type Field = ConstObjectField<S, Span>;
+  type Entry = ConstMapEntry<S, Span>;
+}
+
 impl<S, Span> Nestable for ConstInputValue<S, Span> {
   type Node = Self;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Self>) {
+  fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // These arms hold no value of this enum, so they are released here. They do hold `S` and
       // `Span`, and at a caller's arguments either can own a node this loop cannot reach
@@ -359,20 +366,12 @@ impl<S, Span> Nestable for ConstInputValue<S, Span> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_) => {}
-      Self::List(list) => pending.extend(list.into_values()),
-      Self::Set(set) => pending.extend(set.into_values()),
+      Self::List(list) => worklist.adopt(list.into_values().into_vec()),
+      Self::Set(set) => worklist.adopt(set.into_values().into_vec()),
       // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
       // place in either dialect where a single child slot yields two subtrees.
-      Self::Map(map) => pending.extend(map.into_entries().into_iter().flat_map(|entry| {
-        let (_, key, value) = entry.into_components();
-        [key, value]
-      })),
-      Self::Object(object) => pending.extend(
-        object
-          .into_fields()
-          .into_iter()
-          .map(|field| field.into_components().2),
-      ),
+      Self::Map(map) => worklist.adopt_entries(map.into_entries().into_vec()),
+      Self::Object(object) => worklist.adopt_fields(object.into_fields().into_vec()),
     }
   }
 }
@@ -442,38 +441,47 @@ pub enum Type<S, Span = SimpleSpan> {
 
 impl<S, Span> Sealed for Type<S, Span> {}
 
+/// A type's children are types, so neither carrier lane exists on this enum: an object field and
+/// a map entry are *value* carriers, and a map **type**'s key and value are types handed over one
+/// at a time through [`Worklist::push`].
+impl<S, Span> NestNode for Type<S, Span> {
+  type Field = Absent<Self>;
+  type Entry = Absent<Self>;
+}
+
 impl<S, Span> Nestable for Type<S, Span> {
   type Node = Self;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Self>) {
+  fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // A path holds no type EXCEPT through its generic arguments, which is the arm a reading of
       // the three pointer variants alone would miss.
       Self::Path(path) => {
         let (_, _, generics, _) = path.into_components();
         if let Some(generics) = generics {
-          pending.extend(generics.into_params().into_vec());
+          worklist.adopt(generics.into_params().into_vec());
         }
       }
-      // `None` only when a pointer is shared and another owner remains, which is the one case with
-      // nothing below it to unlink yet.
+      // Nothing is handed over only when a pointer is shared and another owner remains, which is
+      // the one case with nothing below it to unlink yet. A chain of these arms runs through the
+      // worklist's register, so releasing one allocates nothing at any depth.
       Self::List(nest) => {
         if let Some(list) = nest.into_inner() {
-          pending.push(list.into_components().1);
+          worklist.push(list.into_components().1);
         }
       }
       Self::Set(nest) => {
         if let Some(set) = nest.into_inner() {
-          pending.push(set.into_components().1);
+          worklist.push(set.into_components().1);
         }
       }
       // A map's KEY is a type too, and it nests exactly as the value does.
       Self::Map(nest) => {
         if let Some(map) = nest.into_inner() {
           let (_, key, value, _) = map.into_components();
-          pending.push(key);
-          pending.push(value);
+          worklist.push(key);
+          worklist.push(value);
         }
       }
     }
@@ -487,8 +495,8 @@ impl<S, Span> Nestable for crate::ty::ListType<Type<S, Span>, Span> {
   type Node = Type<S, Span>;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Type<S, Span>>) {
-    pending.push(self.into_components().1);
+  fn into_children(self, worklist: &mut Worklist<Type<S, Span>>) {
+    worklist.push(self.into_components().1);
   }
 }
 
@@ -499,8 +507,8 @@ impl<S, Span> Nestable for crate::ty::SetType<Type<S, Span>, Span> {
   type Node = Type<S, Span>;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Type<S, Span>>) {
-    pending.push(self.into_components().1);
+  fn into_children(self, worklist: &mut Worklist<Type<S, Span>>) {
+    worklist.push(self.into_components().1);
   }
 }
 
@@ -512,10 +520,10 @@ impl<S, Span> Nestable for crate::ty::MapType<Type<S, Span>, Type<S, Span>, Span
   type Node = Type<S, Span>;
 
   #[inline]
-  fn into_children(self, pending: &mut Vec<Type<S, Span>>) {
+  fn into_children(self, worklist: &mut Worklist<Type<S, Span>>) {
     let (_, key, value, _) = self.into_components();
-    pending.push(key);
-    pending.push(value);
+    worklist.push(key);
+    worklist.push(value);
   }
 }
 

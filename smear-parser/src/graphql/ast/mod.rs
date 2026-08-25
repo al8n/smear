@@ -67,4 +67,9 @@ pub type DefaultVec<T> = Vec<T>;
 ///
 /// It is the default container of the selection aliases too, for the same reason and against the
 /// same defect: an inline fragment owns a nested selection set and a field owns an optional one.
-pub use crate::value::{Nestable, Nested};
+///
+/// [`Worklist`], [`NestNode`] and [`Absent`] travel with them because they are in
+/// [`Nestable`]'s own signature: the trait hands its children to a [`Worklist`], and its `Node` is
+/// bounded by [`NestNode`], whose two carrier lanes a node without them fills with [`Absent`]. A
+/// trait nobody outside this crate can implement is still one a consumer reads.
+pub use crate::value::{Absent, NestNode, Nestable, Nested, Worklist};
