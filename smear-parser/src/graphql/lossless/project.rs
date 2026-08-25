@@ -417,7 +417,7 @@ impl super::ast::TypeSystemDocument {
 /// borrow, and it allocates nothing.
 ///
 /// This was `parse.syntax().text() == source` for one round, and that sentence was written about it
-/// too — wrongly. [`Parse::syntax`](crate::lossless::Parse::syntax) *materialises rowan's red
+/// too — wrongly. [`Parse::syntax`](crate::lossless::runner::Parse::syntax) *materialises rowan's red
 /// cursor*: it clones the `Arc` and allocates the root's cursor data, and `SyntaxText`'s equality
 /// then walks descendants through red nodes and tokens that are allocated and dropped as the walk
 /// passes them. A token-dense parse therefore made `Θ(elements)` transient allocations here, on
