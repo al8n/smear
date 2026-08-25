@@ -1334,7 +1334,13 @@ where
       // which means the *response shape*'s nesting and nothing else. Charging the depth makes the
       // total quadratic in it, so a hostile literal exhausts the budget long before it exhausts
       // anything else.
-      if !self.charge(depth) {
+      //
+      // **Twice the depth**, because there are two descents: `descend_value` runs once for each
+      // side. The sixteenth round's depth audit recorded this as a bounded 2x and left it, on the
+      // class argument that this module amortises repeated reads of one key into one unit. That
+      // argument is about *one* key read more than once; these are two independent walks, so the
+      // exact number is the honest one and it costs a multiply. al8n/smear#198.
+      if !self.charge(depth.saturating_mul(2)) {
         self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
         return ControlFlow::Continue(true);
       }

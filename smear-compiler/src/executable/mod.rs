@@ -137,7 +137,7 @@
 //! | [`Validator::resolve_roots`] | `suffix_of(roots).len()` | the suffix — **was the whole stack** |
 //! | `walk_value` | `depth - base` | the slice it then resolves, written once |
 //! | `resolve_merge_set` | `merge_path.len() + 1` | exact, and it cannot be otherwise |
-//! | `same_value` | `merge_compare.len()` | exact; two descents a unit, a bounded constant |
+//! | `same_value` | `2 * merge_compare.len()` | exact — one term per descent, and there are two |
 //!
 //! The two that were wrong share a stack that **spans definitions**: a fragment spread pushes a
 //! definition-root frame, so a resolution starts partway up and the levels below it are not walked.
