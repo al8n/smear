@@ -1315,23 +1315,28 @@ fn a_refused_projection_reports_what_it_did_not_look_at() {
 
   // And the ordinary refusal — inside the walk, after a projection that did run — says so too, so
   // the flag separates the two rather than being always false on an error.
-  let generous = Budget::default().with_validation_work(4_000);
-  let mut scratch = Scratch::new();
-  let mut quiet = smear::validator::Ignore;
-  let inside = validate_executable_lossless_with(
-    &schema,
-    &parse,
-    &source,
-    &mut scratch,
-    &generous,
-    RuleSet::ALL,
-    &mut quiet,
-  )
-  .expect_err("a budget of four thousand does not validate this document");
-  assert!(
-    inside.recovery().is_some(),
-    "a refusal taken inside the walk reports no recovery"
-  );
+  //
+  // The budget is **found rather than named**: it has to clear the door's prepayment and not the
+  // walk, and the prepayment's size is the pair's own — bytes plus elements — which is not this
+  // test's subject. Doubling from a value below it takes the first budget in that window.
+  let inside = (10..31)
+    .map(|shift| Budget::default().with_validation_work(1u32 << shift))
+    .find_map(|generous| {
+      let mut scratch = Scratch::new();
+      let mut quiet = smear::validator::Ignore;
+      validate_executable_lossless_with(
+        &schema,
+        &parse,
+        &source,
+        &mut scratch,
+        &generous,
+        RuleSet::ALL,
+        &mut quiet,
+      )
+      .err()
+      .filter(|refused| refused.recovery().is_some())
+    })
+    .expect("no budget refuses this document inside the walk");
   assert!(inside.invalid().budget_tripped());
 
   // `First` keeps one diagnostic and breaks. The verdict has to say so.
@@ -3688,5 +3693,110 @@ fn a_verified_pair_is_bounded_from_the_first_instruction() {
     "the verified door was only {saved:.1}x cheaper than the unverified one on a {} B input it \
      was supposed to refuse before reading",
     large.len()
+  );
+}
+
+/// The pair's proof and the door's charge measure the same quantity: **elements**, not bytes.
+///
+/// # Bytes do not bound structure
+///
+/// `Verified` proves the bytes agree. The door then priced the projection from `source.len()`,
+/// which is the assumption that bytes bound what the projection visits — and they do not, in either
+/// direction. A megabyte string literal is one token; a balanced pair of zero-width nodes is two
+/// elements and no bytes at all. `smear_parser::lossless::runner::finish_root` is public, so a
+/// caller can mint a `Parse` from its own CST event stream and reach the second case directly: an
+/// empty source over a tree of a million empty nodes verified against `""`, paid one unit, and then
+/// had every node visited.
+///
+/// The proof carries the cost of the thing it proves now, counted by the same walk that establishes
+/// it. al8n/smear#198's twenty-third round.
+///
+/// # The instrument
+///
+/// Two documents of the **same source length** and very different element counts, so the byte term
+/// is held constant and only the structural one moves. A charge that reads `source.len()` cannot
+/// tell them apart; one that reads the pair's own count must.
+#[cfg(feature = "rowan")]
+#[test]
+fn the_projection_charge_follows_the_tree_and_not_the_bytes() {
+  use smear::{
+    parser::graphql::lossless::{Verified, parse_executable_document},
+    validator::validate_executable_lossless_verified_with,
+  };
+
+  let schema = build(SCHEMA);
+  // One token carrying the bytes, against many nodes carrying the same number of bytes.
+  let heavy = {
+    let mut source = String::from("{ dog { name ");
+    while source.len() < 20_000 {
+      source.push_str("name ");
+    }
+    source.push_str("} }");
+    source
+  };
+  let light = {
+    let padding = "x".repeat(heavy.len() - "{ dog { withJson(payload: \"\") } }".len());
+    std::format!("{{ dog {{ withJson(payload: \"{padding}\") }} }}")
+  };
+  assert_eq!(
+    heavy.len(),
+    light.len(),
+    "the two documents have to be the same size for this to hold bytes constant"
+  );
+
+  let heavy_parse = parse_executable_document(&heavy);
+  let light_parse = parse_executable_document(&light);
+  let heavy_pair = Verified::new(&heavy_parse, &heavy).expect("the pair matches");
+  let light_pair = Verified::new(&light_parse, &light).expect("the pair matches");
+  println!(
+    "same {} B: heavy {} elements, light {} elements",
+    heavy.len(),
+    heavy_pair.projection_cost(),
+    light_pair.projection_cost()
+  );
+
+  // The premise: the counts really do differ, so the charge has something to follow.
+  assert!(
+    heavy_pair.projection_cost() > light_pair.projection_cost() * 10,
+    "the two trees are too alike ({} against {}) for this to measure anything",
+    heavy_pair.projection_cost(),
+    light_pair.projection_cost()
+  );
+
+  // And the door charges it. The smallest budget each pair clears is found by bisection, so no
+  // number here is fitted to an implementation.
+  let least = |pair: Verified<'_, '_>| {
+    let refused = |work: u32| {
+      let budget = Budget::default().with_validation_work(work);
+      let mut scratch = Scratch::new();
+      let mut sink = smear::validator::Ignore;
+      validate_executable_lossless_verified_with(
+        &schema,
+        pair,
+        &mut scratch,
+        &budget,
+        RuleSet::EMPTY,
+        &mut sink,
+      )
+      .is_err()
+    };
+    assert!(!refused(u32::MAX - 1), "refused at every budget");
+    let (mut lo, mut hi) = (0u32, u32::MAX - 1);
+    while lo < hi {
+      let mid = lo + (hi - lo) / 2;
+      if refused(mid) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    lo
+  };
+  let (heavy_units, light_units) = (least(heavy_pair), least(light_pair));
+  println!("least validation_work: heavy {heavy_units}, light {light_units}");
+  assert!(
+    heavy_units > light_units * 5,
+    "the same byte count cost {heavy_units} against {light_units} units, so the charge is still \
+     reading the source length rather than the tree"
   );
 }

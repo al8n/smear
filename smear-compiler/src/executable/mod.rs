@@ -443,9 +443,12 @@ use values::ValueLocation;
 /// The verdict of a failed validation.
 ///
 /// Returned when the document was refused: because at least one diagnostic was emitted, or because
-/// a resource bound abandoned a pass partway through. What the diagnostics *were* is the sink's
-/// business — this is only the count, whether a bound refused, and whether the sink asked to stop
-/// before the document had been fully examined.
+/// validation was **abandoned** before the document had been examined. What the diagnostics *were*
+/// is the sink's business — this is the count, whether the sink asked to stop, and
+/// [`Invalid::refusal`], which is where the reasons for abandoning are named.
+///
+/// This paragraph does not list them, and neither does any accessor below. [`Refusal`] is the one
+/// place they are enumerated, for the reason its own documentation gives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Invalid {
   emitted: u32,
@@ -467,6 +470,21 @@ pub struct Invalid {
 ///
 /// It is `#[non_exhaustive]` for the reason the flags were not: a fourth way to refuse should cost
 /// a `match` arm at the call sites that care, not a sweep of every published sentence.
+///
+/// # What makes the next variant safe
+///
+/// Not "someone re-reads the accessors". `SourceMismatch` was added in al8n/smear#198's twenty-
+/// second round and three published sentences went stale the same day — [`Invalid`]'s header,
+/// [`Invalid::emitted`] ("it means one thing"), and [`Invalid::stopped`] ("there is exactly one
+/// verdict") — each a general claim asserted without listing what it ranges over, in a type whose
+/// whole reason for existing is that such a claim had gone stale once already.
+///
+/// So the invariant is structural: **this enum is the only place the refusal states are
+/// enumerated.** Every accessor points here instead of restating them, so there is nothing on them
+/// to go stale. And the enumeration that must stay in step with the variants is the `match` in
+/// [`Invalid`]'s [`Display`](core::fmt::Display) — inside the defining crate a `match` on a
+/// `#[non_exhaustive]` enum is still checked, so a new variant is a **compile error** there rather
+/// than a sentence nobody re-read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Refusal {
@@ -491,11 +509,14 @@ impl Invalid {
   /// This counts what the validator emitted, not what the sink kept: [`Ignore`](super::Ignore)
   /// discards everything and the count is still right.
   ///
-  /// **Zero is a possible count on a verdict that is still `Err`**, and it means one thing: a
-  /// resource bound refused the document with that bound's own rule outside the
-  /// [`RuleSet`](super::RuleSet), so there was nothing to emit. [`Invalid::budget_tripped`] is
-  /// true whenever that happens, and a caller that reported "no findings" without reading it would
-  /// be describing a check the validator abandoned.
+  /// **Zero is a possible count on a verdict that is still `Err`.** It means validation was
+  /// abandoned before it could produce anything, and [`Invalid::refusal`] says why — see
+  /// [`Refusal`] for the reasons. A caller that reported "no findings" without reading it would be
+  /// describing a check the validator never finished.
+  ///
+  /// This used to name the *one* way that happens. A second way arrived and the sentence did not
+  /// notice, which is why it now points at the enumeration instead of restating it.
+  /// al8n/smear#198.
   #[inline]
   pub const fn emitted(&self) -> u32 {
     self.emitted
@@ -504,16 +525,15 @@ impl Invalid {
   /// Returns whether the **sink** stopped validation before the document was fully examined.
   ///
   /// True for [`First`](super::First) on any invalid document *that produced a diagnostic*. The
-  /// qualification is not pedantry: there is exactly one verdict that is `Err` with nothing
-  /// emitted — a resource bound refusing with its own rule outside the
-  /// [`RuleSet`](super::RuleSet) — and no diagnostic ever reaches the sink there, so the sink
-  /// never asks for anything to stop and this reads `false` on a document that was very much not
-  /// fully examined. Read as "was the whole document looked at", it says the opposite of the truth
-  /// on the one case where it matters most.
+  /// qualification is not pedantry: a verdict that is `Err` with [`Invalid::emitted`] zero was
+  /// abandoned, no diagnostic ever reached the sink, so the sink never asked for anything to stop
+  /// and this reads `false` on a document that was very much not fully examined. Read as "was the
+  /// whole document looked at", it says the opposite of the truth on the cases where it matters
+  /// most — and how many such cases there are is [`Refusal`]'s business, not this sentence's.
   ///
-  /// So the two flags answer two questions and neither answers the other's: this one says **who**
-  /// stopped the walk, and [`Invalid::budget_tripped`] says whether a bound refused. A caller who
-  /// wants "is anything about this document still unknown" reads both.
+  /// So the two answer two questions and neither answers the other's: this one says **who** stopped
+  /// the walk, and [`Invalid::refusal`] says whether — and why — validation was abandoned. A caller
+  /// who wants "is anything about this document still unknown" reads both.
   ///
   /// When it is true, the absence of a diagnostic says nothing: the rest of the document was never
   /// looked at. al8n/smear#196.
@@ -530,10 +550,12 @@ impl Invalid {
   /// [`RuleSet`](super::RuleSet) the diagnostic is
   /// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
   /// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) and says which; **without it there is
-  /// no diagnostic and this flag is the whole of the report**, on a verdict whose
-  /// [`Invalid::emitted`] is zero. Filtering a bound's rule out switches off its diagnostic, not
-  /// the refusal: an engine that stopped and then answered `Ok` would be reporting a clean result
-  /// for a check it never finished. al8n/smear#196.
+  /// no diagnostic**, on a verdict whose [`Invalid::emitted`] is zero. Filtering a bound's rule out
+  /// switches off its diagnostic, not the refusal: an engine that stopped and then answered `Ok`
+  /// would be reporting a clean result for a check it never finished. al8n/smear#196.
+  ///
+  /// It is a **narrowing of [`Invalid::refusal`]**, not a summary of it: `false` here does not mean
+  /// the document was fully examined, only that no budget is why it was not.
   ///
   /// **And when any other pass reached this crate's absolute validation ceiling**, whose diagnostic
   /// is [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget). That bound answers the

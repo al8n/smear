@@ -606,6 +606,66 @@ pub fn verify_slice<'src, L: Language>(
     .ok_or_else(|| ProjectError::new(ProjectErrorKind::SourceMismatch, to_range(range)))
 }
 
+/// [`verify_source`], answering how many **elements** the tree holds when it agrees.
+///
+/// # Why a count, and why here
+///
+/// A `Parse`'s bytes do not bound its structure. `smear_parser::lossless::runner::finish_root` is
+/// public, so a caller can mint one from its own CST event stream, and a balanced pair of zero-width
+/// nodes adds structure without adding a byte — an empty source over a tree with a million empty
+/// top-level nodes is a legal `Parse` that verifies against `""`.
+///
+/// A door that prices a projection from `source.len()` therefore charges one unit and then visits a
+/// million nodes. The verification is the only walk that already sees the whole tree, so counting
+/// here is free, and pairing the count with the proof is what lets a consumer charge for the thing
+/// it is about to do rather than for a proxy that does not bound it. al8n/smear#198.
+///
+/// Nodes and tokens both count: the projection visits a node to dispatch on its kind and a token to
+/// read its text. Saturating at [`u32::MAX`], which no ledger can pay, so a tree too large to
+/// price refuses rather than wrapping into a budget it fits.
+pub fn verify_source_counted<K>(
+  root: &GreenNodeData,
+  source: &str,
+) -> Result<u32, ProjectError<K>> {
+  let len = usize::from(root.text_len());
+  if len != source.len() {
+    return Err(ProjectError::new(
+      ProjectErrorKind::SourceMismatch,
+      len.min(source.len())..len.max(source.len()),
+    ));
+  }
+  // The same recursion `verify_source_at` makes, with a counter threaded through it; see that
+  // function for the depth argument.
+  fn walk(
+    green: &GreenNodeData,
+    source: &[u8],
+    offset: &mut usize,
+    elements: &mut u32,
+  ) -> Result<(), Range<usize>> {
+    for child in green.children() {
+      *elements = elements.saturating_add(1);
+      match child {
+        NodeOrToken::Node(node) => walk(node, source, offset, elements)?,
+        NodeOrToken::Token(token) => {
+          let text = token.text().as_bytes();
+          let end = *offset + text.len();
+          if source.get(*offset..end) != Some(text) {
+            return Err(*offset..end);
+          }
+          *offset = end;
+        }
+      }
+    }
+    Ok(())
+  }
+
+  let mut offset = 0usize;
+  let mut elements = 1u32;
+  walk(root, source.as_bytes(), &mut offset, &mut elements)
+    .map_err(|at| ProjectError::new(ProjectErrorKind::SourceMismatch, at))?;
+  Ok(elements)
+}
+
 /// Verify that `source` is the whole text `root` was parsed from, byte for byte.
 ///
 /// The door check. It covers **every** byte the tree holds — punctuation, trivia and the leading

@@ -51,10 +51,17 @@ use super::schema::{PackedType, Range32, TypeId};
 ///   duplicates, and the tree steps a node resolution walks. Depth alone does not bound the engine
 ///   — breadth times fragment reuse does — so this is the knob that caps that rule's worst case.
 /// - [`validation_work`](Budget::validation_work) bounds **every other pass**, as one running
-///   total for the whole call including the projection the lossless door runs before any rule
-///   does. One unit is one node examined; one more is charged per eight bytes of every
-///   document-chosen name a pass reads, because a name has no length ceiling and where two names
-///   differ decides what comparing them costs.
+///   total that includes the projection the lossless door runs before any rule does. One unit is
+///   one node examined; one more is charged per eight bytes of every document-chosen name a pass
+///   reads, because a name has no length ceiling and where two names differ decides what comparing
+///   them costs.
+///
+///   It is the *whole call* for [`validate_executable`](super::validate_executable) and for the
+///   lossless door's **verified** entry point. It is not, on a lossless entry point handed a
+///   `parse` and a `source` that nothing has paired: showing that those two describe one document
+///   is `O(tokens)` and precedes the ledger, because deciding it requires finishing a comparison
+///   that a bound would have to be able to stop. `smear_compiler::lossless` says which door is
+///   which and why the choice is a type rather than a trade-off. al8n/smear#198.
 ///
 /// A document that exceeds any of the three is **refused**, with
 /// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget),

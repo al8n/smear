@@ -197,6 +197,36 @@ impl<L: rowan::Language> Parse<L> {
 /// The widening costs nothing for input that already worked: gap **placement** differs between
 /// the two doors only for a run that trails no committed token, and only when the stream is
 /// unbalanced — a shape `finish` refuses outright rather than places differently.
+///
+/// # What downstream assumes about a [`Parse`], and what this door does not promise
+///
+/// This is `pub`, and it is the only route to a [`Parse`] that does not go through one of this
+/// crate's parsers. That is deliberate — a dialect built on `tokora` outside this crate needs a way
+/// to finish its own event stream — but it means **a `Parse` is not evidence that a parser produced
+/// it**, and several consumers were written as though it were. al8n/smear#198's twenty-third round
+/// found the first of them; the rest are recorded here rather than repaired, because deciding what
+/// this door should promise is a design question and not a bug fix.
+///
+/// - **Bytes do not bound structure.** A balanced pair of zero-width nodes adds elements and no
+///   text, so an empty source can carry an arbitrarily large tree. A consumer pricing a walk from
+///   `source.len()` charges one unit and does unbounded work. A dialect's verified-pair type now
+///   carries its own element count for exactly this reason; anything else that sizes work from a
+///   length is making the same assumption.
+/// - **Depth is not bounded by the lexer's ceiling.** Three green-tree walks in
+///   `crate::lossless::project` recurse — `verify_source_at`, `verify_source_counted` and
+///   `reject_holes` — and each rests on a comment naming the lexer's `MAX_NESTING_DEPTH` as the
+///   bound on the tree's depth. A minted stream honours no such ceiling, so a deep enough one
+///   overflows the stack rather than refusing. **This is the largest of the residuals.**
+/// - **`has_errors` and `diagnostics` are whatever the stream said.** A minted parse can report a
+///   clean document it did not parse, so a consumer using them as a precondition is trusting the
+///   caller.
+/// - **Kind placement is checked, not assumed.** A dialect's projection matches on its own kind
+///   enum and answers `UnexpectedChild` or `MissingChild` for a shape it does not expect, so an
+///   arbitrary tree is *refused* rather than misread. This one is already safe and is listed so the
+///   list is not read as "everything here is broken".
+///
+/// What is **not** in question is memory safety: every walk above is safe Rust over a green tree,
+/// and the failure modes are a stack overflow and an unpriced walk, not corruption.
 pub fn finish_root<'inp, L, Lx, Em>(
   cst: Cst<'inp, Lx, Em>,
   root: u16,

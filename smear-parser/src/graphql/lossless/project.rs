@@ -126,7 +126,7 @@ use crate::{
   },
   lossless::project::{
     Recovery, SourceMismatch, node_extent, reject_holes, to_range, to_span, verify_source,
-    verify_source_at,
+    verify_source_at, verify_source_counted,
   },
 };
 
@@ -459,6 +459,8 @@ impl super::ast::TypeSystemDocument {
 pub struct Verified<'p, 'src> {
   parse: &'p Parse,
   source: &'src str,
+  /// What projecting this pair costs, in elements — see [`Verified::projection_cost`].
+  elements: u32,
 }
 
 impl core::fmt::Debug for Verified<'_, '_> {
@@ -478,11 +480,36 @@ impl<'p, 'src> Verified<'p, 'src> {
   /// is the same comparison. This is where a caller pays for it, and paying for it here is what
   /// lets a validation of this pair be bounded.
   pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, SourceMismatch> {
-    if matches_source(parse, source) {
-      Ok(Self { parse, source })
-    } else {
-      Err(SourceMismatch)
+    // Counted by the same walk that verifies, so the proof and the price are established together
+    // and cost one pass between them. See [`Verified::projection_cost`].
+    match verify_source_counted::<SyntaxKind>(parse.green(), source) {
+      Ok(elements) => Ok(Self {
+        parse,
+        source,
+        elements,
+      }),
+      Err(_) => Err(SourceMismatch),
     }
+  }
+
+  /// What projecting this pair costs, in **elements** — one per green node and one per token.
+  ///
+  /// # A proof that does not bound what its consumer charges for is not a proof
+  ///
+  /// `Verified` proves the *bytes* agree. A door that then prices the projection from
+  /// `source.len()` is assuming bytes bound structure, and they do not:
+  /// [`finish_root`](crate::lossless::runner::finish_root) is public, so a caller can mint a
+  /// `Parse` from its own CST event stream, and a balanced pair of **zero-width** GraphQL nodes adds
+  /// structure without adding a byte. An empty source over a tree of a million empty top-level
+  /// nodes verifies against `""`, paid one unit, and then had every node visited.
+  ///
+  /// So the value carries the cost of the thing it proves, and the two measure the same quantity.
+  /// Saturating at [`u32::MAX`] — no budget any caller can name pays that, so a tree too large to
+  /// price refuses rather than wrapping into one it fits.
+  /// al8n/smear#198.
+  #[inline]
+  pub const fn projection_cost(&self) -> u32 {
+    self.elements
   }
 
   /// The parse half of the pair.

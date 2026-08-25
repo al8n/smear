@@ -287,40 +287,47 @@ where
 /// is a caller who wants only the [`Recovery`]: `RuleSet::empty()` answers "how much of this
 /// parse has an AST image" and nothing else.
 ///
-/// # The projection is charged, and it is charged before it runs
+/// # What the ledger bounds here, and what it does not
 ///
-/// [`Budget::validation_work`](super::Budget::validation_work) opens **here**, not inside the
-/// validator, and the projection is the first thing to spend from it. That is the whole reason it
-/// is one ledger and not two: the projection allocates an entire AST before a rule exists to
-/// refuse anything, and a bound that starts after it has already lost.
+/// [`Budget::validation_work`](super::Budget::validation_work) bounds **the projection and the
+/// validation**. It does not bound the pair's *verification*, and on this entry point that
+/// verification runs first: `parse` and `source` are two arguments and nothing pairs them, so
+/// before anything can be projected they have to be shown to describe one document, and showing it
+/// is `O(tokens)`.
 ///
-/// The charge is `units` of the prepayment size below, taken in one payment rather than
-/// incrementally. Incrementally would be better and is not available:
-/// `project_executable_document_recovered` lives in `smear-parser`, and threading a validation
-/// ledger into it would put a compiler concept in the parser. What makes the prepayment sound
-/// instead of merely convenient is that it is an **upper bound** obtainable in constant time — the
-/// projection builds at most one AST node per CST token and a token is at least one byte — and
-/// `units` is what turns that into the same unit every rule spends.
+/// A caller who needs the **whole call** bounded constructs a
+/// [`Verified`](smear_parser::graphql::lossless::Verified) itself and uses
+/// [`validate_executable_lossless_verified_with`], where the ledger opens on the first instruction
+/// and the pair's verification was paid for once, by whoever built it. That is not an optimisation:
+/// a door handed an unverified pair cannot both decide that a mismatch outranks a budget refusal —
+/// which needs the comparison *finished* — and refuse before reading its input — which needs it
+/// *stoppable*. The two properties are separated by the type rather than traded off inside one
+/// function. al8n/smear#198.
 ///
-/// # It is priced over **both** inputs, because they are two parameters and nothing pairs them
+/// # What the prepayment prices
 ///
-/// `parse` and `source` are separate arguments and no type says they describe the same bytes. The
-/// prepayment was `source.len()` alone, and the projector walks the **`Parse`**: a tree of `N`
-/// top-level definitions handed in beside an *empty* source paid one unit, and the recovering
-/// projector then visited all `N` CST children, rejected each on a source mismatch, and returned
-/// `Ok` with an empty AST and an incomplete [`Recovery`]. The bound was priced from one input and
-/// spent on the other.
+/// One payment, before the projection, of two terms that do not bound each other:
 ///
-/// So it is priced from `max(source.len(), parse.green().text_len())` — still constant time, both
-/// a green length and a slice length being `O(1)` — which upper-bounds the traversal whichever
-/// input is the larger and whether or not the two agree. Rejecting a mismatch outright was the
-/// alternative and is worse: the projection already answers a mismatch with [`Recovery`] rather
-/// than with a refusal, and turning that into an error would be a new way to fail for callers who
-/// are not doing anything wrong.
+/// - `units(source.len())`, for the bytes — the projector re-verifies each definition against the
+///   source at that definition's own range; and
+/// - the pair's own
+///   [`projection_cost`](smear_parser::graphql::lossless::Verified::projection_cost), for the
+///   **elements** — one per green node and one per token, counted by the walk that verified the
+///   pair.
 ///
-/// It was the pass al8n/smear#198's table could not place, and "bounded by the document" was the
-/// wrong answer: the parser's own limits bound the CST's *shape* and not its *size*, and the size
-/// is the thing an adversary picks.
+/// The second term exists because bytes do not bound structure. This section used to say the
+/// projection "builds at most one AST node per CST token and a token is at least one byte", and a
+/// zero-width node is a counter-example the parser itself produces —
+/// [`finish_root`](smear_parser::lossless::runner::finish_root) is public, so a caller can mint a
+/// `Parse` full of them. An empty source over such a tree verified, paid one unit, and had every
+/// node visited.
+///
+/// Incremental charging would still be better and is still not available:
+/// `project_executable_document_verified` lives in `smear-parser`, and threading a validation
+/// ledger into it would put a compiler concept in the parser. What makes a prepayment sound rather
+/// than merely convenient is that it is an upper bound the caller already holds — and it is one
+/// *because* the pair carries its own element count, rather than because a proxy was assumed to
+/// bound it.
 ///
 /// **This is the one place the two doors do not answer identically, and it is not a drift.** The
 /// module header's promise — the same rules, the same order, the same spans — is about the *rules*,
@@ -347,6 +354,17 @@ where
 /// having one. And it would be `Ok`: a caller who does not read the recovery sees a clean verdict,
 /// which is the failure this check exists to remove, one indirection later. This crate has already
 /// ruled on "nothing was examined" once, for the budget refusal, and ruled `Err`.
+///
+/// It also **outranks** the budget: the pair is checked before the ledger opens, so a mismatch
+/// answers [`Refusal::SourceMismatch`](super::Refusal::SourceMismatch) at every budget including
+/// zero. A stale pair is not a resource problem, and `Refusal::Budget` names a remedy — raise the
+/// limit, retry — that cannot help with one. That ordering is what the verified entry point exists
+/// to make free: there, the check has already happened.
+///
+/// An earlier version of this contract said rejecting outright "would be a new way to fail for
+/// callers who are not doing anything wrong". That reasoning did not survive its own case — the
+/// projector's per-definition check cannot see a `source` that merely *extends* the parse's text,
+/// so the alternative was a complete-looking [`Recovery`] over a document nobody validated.
 ///
 /// # What a refusal here looks like
 ///
@@ -413,9 +431,24 @@ where
   K: Sink<&'src str>,
 {
   let source = pair.source();
+  // **Two dimensions, and neither bounds the other.** Bytes: the projector re-verifies each
+  // definition against the source at its own range, which reads them. Elements: it visits a node to
+  // dispatch on its kind and a token to read its text. A megabyte string literal is one token, and
+  // a balanced pair of zero-width nodes is two elements and no bytes — so the charge is the sum
+  // rather than either one.
+  //
+  // The element count is [`Verified`]'s, established by the same walk that established the pair's
+  // proof. This door charged `units(source.len())` alone until al8n/smear#198's twenty-third round,
+  // which is the assumption that bytes bound structure — and
+  // [`finish_root`](smear_parser::lossless::runner::finish_root) is public, so a caller can mint a
+  // `Parse` where they do not. An empty source over a tree of a million empty nodes verified, paid
+  // one unit, and had every node visited. A proof that does not bound what its consumer charges for
+  // is not a proof of the thing being relied on.
+  //
   // The pair's two halves are the same length by construction, so there is no maximum to take: the
   // twentieth round's "priced over both inputs" question does not exist for a verified pair.
-  let Some(left) = Ledger::open(budget).take(units(source.len())) else {
+  let cost = units(source.len()).saturating_add(pair.projection_cost());
+  let Some(left) = Ledger::open(budget).take(cost) else {
     let (emitted, stopped) = refuse_projection(source, budget, rules, sink);
     return Err(LosslessInvalid {
       invalid: Invalid::refused(emitted, stopped),
