@@ -212,11 +212,34 @@ impl<L: rowan::Language> Parse<L> {
 ///   `source.len()` charges one unit and does unbounded work. A dialect's verified-pair type now
 ///   carries its own element count for exactly this reason; anything else that sizes work from a
 ///   length is making the same assumption.
-/// - **Depth is not bounded by the lexer's ceiling.** Three green-tree walks in
-///   `crate::lossless::project` recurse — `verify_source_at`, `verify_source_counted` and
-///   `reject_holes` — and each rests on a comment naming the lexer's `MAX_NESTING_DEPTH` as the
-///   bound on the tree's depth. A minted stream honours no such ceiling, so a deep enough one
-///   overflows the stack rather than refusing. **This is the largest of the residuals.**
+/// - **Depth is not bounded by the lexer's ceiling.** **Four** green-tree walks in
+///   `crate::lossless::project` recurse — `verify_source_at`, `verify_source_counted`,
+///   `reject_holes`, and the mutually recursive `node_extent`/`extent_of` pair — and each rested on
+///   a comment naming the lexer's `MAX_NESTING_DEPTH` as the bound on the tree's depth. A minted
+///   stream honours no such ceiling.
+///
+///   Each carries its own counter now and refuses at
+///   [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH), so **these walks** are safe on
+///   any tree. Two halves of the problem are not, and neither is this door's to close:
+///
+///   - **Construction.** The over-deep tree is built by `finish_partial`, from events already
+///     recorded in the `Cst` this function is handed. There is nothing here to inspect and no way
+///     to refuse before the tree exists — that check belongs upstream, in the builder that sees the
+///     events as they arrive. This crate's own dialects are bounded by
+///     `crate::lossless::depth::descend` before they ever reach here; a `Cst` built elsewhere is
+///     not.
+///   - **Destruction.** `rowan` drops a green tree recursively, so a tree deep enough to overflow
+///     is a crash in its own destructor. That is reachable through `rowan`'s public builder without
+///     this crate being involved at all, and no guard placed after materialisation can help: the
+///     value's mere existence is the hazard.
+///
+///   So the honest statement of this entry is that **the walks are bounded and the lifecycle is
+///   not**, and closing the lifecycle needs a change upstream rather than here.
+///
+///   The first version of this list said *three* walks and did not mention either lifecycle half.
+///   That is worth recording where it happened: a general claim written without enumerating what it
+///   ranges over is this workspace's most repeated defect, and this is the instance where the
+///   incomplete enumeration **was itself the deliverable**. al8n/smear#198.
 /// - **`has_errors` and `diagnostics` are whatever the stream said.** A minted parse can report a
 ///   clean document it did not parse, so a consumer using them as a precondition is trusting the
 ///   caller.

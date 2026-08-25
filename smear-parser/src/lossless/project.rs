@@ -77,6 +77,63 @@ use rowan::{
 };
 use tokora::SimpleSpan;
 
+/// The deepest green tree any walk in this module will descend.
+///
+/// # It bounds a crash, so it is a constant and not a knob
+///
+/// Every other ceiling this workspace exposes — the merge bounds, the validation ledger, the
+/// lexer's own nesting limit — bounds *work*, and a caller can want more of it. This one bounds
+/// **native stack frames**, and the right value is a property of the runtime rather than of the
+/// document. A caller who raised it would be configuring a segmentation fault back in, and one who
+/// lowered it would break nothing, because nothing a parser produces comes near it.
+///
+/// The measured facts it is set against: the deepest green tree in this repository's 472 corpus
+/// fixtures is **12** levels, and the deepest document the lexer will accept at all — its
+/// `MAX_NESTING_DEPTH` of 24 open brackets — materialises **51**. This is an order of magnitude
+/// above the second number and nearly two above the first.
+///
+/// # Why any bound is needed here at all
+///
+/// These helpers take a `&GreenNodeData`, and `rowan`'s builder is public, so the tree can come
+/// from anywhere — including `finish_root`, which finishes an event stream this crate did not
+/// emit. A recursive walk over an unproved tree is a stack overflow rather than a refusal, and a
+/// crash is worse than every charge defect al8n/smear#198 has found. Each walk therefore carries
+/// its own counter and refuses on its own terms, which is what "independently bounded" has to mean
+/// when the caller supplies the tree.
+///
+/// What this does **not** bound is the tree's *construction* or its *destruction*: `rowan` drops a
+/// green tree recursively, so a tree deep enough to overflow this walk was already deep enough to
+/// overflow its own `Drop`, in the caller's code, before any of these functions saw it. That route
+/// is `rowan`'s and is reachable without this crate; see `crate::lossless::runner::finish_root`.
+pub const MAX_GREEN_DEPTH: usize = 512;
+
+/// How a depth-bounded green walk stopped: on a divergence, or on the ceiling.
+///
+/// Two reasons one `Result` has to carry, so the walk stays a single recursion with a single exit.
+enum Depth {
+  /// The bytes stopped agreeing, over this range.
+  Diverged(Range<usize>),
+  /// [`MAX_GREEN_DEPTH`] was reached.
+  TooDeep,
+}
+
+impl Depth {
+  /// The refusal a door reports, with the span each reason can honestly name.
+  fn into_error<K>(self) -> ProjectError<K> {
+    match self {
+      Self::Diverged(at) => ProjectError::new(ProjectErrorKind::SourceMismatch, at),
+      // No byte range is the answer here — the tree's shape is — so the span is empty rather than
+      // pointing at whichever token the walk happened to be under.
+      Self::TooDeep => ProjectError::new(
+        ProjectErrorKind::TooDeep {
+          limit: MAX_GREEN_DEPTH,
+        },
+        0..0,
+      ),
+    }
+  }
+}
+
 /// Why a projection refused.
 ///
 /// Positioned, single, and fail-fast. The projection is **not** a diagnostics channel: the
@@ -132,6 +189,15 @@ pub enum ProjectErrorKind<K> {
     /// The rule, named for a human.
     rule: &'static str,
   },
+  /// The tree nests deeper than any walk here will descend.
+  ///
+  /// Not reachable from a parsed document — see [`MAX_GREEN_DEPTH`] for the measured margin. It
+  /// exists because these helpers take an arbitrary `GreenNodeData` and a recursive walk over an
+  /// unproved one is a stack overflow rather than a refusal.
+  TooDeep {
+    /// The limit that was reached.
+    limit: usize,
+  },
 }
 
 /// A projection refusal, with the byte range of the element that caused it.
@@ -185,6 +251,10 @@ impl<K: fmt::Debug> fmt::Display for ProjectError<K> {
         "{start}..{end}: the source text is not what this tree was parsed from"
       ),
       ProjectErrorKind::SemanticRule { rule } => write!(f, "{start}..{end}: {rule}"),
+      ProjectErrorKind::TooDeep { limit } => write!(
+        f,
+        "{start}..{end}: the tree nests deeper than the {limit} levels a projection will descend"
+      ),
     }
   }
 }
@@ -549,7 +619,7 @@ pub fn node_extent<L: Language>(
   node: Node<'_, L>,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
 ) -> Option<TextRange> {
-  extent_of(node.children(), is_trivia)
+  extent_of_bounded(node.children(), is_trivia, MAX_GREEN_DEPTH)
 }
 
 /// The token extent of a run of elements, descending into every node it contains.
@@ -564,6 +634,28 @@ pub fn extent_of<'g, L: Language, I>(
 where
   I: IntoIterator<Item = Element<'g, L>>,
 {
+  extent_of_bounded(elements, is_trivia, MAX_GREEN_DEPTH)
+}
+
+/// [`extent_of`] with the descent it and [`node_extent`] make into each other counted.
+///
+/// The pair is **mutually recursive** and both halves are `pub`, so a caller-supplied tree drives
+/// the native stack. al8n/smear#198's audit of this named three recursive walks and missed this
+/// one, which is what a general claim recorded without enumerating its members looks like when the
+/// artifact *is* the enumeration.
+///
+/// It has no error channel, so the ceiling is not a refusal here: past it the node's own
+/// [`TextRange`] stands in for its token extent. That is a **superset** — an extent is a cover, and
+/// covering the node's trivia as well is imprecise rather than wrong — and it is reachable only on a
+/// tree far deeper than any parser produces. See [`MAX_GREEN_DEPTH`].
+fn extent_of_bounded<'g, L: Language, I>(
+  elements: I,
+  is_trivia: impl Fn(L::Kind) -> bool + Copy,
+  left: usize,
+) -> Option<TextRange>
+where
+  I: IntoIterator<Item = Element<'g, L>>,
+{
   let mut extent: Option<TextRange> = None;
   for element in elements {
     let piece = match element {
@@ -573,7 +665,10 @@ where
         }
         Some(token.text_range())
       }
-      NodeOrToken::Node(node) => node_extent(node, is_trivia),
+      NodeOrToken::Node(node) => match left.checked_sub(1) {
+        Some(left) => extent_of_bounded(node.children(), is_trivia, left),
+        None => Some(node.text_range()),
+      },
     };
     if let Some(piece) = piece {
       extent = Some(match extent {
@@ -641,16 +736,20 @@ pub fn verify_source_counted<K>(
     source: &[u8],
     offset: &mut usize,
     elements: &mut u32,
-  ) -> Result<(), Range<usize>> {
+    left: usize,
+  ) -> Result<(), Depth> {
+    let Some(left) = left.checked_sub(1) else {
+      return Err(Depth::TooDeep);
+    };
     for child in green.children() {
       *elements = elements.saturating_add(1);
       match child {
-        NodeOrToken::Node(node) => walk(node, source, offset, elements)?,
+        NodeOrToken::Node(node) => walk(node, source, offset, elements, left)?,
         NodeOrToken::Token(token) => {
           let text = token.text().as_bytes();
           let end = *offset + text.len();
           if source.get(*offset..end) != Some(text) {
-            return Err(*offset..end);
+            return Err(Depth::Diverged(*offset..end));
           }
           *offset = end;
         }
@@ -661,8 +760,14 @@ pub fn verify_source_counted<K>(
 
   let mut offset = 0usize;
   let mut elements = 1u32;
-  walk(root, source.as_bytes(), &mut offset, &mut elements)
-    .map_err(|at| ProjectError::new(ProjectErrorKind::SourceMismatch, at))?;
+  walk(
+    root,
+    source.as_bytes(),
+    &mut offset,
+    &mut elements,
+    MAX_GREEN_DEPTH,
+  )
+  .map_err(Depth::into_error)?;
   Ok(elements)
 }
 
@@ -705,15 +810,23 @@ pub fn verify_source_at<K>(
   // tokora's inherited 500, which put this walk at a few tens of KiB of frames; smear issue #61
   // replaced it with a number measured against a 2 MiB stack, so the bound this comment relies on
   // got an order of magnitude cheaper rather than merely staying true.
-  fn walk(green: &GreenNodeData, source: &[u8], offset: &mut usize) -> Result<(), Range<usize>> {
+  fn walk(
+    green: &GreenNodeData,
+    source: &[u8],
+    offset: &mut usize,
+    left: usize,
+  ) -> Result<(), Depth> {
+    let Some(left) = left.checked_sub(1) else {
+      return Err(Depth::TooDeep);
+    };
     for child in green.children() {
       match child {
-        NodeOrToken::Node(node) => walk(node, source, offset)?,
+        NodeOrToken::Node(node) => walk(node, source, offset, left)?,
         NodeOrToken::Token(token) => {
           let text = token.text().as_bytes();
           let end = *offset + text.len();
           if source.get(*offset..end) != Some(text) {
-            return Err(*offset..end);
+            return Err(Depth::Diverged(*offset..end));
           }
           *offset = end;
         }
@@ -723,8 +836,7 @@ pub fn verify_source_at<K>(
   }
 
   let mut offset = base;
-  walk(green, source.as_bytes(), &mut offset)
-    .map_err(|at| ProjectError::new(ProjectErrorKind::SourceMismatch, at))
+  walk(green, source.as_bytes(), &mut offset, MAX_GREEN_DEPTH).map_err(Depth::into_error)
 }
 
 /// Refuse a subtree that carries a node the AST has no image for, in preorder.
@@ -746,7 +858,18 @@ pub fn reject_holes<L: Language>(
     node: Node<'_, L>,
     parent: L::Kind,
     is_hole: impl Fn(L::Kind) -> bool + Copy,
+    left: usize,
   ) -> Option<ProjectError<L::Kind>> {
+    // Its own counter, on its own terms: this takes a caller-supplied tree and a recursion over an
+    // unproved one is a stack overflow rather than a refusal. See [`MAX_GREEN_DEPTH`].
+    let Some(left) = left.checked_sub(1) else {
+      return Some(ProjectError::new(
+        ProjectErrorKind::TooDeep {
+          limit: MAX_GREEN_DEPTH,
+        },
+        to_range(node.text_range()),
+      ));
+    };
     let kind = node.kind();
     if is_hole(kind) {
       return Some(ProjectError::new(
@@ -759,7 +882,7 @@ pub fn reject_holes<L: Language>(
     }
     for child in node.children() {
       if let NodeOrToken::Node(child) = child
-        && let Some(refusal) = walk(child, kind, is_hole)
+        && let Some(refusal) = walk(child, kind, is_hole, left)
       {
         return Some(refusal);
       }
@@ -767,7 +890,7 @@ pub fn reject_holes<L: Language>(
     None
   }
 
-  match walk(node, node.kind(), is_hole) {
+  match walk(node, node.kind(), is_hole, MAX_GREEN_DEPTH) {
     Some(refusal) => Err(refusal),
     None => Ok(()),
   }

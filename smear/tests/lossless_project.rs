@@ -1388,3 +1388,115 @@ fn a_gap_beside_the_document_node_is_counted() {
   assert_eq!(recovery, Recovery::new(0, 1));
   assert!(!recovery.is_complete());
 }
+
+/// A tree deeper than any parser produces is **refused**, by every public helper that walks one.
+///
+/// # A crash, not a charge defect
+///
+/// These helpers take a `&GreenNodeData` and `rowan`'s builder is public, so the tree can come from
+/// anywhere — including `finish_root`, which finishes an event stream this crate did not emit. Four
+/// of them recursed with no counter: `verify_source_at`, `verify_source_counted`, `reject_holes`,
+/// and the mutually recursive `node_extent`/`extent_of` pair. al8n/smear#198's own audit of this
+/// named three and missed the fourth, which is what a general claim recorded without enumerating
+/// its members looks like when the artifact *is* the enumeration.
+///
+/// Each carries its own counter now and refuses at `MAX_GREEN_DEPTH`, so an unproved tree is a
+/// `ProjectErrorKind::TooDeep` rather than a stack overflow. The projection doors inherit it
+/// without a counter of their own: every one of them opens with a verification, and
+/// `Verified::new` runs the counted form — so a `Verified` is now proof of the tree's depth as
+/// well as of its bytes.
+///
+/// # What this pins, and what it cannot
+///
+/// A tree one level past the ceiling, which is refused. **Not** a tree deep enough to actually
+/// overflow: `rowan` drops a green tree recursively, so building one here would crash this test in
+/// its own destructor before an assertion ran. That route is `rowan`'s and is reachable without
+/// this crate at all — which is why the ceiling is about *these walks* rather than about the tree's
+/// existence, and why `finish_root`'s audit records construction and destruction separately.
+#[test]
+fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
+  use smear::parser::lossless::project::{
+    MAX_GREEN_DEPTH, node_extent, reject_holes, verify_source, verify_source_counted,
+  };
+
+  // One level past what the walks will descend. Every level is a `SelectionSet`, a shape the
+  // grammar allows and the lexer's own nesting ceiling of twenty-four would never reach.
+  let over = MAX_GREEN_DEPTH + 8;
+  let mut tree = Tree::new();
+  tree.open(K::Root);
+  for _ in 0..over {
+    tree.open(K::SelectionSet);
+  }
+  for _ in 0..over {
+    tree.close();
+  }
+  tree.close();
+  let root = tree.finish();
+  let green = root.green();
+
+  // The tree holds no token, so its text is empty and the bytes agree — which is what makes depth
+  // the only thing left to refuse it for.
+  let refused =
+    verify_source::<K>(green, "").expect_err("`verify_source` descended a tree past the ceiling");
+  assert_eq!(
+    *refused.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{refused}"
+  );
+  let counted = verify_source_counted::<K>(green, "")
+    .map(|_| ())
+    .expect_err("`verify_source_counted` descended a tree past the ceiling");
+  assert_eq!(
+    *counted.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{counted}"
+  );
+
+  let node = smear::parser::lossless::project::Node::of(&root);
+  let holes = reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
+    .expect_err("`reject_holes` descended a tree past the ceiling");
+  assert_eq!(
+    *holes.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{holes}"
+  );
+
+  // The extent pair has no error channel, so its ceiling is a **stand-in** rather than a refusal:
+  // past it the node's own range covers what its token extent would have. What is pinned is that
+  // it answers at all.
+  assert!(
+    node_extent(node, |kind| matches!(kind, K::Space | K::Comment)).is_none()
+      || node_extent(node, |_| false).is_some(),
+    "`node_extent` did not terminate on a tree past the ceiling"
+  );
+
+  // The ceiling is not in the way of anything real: the deepest green tree in this repository's
+  // corpus is twelve levels, and the deepest document the lexer accepts at all materialises
+  // fifty-one.
+  let deepest = corpus("valid_")
+    .into_iter()
+    .map(|(_, src)| depth_of(parse_document(&src).green()))
+    .max()
+    .expect("the corpus is not empty");
+  println!("deepest corpus green tree: {deepest} levels, ceiling {MAX_GREEN_DEPTH}");
+  assert!(
+    deepest < 64,
+    "the corpus reaches {deepest} levels, so {MAX_GREEN_DEPTH} is no longer an order of magnitude \
+     of headroom"
+  );
+}
+
+/// The green tree's depth, for the margin assertion above.
+fn depth_of(node: &rowan::GreenNodeData) -> usize {
+  1 + node
+    .children()
+    .filter_map(|child| child.into_node().map(depth_of))
+    .max()
+    .unwrap_or(0)
+}

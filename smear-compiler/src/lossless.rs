@@ -77,8 +77,9 @@
 //!
 //! The three ways out were weighed again and answered the same way, for the same reasons: a §3
 //! pass that skipped the rules a skip can disturb would be a second builder, and refusing the
-//! document is what this door exists to replace. So it reports, the [`Recovery`] rides along in
-//! both arms, and `tests/validator_lossless_schema.rs` pins both artifacts.
+//! document is what this door exists to replace. So it reports, the [`Recovery`] rides along
+//! wherever a projection ran — which is both arms of the build, and neither arm of a refusal taken
+//! before it — and `tests/validator_lossless_schema.rs` pins both artifacts.
 //!
 //! [`project_executable_document`]: smear_parser::graphql::lossless::project_executable_document
 //! [`project_executable_document_recovered`]: smear_parser::graphql::lossless::project_executable_document_recovered
@@ -101,13 +102,15 @@ use super::{
 /// The verdict of a failed lossless validation.
 ///
 /// [`Invalid`] plus the [`Recovery`] the successful arm carries, so the two facts a caller needs
-/// — *what was wrong* and *how much of the document was looked at* — arrive together whichever
-/// way the result went.
+/// — *what was wrong* and *how much of the document was looked at* — arrive together whenever the
+/// second one exists. It does not when the projection never ran; see
+/// [`LosslessInvalid::recovery`], which says so without enumerating the reasons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LosslessInvalid {
   invalid: Invalid,
-  /// `None` when the projection never ran, which is a *different thing* from a projection that ran
-  /// and dropped nothing — and the only representation that cannot be confused with one.
+  /// `None` when the projection never ran, whatever the reason — a *different thing* from a
+  /// projection that ran and dropped nothing, and the only representation that cannot be confused
+  /// with one. [`LosslessInvalid::recovery`] says why the distinction is not enumerated here.
   recovery: Option<Recovery>,
 }
 
@@ -126,10 +129,17 @@ impl LosslessInvalid {
   ///
   /// # `None` means the projection never ran
   ///
-  /// One path produces it: [`Budget::validation_work`](super::Budget::validation_work) could not
-  /// pay for the projection, so the door refused before building any AST. There is no [`Recovery`]
-  /// to report because nothing examined anything, and a caller that unwraps this gets an
-  /// `Option`'s answer rather than a number.
+  /// That is the whole of it, and deliberately: the reason is
+  /// [`Invalid::refusal`](super::Invalid::refusal)'s to give, and [`Refusal`](super::Refusal) is
+  /// the one place the reasons are enumerated. There is no [`Recovery`] to report because nothing
+  /// examined anything, and a caller that unwraps this gets an `Option`'s answer rather than a
+  /// number.
+  ///
+  /// This used to name **one** path — the budget that could not pay for the projection — and a
+  /// second arrived with `Refusal::SourceMismatch` without the sentence noticing. It is the same
+  /// failure the accessors on [`Invalid`] had one round earlier, over a different set with an
+  /// overlapping membership, so it gets the same repair rather than a second enumeration to keep
+  /// in step. al8n/smear#198.
   ///
   /// It took three rounds to arrive at the absence. The count was `1`, disclosed in prose as a
   /// floor; then `1` with a `projection_ran()` flag beside it saying which way to read it. Both
