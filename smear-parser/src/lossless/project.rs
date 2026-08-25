@@ -383,12 +383,24 @@ impl fmt::Display for Unverified {
 }
 
 impl Unverified {
+  /// Gated on its readers, not on the tower's own `rowan` gate: both call sites are in
+  /// `graphql::lossless::project`, so `graphql` is the union of this function's readers' gate.
+  /// `rowan` alone — what `lossless-coverage` builds, and what `cargo hack --each-feature` puts
+  /// through this file — compiles this substrate with no dialect present, and a `pub(crate)`
+  /// function with no in-crate caller there is `dead_code` under `-Dwarnings`.
+  ///
+  /// NOT `any(feature = "graphql", feature = "graphqlx")`: GraphQLx has no projection door to call
+  /// this from, so that gate would be wider than the readers again and would go dead under a
+  /// graphqlx-only build instead. A GraphQLx reader added later has to widen this line itself —
+  /// which is then a compile error naming the miss, not a silent re-widening.
+  ///
   /// The reason a [`ProjectError`] from a whole-root verification names.
   ///
   /// The two are established by one walk and were collapsed into one name at this boundary — the
   /// third time on al8n/smear#198 that two abandonments with different remedies met a channel that
   /// could carry one. The others were an arena refusal wearing the budget's `None` and a stale pair
   /// wearing the budget's refusal; this one is a shape wearing a mismatch.
+  #[cfg(feature = "graphql")]
   pub(crate) fn of<K>(error: &ProjectError<K>) -> Self {
     match error.kind() {
       ProjectErrorKind::TooDeep { limit } => Self::TooDeep { limit: *limit },
