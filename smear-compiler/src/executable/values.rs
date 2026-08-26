@@ -19,7 +19,9 @@ use super::{
 use crate::{
   diagnostic::Context,
   schema::{DirectiveLocation, PackedType, Range32, Sym, TypeKind},
-  scratch::{Compared, NONE, ValueFrame, ValueLevel, count_units, scan_cmp, scan_eq, set_bit},
+  scratch::{
+    BYTES_PER_UNIT, Compared, NONE, ValueFrame, ValueLevel, count_units, scan_cmp, scan_eq, set_bit,
+  },
 };
 
 /// The position a value sits in, as the two bits draft 5.8.5 asks about.
@@ -939,14 +941,13 @@ where
   {
     let name = Some(name);
     if name == self.scalars.int {
-      // `fits_i32` parses the digits, so this arm reads them and pays for them. The `None` arm
-      // has already decided on the variant.
+      // `fits_i32` reads the digits, so this arm pays for them. The `None` arm has already
+      // decided on the variant.
       return match value.as_int() {
-        Some(int) => {
-          let digits = int.source().as_ref();
-          self.spend(units(digits.len()), blame)?;
-          ControlFlow::Continue(fits_i32(digits))
-        }
+        Some(int) => match self.spelling(int.source().as_ref(), blame)? {
+          Some(digits) => ControlFlow::Continue(fits_i32(digits)),
+          None => ControlFlow::Continue(false),
+        },
         None => ControlFlow::Continue(false),
       };
     }
@@ -954,11 +955,10 @@ where
       // The coercion rules let an Int literal stand for a Float — and that arm reads **nothing**:
       // being an Int is the whole of the answer. Only `is_finite` reads a spelling.
       return match (value.as_float(), value.as_int()) {
-        (Some(float), _) => {
-          let digits = float.source().as_ref();
-          self.spend(units(digits.len()), blame)?;
-          ControlFlow::Continue(is_finite(digits))
-        }
+        (Some(float), _) => match self.spelling(float.source().as_ref(), blame)? {
+          Some(digits) => ControlFlow::Continue(is_finite(digits)),
+          None => ControlFlow::Continue(false),
+        },
         (None, Some(_)) => ControlFlow::Continue(true),
         (None, None) => ControlFlow::Continue(false),
       };
@@ -977,11 +977,10 @@ where
         return ControlFlow::Continue(true);
       }
       return match value.as_int() {
-        Some(int) => {
-          let digits = int.source().as_ref();
-          self.spend(units(digits.len()), blame)?;
-          ControlFlow::Continue(fits_id(digits))
-        }
+        Some(int) => match self.spelling(int.source().as_ref(), blame)? {
+          Some(digits) => ControlFlow::Continue(fits_id(digits)),
+          None => ControlFlow::Continue(false),
+        },
         None => ControlFlow::Continue(false),
       };
     }
@@ -990,6 +989,77 @@ where
     // is the whole of al8n/smear#198's tenth-round shape — the branch a document actually takes is
     // the branch that decides what it owes.
     ControlFlow::Continue(true)
+  }
+
+  /// A numeric literal's spelling as text, charging a unit in front of each run of bytes it reads.
+  ///
+  /// `None` is "no `i32` and no `f64` can be named by this", which is what a byte outside ASCII
+  /// establishes: [`str::parse`] accepts digits, a sign, a point, an exponent marker and the three
+  /// non-finite spellings, and every one of those is ASCII. So scanning for that byte decides the
+  /// same question [`core::str::from_utf8`] was being asked here — and, unlike `from_utf8`, it can
+  /// be stopped and charged a run at a time.
+  ///
+  /// That is the whole repair. `units(spelling.len())` stood in front of `from_utf8`, which
+  /// returns at the **first** byte outside the encoding: a spelling whose first byte is not one
+  /// costs a load and was charged for its whole length. An all-ASCII spelling — every `Int` and
+  /// `Float` token any lexer in this workspace produces, and the only kind that can be accepted —
+  /// reads to the end and pays exactly `units(len)`, which is what it paid before.
+  /// al8n/smear#198's twenty-third round.
+  fn spelling<'a>(
+    &mut self,
+    spelling: &'a [u8],
+    blame: SimpleSpan,
+  ) -> ControlFlow<(), Option<&'a str>> {
+    let mut ledger = self.left;
+    let mut refused = false;
+    let mut charge = || match ledger.take(1) {
+      Some(left) => {
+        ledger = left;
+        true
+      }
+      None => {
+        ledger = Ledger::Left(0);
+        refused = true;
+        false
+      }
+    };
+    // The opening unit covers the emptiness test and the first `BYTES_PER_UNIT - 1` bytes, so the
+    // running total after `k` bytes is exactly `units(k)` — `scan_eq`'s schedule, one operation
+    // over.
+    let readable = if charge() {
+      let mut budgeted = BYTES_PER_UNIT - 1;
+      let mut read = 0usize;
+      loop {
+        if read >= spelling.len() {
+          break true;
+        }
+        if read == budgeted {
+          if !charge() {
+            break false;
+          }
+          budgeted += BYTES_PER_UNIT;
+        }
+        let end = budgeted.min(spelling.len());
+        if !spelling[read..end].is_ascii() {
+          break false;
+        }
+        read = end;
+      }
+    } else {
+      false
+    };
+    drop(charge);
+    self.left = ledger;
+    if refused {
+      self.refuse(blame)?;
+    }
+    // ASCII, so the conversion cannot fail; written as the total form for the reason this crate's
+    // other unreachable conversions are.
+    ControlFlow::Continue(
+      readable
+        .then(|| core::str::from_utf8(spelling).ok())
+        .flatten(),
+    )
   }
 
   fn report_value<V>(&mut self, value: &V, context: Context) -> ControlFlow<()>
@@ -1309,25 +1379,25 @@ fn are_types_compatible(mut variable: PackedType, mut location: PackedType) -> b
 ///
 /// Ten characters of digits is the first length that can overflow, so the common case is a length
 /// check and nothing else.
-fn fits_i32(spelling: &[u8]) -> bool {
-  let digits = spelling.strip_prefix(b"-").unwrap_or(spelling);
+fn fits_i32(spelling: &str) -> bool {
+  let digits = spelling.strip_prefix('-').unwrap_or(spelling);
   if digits.len() <= 9 {
     return !digits.is_empty();
   }
-  core::str::from_utf8(spelling).is_ok_and(|text| text.parse::<i32>().is_ok())
+  spelling.parse::<i32>().is_ok()
 }
 
 /// Whether an `Int` literal may stand for an `ID`.
 ///
 /// The specification's `ID` input coercion accepts integer values, and the range that matters is
 /// the one an `Int` literal is allowed to carry in the first place.
-fn fits_id(spelling: &[u8]) -> bool {
+fn fits_id(spelling: &str) -> bool {
   fits_i32(spelling)
 }
 
 /// Whether a `Float` literal's spelling names a finite double.
-fn is_finite(spelling: &[u8]) -> bool {
-  core::str::from_utf8(spelling).is_ok_and(|text| text.parse::<f64>().is_ok_and(f64::is_finite))
+fn is_finite(spelling: &str) -> bool {
+  spelling.parse::<f64>().is_ok_and(f64::is_finite)
 }
 
 #[cfg(test)]
@@ -1362,20 +1432,20 @@ mod tests {
 
   #[test]
   fn int_range_uses_the_retained_spelling() {
-    assert!(fits_i32(b"0"));
-    assert!(fits_i32(b"-1"));
-    assert!(fits_i32(b"999999999"));
-    assert!(fits_i32(b"2147483647"));
-    assert!(fits_i32(b"-2147483648"));
-    assert!(!fits_i32(b"2147483648"));
-    assert!(!fits_i32(b"-2147483649"));
-    assert!(!fits_i32(b"99999999999999999999"));
+    assert!(fits_i32("0"));
+    assert!(fits_i32("-1"));
+    assert!(fits_i32("999999999"));
+    assert!(fits_i32("2147483647"));
+    assert!(fits_i32("-2147483648"));
+    assert!(!fits_i32("2147483648"));
+    assert!(!fits_i32("-2147483649"));
+    assert!(!fits_i32("99999999999999999999"));
   }
 
   #[test]
   fn float_literals_must_be_finite() {
-    assert!(is_finite(b"1.0"));
-    assert!(is_finite(b"-1.5e3"));
-    assert!(!is_finite(b"1e400"));
+    assert!(is_finite("1.0"));
+    assert!(is_finite("-1.5e3"));
+    assert!(!is_finite("1e400"));
   }
 }

@@ -259,7 +259,7 @@
 //! | 5.4.2's `spend_names` | the `Schema::sym` loop below it, which hashes **every** name with no early exit | **kept** — the pass reads what the charge measured |
 //! | 5.7.3's `spend_names` | the same loop, one rule over | **kept** |
 //! | `spend_type`, `subject`, condition and field spellings | `Schema::sym`, or `S::clone` | **kept** — a hash and a copy read the whole key |
-//! | `scalar_accepts`' digits | `core::str::from_utf8` then `parse`, over an ASCII token the lexer produced | **kept** — the conversion has no early exit on that input, and the `<= 9` arm is a constant |
+//! | `scalar_accepts`' digits | `core::str::from_utf8`, which returns at the first byte outside the encoding | **at consumption**, through `Validator::spelling`: an ASCII scan decides the same question and can be stopped |
 //! | `count_units` over words, definitions, fragments, selections | a `resize` that writes every element, or a loop with no early exit | **kept** — counts, not lengths |
 //! | `resolve_frames`, `walk_value`'s depth, `same_value`'s stack | the slice each then walks, written once | **kept** |
 //!
@@ -1528,7 +1528,7 @@ where
   /// | 5.6.4 presence half | before **each written field** the scan resolves | bytes | `InputObjectRequiredFields`; the scan stops where it matches |
   /// | value walk | loop top, before `resolve` | depth | [`Validator::walks_values`], and the family's `HAS_VARIABLES` |
   /// | ” object field name | before the schema lookup | bytes | ” |
-  /// | scalar / enum literal | before the coercion reads it | bytes | `check` && `ValuesOfCorrectType` |
+  /// | scalar / enum literal | in front of **each run** the coercion reads | bytes, at consumption | `check` && `ValuesOfCorrectType` |
   /// | 5.8.1 index build | one unit per declaration, then **inside** each comparison | entries, then bytes at consumption | (`collects_usages` \|\| `VariableUniqueness`) && **> 1 declaration** |
   /// | variable declared type | before `pack_type` | bytes | `VariablesAreInputTypes` \|\| (`checks_values` && this definition has a default) |
   /// | 5.8.3/5.8.5 usage | **inside** the index search, per run its comparisons read | bytes, at consumption | [`collects_usages`] |
