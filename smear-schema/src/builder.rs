@@ -616,9 +616,17 @@ impl Names {
 /// the exponent over 16 k–64 k and 851 ms at 64 k, and is 1.03 and 20 ms. al8n/smear#198.
 #[derive(Debug, Default)]
 struct DeclaredNames {
-  /// One slot per type index, filled on demand: how many asks this declaration has answered by
-  /// scanning, and the sorted `(name, position)` index once one has paid for it.
-  of_type: Vec<(u32, Option<Vec<(Sym, u32)>>)>,
+  /// One slot per type index, filled on demand.
+  of_type: Vec<Declaration>,
+}
+
+/// What one input object's declared names have cost so far, and the index once one is paid for.
+#[derive(Debug, Default)]
+struct Declaration {
+  /// Asks this declaration has answered by scanning, across the whole build.
+  asks: u32,
+  /// `(name, position)` sorted once, so a lookup is a binary search.
+  order: Option<Vec<(Sym, u32)>>,
 }
 
 impl DeclaredNames {
@@ -630,13 +638,13 @@ impl DeclaredNames {
   /// while looking like a cost change.
   fn first(&mut self, types: &[RawType], base: usize, wanted: Sym) -> Option<usize> {
     if self.of_type.len() < types.len() {
-      self.of_type.resize_with(types.len(), || (0, None));
+      self.of_type.resize_with(types.len(), Declaration::default);
     }
     let declared = &types[base].input_fields;
-    let (asks, order) = &mut self.of_type[base];
-    if order.is_none() {
-      if *asks < NARROW_LIST as u32 {
-        *asks += 1;
+    let slot = &mut self.of_type[base];
+    if slot.order.is_none() {
+      if slot.asks < NARROW_LIST as u32 {
+        slot.asks += 1;
         return declared.iter().position(|field| field.name.sym == wanted);
       }
       let mut sorted: Vec<(Sym, u32)> = declared
@@ -645,9 +653,9 @@ impl DeclaredNames {
         .map(|(at, field)| (field.name.sym, at as u32))
         .collect();
       sorted.sort_unstable();
-      *order = Some(sorted);
+      slot.order = Some(sorted);
     }
-    let order = order.as_ref().expect("the index was just filled");
+    let order = slot.order.as_ref().expect("the index was just filled");
     let at = order.partition_point(|&(declared, _)| declared < wanted);
     match order.get(at) {
       Some(&(declared, position)) if declared == wanted => Some(position as usize),
@@ -2945,7 +2953,13 @@ impl SchemaBuilder {
   /// [`SchemaBuilder::apply_extensions`] because a type and its extensions are one location.
   fn validate_directive_usages(&mut self) {
     let (model, errors, names) = self.split_indexed();
-    Self::check_directive_uses(model, errors, names, DirectivesOf::Schema, Coordinate::schema());
+    Self::check_directive_uses(
+      model,
+      errors,
+      names,
+      DirectivesOf::Schema,
+      Coordinate::schema(),
+    );
 
     for ty in 0..model.types.len() {
       let owner = Coordinate::named(model.types[ty].name.sym);
@@ -2953,7 +2967,13 @@ impl SchemaBuilder {
 
       for field in 0..model.types[ty].fields.len() {
         let path = owner.then(model.types[ty].fields[field].name.sym);
-        Self::check_directive_uses(model, errors, names, DirectivesOf::Field { ty, field }, path);
+        Self::check_directive_uses(
+          model,
+          errors,
+          names,
+          DirectivesOf::Field { ty, field },
+          path,
+        );
 
         // The gate decides whether this field's arguments are visited at all, which is also
         // what makes `DirectivesOf::FieldArgument`'s own refused arm unreachable: an `arg`
@@ -2974,12 +2994,24 @@ impl SchemaBuilder {
 
       for field in 0..model.types[ty].input_fields.len() {
         let path = owner.then(model.types[ty].input_fields[field].name.sym);
-        Self::check_directive_uses(model, errors, names, DirectivesOf::InputField { ty, field }, path);
+        Self::check_directive_uses(
+          model,
+          errors,
+          names,
+          DirectivesOf::InputField { ty, field },
+          path,
+        );
       }
 
       for value in 0..model.types[ty].enum_values.len() {
         let path = owner.then(model.types[ty].enum_values[value].name.sym);
-        Self::check_directive_uses(model, errors, names, DirectivesOf::EnumValue { ty, value }, path);
+        Self::check_directive_uses(
+          model,
+          errors,
+          names,
+          DirectivesOf::EnumValue { ty, value },
+          path,
+        );
       }
     }
 
