@@ -29,36 +29,103 @@ use tokora::SimpleSpan;
 
 use super::schema::{PackedType, Range32, TypeId};
 
-/// How much work draft 5.3.2's merge engine may do before a document is refused.
+/// How much work validation may do before a document is refused.
 ///
-/// Both knobs are **absolute**, never proportional to the input: an attacker chooses the input,
-/// so a proportional bound is not a bound. On a trip the engine emits its own rule and fails the
+/// Every knob is **absolute**, never proportional to the input: an attacker chooses the input, so
+/// a proportional bound is not a bound. On a trip the validator emits its own rule and fails the
 /// document — never "passes unvalidated", never panics.
 ///
 /// This is a *validation* budget and has nothing to do with the parser's recursion budget. They
-/// bound different resources — parse-time nesting against merge-time work — and are set
-/// independently.
+/// bound different resources — parse-time nesting against validation-time work — and are set
+/// independently. Nor may one be leaned on for the other: the AST constructors are public, so a
+/// caller can hand [`validate_executable`](super::validate_executable) a document no parser ever
+/// saw and no parser limit ever bounded. Nothing here rests on a document having provenance.
 ///
-/// # What the two knobs count
+/// # What the three knobs count
 ///
 /// - [`merge_depth`](Budget::merge_depth) bounds how deeply the merge recursion may nest. One
 ///   level is one field-nesting level of the *response shape*, so it is the same quantity
 ///   `serde_json` bounds when it deserialises the answer.
-/// - [`merge_work`](Budget::merge_work) bounds everything else, as one running total for the whole
-///   call: expanded field rows, pair comparisons, the rows a common-parent partition duplicates,
-///   and the tree steps a node resolution walks. Depth alone does not bound the engine — breadth
-///   times fragment reuse does — so this is the knob that actually caps the worst case.
+/// - [`merge_work`](Budget::merge_work) bounds everything else *inside draft 5.3.2*, as one
+///   running total: expanded field rows, pair comparisons, the rows a common-parent partition
+///   duplicates, and the tree steps a node resolution walks. Depth alone does not bound the engine
+///   — breadth times fragment reuse does — so this is the knob that caps that rule's worst case.
+/// - [`validation_work`](Budget::validation_work) bounds **every other pass**, as one running
+///   total that includes the projection the lossless door runs before any rule does. One unit is
+///   one node examined; one more is charged per eight bytes of every document-chosen name a pass
+///   reads, because a name has no length ceiling and where two names differ decides what comparing
+///   them costs.
 ///
-/// A document that exceeds either one is **refused**, with
-/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set on the verdict and —
-/// when that bound's rule is in the [`RuleSet`](super::RuleSet) —
-/// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
-/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) naming which. The refusal does not
-/// depend on the rule being enabled; only being told which bound does.
+///   It is the *whole call* for [`validate_executable`](super::validate_executable) and for the
+///   lossless door's **verified** entry point. It is not, on a lossless entry point handed a
+///   `parse` and a `source` that nothing has paired: showing that those two describe one document
+///   is `O(tokens)` and precedes the ledger, because deciding it requires finishing a comparison
+///   that a bound would have to be able to stop. `smear_compiler::lossless` says which door is
+///   which and why the choice is a type rather than a trade-off. al8n/smear#198.
+///
+/// A document that exceeds any of the three is **refused**, with
+/// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget),
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) or
+/// [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget) naming which — when that
+/// bound's rule is in the [`RuleSet`](super::RuleSet) — and
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set on the verdict either way. The
+/// refusal does not depend on the rule being enabled; only being told which bound does.
+///
+/// The third knob is not redundant with the first two, and the reason is *pass order*: draft
+/// 5.3.2 runs **last**, so the merge budget is consulted after every other pass has already
+/// finished spending. Measured, a 129 KB document of 3,200 operations spreading one 3,200-field
+/// fragment spent 189 ms in the selection walk with the merge rules fully enabled, and tripped
+/// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) afterwards, on work already done.
+///
+/// # Turning the validation bound off
+///
+/// Set [`validation_work`](Budget::validation_work) to [`u32::MAX`]. That is the supported
+/// spelling of "never refuse for this resource", and it is the only one: an empty
+/// [`RuleSet`](super::RuleSet) switches off the bound's *diagnostic*, not the bound. A caller who
+/// wants a validator that cannot refuse — an offline linter over trusted input, a test harness —
+/// sets the knob, not the rules.
+///
+/// It is a **state** and not a large number. The validator turns it into one the moment the budget
+/// is read, so no charge, and no prepayment the lossless door subtracts before validation starts,
+/// can wear it down into a merely-large finite budget. That is the fourth counter in this
+/// repository to need saying: a maximum is not an absence.
+///
+/// The same sentence is **not** made here about [`merge_depth`](Budget::merge_depth) and
+/// [`merge_work`](Budget::merge_work). Their engine reads them itself, and what a maximum means
+/// there is that engine's to say.
+///
+/// # What [`validation_work`](Budget::validation_work) does not bound: the caller's `Clone`
+///
+/// A diagnostic carries the spelling it is about, as a value of the document's own source type —
+/// which is how a caller holding an owned source gets that spelling back at all. Producing it is a
+/// `S::clone`, and the validator charges the **name's bytes** in front of every one of them.
+///
+/// That bounds two things and not a third. It bounds **how many** clones a run can make, because a
+/// clone needs a node and every node is charged before it is read. It bounds the length of the name
+/// each clone names. It does **not** bound what `S::clone` does: the bound on this type is
+/// `AsRef<[u8]> + Clone`, and `Clone` carries no promise of any relationship to `as_ref().len()`.
+///
+/// For the source types this crate is written around the relationship holds and the ceiling is a
+/// ceiling: `&str` and `&[u8]` clone in constant time, and `String` or `Vec<u8>` copy `L` bytes
+/// against a charge of `L / 8` — a constant multiple. For a source type whose `Clone` is expensive
+/// independently of its length, the ceiling bounds the count and nothing else, and the remaining
+/// cost is the caller's own. That is the same standing this crate gives [`Sink`](super::Sink): a
+/// caller-implemented behaviour on the validator's hot path, priced by what the validator can
+/// measure and named where the measurement stops.
+///
+/// The alternative was to stop storing the spelling — a representation whose copy cost is
+/// measurable, which is the move that has closed every other unknown here. It is not taken because
+/// it removes a *capability* rather than a caveat: a diagnostic's span indexes bytes the AST owns,
+/// not bytes an owned-source caller holds, so
+/// [`Diagnostic::subject_source`](super::Diagnostic::subject_source) is the only way back to the
+/// name. A cost contract on the source type was the other, and no signature can prove a `Clone` is
+/// proportional to a length — it would be a documentation request wearing a trait bound's clothes,
+/// on every public entry point of this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Budget {
   merge_depth: u32,
   merge_work: u32,
+  validation_work: u32,
 }
 
 impl Budget {
@@ -73,12 +140,29 @@ impl Budget {
   /// work counter is the knob that actually caps the worst case.
   pub const DEFAULT_MERGE_WORK: u32 = 65_536;
 
-  /// Creates a budget from both knobs.
+  /// The default bound on validation work outside draft 5.3.2.
+  ///
+  /// 2^22. Measured in these units: the four executable fixtures in
+  /// `smear/tests/fixtures/executables` spend 4, 54, 124 and 789 — about a fifth of a unit per
+  /// byte — so this admits over twenty megabytes of document written that way. Fragment reuse is
+  /// where the units are a product rather than a sum, and it is the shape this knob is for: fifty
+  /// operations sharing one two-hundred-field fragment is 3,451 bytes and 20,651 units, and even
+  /// there the default admits about two hundred times what a real client sends.
+  pub const DEFAULT_VALIDATION_WORK: u32 = 1 << 22;
+
+  /// Creates a budget from the two merge knobs, leaving
+  /// [`validation_work`](Budget::validation_work) at its default.
+  ///
+  /// Two parameters and not three, deliberately. This constructor predates the third knob and is
+  /// spelled in a hundred call sites and fixtures; widening it would have moved every one of them
+  /// to say nothing new. [`with_validation_work`](Budget::with_validation_work) is how the third
+  /// is set, which is also how a reader can see at the call site that it was set at all.
   #[inline]
   pub const fn new(merge_depth: u32, merge_work: u32) -> Self {
     Self {
       merge_depth,
       merge_work,
+      validation_work: Self::DEFAULT_VALIDATION_WORK,
     }
   }
 
@@ -105,6 +189,23 @@ impl Budget {
   #[inline]
   pub const fn with_merge_work(mut self, merge_work: u32) -> Self {
     self.merge_work = merge_work;
+    self
+  }
+
+  /// Returns the bound on validation work outside draft 5.3.2.
+  #[inline]
+  pub const fn validation_work(&self) -> u32 {
+    self.validation_work
+  }
+
+  /// Returns the budget with a different bound on validation work outside draft 5.3.2.
+  ///
+  /// [`u32::MAX`] is the spelling of "do not refuse for this resource". It is not a bound and is
+  /// not treated as one; it is here so that a caller who needs a validator that cannot refuse has
+  /// a way to say so that does not involve switching off a diagnostic and hoping.
+  #[inline]
+  pub const fn with_validation_work(mut self, validation_work: u32) -> Self {
+    self.validation_work = validation_work;
     self
   }
 }
@@ -265,6 +366,20 @@ pub(crate) struct Frame {
   pub(crate) cursor: u32,
   /// The type this level's selections are written against, or [`NONE`] when it did not resolve.
   pub(crate) ty: u32,
+  /// Where this level's **definition root** sits in the stack it is on.
+  ///
+  /// A coordinate is resolved by descending from the nearest root below it, so this is the index
+  /// the descent starts at — and `stack length − this` is the length of the part a resolution
+  /// actually walks. Both were previously found by scanning the stack backwards, which made the
+  /// *scan* cost the suffix as well and made the natural charge the whole stack: a fragment
+  /// entered at depth `D` billed `D` for the `O(1)` resolution of each of its own shallow levels,
+  /// `Θ(D · W)` charged against `Θ(W)` performed, and a refusal for a valid document out of it.
+  /// al8n/smear#198.
+  ///
+  /// Private, and [`NONE`] until [`push_frame`] fills it: it is a statement about a position in a
+  /// stack, so it is meaningless on a frame that is not on one, and nothing outside this module can
+  /// write a value that disagrees with where the frame actually landed.
+  root: u32,
   /// See the `frame` flag constants.
   pub(crate) flags: u8,
 }
@@ -284,6 +399,7 @@ impl Frame {
       child: NONE,
       cursor: 0,
       ty,
+      root: NONE,
       flags,
     }
   }
@@ -296,6 +412,7 @@ impl Frame {
       child,
       cursor: 0,
       ty,
+      root: NONE,
       flags,
     }
   }
@@ -304,6 +421,14 @@ impl Frame {
   #[inline]
   pub(crate) const fn is_definition_root(&self) -> bool {
     self.child == NONE
+  }
+
+  /// Where the definition root this level descends from sits in its stack.
+  ///
+  /// Only meaningful for a frame that is on one — see the field.
+  #[inline]
+  pub(crate) const fn definition_root(&self) -> u32 {
+    self.root
   }
 
   /// Returns the level's type, or `None` when it did not resolve.
@@ -315,6 +440,26 @@ impl Frame {
       Some(TypeId::new(self.ty))
     }
   }
+}
+
+/// Pushes a level onto a selection stack, recording where its definition root sits.
+///
+/// The **only** way a [`Frame`] reaches a stack, and the reason [`Frame::root`](Frame::root) — the
+/// field, not the constructor — is private. The value is derived rather than passed: a frame that
+/// begins a definition roots at its own position, and one that continues a level roots wherever
+/// the level below it does. There is no third case and no argument a caller can get wrong.
+///
+/// `O(1)`, and it replaces the backwards scan `selections::resolve` used to make for the same
+/// answer. That is what makes the charge in front of a resolution exact rather
+/// than merely conservative: the quantity is now the suffix the descent walks, and the descent is
+/// all the walking there is.
+pub(crate) fn push_frame(frames: &mut std::vec::Vec<Frame>, mut frame: Frame) {
+  frame.root = if frame.is_definition_root() {
+    frames.len() as u32
+  } else {
+    frames.last().map_or(0, Frame::definition_root)
+  };
+  frames.push(frame);
 }
 
 /// What a value-walk level is descending through.
@@ -632,11 +777,15 @@ impl Names {
         // only one an adversary has — is rejected here without touching a byte.
         let (start, end) = self.ranges[id as usize];
         if self.hashes[id as usize] == hash && end - start == key.len() {
-          if !work.take_bytes(key.len()) {
-            return None;
-          }
-          if &self.bytes[start..end] == key {
-            return Some(id);
+          // Charged for the bytes the `memcmp` reads. Reaching here needs the whole stored hash
+          // **and** the length to agree, so the bytes are about to be equal and this ordinarily
+          // pays `byte_units(len)` exactly as the whole-length charge did; what it no longer does
+          // is bill a constructed hash collision for a pass that stops at its first differing
+          // byte. al8n/smear#198's twenty-third round.
+          match scan_eq(&self.bytes[start..end], key, |_| work.take(1)) {
+            Compared::Equal => return Some(id),
+            Compared::Differs => (),
+            Compared::Refused => return None,
           }
         }
         id = self.chain[id as usize];
@@ -803,11 +952,204 @@ const fn finalize(mut hash: u64) -> u64 {
 /// this unit is charged again in front of the `memcmp` a step that agrees on both goes on to make.
 #[inline]
 pub(crate) const fn byte_units(len: usize) -> u32 {
-  let units = len / 8 + 1;
+  let units = len / BYTES_PER_UNIT + 1;
   if units > u32::MAX as usize {
     u32::MAX
   } else {
     units as u32
+  }
+}
+
+/// How many bytes one charged unit pays for.
+///
+/// Named rather than written a third time: [`units`](super::executable::units) and [`byte_units`]
+/// both compute `len / 8 + 1` from it, and [`scan_cmp`] and [`scan_eq`] charge the same ledger a
+/// unit at a time as they read, so their running total after `k` bytes has to be the number those
+/// two would have produced for `k`. Three spellings of the stride would be three ledgers over one
+/// pass.
+pub(crate) const BYTES_PER_UNIT: usize = 8;
+
+/// The answer a charged comparison gives, and the third arm is why it is not a `bool`.
+///
+/// [`Compared::Refused`] means the ledger had no room for the next run of bytes, so the comparison
+/// stopped **with no answer**. A caller that cannot tell "these differ" from "this was never read"
+/// reports a resource ceiling as a finding about the document, or a finding as a ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Compared {
+  /// Every byte agreed, and the lengths did.
+  Equal,
+  /// The lengths disagreed, or a run of bytes did.
+  Differs,
+  /// The ledger ran out of room for a run this comparison had not read yet.
+  Refused,
+}
+
+/// `left == right`, asking `charge` for each unit before the run of bytes it covers is read.
+///
+/// # A charge over a length in front of an operation that is sub-linear in it
+///
+/// al8n/smear#198's twenty-third round, and it is the four rounds before it asked one notch
+/// further in. Those asked *where* a charge stands: in front of the work, and in front of work
+/// that cannot return before the work the charge priced is done. This one asks what the charge
+/// **names**. `[u8] == [u8]` rejects unequal lengths without reading either spelling, and on equal
+/// lengths stops at the first byte that disagrees; `[u8]::cmp` stops at the first byte that
+/// disagrees whatever the lengths are. A charge of `units(len)` in front of either prices a pass
+/// the operation is sub-linear in — so two long spellings differing at their first byte were
+/// charged for the whole of both, and a document this crate accepts became
+/// [`Refusal::Budget`](super::Refusal::Budget).
+///
+/// The running total after `k` bytes is exactly `units(k)`: the opening unit covers the length
+/// test and the first [`BYTES_PER_UNIT`]` - 1` bytes, and every later one covers
+/// [`BYTES_PER_UNIT`]. A comparison that reads a whole `L`-byte spelling therefore costs what
+/// `units(L)` cost, which is what the measured figures in this crate's headers are about; one that
+/// reads less costs less; and nothing costs for bytes no comparison reached.
+///
+/// `charge` takes the 1-based index of the unit about to be spent and answers whether there was
+/// room. It is a closure rather than a ledger because the unit's *owner* differs by site: a
+/// comparison against a spelling an earlier comparison already paid a prefix of owes only the
+/// units past that prefix — which is what keeps a sort of `N` names inside the `N` whole spellings
+/// the prepayment used to charge, rather than `N log N` of them.
+#[inline]
+pub(crate) fn scan_eq(left: &[u8], right: &[u8], mut charge: impl FnMut(u32) -> bool) -> Compared {
+  // Unit one: the length test, and the first `BYTES_PER_UNIT - 1` bytes if it passes. This is the
+  // whole cost of an unequal-length comparison, which is the whole cost `[u8]::eq` pays for one.
+  if !charge(1) {
+    return Compared::Refused;
+  }
+  if left.len() != right.len() {
+    return Compared::Differs;
+  }
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < left.len() {
+    if read == budgeted {
+      unit += 1;
+      if !charge(unit) {
+        return Compared::Refused;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(left.len());
+    if left[read..end] != right[read..end] {
+      return Compared::Differs;
+    }
+    read = end;
+  }
+  Compared::Equal
+}
+
+/// `left.cmp(right)`, charging as [`scan_eq`] does, and **answering whatever the ledger says**.
+///
+/// # Why this one cannot stop, and why that is a fact about *sorting*
+///
+/// Its one caller is `sort_unstable_by`, through [`Meter::cmp`](super::executable::Meter::cmp),
+/// and a comparator that starts answering differently part-way through is not a total order: the
+/// current sort detects exactly that and panics. So an exhausted ledger is reported alongside the
+/// true ordering and the caller refuses **after** the sort, rather than the comparison abandoning
+/// its answer.
+///
+/// What that costs is bounded, and by the bound the sort already had. `F` names of total length
+/// `D` cost at most `F log F` comparisons of at most `D / F` bytes each, so the whole sort is
+/// `D log F` however it is charged — the same "log factor at most thirty-two, a constant multiple
+/// and not a second factor" this module's fragment index has always rested on, and `F` itself is
+/// bounded by the ledger because the prep sweep charges a unit per definition before any sort
+/// exists. A refusal therefore finishes a sort whose total is a constant multiple of a document
+/// the parser has already walked, and refuses.
+///
+/// **A lookup borrowed that argument and is not entitled to it.** `binary_search_by` and
+/// `partition_point` were comparators of this one too, on the sentence above read as a fact about
+/// charged comparators rather than about `sort_unstable_by`. A search whose result is about to be
+/// discarded needs no ordering at all — nothing consumes its answer — so it can stop at the first
+/// charge it cannot pay, and every comparison it makes after that is work performed with no budget
+/// left. [`probe_cmp`] is that comparator, and the searches are
+/// [`probe_slot`](super::executable::probe_slot) and
+/// [`probe_partition`](super::executable::probe_partition).
+/// al8n/smear#198's twenty-fourth round.
+#[inline]
+pub(crate) fn scan_cmp(
+  left: &[u8],
+  right: &[u8],
+  mut charge: impl FnMut(u32) -> bool,
+) -> (core::cmp::Ordering, bool) {
+  use core::cmp::Ordering;
+
+  let mut held = charge(1);
+  let shared = left.len().min(right.len());
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < shared {
+    if read == budgeted {
+      unit += 1;
+      held &= charge(unit);
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(shared);
+    match left[read..end].cmp(&right[read..end]) {
+      Ordering::Equal => read = end,
+      other => return (other, held),
+    }
+  }
+  (left.len().cmp(&right.len()), held)
+}
+
+/// `left.cmp(right)`, charging as [`scan_eq`] does, and **stopping at the refusal**.
+///
+/// [`scan_cmp`]'s lookup twin, and [`None`] is a comparison that was never finished: the ledger had
+/// no room for a run this comparison had not read yet, exactly as [`Compared::Refused`] says it for
+/// equality. See [`scan_cmp`] for why the sorting one cannot do this and a search can.
+///
+/// The running total after `k` bytes is [`scan_eq`]'s, so a comparison that is never refused costs
+/// what the same comparison through [`scan_cmp`] cost.
+#[inline]
+pub(crate) fn probe_cmp(
+  left: &[u8],
+  right: &[u8],
+  mut charge: impl FnMut(u32) -> bool,
+) -> Option<core::cmp::Ordering> {
+  use core::cmp::Ordering;
+
+  if !charge(1) {
+    return None;
+  }
+  let shared = left.len().min(right.len());
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < shared {
+    if read == budgeted {
+      unit += 1;
+      if !charge(unit) {
+        return None;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(shared);
+    match left[read..end].cmp(&right[read..end]) {
+      Ordering::Equal => read = end,
+      other => return Some(other),
+    }
+  }
+  Some(left.len().cmp(&right.len()))
+}
+
+/// One unit per element of a population, saturating at [`u32::MAX`].
+///
+/// [`byte_units`]'s counting twin, and the unit the merge engine already charges its loops in —
+/// one a queued set, one a selection, one a compared member. It exists as a function for the
+/// saturation: an `as u32` on a `usize` count *truncates*, so a population no ledger could cover
+/// would wrap into one it can and be charged a few units for it. The counts here are document
+/// definitions and fragment rows, which no in-memory document reaches — the same thing was true of
+/// [`Work::take`]'s overflow until [`take_bytes`](Work::take_bytes) made it reachable, and the
+/// lesson recorded there was to write the saturating form rather than the argument for why the
+/// wrapping one is safe today. al8n/smear#198.
+#[inline]
+pub(crate) const fn count_units(count: usize) -> u32 {
+  if count > u32::MAX as usize {
+    u32::MAX
+  } else {
+    count as u32
   }
 }
 
@@ -882,10 +1224,24 @@ pub struct Scratch {
   /// Segments stack — a scan pushes at `len`, sorts its own slice and truncates back — so an input
   /// object literal nested inside an argument list does not disturb the scan above it.
   pub(crate) keys: Vec<u32>,
+  /// How deep into each member's spelling a charged sort has already paid, in `units`.
+  ///
+  /// **A high-water mark per name, because a sort reads one name `log N` times.** Charging each
+  /// comparison in full would make an accepted document's sort cost `N log N` whole spellings
+  /// where the prepayment it replaces charged `N`; charging the first comparison only would leave
+  /// the rest free, and the rest is where the bytes are. So each comparison pays for the units it
+  /// deepens its two sides by and nothing else, and the total over the sort is the deepest prefix
+  /// of each name that any comparison examined — never more than the prepayment, and, for two long
+  /// names that differ at their first byte, two units instead of two whole spellings.
+  ///
+  /// Indexed by the **population's** own index, which is what the segment in [`Scratch::keys`]
+  /// holds. Cleared and resized at each sort door, behind that population's own per-member charge;
+  /// the doors do not nest, so one buffer serves all of them.
+  pub(crate) paid: Vec<u32>,
   /// Fragment ordinals reachable from some operation (draft 5.5.1.4).
   pub(crate) reachable: Vec<u64>,
-  /// Fragment ordinals already entered during the current walk.
-  pub(crate) visited: Vec<u64>,
+  /// Fragment ordinals already entered during the current walk. See [`Visited`].
+  pub(crate) visited: Visited,
   /// Fragment ordinals on the current fragment-graph search path (draft 5.5.2.2).
   pub(crate) on_path: Vec<u64>,
   /// Fragment ordinals whose fragment-graph search has finished.
@@ -990,8 +1346,9 @@ impl Scratch {
       values: Vec::new(),
       graph: Vec::new(),
       keys: Vec::new(),
+      paid: Vec::new(),
       reachable: Vec::new(),
-      visited: Vec::new(),
+      visited: Visited::new(),
       on_path: Vec::new(),
       done: Vec::new(),
       checked: Vec::new(),
@@ -1034,8 +1391,12 @@ impl Scratch {
     self.values.clear();
     self.graph.clear();
     self.keys.clear();
+    self.paid.clear();
     self.reachable.clear();
-    self.visited.clear();
+    // Not cleared, and that is the point of the type: a mark is only current for one generation,
+    // and retiring the generation makes every mark stale in `O(1)`. `Scratch::reset` clears without
+    // freeing; this is that idea one step further, with nothing left to clear.
+    self.visited.retire();
     self.on_path.clear();
     self.done.clear();
     self.checked.clear();
@@ -1118,6 +1479,112 @@ pub(crate) fn reset_bits(words: &mut Vec<u64>, bits: usize) {
   words.resize(needed, 0);
 }
 
+/// The per-walk "already entered" set over fragment ordinals, as generation **stamps**.
+///
+/// # Why not a bitset
+///
+/// It was one, and clearing it was `O(F / 64)` writes at the top of **every** operation's walk and
+/// every subscription's root collection. `O` operations against `F` fragments is `Θ(O · F / 64)` of
+/// zeroing that no ledger saw, because the ledger charges what a pass *examines* and this is what a
+/// pass *prepares* — a class no audit on this branch had a row for until al8n/smear#198's ninth
+/// round. A valid document pairing many operations with many distinct fragments could spend
+/// gigabytes on it while staying under the ceiling.
+///
+/// Pricing it was the alternative. Stamping removes it instead: a walk advances a counter, and a
+/// mark from an earlier walk is stale because its number is. There is no clear to charge for, no
+/// gate to get wrong, and nothing left at this site for a later round to find one level in — which
+/// is the move that has actually ended things on this branch, from `Ledger::Off` to
+/// `Option<Recovery>`.
+///
+/// Draft 5.3.2's engine already does this, one axis over: `Validator::generation` distinguishes one
+/// fragment *expansion* from the next without clearing a bitset per expansion. This is the same
+/// technique at the operation boundary rather than the expansion boundary.
+///
+/// # What it costs
+///
+/// Four bytes per fragment instead of one bit. In this buffer's own company that is not a new
+/// order of cost: `Scratch::fragments` already holds a `FragmentRow` per fragment, several times
+/// wider, and every other document-sized table here is `u32`-keyed.
+///
+/// # The objection that sinks generation counters elsewhere does not exist here
+///
+/// A generation outside a rollback set can miscount an operation that was undone — a stamp survives
+/// while the state it described is rewound, and a later walk reads it as current. This counter
+/// lives in a [`Scratch`] the validator owns for the length of one call, and validation has no
+/// checkpoint, no speculation and no rollback: a walk either finishes or the whole run is abandoned
+/// through [`ControlFlow::Break`](core::ops::ControlFlow::Break). There is nothing to rewind past.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Visited {
+  /// The generation that last entered each fragment, indexed by ordinal.
+  stamps: Vec<u32>,
+  /// The generation the current walk is in. Zero before the first walk, and no stamp is ever
+  /// written as zero, so a freshly grown entry reads as "not entered".
+  current: u32,
+}
+
+impl Visited {
+  /// An empty set.
+  pub(crate) const fn new() -> Self {
+    Self {
+      stamps: Vec::new(),
+      current: 0,
+    }
+  }
+
+  /// Opens a walk over `fragments` ordinals, retiring every mark from the previous one.
+  ///
+  /// `O(1)` for a buffer that is already wide enough, which after the first walk of a run it is.
+  /// Growth is amortised and bounded by the document's fragment count, which the prep sweep has
+  /// already charged one name at a time.
+  pub(crate) fn begin(&mut self, fragments: usize) {
+    self.advance();
+    if self.stamps.len() < fragments {
+      self.stamps.resize(fragments, 0);
+    }
+  }
+
+  /// Retires every mark without touching the buffer.
+  pub(crate) fn retire(&mut self) {
+    self.advance();
+  }
+
+  /// Marks `ordinal` entered, answering whether it already was.
+  ///
+  /// The answer for an ordinal outside the table is `true` — "already entered", so do not enter —
+  /// which is what the bitset this replaces answered when the word was out of range.
+  #[inline]
+  pub(crate) fn visit(&mut self, ordinal: u32) -> bool {
+    match self.stamps.get_mut(ordinal as usize) {
+      Some(slot) if *slot == self.current => true,
+      Some(slot) => {
+        *slot = self.current;
+        false
+      }
+      None => true,
+    }
+  }
+
+  /// Entries the buffer has reserved room for.
+  pub(crate) fn capacity(&self) -> usize {
+    self.stamps.capacity()
+  }
+
+  /// Moves to the next generation, emptying the table if the counter has run out of them.
+  ///
+  /// Four billion walks on one [`Scratch`] is not reachable by any document the ledger admits, and
+  /// the wrap is handled anyway: correctness that rests on a number being big enough is the defect
+  /// this repository has now written under four different names.
+  fn advance(&mut self) {
+    self.current = match self.current.checked_add(1) {
+      Some(next) => next,
+      None => {
+        self.stamps.clear();
+        1
+      }
+    };
+  }
+}
+
 /// Returns whether bit `index` is set.
 #[inline]
 pub(crate) fn get_bit(words: &[u64], index: u32) -> bool {
@@ -1163,8 +1630,15 @@ mod tests {
     assert_eq!(budget.merge_work(), 65_536);
     assert_eq!(budget.with_merge_depth(8).merge_depth(), 8);
     assert_eq!(budget.with_merge_work(9).merge_work(), 9);
-    // The knobs are independent; setting one must not disturb the other.
+    assert_eq!(budget.validation_work(), 1 << 22);
+    assert_eq!(budget.with_validation_work(7).validation_work(), 7);
+    // The knobs are independent; setting one must not disturb the others.
     assert_eq!(budget.with_merge_depth(8).merge_work(), 65_536);
+    assert_eq!(budget.with_merge_depth(8).validation_work(), 1 << 22);
+    assert_eq!(budget.with_validation_work(7).merge_work(), 65_536);
+    // `Budget::new` predates the third knob and leaves it at the default rather than at zero,
+    // which is what keeps every existing two-argument call site meaning what it meant.
+    assert_eq!(Budget::new(1, 2).validation_work(), 1 << 22);
   }
 
   #[test]

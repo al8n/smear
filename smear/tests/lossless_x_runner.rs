@@ -190,7 +190,7 @@ fn the_profile_validator_refuses_an_out_of_space_kind_at_the_emit_door() {
 /// The expected string is the whole point: GraphQL's twin of this test asserts "graphql", so a
 /// GraphQLx runner that passed the wrong `space` through would go red here and green there.
 #[test]
-#[should_panic(expected = "the graphqlx lossless sink emitted a malformed event stream")]
+#[should_panic(expected = "the graphqlx lossless event stream was refused")]
 fn a_malformed_stream_panics_naming_the_graphqlx_sink() {
   let _ = smear::parser::graphqlx::lossless::runner::test_support::structure_without_tokens("a", 0);
 }

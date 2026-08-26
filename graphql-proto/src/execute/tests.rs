@@ -10,15 +10,21 @@
 use smear_parser::{
   graphql::{
     GraphQL,
-    ast::{ExecutableDocument, TypeSystemDocument},
+    ast::{
+      Argument, ArgumentList, Described, Directive, Directives, ExecutableDefinition,
+      ExecutableDocument, Field, InputValue, Name, OperationDefinition, Selection, SelectionSet,
+      TypeSystemDocument, VariableValue,
+    },
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   lexer::tokora::{Parse as _, Parser},
 };
-use smear_schema::Schema;
+use smear_schema::{MAX_FIELD_ARGUMENTS, Schema};
 
-use crate::{Extensions, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError, Values};
+use crate::{
+  Extensions, Kind, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError, Values,
+};
 
 // Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
 // compiles under `--no-default-features`, where `crate::std` is `alloc` and `ToString` is not in
@@ -27,7 +33,7 @@ use std::string::ToString;
 
 use core::num::NonZeroU32;
 
-use super::{Executor, Limits, NONE, State, node};
+use super::{Executor, Limits, NONE, State, Visits, node};
 
 const SDL: &str = r#"
 type Query {
@@ -1272,6 +1278,543 @@ fn a_refused_probe_run_stops_at_the_refusal() {
     errors, 1,
     "and the request is refused, rather than served by a run nobody paid for"
   );
+}
+
+/// Draft §6.3 step 3.a returns at the first `@skip` that says so, and the ledger stops there too.
+///
+/// **The regression for a charge in front of work the taken branch does not do.** `included` spent
+/// the whole directive list's length before either pass, so a *valid* field whose first directive
+/// removes it — one comparison, and then the collector is done with the selection — was refused
+/// with `CollectionBudget` for a suffix nothing read. Charging first is what makes "units spent"
+/// equal "work done"; charging for a branch that is not taken makes it "work the client wrote",
+/// which is a different quantity and refuses operations this executor was about to serve.
+///
+/// Both halves are asserted, because either alone can be satisfied by the wrong mechanism: the
+/// long list costs exactly what the short one costs, and the operation is then served under a
+/// budget set to precisely that. At 555deb7 the first is `short + 1600`.
+#[test]
+fn a_skipped_selection_does_not_pay_for_the_directives_after_the_skip() {
+  /// Past any plausible slack in the budget below, so a refusal cannot be a near miss.
+  const SUFFIX: usize = 1_600;
+  const SDL: &str = "type Query { a: String b: String }\ndirective @custom repeatable on FIELD";
+
+  let mut long = std::string::String::from("{ a @skip(if: true)");
+  for _ in 0..SUFFIX {
+    long.push_str(" @custom");
+  }
+  long.push_str(" b }");
+  let short = "{ a @skip(if: true) b }";
+
+  // The budget the suffix-free form needs, and nothing over: tight enough that one unit for one
+  // unread directive crosses it, so being served is a statement about the charge and not slack.
+  let spent_short = collection_work(SDL, short);
+
+  let (schema, document) = compile_against(SDL, &long);
+  let mut space = Space;
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(spent_short).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let errors = {
+    let response = executor.poll_response().expect("nothing is outstanding");
+    response.error_count()
+  };
+  assert_eq!(
+    errors, 0,
+    "a valid operation was refused by a ceiling of {spent_short} — the exact cost of the same \
+     operation without the {SUFFIX} directives step 3.a never reaches"
+  );
+
+  let spent_long = collection_work(SDL, &long);
+  assert_eq!(
+    spent_long, spent_short,
+    "the same field, skipped by the same first directive, cost {spent_long} units with a \
+     {SUFFIX}-directive suffix and {spent_short} without one. Step 3.a examined one directive in \
+     both, so the difference is a charge for comparisons that never happened"
+  );
+}
+
+/// The scan for `if` at one `@skip` usage stops at `if`, and the ledger stops there too.
+///
+/// The sibling of the test above, at the second charge the same round added. `condition_is_true`
+/// spent the usage's whole argument list before a `find` that returns at the first `if`, so the
+/// arguments after it were priced and never compared.
+///
+/// **The fixture is deliberately not a validated document**, and that is the point rather than a
+/// gap: draft 5.4.1 and 5.7.3 leave a conforming `@skip` exactly one argument, so on validated
+/// input there is no suffix and no difference to see. This executor does not validate — the whole
+/// collection ledger exists because what reaches it is what the *client* wrote — so the population
+/// with a suffix is the unvalidated one, and it is the one the charge has to be honest about.
+#[test]
+fn a_condition_does_not_pay_for_the_arguments_after_if() {
+  const SUFFIX: usize = 1_600;
+
+  let mut long = std::string::String::from("{ a @skip(if: true");
+  for index in 0..SUFFIX {
+    long.push_str(&std::format!(" x{index}: 1"));
+  }
+  long.push_str(") }");
+  let short = "{ a @skip(if: true) }";
+
+  let spent_short = collection_work(ONE_FIELD, short);
+  let spent_long = collection_work(ONE_FIELD, &long);
+  assert_eq!(
+    spent_long, spent_short,
+    "one `@skip` usage cost {spent_long} units with {SUFFIX} arguments written after `if` and \
+     {spent_short} with none. The scan compared one argument in both cases"
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// draft §2.1.9's pass over a variable spelling, metered as it reads
+// ------------------------------------------------------------------------------------------
+
+/// A schema with the three shapes a variable spelling can be written into.
+const VARIABLES_SDL: &str =
+  "type Query { ok: String opt(a: String): String need(a: String!): String }";
+
+/// How long an unreadable spelling the fixtures assemble.
+///
+/// Only has to be past the budget the readable control needs; `byte_units` of this is 1,025, and
+/// every ceiling below is under a hundred.
+const SPELLING: usize = 8_192;
+
+fn assembled_span() -> tokora::SimpleSpan {
+  tokora::SimpleSpan::new(0, 0)
+}
+
+fn assembled_name(source: &[u8]) -> Name<&[u8]> {
+  Name::new(assembled_span(), source)
+}
+
+fn assembled_variable(spelling: &[u8]) -> InputValue<&[u8]> {
+  InputValue::Variable(VariableValue::new(
+    assembled_span(),
+    assembled_name(spelling),
+  ))
+}
+
+fn assembled_document(selection: Selection<&[u8]>) -> ExecutableDocument<&[u8]> {
+  ExecutableDocument::new(
+    assembled_span(),
+    std::vec![Described::new(
+      assembled_span(),
+      None,
+      ExecutableDefinition::Operation(OperationDefinition::Shorthand(SelectionSet::new(
+        assembled_span(),
+        std::vec![selection].into(),
+      ))),
+    )],
+  )
+}
+
+/// `{ ok @skip(if: $spelling) }` — draft §6.3's condition, read during collection.
+fn at_a_condition(spelling: &[u8]) -> ExecutableDocument<&[u8]> {
+  assembled_document(Selection::Field(Field::new(
+    assembled_span(),
+    None,
+    assembled_name(b"ok"),
+    None,
+    Some(Directives::new(
+      assembled_span(),
+      std::vec![Directive::new(
+        assembled_span(),
+        assembled_name(b"skip"),
+        Some(ArgumentList::new(
+          assembled_span(),
+          std::vec![Argument::new(
+            assembled_span(),
+            assembled_name(b"if"),
+            assembled_variable(spelling),
+          )],
+        )),
+      )],
+    )),
+    None,
+  )))
+}
+
+/// `{ field(a: $spelling) }` — draft §6.4.1 step 5.f's variable, read at resolution.
+fn at_an_argument<'a>(field: &'a [u8], spelling: &'a [u8]) -> ExecutableDocument<&'a [u8]> {
+  assembled_document(Selection::Field(Field::new(
+    assembled_span(),
+    None,
+    assembled_name(field),
+    Some(ArgumentList::new(
+      assembled_span(),
+      std::vec![Argument::new(
+        assembled_span(),
+        assembled_name(b"a"),
+        assembled_variable(spelling),
+      )],
+    )),
+    None,
+    None,
+  )))
+}
+
+/// What one assembled operation did: the ledger, the fields handed to the driver, and the errors.
+struct Assembled {
+  visits: u32,
+  resolved: usize,
+  kinds: std::vec::Vec<Kind>,
+  messages: std::vec::Vec<String>,
+}
+
+fn drive<S: AsRef<[u8]>>(
+  schema: &Schema,
+  document: &ExecutableDocument<S>,
+  limit: Option<u32>,
+) -> Assembled {
+  let mut space = Space;
+  let limits = match limit {
+    Some(limit) => Limits {
+      max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
+      ..Limits::default()
+    },
+    None => Limits::default(),
+  };
+  let mut executor = Executor::with_limits(schema, document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let mut resolved = 0;
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    resolved += 1;
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let visits = executor.charges().visits;
+  let response = executor.poll_response().expect("nothing is outstanding");
+  Assembled {
+    visits,
+    resolved,
+    kinds: response.errors().map(|error| error.kind()).collect(),
+    messages: response.errors().map(|error| error.to_string()).collect(),
+  }
+}
+
+/// An unreadable spelling costs the bytes draft §2.1.9's pass **read**, at draft §6.3's condition.
+///
+/// # The misclassification, not a slowdown
+///
+/// `condition_is_true` charged `byte_units(spelling.len())` and then called `variable_key`, whose
+/// `is_name` returns at the first byte outside the production. So a spelling rejected at byte
+/// **zero** did one byte of admission work and was billed for the whole assembled length — and a
+/// caller who assembled a long enough one was told `CollectionBudget`, whose printed remedy is a
+/// larger ceiling, where the finding is `ConditionFault::VariableMissing`: the request supplied no
+/// such variable, and no ceiling anywhere would have changed that.
+///
+/// The control is the *same* rejection one byte long, so the ceiling below is a quantity the long
+/// spelling's length cannot enter. At `33001c2` the long form costs `short + 1024` and is refused
+/// under it; the assertion that the two costs are equal is the one that cannot be satisfied by a
+/// harness that drives nothing.
+#[test]
+fn an_unreadable_condition_variable_is_charged_for_the_byte_that_refused_it() {
+  let (schema, _) = compile_against(VARIABLES_SDL, "{ ok }");
+  let mut long = std::vec![b'a'; SPELLING];
+  long[0] = b'1';
+
+  let short = drive(&schema, &at_a_condition(b"1"), None);
+  let refused_at_the_first_byte = std::vec![Kind::DirectiveCondition];
+  assert_eq!(
+    short.kinds, refused_at_the_first_byte,
+    "{:?}",
+    short.messages
+  );
+
+  let tight = drive(&schema, &at_a_condition(&long), Some(short.visits));
+  assert_eq!(
+    tight.kinds, refused_at_the_first_byte,
+    "a {SPELLING}-byte spelling rejected at its first byte reported {:?} under a ceiling of {} — \
+     the exact cost of the same rejection one byte long",
+    tight.messages, short.visits
+  );
+  assert_eq!(
+    tight.visits, short.visits,
+    "the ledger read {} units for a spelling whose scan examined one byte, and {} for the same \
+     scan over one byte of spelling",
+    tight.visits, short.visits
+  );
+}
+
+/// The same spelling at draft §6.4.1 step 5.f, where the misclassification nulls a served field.
+///
+/// # Why this site is the sharper one
+///
+/// Step 5.d's answer for a spelling that names no variable is `hasValue = false`, and for an
+/// **optional** argument with no default that is `continue` — the field is resolved, with that
+/// argument absent, and the response carries it. The charge in front of `variable_key` turned that
+/// request into `Coercion::Refused`: `ArgumentBudget`, the field nulled, and at a subscription's
+/// source field `StartError::SourceFieldArgumentBudget` instead of a stream. A resource refusal for
+/// a request the executor was about to serve, which is the `Coercion::FieldError`-versus-`Refused`
+/// distinction this branch built being decided by a charge rather than by the work.
+///
+/// The three arms are asserted together, because the repair is that they stay *different*:
+/// optional serves (`Coercion::Coerced`), non-null raises §6.4.1's own field error
+/// (`Coercion::FieldError`, `ArgumentVariableMissing`), and neither names a ceiling.
+#[test]
+fn an_unreadable_argument_variable_serves_the_optional_argument_it_names() {
+  let (schema, _) = compile_against(VARIABLES_SDL, "{ ok }");
+  let mut long = std::vec![b'a'; SPELLING];
+  long[0] = b'1';
+
+  // The ceiling: what the same rejection costs one byte long, at the same position.
+  let short = drive(&schema, &at_an_argument(b"opt", b"1"), None);
+  assert_eq!(short.kinds, std::vec![], "{:?}", short.messages);
+  assert_eq!(
+    short.resolved, 1,
+    "the control's optional argument was served"
+  );
+
+  let tight = drive(&schema, &at_an_argument(b"opt", &long), Some(short.visits));
+  assert_eq!(
+    tight.kinds,
+    std::vec![],
+    "a {SPELLING}-byte spelling rejected at its first byte reported {:?} for an OPTIONAL argument \
+     under a ceiling of {}",
+    tight.messages,
+    short.visits
+  );
+  assert_eq!(
+    tight.resolved, 1,
+    "the field was nulled rather than resolved, so step 5.d's `hasValue = false` did not reach \
+     step 5.h's `continue`"
+  );
+  assert_eq!(
+    tight.visits, short.visits,
+    "the ledger read {} units for a scan that examined one byte, and {} for the same scan over \
+     one byte of spelling",
+    tight.visits, short.visits
+  );
+
+  // The half a repair that simply stopped charging would also satisfy: a spelling that **is** a
+  // name is read to its end by all three of `is_name`, the conversion and the driver's lookup, so
+  // it still costs `byte_units` of its whole length — the number the header's measured ladder is
+  // written in, unchanged by metering it a unit at a time.
+  {
+    use crate::collect::byte_units;
+
+    let one = drive(&schema, &at_an_argument(b"opt", b"a"), None);
+    let many = drive(
+      &schema,
+      &at_an_argument(b"opt", &std::vec![b'a'; SPELLING]),
+      None,
+    );
+    assert_eq!(
+      many.visits - one.visits,
+      byte_units(SPELLING) - byte_units(1),
+      "a readable {SPELLING}-byte spelling cost {} units where a one-byte one cost {}",
+      many.visits,
+      one.visits
+    );
+  }
+
+  // The other arm of step 5.h: a non-null argument with no default is §6.4.1's own field error,
+  // and it is *still* not a budget refusal at any length.
+  let required = drive(
+    &schema,
+    &at_an_argument(b"need", &long),
+    Some(short.visits + 8),
+  );
+  assert_eq!(
+    required.kinds,
+    std::vec![Kind::ArgumentVariableMissing],
+    "{:?}",
+    required.messages
+  );
+  assert_eq!(
+    required.resolved, 0,
+    "a field whose non-null argument has no value is not handed to the driver"
+  );
+}
+
+/// Draft §6.4.1 step 5's scan stops at the argument it matches, and the ledger stops there too.
+///
+/// # The third charge the corrected question convicted
+///
+/// A whole-list charge over `written` stood in front of `written.iter().find(..)`. On a document
+/// draft 5.4.1 admits it is honest in aggregate — every written argument is compared while the
+/// scan looks for its own declared counterpart — and this executor does not validate, which is the
+/// entire reason the ledger exists. On the unvalidated population the two come apart: the loop
+/// below is over what the **schema** declares, so an undeclared entry is never read, and
+/// `f(a: "v", j0: "v" … j1599: "v")` against `f(a: String)` compared **one** name and was charged
+/// for 1,601. That is `ArgumentBudget` with the field nulled for a request this executor was about
+/// to serve, which is the misclassification `metered_variable_key`'s header tabulates.
+///
+/// The repair is a high-water mark rather than a charge inside the scan, because a charge inside
+/// the scan is `declared × written` — the schema's factor entering a caller's ledger, measured to
+/// refuse a full-occupancy response at about thirteen declared arguments. Each entry pays once,
+/// the first time any scan reaches it.
+///
+/// Both halves, because either alone is satisfiable by the wrong mechanism: the two costs are
+/// equal, and the long form is then served under a ceiling set to precisely the short one's cost.
+#[test]
+fn a_matched_argument_does_not_pay_for_the_arguments_after_it() {
+  /// Past any plausible slack in the budget below, so a refusal cannot be a near miss.
+  const SUFFIX: usize = 1_600;
+  const SDL: &str = "type Query { f(a: String): String }";
+
+  let mut long = std::string::String::from("{ f(a: \"v\"");
+  for index in 0..SUFFIX {
+    long.push_str(&std::format!(" j{index}: \"v\""));
+  }
+  long.push_str(") }");
+  let short = "{ f(a: \"v\") }";
+
+  let (schema, short_document) = compile_against(SDL, short);
+  let spent_short = drive(&schema, &short_document, None);
+  assert_eq!(spent_short.resolved, 1, "the control resolved the field");
+
+  let (schema, long_document) = compile_against(SDL, &long);
+  let spent_long = drive(&schema, &long_document, None);
+  assert_eq!(
+    spent_long.visits, spent_short.visits,
+    "one declared argument matched at the first written entry cost {} units with a {SUFFIX}-entry \
+     suffix and {} without one — the scan compared one name in both",
+    spent_long.visits, spent_short.visits
+  );
+
+  let tight = drive(&schema, &long_document, Some(spent_short.visits));
+  assert_eq!(
+    tight.kinds,
+    std::vec![],
+    "a request whose undeclared entries §6.4.1 never reads was refused by a ceiling of {}: {:?}",
+    spent_short.visits,
+    tight.messages
+  );
+  assert_eq!(
+    tight.resolved, 1,
+    "the field was nulled rather than resolved"
+  );
+}
+
+/// Draft §6.4.1 step 5's scan is charged for the bytes its comparison **reads**.
+///
+/// # The fourth charge the corrected question convicted, one notch further in
+///
+/// The round before this one moved the whole-list charge over `written` in front of the one
+/// comparison that reads each entry, behind a high-water mark. That put the charge in the right
+/// *place* and left it the wrong *amount*: `written.name() == name_bytes` is slice equality, which
+/// rejects unequal lengths without reading either spelling and, on equal ones, stops at the first
+/// byte that disagrees. So an entry no declared name can possibly equal — because no declared name
+/// is that long — was charged `byte_units(L)` for two integer loads.
+///
+/// `f(<L bytes of undeclared name>: "v", a: "v")` against `f(a: String)` is the case: step 5's
+/// scan for `a` reads one length, skips the entry, matches at the second, and serves the field.
+/// At `eb641d2` the same request cost 8,193 units more than the one-byte control and was refused —
+/// `ArgumentBudget`, the field nulled — under a ceiling the control fits in.
+///
+/// Both halves again, because either alone is satisfiable by the wrong mechanism: the costs are
+/// equal, **and** the long form is served under a ceiling set to precisely the short one's cost.
+#[test]
+fn an_entry_of_another_length_is_charged_for_the_length_test_that_rejected_it() {
+  const SDL: &str = "type Query { f(a: String): String }";
+
+  // The control writes the same two entries with the same *shapes* and differs in one dimension
+  // only: the first entry's length. One byte is what the length test costs, and the ceiling below
+  // is therefore a quantity the padding cannot enter.
+  let padded = "z".repeat(SPELLING);
+  let long = std::format!("{{ f({padded}: \"v\", a: \"v\") }}");
+  let short = "{ f(z: \"v\", a: \"v\") }";
+
+  let (schema, short_document) = compile_against(SDL, short);
+  let spent_short = drive(&schema, &short_document, None);
+  assert_eq!(spent_short.resolved, 1, "the control resolved the field");
+  assert_eq!(
+    spent_short.kinds,
+    std::vec![],
+    "the control raised {:?}",
+    spent_short.messages
+  );
+
+  let (schema, long_document) = compile_against(SDL, &long);
+  let spent_long = drive(&schema, &long_document, None);
+  std::println!(
+    "one written entry no declared name can equal: 1-byte {} units, {SPELLING}-byte {} units",
+    spent_short.visits,
+    spent_long.visits
+  );
+  assert_eq!(
+    spent_long.visits, spent_short.visits,
+    "a {SPELLING}-byte entry no declared name can equal cost {} units against the one-byte \
+     control's {} — the scan compared two lengths in both",
+    spent_long.visits, spent_short.visits
+  );
+
+  let tight = drive(&schema, &long_document, Some(spent_short.visits));
+  assert_eq!(
+    tight.kinds,
+    std::vec![],
+    "a request §6.4.1 serves was refused by a ceiling of {}: {:?}",
+    spent_short.visits,
+    tight.messages
+  );
+  assert_eq!(
+    tight.resolved, 1,
+    "the field was nulled rather than resolved"
+  );
+}
+
+/// The metered scan and the whole-slice one admit exactly the same spellings.
+///
+/// [`scan_key`] applies draft §2.1.9's rule a run of bytes at a time so the ledger can stop in the
+/// middle of it, and `is_name` applies it to the whole slice at once. The chunking is where those
+/// two can disagree — a run boundary inside a name is not a name boundary — so the agreement is
+/// asserted rather than argued, across every length that straddles one.
+#[test]
+fn the_metered_scan_admits_what_the_whole_slice_rule_admits() {
+  use crate::collect::{Admission, metered_variable_key};
+
+  let mut visits = Visits::new(u32::MAX);
+  let mut check = |spelling: &[u8]| {
+    let admitted = matches!(
+      metered_variable_key(spelling, &mut visits),
+      Admission::Key(_)
+    );
+    assert_eq!(
+      admitted,
+      smear_schema::is_name(spelling),
+      "the two rules disagree about {spelling:?}"
+    );
+  };
+
+  for spelling in [
+    &b""[..],
+    b"_",
+    b"a",
+    b"1",
+    b"_0aZ",
+    b"a b",
+    b"a-b",
+    "caf\u{e9}".as_bytes(),
+    b"\xff\x9f",
+  ] {
+    check(spelling);
+  }
+  // Every length across three unit boundaries, with the one byte outside the production walked to
+  // each position in turn — which is what a chunked scan can get wrong and a whole-slice one
+  // cannot.
+  for len in 1..=24usize {
+    let name = std::vec![b'a'; len];
+    check(&name);
+    for at in 0..len {
+      let mut broken = name.clone();
+      broken[at] = b'-';
+      check(&broken);
+      let mut digit = name.clone();
+      digit[at] = b'0';
+      check(&digit);
+    }
+  }
 }
 
 /// A name interned out of the *document* is charged like any other, so a colliding set of them
@@ -3610,6 +4153,10 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
     // entry per argument the *schema* declares on the one field being coerced, so the peak is the
     // schema's widest argument list — a deployment constant, like `MAX_WRAPPERS`.
     ("scratch_args", held.scratch_args, SCHEMA_ARGUMENTS as u64),
+    // Draft §6.4.1's per-entry prefix high-water: one `u32` per *written* entry the scan admitted,
+    // and an admission is one unit taken against the visit ceiling before the push. Cleared with
+    // `scratch_args`, so its peak is one field's written list.
+    ("arg_prefix", held.arg_prefix, u64::from(VISITS)),
     // The fragment index, kept across every reset on purpose. **The document's size**, and its
     // pass is charged: `defs` and `chain` are one entry per fragment and `heads` is a power-of-two
     // bucket table at a load factor of a half.
@@ -4057,5 +4604,202 @@ fn a_name_the_arena_refuses_is_not_charged_for_its_copy() {
     visits.spent(),
     2 * byte_units(short.len()),
     "an insertion that happens is charged for the hash and for the copy"
+  );
+}
+
+/// Draft §6.4.1 step 5's scan pays for what the **request** wrote.
+///
+/// # The product, and which factor was free
+///
+/// Step 5 iterates every argument the *schema* declares and asks, for each, whether the request
+/// supplied it — `written.iter().find(..)` — so the scan is `declared × written` name comparisons
+/// at every position. Both factors were free. Measured before the charge: thirty-two declared,
+/// thirty-two written, eight positions — 8,192 name comparisons for **zero** units, and taking
+/// `written` from zero to thirty-two moved the ledger not at all.
+///
+/// # Why only the caller's factor is charged
+///
+/// `declared` is the service's own design-time number. Pricing it would refuse a caller whose
+/// document is *small* because the schema is *wide*: against the shipped defaults — `2^20` response
+/// slots, `2^24` selection visits, and the ~4.6 units a position already costs — one unit per
+/// declared argument per position refuses a full-occupancy response at about **eleven** declared
+/// arguments. That is a false refusal of a legitimate response, and it is why al8n/smear#198's
+/// first round deferred this rather than patching it.
+///
+/// Charging `written` refuses only a caller whose document grew: the same response needs eleven
+/// arguments written at *every one* of a million positions, which is tens of megabytes of request.
+/// And what stays uncharged is bounded — the comparison total is now `declared × (charged units)`,
+/// a schema constant times the ledger, rather than a product with a free factor in it.
+#[test]
+fn the_written_arguments_are_charged_and_the_declared_ones_are_not() {
+  fn visits(declared: usize, written: usize, positions: usize) -> u32 {
+    let mut sdl = String::from("type Query { f(");
+    for index in 0..declared {
+      sdl.push_str(&std::format!("a{index}: String "));
+    }
+    sdl.push_str("): String }\n");
+    let mut query = String::from("{ ");
+    for position in 0..positions {
+      query.push_str(&std::format!("x{position}: f("));
+      for index in 0..written {
+        query.push_str(&std::format!("a{index}: \"v\" "));
+      }
+      query.push_str(") ");
+    }
+    query.push('}');
+    let (schema, document) = compile_against(&sdl, &query);
+    let mut space = Space;
+    let mut executor = Executor::new(&schema, &document);
+    executor
+      .start(&mut space, None, Value::Obj)
+      .expect("the operation resolves");
+    while let Some(request) = executor.poll_resolve(&mut space) {
+      let id = request.id();
+      executor.handle_resolved(&mut space, id, Value::Text);
+    }
+    executor.charges().visits
+  }
+
+  // Written moves the ledger, and in proportion to the positions it was written at.
+  let (bare, loaded) = (visits(32, 0, 8), visits(32, 32, 8));
+  let wide = visits(32, 32, 64);
+  println!("visits: 0 written {bare}, 32 written {loaded}, 32 written x 64 positions {wide}");
+  assert!(
+    loaded > bare + 200,
+    "thirty-two written arguments at eight positions cost {} units",
+    loaded - bare
+  );
+  assert!(
+    wide - visits(32, 0, 64) > (loaded - bare) * 4,
+    "the written charge does not scale with the positions it is written at"
+  );
+
+  // And the schema's own width does not. A caller whose document is unchanged pays the same
+  // whether the field declares four arguments or thirty-two. That is the *design* rather than a
+  // gap, and it is only a design because the other factor is bounded elsewhere — see
+  // `the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger`, which is the half this
+  // case cannot see.
+  let (narrow, broad) = (visits(4, 0, 8), visits(32, 0, 8));
+  assert_eq!(
+    narrow, broad,
+    "the schema's declared-argument count reached the request's ledger"
+  );
+}
+
+/// Draft §6.4.1's scan is `positions × declared`, and its two factors are bounded in two places.
+///
+/// # The hole this closes, and why the ledger could not see it
+///
+/// `the_written_arguments_are_charged_and_the_declared_ones_are_not` pins that a request writing
+/// the same arguments pays the same whatever the schema declares, and the comment that shipped
+/// beside the charge said the remainder was bounded anyway, "because the total comparison count is
+/// now `declared × (charged units)`". **That product is zero when the request writes no arguments,
+/// and the work is not.** A small selection beneath a large resolved list runs the declared-argument
+/// loop once per element for nothing: `{ bulk { f } }` over a driver list of 4,096 elements
+/// measured **20,484 units at every one** of declared = 1, 4, 16, 64, 256, 1,024 and 4,096 — one
+/// ledger reading across a 106× spread in wall time, 431 µs to 45.7 ms. An exemption argued in the
+/// "is it bounded" column whose evidence vanishes at an endpoint is not an exemption.
+///
+/// # Which of the two repairs was taken, and what decided it
+///
+/// Charging a unit per declared iteration puts the charge in the work's own dimension, and makes
+/// the *request* pay for the *service's* design-time width: measured against the shipped defaults,
+/// `2^20` positions at ~2.5 units each leaves room for about **thirteen** declared arguments before
+/// a full-occupancy response is refused, and public schemas write ten-argument fields. Keeping it
+/// non-refusing would mean `max_selection_visits` around `2^27` — an eightfold loosening of the
+/// ceiling whose job is bounding constructed hash pile-ups — or `max_response_slots` down near
+/// `2^18`. Both pay for a schema-side quantity out of a client-side budget.
+///
+/// So the deployment's factor is bounded where the deployment writes it, once, at schema build.
+/// The request's ledger keeps its meaning exactly, and the product closes because the *other*
+/// factor is metered: positions cost this same ceiling on the way in — five units per element,
+/// exactly linear, the third assertion below — and `max_response_slots` refuses past `2^20` of
+/// them. What would reverse the choice is a position that costs nothing: if one could be created
+/// without spending a ceiling, a schema-side constant would leave `unbounded × 64` and only a
+/// charge in this ledger would close it.
+///
+/// # The differential
+///
+/// The first two assertions pass at `6c06ba6` as well — they are the shape of the hole, not the
+/// repair. The last two are the repair: at `6c06ba6` a field of any width builds, so a fixture that
+/// performs `positions × declared` work for zero units can be written at any `declared` a test
+/// cares to type. It cannot any more.
+#[test]
+fn the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger() {
+  fn sdl(declared: usize) -> String {
+    let mut sdl = String::from("type Query { bulk: [Cell] }\ntype Cell { f(");
+    for index in 0..declared {
+      sdl.push_str(&std::format!("a{index}: String "));
+    }
+    sdl.push_str("): String }\n");
+    sdl
+  }
+
+  fn build(sdl: &str) -> Result<Schema, smear_schema::SchemaErrors> {
+    let document = Parser::with_parser::<
+      GraphqlLexer<'_, str>,
+      TypeSystemDocument<&str>,
+      GraphqlErrors<&str>,
+      _,
+      GraphQL,
+    >(type_system_document)
+    .parse_str(sdl)
+    .expect("the SDL parses");
+    Schema::build(&document)
+  }
+
+  /// One `{ bulk { f } }` over a driver list of `elements`, with no argument written anywhere.
+  fn visits(declared: usize, elements: usize) -> u32 {
+    let (schema, document) = compile_against(&sdl(declared), "{ bulk { f } }");
+    let mut space = Space;
+    let mut executor = Executor::new(&schema, &document);
+    executor
+      .start(&mut space, None, Value::Obj)
+      .expect("the operation resolves");
+    while let Some(request) = executor.poll_resolve(&mut space) {
+      let id = request.id();
+      let value = if request.name() == "bulk" {
+        Value::List(elements)
+      } else {
+        Value::Text
+      };
+      executor.handle_resolved(&mut space, id, value);
+    }
+    executor.charges().visits
+  }
+
+  const ELEMENTS: usize = 512;
+  const WIDEST: usize = MAX_FIELD_ARGUMENTS as usize;
+
+  // The hole. Identical ledger, `ELEMENTS × WIDEST` iterations apart.
+  let (one, widest) = (visits(1, ELEMENTS), visits(WIDEST, ELEMENTS));
+  assert_eq!(
+    one, widest,
+    "a request writing no arguments is charged for the schema's width"
+  );
+
+  // And the *other* factor is metered, which is what makes a schema-side constant enough. Read
+  // across three sizes rather than against zero: an empty list interns no response key for `f`, so
+  // the zero point sits one unit off the line every non-empty size is on.
+  let (half, doubled) = (visits(1, ELEMENTS / 2), visits(1, ELEMENTS * 2));
+  assert_eq!(
+    doubled - one,
+    (one - half) * 2,
+    "positions are not charged in proportion to their number, so bounding the declared factor \
+     alone would leave `unbounded × 64`"
+  );
+  assert!(
+    one > half,
+    "positions cost this ceiling nothing at all, which is the one measurement that would make a \
+     schema-side constant the wrong repair"
+  );
+
+  // The differential. The widest field a schema may declare builds; one argument more does not.
+  build(&sdl(WIDEST)).expect("a field at the ceiling is a schema");
+  let refused = build(&sdl(WIDEST + 1)).expect_err("a field past the ceiling is not a schema");
+  assert!(
+    refused.contains_kind(smear_schema::SchemaErrorKind::TooManyFieldArguments),
+    "a field past `MAX_FIELD_ARGUMENTS` was refused for some other reason: {:?}",
+    refused.kinds()
   );
 }

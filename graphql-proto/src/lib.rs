@@ -458,7 +458,7 @@ mod subscribe;
 mod values;
 
 pub use collect::variable_key;
-pub use error::{Error, Kind};
+pub use error::{Error, Kind, Resource};
 pub use execute::{Executor, Limits, Response, SetExtensionsError, StartError};
 pub use extensions::{Ceiling, Extensions, Full};
 pub use request::{Argument, ArgumentSource, FieldRequest, ReqId, SourceField};

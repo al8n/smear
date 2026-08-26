@@ -343,7 +343,7 @@ fn the_substrate_names_no_dialect() {
 /// is exactly how a generic layer starts having a favourite. The count is pinned so that adding one
 /// is a decision rather than a drift.
 ///
-/// Sixteen, in three families, and the third is why this number moved:
+/// Seventeen, in four families, and the last two are why this number moved:
 ///
 /// - **two in `lossless/mod.rs`** — `mod macros` and its `pub(crate) use`. The substrate's macros
 ///   have no invoker without a dialect assembly, and three uninvoked macros are three
@@ -365,13 +365,23 @@ fn the_substrate_names_no_dialect() {
 ///   `crate::combinator::ErrorOf` alongside them reddens the dialect-less cell on the imports
 ///   first and never reaches the lint this family is about.
 ///
+/// - **one in `lossless/runner.rs`**, from al8n/smear#198: `finish_parsed_root`, the panicking
+///   companion the fallible `finish_root` gained when a safe public door stopped reporting a
+///   refusal it cannot prevent by panicking on it. It is the `recover.rs` shape a fourth time and
+///   not a new one — a `pub(crate)` item whose only callers are the two dialect runners, so the
+///   `rowan`-alone cell reports `dead_code` and `-D warnings` fails the one leg that builds the
+///   substrate without a dialect.
+///
 /// **Raising this number is the decision, not the bookkeeping.** Nine at once is a large move and
 /// it is one narrowing, not nine: the count went from 7 to 16 in a single PR because a whole
 /// cluster left the public API together. A future increment of one or two, unaccompanied by a
-/// family added above, is the drift this constant exists to catch.
+/// family added above, is the drift this constant exists to catch — which is exactly what the
+/// seventeenth was when it arrived: it reddened this test rather than passing, the increment was
+/// read against the classification before the pin moved, and the family above is what records that
+/// the added gate is the sanctioned `any(…)` form in a known shape rather than a new fork.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 16;
+const SUBSTRATE_FEATURE_GATES: usize = 17;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {

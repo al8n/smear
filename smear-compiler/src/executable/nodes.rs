@@ -29,6 +29,18 @@ pub(crate) trait ValueLike<S>: Sized {
   /// The object-field row type an object literal of this family holds.
   type Field: ObjectFieldLike<S, Value = Self>;
 
+  /// Whether a value of this family can contain a variable.
+  ///
+  /// `false` for the constant family, and that is a **fact about the grammar**, not a rule set: a
+  /// `ConstInputValue` has no variable arm to return. The validator reads it to decide whether
+  /// draft 5.8.3, 5.8.4 and 5.8.5 can act on a tree at all, which is the difference between
+  /// walking a variable definition's default value for a usage-only rule set and not walking it.
+  ///
+  /// No default, deliberately. A defaulted associated const walks a third family straight past the
+  /// decision with the answer that happens to be right for two of them; an obligation makes it
+  /// state its own case. See the crate's standing note on obligation over observer.
+  const HAS_VARIABLES: bool;
+
   /// Returns the span covering the value.
   fn value_span(&self) -> SimpleSpan;
   /// Returns the variable, when the value is one.
@@ -71,6 +83,10 @@ pub(crate) trait ObjectFieldLike<S> {
 pub(crate) trait ArgumentLike<S> {
   /// The value type the argument carries.
   type Value: ValueLike<S>;
+
+  /// [`ValueLike::HAS_VARIABLES`] for the value this argument carries, restated so a caller that
+  /// holds only the argument type does not have to name the associated path.
+  const HAS_VARIABLES: bool;
 
   /// Returns the span covering the argument.
   fn argument_span(&self) -> SimpleSpan;
@@ -121,6 +137,8 @@ impl<S> ObjectFieldLike<S> for ConstObjectField<S> {
 impl<S> ArgumentLike<S> for Argument<S> {
   type Value = InputValue<S>;
 
+  const HAS_VARIABLES: bool = true;
+
   #[inline]
   fn argument_span(&self) -> SimpleSpan {
     *self.span()
@@ -140,6 +158,8 @@ impl<S> ArgumentLike<S> for Argument<S> {
 impl<S> ArgumentLike<S> for ConstArgument<S> {
   type Value = ConstInputValue<S>;
 
+  const HAS_VARIABLES: bool = false;
+
   #[inline]
   fn argument_span(&self) -> SimpleSpan {
     *self.span()
@@ -158,6 +178,8 @@ impl<S> ArgumentLike<S> for ConstArgument<S> {
 
 impl<S> ValueLike<S> for InputValue<S> {
   type Field = ObjectField<S>;
+
+  const HAS_VARIABLES: bool = true;
 
   #[inline]
   fn value_span(&self) -> SimpleSpan {
@@ -237,6 +259,8 @@ impl<S> ValueLike<S> for InputValue<S> {
 impl<S> ValueLike<S> for ConstInputValue<S> {
   type Field = ConstObjectField<S>;
 
+  const HAS_VARIABLES: bool = false;
+
   #[inline]
   fn value_span(&self) -> SimpleSpan {
     *self.as_span()
@@ -314,6 +338,9 @@ pub(crate) trait DirectiveLike<S> {
   /// The argument row type this directive holds.
   type Argument: ArgumentLike<S>;
 
+  /// [`ValueLike::HAS_VARIABLES`] for the values this directive's arguments carry.
+  const HAS_VARIABLES: bool;
+
   /// Returns the span covering the directive.
   fn directive_span(&self) -> SimpleSpan;
   /// Returns the directive's name, without the `@`.
@@ -324,6 +351,8 @@ pub(crate) trait DirectiveLike<S> {
 
 impl<S> DirectiveLike<S> for Directive<S> {
   type Argument = Argument<S>;
+
+  const HAS_VARIABLES: bool = true;
 
   #[inline]
   fn directive_span(&self) -> SimpleSpan {
@@ -346,6 +375,8 @@ impl<S> DirectiveLike<S> for Directive<S> {
 
 impl<S> DirectiveLike<S> for ConstDirective<S> {
   type Argument = ConstArgument<S>;
+
+  const HAS_VARIABLES: bool = false;
 
   #[inline]
   fn directive_span(&self) -> SimpleSpan {

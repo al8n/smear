@@ -163,6 +163,53 @@ impl TypeDef {
   }
 }
 
+/// How many arguments one field definition may declare.
+///
+/// # It is a bound on a product execution cannot close
+///
+/// Not a rule of the specification — draft §3.6.1 sets no ceiling on an
+/// `ArgumentsDefinition` — and not a packing limit either, which is what separates it from
+/// [`MAX_WRAPPERS`](super::MAX_WRAPPERS): nothing in the representation stops the group being
+/// longer. It is here because draft §6.4.1 `CoerceArgumentValues` iterates **every** declared
+/// argument at **every runtime position** of the field, and only one of those two factors can be
+/// bounded at execution time.
+///
+/// The position count is the driver's, and an executor meters it: `graphql-proto` refuses past
+/// `max_response_slots` positions, and every position is charged against `max_selection_visits`
+/// on its way in. The declared count is the *deployment's*, written once in SDL, and charging a
+/// request for it makes the caller pay for the service's design-time width — measured against
+/// that crate's shipped defaults, one unit per declared argument per position refuses a
+/// full-occupancy response at about **thirteen** declared arguments, which refuses ordinary
+/// input. So the factor that belongs to the deployment is bounded where the deployment states it,
+/// once, and from then on the scan is `positions × MAX_FIELD_ARGUMENTS` with both factors bounded.
+///
+/// # Why sixty-four, and what a schema past it does instead
+///
+/// Six times the widest field in the public schemas this was checked against — GitHub's
+/// `User.repositories` declares ten, Shopify's `products` eight, PostGraphile's generated
+/// connections eight — and it holds the worst case to a small constant multiple of what the
+/// response already costs: measured, one declared-argument iteration is about 2.7 ns against
+/// about 55 ns for the position itself, so sixty-four of them is roughly three times the
+/// position's own cost and an unbounded group is unbounded.
+///
+/// A schema that genuinely wants more says it the way GraphQL already asks for it: one argument
+/// of an input object type. An executor hands an input object literal to the driver whole — draft
+/// §6.4.1 step 5.j's coercion of a literal's *contents* is the driver's — so an input object's
+/// fields are never iterated per position, and no API surface is lost by moving there.
+///
+/// The refusal is `SchemaErrorKind::TooManyFieldArguments` — named rather than linked, because
+/// this module is also compiled standalone by `smear-noatomic`, which has no `build` feature and
+/// so no error vocabulary to resolve the link against. It is raised for interface fields as well
+/// as object fields. Draft §3.7 makes an interface
+/// field's argument list a lower bound on every implementing field's, so an interface field past
+/// this ceiling is one no object type could implement without being refused itself.
+///
+/// It bounds a **field's** list and nothing else. A directive definition's arguments are the
+/// other list of the same shape written by the same party, they go through the same builder walk,
+/// and §6.4.1 — this constant's whole mechanism — never reaches them; they are bounded by
+/// [`MAX_DIRECTIVE_ARGUMENTS`], which states the product that does.
+pub const MAX_FIELD_ARGUMENTS: u32 = 64;
+
 /// A field definition on an object or interface type.
 #[derive(Debug, Clone, Copy)]
 pub struct FieldDef {
@@ -237,6 +284,43 @@ impl InputValueDef {
     self.ty.is_non_null() && !self.default.is_present()
   }
 }
+
+/// How many arguments one directive definition may declare.
+///
+/// # The same product, written by the same party, read in a different pass
+///
+/// [`MAX_FIELD_ARGUMENTS`] bounds a *field*'s declared list because draft §6.4.1's coercion
+/// iterates it at every runtime position of the field. A directive definition's list is never
+/// coerced per position — an executor never reads it at all — but it is read once per **usage**,
+/// and a document chooses how many usages it writes. Draft 5.4.3's presence half walks every
+/// declared argument of the definition a usage names, at every directive on every selection,
+/// fragment and variable definition of the request, so `usages × declared` is §6.4.1's product
+/// with §6.4.1's asymmetry: the count is the client's and the width is the deployment's.
+///
+/// The validator bills that width to the request today — the scan spends one unit per declared
+/// entry in front of the scan, which is what makes the count payable — so a directive definition
+/// a thousand arguments wide refuses ordinary documents against a work ceiling for a number the
+/// document did not choose. That is the outcome [`MAX_FIELD_ARGUMENTS`] rejected for fields, and
+/// the population argument is the same one: bound the deployment's factor where the deployment
+/// writes it, once, and the charge left over is a small constant per usage.
+///
+/// # Why a constant of its own, and why the same number
+///
+/// Of its own because the two bound different products — coercion per response position, and
+/// validation per document usage — in different crates, so a number moved for one has no claim on
+/// the other, and a directive's refusal naming a *field* limit would name a mechanism that does
+/// not reach it. This crate already splits every field/directive argument diagnostic for the same
+/// reason.
+///
+/// The same sixty-four because the headroom argument is the field one with more room in it: the
+/// specification's own directives declare at most one argument each, and the widest directive in
+/// the registries checked when the field number was chosen — Apollo Federation's `@link`, with
+/// `url`, `as`, `for` and `import` — declares four. The rewrite for a directive that genuinely
+/// wants more is the field one unchanged: one argument of an input object type.
+///
+/// The refusal is `SchemaErrorKind::TooManyDirectiveArguments` — named rather than linked, for
+/// the reason [`MAX_FIELD_ARGUMENTS`] gives.
+pub const MAX_DIRECTIVE_ARGUMENTS: u32 = 64;
 
 /// A directive definition.
 #[derive(Debug, Clone, Copy)]
