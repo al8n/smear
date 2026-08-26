@@ -3737,6 +3737,23 @@ impl SchemaBuilder {
   /// has nothing to cover. `asked` is stamped with the descent that wrote it rather than cleared
   /// for it, so the other width-proportional pass goes too.
   ///
+  /// **A frame's WORK is a second population, and narrowing the one did not narrow the other.**
+  /// The first revision of this recognised a descent into a single empty map and built the work
+  /// list over the whole declaration everywhere else — which recognised the case it was written
+  /// against and not the case beside it. `[{} × M]` of a `D`-field input object of nullable
+  /// scalars is `O(M + D)` of SDL that `finish` ACCEPTS, unwraps to `M` empty map nodes rather
+  /// than one, and appended `M × D` entries the loop then popped and `continue`d past — over
+  /// fields that name no input object and so cannot be in a cycle at all.
+  ///
+  /// Two things fix it and they compose. `descendable` — `coverable` without the "carries a
+  /// default" clause — is the population a work entry can *do* anything for, so it and not the
+  /// declaration is what the inner loop walks; with it, a declaration of scalars produces no work
+  /// whatever its width, and so does a list of NON-empty maps that supplies nothing descendable,
+  /// which widening the empty-map test would have left standing. And every empty map node asks
+  /// the same question as the first, so they coalesce to one — duplicate work is a duplicate
+  /// exploration of a field already retired and cannot reach a different verdict. The first
+  /// removes the `D` factor, the second the `M`.
+  ///
   /// The population that stood in for the rule before this was **`N` input types with a valid
   /// `w: [Wide] = []` in front of a `D`-field `Wide` holding one defaulted input-object field**:
   /// each empty list produces no map, so it can settle nothing, and it repeated both `D`-wide
@@ -3772,8 +3789,13 @@ impl SchemaBuilder {
       /// is why it exists. Popped off the path when the frame retires.
       pushed: Option<usize>,
       /// `(field index in `object`, the value the caller supplied for it)`, one entry per
-      /// (map node, field) pair — which is exactly the draft's "for each field in inputObject",
-      /// run once per map node the level's value unwraps to.
+      /// (map node, field) pair the walk will actually descend through — the draft's "for each
+      /// field in inputObject", run once per map node the level's value unwraps to, with the
+      /// pairs that return immediately left out rather than materialised. A field naming no input
+      /// object holds no cycle whatever a literal says about it, and one asked with nothing
+      /// supplied and carrying no default has nothing to descend into; both are entries this loop
+      /// pops and `continue`s past, and the count of them is a product. The header says what
+      /// materialising them cost.
       ///
       /// Borrowed out of the model rather than owned; the header says why.
       work: Vec<(usize, Option<&'a RawValue>)>,
@@ -3808,18 +3830,37 @@ impl SchemaBuilder {
     // `D`-field `Wide` is `Θ(N + D)` of SDL `Schema::build` ACCEPTS: an empty list unwraps to no
     // map, so it can settle nothing and repeats both `D`-wide passes `N` times. 1.90 in the
     // exponent over 16 k–128 k and 34.9 s at 128 k. al8n/smear#198.
+    //
+    // `descendable` is the wider of the two and is what a frame's WORK LIST is built over: a field
+    // whose named type is not an input object can hold no cycle whatever any literal says about
+    // it, so a work entry for one is an entry the frame pops and `continue`s past. Materialising
+    // those was the Cartesian product — one entry per (map node, DECLARED field) — and the fields
+    // being multiplied are the ones that cannot participate in a cycle at all: a `D`-field input
+    // object of nullable scalars, defaulted to `[{} × M]`, allocated `Θ(M × D)` entries on
+    // `O(M + D)` of SDL that `finish` ACCEPTS. Built over `descendable` instead, that literal
+    // produces **no work at all**, because none of `D` is descendable. al8n/smear#198.
+    //
+    // `coverable` is `descendable` narrowed by "and carries a default", and it is the settling
+    // question rather than the work one — the two are separate lists because they answer separate
+    // questions and neither is the other's subset by accident: a descendable field with no
+    // default is asked and returns immediately, so it is inert for covering and still real for
+    // descending when a caller SUPPLIES it.
+    let mut descendable_base: Vec<usize> = vec![0; count + 1];
+    let mut descendable: Vec<u32> = Vec::new();
     let mut coverable_base: Vec<usize> = vec![0; count + 1];
     let mut coverable: Vec<u32> = Vec::new();
     for index in 0..count {
       for (at, field) in model.types[index].input_fields.iter().enumerate() {
         let base = field.ty.packed.base_id();
-        if base != UNRESOLVED
-          && model.types[base.get() as usize].kind == TypeKind::InputObject
-          && field.default_value.is_some()
-        {
+        if base == UNRESOLVED || model.types[base.get() as usize].kind != TypeKind::InputObject {
+          continue;
+        }
+        descendable.push(at as u32);
+        if field.default_value.is_some() {
           coverable.push(at as u32);
         }
       }
+      descendable_base[index + 1] = descendable.len();
       coverable_base[index + 1] = coverable.len();
     }
 
@@ -3843,11 +3884,16 @@ impl SchemaBuilder {
         continue;
       }
       // The draft's top-level call: `defaultValue` is an empty map, so every field is asked, and
-      // none of them is supplied a value.
+      // none of them is supplied a value. `canonical` is therefore true by construction and does
+      // not depend on the work list — which is why this frame carries only the entries that
+      // descend. Asked with nothing supplied descends into the field's own default, so the ones
+      // that do are exactly `coverable`, and the rest are the declaration's whole width popped and
+      // `continue`d past. The descent below narrows the same population for the same reason.
       let mut stack = vec![Frame {
         pushed: None,
-        work: (0..model.types[start].input_fields.len())
-          .map(|field| (field, None))
+        work: coverable[coverable_base[start]..coverable_base[start + 1]]
+          .iter()
+          .map(|&field| (field as usize, None))
           .collect(),
         cursor: 0,
         object: start,
@@ -3933,6 +3979,7 @@ impl SchemaBuilder {
         // starts and descents that follow. That is the rule 1260027 wrote, unchanged; what
         // changed is that it is decided over `coverable` instead of by rescanning `declared`.
         let coverable_here = &coverable[coverable_base[target]..coverable_base[target + 1]];
+        let descendable_here = &descendable[descendable_base[target]..descendable_base[target + 1]];
         let mut work = Vec::new();
         let canonical = if maps.is_empty() {
           // The draft's "for each field in inputObject" runs once per map node, so no map is no
@@ -3942,20 +3989,46 @@ impl SchemaBuilder {
           coverable_here.is_empty()
         } else {
           descent += 1;
+          // **Every empty map node asks the same question, so the second one asks nothing new.**
+          // A node with no entries supplies nothing for any field, so the work it produces and
+          // the fields it marks asked are byte-for-byte the first empty node's — and duplicate
+          // work is a duplicate exploration of a field the walk has already retired, which
+          // cannot reach a different verdict. `[{} × M]` therefore costs one node's work rather
+          // than `M`. Only the EMPTY ones coalesce: two nodes that write anything are two
+          // different questions, and deciding they are the same would mean comparing them.
+          let mut coalesced = false;
           for map in &maps {
-            // The scan [`Names`] was written for, asked the other way round: one lookup per
-            // declared field into one map node, so a wide input object in front of a literal that
-            // writes its fields was `Θ(declared × written)` here as well as at
-            // [`SchemaBuilder::check_const_value`].
-            let of_entry = Names::over(map.len(), declared.len(), |at| map[at].name.sym);
-            for (index, declared_field) in declared.iter().enumerate() {
-              let supplied = of_entry
-                .first(map.len(), declared_field.name.sym, |at| map[at].name.sym)
-                .map(|at| &map[at].value);
-              if supplied.is_none() {
-                asked[field_base[target] + index] = descent;
+            if map.is_empty() {
+              if coalesced {
+                continue;
               }
-              work.push((index, supplied));
+              coalesced = true;
+            }
+            // The scan [`Names`] was written for, asked the other way round: one lookup per
+            // DESCENDABLE field into one map node, so a wide input object in front of a literal
+            // that writes its fields was `Θ(declared × written)` here as well as at
+            // [`SchemaBuilder::check_const_value`]. The ask count is the subset's, not the
+            // declaration's, because the subset is what this loop asks about — telling `Names`
+            // otherwise would sort a map for questions nobody puts to it.
+            let of_entry = Names::over(map.len(), descendable_here.len(), |at| map[at].name.sym);
+            for &at in descendable_here {
+              let index = at as usize;
+              let supplied = of_entry
+                .first(map.len(), declared[index].name.sym, |at| map[at].name.sym)
+                .map(|at| &map[at].value);
+              match supplied {
+                // A caller's literal named the field, so the walk descends into that literal and
+                // the field's own default is never consulted.
+                Some(value) => work.push((index, Some(value))),
+                None => {
+                  asked[field_base[target] + index] = descent;
+                  // Asked with nothing supplied descends into the field's OWN default, so an
+                  // entry for a field that has none is one the frame pops and `continue`s past.
+                  if declared[index].default_value.is_some() {
+                    work.push((index, None));
+                  }
+                }
+              }
             }
           }
           coverable_here
