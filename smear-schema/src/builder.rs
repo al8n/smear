@@ -2443,11 +2443,32 @@ impl SchemaBuilder {
   }
 
   /// Fills every type's interface closure, reporting interfaces that implement themselves.
+  ///
+  /// # The membership mark, and why `contains` was the same product a fourth time
+  ///
+  /// The walk below is a depth-first traversal that must not visit a node twice, and "have I got
+  /// this one already" was asked by scanning the closure built so far — `Θ(popped × closure)`,
+  /// with a ceiling on neither. `type T implements I0 & … & I{K-1}` in front of `K` interfaces that
+  /// implement nothing is `Θ(K)` of SDL, `Θ(K²)` of walk, and a schema `Schema::build` **accepts**:
+  /// 2.15 in the exponent over 2 k–4 k and 16.0 ms at `K` = 4 000, of which the traversal is the
+  /// term that grows.
+  ///
+  /// One `bool` per type index answers it in `O(1)`, and the marks are cleared by walking the
+  /// closure this type just built rather than the table — `O(closure)`, not `O(types)`, which is
+  /// what lets one table serve every type in the schema. It is the shape [`Positions`] takes for
+  /// the same reason, minus the reentrancy question: this walk nests no second closure inside the
+  /// one it is building. Lazily grown, so a schema whose types implement nothing never allocates
+  /// it. The closure is pushed in the traversal order it was pushed in and sorted exactly where it
+  /// was sorted, so what a later pass reads is unchanged. al8n/smear#198.
   fn compute_closures(&mut self) {
     let count = self.types.len();
+    let mut member: Vec<bool> = Vec::new();
     for index in 0..count {
       if self.types[index].implements.is_empty() {
         continue;
+      }
+      if member.len() < count {
+        member.resize(count, false);
       }
       let mut closure: Vec<u32> = Vec::new();
       let mut stack: Vec<u32> = Vec::new();
@@ -2457,15 +2478,19 @@ impl SchemaBuilder {
         }
       }
       while let Some(next) = stack.pop() {
-        if closure.contains(&next) {
+        if member[next as usize] {
           continue;
         }
+        member[next as usize] = true;
         closure.push(next);
         for declared in &self.types[next as usize].implements {
           if let Some(target) = self.type_index(declared.sym) {
             stack.push(target as u32);
           }
         }
+      }
+      for &id in &closure {
+        member[id as usize] = false;
       }
       closure.sort_unstable();
       self.types[index].closure = closure;
@@ -4445,6 +4470,47 @@ impl SchemaBuilder {
     }
     let possible_words = objects.len().div_ceil(64).max(1) as u32;
 
+    // Every interface's implementors, from the closures that name them, in one pass over the
+    // objects.
+    //
+    // Draft §3.7 states the set the other way round — an interface's possible objects are the
+    // objects that declare it — and the loop below stated it that way too: for each interface,
+    // every type in the schema, and for each object among them a scan of its closure. That is
+    // `Θ(interfaces × types × closure)` with a ceiling on none of the three, and it runs in
+    // `flatten`, which is reached only when the build has **accepted** the document. `N`
+    // implementor-less interfaces beside `N` objects is `Θ(N)` of SDL and was `Θ(N²)` here: 1.87
+    // in the exponent over 500–4 000 and **55.4 ms** at `N` = 4 000, against 1.00 and 3.6 ms.
+    //
+    // A counting sort rather than a `Vec` per interface, because one row per interface is one
+    // allocation per interface where this is two for the schema, and because the rows are read
+    // once each in the loop below. The membership question disappears with the direction: an
+    // object's closure names the interfaces it implements, so walking it emits exactly the pairs
+    // the scan was looking for and no pair it was not. Bit order within a word is not a
+    // representation: `set_bit` is idempotent and the bitset is a set. al8n/smear#198.
+    let mut implementor_base: Vec<u32> = vec![0; raw_types.len() + 1];
+    for raw in &raw_types {
+      if raw.kind == TypeKind::Object {
+        for &interface in &raw.closure {
+          implementor_base[interface as usize + 1] += 1;
+        }
+      }
+    }
+    for at in 0..raw_types.len() {
+      implementor_base[at + 1] += implementor_base[at];
+    }
+    let mut implementors: Vec<u32> = vec![0; implementor_base[raw_types.len()] as usize];
+    {
+      let mut cursor = implementor_base.clone();
+      for (index, raw) in raw_types.iter().enumerate() {
+        if raw.kind == TypeKind::Object {
+          for &interface in &raw.closure {
+            implementors[cursor[interface as usize] as usize] = ordinal_of[index];
+            cursor[interface as usize] += 1;
+          }
+        }
+      }
+    }
+
     let string_id = interner
       .lookup(b"String")
       .and_then(id_of)
@@ -4605,10 +4671,9 @@ impl SchemaBuilder {
             }
           }
           TypeKind::Interface => {
-            for (candidate, other) in raw_types.iter().enumerate() {
-              if other.kind == TypeKind::Object && other.closure.contains(&(index as u32)) {
-                set_bit(&mut possible, start, ordinal_of[candidate]);
-              }
+            let row = implementor_base[index] as usize..implementor_base[index + 1] as usize;
+            for &ordinal in &implementors[row] {
+              set_bit(&mut possible, start, ordinal);
             }
           }
           _ => {}
