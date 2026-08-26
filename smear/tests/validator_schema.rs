@@ -2075,3 +2075,30 @@ fn a_deep_defaulted_input_chain_does_not_recurse() {
     "a cycle through twenty thousand objects is one diagnostic, not twenty thousand"
   );
 }
+
+/// Draft §3.10.1(4) is a property of the definitions, so reordering them cannot change the answer.
+///
+/// The settling that keeps `a_deep_defaulted_input_chain_does_not_recurse` linear used to be taken
+/// from *any* retired frame, including one reached through a caller's supplied literal — which
+/// explores a different question from the empty-map call and establishes nothing about it. With
+/// `Outer` read first, its `{ loop: null }` marked `Bad` clean, `Bad`'s own start was then skipped,
+/// and the build **accepted** a schema whose default cycle it refused when the same two definitions
+/// were read the other way round.
+#[test]
+fn input_object_default_cycle_verdict_is_declaration_order_independent() {
+  const QUERY: &str = "type Query { q(a: Outer, b: Bad): String }\n";
+  const BAD: &str = "input Bad { loop: Bad = {} }\n";
+  const OUTER: &str = "input Outer { b: Bad = { loop: null } }\n";
+
+  for sdl in [
+    format!("{QUERY}{OUTER}{BAD}"),
+    format!("{QUERY}{BAD}{OUTER}"),
+  ] {
+    let errors = refused(&sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::InputObjectDefaultValueCycle],
+      "{errors}"
+    );
+  }
+}

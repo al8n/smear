@@ -480,6 +480,91 @@ impl Drop for Positions<'_, '_> {
   }
 }
 
+/// The first position of a name in one list, asked by names from a *second* list the reader walks
+/// at the same time — where the two lists **nest**.
+///
+/// # Why this is neither [`Duplicates`] nor [`Positions`], which are the two neighbours
+///
+/// [`Duplicates`] is addressed by **position** and its [`Duplicates::Index`] payload has discarded
+/// the names, so it cannot answer "which position of *this* list holds the name that *other* list
+/// carries" at all. [`Positions`] answers exactly that question, and its payload is one slot per
+/// [`Sym`] over the whole symbol space — the shape [`Duplicates`]'s header rules out because it
+/// "does not survive the nesting", and which [`Positions`] takes only because draft §3.6.1's
+/// conformance pass holds one implementor's list at a time and nests no second index inside it.
+///
+/// [`SchemaBuilder::check_const_value`] **is** the nesting case: an input-object literal's entry is
+/// itself a literal offered to a second input object, so the outer list's index is live while the
+/// inner one is built. One slot per symbol shared across that pair would have the inner list answer
+/// the outer's lookup, and [`Positions::drop`] would then clear a slot the outer still needs. So
+/// this is a value per list, reentrant because there is nothing to share, made out of the sorted
+/// pairs [`Duplicates`] already uses.
+///
+/// # Sorting the pair, so `first` is still the first
+///
+/// Equal names order by ascending position, so the head of a run is the first occurrence and not
+/// merely one of them — which is the answer [`Iterator::find`] gave. A type that writes one input
+/// field twice is a `DuplicateInputFieldName` already, and a literal that writes one entry twice is
+/// checked against the same declaration both times; resolving either by whatever the sort put in
+/// front would move a blessed diagnostic while looking like a cost change.
+///
+/// # The switch is on the number of *asks*, not on the length of the list
+///
+/// [`Duplicates`] and [`Positions`] both switch on the list they index, because there those two
+/// numbers are the same one. Here they are not: `Q` lookups into a list of `D` names cost `Q × D`
+/// scanned and `D log D + Q log D` indexed, so the sort pays for itself once `Q` passes `log D` —
+/// and it *loses* on a wide declared list asked one question, which is an ordinary small literal
+/// offered to a wide input object. [`NARROW_LIST`] is the threshold on `Q` for the reason it is the
+/// threshold anywhere else: below it the scan costs a constant times the list, which is the walk
+/// the caller was making regardless.
+///
+/// # What it replaces
+///
+/// `declared.iter().find(..)`, restarted for every field an input-object literal writes, and
+/// `fields.iter().any(..)`, restarted for every required field the object declares — draft 5.6.2
+/// and 5.6.4's SDL twins, both `Θ(literal × declared)`. `input Wide` with `N` fields and one
+/// default writing those same `N` entries is `O(N)` of source, and was 1.98 in the exponent over
+/// 1 k–64 k, 2.02 over the top step, **3.197 s** at 64 k — on a schema `Schema::build` **accepts**.
+/// The same document pays it twice, because
+/// [`SchemaBuilder::validate_input_object_default_cycles`] builds its work list with the same scan,
+/// so both are indexed and the ladder becomes 0.99 and **42 ms** at 64 k. That exponent is read off
+/// a low end near one millisecond, so it is carried out to 256 k where the floor cannot be what is
+/// being measured: 1.12 over 64 k–256 k, 196 ms. al8n/smear#198.
+enum Names {
+  /// At or below [`NARROW_LIST`] asks: the scan, whose per-lookup cost that ceiling is what bounds,
+  /// exactly as it bounds the declared argument lists'.
+  Scan,
+  /// Past it: `(name, position)` sorted once, so a lookup is a binary search.
+  Sorted(Vec<(Sym, u32)>),
+}
+
+impl Names {
+  /// Resolves one list of `len` positions, `name` addressing it, against the `asks` lookups that
+  /// are coming.
+  fn over(len: usize, asks: usize, name: impl Fn(usize) -> Sym) -> Self {
+    if asks <= NARROW_LIST {
+      return Self::Scan;
+    }
+    let mut order: Vec<(Sym, u32)> = (0..len).map(|at| (name(at), at as u32)).collect();
+    order.sort_unstable();
+    Self::Sorted(order)
+  }
+
+  /// The first position that wrote `wanted`, or `None`. `name` is the accessor `over` was given,
+  /// because the narrow arm stores nothing.
+  fn first(&self, len: usize, wanted: Sym, name: impl Fn(usize) -> Sym) -> Option<usize> {
+    match self {
+      Self::Scan => (0..len).find(|&at| name(at) == wanted),
+      Self::Sorted(order) => {
+        let at = order.partition_point(|&(written, _)| written < wanted);
+        match order.get(at) {
+          Some(&(written, position)) if written == wanted => Some(position as usize),
+          _ => None,
+        }
+      }
+    }
+  }
+}
+
 /// A type reference whose base has been interned but not yet resolved.
 #[derive(Debug, Clone, Copy)]
 struct RawTypeRef {
@@ -760,6 +845,17 @@ struct RawType {
   directives: Vec<RawDirectiveUse>,
   /// The interface closure, filled in during validation.
   closure: Vec<u32>,
+  /// The positions of [`input_fields`](RawType::input_fields) that [`RawInput::is_required`]
+  /// answers `true` for, filled in during validation beside the closure.
+  ///
+  /// Draft 5.6.4's omitted half asks "which required field did this literal not write", once per
+  /// literal offered to this type, and the list is what makes the answer proportional to what it
+  /// reports instead of to the declaration. Sieving it at the literal is a walk over every declared
+  /// field for a type that may have no required field at all: `input Wide` with `N` fields and `N`
+  /// input objects defaulting to `{}` of it is `O(N)` of source, `Θ(N²)` of sieve — 1.97 in the
+  /// exponent over the top step of 1 k–16 k and **1.470 s** at 16 k, on a schema `Schema::build`
+  /// **accepts**. al8n/smear#198.
+  required_input_fields: Vec<u32>,
 }
 
 impl RawType {
@@ -776,6 +872,7 @@ impl RawType {
       enum_values: Vec::new(),
       directives: Vec::new(),
       closure: Vec::new(),
+      required_input_fields: Vec::new(),
     }
   }
 }
@@ -1983,6 +2080,7 @@ impl SchemaBuilder {
     self.resolve_roots();
     self.resolve_type_refs();
     self.compute_closures();
+    self.collect_required_input_fields();
     self.validate_types();
     self.validate_directive_definitions();
     self.validate_directive_usages();
@@ -2209,6 +2307,30 @@ impl SchemaBuilder {
         // Break the cycle so nothing downstream walks it.
         self.types[index].closure.retain(|id| *id != index as u32);
       }
+    }
+  }
+
+  /// Fills [`RawType::required_input_fields`], one pass over the input fields the whole schema
+  /// declares.
+  ///
+  /// Here rather than at ingest because an `extend input` appends to `input_fields` after the
+  /// definition was read, and here rather than at the literal because the literal is the site the
+  /// field exists to keep proportional. Nothing it reads changes during validation:
+  /// [`RawInput::is_required`] is a `Non-Null` wrapper and a `DefaultKind`, both fixed when the
+  /// declaration was ingested.
+  fn collect_required_input_fields(&mut self) {
+    for index in 0..self.types.len() {
+      if self.types[index].kind != TypeKind::InputObject {
+        continue;
+      }
+      let required: Vec<u32> = self.types[index]
+        .input_fields
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.is_required())
+        .map(|(at, _)| at as u32)
+        .collect();
+      self.types[index].required_input_fields = required;
     }
   }
 
@@ -3036,8 +3158,15 @@ impl SchemaBuilder {
         // away.
         let object = Coordinate::named(model.types[base].name.sym);
         let declared = &model.types[base].input_fields;
+        // One index per literal, and it has to be per literal: the recursion below offers a nested
+        // entry to a second input object while this one is still being read. [`Names`] carries why
+        // that rules out the table [`Positions`] uses, and what the scan it replaces cost.
+        let of_declared = Names::over(declared.len(), fields.len(), |at| declared[at].name.sym);
         for field in fields {
-          let Some(expected) = declared.iter().find(|d| d.name.sym == field.name.sym) else {
+          let Some(expected) = of_declared
+            .first(declared.len(), field.name.sym, |at| declared[at].name.sym)
+            .map(|at| &declared[at])
+          else {
             // Draft 5.6.2's SDL twin.
             let name = model.text(field.name.sym).to_owned();
             push_owned(
@@ -3070,13 +3199,18 @@ impl SchemaBuilder {
         // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
         // what the omission is blamed on — the same choice `check_directive_arguments` makes for
         // an omitted required argument.
-        for expected in declared {
-          if !expected.is_required() {
-            continue;
-          }
-          if fields
-            .iter()
-            .any(|field| field.name.sym == expected.name.sym)
+        //
+        // Over the required positions rather than over the declaration, and the literal indexed
+        // rather than rescanned: the two factors of the same product, one bounded by what this
+        // reports and the other by [`Names`]. Source order is the declaration's either way, because
+        // `required_input_fields` is filled by ascending position.
+        let required = &model.types[base].required_input_fields;
+        let of_written = Names::over(fields.len(), required.len(), |at| fields[at].name.sym);
+        for &position in required {
+          let expected = &declared[position as usize];
+          if of_written
+            .first(fields.len(), expected.name.sym, |at| fields[at].name.sym)
+            .is_some()
           {
             continue;
           }
@@ -3407,17 +3541,38 @@ impl SchemaBuilder {
   /// cost is the same one [`SchemaBuilder::validate_input_object_cycles`] pays for its colouring:
   /// a second, independent cycle through an already-implicated object waits for the next build.
   ///
-  /// # Settling, and why it is sound
+  /// # Settling, and what "explored" has to mean for it to be sound
   ///
   /// A frame retires only when its whole sub-exploration finished, and nothing prunes that
   /// exploration except the cycle test itself — which does not prune, it `break`s the entire walk.
   /// So a retired frame's object has had every path below it followed to the end with no repeat,
-  /// which is to say **no cycle is reachable from it at all**, whatever `visited` it was reached
-  /// with. Starting a fresh walk there would re-derive that at the cost of the whole subtree over
-  /// again, so it is skipped. Without it a chain of `N` defaulted input objects costs `O(N²)`:
+  /// and starting a fresh walk there would re-derive that at the cost of the whole subtree over
+  /// again. Without the skip a chain of `N` defaulted input objects costs `O(N²)`:
   /// `a_deep_defaulted_input_chain_does_not_recurse` is twenty thousand links long and takes
-  /// **41.5 s** with the skip removed against **under one second** with it — measured, not
-  /// estimated. It is the standing guard on this and on the iterative shape both.
+  /// **41.5 s** with it removed against **under one second** with it — measured, not estimated. It
+  /// is the standing guard on this and on the iterative shape both.
+  ///
+  /// **What that argument leaves out is *which* paths "every path below it" is.** A frame reached
+  /// through a caller's *supplied* literal descends into that literal, and the draft is explicit
+  /// that the field's own default is then never consulted — so such a frame explores a different
+  /// question from `InputObjectDefaultValueHasCycle(object, {})`, and finishing it establishes
+  /// nothing about the empty-map one. Settling from it made **declaration order decide the
+  /// verdict**: with `input Outer { b: Bad = { loop: null } }` read before `input Bad { loop: Bad =
+  /// {} }`, `Outer`'s walk marked `Bad` settled through the supplied `{ loop: null }`, the
+  /// canonical start at `Bad` was then skipped, and `SchemaBuilder::finish` **accepted a schema
+  /// carrying the default cycle this rule exists to refuse**. The same two definitions in the other
+  /// order were refused. `input_object_default_cycle_verdict_is_declaration_order_independent` is
+  /// the guard.
+  ///
+  /// So a frame settles its object only when its work list **covers** the canonical exploration:
+  /// every declared field either asked with nothing supplied at least once — which is what makes
+  /// the walk descend into that field's *own* default — or inert, meaning asking would have
+  /// returned immediately because the field names no input object or carries no default. The
+  /// top-level start frame is canonical by construction, and so is a descent into `{}`, which is
+  /// what the chain guard above is made of; a supplied entry for a field whose default matters is
+  /// what stops being enough. `settled` is read at two places and both take this flag: the start
+  /// loop, and the descent, which is why `N` input objects defaulting to `{}` of one wide type cost
+  /// `O(N)` rather than a fresh `Θ(width)` work list each.
   ///
   /// # Over the split, and the factor here is not a count of fields
   ///
@@ -3456,6 +3611,9 @@ impl SchemaBuilder {
       cursor: usize,
       /// The object whose fields `work` indexes, so a frame can name the field it blames.
       object: usize,
+      /// Whether `work` covers `InputObjectDefaultValueHasCycle(object, {})` — the question the
+      /// start loop and the descent both skip a settled object on the strength of. See the header.
+      canonical: bool,
     }
 
     let (model, errors) = self.split();
@@ -3468,9 +3626,13 @@ impl SchemaBuilder {
     let total_fields = field_base[count];
 
     let mut implicated = vec![false; count];
-    // Objects a completed walk proved clean; see the header for why that is transitive.
+    // Objects a completed *canonical* exploration proved clean; the header says why only that one
+    // counts, and why what it proves is transitive.
     let mut settled = vec![false; count];
     let mut on_path = vec![false; total_fields];
+    // Which of a target's declared fields this descent asks with nothing supplied, reused across
+    // pushes: it decides one `bool` per frame and is dead the moment the frame exists.
+    let mut asked: Vec<bool> = Vec::new();
 
     for start in 0..count {
       if model.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
@@ -3485,6 +3647,7 @@ impl SchemaBuilder {
           .collect(),
         cursor: 0,
         object: start,
+        canonical: true,
       }];
 
       let mut found: Option<(usize, usize)> = None;
@@ -3493,7 +3656,9 @@ impl SchemaBuilder {
           if let Some(id) = frame.pushed {
             on_path[id] = false;
           }
-          settled[frame.object] = true;
+          if frame.canonical {
+            settled[frame.object] = true;
+          }
           stack.pop();
           continue;
         };
@@ -3512,42 +3677,88 @@ impl SchemaBuilder {
           continue;
         }
 
-        let (descend_into, pushed) = match supplied {
+        let descend_into = match supplied {
           // The caller's literal named this field, so the field's own default is never consulted
           // and `visited` does not grow.
-          Some(value) => (value, None),
+          Some(value) => value,
+          // The field's own default, which is the descent `visited` grows for.
+          None => match field.default_value.as_ref() {
+            Some(default) => default,
+            None => continue,
+          },
+        };
+
+        let declared = &model.types[target].input_fields;
+        let mut maps: Vec<&[RawObjectField]> = Vec::new();
+        map_nodes(descend_into, &mut maps);
+
+        // A descent into `{}` *is* `InputObjectDefaultValueHasCycle(target, {})`, so a target some
+        // canonical frame already retired has nothing left to say and the work list is not built
+        // at all. Ahead of the cycle test on purpose, and the two cannot both apply: reaching this
+        // field while it is already on the path means the exploration below it comes back here, and
+        // an exploration that comes back to a field it pushed is one that `break`s rather than
+        // retires — so no canonical frame for `target` could have settled it.
+        //
+        // Without the skip, `N` input objects each defaulting to `{}` of one `N`-field input object
+        // build a fresh `Θ(N)` work list apiece: `O(N)` of source, `Θ(N²)` of walk, on a schema
+        // `Schema::build` **accepts**. 1.97 in the exponent over the top step of 1 k–16 k and
+        // **1.470 s** at 16 k, against 1.08 and 23 ms — and 1.10 carried out to 256 k, where a
+        // millisecond floor cannot be what is being read. al8n/smear#198.
+        if settled[target] && matches!(maps.as_slice(), [entries] if entries.is_empty()) {
+          continue;
+        }
+
+        let pushed = match supplied {
+          Some(_) => None,
           None => {
-            let Some(default) = field.default_value.as_ref() else {
-              continue;
-            };
             let id = field_base[object] + field_index;
             if on_path[id] {
               found = Some((object, field_index));
               break;
             }
             on_path[id] = true;
-            (default, Some(id))
+            Some(id)
           }
         };
 
-        let declared = &model.types[target].input_fields;
-        let mut maps: Vec<&[RawObjectField]> = Vec::new();
-        map_nodes(descend_into, &mut maps);
+        asked.clear();
+        asked.resize(declared.len(), false);
         let mut work = Vec::new();
         for map in &maps {
+          // The scan [`Names`] was written for, asked the other way round: one lookup per declared
+          // field into one map node, so a wide input object in front of a literal that writes its
+          // fields was `Θ(declared × written)` here as well as at
+          // [`SchemaBuilder::check_const_value`].
+          let of_entry = Names::over(map.len(), declared.len(), |at| map[at].name.sym);
           for (index, declared_field) in declared.iter().enumerate() {
-            let supplied = map
-              .iter()
-              .find(|entry| entry.name.sym == declared_field.name.sym)
-              .map(|entry| &entry.value);
+            let supplied = of_entry
+              .first(map.len(), declared_field.name.sym, |at| map[at].name.sym)
+              .map(|at| &map[at].value);
+            asked[index] |= supplied.is_none();
             work.push((index, supplied));
           }
         }
+        // The header's condition. A field asked with nothing supplied is the one whose *own*
+        // default this frame descends into, which is what the empty-map call does to every field;
+        // a field naming no input object, or carrying no default, returns immediately whichever
+        // way it is asked, so covering it is nothing to cover. Both together are what make this
+        // frame's work the canonical exploration of `target` — and only then may retiring it
+        // settle `target` for the starts and descents that follow.
+        let canonical = declared.iter().enumerate().all(|(index, field)| {
+          if asked[index] {
+            return true;
+          }
+          let base = field.ty.packed.base_id();
+          base == UNRESOLVED
+            || model.types[base.get() as usize].kind != TypeKind::InputObject
+            || field.default_value.is_none()
+        });
         stack.push(Frame {
           pushed,
           work,
           cursor: 0,
           object: target,
+          canonical,
         });
       }
 

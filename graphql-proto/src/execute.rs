@@ -107,7 +107,7 @@ mod tests;
 /// | outstanding work | requests | [`max_in_flight`](Limits::max_in_flight) | `poll_resolve` withholds, and the slab reuses freed entries | — |
 /// | response positions | positions | [`max_response_slots`](Limits::max_response_slots) | `push_child`, the only creator | — |
 /// | response metadata | merged selections **and** location spans, counted as one | [`max_response_metadata`](Limits::max_response_metadata) | `expand` before appending, and `fail_at` | a writer appending spans without charging — which `fail_at` did, making the ceiling neither bound it claimed |
-/// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, and the bytes of every argument a request **writes**, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; **`coerce_arguments`** per written argument, in front of draft §6.4.1's scan | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here |
+/// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive written on a selection and `condition_is_true` per argument written at a `@skip`/`@include` usage; **`coerce_arguments`** per written argument, in front of draft §6.4.1's scan, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — per position that reads one | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
 /// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the two retainers** — [`set_extensions`](Executor::set_extensions) and [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions), both of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too |
@@ -3635,8 +3635,9 @@ where
             limit,
           },
         );
-        // The one resource exit in this function. The three below are §6.4.1's own field errors,
-        // and telling them apart is the whole reason this returns a `Coercion` and not a `bool`.
+        // One of the two resource exits in this function — the other is the variable spelling's,
+        // below. The three §6.4.1 field errors further down are not resource exits, and telling
+        // them apart is the whole reason this returns a `Coercion` and not a `bool`.
         return Coercion::Refused { limit };
       }
     }
@@ -3669,7 +3670,38 @@ where
       let (variable, has_value, is_null) = match supplied.map(|argument| argument.value()) {
         None => (None, false, false),
         Some(InputValue::Variable(spelled)) => {
-          match variable_key(spelled.name().source().as_ref()) {
+          // **The value's own spelling, which the precharge above does not measure.**
+          //
+          // That charge is over `argument.name()` — the key §6.4.1 step 5's scan compares — and a
+          // variable written for it is a *second*, independent name the request chose. Every byte
+          // of it is read twice more: once by `variable_key`'s draft §2.1.9 pass, and once by the
+          // driver's lookup, which hashes or compares the whole key. Both run here, once per
+          // runtime position.
+          //
+          // So `a: $<L bytes>` over `P` list elements performed `P × L` bytes of work for about `P`
+          // units, and the ledger could not see it: measured at `P` = 4,096 with the schema
+          // declaring one argument, the smallest `max_selection_visits` that accepts the operation
+          // was **24,580 at every one of `L` = 1 k, 4 k, 16 k and 64 k** — 0.000 in the exponent —
+          // while the wall clock went 8.7 ms to 751 ms, 1.06 in the same one. Charged, the ledger
+          // reads 540,676 to 32,796,676 over that ladder, which is 0.99. A list child's arguments
+          // are written **once** in the document and the same node is re-read at every element, so
+          // the position count says nothing whatever about how much the client had to write. Draft
+          // §6.3's condition reads a variable the same way and is charged in
+          // `collect::condition_is_true`. al8n/smear#198.
+          let spelling = spelled.name().source().as_ref();
+          if !self.visits.take_bytes(spelling.len()) {
+            let limit = self.visits.limit();
+            self.fail(
+              slot,
+              Raw::ArgumentBudget {
+                parent: parent_type,
+                field: field_sym,
+                limit,
+              },
+            );
+            return Coercion::Refused { limit };
+          }
+          match variable_key(spelling) {
             // A variable *was* written, so this is step 5.d and not step 5.b: the outer `Some`
             // keeps the error `ArgumentVariableMissing` rather than `ArgumentMissing`, which is
             // the truthful one — the argument names a variable, and the variable has no value.

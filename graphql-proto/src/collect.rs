@@ -331,8 +331,10 @@ impl Visits {
 
   /// Charges `work` units **before** the work they pay for, answering whether there was room.
   ///
-  /// A selection examined is one unit, an entry a name lookup compares is one unit, and a
-  /// definition or fragment the index pass handles is one unit.
+  /// A selection examined is one unit, an entry a name lookup compares is one unit, a definition
+  /// or fragment the index pass handles is one unit, and so is a directive written on a selection
+  /// or an argument written at a `@skip`/`@include` usage — each of those is a name compared
+  /// against an ASCII literal, settled by its length before a byte is read.
   ///
   /// # Every caller charges first, and that is a property and not a convention
   ///
@@ -1934,7 +1936,7 @@ where
 
     match selection {
       Selection::Field(field) => {
-        if !included(field.directives(), ctx)? {
+        if !included(field.directives(), ctx, visits, *field.span())? {
           continue;
         }
         let spelling = match field.alias() {
@@ -2014,7 +2016,7 @@ where
         fields.push((group, field));
       }
       Selection::FragmentSpread(spread) => {
-        if !included(spread.directives(), ctx)? {
+        if !included(spread.directives(), ctx, visits, *spread.span())? {
           continue;
         }
         // Indexed here rather than at construction, and charged. A document whose fragments are
@@ -2042,7 +2044,7 @@ where
         stack.push((fragment.selection_set(), 0));
       }
       Selection::InlineFragment(inline) => {
-        if !included(inline.directives(), ctx)? {
+        if !included(inline.directives(), ctx, visits, *inline.span())? {
           continue;
         }
         if let Some(condition) = inline.type_condition() {
@@ -2083,7 +2085,26 @@ fn applies(schema: &Schema, condition: &[u8], object_type: TypeId) -> bool {
 /// so whatever `@include` says — and once step 3.a has removed it, step 3.b never runs, so
 /// `{ f @include(if: $unreadable) @skip(if: true) }` produces no error. Reading them in document
 /// order would raise one, and the reference implementation does not.
-fn included<'a, S, V>(directives: Option<&'a Directives<S>>, ctx: &mut V) -> Result<bool, Fault<'a>>
+///
+/// # The list is charged, because the two passes are over what the *request* wrote
+///
+/// A selection costs one unit however many directives it carries, and both passes walk all of them
+/// at every runtime position the selection is collected for. `{ bulk { f @skip(if: false) × 1600 }
+/// }` is one selection in the document and `positions × 1600` comparisons at execution: measured at
+/// 4,096 positions, taking the list from 100 to 1,600 moved the wall clock 2.0 ms to 30.5 ms and
+/// the ledger not at all; charged, it moves 843,780 to 13,131,780.
+///
+/// One unit per directive, not two, although the list is walked twice: the comparisons are
+/// length-first against an ASCII literal, so what the client chooses here is the **count**, and the
+/// two passes are a constant on it rather than a second factor. That is the distinction the
+/// ledger's table draws — a budget on one factor of a product is the defect; a budget off by a
+/// fixed two is a unit. al8n/smear#198.
+fn included<'a, S, V>(
+  directives: Option<&'a Directives<S>>,
+  ctx: &mut V,
+  visits: &mut Visits,
+  location: SimpleSpan,
+) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
@@ -2091,13 +2112,17 @@ where
   let Some(directives) = directives else {
     return Ok(true);
   };
-  for directive in directives.directives() {
-    if directive.name().source().as_ref() == b"skip" && condition_is_true(directive, ctx)? {
+  let written = directives.directives();
+  visits.spend(u32::try_from(written.len()).unwrap_or(u32::MAX), location)?;
+  for directive in written {
+    if directive.name().source().as_ref() == b"skip" && condition_is_true(directive, ctx, visits)? {
       return Ok(false);
     }
   }
-  for directive in directives.directives() {
-    if directive.name().source().as_ref() == b"include" && !condition_is_true(directive, ctx)? {
+  for directive in written {
+    if directive.name().source().as_ref() == b"include"
+      && !condition_is_true(directive, ctx, visits)?
+    {
       return Ok(false);
     }
   }
@@ -2239,17 +2264,31 @@ pub(super) fn name_key(spelling: &[u8]) -> Option<&str> {
 /// non-`Boolean` variable at the `Boolean!` location — or a driver whose §6.1 did not coerce, so
 /// no conforming request can tell the two apart; and of the two answers only this one is safe
 /// under both senses.
-fn condition_is_true<'a, S, V>(directive: &'a Directive<S>, ctx: &mut V) -> Result<bool, Fault<'a>>
+fn condition_is_true<'a, S, V>(
+  directive: &'a Directive<S>,
+  ctx: &mut V,
+  visits: &mut Visits,
+) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
 {
-  let argument = directive.arguments().and_then(|arguments| {
-    arguments
-      .arguments()
-      .iter()
-      .find(|argument| argument.name().source().as_ref() == b"if")
-  });
+  let written = directive
+    .arguments()
+    .map(|arguments| arguments.arguments())
+    .unwrap_or(&[]);
+  // The scan for `if` reads every argument the *request* wrote at this usage, and this runs once
+  // per runtime position the selection is collected for — so `@skip(a0: 1 … a1599: 1, if: false)`
+  // did 1,600 comparisons at every position for the one unit the selection cost. Charged in
+  // entries and not in bytes: a name compared against an ASCII literal is settled by its length
+  // first, so what the client chooses here is the count. al8n/smear#198.
+  visits.spend(
+    u32::try_from(written.len()).unwrap_or(u32::MAX),
+    *directive.span(),
+  )?;
+  let argument = written
+    .iter()
+    .find(|argument| argument.name().source().as_ref() == b"if");
   let Some(argument) = argument else {
     return Err(Fault {
       raw: Raw::DirectiveCondition {
@@ -2273,6 +2312,11 @@ where
       // Read once. Interning the name costs a scan of the name table, so it happens only on the
       // branch that needs it for a message.
       let spelling = spelled.name().source().as_ref();
+      // Draft §6.4.1 step 5.f's charge, at draft §6.3's site: `variable_key`'s §2.1.9 pass and the
+      // driver's lookup each read every byte of the spelling, once per runtime position, and a
+      // selection was one unit however long the name it names. `Executor::coerce_arguments` carries
+      // the measurement; the two readers of a variable spelling now charge alike.
+      visits.spend_bytes(spelling.len(), location)?;
       match variable_key(spelling).and_then(|name| ctx.variable(name)) {
         // The variable was not supplied, and that is the finding whether or not its spelling can
         // be quoted — so an arena with no room shortens the message and keeps the diagnosis. The
