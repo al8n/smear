@@ -53,11 +53,12 @@ fn the_oracle_agrees() {
 /// Rules with no case, each with the reason written down.
 ///
 /// A [`Rule`] belongs here only when the *oracle* cannot express it — not when writing the case is
-/// merely awkward. Both entries are this crate's resource policy over draft 5.3.2, which the
-/// specification leaves unbounded: a document that trips one is refused by smear and accepted by
-/// apollo, which has no such bound, so any case reaching one would be an
+/// merely awkward. All three entries are this crate's resource policy over rules the specification
+/// leaves unbounded: a document that trips one is refused by smear and accepted by apollo, which
+/// has no such bound, so any case reaching one would be an
 /// [`UndeclaredStricter`](Divergence::UndeclaredStricter) divergence rather than coverage. The
-/// bounds are gated where they can be: `smear/tests/validator_merge.rs` drives them directly.
+/// bounds are gated where they can be: `smear/tests/validator_merge.rs` drives the two merge ones
+/// directly and `smear/tests/validator_work.rs` drives the validation-wide one.
 ///
 /// The list is asserted **exactly**, so a rule that acquires a case must be deleted from here.
 const UNREACHABLE_BY_DIFFERENTIAL: &[(Rule, &str)] = &[
@@ -69,6 +70,12 @@ const UNREACHABLE_BY_DIFFERENTIAL: &[(Rule, &str)] = &[
   (
     Rule::MergeWorkBudget,
     "likewise a resource bound; the same argument as MergeDepthBudget",
+  ),
+  (
+    Rule::ValidationWorkBudget,
+    "likewise a resource bound, and the one this corpus is furthest from: it has no knob to \
+     lower, so the smallest case that would reach it is about sixty kilobytes of adversarial \
+     shape — and apollo would accept every byte of it",
   ),
 ];
 
@@ -380,8 +387,8 @@ fn the_whitelist_still_describes_apollo() {
 /// The list is asserted **exactly**: a rule that drops off it (the corpus grew a case that
 /// isolates it) fails just as loudly as a rule that joins it.
 ///
-/// Its two entries today are there for the *other* reason a rule can be invisible — no case
-/// reaches it at all — and both are the resource bounds
+/// Its three entries today are there for the *other* reason a rule can be invisible — no case
+/// reaches it at all — and all three are the resource bounds
 /// [`UNREACHABLE_BY_DIFFERENTIAL`] explains. That the two lists agree is a coincidence of the
 /// current corpus, not a derivation: a rule with a case can still be undetectable, which is what
 /// the paragraph above describes, so the two are asserted separately.
@@ -394,6 +401,11 @@ const UNDETECTABLE_LOSSES: &[(Rule, &str)] = &[
   (
     Rule::MergeWorkBudget,
     "likewise unreached; the same argument as MergeDepthBudget",
+  ),
+  (
+    Rule::ValidationWorkBudget,
+    "likewise unreached, and switching it off changes no verdict here for a second reason: every \
+     document in this corpus spends four figures of a ceiling of four million",
   ),
 ];
 

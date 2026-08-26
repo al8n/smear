@@ -159,12 +159,19 @@ fn executable_lossless_blocker(
   let mut sink = First::new();
   let verdict = validate_executable_lossless(schema, parse, query, scratch, budget, &mut sink);
   let recovery = match &verdict {
-    Ok(recovery) => *recovery,
+    Ok(recovery) => Some(*recovery),
     Err(invalid) => invalid.recovery(),
   };
 
-  if !recovery.is_complete() {
-    return Some(format!("the projection is partial ({recovery})"));
+  match recovery {
+    // The budget refused before the projection ran, so there is no AST for the doors to disagree
+    // about. Reported for the same reason a partial projection is: this comparison is only
+    // meaningful over a document both doors actually looked at.
+    None => return Some("the validation budget refused before the projection".to_owned()),
+    Some(recovery) if !recovery.is_complete() => {
+      return Some(format!("the projection is partial ({recovery})"));
+    }
+    Some(_) => {}
   }
   if verdict.is_ok() != syntactic_ok {
     return Some(format!(

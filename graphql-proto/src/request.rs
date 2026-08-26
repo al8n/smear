@@ -424,9 +424,12 @@ impl<'r, 'a, S, V> SourceField<'r, 'a, S, V> {
   /// The guarantee is [`FieldRequest::arguments`]', with one difference in what a failure means.
   /// Every argument §6.4.1 rejects as a whole has already refused the **subscription** — §6.2.3.1
   /// runs `CoerceArgumentValues` inside `CreateSourceEventStream`, where there is no execution
-  /// result for a field error to live in, so the refusal is
-  /// [`StartError::SourceFieldArguments`](super::StartError::SourceFieldArguments) and this value
-  /// does not exist.
+  /// result for a field error to live in, so the refusal is a [`StartError`](super::StartError)
+  /// and this value does not exist. Which one says who is at fault:
+  /// [`SourceFieldArguments`](super::StartError::SourceFieldArguments) for a request that does not
+  /// satisfy an argument the schema declares, and
+  /// [`SourceFieldArgumentBudget`](super::StartError::SourceFieldArgumentBudget), carrying the
+  /// ceiling, for a valid subscription whose written arguments ran the visit budget out.
   #[inline]
   pub const fn arguments(&self) -> &'r [Argument<'a, S, V>] {
     self.arguments

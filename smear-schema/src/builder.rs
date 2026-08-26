@@ -41,14 +41,15 @@ use smear_parser::graphql::{
   syntactic::{GraphqlLexer, type_system_document},
 };
 
+use self::declared::{Args, ArgsMut, Declared};
 use super::{
   builtin,
   error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
   literal::{BuiltInScalar, LiteralShape},
   repr::{
     DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
-    MAX_SYMBOLS, NameIndex, PackedType, Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags,
-    TypeId, TypeKind, is_name, is_reserved,
+    MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, NameIndex, PackedType, Range32,
+    RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_reserved,
   },
 };
 
@@ -221,6 +222,20 @@ enum DirectivesOf {
   DirectiveArgument { directive: usize, arg: usize },
 }
 
+/// What one declared argument list's three §3.6.1 rules are called.
+///
+/// A field's arguments and a directive definition's are the same three rules read twice, under six
+/// names: draft §3.6.1(2.1) uniqueness, (2.2) the reserved prefix and (2.4.2) "must be an input
+/// type". The caller supplies the names its half of the specification uses, and they travel as one
+/// value for the reason [`Blame`] does — three parameters that are always passed together are one
+/// parameter.
+#[derive(Debug, Clone, Copy)]
+struct ArgumentRules {
+  duplicate: SchemaErrorKind,
+  reserved: SchemaErrorKind,
+  not_input: SchemaErrorKind,
+}
+
 /// What a failing literal is reported as, in symbols rather than in text.
 #[derive(Debug, Clone, Copy)]
 struct Blame {
@@ -230,6 +245,478 @@ struct Blame {
   /// [`check_const_value`](SchemaBuilder::check_const_value).
   mismatch: SchemaErrorKind,
   document: u32,
+}
+
+/// The graph node a type reference reaches, dropped when the reference never resolved.
+///
+/// See [`SchemaBuilder::cyclic_directives`] for what the offset addresses.
+fn push_type(base: TypeId, first_type_node: u32, reaches: &mut Vec<u32>) {
+  if base != UNRESOLVED {
+    reaches.push(first_type_node + base.get());
+  }
+}
+
+/// The width at or below which a list finds its duplicates by scanning the names before them.
+///
+/// Sixty-four because that is where this crate has already measured the scan's quadratic term to
+/// sit below the per-list overhead around it — the widest permitted argument list built in 0.060
+/// ms, and one sixty-four-argument list was *cheaper* than sixty-four one-argument lists — and
+/// because it is [`MAX_FIELD_ARGUMENTS`], so a declared argument list, which a ceiling already
+/// holds at that width, never builds an index it could not need. al8n/smear#198.
+const NARROW_LIST: usize = 64;
+
+/// Which earlier position of a name list wrote the name at a given position.
+///
+/// # The shape this replaces
+///
+/// Every duplicate-name rule in draft §3 asks "was this name already written in this list", and
+/// the obvious way to answer it is to keep the names written so far and scan them:
+/// `seen.iter().find(|(sym, _)| *sym == name)`. That was written eight times in this file, and
+/// **one** of the eight has a ceiling on it — [`MAX_FIELD_ARGUMENTS`] and
+/// [`MAX_DIRECTIVE_ARGUMENTS`] hold a *declared* argument list at sixty-four. Nothing bounds a
+/// type's fields, its `implements` list, a union's members, an enum's values, an input object's
+/// fields, the directives written at one location, or the arguments written at one usage, so on
+/// each of those seven the scan is `Θ(list²)` over a width the document chooses.
+///
+/// A ceiling is the wrong instrument there, and it is the argument that chose one for the
+/// argument lists read the other way round: four-figure enum-value and field lists are ordinary
+/// in real schemas, so a number that refuses them refuses valid input. What is wrong is not the
+/// width, it is the cost per unit of width. Measured on `type Query` with N one-argument fields,
+/// `Schema::build` alone with the parse outside the clock: 0.639 ms at 1 k, 3.749 at 4 k, 44.128
+/// at 16 k and **585.305 at 64 k** — top-step exponent 1.86, against 127.577 ms for a control
+/// spreading the same declarations over N types with every list length one. al8n/smear#198.
+///
+/// # Sorted pairs, and why `first` is still the first
+///
+/// [`Duplicates::Index`] pairs every position with the name written there and sorts once. Sorting
+/// the *pair* orders equal names by ascending position, so the head of each run is the first
+/// occurrence rather than merely one of them, and the answer read back at position `p` is the
+/// same position the trail would have been holding when the walk reached `p`. That is what keeps
+/// the diagnostic still: [`SchemaBuilder::push_related`] relates a duplicate to the span of the
+/// **first** occurrence, and these rules report in source order, so an index that resolved `first`
+/// by whatever the sort put in front would move a blessed diagnostic while looking like a cost
+/// change.
+///
+/// # What it is not
+///
+/// **Not a hash map.** A `HashMap<Sym, u32>` per list allocates and hashes where an integer sort
+/// does neither, and the finished [`Schema`] deliberately holds no hash map at all — see
+/// [`Interner`], which is the one in the workspace and exists only while building.
+///
+/// **Not a table indexed by [`Sym`].** That is the shape `type_of_sym` and `directive_of_sym`
+/// already have here, it is `O(1)` rather than `O(list log list)`, and it does not survive the
+/// nesting: a field list is walked *around* its arguments' lists and a directive list around each
+/// usage's arguments, so one slot per symbol shared across a nested pair has the inner list erase
+/// the outer's record of the same name. A value per list is reentrant because there is nothing to
+/// share.
+///
+/// **Not more memory.** The trail it replaces recorded `(Sym, SimpleSpan)`, twenty-four bytes per
+/// name; this is eight bytes per position while the index is built and four while it is read. A
+/// position is a `u32` because everything this crate addresses is — [`Sym`] itself, [`Range32`],
+/// the flat tables `flatten` builds — so the width is the representation's and not a new one.
+enum Duplicates {
+  /// The names written so far and the position that wrote each, scanned in order.
+  Trail(Vec<(Sym, u32)>),
+  /// One entry per position: the position that first wrote that position's name, which is the
+  /// position itself when this is the first.
+  Index(Vec<u32>),
+}
+
+impl Duplicates {
+  /// Resolves one list, `name` addressing it by position.
+  ///
+  /// The accessor is read at most once per position and only on the wide path; a narrow list
+  /// never calls it.
+  fn over(len: usize, name: impl Fn(usize) -> Sym) -> Self {
+    if len <= NARROW_LIST {
+      return Self::Trail(Vec::with_capacity(len));
+    }
+
+    let mut order: Vec<(Sym, u32)> = (0..len).map(|at| (name(at), at as u32)).collect();
+    order.sort_unstable();
+
+    let mut first = vec![0u32; len];
+    let mut head = order[0];
+    first[head.1 as usize] = head.1;
+    for &entry in &order[1..] {
+      if entry.0 != head.0 {
+        head = entry;
+      }
+      first[entry.1 as usize] = head.1;
+    }
+    Self::Index(first)
+  }
+
+  /// Answers the earlier position that wrote `name`, or records this one as its first.
+  ///
+  /// Call it once per position, in source order, and only where the rule actually applies — a
+  /// repeatable directive is not recorded, exactly as the trail did not record one.
+  fn first(&mut self, position: usize, name: Sym) -> Option<usize> {
+    match self {
+      Self::Trail(trail) => match trail.iter().find(|(written, _)| *written == name) {
+        Some(&(_, at)) => Some(at as usize),
+        None => {
+          trail.push((name, position as u32));
+          None
+        }
+      },
+      Self::Index(first) => {
+        let at = first[position] as usize;
+        (at != position).then_some(at)
+      }
+    }
+  }
+}
+
+/// The position of a name in one type's field list, asked by a name from a *different* list.
+///
+/// # Why this is not [`Duplicates`], which is the neighbouring question
+///
+/// [`Duplicates`] is addressed by **position**: `first(position, name)` answers "did an earlier
+/// position of *this* list write this name", and its [`Duplicates::Index`] payload is one entry
+/// per position with the names already discarded. Draft §3.6.1's conformance pass asks the other
+/// question — "which position of the *implementor's* list wrote the name this *interface* field
+/// carries" — and the sorted pairs that built that payload are gone by the time it could be
+/// asked. So the type is not reusable here, and neither is its `Vec<u32>`.
+///
+/// # What it replaces
+///
+/// `model.types[index].fields.iter().position(..)`, restarted for every interface field. A valid
+/// interface and object with the same `N` fields in source order did `N(N+1)/2` symbol
+/// comparisons, and **nothing bounds a field list** — the argument [`NARROW_LIST`] already makes
+/// about enum values and fields is that four-figure lists are ordinary, so a ceiling here would
+/// refuse valid documents rather than bound the scan. Fitted at 1.83 in the exponent over
+/// 1 k–64 k and 2.00 over the top step of that ladder, 1.507 s at 64 k, on a document
+/// `Schema::build` **accepts**; 1.03 and 40 ms with the list indexed. al8n/smear#198.
+///
+/// # A table indexed by [`Sym`], which [`Duplicates`] rejected for a reason that is not this site's
+///
+/// That header rules the shape out because it "does not survive the nesting": a field list is
+/// walked *around* its arguments' lists, so one slot per symbol shared across a nested pair has
+/// the inner list erase the outer's record of the same name. This pass nests no second field
+/// index inside the first — it holds one implementor's list while reading interface *names* —
+/// so the condition that shape fails under is absent, and what is left is `O(1)` per lookup
+/// against the sorted index's `O(log N)`, over one table for the whole pass instead of one
+/// allocation per implementing type.
+///
+/// The table is put back rather than reallocated, and [`Positions::drop`] is what puts it back:
+/// a slot left set would answer the *next* type's lookup with a position in a list that type
+/// does not have, which is a wrong span on a diagnostic rather than a cost.
+///
+/// # If you change this, a fixture dump will not tell you
+///
+/// The first-occurrence rule below was proved by *planting its negation* — recording the last
+/// occurrence instead — and the twenty hand-written fixtures this branch had used twice, **wide
+/// ones written for exactly this property included**, came back byte-identical. A duplicate field
+/// name is benign for every rule here unless the two occurrences differ in a way some rule reads,
+/// and hand-picking a fixture that satisfies that is harder than it looks.
+///
+/// What caught it was four thousand *derived* schemas: 320 923 diagnostics across eighteen kinds,
+/// of which the plant moved 197 804 lines. So the instrument for a change here is a derived
+/// corpus diffed against the previous commit's binary, not a fixture list — and the plant is what
+/// says the corpus can see the change at all. al8n/smear#198.
+enum Positions<'f, 's> {
+  /// At or below [`NARROW_LIST`]: the scan, whose cost per lookup the ceiling on that constant is
+  /// what bounds, exactly as the argument lists' scan is bounded.
+  Scan(&'f [RawField]),
+  /// Past it: `Sym` to the first position of `fields` that wrote it, [`Positions::ABSENT`]
+  /// everywhere else, over a table sized to the whole symbol space.
+  Index {
+    fields: &'f [RawField],
+    of_sym: &'s mut [u32],
+  },
+}
+
+impl<'f, 's> Positions<'f, 's> {
+  /// No position wrote this name. Not a position a document can reach: a field needs bytes, a
+  /// span is a `u32`, so a list of `u32::MAX` fields does not fit in a document this crate can
+  /// address.
+  const ABSENT: u32 = u32::MAX;
+
+  /// Resolves one type's field list, borrowing the pass's table only when the list is wide
+  /// enough to want it. `symbols` is the interner's width, which is what the table is addressed
+  /// by; it is grown once, on the first wide list, and never for a schema that has none.
+  fn over(fields: &'f [RawField], symbols: usize, of_sym: &'s mut Vec<u32>) -> Self {
+    if fields.len() <= NARROW_LIST {
+      return Self::Scan(fields);
+    }
+    if of_sym.len() < symbols {
+      of_sym.resize(symbols, Self::ABSENT);
+    }
+    for (at, field) in fields.iter().enumerate() {
+      let slot = &mut of_sym[field.name.sym.get() as usize];
+      // First occurrence wins, which is what the scan answered. A type that writes one name twice
+      // is a `DuplicateFieldName` already, and the span every rule below blames is the first
+      // one's; letting the second overwrite it would move a blessed diagnostic while looking
+      // like a cost change.
+      if *slot == Self::ABSENT {
+        *slot = at as u32;
+      }
+    }
+    Self::Index { fields, of_sym }
+  }
+
+  /// The first position that wrote `name`, or `None`.
+  fn of(&self, name: Sym) -> Option<usize> {
+    match self {
+      Self::Scan(fields) => fields.iter().position(|field| field.name.sym == name),
+      Self::Index { of_sym, .. } => match of_sym[name.get() as usize] {
+        Self::ABSENT => None,
+        at => Some(at as usize),
+      },
+    }
+  }
+}
+
+impl Drop for Positions<'_, '_> {
+  /// Clears exactly the slots this list wrote, which is `O(fields)` and not `O(symbols)`.
+  fn drop(&mut self) {
+    let Self::Index { fields, of_sym } = self else {
+      return;
+    };
+    for field in *fields {
+      of_sym[field.name.sym.get() as usize] = Self::ABSENT;
+    }
+  }
+}
+
+/// The first position of a name in one **written** list — a literal's own entries — asked by names
+/// from the declaration the reader is walking at the same time.
+///
+/// # Why this is neither [`Duplicates`] nor [`Positions`], which are the two neighbours
+///
+/// [`Duplicates`] is addressed by **position** and its [`Duplicates::Index`] payload has discarded
+/// the names, so it cannot answer "which position of *this* list holds the name that *other* list
+/// carries" at all. [`Positions`] answers exactly that question, and its payload is one slot per
+/// [`Sym`] over the whole symbol space — the shape [`Duplicates`]'s header rules out because it
+/// "does not survive the nesting", and which [`Positions`] takes only because draft §3.6.1's
+/// conformance pass holds one implementor's list at a time and nests no second index inside it.
+///
+/// A value per list rather than a table, because what these index is a **literal**: its entries
+/// belong to the one node that wrote them, so there is nothing for a table to be keyed by. The
+/// *declaration* side is the half that is a function of a type, and [`DeclaredNames`] is that half
+/// — which is also where the nesting hazard went. [`Positions`]'s payload could not have served
+/// either: one slot per [`Sym`] over the whole symbol space is a `&mut` scratch, and the checks
+/// that read literals run over [`Model`], the read-only half that carries no scratch to clear.
+///
+/// So this is one value per list, made out of the sorted pairs [`Duplicates`] already uses, built
+/// where the list is read and dropped before the frame that read it returns.
+///
+/// # Sorting the pair, so `first` is still the first
+///
+/// Equal names order by ascending position, so the head of a run is the first occurrence and not
+/// merely one of them — which is the answer [`Iterator::find`] gave. A type that writes one input
+/// field twice is a `DuplicateInputFieldName` already, and a literal that writes one entry twice is
+/// checked against the same declaration both times; resolving either by whatever the sort put in
+/// front would move a blessed diagnostic while looking like a cost change.
+///
+/// # The switch is on the number of *asks*, not on the length of the list
+///
+/// [`Duplicates`] and [`Positions`] both switch on the list they index, because there those two
+/// numbers are the same one. Here they are not: `Q` lookups into a list of `D` names cost `Q × D`
+/// scanned and `D log D + Q log D` indexed, so the sort pays for itself once `Q` passes `log D` —
+/// and it *loses* on a wide declared list asked one question, which is an ordinary small literal
+/// offered to a wide input object. [`NARROW_LIST`] is the threshold on `Q` for the reason it is the
+/// threshold anywhere else: below it the scan costs a constant times the list, which is the walk
+/// the caller was making regardless.
+///
+/// # What it replaces
+///
+/// `fields.iter().any(..)`, restarted for every required field an input object declares — draft
+/// 5.6.4's SDL twin, `Θ(literal × required)` — and the same scan asked the other way round in
+/// [`SchemaBuilder::validate_input_object_default_cycles`], which reads one map node once per
+/// declared field. `input Wide` with `N` fields and one default writing those same `N` entries is
+/// `O(N)` of source, and both were `Θ(N²)` on it: 1.98 in the exponent over 1 k–64 k, 2.02 over the
+/// top step, **3.197 s** at 64 k — on a schema `Schema::build` **accepts**. Indexed, the ladder is
+/// 0.99 and **42 ms** at 64 k; read off a low end near one millisecond, so carried out to 256 k
+/// where the floor cannot be what is being measured: 1.12 over 64 k–256 k, 196 ms.
+///
+/// Draft 5.6.2's twin — `declared.iter().find(..)`, restarted for every field the literal writes —
+/// was the third, and is [`DeclaredNames`]'s: a scan over the *declaration* is a question one table
+/// per type answers for every literal at once, and a value per list answered it once per literal
+/// and once per nesting level.
+///
+/// That second reader is **gone**, and not because the index was slow. Asking a map node once per
+/// declared field is the shape whose count is a product, and no index makes a product linear:
+/// [`SchemaBuilder::validate_input_object_default_cycles`] now reads a literal the way
+/// [`SchemaBuilder::check_const_value`] reads one — entry first, resolved against the declaration
+/// through [`DeclaredNames`]. What is left here is the required-field pass, which asks one
+/// literal `Θ(required)` questions and is a value per list for the reason above. al8n/smear#198.
+enum Names {
+  /// At or below [`NARROW_LIST`] asks: the scan, whose per-lookup cost that ceiling is what bounds,
+  /// exactly as it bounds the declared argument lists'.
+  Scan,
+  /// Past it: `(name, position)` sorted once, so a lookup is a binary search.
+  Sorted(Vec<(Sym, u32)>),
+}
+
+impl Names {
+  /// Resolves one list of `len` positions, `name` addressing it, against the `asks` lookups that
+  /// are coming.
+  fn over(len: usize, asks: usize, name: impl Fn(usize) -> Sym) -> Self {
+    if asks <= NARROW_LIST {
+      return Self::Scan;
+    }
+    let mut order: Vec<(Sym, u32)> = (0..len).map(|at| (name(at), at as u32)).collect();
+    order.sort_unstable();
+    Self::Sorted(order)
+  }
+
+  /// The first position that wrote `wanted`, or `None`. `name` is the accessor `over` was given,
+  /// because the narrow arm stores nothing.
+  fn first(&self, len: usize, wanted: Sym, name: impl Fn(usize) -> Sym) -> Option<usize> {
+    match self {
+      Self::Scan => (0..len).find(|&at| name(at) == wanted),
+      Self::Sorted(order) => {
+        let at = order.partition_point(|&(written, _)| written < wanted);
+        match order.get(at) {
+          Some(&(written, position)) if written == wanted => Some(position as usize),
+          _ => None,
+        }
+      }
+    }
+  }
+}
+
+/// The first position of each name one **type declares** — an input object's fields, an enum's
+/// values — addressed by name, built at most once per type and shared by every literal offered to
+/// it.
+///
+/// # One slot per type, and a type declares one of these lists
+///
+/// [`RawType`] carries a list for every kind, but its `kind` is fixed before any of this runs —
+/// `apply_extensions` is finished by the time `validate` starts — and
+/// [`SchemaBuilder::check_const_value`] dispatches on that `kind`. So the two lists one slot may be
+/// asked about are never both asked about, and one `asks` count and one sort per type index cover
+/// both without a second table to resize and without a kind tag to keep them apart.
+///
+/// # Why the declared side is a table per type and the written side stays a value per list
+///
+/// [`Names`] is a value per list, and that is what made it correct for a nested literal — and also
+/// what made it a cost per level. [`SchemaBuilder::check_const_value`] recurses into a nested
+/// entry while the surrounding loop still needs the outer index, so a value built for the outer
+/// literal is *live* for the whole of the inner one, and one built for a sibling literal is built
+/// again from nothing. A directive default holding an `N`-deep literal of one `D`-wide input type,
+/// sixty-five fields per level with the recursive field first, therefore retained `Θ(N × D)` pairs
+/// and sorted `Θ(N × D log D)` of them on `Θ(N + D)` of SDL `Schema::build` **accepts** — and
+/// `Schema::build` carries no proof of a literal's depth, so a parser-bounded `N` still multiplies
+/// a large declaration by whatever that bound is, once per literal that reaches the type.
+///
+/// A declaration does not change while a literal is read, so the index a nested literal wants is
+/// the *same* index: it is a function of the type and not of the literal. One table keyed by type
+/// removes the rebuild and the retention together, which is what picks it over materialising each
+/// level's resolved fields and dropping the index before recursing — that removes only the
+/// retention, and leaves the sort per level standing.
+///
+/// A *written* list is not a function of any type, so there is nothing for a shared table to be
+/// keyed by, and [`Names`] stays what indexes one: the literal's own entries, asked by the names
+/// the declaration carries.
+///
+/// # The switch is on the asks this declaration has answered, not on one literal's
+///
+/// [`Names::over`] decides per literal, because a value per list knows nothing about the last one.
+/// A table does, and the two numbers it can compare are the right ones: `Q` lookups into a list of
+/// `D` names cost `Q × D` scanned and `D log D + Q log D` indexed, and `Q` is the number of asks
+/// this *declaration* has answered across the whole build rather than the width of whichever
+/// literal is asking now. So the sort is paid for once, by whichever ask crosses [`NARROW_LIST`],
+/// and a wide declaration asked one question by each of many small literals — the case a
+/// per-literal switch reads as narrow every time, and rescans in full every time — crosses it too.
+///
+/// What that costs before the index exists is at most [`NARROW_LIST`] scans of the declaration,
+/// which is the same constant times the same list the caller was walking regardless.
+///
+/// # What it replaces
+///
+/// `declared.iter().find(..)`, restarted for every field an input-object literal writes, and then
+/// [`Names::over`] rebuilt at every level and every sibling. The nested fixture above was 1.66 in
+/// the exponent over 16 k–64 k and 851 ms at 64 k, and is 1.03 and 20 ms.
+///
+/// And `enum_values.iter().any(..)`, restarted for every member an enum literal writes — the same
+/// mechanism a fourth time, in a spelling none of the three sweeps before it went looking for.
+/// `ok(p: [E] = [Vlast …M times])` in front of a `D`-value `enum E` is `Θ(M + D)` of SDL and was
+/// `Θ(M × D)` of build, on a default `Schema::build` **accepts**. The literal writes the LAST value
+/// because a scan reaching its answer at the first position hides the whole product.
+///
+/// **Swept on `M` and `D` independently, the product is invisible in the exponent**: with the other
+/// axis fixed at 4 000 the scan is 1.0 in the exponent over 1 k–128 k on both, because a fixed
+/// second factor is a constant. What it is worth is the constant — 314 ms at `M` = 128 k against
+/// 21 ms, 346 ms at `D` = 128 k against 54 ms — and the count, which is where a product shows:
+/// `M × D` declared slots examined, 512 000 000 at either end, against 1 843 232 and 10 562 912.
+/// Swept together at 1 k/4 k/16 k/64 k/128 k the exponent is the product's: **1.89** over the
+/// ladder and 1.98–2.15 over the top step, **10.1 s** and 16 384 000 000 slots examined at 128 k,
+/// against **1.05**, **78 ms** and 12 670 912. al8n/smear#198.
+#[derive(Debug, Default)]
+struct DeclaredNames {
+  /// One slot per type index, filled on demand.
+  of_type: Vec<Declaration>,
+}
+
+/// What one type's declared names have cost so far, and the index once one is paid for.
+#[derive(Debug, Default)]
+struct Declaration {
+  /// Asks this declaration has answered by scanning, across the whole build.
+  asks: u32,
+  /// `(name, position)` sorted once, so a lookup is a binary search.
+  order: Option<Vec<(Sym, u32)>>,
+}
+
+impl DeclaredNames {
+  /// The first position of `wanted` in `types[base]`'s declared input fields, or `None`.
+  fn first(&mut self, types: &[RawType], base: usize, wanted: Sym) -> Option<usize> {
+    let declared = &types[base].input_fields;
+    self.position(types.len(), base, declared, |field| field.name.sym, wanted)
+  }
+
+  /// Whether `types[base]` declares `wanted` among its enum values.
+  ///
+  /// The membership half of the same question, asked of the other list one slot may hold — see the
+  /// header for why one slot holds both.
+  fn has_enum_value(&mut self, types: &[RawType], base: usize, wanted: Sym) -> bool {
+    let declared = &types[base].enum_values;
+    self
+      .position(types.len(), base, declared, |value| value.name.sym, wanted)
+      .is_some()
+  }
+
+  /// The first position of `wanted` in `declared`, `types` being how many slots the table needs and
+  /// `name` how a position of `declared` is read.
+  ///
+  /// Sorted pairs order equal names by ascending position, so the head of a run is the first
+  /// occurrence and not merely one of them — the answer the scan it replaces gave, and the one a
+  /// type that declares a name twice needs, because moving it would move a blessed diagnostic
+  /// while looking like a cost change.
+  fn position<T>(
+    &mut self,
+    types: usize,
+    base: usize,
+    declared: &[T],
+    name: impl Fn(&T) -> Sym,
+    wanted: Sym,
+  ) -> Option<usize> {
+    if self.of_type.len() < types {
+      self.of_type.resize_with(types, Declaration::default);
+    }
+    let slot = &mut self.of_type[base];
+    if slot.order.is_none() {
+      if slot.asks < NARROW_LIST as u32 {
+        slot.asks += 1;
+        return declared.iter().position(|entry| name(entry) == wanted);
+      }
+      let mut sorted: Vec<(Sym, u32)> = declared
+        .iter()
+        .enumerate()
+        .map(|(at, entry)| (name(entry), at as u32))
+        .collect();
+      sorted.sort_unstable();
+      slot.order = Some(sorted);
+    }
+    let order = slot.order.as_ref().expect("the index was just filled");
+    let at = order.partition_point(|&(declared, _)| declared < wanted);
+    match order.get(at) {
+      Some(&(declared, position)) if declared == wanted => Some(position as usize),
+      _ => None,
+    }
+  }
 }
 
 /// A type reference whose base has been interned but not yet resolved.
@@ -339,12 +826,178 @@ impl RawInput {
   }
 }
 
+/// The declared argument list and the ceiling that decides who may read it.
+///
+/// A module of its own — inside this file, whose every other item is a sibling — because Rust's
+/// privacy is per module and the whole mechanism is the private field. `Declared`'s `Vec` is
+/// unreachable from the rest of `builder.rs`, so [`Declared::read`] is the only way to a
+/// `&[RawInput]` and there is no second way for a consumer to find.
+mod declared {
+  // `Vec` by name, because this module is `mod`-scoped and a prelude is not: the crate root aliases
+  // `alloc` to `std` under `no_std`, so the outer file's `use std::vec::Vec` is the only thing that
+  // resolves the name and an inner module does not inherit it. Without this, `smear-schema` with
+  // `build` and without `std` — a cell `cargo hack --each-feature` builds — is three `E0425`s, and
+  // it is what has kept both `build` and both `clippy` jobs red since this module landed.
+  use std::vec::Vec;
+
+  use super::RawInput;
+
+  /// A *declared* argument list — a field's or a directive definition's — held behind the ceiling
+  /// that decides whether reading it is bounded work.
+  ///
+  /// # What a reader cannot do
+  ///
+  /// There is no accessor that hands over the list. [`Declared::read`] answers with [`Args`],
+  /// whose two arms have to be destructured, and the over-limit arm carries nothing. A consumer
+  /// written next year by someone who has never heard of `MAX_FIELD_ARGUMENTS` cannot scan an
+  /// over-limit list by forgetting to check for one: forgetting does not compile.
+  ///
+  /// # Why the ceilings were not enough on their own
+  ///
+  /// Each of the two ceilings was first written as a `continue` in front of the one walk that had
+  /// been measured, and review then found the next consumer — twice, at two walks that were never
+  /// on that path. Every directive *usage* re-scanned the oversized declared list once per written
+  /// argument, `Θ(declared × written)`; interface conformance scanned both sides of an
+  /// over-limit field, `Θ(own × interface)`. A guard in front of one caller bounds one caller.
+  /// The list is what every caller has in common, so the guard belongs on the list, and the next
+  /// consumer meets it without anyone having remembered to put it there.
+  ///
+  /// # And what no reader can reach, because it is no longer here
+  ///
+  /// A gate on the read is still a gate on *readers*. `Declared` derives [`Clone`], and a derived
+  /// `Clone` copies the private field without asking [`Declared::read`] anything — so interface
+  /// conformance, which copies a whole `RawField` once per implementor *before* it reaches the
+  /// gate, performed `Θ(implementors × declared)` deep [`RawInput`] clones over a document of size
+  /// `O(implementors + declared)` and only then refused the schema. The ceiling kept the
+  /// diagnostics and lost the resource.
+  ///
+  /// So the refusal is a *state* rather than a comparison, decided in `Declared::from` and holding
+  /// nothing: `args` is `None`, and the `Vec` is dropped at the moment the length is first known.
+  /// There is no payload for `Clone` to copy, none for `Debug` to format, and none for a `Deref`,
+  /// a serialiser or an iterator adaptor written later to reach. The guarantee stops depending on
+  /// every reader remembering, on every derive having been audited, and on this module's boundary
+  /// holding against traits nobody has written yet.
+  ///
+  /// # Why at construction, and not later
+  ///
+  /// Both construction sites — [`SchemaBuilder::fields`](super::SchemaBuilder::fields) and
+  /// [`SchemaBuilder::directive_definition`](super::SchemaBuilder::directive_definition) — hand
+  /// over a list that is already whole, and nothing appends to one afterwards:
+  /// [`apply_extensions`](super::SchemaBuilder::apply_extensions) extends a type's *fields*,
+  /// never an existing field's arguments. The length at `from` is final, so refusing there means
+  /// no phase ever holds an over-limit payload, rather than one phase dropping what the phases
+  /// before it carried.
+  ///
+  /// Neither ceiling diagnostic needs anything from the payload to survive it. Both are built from
+  /// the *owner's* [`Located`](super::Located) — the field's name, the directive's name — which
+  /// lives beside this list and not in it, and neither message renders a count. Nothing had to be
+  /// captured on the way past.
+  ///
+  /// # Why the list is not truncated instead
+  ///
+  /// Cutting an over-limit list down to `CEILING` would bound every scan with no gate at all, and
+  /// it would **invent** diagnostics: an interface field whose arguments are cut to sixty-four
+  /// reports `MissingInterfaceFieldArgument` for arguments the document genuinely wrote. Dropping
+  /// the list whole is not that, and [`Args::Refused`] is the difference: a refused list answers
+  /// `Refused` and never "empty", so every consumer skips the entire check exactly as it did while
+  /// the payload was still there, and no diagnostic moves.
+  ///
+  /// # What the skipped work costs
+  ///
+  /// Nothing a caller can observe. `SchemaBuilder::finish` returns `Err` for any recorded error,
+  /// so a schema carrying `TooManyFieldArguments` or `TooManyDirectiveArguments` is never handed
+  /// out; every diagnostic a refused list suppresses is one about a document that is refused
+  /// already, for a reason the refusal names. al8n/smear#198.
+  #[derive(Debug, Clone)]
+  pub(super) struct Declared<const CEILING: u32> {
+    /// The declared arguments, or `None` — the ceiling refused this list and the arguments were
+    /// dropped where that was decided. The two states are not "long" and "short" but "may be read"
+    /// and "does not exist", which is why a field declaring no arguments at all is `Some(&[])`.
+    args: Option<Vec<RawInput>>,
+  }
+
+  /// What a [`Declared`] list answers when a reader asks for its arguments.
+  pub(super) enum Args<'a> {
+    /// At or below the ceiling: the scan the reader is about to do is the one the ceiling bounds.
+    Bounded(&'a [RawInput]),
+    /// Past it, and recorded as such. No list here, on purpose — the reader's very next line is
+    /// where the decision to skip has to be written.
+    Refused,
+  }
+
+  /// [`Args`] for the one pass that resolves the arguments in place.
+  pub(super) enum ArgsMut<'a> {
+    /// At or below the ceiling.
+    Bounded(&'a mut [RawInput]),
+    /// Past it.
+    Refused,
+  }
+
+  impl<const CEILING: u32> Declared<CEILING> {
+    /// Whether the ceiling refused this list — which is what the refusal site records the
+    /// diagnostic for. No other reader has to ask, because [`Declared::read`] asks on its behalf.
+    ///
+    /// A length comparison answered the same question one round ago and cannot answer it now:
+    /// there is no length left to compare, which is the whole of the repair.
+    pub(super) fn refused(&self) -> bool {
+      self.args.is_none()
+    }
+
+    /// The arguments, if the ceiling admits them.
+    pub(super) fn read(&self) -> Args<'_> {
+      match &self.args {
+        Some(args) => Args::Bounded(args),
+        None => Args::Refused,
+      }
+    }
+
+    /// The arguments to resolve in place, if the ceiling admits them.
+    pub(super) fn read_mut(&mut self) -> ArgsMut<'_> {
+      match &mut self.args {
+        Some(args) => ArgsMut::Bounded(args),
+        None => ArgsMut::Refused,
+      }
+    }
+  }
+
+  /// Where the ceiling is applied, and the only way a `Vec<RawInput>` becomes a `Declared`.
+  ///
+  /// The over-limit arm drops `args` instead of storing it. The copy a derived `Clone` would make,
+  /// the walk a reader would have done, and the bytes the list would have occupied for the rest of
+  /// the build are then work that does not exist, rather than work every consumer is trusted to
+  /// decline.
+  impl<const CEILING: u32> From<Vec<RawInput>> for Declared<CEILING> {
+    fn from(args: Vec<RawInput>) -> Self {
+      match args.len() > CEILING as usize {
+        false => Self { args: Some(args) },
+        true => Self { args: None },
+      }
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 struct RawField {
   name: Located,
   ty: RawTypeRef,
-  args: Vec<RawInput>,
+  args: Declared<MAX_FIELD_ARGUMENTS>,
   directives: Vec<RawDirectiveUse>,
+  /// Whether `@deprecated` is written on this field, decided once where the list is built.
+  ///
+  /// Draft `IsValidImplementation` 2.6 asks it of BOTH sides of every pair the conformance pass
+  /// forms, and [`is_deprecated`] answers by scanning a written directive list and comparing each
+  /// name's *text*. The pair count is the rule's own extent — an implementor's field against an
+  /// interface's, once each — but the scan is a third factor multiplying it, and nothing bounds a
+  /// field's directive list. `K` interfaces declaring one field, in front of one implementor whose
+  /// field carries `D` directives, asks the implementor's own list `K` times: `Θ(K + D)` of SDL,
+  /// `Θ(K × D)` of build — 1.77 in the exponent over 500–8 000 with `K = D`, 1.97 over the top
+  /// step and **299.5 ms** at 8 000, on a schema `Schema::build` **accepts**, against 0.78, 1.05
+  /// and **10.3 ms**.
+  ///
+  /// A bit on the field rather than a table beside the pass, because the answer is a property of
+  /// the declaration and not of the pair: an extension appends new fields and never edits one that
+  /// is already here, so what is decided at ingest is still true at conformance. al8n/smear#198.
+  deprecated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +1022,32 @@ struct RawType {
   directives: Vec<RawDirectiveUse>,
   /// The interface closure, filled in during validation.
   closure: Vec<u32>,
+  /// The resolved type index of each of [`members`](RawType::members), sorted, filled in during
+  /// validation beside the closure.
+  ///
+  /// Draft §3.6.1's covariance check asks "is this object a member of that union" once per field an
+  /// interface declares, and [`Model::is_sub_type`] answered it by scanning `members` and resolving
+  /// each entry's name. `Θ(interface fields × union members)`, with a ceiling on neither: a
+  /// `K`-member union behind `F` interface fields whose implementor names the LAST member is
+  /// `Θ(F + K)` of SDL and was `Θ(F × K)` of build — with `F = K`, 1.48 in the exponent over
+  /// 1 k–16 k, 1.81 over the top step and **156.6 ms** at 16 000, on a schema `Schema::build`
+  /// **accepts**, against 0.95 and **28.2 ms**. Sorted once per union, the answer is a binary
+  /// search.
+  ///
+  /// Empty for every other kind, and empty for a member that names nothing — which is the
+  /// `UndefinedUnionMember` refusal, and an answer of `false` either way.
+  sorted_members: Vec<u32>,
+  /// The positions of [`input_fields`](RawType::input_fields) that [`RawInput::is_required`]
+  /// answers `true` for, filled in during validation beside the closure.
+  ///
+  /// Draft 5.6.4's omitted half asks "which required field did this literal not write", once per
+  /// literal offered to this type, and the list is what makes the answer proportional to what it
+  /// reports instead of to the declaration. Sieving it at the literal is a walk over every declared
+  /// field for a type that may have no required field at all: `input Wide` with `N` fields and `N`
+  /// input objects defaulting to `{}` of it is `O(N)` of source, `Θ(N²)` of sieve — 1.97 in the
+  /// exponent over the top step of 1 k–16 k and **1.470 s** at 16 k, on a schema `Schema::build`
+  /// **accepts**. al8n/smear#198.
+  required_input_fields: Vec<u32>,
 }
 
 impl RawType {
@@ -385,6 +1064,8 @@ impl RawType {
       enum_values: Vec::new(),
       directives: Vec::new(),
       closure: Vec::new(),
+      sorted_members: Vec::new(),
+      required_input_fields: Vec::new(),
     }
   }
 }
@@ -392,7 +1073,7 @@ impl RawType {
 #[derive(Debug, Clone)]
 struct RawDirectiveDef {
   name: Located,
-  args: Vec<RawInput>,
+  args: Declared<MAX_DIRECTIVE_ARGUMENTS>,
   locations: DirectiveLocations,
   repeatable: bool,
   built_in: bool,
@@ -471,6 +1152,8 @@ const _: () = {
 struct Model<'a> {
   types: &'a [RawType],
   directives: &'a [RawDirectiveDef],
+  /// `Sym` to an index into `types`; `u32::MAX` for "not a type".
+  type_of_sym: &'a [u32],
   /// `Sym` to an index into `directives`; `u32::MAX` for "not a directive".
   directive_of_sym: &'a [u32],
   schema_directives: &'a [RawDirectiveUse],
@@ -486,17 +1169,86 @@ impl<'a> Model<'a> {
     render_owner(self.interner, at)
   }
 
+  fn type_index(&self, sym: Sym) -> Option<usize> {
+    index_of(self.type_of_sym, sym)
+  }
+
   fn directive_index(&self, sym: Sym) -> Option<usize> {
-    match self.directive_of_sym.get(sym.get() as usize) {
-      Some(&index) if index != u32::MAX => Some(index as usize),
-      _ => None,
+    index_of(self.directive_of_sym, sym)
+  }
+
+  /// Draft's `IsValidImplementationFieldType`.
+  fn is_valid_implementation_type(&self, field: PackedType, implemented: PackedType) -> bool {
+    if field.is_non_null() {
+      return self.is_valid_implementation_type(field.nullable(), implemented.nullable());
+    }
+    if let (Some(item), Some(implemented_item)) = (field.list_item(), implemented.list_item()) {
+      return self.is_valid_implementation_type(item, implemented_item);
+    }
+    if field == implemented {
+      return true;
+    }
+    if field.wrappers() != implemented.wrappers() {
+      return false;
+    }
+    self.is_sub_type(field.base_id(), implemented.base_id())
+  }
+
+  /// Whether `candidate` is one of `abstract_type`'s possible types, in the draft's wider sense:
+  /// union membership, or the interface closure — which, unlike the runtime possible-object
+  /// bitsets, includes interfaces implementing interfaces.
+  ///
+  /// # Both arms are searched, not scanned
+  ///
+  /// This runs once per field an interface declares, per type implementing it, and both
+  /// populations it consults are the document's. `members.iter().any(..)` and
+  /// `closure.contains(..)` were therefore two products, one per arm — see
+  /// [`RawType::sorted_members`] for the union half's numbers, and the closure half is the same
+  /// sentence about an object's interface list: `Θ(interface fields × closure)`, answered on the
+  /// first entry only when the interface asked about happens to sort first. `F` fields typed as the
+  /// LAST of a `K`-interface closure, `F = K`, is 1.18 in the exponent over 1 k–16 k, 1.34 over the
+  /// top step and 38.5 ms at 16 000, against 1.07, 1.14 and 26.6 ms.
+  ///
+  /// Both lists are already sorted where they are built — [`SchemaBuilder::compute_closures`] sorts
+  /// the closure, [`SchemaBuilder::index_union_members`] the members — so neither arm needed an
+  /// index built here, only a search instead of a walk.
+  fn is_sub_type(&self, candidate: TypeId, abstract_type: TypeId) -> bool {
+    if candidate == UNRESOLVED || abstract_type == UNRESOLVED {
+      return false;
+    }
+    let target = &self.types[abstract_type.get() as usize];
+    match target.kind {
+      TypeKind::Union => target
+        .sorted_members
+        .binary_search(&candidate.get())
+        .is_ok(),
+      TypeKind::Interface => self.types[candidate.get() as usize]
+        .closure
+        .binary_search(&abstract_type.get())
+        .is_ok(),
+      _ => false,
     }
   }
 
-  fn arguments(&self, at: ArgumentsOf) -> &'a [RawInput] {
+  fn render_type(&self, packed: PackedType) -> String {
+    struct Rendered<'a>(PackedType, &'a str);
+    impl core::fmt::Display for Rendered<'_> {
+      fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.write(f, self.1)
+      }
+    }
+    Rendered(packed, self.text(packed.base())).to_string()
+  }
+
+  /// One declared argument list, through the ceiling that decides whether it may be walked.
+  ///
+  /// The only reader of either list in this file, now that `SchemaBuilder` has no accessor of its
+  /// own: a `&mut self` pass reaches it through [`SchemaBuilder::split`], which is what the read
+  /// and write halves were separated for. See [`Declared`].
+  fn arguments(&self, at: ArgumentsOf) -> Args<'a> {
     match at {
-      ArgumentsOf::Field { ty, field } => &self.types[ty].fields[field].args,
-      ArgumentsOf::Directive { index } => &self.directives[index].args,
+      ArgumentsOf::Field { ty, field } => self.types[ty].fields[field].args.read(),
+      ArgumentsOf::Directive { index } => self.directives[index].args.read(),
     }
   }
 
@@ -505,13 +1257,24 @@ impl<'a> Model<'a> {
       DirectivesOf::Schema => self.schema_directives,
       DirectivesOf::Type { ty } => &self.types[ty].directives,
       DirectivesOf::Field { ty, field } => &self.types[ty].fields[field].directives,
+      // The two argument arms are the only ones whose list is behind a ceiling, and their
+      // `Refused` arm is unreachable: an `arg` position exists only because the loop that minted
+      // it read the same list through the gate and stopped when the gate refused. An empty list
+      // is what an unreachable arm should degrade to here — no directive to check, so nothing
+      // reported — rather than a diagnostic invented about a list nobody may look at.
       DirectivesOf::FieldArgument { ty, field, arg } => {
-        &self.types[ty].fields[field].args[arg].directives
+        match self.types[ty].fields[field].args.read() {
+          Args::Bounded(args) => &args[arg].directives,
+          Args::Refused => &[],
+        }
       }
       DirectivesOf::InputField { ty, field } => &self.types[ty].input_fields[field].directives,
       DirectivesOf::EnumValue { ty, value } => &self.types[ty].enum_values[value].directives,
       DirectivesOf::DirectiveArgument { directive, arg } => {
-        &self.directives[directive].args[arg].directives
+        match self.directives[directive].args.read() {
+          Args::Bounded(args) => &args[arg].directives,
+          Args::Refused => &[],
+        }
       }
     }
   }
@@ -541,6 +1304,30 @@ fn render_owner(interner: &Interner, at: Coordinate) -> String {
     Some(directive) => directive_coordinate(&path, interner.text(directive)),
     None => path,
   }
+}
+
+/// A `Sym` to the index of what it names, over a table that spells "nothing" as `u32::MAX`.
+///
+/// One body and four callers: [`SchemaBuilder`] and [`Model`] each ask it about types and about
+/// directives. Written once because two halves of the same builder answering the same question
+/// differently is a defect no test would name — and because the fourth copy of a four-line
+/// predicate is where that starts.
+fn index_of(table: &[u32], sym: Sym) -> Option<usize> {
+  match table.get(sym.get() as usize) {
+    Some(&index) if index != u32::MAX => Some(index as usize),
+    _ => None,
+  }
+}
+
+/// Whether `@deprecated` is applied in this directive list.
+///
+/// A free function over the arena rather than a method, because both halves of
+/// [`SchemaBuilder::split`] ask it: the read half while walking a list it is holding, and the
+/// `&mut self` passes while walking one they re-address.
+fn is_deprecated(interner: &Interner, directives: &[RawDirectiveUse]) -> bool {
+  directives
+    .iter()
+    .any(|used| interner.text(used.name.sym) == DEPRECATED)
 }
 
 fn push_owned(
@@ -618,6 +1405,9 @@ pub struct SchemaBuilder {
   extensions: Vec<RawExtension>,
   errors: Vec<SchemaError>,
   document: u32,
+  /// One lookup index per input object, shared by every literal validation. Empty until a
+  /// declaration is asked; see [`DeclaredNames`].
+  declared_names: DeclaredNames,
 }
 
 impl SchemaBuilder {
@@ -691,15 +1481,27 @@ impl SchemaBuilder {
 
   /// The read side and the write side, borrowed apart. See [`Model`].
   fn split(&mut self) -> (Model<'_>, &mut Vec<SchemaError>) {
+    let (model, errors, _) = self.split_indexed();
+    (model, errors)
+  }
+
+  /// [`split`](SchemaBuilder::split), with the literal-checking index as a third disjoint borrow.
+  ///
+  /// A third field borrow rather than a local, because the index is a function of the declarations
+  /// alone: the checks that read literals are reached from four `&mut self` passes, and an index
+  /// per pass would sort one declaration once for each of them. See [`DeclaredNames`].
+  fn split_indexed(&mut self) -> (Model<'_>, &mut Vec<SchemaError>, &mut DeclaredNames) {
     (
       Model {
         types: &self.types,
         directives: &self.directives,
+        type_of_sym: &self.type_of_sym,
         directive_of_sym: &self.directive_of_sym,
         schema_directives: &self.schema_directives,
         interner: &self.interner,
       },
       &mut self.errors,
+      &mut self.declared_names,
     )
   }
 
@@ -791,10 +1593,7 @@ impl SchemaBuilder {
   }
 
   fn type_index(&self, sym: Sym) -> Option<usize> {
-    match self.type_of_sym.get(sym.get() as usize) {
-      Some(&index) if index != u32::MAX => Some(index as usize),
-      _ => None,
-    }
+    index_of(&self.type_of_sym, sym)
   }
 
   fn set_type_index(&mut self, sym: Sym, index: u32) {
@@ -806,10 +1605,7 @@ impl SchemaBuilder {
   }
 
   fn directive_index(&self, sym: Sym) -> Option<usize> {
-    match self.directive_of_sym.get(sym.get() as usize) {
-      Some(&index) if index != u32::MAX => Some(index as usize),
-      _ => None,
-    }
+    index_of(&self.directive_of_sym, sym)
   }
 
   fn set_directive_index(&mut self, sym: Sym, index: u32) {
@@ -923,7 +1719,7 @@ impl SchemaBuilder {
     self.set_directive_index(name.sym, index);
     self.directives.push(RawDirectiveDef {
       name,
-      args,
+      args: args.into(),
       locations,
       repeatable,
       built_in,
@@ -1127,11 +1923,13 @@ impl SchemaBuilder {
         };
         let directives =
           self.directive_uses(field.directives(), DirectiveLocation::FieldDefinition);
+        let deprecated = is_deprecated(&self.interner, &directives);
         RawField {
           name,
           ty,
-          args,
+          args: args.into(),
           directives,
+          deprecated,
         }
       })
       .collect()
@@ -1507,6 +2305,8 @@ impl SchemaBuilder {
     self.resolve_roots();
     self.resolve_type_refs();
     self.compute_closures();
+    self.index_union_members();
+    self.collect_required_input_fields();
     self.validate_types();
     self.validate_directive_definitions();
     self.validate_directive_usages();
@@ -1610,15 +2410,21 @@ impl SchemaBuilder {
           &mut unresolved,
           &mut too_deep,
         );
-        for arg in 0..self.types[index].fields[field].args.len() {
-          let path = path.then(self.types[index].fields[field].args[arg].name.sym);
-          Self::resolve_one(
-            &self.type_of_sym,
-            &mut self.types[index].fields[field].args[arg].ty,
-            path,
-            &mut unresolved,
-            &mut too_deep,
-          );
+        // A refused list is not resolved, for the reason no later pass reads one: the field is
+        // already refused, `finish` will not hand the schema out, and an `UndefinedType` naming
+        // an argument of a field nobody may declare is a diagnostic about the wrong defect. See
+        // [`Declared`].
+        if let ArgsMut::Bounded(args) = self.types[index].fields[field].args.read_mut() {
+          for arg in args {
+            let path = path.then(arg.name.sym);
+            Self::resolve_one(
+              &self.type_of_sym,
+              &mut arg.ty,
+              path,
+              &mut unresolved,
+              &mut too_deep,
+            );
+          }
         }
       }
 
@@ -1636,15 +2442,17 @@ impl SchemaBuilder {
 
     for index in 0..self.directives.len() {
       let owner = Coordinate::named(self.directives[index].name.sym);
-      for arg in 0..self.directives[index].args.len() {
-        let path = owner.then(self.directives[index].args[arg].name.sym);
-        Self::resolve_one(
-          &self.type_of_sym,
-          &mut self.directives[index].args[arg].ty,
-          path,
-          &mut unresolved,
-          &mut too_deep,
-        );
+      if let ArgsMut::Bounded(args) = self.directives[index].args.read_mut() {
+        for arg in args {
+          let path = owner.then(arg.name.sym);
+          Self::resolve_one(
+            &self.type_of_sym,
+            &mut arg.ty,
+            path,
+            &mut unresolved,
+            &mut too_deep,
+          );
+        }
       }
     }
 
@@ -1686,11 +2494,32 @@ impl SchemaBuilder {
   }
 
   /// Fills every type's interface closure, reporting interfaces that implement themselves.
+  ///
+  /// # The membership mark, and why `contains` was the same product a fourth time
+  ///
+  /// The walk below is a depth-first traversal that must not visit a node twice, and "have I got
+  /// this one already" was asked by scanning the closure built so far — `Θ(popped × closure)`,
+  /// with a ceiling on neither. `type T implements I0 & … & I{K-1}` in front of `K` interfaces that
+  /// implement nothing is `Θ(K)` of SDL, `Θ(K²)` of walk, and a schema `Schema::build` **accepts**:
+  /// 2.15 in the exponent over 2 k–4 k and 16.0 ms at `K` = 4 000, of which the traversal is the
+  /// term that grows.
+  ///
+  /// One `bool` per type index answers it in `O(1)`, and the marks are cleared by walking the
+  /// closure this type just built rather than the table — `O(closure)`, not `O(types)`, which is
+  /// what lets one table serve every type in the schema. It is the shape [`Positions`] takes for
+  /// the same reason, minus the reentrancy question: this walk nests no second closure inside the
+  /// one it is building. Lazily grown, so a schema whose types implement nothing never allocates
+  /// it. The closure is pushed in the traversal order it was pushed in and sorted exactly where it
+  /// was sorted, so what a later pass reads is unchanged. al8n/smear#198.
   fn compute_closures(&mut self) {
     let count = self.types.len();
+    let mut member: Vec<bool> = Vec::new();
     for index in 0..count {
       if self.types[index].implements.is_empty() {
         continue;
+      }
+      if member.len() < count {
+        member.resize(count, false);
       }
       let mut closure: Vec<u32> = Vec::new();
       let mut stack: Vec<u32> = Vec::new();
@@ -1700,15 +2529,19 @@ impl SchemaBuilder {
         }
       }
       while let Some(next) = stack.pop() {
-        if closure.contains(&next) {
+        if member[next as usize] {
           continue;
         }
+        member[next as usize] = true;
         closure.push(next);
         for declared in &self.types[next as usize].implements {
           if let Some(target) = self.type_index(declared.sym) {
             stack.push(target as u32);
           }
         }
+      }
+      for &id in &closure {
+        member[id as usize] = false;
       }
       closure.sort_unstable();
       self.types[index].closure = closure;
@@ -1725,6 +2558,50 @@ impl SchemaBuilder {
         // Break the cycle so nothing downstream walks it.
         self.types[index].closure.retain(|id| *id != index as u32);
       }
+    }
+  }
+
+  /// Fills [`RawType::sorted_members`], one pass over the members the whole schema declares.
+  ///
+  /// Here rather than at ingest because an `extend union` appends to `members` after the definition
+  /// was read, and after [`SchemaBuilder::resolve_type_refs`] because it is the resolved index that
+  /// is stored. Nothing it reads changes during validation.
+  fn index_union_members(&mut self) {
+    for index in 0..self.types.len() {
+      if self.types[index].kind != TypeKind::Union {
+        continue;
+      }
+      let mut sorted: Vec<u32> = self.types[index]
+        .members
+        .iter()
+        .filter_map(|member| self.type_index(member.sym).map(|at| at as u32))
+        .collect();
+      sorted.sort_unstable();
+      self.types[index].sorted_members = sorted;
+    }
+  }
+
+  /// Fills [`RawType::required_input_fields`], one pass over the input fields the whole schema
+  /// declares.
+  ///
+  /// Here rather than at ingest because an `extend input` appends to `input_fields` after the
+  /// definition was read, and here rather than at the literal because the literal is the site the
+  /// field exists to keep proportional. Nothing it reads changes during validation:
+  /// [`RawInput::is_required`] is a `Non-Null` wrapper and a `DefaultKind`, both fixed when the
+  /// declaration was ingested.
+  fn collect_required_input_fields(&mut self) {
+    for index in 0..self.types.len() {
+      if self.types[index].kind != TypeKind::InputObject {
+        continue;
+      }
+      let required: Vec<u32> = self.types[index]
+        .input_fields
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.is_required())
+        .map(|(at, _)| at as u32)
+        .collect();
+      self.types[index].required_input_fields = required;
     }
   }
 
@@ -1769,13 +2646,6 @@ impl SchemaBuilder {
       .any(|used| self.text(used.name.sym) == name)
   }
 
-  /// Whether `@deprecated` is applied in this directive list.
-  fn is_deprecated(&self, directives: &[RawDirectiveUse]) -> bool {
-    directives
-      .iter()
-      .any(|used| self.text(used.name.sym) == DEPRECATED)
-  }
-
   fn validate_fields(&mut self, index: usize, owner: Coordinate) {
     if self.types[index].fields.is_empty() {
       let at = self.types[index].name;
@@ -1784,12 +2654,15 @@ impl SchemaBuilder {
       return;
     }
 
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].fields.len(), |at| {
+      self.types[index].fields[at].name.sym
+    });
     for field in 0..self.types[index].fields.len() {
       let at = self.types[index].fields[field].name;
       let path = owner.then(at.sym);
 
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
+      if let Some(earlier) = seen.first(field, at.sym) {
+        let first = self.types[index].fields[earlier].name.span;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -1799,8 +2672,6 @@ impl SchemaBuilder {
           at,
           first,
         );
-      } else {
-        seen.push((at.sym, at.span));
       }
 
       if !self.types[index].built_in && is_reserved(self.text(at.sym).as_bytes()) {
@@ -1825,78 +2696,117 @@ impl SchemaBuilder {
         );
       }
 
+      // Draft §6.4.1 `CoerceArgumentValues` iterates this whole list at every runtime position of
+      // the field, so `positions × declared` is a product an executor meets once per response. It
+      // can charge the positions — they are the driver's — and it cannot charge `declared` without
+      // billing a request for the service's own design-time width. So the deployment's factor is
+      // bounded where the deployment writes it. See `MAX_FIELD_ARGUMENTS`. al8n/smear#198.
+      //
+      // The refusal is RECORDED here and ENFORCED by [`Declared`], and that split is what
+      // distinguishes this from the two shapes that came before it. Ordering the check in front of
+      // the argument walk settled only the diagnostics — a field a thousand arguments wide would
+      // otherwise report a thousand argument diagnostics ahead of the one saying why the field is
+      // refused. Adding a `continue` bounded the one walk the check stood in front of. Review then
+      // found two more walks it did not stand in front of at all: a directive usage's scan of its
+      // definition's declared list, and interface conformance's scan of both sides of a field.
+      // A guard in front of one caller bounds one caller.
+      //
+      // So there is no `continue` here any more. Below this line the list is reached only through
+      // `Declared::read`, which hands an over-limit list to nobody — this pass included, and a
+      // pass written next year included, without either having been told about the ceiling.
+      //
+      // And the list is gone by the time this asks. `Declared::from` decided the refusal and
+      // dropped the arguments; what survives to here is the state, plus the field's own name and
+      // span, which is all either half of this diagnostic ever read.
+      if self.types[index].fields[field].args.refused() {
+        let name = self.text(at.sym).to_owned();
+        let owner = self.owner(owner);
+        self.push_owned(SchemaErrorKind::TooManyFieldArguments, &name, owner, at);
+      }
+
       let built_in = self.types[index].built_in;
-      self.validate_arguments(
+      let (model, errors, names) = self.split_indexed();
+      Self::validate_arguments(
+        model,
+        errors,
+        names,
         ArgumentsOf::Field { ty: index, field },
         path,
         built_in,
-        SchemaErrorKind::DuplicateArgumentName,
-        SchemaErrorKind::ReservedArgumentName,
-        SchemaErrorKind::ArgumentTypeNotInputType,
+        ArgumentRules {
+          duplicate: SchemaErrorKind::DuplicateArgumentName,
+          reserved: SchemaErrorKind::ReservedArgumentName,
+          not_input: SchemaErrorKind::ArgumentTypeNotInputType,
+        },
       );
     }
   }
 
-  /// One input-value list, addressed rather than borrowed.
+  /// One declared argument list, against the §3.6.1 rules that read the arguments themselves.
   ///
-  /// `&self.types[…].args` cannot be held across a `self.push*`, and the list is walked far more
-  /// often than it is reported on — every argument of every field of every type, built-ins
-  /// included — so it is re-addressed per item rather than copied once per list. See [`Model`].
-  fn arguments(&self, at: ArgumentsOf) -> &[RawInput] {
-    match at {
-      ArgumentsOf::Field { ty, field } => &self.types[ty].fields[field].args,
-      ArgumentsOf::Directive { index } => &self.directives[index].args,
-    }
-  }
-
+  /// Over a [`Model`] and the error list rather than `&mut self`, which is what lets the gated
+  /// list be read **once** and held for the whole walk: every rule below reports through `errors`,
+  /// the half [`SchemaBuilder::split`] keeps disjoint from the half the list lives in. The shape
+  /// this replaces re-addressed the list at each of seven reads, because a `&self.types[…].args`
+  /// could not survive a `self.push*` — and each of those reads would now be a separate encounter
+  /// with the gate, saying seven times what the first `let` says once.
   fn validate_arguments(
-    &mut self,
+    model: Model<'_>,
+    errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     args: ArgumentsOf,
     owner: Coordinate,
     built_in: bool,
-    duplicate: SchemaErrorKind,
-    reserved: SchemaErrorKind,
-    not_input: SchemaErrorKind,
+    rules: ArgumentRules,
   ) {
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
-    for index in 0..self.arguments(args).len() {
-      let arg = &self.arguments(args)[index];
-      let at = arg.name;
-      let ty = arg.ty;
-      let required = arg.is_required();
+    // The gate, and the whole of the bound on this pass. Its caller records the refusal; nothing
+    // here needs to know that, because a refused list hands out no arguments to walk. `Duplicates`
+    // is the scan the previous round kept, and this is the one §3 list a ceiling holds at
+    // sixty-four — written through the shared type all the same, because a copy of the shape kept
+    // because a ceiling happens to hold this one list today is the copy the next ceiling change
+    // re-opens.
+    let Args::Bounded(declared) = model.arguments(args) else {
+      return;
+    };
 
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
-        let name = self.text(at.sym).to_owned();
-        let owner = self.owner(owner);
-        self.push_related(duplicate, &name, Some(owner), at, first);
-      } else {
-        seen.push((at.sym, at.span));
+    let mut seen = Duplicates::over(declared.len(), |at| declared[at].name.sym);
+    for (index, argument) in declared.iter().enumerate() {
+      let at = argument.name;
+      let ty = argument.ty;
+      let required = argument.is_required();
+
+      if let Some(earlier) = seen.first(index, at.sym) {
+        let first = declared[earlier].name.span;
+        let name = model.text(at.sym).to_owned();
+        let owner = model.owner(owner);
+        push_related(errors, rules.duplicate, &name, Some(owner), at, first);
       }
 
-      if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
-        let name = self.text(at.sym).to_owned();
-        let owner = self.owner(owner);
-        self.push_owned(reserved, &name, owner, at);
+      if !built_in && is_reserved(model.text(at.sym).as_bytes()) {
+        let name = model.text(at.sym).to_owned();
+        let owner = model.owner(owner);
+        push_owned(errors, rules.reserved, &name, owner, at);
       }
 
       let base = ty.packed.base_id();
-      if base != UNRESOLVED && !self.types[base.get() as usize].kind.is_input() {
-        let subject = self
-          .text(self.types[base.get() as usize].name.sym)
+      if base != UNRESOLVED && !model.types[base.get() as usize].kind.is_input() {
+        let subject = model
+          .text(model.types[base.get() as usize].name.sym)
           .to_owned();
-        let path = self.owner(owner.then(at.sym));
+        let path = model.owner(owner.then(at.sym));
         let mut where_ = at;
         where_.span = ty.span;
-        self.push_owned(not_input, &subject, path, where_);
+        push_owned(errors, rules.not_input, &subject, path, where_);
       }
 
       // Draft §3.6.1(2.4.4.1): "if argument type is Non-Null and a default value is not defined,
       // the `@deprecated` directive must not be applied to this argument" — which is exactly
       // `is_required`.
-      if required && self.is_deprecated(&self.arguments(args)[index].directives) {
-        let name = self.text(at.sym).to_owned();
-        let owner = self.owner(owner);
-        self.push_owned(
+      if required && is_deprecated(model.interner, &argument.directives) {
+        let name = model.text(at.sym).to_owned();
+        let owner = model.owner(owner);
+        push_owned(
+          errors,
           SchemaErrorKind::DeprecatedRequiredArgument,
           &name,
           owner,
@@ -1907,15 +2817,11 @@ impl SchemaBuilder {
       // Draft §3.6.1(2.4.5): "if the argument has a default value it must be compatible with
       // `argumentType` as per the coercion rules for that type" — the same coercion procedure a
       // directive argument's *supplied* value goes through, so the two cannot answer differently.
-      if self.arguments(args)[index].default_value.is_some() {
-        let (model, errors) = self.split();
-        let default = model.arguments(args)[index]
-          .default_value
-          .as_ref()
-          .expect("just observed to be present");
+      if let Some(default) = argument.default_value.as_ref() {
         Self::check_const_value(
           model,
           errors,
+          names,
           default,
           ty.packed,
           Blame {
@@ -1930,10 +2836,13 @@ impl SchemaBuilder {
   }
 
   fn validate_implements(&mut self, index: usize, owner: Coordinate) {
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].implements.len(), |at| {
+      self.types[index].implements[at].sym
+    });
     for position in 0..self.types[index].implements.len() {
       let declared = self.types[index].implements[position];
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == declared.sym).copied() {
+      if let Some(earlier) = seen.first(position, declared.sym) {
+        let first = self.types[index].implements[earlier].span;
         let name = self.text(declared.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -1945,7 +2854,6 @@ impl SchemaBuilder {
         );
         continue;
       }
-      seen.push((declared.sym, declared.span));
 
       let kind = match self.type_index(declared.sym) {
         None => Some(SchemaErrorKind::UndefinedImplementsInterface),
@@ -1969,10 +2877,13 @@ impl SchemaBuilder {
       self.push(SchemaErrorKind::EmptyUnionMembers, &subject, at);
       return;
     }
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].members.len(), |at| {
+      self.types[index].members[at].sym
+    });
     for position in 0..self.types[index].members.len() {
       let member = self.types[index].members[position];
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == member.sym).copied() {
+      if let Some(earlier) = seen.first(position, member.sym) {
+        let first = self.types[index].members[earlier].span;
         let name = self.text(member.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -1984,7 +2895,6 @@ impl SchemaBuilder {
         );
         continue;
       }
-      seen.push((member.sym, member.span));
 
       let kind = match self.type_index(member.sym) {
         None => Some(SchemaErrorKind::UndefinedUnionMember),
@@ -2009,10 +2919,13 @@ impl SchemaBuilder {
       return;
     }
     let built_in = self.types[index].built_in;
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].enum_values.len(), |at| {
+      self.types[index].enum_values[at].name.sym
+    });
     for position in 0..self.types[index].enum_values.len() {
       let value = self.types[index].enum_values[position].name;
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == value.sym).copied() {
+      if let Some(earlier) = seen.first(position, value.sym) {
+        let first = self.types[index].enum_values[earlier].name.span;
         let name = self.text(value.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -2022,8 +2935,6 @@ impl SchemaBuilder {
           value,
           first,
         );
-      } else {
-        seen.push((value.sym, value.span));
       }
       if !built_in && is_reserved(self.text(value.sym).as_bytes()) {
         let name = self.text(value.sym).to_owned();
@@ -2041,7 +2952,9 @@ impl SchemaBuilder {
       return;
     }
     let built_in = self.types[index].built_in;
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(self.types[index].input_fields.len(), |at| {
+      self.types[index].input_fields[at].name.sym
+    });
     for position in 0..self.types[index].input_fields.len() {
       let field = &self.types[index].input_fields[position];
       let at = field.name;
@@ -2049,7 +2962,8 @@ impl SchemaBuilder {
       let required = field.is_required();
       let has_default = field.default.is_present();
 
-      if let Some((_, first)) = seen.iter().find(|(sym, _)| *sym == at.sym).copied() {
+      if let Some(earlier) = seen.first(position, at.sym) {
+        let first = self.types[index].input_fields[earlier].name.span;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -2059,8 +2973,6 @@ impl SchemaBuilder {
           at,
           first,
         );
-      } else {
-        seen.push((at.sym, at.span));
       }
 
       if !built_in && is_reserved(self.text(at.sym).as_bytes()) {
@@ -2086,7 +2998,12 @@ impl SchemaBuilder {
       }
 
       // Draft §3.10.1(2.4.1), the input-field twin of §3.6.1(2.4.4.1).
-      if required && self.is_deprecated(&self.types[index].input_fields[position].directives) {
+      if required
+        && is_deprecated(
+          &self.interner,
+          &self.types[index].input_fields[position].directives,
+        )
+      {
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_owned(
@@ -2106,7 +3023,7 @@ impl SchemaBuilder {
         .default_value
         .is_some()
       {
-        let (model, errors) = self.split();
+        let (model, errors, names) = self.split_indexed();
         let default = model.types[index].input_fields[position]
           .default_value
           .as_ref()
@@ -2114,6 +3031,7 @@ impl SchemaBuilder {
         Self::check_const_value(
           model,
           errors,
+          names,
           default,
           ty.packed,
           Blame {
@@ -2150,13 +3068,31 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::ReservedDirectiveName, &name, at);
       }
 
-      self.validate_arguments(
+      // The second population of the same list, refused the same way and enforced by the same
+      // gate. A directive definition's arguments go through `validate_arguments` exactly as a
+      // field's do; and the width is read again at every usage a document writes, which is the
+      // product `MAX_DIRECTIVE_ARGUMENTS` states and the scan review found second. The field
+      // ceiling did not reach here — one constant enforced at one site — which is the shape
+      // [`Declared`] retires: the ceiling now travels with the list rather than with the site,
+      // and past it the list is not carried at all. al8n/smear#198.
+      if self.directives[index].args.refused() {
+        let name = self.text(at.sym).to_owned();
+        self.push(SchemaErrorKind::TooManyDirectiveArguments, &name, at);
+      }
+
+      let (model, errors, names) = self.split_indexed();
+      Self::validate_arguments(
+        model,
+        errors,
+        names,
         ArgumentsOf::Directive { index },
         Coordinate::named(at.sym),
         built_in,
-        SchemaErrorKind::DuplicateDirectiveArgumentName,
-        SchemaErrorKind::ReservedDirectiveArgumentName,
-        SchemaErrorKind::DirectiveArgumentTypeNotInputType,
+        ArgumentRules {
+          duplicate: SchemaErrorKind::DuplicateDirectiveArgumentName,
+          reserved: SchemaErrorKind::ReservedDirectiveArgumentName,
+          not_input: SchemaErrorKind::DirectiveArgumentTypeNotInputType,
+        },
       );
     }
   }
@@ -2174,49 +3110,83 @@ impl SchemaBuilder {
   /// be resolved before a value can be checked against it, and after
   /// [`SchemaBuilder::apply_extensions`] because a type and its extensions are one location.
   fn validate_directive_usages(&mut self) {
-    let (model, errors) = self.split();
-    Self::check_directive_uses(model, errors, DirectivesOf::Schema, Coordinate::schema());
+    let (model, errors, names) = self.split_indexed();
+    Self::check_directive_uses(
+      model,
+      errors,
+      names,
+      DirectivesOf::Schema,
+      Coordinate::schema(),
+    );
 
     for ty in 0..model.types.len() {
       let owner = Coordinate::named(model.types[ty].name.sym);
-      Self::check_directive_uses(model, errors, DirectivesOf::Type { ty }, owner);
+      Self::check_directive_uses(model, errors, names, DirectivesOf::Type { ty }, owner);
 
       for field in 0..model.types[ty].fields.len() {
         let path = owner.then(model.types[ty].fields[field].name.sym);
-        Self::check_directive_uses(model, errors, DirectivesOf::Field { ty, field }, path);
+        Self::check_directive_uses(
+          model,
+          errors,
+          names,
+          DirectivesOf::Field { ty, field },
+          path,
+        );
 
-        for arg in 0..model.types[ty].fields[field].args.len() {
-          let path = path.then(model.types[ty].fields[field].args[arg].name.sym);
-          Self::check_directive_uses(
-            model,
-            errors,
-            DirectivesOf::FieldArgument { ty, field, arg },
-            path,
-          );
+        // The gate decides whether this field's arguments are visited at all, which is also
+        // what makes `DirectivesOf::FieldArgument`'s own refused arm unreachable: an `arg`
+        // position exists only for a list admitted here.
+        if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Field { ty, field }) {
+          for (arg, argument) in declared.iter().enumerate() {
+            let path = path.then(argument.name.sym);
+            Self::check_directive_uses(
+              model,
+              errors,
+              names,
+              DirectivesOf::FieldArgument { ty, field, arg },
+              path,
+            );
+          }
         }
       }
 
       for field in 0..model.types[ty].input_fields.len() {
         let path = owner.then(model.types[ty].input_fields[field].name.sym);
-        Self::check_directive_uses(model, errors, DirectivesOf::InputField { ty, field }, path);
+        Self::check_directive_uses(
+          model,
+          errors,
+          names,
+          DirectivesOf::InputField { ty, field },
+          path,
+        );
       }
 
       for value in 0..model.types[ty].enum_values.len() {
         let path = owner.then(model.types[ty].enum_values[value].name.sym);
-        Self::check_directive_uses(model, errors, DirectivesOf::EnumValue { ty, value }, path);
+        Self::check_directive_uses(
+          model,
+          errors,
+          names,
+          DirectivesOf::EnumValue { ty, value },
+          path,
+        );
       }
     }
 
     for directive in 0..model.directives.len() {
       let owner = Coordinate::named(model.directives[directive].name.sym);
-      for arg in 0..model.directives[directive].args.len() {
-        let path = owner.then(model.directives[directive].args[arg].name.sym);
-        Self::check_directive_uses(
-          model,
-          errors,
-          DirectivesOf::DirectiveArgument { directive, arg },
-          path,
-        );
+      if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: directive })
+      {
+        for (arg, argument) in declared.iter().enumerate() {
+          let path = owner.then(argument.name.sym);
+          Self::check_directive_uses(
+            model,
+            errors,
+            names,
+            DirectivesOf::DirectiveArgument { directive, arg },
+            path,
+          );
+        }
       }
     }
   }
@@ -2231,12 +3201,15 @@ impl SchemaBuilder {
   fn check_directive_uses(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     at: DirectivesOf,
     owner: Coordinate,
   ) {
     // Only a definition the schema knows can be known non-repeatable, so an undefined directive
     // written twice is the undefined-directive mistake twice over and not also this one.
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+    let mut seen = Duplicates::over(model.directive_uses(at).len(), |position| {
+      model.directive_uses(at)[position].name.sym
+    });
 
     for index in 0..model.directive_uses(at).len() {
       let used = &model.directive_uses(at)[index];
@@ -2252,21 +3225,21 @@ impl SchemaBuilder {
         continue;
       };
 
-      if !model.directives[definition].repeatable {
-        match seen.iter().find(|(sym, _)| *sym == used.name.sym).copied() {
-          Some((_, first)) => {
-            let name = model.text(used.name.sym).to_owned();
-            push_related(
-              errors,
-              SchemaErrorKind::DuplicateDirectiveUse,
-              &name,
-              Some(model.owner(owner)),
-              used.name,
-              first,
-            );
-          }
-          None => seen.push((used.name.sym, used.name.span)),
-        }
+      // The `&&` is what keeps a repeatable directive out of the record, exactly as the `match`
+      // arm it replaced did: `Duplicates::first` is asked only where the rule applies.
+      if !model.directives[definition].repeatable
+        && let Some(earlier) = seen.first(index, used.name.sym)
+      {
+        let first = model.directive_uses(at)[earlier].name.span;
+        let name = model.text(used.name.sym).to_owned();
+        push_related(
+          errors,
+          SchemaErrorKind::DuplicateDirectiveUse,
+          &name,
+          Some(model.owner(owner)),
+          used.name,
+          first,
+        );
       }
 
       // The whole of the location rule: one shift and one `AND` against the word the definition
@@ -2286,7 +3259,7 @@ impl SchemaBuilder {
         );
       }
 
-      Self::check_directive_arguments(model, errors, at, index, definition, owner);
+      Self::check_directive_arguments(model, errors, names, at, index, definition, owner);
     }
   }
 
@@ -2294,6 +3267,7 @@ impl SchemaBuilder {
   fn check_directive_arguments(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     at: DirectivesOf,
     index: usize,
     definition: usize,
@@ -2303,33 +3277,36 @@ impl SchemaBuilder {
     // Rendered only where one is reported. `check_directive_arguments` runs for every well-formed
     // usage too, and a supergraph has thousands of them.
     let coordinate = owner.at_directive(used.name.sym);
-    let declared = &model.directives[definition].args;
 
     // Draft 5.4.2's SDL twin. Unlike the repeatability rule above, this one needs nothing from the
     // definition — an argument written twice is a mistake whether or not the directive declares it
     // — so it is checked for every written argument, including one that is about to be reported
-    // as undefined.
-    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::with_capacity(used.args.len());
-    for argument in &used.args {
-      match seen
-        .iter()
-        .find(|(sym, _)| *sym == argument.name.sym)
-        .copied()
-      {
-        Some((_, first)) => {
-          let name = model.text(argument.name.sym).to_owned();
-          push_related(
-            errors,
-            SchemaErrorKind::DuplicateDirectiveArgumentUse,
-            &name,
-            Some(model.owner(coordinate)),
-            argument.name,
-            first,
-          );
-        }
-        None => seen.push((argument.name.sym, argument.name.span)),
+    // as undefined. It is above the gate for that same reason: it reads the usage, which no
+    // ceiling holds, and `Duplicates` is what bounds it.
+    let mut seen = Duplicates::over(used.args.len(), |at| used.args[at].name.sym);
+    for (position, argument) in used.args.iter().enumerate() {
+      if let Some(earlier) = seen.first(position, argument.name.sym) {
+        let first = used.args[earlier].name.span;
+        let name = model.text(argument.name.sym).to_owned();
+        push_related(
+          errors,
+          SchemaErrorKind::DuplicateDirectiveArgumentUse,
+          &name,
+          Some(model.owner(coordinate)),
+          argument.name,
+          first,
+        );
       }
     }
+
+    // Everything below reads the DEFINITION's declared list once per written argument, and that
+    // is the `Θ(declared × written)` review found here: a definition past its ceiling is refused
+    // at build, and every usage of it then re-scanned the oversized list anyway. The refusal is
+    // recorded where the definition is validated; this is the reader being told, by the list.
+    let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: definition })
+    else {
+      return;
+    };
 
     for argument in &used.args {
       let Some(expected) = declared.iter().find(|d| d.name.sym == argument.name.sym) else {
@@ -2361,6 +3338,7 @@ impl SchemaBuilder {
       Self::check_const_value(
         model,
         errors,
+        names,
         &argument.value,
         expected.ty.packed,
         Blame {
@@ -2423,6 +3401,7 @@ impl SchemaBuilder {
   fn check_const_value(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     value: &RawValue,
     expected: PackedType,
     blame: Blame,
@@ -2461,7 +3440,7 @@ impl SchemaBuilder {
         return;
       };
       for entry in entries {
-        Self::check_const_value(model, errors, entry, item, blame);
+        Self::check_const_value(model, errors, names, entry, item, blame);
       }
       return;
     }
@@ -2485,8 +3464,15 @@ impl SchemaBuilder {
         // away.
         let object = Coordinate::named(model.types[base].name.sym);
         let declared = &model.types[base].input_fields;
+        // One index per input OBJECT, held by the caller and shared by every literal offered to
+        // this type — the nested entry the recursion below is about to offer to a second one
+        // included. A value per literal is what this was, and it was live across that recursion
+        // and built again for every sibling; [`DeclaredNames`] carries what that cost.
         for field in fields {
-          let Some(expected) = declared.iter().find(|d| d.name.sym == field.name.sym) else {
+          let Some(expected) = names
+            .first(model.types, base, field.name.sym)
+            .map(|at| &declared[at])
+          else {
             // Draft 5.6.2's SDL twin.
             let name = model.text(field.name.sym).to_owned();
             push_owned(
@@ -2513,19 +3499,28 @@ impl SchemaBuilder {
             );
             continue;
           }
-          Self::check_const_value(model, errors, &field.value, expected.ty.packed, blame);
+          let expected = expected.ty.packed;
+          Self::check_const_value(model, errors, names, &field.value, expected, blame);
         }
 
         // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
         // what the omission is blamed on — the same choice `check_directive_arguments` makes for
         // an omitted required argument.
-        for expected in declared {
-          if !expected.is_required() {
-            continue;
-          }
-          if fields
-            .iter()
-            .any(|field| field.name.sym == expected.name.sym)
+        //
+        // Over the required positions rather than over the declaration, and the literal indexed
+        // rather than rescanned: the two factors of the same product, one bounded by what this
+        // reports and the other by [`Names`] — which stays a value per list here, because what it
+        // indexes is the literal's own entries and no type keys those. It is built after the
+        // recursion above and dropped before this frame returns, so no second one is ever live
+        // inside it. Source order is the declaration's either way, because
+        // `required_input_fields` is filled by ascending position.
+        let required = &model.types[base].required_input_fields;
+        let of_written = Names::over(fields.len(), required.len(), |at| fields[at].name.sym);
+        for &position in required {
+          let expected = &declared[position as usize];
+          if of_written
+            .first(fields.len(), expected.name.sym, |at| fields[at].name.sym)
+            .is_some()
           {
             continue;
           }
@@ -2541,13 +3536,16 @@ impl SchemaBuilder {
         }
       }
       TypeKind::Enum => {
+        // One index per ENUM, shared by every literal offered to it, for the reason the input
+        // object's is shared: the declaration is a function of the type, and a list literal writes
+        // as many members as it likes against it. `any` over the declared values, restarted per
+        // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
+        // other three did not reach — see its header.
         let member = match &value.shape {
-          RawShape::Enum(bytes) => model.interner.lookup(bytes).is_some_and(|sym| {
-            model.types[base]
-              .enum_values
-              .iter()
-              .any(|value| value.name.sym == sym)
-          }),
+          RawShape::Enum(bytes) => model
+            .interner
+            .lookup(bytes)
+            .is_some_and(|sym| names.has_enum_value(model.types, base, sym)),
           _ => false,
         };
         if !member {
@@ -2570,43 +3568,104 @@ impl SchemaBuilder {
   }
 
   /// Draft §3.6.1/§3.7.1: transitivity, covariance of field types, invariance of argument types.
+  ///
+  /// # Over the split, and this pass is what [`Model`] was separated for
+  ///
+  /// Every list this reads belongs to a type it is *not* reporting on — the interface's fields,
+  /// the interface's closure — and `self.push_*` cannot be called while one of them is borrowed.
+  /// The shape that stood here bought its way past that with `clone`, once per implementor, and
+  /// the copies were deep: a [`RawField`] owns its directives, and every [`RawInput`] under it
+  /// owns its own directives and its default literal, each an arbitrarily large tree.
+  ///
+  /// Two products came out of that, and only one of them is the ceiling's.
+  ///
+  /// - `Θ(implementors × declared arguments)`, from cloning an interface field whose argument
+  ///   list a ceiling had *already* refused. [`Declared`] now drops a refused list where the
+  ///   refusal is decided, so there is nothing left of it to copy.
+  /// - `Θ(implementors × literal size)`, from cloning the default literals and directive
+  ///   arguments of a field whose declared list is perfectly legal. **No ceiling bounds this
+  ///   one**: *one* argument under the limit, carrying one large default, is enough — so neither
+  ///   this ceiling nor a wider one could have closed it. Fitted at 2.00 in the exponent over
+  ///   1k–64k and 85 s at the top of that ladder, on a document `Schema::build` **accepts**.
+  ///
+  /// So the copies are gone rather than bounded: the pass reads through [`Model`] and reports
+  /// through the error list, the two halves borrowed apart. Nothing about which diagnostic is
+  /// reported, in what order, or with which span depends on that — the loops below are the ones
+  /// that were here, reading `&model.types[…]` where they read a copy. al8n/smear#198.
+  ///
+  /// # The third product, which is neither a copy nor a ceiling's
+  ///
+  /// Finding the implementor's field restarted a linear scan of its **whole** field list for
+  /// every interface field, so a valid interface and object with the same `N` fields in source
+  /// order — the honest case, not an adversarial one — did `N(N+1)/2` symbol comparisons.
+  /// [`Positions`] indexes that list once per implementing type and the loop reads it, at 1.83
+  /// in the exponent over 1 k–64 k before and 1.03 after. Its header carries why the shape
+  /// [`Duplicates`] rejected is the right one *here*, and why the first occurrence still wins.
   fn validate_interface_implementations(&mut self) {
-    for index in 0..self.types.len() {
+    let (model, errors) = self.split();
+    let symbols = model.interner.len() as usize;
+    // One table for the whole pass, lazily grown by the first implementing type wide enough to
+    // index and handed back to the next one by [`Positions::drop`]. A schema whose types
+    // implement nothing, or implement narrowly, never allocates it.
+    let mut of_sym: Vec<u32> = Vec::new();
+    // One `bool` per type index, marking the interfaces THIS type declares, for the transitivity
+    // rule below. Same table for the whole pass and cleared by the declaration that wrote it, so a
+    // schema whose types implement nothing never allocates it. See the rule's own comment.
+    let mut declared_here: Vec<bool> = Vec::new();
+    for index in 0..model.types.len() {
       if !matches!(
-        self.types[index].kind,
+        model.types[index].kind,
         TypeKind::Object | TypeKind::Interface
       ) {
         continue;
       }
       // Nothing below has anything to say about a type that implements nothing, and every
-      // introspection type is one — so the owner name and the copy of the list are built after
-      // the question is asked rather than before it.
-      if self.types[index].implements.is_empty() {
+      // introspection type is one — so the owner name is rendered after the question is asked
+      // rather than before it.
+      if model.types[index].implements.is_empty() {
         continue;
       }
-      let owner = self.text(self.types[index].name.sym).to_owned();
-      let declared: Vec<Located> = self.types[index].implements.clone();
+      let owner = model.text(model.types[index].name.sym).to_owned();
+      let declared: &[Located] = &model.types[index].implements;
+      // Built once per implementing type and read by every interface it declares, which is the
+      // whole of the repair: the loop below is the one that was here, in the order it was in.
+      let positions = Positions::over(&model.types[index].fields, symbols, &mut of_sym);
+      if declared_here.len() < model.types.len() {
+        declared_here.resize(model.types.len(), false);
+      }
+      for entry in declared {
+        if let Some(at) = model.type_index(entry.sym) {
+          declared_here[at] = true;
+        }
+      }
 
-      for entry in &declared {
-        let Some(interface) = self.type_index(entry.sym) else {
+      for entry in declared {
+        let Some(interface) = model.type_index(entry.sym) else {
           continue;
         };
-        if self.types[interface].kind != TypeKind::Interface {
+        if model.types[interface].kind != TypeKind::Interface {
           continue;
         }
 
         // Transitivity: every interface the interface implements must also be declared here.
-        let required: Vec<u32> = self.types[interface].closure.clone();
-        for needed in required {
+        //
+        // Read off the mark rather than by rescanning `declared`. The scan was
+        // `Θ(Σ closure × declared)` with a ceiling on neither factor, and it answered on the first
+        // entry only when the missing one happened to be written first: `interface J{i} implements
+        // I` for `K` values of `i`, and `type T implements J0 & … & J{K-1} & I`, is `Θ(K)` of SDL
+        // and `Θ(K²)` here — 1.71 in the exponent over 1 k–16 k, 1.87 over the top step and
+        // **187.3 ms** at `K` = 16 000, on a schema `Schema::build` **accepts**. Writing `I` first
+        // instead hides the whole product, which is why the fixture writes it last.
+        let required: &[u32] = &model.types[interface].closure;
+        for &needed in required {
           if needed as usize == index {
             continue;
           }
-          let is_declared = declared
-            .iter()
-            .any(|d| self.type_index(d.sym) == Some(needed as usize));
+          let is_declared = declared_here[needed as usize];
           if !is_declared {
-            let subject = self.text(self.types[needed as usize].name.sym).to_owned();
-            self.push_owned(
+            let subject = model.text(model.types[needed as usize].name.sym).to_owned();
+            push_owned(
+              errors,
               SchemaErrorKind::MissingTransitiveInterface,
               &subject,
               owner.clone(),
@@ -2616,15 +3675,12 @@ impl SchemaBuilder {
         }
 
         // Field coverage, covariance, and argument invariance.
-        let interface_fields = self.types[interface].fields.clone();
-        for interface_field in &interface_fields {
-          let field_name = self.text(interface_field.name.sym).to_owned();
-          let Some(position) = self.types[index]
-            .fields
-            .iter()
-            .position(|f| f.name.sym == interface_field.name.sym)
-          else {
-            self.push_owned(
+        let interface_fields: &[RawField] = &model.types[interface].fields;
+        for interface_field in interface_fields {
+          let field_name = model.text(interface_field.name.sym).to_owned();
+          let Some(position) = positions.of(interface_field.name.sym) else {
+            push_owned(
+              errors,
               SchemaErrorKind::MissingInterfaceField,
               &field_name,
               owner.clone(),
@@ -2632,12 +3688,13 @@ impl SchemaBuilder {
             );
             continue;
           };
-          let own = self.types[index].fields[position].clone();
+          let own: &RawField = &model.types[index].fields[position];
 
-          if !self.is_valid_implementation_type(own.ty.packed, interface_field.ty.packed) {
+          if !model.is_valid_implementation_type(own.ty.packed, interface_field.ty.packed) {
             let path = owner_path(&[&owner, &field_name]);
-            let expected = self.render_type(interface_field.ty.packed);
-            self.push_owned(
+            let expected = model.render_type(interface_field.ty.packed);
+            push_owned(
+              errors,
               SchemaErrorKind::InvalidInterfaceFieldType,
               &expected,
               path,
@@ -2648,9 +3705,9 @@ impl SchemaBuilder {
           // `IsValidImplementation` 2.6: "if `field` is deprecated then `implementedField` must
           // also be deprecated". The span is the implementing field, which is where the edit goes;
           // `related` points at the interface field, which is the other half of the obligation.
-          if self.is_deprecated(&own.directives) && !self.is_deprecated(&interface_field.directives)
-          {
-            self.push_related(
+          if own.deprecated && !interface_field.deprecated {
+            push_related(
+              errors,
               SchemaErrorKind::InterfaceFieldNotDeprecated,
               &field_name,
               Some(owner.clone()),
@@ -2659,16 +3716,29 @@ impl SchemaBuilder {
             );
           }
 
-          for interface_arg in &interface_field.args {
-            let arg_name = self.text(interface_arg.name.sym).to_owned();
-            match own
-              .args
+          // Draft `IsValidImplementation` 2.4 and 2.5 read both argument lists, and each loop
+          // scans the other list once per entry — `Θ(own × interface)`, which is the third
+          // consumer review found walking a list a ceiling had already refused. Both sides are
+          // asked, and it has to be both: a refused list is not an empty one, so pairing a
+          // refused side against a live one would report every argument of the live side as
+          // missing from a list nobody may look at. That is exactly the diagnostic truncating an
+          // over-limit list would have invented, reached from the other direction.
+          let (Args::Bounded(interface_args), Args::Bounded(own_args)) =
+            (interface_field.args.read(), own.args.read())
+          else {
+            continue;
+          };
+
+          for interface_arg in interface_args {
+            let arg_name = model.text(interface_arg.name.sym).to_owned();
+            match own_args
               .iter()
               .find(|a| a.name.sym == interface_arg.name.sym)
             {
               None => {
                 let path = owner_path(&[&owner, &field_name]);
-                self.push_owned(
+                push_owned(
+                  errors,
                   SchemaErrorKind::MissingInterfaceFieldArgument,
                   &arg_name,
                   path,
@@ -2678,8 +3748,9 @@ impl SchemaBuilder {
               Some(own_arg) => {
                 if own_arg.ty.packed != interface_arg.ty.packed {
                   let path = owner_path(&[&owner, &field_name, &arg_name]);
-                  let expected = self.render_type(interface_arg.ty.packed);
-                  self.push_owned(
+                  let expected = model.render_type(interface_arg.ty.packed);
+                  push_owned(
+                    errors,
                     SchemaErrorKind::InvalidInterfaceFieldArgumentType,
                     &expected,
                     path,
@@ -2690,18 +3761,18 @@ impl SchemaBuilder {
             }
           }
 
-          for own_arg in &own.args {
-            let declared_by_interface = interface_field
-              .args
+          for own_arg in own_args {
+            let declared_by_interface = interface_args
               .iter()
               .any(|a| a.name.sym == own_arg.name.sym);
             if declared_by_interface {
               continue;
             }
             if own_arg.ty.packed.is_non_null() && !own_arg.default.is_present() {
-              let arg_name = self.text(own_arg.name.sym).to_owned();
+              let arg_name = model.text(own_arg.name.sym).to_owned();
               let path = owner_path(&[&owner, &field_name]);
-              self.push_owned(
+              push_owned(
+                errors,
                 SchemaErrorKind::UnexpectedRequiredArgument,
                 &arg_name,
                 path,
@@ -2711,54 +3782,15 @@ impl SchemaBuilder {
           }
         }
       }
-    }
-  }
 
-  /// Draft's `IsValidImplementationFieldType`.
-  fn is_valid_implementation_type(&self, field: PackedType, implemented: PackedType) -> bool {
-    if field.is_non_null() {
-      return self.is_valid_implementation_type(field.nullable(), implemented.nullable());
-    }
-    if let (Some(item), Some(implemented_item)) = (field.list_item(), implemented.list_item()) {
-      return self.is_valid_implementation_type(item, implemented_item);
-    }
-    if field == implemented {
-      return true;
-    }
-    if field.wrappers() != implemented.wrappers() {
-      return false;
-    }
-    self.is_sub_type(field.base_id(), implemented.base_id())
-  }
-
-  /// Whether `candidate` is one of `abstract_type`'s possible types, in the draft's wider sense:
-  /// union membership, or the interface closure — which, unlike the runtime possible-object
-  /// bitsets, includes interfaces implementing interfaces.
-  fn is_sub_type(&self, candidate: TypeId, abstract_type: TypeId) -> bool {
-    if candidate == UNRESOLVED || abstract_type == UNRESOLVED {
-      return false;
-    }
-    let target = &self.types[abstract_type.get() as usize];
-    match target.kind {
-      TypeKind::Union => target
-        .members
-        .iter()
-        .any(|member| self.type_index(member.sym) == Some(candidate.get() as usize)),
-      TypeKind::Interface => self.types[candidate.get() as usize]
-        .closure
-        .contains(&abstract_type.get()),
-      _ => false,
-    }
-  }
-
-  fn render_type(&self, packed: PackedType) -> String {
-    struct Rendered<'a>(PackedType, &'a str);
-    impl core::fmt::Display for Rendered<'_> {
-      fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.0.write(f, self.1)
+      // Exactly the slots this declaration wrote, which is `O(declared)` and not `O(types)` — the
+      // same accounting [`Positions::drop`] does one line above, for the same table.
+      for entry in declared {
+        if let Some(at) = model.type_index(entry.sym) {
+          declared_here[at] = false;
+        }
       }
     }
-    Rendered(packed, self.text(packed.base())).to_string()
   }
 
   /// Draft §3.10.1: an input-object cycle must have at least one nullable or list link.
@@ -2846,68 +3878,252 @@ impl SchemaBuilder {
   /// cost is the same one [`SchemaBuilder::validate_input_object_cycles`] pays for its colouring:
   /// a second, independent cycle through an already-implicated object waits for the next build.
   ///
-  /// # Settling, and why it is sound
+  /// # Settling, and what "explored" has to mean for it to be sound
   ///
   /// A frame retires only when its whole sub-exploration finished, and nothing prunes that
   /// exploration except the cycle test itself — which does not prune, it `break`s the entire walk.
   /// So a retired frame's object has had every path below it followed to the end with no repeat,
-  /// which is to say **no cycle is reachable from it at all**, whatever `visited` it was reached
-  /// with. Starting a fresh walk there would re-derive that at the cost of the whole subtree over
-  /// again, so it is skipped. Without it a chain of `N` defaulted input objects costs `O(N²)`:
+  /// and starting a fresh walk there would re-derive that at the cost of the whole subtree over
+  /// again. Without the skip a chain of `N` defaulted input objects costs `O(N²)`:
   /// `a_deep_defaulted_input_chain_does_not_recurse` is twenty thousand links long and takes
-  /// **41.5 s** with the skip removed against **under one second** with it — measured, not
-  /// estimated. It is the standing guard on this and on the iterative shape both.
+  /// **41.5 s** with it removed against **under one second** with it — measured, not estimated. It
+  /// is the standing guard on this and on the iterative shape both.
+  ///
+  /// **What that argument leaves out is *which* paths "every path below it" is.** A frame reached
+  /// through a caller's *supplied* literal descends into that literal, and the draft is explicit
+  /// that the field's own default is then never consulted — so such a frame explores a different
+  /// question from `InputObjectDefaultValueHasCycle(object, {})`, and finishing it establishes
+  /// nothing about the empty-map one. Settling from it made **declaration order decide the
+  /// verdict**: with `input Outer { b: Bad = { loop: null } }` read before `input Bad { loop: Bad =
+  /// {} }`, `Outer`'s walk marked `Bad` settled through the supplied `{ loop: null }`, the
+  /// canonical start at `Bad` was then skipped, and `SchemaBuilder::finish` **accepted a schema
+  /// carrying the default cycle this rule exists to refuse**. The same two definitions in the other
+  /// order were refused. `input_object_default_cycle_verdict_is_declaration_order_independent` is
+  /// the guard.
+  ///
+  /// So a frame settles its object only when its work list **covers** the canonical exploration:
+  /// every declared field either asked with nothing supplied at least once — which is what makes
+  /// the walk descend into that field's *own* default — or inert, meaning asking would have
+  /// returned immediately because the field names no input object or carries no default. The
+  /// top-level start frame is canonical by construction, and so is a descent into `{}`, which is
+  /// what the chain guard above is made of; a supplied entry for a field whose default matters is
+  /// what stops being enough. `settled` is read at two places and both take this flag: the start
+  /// loop, and the descent, which is why `N` input objects defaulting to `{}` of one wide type cost
+  /// `O(N)` rather than a fresh `Θ(width)` work list each.
+  ///
+  /// **How that rule is decided is not the rule.** Written out as "every declared field", it read
+  /// the whole declaration once to clear its per-field marks and once again to answer —
+  /// *whatever the descent was about to do*, the descent that pushes no work at all included. Its complement is the
+  /// subset that decides it: `coverable` holds, per object, the fields that are not inert, so
+  /// "every declared field was asked or is inert" is "every coverable field was asked", and an
+  /// object with none of them is canonical for nothing having been asked. That is what makes the
+  /// no-map descent `O(1)` — a value unwrapping to no map node runs the draft's "for each field in
+  /// `inputObject`" zero times, so it asks nothing, and it covers `target` exactly when `target`
+  /// has nothing to cover. The marks are stamped with the descent that wrote them rather than
+  /// cleared for it, so the other width-proportional pass goes too.
+  ///
+  /// # A frame's WORK is a second population, and narrowing it twice did not remove the product
+  ///
+  /// Two revisions tried. The first recognised a descent into a *single* empty map and built the
+  /// work list over the whole declaration everywhere else. The second built it over `descendable`
+  /// — `coverable` without the "carries a default" clause — and coalesced the empty map nodes,
+  /// which between them made `[{} × M]` of a `D`-field object of nullable scalars cost one entry
+  /// instead of `M × D`. Each was correct about the fixture in front of it, and each left the
+  /// product standing one literal away, because **each narrowed a population that a literal
+  /// writing something walks straight past**: `input Outer { w: [Wide] = [{f0: null} … ×M] }` in
+  /// front of `input Wide { f0: Leaf = {} … fD: Leaf = {} }` over an acyclic `input Leaf { x: Int }`.
+  ///
+  /// No node is empty, so nothing coalesces; every one of `Wide`'s `D` fields names an input
+  /// object and carries a default, so `descendable` and `coverable` are the whole declaration;
+  /// and `f0` is supplied by every node, so `Wide` never settles. `Θ(M × D)` work entries on
+  /// `O(M + D)` of SDL `finish` ACCEPTS, out of repeating one single-field map — and widening the
+  /// predicate again would fix this fixture and leave the next one.
+  ///
+  /// So the loop is **inverted** rather than narrowed a third time. A frame's work is built from
+  /// what the caller WROTE: one entry per map entry naming a descendable field — a total the
+  /// document bounds, because every one of those entries was written once in the SDL — plus one
+  /// entry per coverable field that some node left out, which is `Θ(coverable)` for the whole
+  /// descent and not per node. A declared field is never visited once per map node, so there is
+  /// no pair of nested loops left for a fixture to multiply, and that is a property a later
+  /// reader checks by *looking at the loop* instead of by finding the literal that gets through
+  /// it. The comment at the loop states it.
+  ///
+  /// The multiplicity goes with the nesting. `(field, None)` means "descend into this field's own
+  /// default", which does not depend on WHICH node omitted it, so `M` omissions were `M` byte-
+  /// identical entries and are now one — the argument the empty-node coalescing made, made where
+  /// it belongs. The coalescing itself is gone: a node with no entries now contributes nothing to
+  /// enumerate, so there is nothing left for a special case to skip.
+  ///
+  /// **The settling rule's meaning is unchanged, and so is how it is decided.** It is still
+  /// "every coverable field of `target` was asked with nothing supplied at least once", and
+  /// asked-with-nothing-supplied is still exactly "some map node of this level omitted it". What
+  /// changed is which side of that is counted. Scanning the declaration per node stamped the
+  /// fields a node OMITTED; enumerating entries stamps the fields a node SUPPLIED, and a field is
+  /// asked when the nodes that supplied it are short of the nodes there are. No node can supply a
+  /// field twice — an entry repeated inside one node is one supply, which is what reading the
+  /// *first* occurrence meant — so `supplied < maps.len()` and "some node omitted it" are the
+  /// same statement, and `canonical` is that statement over `coverable`.
+  ///
+  /// Resolving a written name through [`DeclaredNames`] resolves it to the FIRST declaration
+  /// carrying it, which is what [`SchemaBuilder::check_const_value`] does with the same literal.
+  /// The direction that is gone gave every declaration of a repeated name the same written value;
+  /// a type declaring one input field `D` times under `M` nodes is that product again, and such a
+  /// type is a `DuplicateInputFieldName` refusal in every case, so no schema changes verdict over
+  /// it.
+  ///
+  /// The population that stood in for the rule before this was **`N` input types with a valid
+  /// `w: [Wide] = []` in front of a `D`-field `Wide` holding one defaulted input-object field**:
+  /// each empty list produces no map, so it can settle nothing, and it repeated both `D`-wide
+  /// passes. `Θ(N + D)` of accepted SDL, `Θ(N × D)` of build — 1.90 in the exponent over
+  /// 16 k–128 k and **34.9 s** at 128 k, against 1.06 and **160 ms**. al8n/smear#198.
+  ///
+  /// # Over the split, and the factor here is not a count of fields
+  ///
+  /// Every literal this walk descends into belongs to a field it is *not* reporting on, and the
+  /// shape that stood here bought its way past `&mut self` with `clone` three times over: the
+  /// field's own default, the entry a map node supplies for a declared field, and the work entry
+  /// again as it is consumed. Each is a deep copy of a [`RawValue`] tree, which the document
+  /// alone bounds — the sentence [`SchemaBuilder::validate_interface_implementations`] was
+  /// repaired under, and this is the rest of the set it covers.
+  ///
+  /// What multiplies it here is not a field count. A level's work list holds one entry per (map
+  /// node, field) pair, so a literal unwrapping to `M` map nodes asks each of the target's fields
+  /// `M` times and the copies are made per ask, not per field. `input Outer { o: [Mid] = [{} {}
+  /// …] }` in front of a single `Mid.m` whose own default is one large literal is therefore
+  /// `Θ(M × literal)`: one field, one default, on a document `Schema::build` **accepts**. Fitted
+  /// at 1.99 in the exponent over 1k–64k and **29.6 s** at the top of that ladder, against 1.01
+  /// and **5.6 ms** with the work list holding `&RawValue`. No ceiling stands in front of either
+  /// factor, so no ceiling could have closed it.
+  ///
+  /// The walk therefore reads through [`Model`] and reports through the error list, borrowed
+  /// apart. The frames, their order, the spans and the settling are the ones that were here;
+  /// only the ownership moved. al8n/smear#198.
   fn validate_input_object_default_cycles(&mut self) {
     /// One level of `InputObjectDefaultValueHasCycle`: an input object, and the work its
     /// `defaultValue` produced.
-    struct Frame {
+    struct Frame<'a> {
       /// The field of the enclosing object whose *own* default this frame descended into, if that
       /// is why it exists. Popped off the path when the frame retires.
       pushed: Option<usize>,
-      /// `(field index in `object`, the value the caller supplied for it)`, one entry per
-      /// (map node, field) pair — which is exactly the draft's "for each field in inputObject",
-      /// run once per map node the level's value unwraps to.
-      work: Vec<(usize, Option<RawValue>)>,
+      /// `(field index in `object`, the value the caller supplied for it)` — the draft's "for
+      /// each field in inputObject", built from the two sides of that question separately rather
+      /// than by crossing the declaration with the map nodes.
+      ///
+      /// One entry per map ENTRY naming a field that can descend, which the document bounds
+      /// because each was written once in the SDL; and one entry per coverable field that some
+      /// node left out, which is one per FIELD rather than one per (node, field), because
+      /// descending into a field's own default does not depend on which node omitted it. Nothing
+      /// here is a count of pairs. The header says what counting pairs cost.
+      ///
+      /// Borrowed out of the model rather than owned; the header says why.
+      work: Vec<(usize, Option<&'a RawValue>)>,
       cursor: usize,
       /// The object whose fields `work` indexes, so a frame can name the field it blames.
       object: usize,
+      /// Whether `work` covers `InputObjectDefaultValueHasCycle(object, {})` — the question the
+      /// start loop and the descent both skip a settled object on the strength of. See the header.
+      canonical: bool,
     }
 
-    let count = self.types.len();
+    let (model, errors, names) = self.split_indexed();
+    let count = model.types.len();
     // A dense id per input field, so path membership is a bit rather than a search.
     let mut field_base: Vec<usize> = vec![0; count + 1];
     for index in 0..count {
-      field_base[index + 1] = field_base[index] + self.types[index].input_fields.len();
+      field_base[index + 1] = field_base[index] + model.types[index].input_fields.len();
     }
     let total_fields = field_base[count];
 
+    // The fields a frame has to have ASKED for its work to cover `(object, {})`, per object, as
+    // one flat list with `coverable_base` addressing it — the shape `field_base` above already
+    // uses. A field naming no input object, or carrying no default, returns immediately whichever
+    // way it is asked, so it is inert and covering it is nothing to cover; every other declared
+    // field is here, and `canonical` is exactly "every one of mine was asked".
+    //
+    // Derived once, in `Θ(input fields)`, so that a descent's two questions are answered over
+    // this subset rather than over the whole declaration. What that replaces is the reason:
+    // every descent cleared and resized a per-field mark to the target's full declared width and
+    // then scanned every declaration, EVEN WHEN `map_nodes` produced no map at all and the frame it
+    // pushed had no work in it. `N` input types with a valid `w: [Wide] = []` in front of a
+    // `D`-field `Wide` is `Θ(N + D)` of SDL `Schema::build` ACCEPTS: an empty list unwraps to no
+    // map, so it can settle nothing and repeats both `D`-wide passes `N` times. 1.90 in the
+    // exponent over 16 k–128 k and 34.9 s at 128 k. al8n/smear#198.
+    //
+    // It is also what a descent's WORK is built over, on the side a literal does not write: a
+    // coverable field no node supplied is asked, and asked with nothing supplied is the descent
+    // into that field's own default. The side a literal *does* write is enumerated from the
+    // literal, so no second subset of the declaration is derived for it — a field whose named
+    // type is not an input object is turned away by an `O(1)` test on the entry that named it,
+    // not by being kept out of a list built in advance.
+    let mut coverable_base: Vec<usize> = vec![0; count + 1];
+    let mut coverable: Vec<u32> = Vec::new();
+    for index in 0..count {
+      for (at, field) in model.types[index].input_fields.iter().enumerate() {
+        let base = field.ty.packed.base_id();
+        if base != UNRESOLVED
+          && model.types[base.get() as usize].kind == TypeKind::InputObject
+          && field.default_value.is_some()
+        {
+          coverable.push(at as u32);
+        }
+      }
+      coverable_base[index + 1] = coverable.len();
+    }
+
     let mut implicated = vec![false; count];
-    // Objects a completed walk proved clean; see the header for why that is transitive.
+    // Objects a completed *canonical* exploration proved clean; the header says why only that one
+    // counts, and why what it proves is transitive.
     let mut settled = vec![false; count];
     let mut on_path = vec![false; total_fields];
+    // Which input field each map node SUPPLIED, addressed by the same dense id `on_path` uses.
+    // `supplied_in` is the node that last wrote the field and `supplied_by` how many nodes of the
+    // descent now running have, and the pair answers both questions one pass over the entries can
+    // raise: an entry repeated inside one node is one supply, and a field every node wrote was
+    // asked by none of them.
+    //
+    // STAMPED rather than cleared, for the reason the answer is read over `coverable` at all: that
+    // subset may be empty while the declaration is wide, so a clear proportional to the
+    // declaration would be a width-proportional pass in front of a descent that reads none of it.
+    // Node stamps are global and strictly increasing, and a descent's nodes are the contiguous run
+    // that begins where its map loop begins, so `supplied_in[id] >= since` is "this descent", with
+    // no second counter to keep in step. `u64` because a stamp that wraps is a stamp that answers
+    // for a node that did not write, and no walk can make 2^64 of them; zero is therefore never a
+    // live stamp, which is what lets the whole array start there.
+    let mut supplied_in: Vec<u64> = vec![0; total_fields];
+    let mut supplied_by: Vec<usize> = vec![0; total_fields];
+    let mut node: u64 = 0;
 
     for start in 0..count {
-      if self.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
+      if model.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
         continue;
       }
       // The draft's top-level call: `defaultValue` is an empty map, so every field is asked, and
-      // none of them is supplied a value.
+      // none of them is supplied a value. `canonical` is therefore true by construction and does
+      // not depend on the work list — which is why this frame carries only the entries that
+      // descend. Asked with nothing supplied descends into the field's own default, so the ones
+      // that do are exactly `coverable`, and the rest are the declaration's whole width popped and
+      // `continue`d past. The descent below reaches the same list from the other side: an empty
+      // map writes no entry, so every coverable field is one no node supplied.
       let mut stack = vec![Frame {
         pushed: None,
-        work: (0..self.types[start].input_fields.len())
-          .map(|field| (field, None))
+        work: coverable[coverable_base[start]..coverable_base[start + 1]]
+          .iter()
+          .map(|&field| (field as usize, None))
           .collect(),
         cursor: 0,
         object: start,
+        canonical: true,
       }];
 
       let mut found: Option<(usize, usize)> = None;
       while let Some(frame) = stack.last_mut() {
-        let Some((field_index, supplied)) = frame.work.get(frame.cursor).cloned() else {
+        let Some(&(field_index, supplied)) = frame.work.get(frame.cursor) else {
           if let Some(id) = frame.pushed {
             on_path[id] = false;
           }
-          settled[frame.object] = true;
+          if frame.canonical {
+            settled[frame.object] = true;
+          }
           stack.pop();
           continue;
         };
@@ -2916,52 +4132,150 @@ impl SchemaBuilder {
 
         // `InputFieldDefaultValueHasCycle`. A field whose named type is not an input object can
         // hold no cycle, whatever its default says.
-        let field = &self.types[object].input_fields[field_index];
+        let field = &model.types[object].input_fields[field_index];
         let base = field.ty.packed.base_id();
         if base == UNRESOLVED {
           continue;
         }
         let target = base.get() as usize;
-        if self.types[target].kind != TypeKind::InputObject {
+        if model.types[target].kind != TypeKind::InputObject {
           continue;
         }
 
-        let (descend_into, pushed) = match supplied {
+        let descend_into = match supplied {
           // The caller's literal named this field, so the field's own default is never consulted
           // and `visited` does not grow.
-          Some(value) => (value, None),
+          Some(value) => value,
+          // The field's own default, which is the descent `visited` grows for.
+          None => match field.default_value.as_ref() {
+            Some(default) => default,
+            None => continue,
+          },
+        };
+
+        let declared = &model.types[target].input_fields;
+        let mut maps: Vec<&[RawObjectField]> = Vec::new();
+        map_nodes(descend_into, &mut maps);
+
+        // A descent into `{}` *is* `InputObjectDefaultValueHasCycle(target, {})`, so a target some
+        // canonical frame already retired has nothing left to say and the work list is not built
+        // at all. Ahead of the cycle test on purpose, and the two cannot both apply: reaching this
+        // field while it is already on the path means the exploration below it comes back here, and
+        // an exploration that comes back to a field it pushed is one that `break`s rather than
+        // retires — so no canonical frame for `target` could have settled it.
+        //
+        // Without the skip, `N` input objects each defaulting to `{}` of one `N`-field input object
+        // build a fresh `Θ(N)` work list apiece: `O(N)` of source, `Θ(N²)` of walk, on a schema
+        // `Schema::build` **accepts**. 1.97 in the exponent over the top step of 1 k–16 k and
+        // **1.470 s** at 16 k, against 1.08 and 23 ms — and 1.10 carried out to 256 k, where a
+        // millisecond floor cannot be what is being read. al8n/smear#198.
+        if settled[target] && matches!(maps.as_slice(), [entries] if entries.is_empty()) {
+          continue;
+        }
+
+        let pushed = match supplied {
+          Some(_) => None,
           None => {
-            let Some(default) = field.default_value.clone() else {
-              continue;
-            };
             let id = field_base[object] + field_index;
             if on_path[id] {
               found = Some((object, field_index));
               break;
             }
             on_path[id] = true;
-            (default, Some(id))
+            Some(id)
           }
         };
 
-        let declared = &self.types[target].input_fields;
-        let mut maps: Vec<&[RawObjectField]> = Vec::new();
-        map_nodes(&descend_into, &mut maps);
+        // The header's condition, over the subset that can fail it. A field asked with nothing
+        // supplied is the one whose *own* default this frame descends into, which is what the
+        // empty-map call does to every field; an inert field is covered by being inert. So this
+        // frame's work is the canonical exploration of `target` exactly when every coverable
+        // field of `target` was asked — and only then may retiring it settle `target` for the
+        // starts and descents that follow. That is the rule 1260027 wrote, unchanged; what
+        // changed is that it is decided over `coverable` instead of by rescanning `declared`.
+        let coverable_here = &coverable[coverable_base[target]..coverable_base[target + 1]];
         let mut work = Vec::new();
-        for map in &maps {
-          for (index, declared_field) in declared.iter().enumerate() {
-            let supplied = map
-              .iter()
-              .find(|entry| entry.name.sym == declared_field.name.sym)
-              .map(|entry| entry.value.clone());
-            work.push((index, supplied));
+        let canonical = if maps.is_empty() {
+          // The draft's "for each field in inputObject" runs once per map node, so no map is no
+          // work — and no work asks nothing, which covers `target` only when there is nothing of
+          // `target` to cover. Decided here in `O(1)` rather than by two passes over a
+          // declaration this frame is not going to read.
+          coverable_here.is_empty()
+        } else {
+          // **What the two loops below enumerate is every entry these map nodes WROTE, once each,
+          // and every coverable field of `target`, once for the whole descent — and never a
+          // declared field once per map node.** Neither loop is inside the other, so there is no
+          // pair for a literal to multiply: the header's three fixtures each got through a
+          // narrower predicate, and a predicate is not what stops this one.
+          let since = node + 1;
+          for &map in &maps {
+            node += 1;
+            for entry in map {
+              // Draft 5.6.2's direction, and [`SchemaBuilder::check_const_value`]'s: the written
+              // name is resolved against the declaration, through the one index per type that
+              // every literal offered to `target` shares. An entry naming nothing `target`
+              // declares is invisible to this rule, exactly as it was when the declaration did
+              // the asking.
+              let Some(index) = names.first(model.types, target, entry.name.sym) else {
+                continue;
+              };
+              // A field whose named type is not an input object can hold no cycle whatever this
+              // entry says about it, so it is turned away here rather than kept out of a subset
+              // built in advance — and turning it away costs one test on an entry that exists,
+              // not one per declared field per node.
+              let base = declared[index].ty.packed.base_id();
+              if base == UNRESOLVED
+                || model.types[base.get() as usize].kind != TypeKind::InputObject
+              {
+                continue;
+              }
+              let id = field_base[target] + index;
+              // Reading the first occurrence, written as a mark rather than as a lookup: a node
+              // that writes one name twice supplies it once, which is the answer the sorted pairs
+              // gave and the one a repeated entry needs, because descending into the second copy
+              // as well would explore a literal the draft's `value[field]` never selects.
+              if supplied_in[id] == node {
+                continue;
+              }
+              supplied_by[id] = if supplied_in[id] >= since {
+                supplied_by[id] + 1
+              } else {
+                1
+              };
+              supplied_in[id] = node;
+              // The caller's literal named this field, so the walk descends into that literal and
+              // the field's own default is never consulted.
+              work.push((index, Some(&entry.value)));
+            }
           }
-        }
+          // The condition stated above, read off the supply marks — and the descents it licenses,
+          // in the same pass. A coverable field short of a supply from every node was omitted by
+          // one of them, which is the ask that makes the walk descend into that field's OWN
+          // default; a field every node wrote was asked by none of them, and is what stops this
+          // frame from covering `InputObjectDefaultValueHasCycle(target, {})`.
+          let mut canonical = true;
+          for &at in coverable_here {
+            let index = at as usize;
+            let id = field_base[target] + index;
+            let supplied = if supplied_in[id] >= since {
+              supplied_by[id]
+            } else {
+              0
+            };
+            if supplied == maps.len() {
+              canonical = false;
+            } else {
+              work.push((index, None));
+            }
+          }
+          canonical
+        };
         stack.push(Frame {
           pushed,
           work,
           cursor: 0,
           object: target,
+          canonical,
         });
       }
 
@@ -2982,10 +4296,11 @@ impl SchemaBuilder {
         implicated[frame.object] = true;
       }
       implicated[object] = true;
-      let owner = self.text(self.types[object].name.sym).to_owned();
-      let at = self.types[object].input_fields[field_index].name;
-      let name = self.text(at.sym).to_owned();
-      self.push_owned(
+      let owner = model.text(model.types[object].name.sym).to_owned();
+      let at = model.types[object].input_fields[field_index].name;
+      let name = model.text(at.sym).to_owned();
+      push_owned(
+        errors,
         SchemaErrorKind::InputObjectDefaultValueCycle,
         &name,
         owner,
@@ -2996,93 +4311,217 @@ impl SchemaBuilder {
 
   /// Draft §3.13.1: a directive definition must not refer to itself, directly or indirectly.
   ///
-  /// One reachability walk per directive, over two interleaved worklists — directives to expand
-  /// and types to expand — with a visited bit each. Iterative on purpose: the type graph's depth
-  /// is bounded by nothing but the document, and a recursive walk would put an SDL's input-object
-  /// chain on the call stack.
+  /// The rule is exactly "is this directive reachable from itself", over one graph with two kinds
+  /// of node — a directive, and a type an argument accepts — because the path between two
+  /// directives runs through the types their arguments name.
   ///
-  /// The cycle is only reported on the directive the walk *started* from. A directive `@b` that
-  /// merely uses a self-referential `@a` is not itself self-referential, and blaming it would put
-  /// the diagnostic on the wrong definition — the same refinement apollo-compiler makes.
+  /// # What a walk per directive cost, on a document `Schema::build` accepts
+  ///
+  /// The shape that stood here ran one reachability walk from every directive, and allocated the
+  /// two schema-wide visitation vectors **inside** that loop. Two independent `Θ(N²)` terms came
+  /// out of that, and both were measured on documents `Schema::build` **accepts**:
+  ///
+  /// - The **initialisation**, which `N` distinct zero-argument directives with no dependency
+  ///   edge at all — nothing to walk, nothing to find — paid in full. It is the quieter of the
+  ///   two, because ingesting `N` definitions is itself linear and hides it: 1.39 in the exponent
+  ///   over 1 k–256 k, and only over the ladder's top step, 1.62, does the square show. 793 ms at
+  ///   256 k, against 106 ms and 1.04 now.
+  /// - The **traversal**, which a long *acyclic* chain `@d0 ← @d1 ← … ← @dN` paid by being walked
+  ///   again from every starting directive — a term stamping the visitation would have left
+  ///   exactly where it was. 1.97 in the exponent over 1 k–64 k, 2.04 over the top step, and
+  ///   26.1 s at 64 k, against 56 ms and 1.07 now.
+  ///
+  /// al8n/smear#198.
+  ///
+  /// # One graph, one pass
+  ///
+  /// [`SchemaBuilder::cyclic_directives`] builds that graph once and runs Tarjan over it, so
+  /// every directive's answer comes out of a single `O(nodes + edges)` traversal. "Reachable from
+  /// itself" is "in a strongly connected component with a second member, or carrying an edge to
+  /// itself", and the second disjunct is not a special case to be tidied away: a directive naming
+  /// itself directly is a component of one, which is otherwise indistinguishable from an acyclic
+  /// node.
+  ///
+  /// # What does not change
+  ///
+  /// The cycle is still reported only on the directive that is on it. A directive `@b` that
+  /// merely uses a self-referential `@a` is not itself self-referential — `@a` is not reachable
+  /// *back* to `@b`, so they are not in one component — and blaming it would put the diagnostic
+  /// on the wrong definition, the same refinement apollo-compiler makes.
+  ///
+  /// Diagnostics are emitted by ascending directive index, which is the order the definitions
+  /// were read in, which is the order the walk-per-directive loop produced them in.
   fn validate_directive_cycles(&mut self) {
     let directives = self.directives.len();
     if directives == 0 {
       return;
     }
-    let types = self.types.len();
-    let mut cyclic: Vec<usize> = Vec::new();
-
-    for start in 0..directives {
-      let mut seen_directives = vec![false; directives];
-      let mut seen_types = vec![false; types];
-      let mut pending_directives: Vec<usize> = Vec::new();
-      let mut pending_types: Vec<usize> = Vec::new();
-
-      // Seed with what the definition itself names: the directives applied to its arguments, and
-      // the types those arguments accept.
-      for arg in &self.directives[start].args {
-        self.push_directive_uses(&arg.directives, &mut pending_directives);
-        self.push_type(arg.ty.packed.base_id(), &mut pending_types);
+    let cyclic = self.cyclic_directives();
+    for (index, &on_cycle) in cyclic.iter().enumerate() {
+      if !on_cycle {
+        continue;
       }
-
-      let mut found = false;
-      while !found {
-        if let Some(next) = pending_directives.pop() {
-          if next == start {
-            found = true;
-            break;
-          }
-          if seen_directives[next] {
-            continue;
-          }
-          seen_directives[next] = true;
-          for arg in &self.directives[next].args {
-            self.push_directive_uses(&arg.directives, &mut pending_directives);
-            self.push_type(arg.ty.packed.base_id(), &mut pending_types);
-          }
-          continue;
-        }
-        let Some(next) = pending_types.pop() else {
-          break;
-        };
-        if seen_types[next] {
-          continue;
-        }
-        seen_types[next] = true;
-        let raw = &self.types[next];
-        self.push_directive_uses(&raw.directives, &mut pending_directives);
-        for field in &raw.input_fields {
-          self.push_directive_uses(&field.directives, &mut pending_directives);
-          self.push_type(field.ty.packed.base_id(), &mut pending_types);
-        }
-        for value in &raw.enum_values {
-          self.push_directive_uses(&value.directives, &mut pending_directives);
-        }
-      }
-
-      if found {
-        cyclic.push(start);
-      }
-    }
-
-    for index in cyclic {
       let at = self.directives[index].name;
       let name = self.text(at.sym).to_owned();
       self.push(SchemaErrorKind::SelfReferentialDirective, &name, at);
     }
   }
 
-  fn push_directive_uses(&self, uses: &[RawDirectiveUse], pending: &mut Vec<usize>) {
-    for used in uses {
-      if let Some(index) = self.directive_index(used.name.sym) {
-        pending.push(index);
+  /// Which directives are reachable from themselves, one bit per directive index.
+  ///
+  /// # The graph
+  ///
+  /// Node `d` below [`SchemaBuilder::directives`]`.len()` is that directive; node
+  /// `directives + t` is type `t`. The edges are the steps the walk this replaces took, and they
+  /// are the same steps: a directive reaches the directives written on its arguments and the base
+  /// types its arguments accept; a type reaches the directives written on it, on its input fields
+  /// and on its enum values, and the base types its input fields accept.
+  ///
+  /// A directive whose argument list a ceiling refused reaches **nothing**, exactly as it seeded
+  /// nothing before. A cycle through a directive that will not build is a second diagnostic about
+  /// a schema the first one has already refused.
+  ///
+  /// # Compressed rows, and why the edges are counted before they are written
+  ///
+  /// [`SchemaBuilder::dependencies`] is asked twice — once to size each row, once to fill it —
+  /// rather than pushing into a vector per node, because one row per node is `nodes` allocations
+  /// and this is two. The scratch it writes through is reused across both passes and every node.
+  fn cyclic_directives(&self) -> Vec<bool> {
+    let directives = self.directives.len();
+    let nodes = directives + self.types.len();
+
+    let mut reaches: Vec<u32> = Vec::new();
+    let mut offset: Vec<usize> = vec![0; nodes + 1];
+    for node in 0..nodes {
+      self.dependencies(node, &mut reaches);
+      offset[node + 1] = reaches.len();
+    }
+    for node in 0..nodes {
+      offset[node + 1] += offset[node];
+    }
+    let mut edges: Vec<u32> = vec![0; offset[nodes]];
+    for node in 0..nodes {
+      self.dependencies(node, &mut reaches);
+      edges[offset[node]..offset[node + 1]].copy_from_slice(&reaches);
+    }
+
+    // Tarjan, iterative for the reason the walk it replaces was iterative: the type graph's depth
+    // is bounded by nothing but the document, and a recursive walk would put an SDL's
+    // input-object chain on the call stack.
+    //
+    // Discovery indices start at one so that zero means "not yet visited". A sentinel at the top
+    // of the range would be a second thing the counter must never reach; this way the counter has
+    // only its own width to respect.
+    const UNVISITED: u32 = 0;
+    let mut discovered: Vec<u32> = vec![UNVISITED; nodes];
+    let mut low: Vec<u32> = vec![0; nodes];
+    let mut stacked: Vec<bool> = vec![false; nodes];
+    let mut component: Vec<u32> = Vec::new();
+    /// A node and the edge of its row to read next.
+    type Descent = (u32, usize);
+    let mut descent: Vec<Descent> = Vec::new();
+    let mut next_discovery: u32 = 1;
+    let mut cyclic = vec![false; directives];
+
+    for root in 0..nodes {
+      if discovered[root] != UNVISITED {
+        continue;
       }
+      discovered[root] = next_discovery;
+      low[root] = next_discovery;
+      next_discovery += 1;
+      component.push(root as u32);
+      stacked[root] = true;
+      descent.push((root as u32, offset[root]));
+
+      while let Some(&(node, cursor)) = descent.last() {
+        let node = node as usize;
+        if cursor < offset[node + 1] {
+          descent
+            .last_mut()
+            .expect("the frame just read is still on the descent")
+            .1 = cursor + 1;
+          let next = edges[cursor] as usize;
+          if next == node && node < directives {
+            // A component of one, which nothing below can tell from an acyclic node.
+            cyclic[node] = true;
+          }
+          if discovered[next] == UNVISITED {
+            discovered[next] = next_discovery;
+            low[next] = next_discovery;
+            next_discovery += 1;
+            component.push(next as u32);
+            stacked[next] = true;
+            descent.push((next as u32, offset[next]));
+          } else if stacked[next] {
+            low[node] = low[node].min(discovered[next]);
+          }
+          continue;
+        }
+
+        descent.pop();
+        if let Some(&(parent, _)) = descent.last() {
+          low[parent as usize] = low[parent as usize].min(low[node]);
+        }
+        if low[node] != discovered[node] {
+          continue;
+        }
+        // The component is the tail of the stack above this node, which is its root.
+        let at = component
+          .iter()
+          .rposition(|&member| member as usize == node)
+          .expect("a component's root is on the component stack");
+        // Two members mean every member reaches every other, so every directive among them
+        // reaches itself.
+        let closed = component.len() - at > 1;
+        for &member in &component[at..] {
+          stacked[member as usize] = false;
+          if closed && (member as usize) < directives {
+            cyclic[member as usize] = true;
+          }
+        }
+        component.truncate(at);
+      }
+    }
+
+    cyclic
+  }
+
+  /// The nodes one node of [`SchemaBuilder::cyclic_directives`]'s graph reaches in one step,
+  /// written into `reaches`, which is cleared first.
+  fn dependencies(&self, node: usize, reaches: &mut Vec<u32>) {
+    reaches.clear();
+    let directives = self.directives.len();
+    let first_type_node = directives as u32;
+
+    if node < directives {
+      // Unless the ceiling holds this list, in which case the definition reaches nothing.
+      let Args::Bounded(args) = self.directives[node].args.read() else {
+        return;
+      };
+      for arg in args {
+        self.push_directive_uses(&arg.directives, reaches);
+        push_type(arg.ty.packed.base_id(), first_type_node, reaches);
+      }
+      return;
+    }
+
+    let raw = &self.types[node - directives];
+    self.push_directive_uses(&raw.directives, reaches);
+    for field in &raw.input_fields {
+      self.push_directive_uses(&field.directives, reaches);
+      push_type(field.ty.packed.base_id(), first_type_node, reaches);
+    }
+    for value in &raw.enum_values {
+      self.push_directive_uses(&value.directives, reaches);
     }
   }
 
-  fn push_type(&self, base: TypeId, pending: &mut Vec<usize>) {
-    if base != UNRESOLVED {
-      pending.push(base.get() as usize);
+  fn push_directive_uses(&self, uses: &[RawDirectiveUse], reaches: &mut Vec<u32>) {
+    for used in uses {
+      if let Some(index) = self.directive_index(used.name.sym) {
+        reaches.push(index as u32);
+      }
     }
   }
 
@@ -3125,6 +4564,47 @@ impl SchemaBuilder {
       }
     }
     let possible_words = objects.len().div_ceil(64).max(1) as u32;
+
+    // Every interface's implementors, from the closures that name them, in one pass over the
+    // objects.
+    //
+    // Draft §3.7 states the set the other way round — an interface's possible objects are the
+    // objects that declare it — and the loop below stated it that way too: for each interface,
+    // every type in the schema, and for each object among them a scan of its closure. That is
+    // `Θ(interfaces × types × closure)` with a ceiling on none of the three, and it runs in
+    // `flatten`, which is reached only when the build has **accepted** the document. `N`
+    // implementor-less interfaces beside `N` objects is `Θ(N)` of SDL and was `Θ(N²)` here: 1.87
+    // in the exponent over 500–4 000 and **55.4 ms** at `N` = 4 000, against 1.00 and 3.6 ms.
+    //
+    // A counting sort rather than a `Vec` per interface, because one row per interface is one
+    // allocation per interface where this is two for the schema, and because the rows are read
+    // once each in the loop below. The membership question disappears with the direction: an
+    // object's closure names the interfaces it implements, so walking it emits exactly the pairs
+    // the scan was looking for and no pair it was not. Bit order within a word is not a
+    // representation: `set_bit` is idempotent and the bitset is a set. al8n/smear#198.
+    let mut implementor_base: Vec<u32> = vec![0; raw_types.len() + 1];
+    for raw in &raw_types {
+      if raw.kind == TypeKind::Object {
+        for &interface in &raw.closure {
+          implementor_base[interface as usize + 1] += 1;
+        }
+      }
+    }
+    for at in 0..raw_types.len() {
+      implementor_base[at + 1] += implementor_base[at];
+    }
+    let mut implementors: Vec<u32> = vec![0; implementor_base[raw_types.len()] as usize];
+    {
+      let mut cursor = implementor_base.clone();
+      for (index, raw) in raw_types.iter().enumerate() {
+        if raw.kind == TypeKind::Object {
+          for &interface in &raw.closure {
+            implementors[cursor[interface as usize] as usize] = ordinal_of[index];
+            cursor[interface as usize] += 1;
+          }
+        }
+      }
+    }
 
     let string_id = interner
       .lookup(b"String")
@@ -3186,9 +4666,23 @@ impl SchemaBuilder {
         TypeKind::Object | TypeKind::Interface | TypeKind::Union => {
           let mut rows: Vec<FieldDef> = Vec::with_capacity(raw.fields.len() + 3);
           for field in &raw.fields {
+            // Unreachable, and reported rather than assumed. `finish` returns `Err` for any
+            // recorded error and an over-limit list records one, so flattening never meets a
+            // refused list. What the arm must not do is degrade quietly: an empty argument range
+            // is a schema that silently drops arguments the document wrote, which is the one
+            // outcome worse than the refusal this returns.
+            let Args::Bounded(declared) = field.args.read() else {
+              return Err(SchemaErrors::new(vec![
+                SchemaError::new(
+                  SchemaErrorKind::TooManyFieldArguments,
+                  interner.text(field.name.sym),
+                  field.name.span,
+                )
+                .in_document(field.name.document),
+              ]));
+            };
             let args_start = inputs.len() as u32;
-            let mut args: Vec<InputValueDef> = field
-              .args
+            let mut args: Vec<InputValueDef> = declared
               .iter()
               .map(|arg| InputValueDef::new(arg.name.sym, arg.ty.packed, arg.default))
               .collect();
@@ -3272,10 +4766,9 @@ impl SchemaBuilder {
             }
           }
           TypeKind::Interface => {
-            for (candidate, other) in raw_types.iter().enumerate() {
-              if other.kind == TypeKind::Object && other.closure.contains(&(index as u32)) {
-                set_bit(&mut possible, start, ordinal_of[candidate]);
-              }
+            let row = implementor_base[index] as usize..implementor_base[index + 1] as usize;
+            for &ordinal in &implementors[row] {
+              set_bit(&mut possible, start, ordinal);
             }
           }
           _ => {}
@@ -3312,9 +4805,20 @@ impl SchemaBuilder {
 
     let mut directives: Vec<DirectiveDef> = Vec::with_capacity(raw_directives.len());
     for raw in &raw_directives {
+      // Unreachable for the reason the field arm above states, and refused rather than emptied
+      // for the same one.
+      let Args::Bounded(declared) = raw.args.read() else {
+        return Err(SchemaErrors::new(vec![
+          SchemaError::new(
+            SchemaErrorKind::TooManyDirectiveArguments,
+            interner.text(raw.name.sym),
+            raw.name.span,
+          )
+          .in_document(raw.name.document),
+        ]));
+      };
       let args_start = inputs.len() as u32;
-      let mut args: Vec<InputValueDef> = raw
-        .args
+      let mut args: Vec<InputValueDef> = declared
         .iter()
         .map(|arg| InputValueDef::new(arg.name.sym, arg.ty.packed, arg.default))
         .collect();

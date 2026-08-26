@@ -94,6 +94,22 @@ pub enum SchemaErrorKind {
   ReservedArgumentName,
   /// An argument's type is an output type (draft §3.6.1, §3.7.1).
   ArgumentTypeNotInputType,
+  /// A field declares more arguments than
+  /// [`MAX_FIELD_ARGUMENTS`](super::MAX_FIELD_ARGUMENTS).
+  ///
+  /// A capacity limit of this implementation, not a specification rule — and unlike
+  /// [`TooManyNames`](Self::TooManyNames) or
+  /// [`TypeReferenceTooDeep`](Self::TypeReferenceTooDeep) it is not about what the representation
+  /// can address. Draft §6.4.1 `CoerceArgumentValues` iterates every declared argument at every
+  /// runtime position of the field, and an executor can meter the positions but cannot charge the
+  /// declared count without billing a request for the service's own design-time width. The
+  /// constant's own documentation has the measurement and the rewrite a wider field takes: one
+  /// argument of an input object type, whose fields no executor iterates per position.
+  ///
+  /// Raised for interface fields as well as object fields. Draft §3.7 makes an interface field's
+  /// argument list a lower bound on every implementing field's, so an interface field past the
+  /// ceiling is one no object type could implement without being refused itself.
+  TooManyFieldArguments,
   /// `@deprecated` is applied to a required argument (draft §3.6.1 2.4.4.1, §3.7.1).
   ///
   /// Required means non-null with no default, and §3.13's own text for the directive says why:
@@ -217,6 +233,18 @@ pub enum SchemaErrorKind {
   ReservedDirectiveArgumentName,
   /// A directive argument's type is an output type (draft §3.13.1).
   DirectiveArgumentTypeNotInputType,
+  /// A directive definition declares more arguments than
+  /// [`MAX_DIRECTIVE_ARGUMENTS`](super::MAX_DIRECTIVE_ARGUMENTS).
+  ///
+  /// A capacity limit of this implementation, and the directive twin of
+  /// [`TooManyFieldArguments`](Self::TooManyFieldArguments) rather than the same rule read twice.
+  /// The field ceiling bounds draft §6.4.1's coercion, which no directive definition is put
+  /// through; this one bounds draft 5.4.3's presence scan, which walks every argument the named
+  /// definition declares at every usage a document writes. Both are `count × declared` with the
+  /// count the client's and the width the deployment's, and both are answered where the
+  /// deployment writes the width. The constant's own documentation has the measurement, the
+  /// reason it is a separate number, and the rewrite a wider directive takes.
+  TooManyDirectiveArguments,
   /// A directive definition refers to itself, directly or through the types it names
   /// (draft §3.13.1).
   SelfReferentialDirective,
@@ -307,6 +335,7 @@ impl SchemaErrorKind {
     Self::DuplicateArgumentName,
     Self::ReservedArgumentName,
     Self::ArgumentTypeNotInputType,
+    Self::TooManyFieldArguments,
     Self::DeprecatedRequiredArgument,
     Self::InvalidDefaultValue,
     Self::ImplementsNonInterface,
@@ -341,6 +370,7 @@ impl SchemaErrorKind {
     Self::DuplicateDirectiveArgumentName,
     Self::ReservedDirectiveArgumentName,
     Self::DirectiveArgumentTypeNotInputType,
+    Self::TooManyDirectiveArguments,
     Self::SelfReferentialDirective,
     Self::UndefinedDirective,
     Self::UnsupportedDirectiveLocation,
@@ -379,6 +409,7 @@ impl SchemaErrorKind {
       Self::DuplicateArgumentName => "duplicate argument",
       Self::ReservedArgumentName => "argument name is reserved for introspection",
       Self::ArgumentTypeNotInputType => "argument type is not an input type",
+      Self::TooManyFieldArguments => "field declares too many arguments",
       Self::DeprecatedRequiredArgument => "required argument is deprecated",
       Self::InvalidDefaultValue => "default value does not fit its declared type",
       Self::ImplementsNonInterface => "implemented type is not an interface",
@@ -427,6 +458,7 @@ impl SchemaErrorKind {
         "directive argument name is reserved for introspection"
       }
       Self::DirectiveArgumentTypeNotInputType => "directive argument type is not an input type",
+      Self::TooManyDirectiveArguments => "directive declares too many arguments",
       Self::SelfReferentialDirective => "directive definition refers to itself",
       Self::UndefinedDirective => "undefined directive",
       Self::UnsupportedDirectiveLocation => "directive is not allowed here",
@@ -479,6 +511,7 @@ impl SchemaErrorKind {
       Self::DuplicateArgumentName => Code::new("smear::schema::duplicate-argument-name"),
       Self::ReservedArgumentName => Code::new("smear::schema::reserved-argument-name"),
       Self::ArgumentTypeNotInputType => Code::new("smear::schema::argument-type-not-input-type"),
+      Self::TooManyFieldArguments => Code::new("smear::schema::too-many-field-arguments"),
       Self::DeprecatedRequiredArgument => Code::new("smear::schema::deprecated-required-argument"),
       Self::InvalidDefaultValue => Code::new("smear::schema::invalid-default-value"),
       Self::ImplementsNonInterface => Code::new("smear::schema::implements-non-interface"),
@@ -537,6 +570,7 @@ impl SchemaErrorKind {
       Self::DirectiveArgumentTypeNotInputType => {
         Code::new("smear::schema::directive-argument-type-not-input-type")
       }
+      Self::TooManyDirectiveArguments => Code::new("smear::schema::too-many-directive-arguments"),
       Self::SelfReferentialDirective => Code::new("smear::schema::self-referential-directive"),
       Self::UndefinedDirective => Code::new("smear::schema::undefined-directive"),
       Self::UnsupportedDirectiveLocation => {
@@ -591,6 +625,7 @@ impl SchemaErrorKind {
       | Self::DuplicateArgumentName
       | Self::ReservedArgumentName
       | Self::ArgumentTypeNotInputType
+      | Self::TooManyFieldArguments
       | Self::DeprecatedRequiredArgument
       | Self::InvalidDefaultValue
       | Self::ImplementsNonInterface
@@ -625,6 +660,7 @@ impl SchemaErrorKind {
       | Self::DuplicateDirectiveArgumentName
       | Self::ReservedDirectiveArgumentName
       | Self::DirectiveArgumentTypeNotInputType
+      | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation
@@ -695,6 +731,9 @@ impl SchemaErrorKind {
       Self::ArgumentTypeNotInputType => {
         Some("an argument's type must be a scalar, enum or input object.")
       }
+      Self::TooManyFieldArguments => Some(
+        "argument coercion runs once per runtime position of the field, so this list is bounded at          the schema; gather the arguments into one input object.",
+      ),
       Self::DeprecatedRequiredArgument => Some(
         "to deprecate a required argument, first make it optional — give it a default, or drop the `!`.",
       ),
@@ -758,6 +797,9 @@ impl SchemaErrorKind {
       Self::DirectiveArgumentTypeNotInputType => {
         Some("a directive argument's type must be a scalar, enum or input object.")
       }
+      Self::TooManyDirectiveArguments => Some(
+        "every usage rescans the whole declared list, so it is bounded at the schema; gather the arguments into one input object.",
+      ),
       Self::SelfReferentialDirective => Some(
         "a directive may not appear on its own definition, nor on any type that definition names.",
       ),
@@ -841,6 +883,7 @@ impl SchemaErrorKind {
       | Self::FieldTypeNotOutputType
       | Self::ReservedArgumentName
       | Self::ArgumentTypeNotInputType
+      | Self::TooManyFieldArguments
       | Self::DeprecatedRequiredArgument
       | Self::InvalidDefaultValue
       | Self::ImplementsNonInterface
@@ -869,6 +912,7 @@ impl SchemaErrorKind {
       | Self::ReservedDirectiveName
       | Self::ReservedDirectiveArgumentName
       | Self::DirectiveArgumentTypeNotInputType
+      | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation

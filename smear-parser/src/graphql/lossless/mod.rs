@@ -282,9 +282,10 @@ pub use runner::{
 // again at the SDL root. Every root has a projection, and each single-half root has a recovering
 // one beside it. `Recovery` is the substrate's — it says how much of a tree the recovering door
 // could see and nothing about a dialect — so it is re-exported here rather than copied.
-pub use crate::lossless::project::Recovery;
+pub use crate::lossless::project::{Recovery, Unverified};
 pub use project::{
-  ProjectError, ProjectErrorKind, project, project_executable_document,
-  project_executable_document_recovered, project_type_system_document,
-  project_type_system_document_recovered,
+  ProjectError, ProjectErrorKind, Verified, project, project_executable_document,
+  project_executable_document_recovered, project_executable_document_verified,
+  project_type_system_document, project_type_system_document_recovered,
+  project_type_system_document_verified, verify_parse,
 };

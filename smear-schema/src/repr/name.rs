@@ -317,7 +317,23 @@ pub const fn is_name(bytes: &[u8]) -> bool {
   if !(first == b'_' || first.is_ascii_alphabetic()) {
     return false;
   }
-  let mut i = 1;
+  is_name_tail(bytes.split_at(1).1)
+}
+
+/// Returns whether every byte of `bytes` may **follow** a `Name`'s first one.
+///
+/// [`is_name`]'s rule for everything after `bytes[0]`, split out because it is the half that
+/// *composes*: the tail of a `Name` is a tail whatever it is cut into, so a reader that has to
+/// examine a spelling a piece at a time — one charging a ledger for the bytes it is about to
+/// read — asks this once per piece and reaches the answer [`is_name`] would have given for the
+/// whole. [`is_name`] is written in terms of it, so draft §2.1.9's byte rule has one spelling in
+/// this workspace and not two that can drift apart.
+///
+/// An empty slice is a tail, and the empty *name* is refused by [`is_name`]'s own emptiness check
+/// rather than here — a one-byte `Name` has an empty tail.
+#[inline]
+pub const fn is_name_tail(bytes: &[u8]) -> bool {
+  let mut i = 0;
   while i < bytes.len() {
     let b = bytes[i];
     if !(b == b'_' || b.is_ascii_alphanumeric()) {

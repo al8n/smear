@@ -42,7 +42,7 @@ use smear_parser::graphql::ast::{
   Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
   SelectionSet,
 };
-use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name};
+use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name, is_name_tail};
 
 use super::{
   Values,
@@ -108,13 +108,21 @@ pub(super) enum Unstored {
 /// al8n/smear#172.
 #[inline]
 pub(super) const fn byte_units(len: usize) -> u32 {
-  let units = len / 8 + 1;
+  let units = len / BYTES_PER_UNIT + 1;
   if units > u32::MAX as usize {
     u32::MAX
   } else {
     units as u32
   }
 }
+
+/// How many bytes one [`byte_units`] unit pays for.
+///
+/// Named rather than written twice: [`scan_key`] charges the same ledger a unit at a time as it
+/// examines a spelling, and its running total has to be the number [`byte_units`] would have
+/// produced for the bytes it has read. Two spellings of the stride would be two different ledgers
+/// over the same pass.
+const BYTES_PER_UNIT: usize = 8;
 
 /// An empty open-addressing slot, an unterminated chain, and "this key has no group yet".
 ///
@@ -331,8 +339,10 @@ impl Visits {
 
   /// Charges `work` units **before** the work they pay for, answering whether there was room.
   ///
-  /// A selection examined is one unit, an entry a name lookup compares is one unit, and a
-  /// definition or fragment the index pass handles is one unit.
+  /// A selection examined is one unit, an entry a name lookup compares is one unit, a definition
+  /// or fragment the index pass handles is one unit, and so is a directive written on a selection
+  /// or an argument written at a `@skip`/`@include` usage — each of those is a name compared
+  /// against an ASCII literal, settled by its length before a byte is read.
   ///
   /// # Every caller charges first, and that is a property and not a convention
   ///
@@ -413,6 +423,21 @@ impl Visits {
   #[inline]
   fn spend_bytes(&mut self, len: usize, location: SimpleSpan) -> Result<(), Fault<'static>> {
     self.spend(byte_units(len), location)
+  }
+
+  /// The fault a refusal reports, for a door that learned about the refusal from
+  /// [`Compared::Refused`] rather than from a `false` this type returned.
+  ///
+  /// One spelling of the refusal, so that a charged comparison and a charged pass cannot report
+  /// the same exhausted ceiling two different ways.
+  #[inline]
+  #[cold]
+  pub(super) const fn budget_fault(&self, location: SimpleSpan) -> Fault<'static> {
+    Fault {
+      raw: Raw::CollectionBudget { limit: self.limit },
+      location,
+      name: None,
+    }
   }
 
   /// The ceiling, for the message that reports a refusal.
@@ -747,7 +772,7 @@ mod table {
   };
   use smear_schema::{bucket, hash_bytes};
 
-  use super::{Fault, NONE, Visits, byte_units};
+  use super::{Compared, Fault, NONE, Visits, byte_units, metered_eq};
 
   /// One accepted charge, and the fragments it was taken over.
   ///
@@ -1054,9 +1079,15 @@ mod table {
         let fragment = self.defs[ordinal as usize];
         let spelling = fragment.name().source().as_ref();
         if self.hashes[ordinal as usize] == hash && spelling.len() == name.len() {
-          visits.spend_bytes(name.len(), location)?;
-          if spelling == name {
-            return Ok(Some((ordinal, fragment)));
+          // Charged for the bytes the `memcmp` reads, not for the length it is over. Reaching
+          // here needs the whole stored hash **and** the length to agree, so the bytes are about
+          // to be equal and this ordinarily pays `byte_units(len)` exactly as the whole-length
+          // charge did; what it no longer does is bill a genuine hash collision for a pass that
+          // stops at its first differing byte. al8n/smear#198's twenty-third round.
+          match metered_eq(spelling, name, visits) {
+            Compared::Equal => return Ok(Some((ordinal, fragment))),
+            Compared::Differs => (),
+            Compared::Refused => return Err(visits.budget_fault(location)),
           }
         }
         ordinal = self.chain[ordinal as usize];
@@ -1458,13 +1489,19 @@ impl Interner {
         // only one an adversary has — is rejected here without touching a byte.
         let (start, len) = self.spans[id as usize];
         if self.hashes[id as usize] == hash && len as usize == bytes.len() {
-          if !visits.take_bytes(bytes.len()) {
-            return Err(Unstored::Budget {
-              limit: visits.limit(),
-            });
-          }
-          if &self.names.as_bytes()[start as usize..(start + len) as usize] == bytes {
-            return Ok(id);
+          // Charged for what the `memcmp` reads. The stored hash and the length have both agreed,
+          // so the ordinary outcome is equality and this pays `byte_units(len)` exactly as the
+          // whole-length charge did; a constructed hash collision no longer pays for a pass that
+          // stops at its first differing byte. al8n/smear#198's twenty-third round.
+          let stored = &self.names.as_bytes()[start as usize..(start + len) as usize];
+          match metered_eq(stored, bytes, visits) {
+            Compared::Equal => return Ok(id),
+            Compared::Differs => (),
+            Compared::Refused => {
+              return Err(Unstored::Budget {
+                limit: visits.limit(),
+              });
+            }
           }
         }
         id = self.chain[id as usize];
@@ -1934,7 +1971,7 @@ where
 
     match selection {
       Selection::Field(field) => {
-        if !included(field.directives(), ctx)? {
+        if !included(field.directives(), ctx, visits, *field.span())? {
           continue;
         }
         let spelling = match field.alias() {
@@ -2014,7 +2051,7 @@ where
         fields.push((group, field));
       }
       Selection::FragmentSpread(spread) => {
-        if !included(spread.directives(), ctx)? {
+        if !included(spread.directives(), ctx, visits, *spread.span())? {
           continue;
         }
         // Indexed here rather than at construction, and charged. A document whose fragments are
@@ -2042,7 +2079,7 @@ where
         stack.push((fragment.selection_set(), 0));
       }
       Selection::InlineFragment(inline) => {
-        if !included(inline.directives(), ctx)? {
+        if !included(inline.directives(), ctx, visits, *inline.span())? {
           continue;
         }
         if let Some(condition) = inline.type_condition() {
@@ -2083,7 +2120,45 @@ fn applies(schema: &Schema, condition: &[u8], object_type: TypeId) -> bool {
 /// so whatever `@include` says — and once step 3.a has removed it, step 3.b never runs, so
 /// `{ f @include(if: $unreadable) @skip(if: true) }` produces no error. Reading them in document
 /// order would raise one, and the reference implementation does not.
-fn included<'a, S, V>(directives: Option<&'a Directives<S>>, ctx: &mut V) -> Result<bool, Fault<'a>>
+///
+/// # The directives are charged, because the two passes are over what the *request* wrote
+///
+/// A selection costs one unit however many directives it carries, and both passes walk all of them
+/// at every runtime position the selection is collected for. `{ bulk { f @skip(if: false) × 1600 }
+/// }` is one selection in the document and `positions × 1600` comparisons at execution: measured at
+/// 4,096 positions, taking the list from 100 to 1,600 moved the wall clock 2.0 ms to 30.5 ms and
+/// the ledger not at all; charged, it moves 843,780 to 13,131,780.
+///
+/// One unit per directive, not two, although the list is walked twice: the comparisons are
+/// length-first against an ASCII literal, so what the client chooses here is the **count**, and the
+/// two passes are a constant on it rather than a second factor. That is the distinction the
+/// ledger's table draws — a budget on one factor of a product is the defect; a budget off by a
+/// fixed two is a unit.
+///
+/// # The unit is spent at the directive, because step 3.a does not read the rest
+///
+/// The first revision of this spent the whole list's length before either pass. That is the
+/// charge-first discipline overshot: **step 3.a returns as soon as a `@skip` says so**, so
+/// `{ f @skip(if: true) @custom × 1600 }` — a *valid* field, one directive examined — was refused
+/// with `CollectionBudget` for 1,600 directives nothing read. A charge in front of work the taken
+/// branch does not do is not a bound on anything; it is a refusal of input the executor was about
+/// to serve for free.
+///
+/// So the unit is spent inside the first loop, in front of the comparison that reads that
+/// directive. The second loop needs none of its own and is not left uncharged either: it runs only
+/// where the first reached the end, so every directive it can examine was already charged before
+/// the first loop read it — which is what keeps the count above exact rather than doubling it, and
+/// what keeps the whole list's measured numbers the numbers for a list that *is* fully read.
+///
+/// It also retires the [`u32::MAX`] saturation this charge used to need. A length that does not
+/// fit the counter is a length the counter has stopped tracking, and one unit at a time never
+/// reaches for a number it cannot spell. al8n/smear#198.
+fn included<'a, S, V>(
+  directives: Option<&'a Directives<S>>,
+  ctx: &mut V,
+  visits: &mut Visits,
+  location: SimpleSpan,
+) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
@@ -2091,13 +2166,22 @@ where
   let Some(directives) = directives else {
     return Ok(true);
   };
-  for directive in directives.directives() {
-    if directive.name().source().as_ref() == b"skip" && condition_is_true(directive, ctx)? {
+  let written = directives.directives();
+  for directive in written {
+    // In front of the comparison that reads THIS directive, and not in front of the list. Step
+    // 3.a returns the moment a `@skip` says so, and a charge over the whole list made the ledger
+    // refuse a valid `{ f @skip(if: true) @custom … }` for a suffix nothing read. The second pass
+    // is prepaid by this one: it runs only where this loop reached the end, so every directive it
+    // can examine was charged before this loop read it.
+    visits.spend(1, location)?;
+    if directive.name().source().as_ref() == b"skip" && condition_is_true(directive, ctx, visits)? {
       return Ok(false);
     }
   }
-  for directive in directives.directives() {
-    if directive.name().source().as_ref() == b"include" && !condition_is_true(directive, ctx)? {
+  for directive in written {
+    if directive.name().source().as_ref() == b"include"
+      && !condition_is_true(directive, ctx, visits)?
+    {
       return Ok(false);
     }
   }
@@ -2201,10 +2285,255 @@ pub fn variable_key(spelling: &[u8]) -> Option<&str> {
 ///   §7.1.7 puts under no lexical restriction at all.
 #[inline]
 pub(super) fn name_key(spelling: &[u8]) -> Option<&str> {
-  if !is_name(spelling) {
-    return None;
+  match scan_key(spelling, |_| true) {
+    Admission::Key(key) => Some(key),
+    // A meter that never refuses cannot produce `Admission::Refused`, and this door's answer for a
+    // spelling that is not a `Name` has always been `None`.
+    Admission::Unreadable | Admission::Refused => None,
   }
-  core::str::from_utf8(spelling).ok()
+}
+
+/// What reading a spelling as a name produced, and — for the metered door — whether it was read at
+/// all.
+///
+/// Three answers and not two, because the two failures are opposite findings about opposite
+/// parties. [`Unreadable`](Self::Unreadable) is about the *document*: these bytes are not a draft
+/// §2.1.9 `Name`, so they name no variable the request could have supplied, and both readers take
+/// their existing "not provided" branch. [`Refused`](Self::Refused) is about this *executor*: the
+/// ledger ran out with bytes still unexamined, so there is no finding about the spelling yet, and
+/// the caller reports a resource refusal naming the ceiling.
+///
+/// Collapsing them is the defect this type exists to prevent, and it is the sixth time on
+/// al8n/smear#198 that a distinction the code makes died at a boundary. See
+/// [`metered_variable_key`].
+pub(super) enum Admission<'a> {
+  /// The spelling is a `Name`, and this is the key to look up.
+  Key(&'a str),
+  /// The spelling is not a `Name`. Nothing about the ledger is being reported.
+  Unreadable,
+  /// The ledger had no room for the next run of bytes, so the scan stopped with no answer.
+  Refused,
+}
+
+/// [`variable_key`], charging `visits` for the bytes the draft §2.1.9 pass **examines**.
+///
+/// # A charge over the whole spelling stood in front of a scan that stops at its first byte
+///
+/// Both readers of a variable spelling used to `take_bytes(spelling.len())` and then call
+/// [`variable_key`]. The charge is correct about a spelling that *is* a name — `is_name`'s pass,
+/// the conversion and the driver's lookup each read all of it — and wrong about every spelling
+/// that is not, because [`is_name`] returns at the first byte outside the production. So
+/// `$1aaaa…a` of any length did one byte of admission work and was charged for the whole
+/// assembled length, and a caller who wrote a long enough one was told
+/// [`Raw::CollectionBudget`] — or, at draft §6.4.1's site, [`Raw::ArgumentBudget`] — where the
+/// finding is that the request supplied no such variable. The remedy printed with a budget refusal
+/// is a larger ceiling, so a caller was pointed at a knob that would not have changed the answer.
+///
+/// The charge is now taken a unit at a time in front of the run of bytes it pays for, so the
+/// running total after `k` bytes is exactly [`byte_units`]`(k)` — the opening unit covers seven
+/// bytes and each later one covers eight, which is what `len / 8 + 1` counts. A spelling refused at
+/// its first byte therefore costs one unit, the whole cost is paid only where the scan reached the
+/// end, and [`Admission::Refused`] means the ledger ran out of room for work this door was about to do.
+/// al8n/smear#198.
+///
+/// # One implementation, and one spelling of the rule underneath it
+///
+/// Both readers call this, for the reason [`variable_key`] is `pub` at all: two sites spelling
+/// "charge, then convert" is exactly the shape one of them can write half of, and this repair is
+/// the second time that shape has produced a defect at these same two sites.
+///
+/// The admission rule is still the schema arena's own. [`scan_key`] applies it through
+/// [`is_name`] for the first byte and [`is_name_tail`] for the runs after it, and `is_name` is
+/// *written in terms of* `is_name_tail` — so the byte rule has one spelling, the chunking cannot
+/// disagree with the whole-slice answer, and [`name_key`] reaches the same scan with a meter that
+/// never refuses.
+///
+/// # The question, re-asked of every charge this branch adds or moves
+///
+/// The round that classified the four charges added with these asked whether a short-circuiting
+/// **loop** stood above each. Two moved, and these two stayed on the ground that each sits
+/// "immediately in front of `variable_key` plus the driver lookup of that one name". A function is
+/// not a loop and `variable_key` short-circuits anyway, so the question was one notch too narrow.
+/// It is: **is there any work below this charge that can return before the work the charge priced
+/// is done** — a loop, a function, a validator, a driver call. The whole collection ledger under
+/// that question:
+///
+/// | charge | what can return early below it | now |
+/// |---|---|---|
+/// | [`included`], one unit per directive a selection carries | draft §6.3 step 3.a returns at the first `@skip` that removes the selection, and step 3.b never runs | **moved into the scan**, one unit in front of the comparison that reads that directive |
+/// | [`condition_is_true`], one unit per argument at a `@skip`/`@include` usage | the scan for `if` stops at `if` | **moved into the scan**, same shape |
+/// | `condition_is_true`, the condition variable's spelling | `is_name` returns at the first byte outside draft §2.1.9's production | **incremental**, through this function |
+/// | `Executor::coerce_arguments`, the argument's variable spelling | the same pass, and the consequence is worse — an optional argument's `hasValue = false` is a *served* field | **incremental**, through this function |
+/// | `coerce_arguments`, the written argument names | `find` stops at the entry it matches, and the loop above it is over what the **schema** declares, so an undeclared entry is never read at all | **once per entry, behind a high-water mark**, in front of the comparison that reads it |
+///
+/// Nothing in this ledger is left charging a population in front of work that can stop inside it.
+///
+/// # The question one notch further in: is the operation *sub-linear* in what the charge measured?
+///
+/// The table above is about **where** a charge stands. This one is about **what** it names, and it
+/// is al8n/smear#198's twenty-third round. A charge computed from a `len()` is a claim that the
+/// operation below it reads that many bytes; where the operation can answer without reading them,
+/// the charge is a prepayment and the claim is false — and the claim had by then been made in good
+/// faith, and been wrong, at four other shapes of this same site.
+///
+/// The operation that broke it is `[u8] == [u8]`. It **rejects unequal lengths without reading
+/// either spelling**, and on equal lengths stops at the first byte that disagrees. Three charges
+/// in this crate stood in front of one:
+///
+/// | charge | what the comparison actually reads | now |
+/// |---|---|---|
+/// | `Executor::coerce_arguments`, per written entry | two lengths, when no declared name is that long — `f(<L bytes>: 1, a: 1)` against `f(a: Int)` compared one length and was billed `byte_units(L)` | [`scan_eq`], **per entry and per depth**: the opening unit once, the runs past it as a comparison reaches them |
+/// | [`Interner::intern`]'s chain step | the stored key, once the whole hash and the length have already agreed | [`metered_eq`] — the same total on the equal path, and nothing for a collision's first differing byte |
+/// | the fragment table's chain step | the same, one table over | [`metered_eq`] |
+///
+/// What *stays* as a charge in front of work that is genuinely unconditional, with the operation
+/// that reads every byte named rather than assumed:
+///
+/// - [`Fragments::build`]'s two passes — `Table::charge` prices a slice `Table::fill` then walks
+///   end to end, hashing every selected name with [`hash_bytes`], and the loop has no early exit;
+/// - [`Interner::intern`]'s opening charge, in front of [`hash_bytes`] over the whole key, and its
+///   closing one, in front of the arena copy of the whole key;
+/// - the fragment table's probe charge, in front of [`hash_bytes`] over the whole probe;
+/// - a type condition's and a runtime type's spelling, handed whole to `Schema::sym`, which hashes
+///   before it compares anything;
+/// - a response key's spelling, for the same probe;
+/// - one unit per selection examined, and one per definition draft §6.1 reads — counts, not
+///   lengths, and each taken in front of the one step it prices.
+///
+/// [`Fragments::build`]: Fragments::build
+/// [`Interner::intern`]: Interner::intern
+#[inline]
+pub(super) fn metered_variable_key<'a>(spelling: &'a [u8], visits: &mut Visits) -> Admission<'a> {
+  scan_key(spelling, |units| visits.take(units))
+}
+
+/// Reads `spelling` as a `Name`, asking `paid` for each unit before the bytes it covers are read.
+#[inline]
+fn scan_key<'a>(spelling: &'a [u8], mut paid: impl FnMut(u32) -> bool) -> Admission<'a> {
+  // `byte_units(0)`, and this door's fixed cost: the emptiness test and the first byte's admission
+  // are what a refusal at the first byte pays for, and nothing else.
+  if !paid(1) {
+    return Admission::Refused;
+  }
+  let Some(first) = spelling.first() else {
+    return Admission::Unreadable;
+  };
+  // The start rule, asked of the one byte it is about to read: a one-byte slice is a `Name` exactly
+  // when that byte may begin one.
+  if !is_name(core::slice::from_ref(first)) {
+    return Admission::Unreadable;
+  }
+  // How far the units taken so far reach. `byte_units(len)` is `len / BYTES_PER_UNIT + 1`, so the
+  // opening unit covers `BYTES_PER_UNIT - 1` bytes and every later one covers `BYTES_PER_UNIT`.
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 1;
+  while read < spelling.len() {
+    if read == budgeted {
+      if !paid(1) {
+        return Admission::Refused;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(spelling.len());
+    if !is_name_tail(&spelling[read..end]) {
+      return Admission::Unreadable;
+    }
+    read = end;
+  }
+  match core::str::from_utf8(spelling) {
+    Ok(key) => Admission::Key(key),
+    // Unreachable: a `Name` is ASCII. Written as the total conversion for the reason the crate's
+    // `unsafe`-free arithmetic is written out — see `name_key`'s header.
+    Err(_) => Admission::Unreadable,
+  }
+}
+
+/// The answer a charged comparison gives, and the third arm is why it is not a `bool`.
+///
+/// [`Compared::Refused`] means the ledger had no room for the next run of bytes, so the comparison
+/// **stopped with no answer** — the same distinction [`Admission::Refused`] draws one door over,
+/// and for the same reason: a caller that cannot tell "these differ" from "this was never read"
+/// reports a resource ceiling as a finding about the request, or a finding about the request as a
+/// resource ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Compared {
+  /// Every byte agreed, and the lengths did.
+  Equal,
+  /// The lengths disagreed, or a run of bytes did.
+  Differs,
+  /// The ledger ran out of room for a run this comparison had not read yet.
+  Refused,
+}
+
+/// `left == right`, charging `visits` a unit in front of each run of bytes it reads.
+///
+/// # A charge over a length in front of an operation that is sub-linear in it
+///
+/// This is al8n/smear#198's twenty-third round, and it is the same finding as
+/// [`metered_variable_key`]'s one notch further in. That round asked whether anything below a
+/// charge can *return* before the work the charge priced is done, moved the charges that could,
+/// and left the byte charges standing in front of `==`. Slice equality **rejects unequal lengths
+/// without reading either spelling**, and on equal lengths `memcmp` stops at the first byte that
+/// disagrees. So a charge of [`byte_units`]`(len)` in front of one prices a pass that a length
+/// test can decide in two loads.
+///
+/// The running total after `k` bytes is exactly `byte_units(k)`, as [`scan_key`]'s is: the opening
+/// unit covers the length test and the first `BYTES_PER_UNIT - 1` bytes, and every later one
+/// covers `BYTES_PER_UNIT`. A comparison that reads a whole `L`-byte spelling therefore costs what
+/// `take_bytes(L)` cost, which is the property the measured ladders in this crate's headers rest
+/// on; a comparison that reads less costs less; and nothing costs for bytes no `memcmp` reached.
+///
+/// # `charge` is a closure, because the unit's *owner* differs by site
+///
+/// Three policies use this scanner and they are not interchangeable, so the unit index is handed
+/// out rather than the decision:
+///
+/// - a **fresh** comparison pays every unit — a chain step's one `memcmp` against a stored key,
+///   which happens once per candidate per lookup;
+/// - a comparison against a spelling some **earlier** comparison already paid a prefix of pays
+///   only the units past that prefix, and raises it — the high-water in
+///   `Executor::coerce_arguments`, where draft §6.4.1's scan re-reads one written entry once per
+///   *declared* argument and charging each of those in full would put the schema's factor in the
+///   caller's ledger;
+/// - and a comparison whose opening unit some **enclosing** charge already took pays only the
+///   continuations.
+///
+/// `charge` is called with the 1-based index of the unit about to be spent, immediately before the
+/// run of bytes that unit pays for is read, and answers whether there was room.
+#[inline]
+pub(super) fn scan_eq(left: &[u8], right: &[u8], mut charge: impl FnMut(u32) -> bool) -> Compared {
+  // Unit one: the length test, and the first `BYTES_PER_UNIT - 1` bytes if it passes. This is the
+  // whole cost of an unequal-length comparison, which is the whole cost `[u8]::eq` pays for one.
+  if !charge(1) {
+    return Compared::Refused;
+  }
+  if left.len() != right.len() {
+    return Compared::Differs;
+  }
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < left.len() {
+    if read == budgeted {
+      unit += 1;
+      if !charge(unit) {
+        return Compared::Refused;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(left.len());
+    if left[read..end] != right[read..end] {
+      return Compared::Differs;
+    }
+    read = end;
+  }
+  Compared::Equal
+}
+
+/// [`scan_eq`] against `visits`, paying every unit it reads.
+#[inline]
+pub(super) fn metered_eq(left: &[u8], right: &[u8], visits: &mut Visits) -> Compared {
+  scan_eq(left, right, |_| visits.take(1))
 }
 
 /// Whether the directive's `if` argument is `true`, or why it could not be read as a boolean.
@@ -2239,18 +2568,38 @@ pub(super) fn name_key(spelling: &[u8]) -> Option<&str> {
 /// non-`Boolean` variable at the `Boolean!` location — or a driver whose §6.1 did not coerce, so
 /// no conforming request can tell the two apart; and of the two answers only this one is safe
 /// under both senses.
-fn condition_is_true<'a, S, V>(directive: &'a Directive<S>, ctx: &mut V) -> Result<bool, Fault<'a>>
+fn condition_is_true<'a, S, V>(
+  directive: &'a Directive<S>,
+  ctx: &mut V,
+  visits: &mut Visits,
+) -> Result<bool, Fault<'a>>
 where
   S: AsRef<[u8]>,
   V: Values,
 {
-  let argument = directive.arguments().and_then(|arguments| {
-    arguments
-      .arguments()
-      .iter()
-      .find(|argument| argument.name().source().as_ref() == b"if")
-  });
-  let Some(argument) = argument else {
+  let written = directive
+    .arguments()
+    .map(|arguments| arguments.arguments())
+    .unwrap_or(&[]);
+  // The scan for `if` reads the arguments the *request* wrote at this usage, and this runs once
+  // per runtime position the selection is collected for — so `@skip(a0: 1 … a1599: 1, if: false)`
+  // did 1,600 comparisons at every position for the one unit the selection cost. Charged in
+  // entries and not in bytes: a name compared against an ASCII literal is settled by its length
+  // first, so what the client chooses here is the count.
+  //
+  // One unit per argument the scan actually compares, spent in front of that comparison. The scan
+  // stops at `if`, so a charge over the whole list priced arguments it was never going to read —
+  // and a written list is not a validated one, which is the population that has any past the
+  // first. al8n/smear#198.
+  let mut found = None;
+  for argument in written {
+    visits.spend(1, *directive.span())?;
+    if argument.name().source().as_ref() == b"if" {
+      found = Some(argument);
+      break;
+    }
+  }
+  let Some(argument) = found else {
     return Err(Fault {
       raw: Raw::DirectiveCondition {
         fault: ConditionFault::Missing,
@@ -2273,7 +2622,38 @@ where
       // Read once. Interning the name costs a scan of the name table, so it happens only on the
       // branch that needs it for a message.
       let spelling = spelled.name().source().as_ref();
-      match variable_key(spelling).and_then(|name| ctx.variable(name)) {
+      // Draft §6.4.1 step 5.f's charge, at draft §6.3's site: `variable_key`'s §2.1.9 pass and the
+      // driver's lookup each read every byte of the spelling, once per runtime position, and a
+      // selection was one unit however long the name it names. `Executor::coerce_arguments` carries
+      // the measurement; the two readers of a variable spelling charge alike because they charge
+      // through one function.
+      //
+      // Metered as the pass examines bytes rather than over the assembled length, because
+      // `is_name` stops at the first byte outside draft §2.1.9's production: an unreadable spelling
+      // long enough to cross the ceiling was refused with `CollectionBudget` where the finding is
+      // that no such variable was supplied, and the remedy printed with a budget refusal is a
+      // larger ceiling. See `metered_variable_key`.
+      let key = metered_variable_key(spelling, visits);
+      let supplied = match key {
+        Admission::Key(name) => ctx.variable(name),
+        // §6.3's answer for a spelling the driver's key space cannot express: no variable the
+        // request could have supplied, so the driver is not asked and the arm below is the one
+        // that was always right for it.
+        Admission::Unreadable => None,
+        // The one exit here that is about this executor rather than about the request, and the
+        // only one that may name a ceiling. Reached with bytes of the spelling still unexamined,
+        // so there is no finding about the variable yet.
+        Admission::Refused => {
+          return Err(Fault {
+            raw: Raw::CollectionBudget {
+              limit: visits.limit(),
+            },
+            location,
+            name: None,
+          });
+        }
+      };
+      match supplied {
         // The variable was not supplied, and that is the finding whether or not its spelling can
         // be quoted — so an arena with no room shortens the message and keeps the diagnosis. The
         // spelling travels as bytes because the caller has an arena to restore before it can mint

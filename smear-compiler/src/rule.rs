@@ -155,7 +155,35 @@ pub enum Rule {
   ///
   /// The companion to [`Rule::MergeDepthBudget`], and the one that actually caps the worst case:
   /// depth alone does not bound draft 5.3.2, breadth times fragment reuse does.
+  ///
+  /// Excluding it behaves exactly as excluding [`Rule::MergeDepthBudget`] does, and for the same
+  /// reason: one verdict tail, one refusal.
   MergeWorkBudget,
+  /// Validation outside draft 5.3.2 reached this crate's absolute work ceiling.
+  ///
+  /// The other two bounds are the merge engine's, and the merge engine runs **last**. Everything
+  /// before it — the prep sweep, the fragment graph, the subscription root collection, and the one
+  /// selection walk per operation that carries every per-node rule — used to run with no ledger at
+  /// all, so a document whose *syntax* is `O(n)` could make those passes do `O(n^2)` and spend it
+  /// before draft 5.3.2 was ever consulted. Neither merge knob sees that, and not because a rule
+  /// set switched them off: measured, a 129 KB document of 3,200 operations spreading one
+  /// 3,200-field fragment spent 189 ms in the walk with [`Rule::MergeWorkBudget`] enabled, and
+  /// tripped it afterwards on work that had already been done.
+  ///
+  /// The knob is [`Budget::validation_work`](super::Budget::validation_work). Its unit is one per
+  /// node examined plus one per eight bytes of any document-chosen name the pass reads, and the
+  /// default is set where no honest document reaches it. It shipped for one review round with no
+  /// knob at all, on the argument that a new unit should not become an API commitment; that was
+  /// wrong in a way worth recording, because an absolute ceiling no caller can raise is a document
+  /// no public API can validate — and a valid 63 KB document was one of them. al8n/smear#198.
+  ///
+  /// Excluding it from a [`RuleSet`](super::RuleSet) removes the *diagnostic*, not the refusal:
+  /// the verdict is still `Err` with
+  /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set and nothing emitted — the
+  /// same answer all three bounds give, because all three write the same field and one tail reads
+  /// it. A validator that abandoned a pass and then answered `Ok` would be spelling giving up the
+  /// same way it spells finishing.
+  ValidationWorkBudget,
 }
 
 impl Rule {
@@ -195,6 +223,7 @@ impl Rule {
     Self::AllVariableUsagesAreAllowed,
     Self::MergeDepthBudget,
     Self::MergeWorkBudget,
+    Self::ValidationWorkBudget,
   ];
 
   /// Returns the rule's bit position in a [`RuleSet`].
@@ -237,6 +266,7 @@ impl Rule {
       Self::AllVariableUsagesAreAllowed => 28,
       Self::MergeDepthBudget => 29,
       Self::MergeWorkBudget => 30,
+      Self::ValidationWorkBudget => 31,
     }
   }
 
@@ -278,6 +308,9 @@ impl Rule {
       // neighbourhood and a grep for a real section number never finds them.
       Self::MergeDepthBudget => "5.3.2/depth",
       Self::MergeWorkBudget => "5.3.2/work",
+      // Not a section either, and deliberately not spelled against one: this bound is over every
+      // §5 pass that is NOT draft 5.3.2, so naming any single section would misstate its scope.
+      Self::ValidationWorkBudget => "§5/work",
     }
   }
 
@@ -316,6 +349,7 @@ impl Rule {
       Self::AllVariableUsagesAreAllowed => "All Variable Usages Are Allowed",
       Self::MergeDepthBudget => "Merge Depth Budget Exceeded",
       Self::MergeWorkBudget => "Merge Work Budget Exceeded",
+      Self::ValidationWorkBudget => "Validation Work Ceiling Exceeded",
     }
   }
 
@@ -377,6 +411,7 @@ impl Rule {
       }
       Self::MergeDepthBudget => Code::new("smear::validation::merge-depth-budget"),
       Self::MergeWorkBudget => Code::new("smear::validation::merge-work-budget"),
+      Self::ValidationWorkBudget => Code::new("smear::validation::validation-work-budget"),
     }
   }
 
@@ -419,7 +454,8 @@ impl Rule {
       | Self::AllVariablesUsed
       | Self::AllVariableUsagesAreAllowed
       | Self::MergeDepthBudget
-      | Self::MergeWorkBudget => Severity::Error,
+      | Self::MergeWorkBudget
+      | Self::ValidationWorkBudget => Severity::Error,
     }
   }
 
@@ -480,10 +516,13 @@ impl Rule {
         "a nullable variable may stand in a non-null position only if it has a default; otherwise widen the position or narrow the variable.",
       ),
       Self::MergeDepthBudget => Some(
-        "raise `Budget::merge_depth`, or refuse the document: the depth is this crate's bound on draft 5.3.2, which the specification leaves unbounded.",
+        "raise `Budget::merge_depth`, or send a shallower document: the depth is this crate's bound on draft 5.3.2, which the specification leaves unbounded.",
       ),
       Self::MergeWorkBudget => Some(
-        "raise `Budget::merge_work`, or refuse the document: breadth times fragment reuse is what actually bounds draft 5.3.2.",
+        "raise `Budget::merge_work`, or send a narrower document: breadth times fragment reuse is what actually bounds draft 5.3.2.",
+      ),
+      Self::ValidationWorkBudget => Some(
+        "raise `Budget::validation_work`, or send a smaller document: what this bounds is every pass except draft 5.3.2, and draft 5.3.2 runs last.",
       ),
       Self::OperationNameUniqueness
       | Self::ArgumentNames
@@ -537,7 +576,8 @@ impl Rule {
       | Self::AllVariablesUsed
       | Self::AllVariableUsagesAreAllowed
       | Self::MergeDepthBudget
-      | Self::MergeWorkBudget => None,
+      | Self::MergeWorkBudget
+      | Self::ValidationWorkBudget => None,
     }
   }
 }
@@ -556,25 +596,30 @@ impl core::fmt::Display for Rule {
 /// a consumer that only wants, say, the fragment rules does not pay for value coercion.
 ///
 /// **The resource bounds are not rules in that sense**, and reading the sentence above as though
-/// they were is the one way to be wrong about this type. [`Rule::MergeDepthBudget`] and
-/// [`Rule::MergeWorkBudget`] are each a rule *and* a bound, and a set reaches only the rule:
-/// narrowing removes a bound's diagnostic, never the bound. A validator asked for
-/// [`Rule::FieldSelectionMerging`] alone still stops when the merge engine reaches
-/// [`Budget::merge_work`](super::Budget::merge_work), and still answers `Err` — with
+/// they were is the one way to be wrong about this type. [`Rule::MergeDepthBudget`],
+/// [`Rule::MergeWorkBudget`] and [`Rule::ValidationWorkBudget`] are each a rule *and* a bound, and
+/// a set reaches only the rule: narrowing removes a bound's diagnostic, never the bound. A
+/// validator asked for [`Rule::FieldSelectionMerging`] alone still stops when the merge engine
+/// reaches [`Budget::merge_work`](super::Budget::merge_work), and still answers `Err` — with
 /// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set and
 /// [`Invalid::emitted`](super::Invalid::emitted) zero, because a validator that abandoned a pass
 /// and then answered `Ok` would be spelling giving up the same way it spells finishing.
 ///
-/// What narrowing *can* do is leave a bound with nothing to bound. Both of these are spent by
-/// draft 5.3.2's engine, and [`Rule::FieldSelectionMerging`] is what starts it: with all three
-/// absent the engine does not run, so a [`Budget::merge_work`](super::Budget::merge_work) of zero
-/// refuses nothing — and refuses it *vacuously*, because no expensive thing was let through, only
-/// none happened. A bound whose passes run regardless of the set would refuse there and be right
-/// to; these two do not run.
+/// What narrowing *can* do is leave a bound with nothing to bound, **and which bounds those are is
+/// the whole of the difference between the three**. The two merge knobs are spent by draft 5.3.2's
+/// engine and [`Rule::FieldSelectionMerging`] is what starts it: with all three merge rules absent
+/// the engine does not run, so a [`Budget::merge_work`](super::Budget::merge_work) of zero refuses
+/// nothing — and refuses it *vacuously*, because no expensive thing was let through, only none
+/// happened.
+///
+/// [`Budget::validation_work`](super::Budget::validation_work) is the bound that sentence
+/// anticipated. Its passes are the prep sweep, the fragment graph and the selection walk, and
+/// those run under **every** rule set including the empty one — so it refuses there, and is right
+/// to. al8n/smear#196 wrote "a bound whose passes run regardless of the set would refuse there and
+/// be right to" as a hypothetical; al8n/smear#198 is it.
 ///
 /// The knob is what switches a bound off: see [`Budget`](super::Budget). And neither instrument is
 /// an admission policy — a set chooses what is checked, a budget chooses what is afforded.
-/// al8n/smear#196.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RuleSet(u64);
 
@@ -583,10 +628,30 @@ impl RuleSet {
   ///
   /// **Not "always `Ok`" as a contract**, which is what this said. That was a promise about
   /// resources a rule set is in no position to make: a set reaches a bound's diagnostic and never
-  /// the bound. It *is* `Ok` on this crate's two bounds, and for a reason narrower than the old
+  /// the bound.
+  ///
+  /// It *was* `Ok` on this crate's two merge bounds, and for a reason narrower than the old
   /// sentence claimed — draft 5.3.2's engine does not run under an empty set at all,
-  /// [`Rule::FieldSelectionMerging`] is what starts it, so neither knob has any work to refuse. A
-  /// bound whose passes ran regardless would refuse here and would be right to. al8n/smear#196.
+  /// [`Rule::FieldSelectionMerging`] is what starts it, so neither knob has any work to refuse.
+  /// al8n/smear#196.
+  ///
+  /// It is **not** `Ok` under [`Budget::validation_work`](super::Budget::validation_work), whose
+  /// passes run whatever the set contains: an empty set removes every *diagnostic*, and a bound
+  /// with no diagnostic to emit still stops and still fails the document. al8n/smear#198.
+  ///
+  /// A caller who wants a validator that genuinely cannot refuse sets the **budget**, not the
+  /// rules: [`Budget::with_validation_work`](super::Budget::with_validation_work) at [`u32::MAX`]
+  /// is the supported spelling of "never refuse for this resource". Draft 5.3.2's engine does not
+  /// run under an empty set at all — [`Rule::FieldSelectionMerging`] is what starts it — so with
+  /// that one knob turned off, an `EMPTY` rule set is `Ok` on every document that fits in memory.
+  ///
+  /// # And it evaluates no rule, which is a claim about work and not only about output
+  ///
+  /// A pass that reads a document-chosen name, hashes it, parses a literal or sorts a list on
+  /// behalf of a rule that is off is this contract being false, whether or not it emits anything —
+  /// and, since these passes are charged, it is also a refusal a caller did not ask for.
+  /// `validator_work.rs` pins it as a resource claim: an `EMPTY` set over an adversarial document
+  /// spends a bounded handful of units.
   pub const EMPTY: Self = Self(0);
 
   /// Every rule.

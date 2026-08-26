@@ -91,9 +91,23 @@
 //! that node — `new GraphQLError(\`Schema is not configured to execute … operation.\`, { nodes:
 //! operation })` in `executeOperation`, against three bare `GraphQLError(message)` constructions
 //! for the `GetOperation` three. So this is an unmet "should" and is recorded as one rather than
-//! argued away. Closing it means [`StartError`] carrying data, which changes a `Copy`, data-free,
-//! `PartialEq` enum that `start` returns and that every case in `proto_execute.rs` compares by
-//! value — a change to a shipped surface, for a "should", and not this section's to make.
+//! argued away.
+//!
+//! **The reason recorded here for not closing it has since stopped being true, and the honest
+//! replacement is a smaller one.** It said closing it means [`StartError`] carrying data, which
+//! changes a `Copy`, data-free, `PartialEq` enum. The enum is no longer data-free:
+//! [`SourceFieldArgumentBudget`](StartError::SourceFieldArgumentBudget) carries the ceiling that
+//! refused, because a resource refusal a caller cannot act on is a wall rather than an error —
+//! the argument the [`TooLarge`] section below makes, applied where §6.2.3.1 had been reporting a
+//! budget as a bad argument. It is still `Copy`, `PartialEq` and `Eq`, and a `SimpleSpan` would be
+//! all three too, so nothing about the *shape* of the type stands in the way any more.
+//!
+//! What still does is narrower and worth stating as the cost it is: adding a **new** variant to a
+//! `#[non_exhaustive]` enum breaks no existing comparison, and changing `NoMutationRoot` from a
+//! unit variant to one carrying a span breaks every `assert_eq!(err, StartError::NoMutationRoot)`
+//! in `proto_execute.rs` and every equivalent line in a driver. That is a real cost for a "should",
+//! and it is the one this section is declining to pay — not a property of the type, which is what
+//! it used to claim.
 //!
 //! # The map it retains, and what bounds it
 //!

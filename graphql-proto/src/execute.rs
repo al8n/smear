@@ -82,7 +82,8 @@ use super::{
   Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
   SourceEventError, SourceField, Values,
   collect::{
-    Allowance, Fragments, Interner, Scratch, Unstored, Visits, collect_fields, variable_key,
+    Admission, Allowance, Compared, Fragments, Interner, Scratch, Unstored, Visits, collect_fields,
+    metered_variable_key, scan_eq, variable_key,
   },
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
@@ -107,7 +108,7 @@ mod tests;
 /// | outstanding work | requests | [`max_in_flight`](Limits::max_in_flight) | `poll_resolve` withholds, and the slab reuses freed entries | — |
 /// | response positions | positions | [`max_response_slots`](Limits::max_response_slots) | `push_child`, the only creator | — |
 /// | response metadata | merged selections **and** location spans, counted as one | [`max_response_metadata`](Limits::max_response_metadata) | `expand` before appending, and `fail_at` | a writer appending spans without charging — which `fail_at` did, making the ceiling neither bound it claimed |
-/// | collection work | selections **examined**, name-table entries **compared**, and the fragment index's pass, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; and leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can |
+/// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
 /// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the two retainers** — [`set_extensions`](Executor::set_extensions) and [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions), both of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too |
@@ -210,7 +211,8 @@ mod tests;
 /// | `scratch.stack` | `walk`, one frame per spread or inline fragment | `max_selection_visits`, charged before the frame is taken |
 /// | `scratch_sets` | `complete`'s object arm, one entry per merged selection carrying a sub-selection | `max_response_metadata`, being a slice of `merged` |
 /// | `fragments` — the index | `Fragments::build`, once, kept across resets on purpose | **the document's** definition count, and the pass is charged against `max_selection_visits` before the storage exists |
-/// | **`scratch_args`** | `coerce_arguments`, which **charges nothing** | **the schema's** widest declared argument list: the function clears and then pushes at most one entry per argument the schema declares on the *one* field being coerced |
+/// | `arg_prefix` | `coerce_arguments`, one `u32` per written entry the scan admits, pushed **behind** that entry's own charged opening unit | [`max_selection_visits`](Limits::max_selection_visits), and cleared at every coercion with `scratch_args` |
+/// | **`scratch_args`** | `coerce_arguments`, which charges the request's **written** argument bytes against `max_selection_visits` and does not charge the *length* of what it pushes | **the schema's** declared argument list for the *one* field being coerced — the function clears and then pushes at most one entry per declared argument — which [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) refuses past sixty-four at schema build |
 ///
 /// **`scratch_args` is the row this section exists for, and it is the third kind of bound rather
 /// than a missing one.** Two rows above are bounded by the document and one by the schema, and a
@@ -221,12 +223,26 @@ mod tests;
 /// declared argument list is the *deployment's*. No request and no event changes it, and no number
 /// of events accumulates it, because `coerce_arguments` opens with `retire_arguments`.
 ///
-/// It is worth stating what a ceiling would and would not buy, because the answer is "less than it
-/// looks". `max_field_arguments` would bound `scratch_args` at a number the operator picked instead
-/// of at a number the operator's own SDL already fixes, and it would have to refuse a *valid* field
-/// mid-coercion to do it. It is a real option and a breaking one — [`Limits`] is not
-/// `#[non_exhaustive]`, and `7b9b293` took that attribute off four types deliberately — so it is
-/// recorded here as the owner's call and not taken.
+/// **What the row above could not see is that the same number is also a factor of a loop.** This
+/// census asks how large a retained buffer gets, and `scratch_args` was correctly answered: at most
+/// one entry per declared argument, cleared per field. Draft §6.4.1's scan that fills it runs once
+/// per **runtime position**, so the *work* was `positions × declared` — one factor metered, the
+/// other fixed by nothing — and a census over buffers cannot report a product over loops. Both
+/// halves of that are closed now and the mechanisms are deliberately different, because the two
+/// factors belong to different parties. The written half is the caller's and is charged, at
+/// `coerce_arguments`, in front of the scan. The declared half is the deployment's and is refused
+/// at **schema build**: [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) is sixty-four,
+/// so no schema an executor can be handed carries a wider field.
+///
+/// **The ceiling this section previously left to the owner was a `Limits` knob, and that one is
+/// still not taken.** `max_field_arguments` would bound `scratch_args` at a number the operator
+/// picked instead of at a number the operator's own SDL already fixes, and it would have to refuse
+/// a *valid* field mid-coercion to do it — a resource refusal landing on a request for the
+/// service's design. A schema-build ceiling has neither cost: it refuses once, before any request
+/// exists, points at the field in the SDL, and leaves this ceiling's meaning untouched. What it
+/// costs instead is that a schema declaring more than sixty-four arguments on one field no longer
+/// builds; that constant's own documentation has the measurement behind the number and the
+/// rewrite — one argument of an input object type, whose fields no position ever iterates.
 ///
 /// `no_buffer_a_subscription_retains_grows_with_the_stream` is the gate, and it is this table
 /// mechanised: every row bounded, and the whole census identical at event 2 and event 20.
@@ -292,14 +308,25 @@ mod tests;
 ///    **The clause "or a fixed input" is a repair, and it was paid for the same way the rest of
 ///    this table was.** The rule shipped saying a growth site not charged by this executor's own
 ///    ceiling makes the buffer unbounded, ran cleanly over the members that existed, and gave the
-///    wrong verdict on the very next one: `coerce_arguments` charges nothing and `scratch_args` is
-///    nonetheless bounded, by the schema, which no request can move. Three of the twelve rows in
-///    the census above are like that. The question the rule is *for* is whether an adversary can
-///    make the buffer grow, and "which ceiling charges it" is only a proxy for that — a good proxy,
-///    which is why it stands first, and a proxy that has to name its other answer or it starts
-///    rejecting sound rows and, worse, teaches the next reader to add a knob instead of a bound.
+///    wrong verdict on the very next one: `scratch_args` is grown by `coerce_arguments`, which
+///    charges no ceiling for the *length* of the group it pushes, and is bounded all the same —
+///    by the schema, which no request can move. Three of the twelve rows in the census above are
+///    like that. The question the rule is *for* is whether an adversary can make the buffer grow,
+///    and "which ceiling charges it" is only a proxy for that — a good proxy, which is why it
+///    stands first, and a proxy that has to name its other answer or it starts rejecting sound
+///    rows and, worse, teaches the next reader to add a knob instead of a bound.
 ///    **A rule that has met one counterexample has probably met the class**: run it over every
 ///    member, not over the one that prompted it.
+///
+///    **And then the class had a second member the clause got wrong in the other direction.**
+///    "Bounded by a fixed input" is a claim about *how large the buffer gets*, and it says nothing
+///    about how often the code walks it. `scratch_args` really is bounded by the schema; draft
+///    §6.4.1's scan filling it runs once per **runtime position**, so the *work* was
+///    `positions × declared` with the second factor fixed by no ceiling at all. A row can pass this
+///    rule and still be an unbounded product, because this rule is about a buffer and that is about
+///    a loop. Both are now closed and by different mechanisms — the written factor is charged here,
+///    and the declared factor is refused at schema build by
+///    [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS). al8n/smear#198.
 ///
 /// # Every event that reaches a death point
 ///
@@ -506,7 +533,7 @@ pub struct Limits {
   ///
   /// A position is one node of the response: the root, a field of an object, or an element of a
   /// list. Reaching the ceiling is a draft §7.1.2 **field error** at the position that could not be
-  /// completed ([`Kind::ResponseBudget`](super::Kind::ResponseBudget)), so draft §6.4.4 nulls that
+  /// completed ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)), so draft §6.4.4 nulls that
   /// position and propagates from it exactly as it does for any other field error.
   ///
   /// A field error is the only shape available, and it is also the right one. The alternative —
@@ -551,7 +578,7 @@ pub struct Limits {
   /// on their product, for the reason the type's own documentation gives at length.
   ///
   /// Reaching it is the same field error as reaching the position ceiling
-  /// ([`Kind::ResponseBudget`](super::Kind::ResponseBudget)) and for the same reasons: it is raised
+  /// ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)) and for the same reasons: it is raised
   /// once execution is under way, so §7.1.2 leaves no other shape, and it names the object whose
   /// selection set could not be recorded rather than diagnosing what made the response expensive.
   ///
@@ -565,22 +592,44 @@ pub struct Limits {
   /// legitimately merged selections should not be refused for being tidy.
   pub max_response_metadata: NonZeroU32,
 
-  /// How much work draft §6.3's collection may do, across the whole operation.
+  /// How much work draft §6.3's collection **and** draft §6.4.1's argument scan may do, across the
+  /// whole operation.
   ///
   /// Charged per selection *looked at*, surviving or not; per entry a name lookup compares, before
-  /// it compares it; per definition and fragment the fragment index's one pass handles; and per
-  /// definition draft §6.1's operation lookup reads. The first is the difference between this and
-  /// every other ceiling here, and it is deliberate: the others count what was produced, and a
+  /// it compares it; per definition and fragment the fragment index's one pass handles; per
+  /// definition draft §6.1's operation lookup reads; and per **byte of every argument the request
+  /// writes**, at every position the field is coerced at. The first is the difference between this
+  /// and every other ceiling here, and it is deliberate: the others count what was produced, and a
   /// document built out of fragments that collect nothing produces nothing while walking as far as
   /// it likes.
   ///
-  /// **The last of those is the one charge taken outside collection, and it is why this ceiling
-  /// can refuse a `start` before a response exists.** Draft §6.1 walks the definitions to find the
-  /// operation, once per [`start`](Executor::start), over a count the document chooses; it was the
-  /// module's last uncharged walk over a client quantity (al8n/smear#144) and it now spends this
-  /// budget like the rest. The refusal is
+  /// **Two of those are taken outside collection, and the first is why this ceiling can refuse a
+  /// `start` before a response exists.** Draft §6.1 walks the definitions to find the operation,
+  /// once per [`start`](Executor::start), over a count the document chooses; it was the module's
+  /// last uncharged walk over a client quantity (al8n/smear#144) and it now spends this budget like
+  /// the rest. The refusal is
   /// [`StartError::OperationLookupRefused`](StartError::OperationLookupRefused) rather than a
   /// field error, because §7.1.2 has no response for a failure raised before execution begins.
+  ///
+  /// **The second is draft §6.4.1 `CoerceArgumentValues`, and its refusal is a field error.**
+  /// Step 5 iterates every argument the *schema* declares and asks, for each, whether the request
+  /// supplied it, so the scan is `declared × written` name comparisons at **every runtime position
+  /// of the field** — and positions are the driver's. `written` is the caller's and is charged
+  /// here, once, in front of the scan; a refusal raises `Raw::ArgumentBudget`, which nulls that
+  /// field under §6.4.4 and leaves the rest of the response alone, exactly as §6.4.1's own
+  /// argument faults do. **`declared` is deliberately not charged against this ceiling**: it is the
+  /// deployment's design-time number, and pricing it here refuses a caller whose document is small
+  /// because the schema is wide — measured, one unit per declared argument per position refuses a
+  /// full-occupancy response at about thirteen declared arguments, which is ordinary input. It is
+  /// bounded at schema build instead, by
+  /// [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS), so the scan is
+  /// `positions × 64` with positions metered by this ceiling and by
+  /// [`max_response_slots`](Limits::max_response_slots). al8n/smear#198.
+  ///
+  /// The one place §6.4.1's refusal is **not** a field error is a subscription's source field:
+  /// §6.2.3.1 coerces before any response exists, so it becomes
+  /// [`StartError::SourceFieldArgumentBudget`](StartError::SourceFieldArgumentBudget) — its own
+  /// variant, carrying this number, rather than the specification failure beside it.
   ///
   /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
   /// text the *document* chose, and the shared hash is unkeyed with every round invertible in the
@@ -774,13 +823,32 @@ const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2
 /// distinguish it. Uniformity is what the finalizer bought here; the *bound* was never at stake,
 /// since a constructed pile-up spends this budget either way.
 ///
+/// # What draft §6.4.1's argument charge costs against this number
+///
+/// The unit widened again after the paragraphs above were written, and this one is here so that
+/// the same failure — the unit moving and the rationale not — does not happen a third time. Every
+/// argument a request *writes* is charged its bytes at every position its field is coerced at. An
+/// honest document does not notice: a written argument name is a handful of bytes, so one unit
+/// each, against a response the slot ceiling already caps at `2^20` positions. A document that
+/// writes eleven arguments at every one of a million positions would reach this ceiling, and it
+/// has to *be* tens of megabytes to say so, which is the original argument holding for the one
+/// factor it was ever true of.
+///
+/// **The other factor of that scan is not charged here and must not be.** `declared` is the
+/// schema's; at one unit per declared argument per position this ceiling refuses a full-occupancy
+/// response at about thirteen of them, and public schemas write ten-argument fields. It is bounded
+/// at schema build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) instead, which is
+/// what keeps this number a statement about the client's document and not about the operator's SDL.
+///
 /// # Tightening it is a separate decision, and deliberately not taken here
 ///
 /// A ceiling eight million keys past what any other ceiling admits is not doing much work, and
 /// lowering it is only safe now: with the fold unfinished, `2^19` refused an honestly named
 /// `h{i:0>8}` document at 5,777 keys — 75 kilobytes — which is a false refusal of legitimate input.
 /// But *what* it should be is a question about the population the default is derived over, and no
-/// measurement here answers it.
+/// measurement here answers it. The argument charge does not move that question: it is the same
+/// ledger over a population the same size, and the measurement that would settle the number has to
+/// cover both.
 const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
 
 /// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a
@@ -944,6 +1012,10 @@ struct Retained {
   /// Draft §6.4.1's coerced arguments. **The one buffer no ceiling bounds** — see [`Limits`]'s
   /// census for the schema-derived bound that does.
   scratch_args: usize,
+  /// Draft §6.4.1's per-entry prefix high-water. One `u32` per *written* entry the scan admitted,
+  /// and every admission is one charged unit, so
+  /// [`max_selection_visits`](Limits::max_selection_visits) bounds it.
+  arg_prefix: usize,
   /// The fragment index. Bounded by the document, and its pass is charged.
   fragments: usize,
 }
@@ -965,6 +1037,40 @@ enum Exhausted {
   /// A `__typename` answer could not be interned. Which ceiling refused, and the number that
   /// belongs to it, travel together — see [`Unstored`].
   Unstored(Unstored),
+}
+
+/// What draft §6.4.1 did at one position.
+///
+/// # A resource refusal is not a specification failure, and a `bool` cannot say which
+///
+/// This used to be a `bool`. [`poll_resolve`](Executor::poll_resolve) does not care — a field
+/// error and a refused ledger both mean "already nulled, take the next ready slot" — but
+/// [`create_source_event_stream`](Executor::create_source_event_stream) does: it discards the row
+/// and returns a [`StartError`], and with one bit to read it returned
+/// [`SourceFieldArguments`](StartError::SourceFieldArguments) for both. A subscription that merely
+/// exhausted [`max_selection_visits`](Limits::max_selection_visits) was told its request does not
+/// satisfy an argument, which names the wrong party and hides the only knob the caller can turn.
+///
+/// The distinction is a type rather than a wider message because that is where it survives. It was
+/// established inside `coerce_arguments`, which raises `Raw::ArgumentBudget` for one and three
+/// named argument faults for the others; a `bool` collapsed it at the return, and every later
+/// reader was reconstructing a fact the callee had already had. This is the fifth time on
+/// al8n/smear#198 that a distinction the code makes died at a boundary conversion — the others
+/// were an arena refusal wearing a budget's `None`, a stale pair wearing a budget's refusal, a
+/// shape refusal wearing a source mismatch, and a nesting refusal wearing a descent's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Coercion {
+  /// Draft §6.4.1 produced `coercedValues`, and `scratch_args` holds it.
+  Coerced,
+  /// One of §6.4.1's own field errors was raised, and the field is already nulled.
+  FieldError,
+  /// A ceiling refused before the coercion finished. The field is already nulled, and this is the
+  /// ceiling that refused — read here rather than at the caller, because a `reset` on the way out
+  /// builds a new ledger and the number would be gone.
+  Refused {
+    /// [`max_selection_visits`](Limits::max_selection_visits), as it stood.
+    limit: u32,
+  },
 }
 
 /// Why [`Executor::start`] refused.
@@ -1081,6 +1187,29 @@ pub enum StartError {
   /// [`SourceSelectionRefused`](Self::SourceSelectionRefused) for why, and note that upstream does
   /// carry it. This is an unmet "should" of §7.1.6's `locations`, recorded as one.
   SourceFieldArguments,
+  /// Coercing the source field's arguments took the operation past
+  /// [`max_selection_visits`](Limits::max_selection_visits).
+  ///
+  /// **Separate from [`SourceFieldArguments`](Self::SourceFieldArguments) because the party at
+  /// fault is a different one.** That variant says the request does not satisfy an argument the
+  /// schema declares, which is a statement about the document; this one says nothing about the
+  /// document at all. The subscription may be entirely valid and have written more argument bytes
+  /// than the ledger had room to read. Reporting the first for the second blames a valid request
+  /// for a malformed one and loses the only number the caller can act on, which is why the number
+  /// is here.
+  ///
+  /// Draft §6.4.1's argument scan charges this ceiling for the bytes of every argument the request
+  /// *wrote* — see [`max_selection_visits`](Limits::max_selection_visits) — and everywhere else in
+  /// draft §6 that refusal is a field error. §6.2.3.1 calls `CoerceArgumentValues` before any
+  /// response exists, so here it has to be a request error, for the same reason
+  /// `SourceFieldArguments` gives.
+  ///
+  /// The remedy is a larger ceiling or a shorter argument list, and never a change to the
+  /// arguments' *values*.
+  SourceFieldArgumentBudget {
+    /// The ceiling that refused.
+    limit: u32,
+  },
   /// The document holds more definitions than
   /// [`max_selection_visits`](Limits::max_selection_visits) left the draft §6.1 lookup room to
   /// read.
@@ -1116,33 +1245,41 @@ pub enum StartError {
 }
 
 impl fmt::Display for StartError {
+  // One `write!` arm is why this is a `match` over the formatter rather than over a `&'static str`:
+  // a refusal that names a ceiling has to print the number, and a caller cannot act on a sentence
+  // that leaves it out.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.write_str(match self {
-      Self::NoOperation => "the document contains no operation",
-      Self::UnknownOperation => "the document contains no operation with that name",
+    match self {
+      Self::NoOperation => f.write_str("the document contains no operation"),
+      Self::UnknownOperation => f.write_str("the document contains no operation with that name"),
       Self::AmbiguousOperation => {
-        "the document contains more than one operation and none was named"
+        f.write_str("the document contains more than one operation and none was named")
       }
-      Self::NoQueryRoot => "the schema declares no query root type",
-      Self::NoMutationRoot => "the schema declares no mutation root type",
-      Self::NoSubscriptionRoot => "the schema declares no subscription root type",
-      Self::NoSourceField => {
-        "the subscription's root selection set does not name exactly one field with an event stream"
-      }
+      Self::NoQueryRoot => f.write_str("the schema declares no query root type"),
+      Self::NoMutationRoot => f.write_str("the schema declares no mutation root type"),
+      Self::NoSubscriptionRoot => f.write_str("the schema declares no subscription root type"),
+      Self::NoSourceField => f.write_str(
+        "the subscription's root selection set does not name exactly one field with an event stream",
+      ),
       Self::SourceSelectionRefused => {
-        "collecting the subscription's root selection set raised an error"
+        f.write_str("collecting the subscription's root selection set raised an error")
       }
       Self::SourceFieldArguments => {
-        "the subscription's source field has an argument the request does not satisfy"
+        f.write_str("the subscription's source field has an argument the request does not satisfy")
       }
+      Self::SourceFieldArgumentBudget { limit } => write!(
+        f,
+        "reading the subscription's source field's written arguments would take the operation \
+         past `max_selection_visits` ({limit})"
+      ),
       Self::OperationLookupRefused => {
-        "the document has more definitions than `max_selection_visits` leaves room to read"
+        f.write_str("the document has more definitions than `max_selection_visits` leaves room to read")
       }
-      Self::ResponseStreamOpen => {
+      Self::ResponseStreamOpen => f.write_str(
         "a response stream is still open, and its source stream must be cancelled through \
-         `unsubscribe` before another operation begins"
-      }
-    })
+         `unsubscribe` before another operation begins",
+      ),
+    }
   }
 }
 
@@ -1681,6 +1818,21 @@ where
   /// It has exactly one reader, and [`retire_arguments`](Self::retire_arguments) is what that
   /// buys.
   scratch_args: std::vec::Vec<Argument<'a, S, V::Value>>,
+  /// How deep into each written argument's spelling draft §6.4.1's scan has already been charged,
+  /// in [`byte_units`](crate::collect::byte_units), parallel to the entries the scan has admitted.
+  ///
+  /// **A high-water mark per entry, because the scan reads one entry once per *declared*
+  /// argument.** The entry's opening unit is taken once — that is what `paid` counts — and the
+  /// runs past it are taken as a comparison reaches them and never again, so the ledger reads the
+  /// deepest prefix of each written spelling that any comparison examined. Charging each
+  /// comparison in full instead would put the schema's argument count into the caller's ledger a
+  /// second time: sixty-four declared names sharing an eight-byte prefix with sixty-four written
+  /// ones of the same length is 4,096 full comparisons at one position, and
+  /// [`max_response_slots`](Limits::max_response_slots) admits `2^20` positions.
+  ///
+  /// Cleared with `scratch_args` at every coercion, so it is one field's population and never an
+  /// operation's.
+  arg_prefix: std::vec::Vec<u32>,
 }
 
 impl<'a, S, V> Executor<'a, S, V>
@@ -1742,6 +1894,7 @@ where
       serial_steps: 0,
       visits: Visits::new(limits.max_selection_visits.get()),
       scratch_args: std::vec::Vec::new(),
+      arg_prefix: std::vec::Vec::new(),
     }
   }
 
@@ -1920,9 +2073,22 @@ where
     };
     // Step 8. Its failure is a *request* error here and a field error everywhere else in draft §6,
     // for the reason `SourceFieldArguments` gives: there is no response yet to null a field in.
-    if !self.coerce_arguments(ctx, source) {
-      self.reset();
-      return Err(StartError::SourceFieldArguments);
+    //
+    // **Two failures, two refusals.** The row `coerce_arguments` recorded is about to be discarded
+    // by the `reset`, so whatever a caller is going to learn has to be read off the return value
+    // before it — which is why `Coercion::Refused` carries the ceiling rather than leaving it to be
+    // fetched from a ledger the next line replaces. A valid subscription that ran out of budget is
+    // not a subscription with a bad argument, and it used to be told it was.
+    match self.coerce_arguments(ctx, source) {
+      Coercion::Coerced => {}
+      Coercion::FieldError => {
+        self.reset();
+        return Err(StartError::SourceFieldArguments);
+      }
+      Coercion::Refused { limit } => {
+        self.reset();
+        return Err(StartError::SourceFieldArgumentBudget { limit });
+      }
     }
     // The root still holds the `initialValue` and `scratch_args` holds step 8's answer, and both
     // are lent by `source_field` for as long as this state lasts. `on_entry` is what would
@@ -2046,11 +2212,15 @@ where
         // parent was flagged with it — its state is already `Null`, holding no value and no count.
         continue;
       }
-      if self.coerce_arguments(ctx, slot) {
+      if self.coerce_arguments(ctx, slot) == Coercion::Coerced {
         break Some(slot);
       }
       // Argument coercion raised a field error, which nulled the field and may have nulled an
       // ancestor. There is nothing to hand the driver; take the next ready slot.
+      //
+      // The two failing outcomes are one case *here* and two at `create_source_event_stream`, and
+      // that asymmetry is the point of `Coercion` carrying three: a response has a place for a
+      // §7.1.2 field error whichever raised it, and a §6.2.3.1 refusal has to name the party.
       //
       // This candidate left Ready without ever being offered, so it is a read that will not happen.
       // Nothing borrows the parent's value here, so the expiry is immediate rather than parked.
@@ -3406,14 +3576,16 @@ where
 
   /// Runs draft §6.4.1 `CoerceArgumentValues` into `self.scratch_args`.
   ///
-  /// Returns whether the field survived. `false` means one of §6.4.1's field errors was raised and
-  /// the field has already been nulled, so the caller must not hand it to the driver.
+  /// Returns how the field fared. Anything but [`Coercion::Coerced`] means the field has already
+  /// been nulled and the caller must not hand it to the driver — and the two failing variants are
+  /// kept apart because one of this crate's two callers has to tell a specification failure from a
+  /// resource refusal. See [`Coercion`].
   ///
   /// All of step 5 is here, including 5.f's variable lookup, which is why this needs `ctx`.
   /// Leaving "was this variable provided" to the driver would put a conformance decision on the
   /// far side of the boundary for every driver to re-derive; [`Values::variable`] already answers
   /// it, and the `Option` it returns is exactly §6.4.1's `hasValue`.
-  fn coerce_arguments(&mut self, ctx: &mut V, slot: u32) -> bool {
+  fn coerce_arguments(&mut self, ctx: &mut V, slot: u32) -> Coercion {
     // Also the release point for a candidate that raised at step 5 with earlier arguments already
     // pushed: `poll_resolve` loops on to the next ready slot, and that slot's coercion starts here.
     self.retire_arguments();
@@ -3421,24 +3593,168 @@ where
     let field_sym = meta.field_sym;
     let parent_type = meta.parent_type;
     let Some(node) = meta.field else {
-      return true;
+      return Coercion::Coerced;
     };
     let Some(definition) = self.schema.field(parent_type, field_sym) else {
-      return true;
+      return Coercion::Coerced;
     };
     let args = definition.args();
     let count = self.schema.inputs(args).len();
     if count == 0 {
-      return true;
+      return Coercion::Coerced;
     }
 
     let written = node.arguments().map(|list| list.arguments()).unwrap_or(&[]);
+
+    // **The written list, charged once, in front of the scan that reads it `count` times.**
+    //
+    // Draft §6.4.1 step 5 iterates every argument the *schema* declares and asks whether the
+    // request supplied it, so the loop below is `declared × written` name comparisons at this
+    // position — and it was free in both factors. Measured before the charge: a field with
+    // thirty-two declared arguments, thirty-two written at each of eight positions, performed 8,192
+    // name comparisons for **zero** units, and taking `written` from zero to thirty-two moved the
+    // ledger not at all.
+    //
+    // Only the caller's factor is charged **here**, and the other one is bounded somewhere else.
+    // `declared` is the deployment's own design-time number, and pricing it against this ledger
+    // refuses a caller whose *document is small* because the schema is wide: measured against the
+    // shipped defaults, one unit per declared argument per position refuses a full-occupancy
+    // response at about thirteen declared arguments — `max_response_slots` of `2^20` against
+    // `max_selection_visits` of `2^24`, with the ~2.5 units a position already costs — and public
+    // schemas write ten-argument fields. That is a false refusal of ordinary input, so the
+    // deployment's factor is bounded where the deployment writes it:
+    // [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) refuses a schema declaring more
+    // than sixty-four arguments on one field, once, at build. The scan is
+    // `positions × MAX_FIELD_ARGUMENTS` from then on, and *positions* are metered: every one is
+    // charged against this same ceiling on its way in — measured, five units per list element —
+    // and `max_response_slots` refuses past `2^20` of them.
+    //
+    // **What stood here instead was an exemption with a hole at one endpoint, and it is worth
+    // keeping the shape of the mistake.** It said `declared` was left uncharged but bounded,
+    // "because the total comparison count is now `declared × (charged units)`". That product is
+    // **zero** when the request writes no arguments, and the work is not: `{ bulk { f } }` over a
+    // driver's list does `positions × declared` iterations for nothing. Measured at 4,096
+    // elements — 20,484 units at every one of declared = 1, 4, 16, 64, 256, 1,024 and 4,096, the
+    // ledger byte-identical across a 106× spread in wall time, 431 µs to 45.7 ms. An exemption
+    // written in the "is it bounded" column whose evidence vanishes at an endpoint is not one.
+    //
+    // The sentence beside it — that charging `written` "refuses only a caller whose document
+    // actually grew … tens of megabytes of request" — was false about the same input, and is
+    // deleted rather than softened. A list child's arguments are written **once** in the AST and
+    // the same node is re-read at every element, so runtime position multiplicity implies nothing
+    // whatever about document size. al8n/smear#198.
+    // **How far into `written` the scan has paid.** One unit per entry, taken in front of the
+    // first comparison that reaches it and never again however many of the `count` scans below
+    // reach it, with the runs of bytes past that entry's opening unit taken in
+    // [`arg_prefix`](Self::arg_prefix) as a comparison actually reads them.
+    //
+    // **The whole-length charge that stood here priced a `memcmp` that a length test can decide.**
+    // `written.name() == name_bytes` is slice equality: unequal lengths are rejected without
+    // either spelling being read, and equal ones stop at the first byte that disagrees. So
+    // `f(a: Int)` written as `f(<a megabyte of undeclared name>: 1, a: 1)` compared **one** length
+    // and was charged 131,073 units for it, which is `ArgumentBudget` with the field nulled — or,
+    // at a subscription's source field, `StartError::SourceFieldArgumentBudget` — for a request
+    // `coerce_arguments` was about to serve. The previous round moved this charge in front of the
+    // comparison that reads the entry, which was the right place; what it did not ask is whether
+    // the comparison reads what the charge priced. It does not, and a charge computed from a
+    // length in front of an operation that is *sub-linear* in that length is the same defect the
+    // four rounds before it found in four other shapes. al8n/smear#198's twenty-third round.
+    //
+    // A whole-list charge stood here, and it stood in front of a `find` that stops at the entry it
+    // matches. On a document draft 5.4.1 admits — every written argument declared — the aggregate
+    // is honest: the scan for a declared name reads every entry before the one that matches it, so
+    // each written name is compared at least once. This executor does **not** validate, which is
+    // the entire reason the ledger exists, and on the unvalidated population the two come apart:
+    // `f(a: Int)` written as `f(a: 1, j0: 1 … j1599: 1)` compares **one** name and was charged for
+    // 1,600. That refused, with `ArgumentBudget` and the field nulled, a request `coerce_arguments`
+    // was about to serve — undeclared entries are simply not read, since the loop is over what the
+    // *schema* declares.
+    //
+    // The high-water mark is what makes the repair possible at all. Charging inside the scan
+    // without one charges `declared × written`, which is the schema's factor entering a caller's
+    // ledger: measured against the shipped defaults, one unit per declared argument per position
+    // refuses a full-occupancy response at about thirteen declared arguments — `max_response_slots`
+    // of `2^20` against `max_selection_visits` of `2^24`, with the ~2.5 units a position already
+    // costs — and public schemas write ten-argument fields. Paying once per entry keeps the ledger
+    // reading exactly the caller's factor, as the whole-list charge did, while never reaching past
+    // the entries some scan actually examined. `MAX_FIELD_ARGUMENTS` still bounds `declared` at
+    // schema build, so the scan is `positions × MAX_FIELD_ARGUMENTS × (charged prefix)` with
+    // positions metered on their way in — the same bound, out of a smaller charge.
+    //
+    // **What stood here before the whole-list charge was an exemption with a hole at one endpoint,
+    // and it is worth keeping the shape of the mistake.** It said `declared` was left uncharged but
+    // bounded, "because the total comparison count is now `declared × (charged units)`". That
+    // product is **zero** when the request writes no arguments, and the work is not: `{ bulk { f } }`
+    // over a driver's list does `positions × declared` iterations for nothing. Measured at 4,096
+    // elements — 20,484 units at every one of declared = 1, 4, 16, 64, 256, 1,024 and 4,096, the
+    // ledger byte-identical across a 106× spread in wall time, 431 µs to 45.7 ms. An exemption
+    // written in the "is it bounded" column whose evidence vanishes at an endpoint is not one.
+    //
+    // The sentence beside it — that charging `written` "refuses only a caller whose document
+    // actually grew … tens of megabytes of request" — was false about the same input, and is
+    // deleted rather than softened. A list child's arguments are written **once** in the AST and
+    // the same node is re-read at every element, so runtime position multiplicity implies nothing
+    // whatever about document size. al8n/smear#198.
+    let mut paid = 0usize;
+
     for index in 0..count {
       let argument = self.schema.inputs(args)[index];
       let name_bytes = self.schema.name_bytes(argument.name());
-      let supplied = written
-        .iter()
-        .find(|written| written.name().source().as_ref() == name_bytes);
+      let mut supplied = None;
+      let mut refused = false;
+      for (entry, written) in written.iter().enumerate() {
+        if entry >= paid {
+          // The entry's opening unit: the loop step, the length test, and the first run of bytes
+          // any comparison here reads. Taken once per entry, which is what keeps the *count* of
+          // comparisons — `declared × written`, and `declared` is the deployment's — out of the
+          // caller's ledger. `MAX_FIELD_ARGUMENTS` bounds that factor at schema build.
+          if !self.visits.take(1) {
+            refused = true;
+            break;
+          }
+          paid = entry + 1;
+          self.arg_prefix.push(1);
+        }
+        let spelling = written.name().source().as_ref();
+        // Everything past the opening unit is taken here, in front of the run of bytes the
+        // comparison is about to read, and only for the depth this entry has not already reached.
+        let depth = &mut self.arg_prefix[entry];
+        let visits = &mut self.visits;
+        let compared = scan_eq(spelling, name_bytes, |unit| {
+          if unit <= *depth {
+            return true;
+          }
+          *depth = unit;
+          visits.take(1)
+        });
+        match compared {
+          Compared::Equal => {
+            supplied = Some(written);
+            break;
+          }
+          Compared::Differs => (),
+          Compared::Refused => {
+            refused = true;
+            break;
+          }
+        }
+      }
+      if refused {
+        let limit = self.visits.limit();
+        self.fail(
+          slot,
+          Raw::ArgumentBudget {
+            parent: parent_type,
+            field: field_sym,
+            limit,
+          },
+        );
+        // One of the two resource exits in this function — the other is the variable
+        // spelling's, below. Both are reached only with work still unattempted. The three
+        // §6.4.1 field errors further down are not resource exits, and telling them apart is
+        // the whole reason this returns a `Coercion` and not a `bool`.
+        return Coercion::Refused { limit };
+      }
       let ty = argument.ty();
       let non_null = ty.is_non_null();
       let default = argument.default_kind().is_present();
@@ -3461,12 +3777,60 @@ where
       let (variable, has_value, is_null) = match supplied.map(|argument| argument.value()) {
         None => (None, false, false),
         Some(InputValue::Variable(spelled)) => {
-          match variable_key(spelled.name().source().as_ref()) {
+          // **The value's own spelling, which the precharge above does not measure.**
+          //
+          // That charge is over `argument.name()` — the key §6.4.1 step 5's scan compares — and a
+          // variable written for it is a *second*, independent name the request chose. Every byte
+          // of it is read twice more: once by `variable_key`'s draft §2.1.9 pass, and once by the
+          // driver's lookup, which hashes or compares the whole key. Both run here, once per
+          // runtime position.
+          //
+          // So `a: $<L bytes>` over `P` list elements performed `P × L` bytes of work for about `P`
+          // units, and the ledger could not see it: measured at `P` = 4,096 with the schema
+          // declaring one argument, the smallest `max_selection_visits` that accepts the operation
+          // was **24,580 at every one of `L` = 1 k, 4 k, 16 k and 64 k** — 0.000 in the exponent —
+          // while the wall clock went 8.7 ms to 751 ms, 1.06 in the same one. Charged, the ledger
+          // reads 540,676 to 32,796,676 over that ladder, which is 0.99. A list child's arguments
+          // are written **once** in the document and the same node is re-read at every element, so
+          // the position count says nothing whatever about how much the client had to write. Draft
+          // §6.3's condition reads a variable the same way and is charged in
+          // `collect::condition_is_true`. al8n/smear#198.
+          let spelling = spelled.name().source().as_ref();
+          // **Metered as the §2.1.9 pass examines bytes, and not over the assembled length.**
+          //
+          // `is_name` stops at the first byte outside the production, so a spelling rejected at
+          // its *first* one does about one byte of work — and charging the whole length in front
+          // of it turned that spelling into a resource refusal. The consequence is worse here than
+          // at §6.3's site, because step 5.d's answer for an unreadable spelling is
+          // `hasValue = false`, which for an **optional** argument with no default is `continue`:
+          // a request this executor was about to serve was instead given `ArgumentBudget` with the
+          // field nulled, or — at a subscription's source field —
+          // `StartError::SourceFieldArgumentBudget`. That is exactly the
+          // `Coercion::FieldError`-versus-`Coercion::Refused` distinction two rounds of this issue
+          // built, defeated by the charge standing in front of the work rather than beside it.
+          // al8n/smear#198.
+          let key = metered_variable_key(spelling, &mut self.visits);
+          match key {
+            // The one resource exit on this arm, and it is reached only with bytes still
+            // unexamined — the ledger ran out of room for work this position was about to do,
+            // which is what `Coercion::Refused` means and the only thing it may mean.
+            Admission::Refused => {
+              let limit = self.visits.limit();
+              self.fail(
+                slot,
+                Raw::ArgumentBudget {
+                  parent: parent_type,
+                  field: field_sym,
+                  limit,
+                },
+              );
+              return Coercion::Refused { limit };
+            }
             // A variable *was* written, so this is step 5.d and not step 5.b: the outer `Some`
             // keeps the error `ArgumentVariableMissing` rather than `ArgumentMissing`, which is
             // the truthful one — the argument names a variable, and the variable has no value.
-            None => (Some((None, None)), false, false),
-            Some(name) => match ctx.variable(name) {
+            Admission::Unreadable => (Some((None, None)), false, false),
+            Admission::Key(name) => match ctx.variable(name) {
               None => (Some((Some(name), None)), false, false),
               Some(value) => {
                 let null = ctx.is_null(&value);
@@ -3534,7 +3898,7 @@ where
             *node.span(),
           ),
         }
-        return false;
+        return Coercion::FieldError;
       }
 
       // Step 5.i.i.
@@ -3548,7 +3912,7 @@ where
           },
           value_span.unwrap_or(*node.span()),
         );
-        return false;
+        return Coercion::FieldError;
       }
 
       let source = match (variable, supplied.map(|argument| argument.value())) {
@@ -3576,7 +3940,7 @@ where
         source,
       });
     }
-    true
+    Coercion::Coerced
   }
 
   // ---------------------------------------------------------------------------------------
@@ -3842,6 +4206,10 @@ where
   #[inline]
   fn retire_arguments(&mut self) {
     self.scratch_args.clear();
+    // The prefix high-water is a fact about *this* field's written list, so it is retired with the
+    // arguments and not with the operation: an entry's paid depth carried into the next coercion
+    // would let a second field read bytes the first one paid for.
+    self.arg_prefix.clear();
   }
 
   /// How many units of [`Limits::max_selection_visits`] this operation has spent.
@@ -3944,6 +4312,7 @@ where
       scratch: self.scratch.capacities(),
       scratch_sets: self.scratch_sets.capacity(),
       scratch_args: self.scratch_args.capacity(),
+      arg_prefix: self.arg_prefix.capacity(),
       fragments: self.fragments.reserved(),
     }
   }

@@ -60,7 +60,7 @@ use core::ops::ControlFlow;
 use smear_parser::graphql::ast::{Field, InputValue, Selection, SelectionSet};
 
 use super::{
-  Diagnostic, Rule, Validator,
+  Charged, Diagnostic, Rule, Validator,
   nodes::{
     ValueLike, child_selection_set, fragment, name_bytes, response_name, root_selection_set,
   },
@@ -69,8 +69,8 @@ use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{
-    MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units, get_bit,
-    hash_bytes, hash_u32,
+    Compared, MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units,
+    count_units, get_bit, hash_bytes, hash_u32, scan_eq,
   },
 };
 
@@ -161,10 +161,9 @@ where
   /// nothing about it, but an unbounded rule that runs *before* the cheap structural refusals is
   /// a denial-of-service posture, not just an ordering preference.
   pub(super) fn check_field_merging(&mut self) -> ControlFlow<()> {
-    let wanted = self.on(Rule::FieldSelectionMerging)
-      || self.on(Rule::MergeDepthBudget)
-      || self.on(Rule::MergeWorkBudget);
-    if !wanted {
+    // `super::merges`, not a copy of it: `check_fragments_used` produces the `reachable` bitset
+    // this pass reads, and the two must activate together or the reader sees a cleared one.
+    if !super::merges(self.rules) {
       return ControlFlow::Continue(());
     }
 
@@ -187,10 +186,24 @@ where
       if self.tripped {
         return ControlFlow::Continue(());
       }
-      if get_bit(&self.scratch.reachable, ordinal as u32) {
+      let row = self.scratch.fragments[ordinal];
+      // **Reached, as this engine means it.** `Scratch::reachable` is draft 5.5.1.4's bitset and it
+      // answers a different question: `mark_reachable` marks *every* definition sharing a reached
+      // name, deliberately, so one duplicated fragment name reports 5.5.1.1 and is not also called
+      // unused. Merge expansion enters only `order[group.start()]` — `find_fragment` resolves a
+      // spread to the group's first definition and nothing else can be spread — so a second
+      // `fragment F` was marked reached, never merged from any operation, and skipped here. Its
+      // conflicts went unreported and `RuleSet::only(FieldSelectionMerging)` answered `Ok`.
+      //
+      // One bitset with two readers that mean different things by it, which is this branch's oldest
+      // shape. The engine asks its own question instead of borrowing 5.5.1.4's, in `O(1)` and with
+      // no second set to keep in agreement: a definition is skipped only if a spread could have
+      // entered *it*. Pre-existing — `9f584d6` has this loop byte for byte and `mark_reachable`'s
+      // group-wide marking with it. al8n/smear#198's twenty-second round.
+      let entered = self.scratch.order[row.group.start() as usize] == ordinal as u32;
+      if entered && get_bit(&self.scratch.reachable, ordinal as u32) {
         continue;
       }
-      let row = self.scratch.fragments[ordinal];
       let root = self.scratch.merge_roots[row.definition as usize];
       self.blame = row.span;
       self.merge_from(root)?;
@@ -236,7 +249,7 @@ where
   /// *document* decides the length of and those loops must not be reachable without one — see
   /// [`Names::intern`](crate::scratch::Names::intern).
   #[inline]
-  fn charge(&mut self, units: u32) -> bool {
+  pub(super) fn charge(&mut self, units: u32) -> bool {
     self.work.take(units)
   }
 
@@ -245,7 +258,7 @@ where
   /// Idempotent. The engine gives up at the first trip, but the caller's sink may have said to
   /// keep going, and every loop that unwinds afterwards would otherwise report the same refusal
   /// again — one budget diagnostic per remaining unit of work is noise, not information.
-  fn trip(&mut self, rule: Rule, limit: u32) -> ControlFlow<()> {
+  pub(super) fn trip(&mut self, rule: Rule, limit: u32) -> ControlFlow<()> {
     if self.tripped {
       return ControlFlow::Continue(());
     }
@@ -268,21 +281,63 @@ where
   // -- the index build ----------------------------------------------------------------------------
 
   /// Records every selection set, field occurrence and spread in the document, as integers.
+  ///
+  /// # The setup is charged, and this is where it was not
+  ///
+  /// Everything below the todo loop was written under one charge — `charge(1)` per queued set —
+  /// and everything *above* it under none. Two document-sized `resize`s, a row per operation, a
+  /// row per fragment, and a `Schema::sym` hash over each fragment's type condition all ran before
+  /// the first unit was taken, so a [`Budget::merge_work`](crate::Budget::merge_work) of **zero**
+  /// still bought `O(definitions + fragments + condition bytes)` of work and allocation before the
+  /// refusal. al8n/smear#198.
+  ///
+  /// It could not be answered by widening
+  /// [`Budget::validation_work`](crate::Budget::validation_work) over it. The two ledgers are
+  /// separate because a caller may raise or disable that one while relying on this one to cap
+  /// draft 5.3.2, and a bound a caller can switch off is not a bound on the pass it was kept for.
+  ///
+  /// Three charges, and they are three *dimensions* rather than three copies of one:
+  ///
+  /// | charge | sits | dimension |
+  /// |---|---|---|
+  /// | the two tables | before either `resize` | one per element written |
+  /// | the operation rows | at the loop's entrance | one per row |
+  /// | the fragment rows | at the loop's entrance | one per row |
+  /// | a fragment's type condition | before `composite_of` reads it | bytes |
+  ///
+  /// The last one is the [`check_fragment_spread`](Validator::check_fragment_spread) repair
+  /// arriving at its merge twin: `composite_of` resolves through
+  /// [`Schema::sym`](crate::schema::Schema::sym), which hashes every byte of a spelling the
+  /// *document* chose, and one unit a row prices a name of any length at one unit.
   fn build_merge_index(&mut self) -> ControlFlow<()> {
     let document = self.document;
     let total = document.definitions().len();
+    let operations = self.scratch.operations.len();
+    let fragments = self.scratch.fragments.len();
 
+    // The two `clear`s stay in front of the charge and the two `resize`s go behind it. `clear` on
+    // a `Vec<u32>` is `O(1)` — no drop glue, no allocation, just a length — so it is not work a
+    // ledger has anything to say about, and doing it unconditionally is what makes a refusal here
+    // leave the tables **empty** rather than holding the previous document's rows. The `resize`s
+    // are the work: one `u32` written per definition and per fragment.
+    //
+    // Saturating rather than `as`, so a count no ledger could cover refuses instead of truncating
+    // into one it can.
     self.scratch.merge_roots.clear();
-    self.scratch.merge_roots.resize(total, NONE);
     self.scratch.merge_seen.clear();
-    self
-      .scratch
-      .merge_seen
-      .resize(self.scratch.fragments.len(), 0);
+    let tables = count_units(total).saturating_add(count_units(fragments));
+    if !self.charge(tables) {
+      return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+    }
+    self.scratch.merge_roots.resize(total, NONE);
+    self.scratch.merge_seen.resize(fragments, 0);
 
     // Every definition's own selection set exists before anything is filled, so that a spread can
     // name its target's root even when the target is defined later in the document.
-    for index in 0..self.scratch.operations.len() {
+    if !self.charge(count_units(operations)) {
+      return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+    }
+    for index in 0..operations {
       let row = self.scratch.operations[index];
       let scope = self
         .schema
@@ -291,14 +346,21 @@ where
       let set = self.new_merge_set(row.definition, NONE, NONE, scope);
       self.scratch.merge_roots[row.definition as usize] = set;
     }
-    for ordinal in 0..self.scratch.fragments.len() {
+    if !self.charge(count_units(fragments)) {
+      return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+    }
+    for ordinal in 0..fragments {
       let row = self.scratch.fragments[ordinal];
       let Some(body) = fragment(document, row.definition) else {
         continue;
       };
-      let scope = self
-        .composite_of(body.type_condition().name())
-        .map_or(NONE, |id| id.get());
+      // The row charge above prices the row. This is the condition's own *spelling*, which
+      // `composite_of` hands to `Schema::sym` to hash, and its length is the document's to choose.
+      let condition = body.type_condition().name();
+      if !self.charge(byte_units(name_bytes(condition).len())) {
+        return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+      }
+      let scope = self.composite_of(condition).map_or(NONE, |id| id.get());
       let set = self.new_merge_set(row.definition, NONE, NONE, scope);
       self.scratch.merge_roots[row.definition as usize] = set;
     }
@@ -451,9 +513,17 @@ where
           // what drops its fields out of the common-parent partition below: nothing is known about
           // what they could be encountered with. 5.5.1.2 has already said so.
           let scope = match inline.type_condition() {
-            Some(condition) => self
-              .composite_of(condition.name())
-              .map_or(NONE, |id| id.get()),
+            Some(condition) => {
+              // `selections().len()` above counts this inline fragment as one. The condition's
+              // *spelling* is a second dimension the document chose, and `composite_of` hands it
+              // to `Schema::sym` to hash end to end — the same charge the fragment loop in
+              // `build_merge_index` takes, at the other place a type condition is resolved.
+              let condition = condition.name();
+              if !self.charge(byte_units(name_bytes(condition).len())) {
+                return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
+              }
+              self.composite_of(condition).map_or(NONE, |id| id.get())
+            }
             None => row.scope,
           };
           let child = self.new_merge_set(row.definition, set, index, scope);
@@ -463,7 +533,15 @@ where
           });
         }
         Selection::FragmentSpread(spread) => {
-          let Some(ordinal) = self.find_fragment(name_bytes(spread.name())) else {
+          let spelling = spread.name();
+          let name = name_bytes(spelling);
+          // `find_fragment` is a binary search whose comparator stops at the first byte that
+          // disagrees, so the spelling is charged **inside** it — a unit in front of each run the
+          // search is about to read, against this engine's own ledger. A whole pass stood here,
+          // and on an index nothing agrees with it billed a length no comparison examined. On an
+          // empty table the search returns without a comparison and without a charge.
+          let found = self.find_fragment(name, Charged::Merge, spelling.span())?;
+          let Some(ordinal) = found else {
             continue;
           };
           let target = self.scratch.fragments[ordinal as usize].definition;
@@ -594,11 +672,36 @@ where
         }
         let known = self.scratch.merge_memo[entry as usize];
         if known.hash == hash && known.rows.len() == rows.len() {
-          if !self.charge(rows.len()) {
+          // Charged per element the comparison reads. `[u32] == [u32]` stops at the first element
+          // that disagrees, so a whole-width charge in front of it priced a pass the operation is
+          // sub-linear in — two 65,536-row sets differing at row zero cost one integer compare and
+          // were charged 65,536 units, which is a resource refusal standing where a real draft
+          // 5.3.2 verdict belongs. al8n/smear#198's twenty-third round.
+          let mut work = self.work;
+          let (matched, refused) = {
+            let left = known.rows.slice(&self.scratch.merge_rows);
+            let right = rows.slice(&self.scratch.merge_rows);
+            let mut matched = true;
+            let mut refused = false;
+            for (a, b) in left.iter().zip(right) {
+              if !work.take(1) {
+                matched = false;
+                refused = true;
+                break;
+              }
+              if a != b {
+                matched = false;
+                break;
+              }
+            }
+            (matched, refused)
+          };
+          self.work = work;
+          if refused {
             self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
             return ControlFlow::Continue((rows, Claim::Refused));
           }
-          if known.rows.slice(&self.scratch.merge_rows) == rows.slice(&self.scratch.merge_rows) {
+          if matched {
             if rows.end() as usize == self.scratch.merge_rows.len()
               && known.rows.start() != rows.start()
             {
@@ -1098,12 +1201,20 @@ where
       }
       let entry = self.scratch.merge_hashes[index.entries + slot as usize];
       if entry.hash == wanted && entry.len == name.len() {
-        if !self.charge(byte_units(entry.len)) {
-          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-          return ControlFlow::Continue(Match::Refused);
-        }
-        if candidate(slot as usize) == name {
-          return ControlFlow::Continue(Match::At(slot as usize));
+        // Charged for the bytes the `memcmp` reads. The stored hash and the length have already
+        // agreed, so the ordinary outcome is equality and this pays `byte_units(len)` exactly as
+        // the whole-length charge did; a constructed hash collision no longer pays for a pass that
+        // stops at its first differing byte. al8n/smear#198's twenty-third round.
+        let mut work = self.work;
+        let compared = scan_eq(candidate(slot as usize), name, |_| work.take(1));
+        self.work = work;
+        match compared {
+          Compared::Equal => return ControlFlow::Continue(Match::At(slot as usize)),
+          Compared::Differs => (),
+          Compared::Refused => {
+            self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+            return ControlFlow::Continue(Match::Refused);
+          }
         }
       }
       slot = entry.next;
@@ -1256,7 +1367,13 @@ where
       // which means the *response shape*'s nesting and nothing else. Charging the depth makes the
       // total quadratic in it, so a hostile literal exhausts the budget long before it exhausts
       // anything else.
-      if !self.charge(depth) {
+      //
+      // **Twice the depth**, because there are two descents: `descend_value` runs once for each
+      // side. The sixteenth round's depth audit recorded this as a bounded 2x and left it, on the
+      // class argument that this module amortises repeated reads of one key into one unit. That
+      // argument is about *one* key read more than once; these are two independent walks, so the
+      // exact number is the honest one and it costs a multiply. al8n/smear#198.
+      if !self.charge(depth.saturating_mul(2)) {
         self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
         return ControlFlow::Continue(true);
       }
@@ -1273,14 +1390,18 @@ where
         // variable's name, and draft §2.1 puts no more of a ceiling on an `Int`'s digits or a
         // `String`'s characters than draft §2.1.9 does on a field name. Charging `depth` prices
         // the descent and says nothing about the `memcmp` at the bottom of it, so the bytes are
-        // charged before they are read — for the length the comparison can actually reach, which
-        // is the shorter of the two. Every other arm settles on a tag, a boolean or a length and
-        // costs nothing here. al8n/smear#196.
-        if !self.charge(shallow_units(a, b)) {
+        // charged before they are read — a unit at a time, in front of the run each one pays for.
+        // Every other arm settles on a tag, a boolean or a length and costs nothing here.
+        // al8n/smear#196, and al8n/smear#198's twenty-third round for the *amount*: the charge was
+        // `byte_units` of the shorter side, which prices a pass `[u8] == [u8]` does not make.
+        let mut work = self.work;
+        let equal = shallow_equal(a, b, |_| work.take(1));
+        self.work = work;
+        let Some(equal) = equal else {
           self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
           return ControlFlow::Continue(true);
-        }
-        if !shallow_equal(a, b) {
+        };
+        if !equal {
           return ControlFlow::Continue(false);
         }
         // Pairing this literal's fields by name is one lookup per field, so they are indexed once
@@ -1363,9 +1484,18 @@ where
     }
     let a = self.scratch.merge_fields[first as usize];
     let b = self.scratch.merge_fields[other as usize];
-    let subject = self
-      .resolve_merge_field(other)?
-      .map(|field| response_name(field).source().clone());
+    // Through `Validator::subject`, which charges the spelling before copying it.
+    //
+    // This was the last direct `source().clone()` in the crate: al8n/smear#198 centralised the
+    // charge at that door and swept its own module for callers, and this one was in a file that
+    // branch was fenced out of. The rebase onto al8n/smear#196 is what put it in reach — the same
+    // shape as the two the sweep did find, and reachable here once per reported conflict.
+    let subject = match self.resolve_merge_field(other)? {
+      // Draft 5.3.2's own ledger, because this is draft 5.3.2's pass. The door is shared; the
+      // ledger is not.
+      Some(field) => Some(self.subject(response_name(field), Charged::Merge)?),
+      None => None,
+    };
     let mut diagnostic = Diagnostic::new(Rule::FieldSelectionMerging, b.span)
       .related(a.span)
       .context(Context::Merge(conflict));
@@ -1423,56 +1553,6 @@ fn buckets_for(count: usize) -> usize {
   count.checked_next_power_of_two().unwrap_or(count)
 }
 
-/// What comparing two values at their own level costs in bytes.
-///
-/// Zero for every arm [`shallow_equal`] settles on a tag, a boolean or a length — a `memcmp` is
-/// only reached by the four that compare source spellings and by the variable, which compares a
-/// name.
-///
-/// # And zero again whenever the two lengths differ
-///
-/// This charged `byte_units` of the *shorter* of the two, on the reasoning that a slice comparison
-/// cannot read past it. True, and it prices a comparison this code does not make: `[u8] == [u8]`
-/// settles unequal lengths **before** it reads a byte of either side. So two string spellings of
-/// 524,288 and 524,289 bytes cost one integer compare and were charged 65,537 units — the whole
-/// default `merge_work` and more, for an `O(1)` decision.
-///
-/// What that bought was not safety. The document has a real draft 5.3.2 conflict — the two
-/// literals differ — and the over-charge replaced that diagnostic with a resource refusal, so the
-/// caller is told the wrong thing about their own document; with `MergeWorkBudget` outside the
-/// rule set it becomes an `Err` carrying nothing at all. A ledger that overcharges is not a safer
-/// ledger, one dimension over from where al8n/smear#196 first said so. al8n/smear#196.
-fn shallow_units<S>(left: &InputValue<S>, right: &InputValue<S>) -> u32
-where
-  S: AsRef<[u8]>,
-{
-  /// What comparing two source spellings costs: nothing unless they are the same length, and then
-  /// one pass over that length.
-  fn spelling(left: &[u8], right: &[u8]) -> u32 {
-    if left.len() != right.len() {
-      return 0;
-    }
-    byte_units(left.len())
-  }
-
-  match (left, right) {
-    (InputValue::Int(a), InputValue::Int(b)) => spelling(a.source().as_ref(), b.source().as_ref()),
-    (InputValue::Float(a), InputValue::Float(b)) => {
-      spelling(a.source().as_ref(), b.source().as_ref())
-    }
-    (InputValue::String(a), InputValue::String(b)) => {
-      spelling(a.source().as_ref(), b.source().as_ref())
-    }
-    (InputValue::Enum(a), InputValue::Enum(b)) => {
-      spelling(a.source().as_ref(), b.source().as_ref())
-    }
-    (InputValue::Variable(a), InputValue::Variable(b)) => {
-      spelling(name_bytes(a.name()), name_bytes(b.name()))
-    }
-    _ => 0,
-  }
-}
-
 /// Follows a comparison stack's child-index chain into one of the two value trees.
 fn descend_value<'a, S>(
   root: &'a InputValue<S>,
@@ -1492,19 +1572,48 @@ fn descend_value<'a, S>(
 }
 
 /// Whether two values agree at their own level, ignoring their children.
-fn shallow_equal<S>(left: &InputValue<S>, right: &InputValue<S>) -> bool
+fn shallow_equal<S>(
+  left: &InputValue<S>,
+  right: &InputValue<S>,
+  charge: impl FnMut(u32) -> bool,
+) -> Option<bool>
 where
   S: AsRef<[u8]>,
 {
-  match (left, right) {
+  /// The five arms that read bytes, each charged for the run it is about to read.
+  ///
+  /// `None` is the ledger's refusal and not an answer, which is why this is an `Option<bool>` all
+  /// the way out: a comparison that stopped for want of budget has established nothing, and
+  /// reporting it as "these differ" would put a draft 5.3.2 conflict on a document that may have
+  /// none. The whole-length charge this replaces settled unequal lengths for `byte_units` of the
+  /// shorter side and read no byte at all — two string spellings of 524,288 and 524,289 bytes cost
+  /// one integer compare and were charged 65,537 units, the whole default `merge_work` and more,
+  /// which replaced a real conflict diagnostic with a resource refusal. al8n/smear#198.
+  fn spelling(left: &[u8], right: &[u8], charge: impl FnMut(u32) -> bool) -> Option<bool> {
+    match scan_eq(left, right, charge) {
+      Compared::Equal => Some(true),
+      Compared::Differs => Some(false),
+      Compared::Refused => None,
+    }
+  }
+
+  Some(match (left, right) {
     (InputValue::Null(_), InputValue::Null(_)) => true,
     (InputValue::Boolean(a), InputValue::Boolean(b)) => a.value() == b.value(),
-    (InputValue::Int(a), InputValue::Int(b)) => a.source().as_ref() == b.source().as_ref(),
-    (InputValue::Float(a), InputValue::Float(b)) => a.source().as_ref() == b.source().as_ref(),
-    (InputValue::String(a), InputValue::String(b)) => a.source().as_ref() == b.source().as_ref(),
-    (InputValue::Enum(a), InputValue::Enum(b)) => a.source().as_ref() == b.source().as_ref(),
+    (InputValue::Int(a), InputValue::Int(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
+    (InputValue::Float(a), InputValue::Float(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
+    (InputValue::String(a), InputValue::String(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
+    (InputValue::Enum(a), InputValue::Enum(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
     (InputValue::Variable(a), InputValue::Variable(b)) => {
-      name_bytes(a.name()) == name_bytes(b.name())
+      return spelling(name_bytes(a.name()), name_bytes(b.name()), charge);
     }
     (InputValue::List(a), InputValue::List(b)) => a.values().len() == b.values().len(),
     // Equal widths, and the caller pairs the fields by name. A literal with a *repeated* field
@@ -1512,5 +1621,5 @@ where
     // refused the document, and apollo-compiler makes the same assumption here.
     (InputValue::Object(a), InputValue::Object(b)) => a.fields().len() == b.fields().len(),
     _ => false,
-  }
+  })
 }

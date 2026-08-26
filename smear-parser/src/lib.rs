@@ -49,6 +49,39 @@ pub mod combinator;
 #[cfg(feature = "rowan")]
 pub mod lossless;
 
+// -- THE LEXER'S CEILING AGAINST THE SUBSTRATE'S, AND WHY THE COMPARISON IS WRITTEN HERE -------
+//
+// `smear_lexer::limits::HARD_MAX` is what every lossless door clamps a parse's recursion budget
+// to, and `lossless::project::MAX_GREEN_DEPTH` is how deep the projection's walks will descend.
+// They live in different crates and had a relationship nothing enforced: a margin derived over 24
+// open brackets went on being stated over 256 of them, and at the top of that range a document
+// this crate's own parser accepted with no diagnostic projected as `TooDeep`. al8n/smear#198.
+//
+// The comparison cannot be written in the substrate. `src/lossless/` is parameterised over
+// `L: Lexer` and is forbidden from naming a concrete lexer crate — `SUBSTRATE_FORBIDDEN` in
+// `smear/tests/lossless_isolation.rs` refuses the spelling outright, and the same file's
+// `ALLOWED_CRATE_ROOTS` grants that root to the two dialect trees and to neither the substrate nor
+// anything else. It cannot be written in the lexer either, which does not depend on this crate.
+//
+// So it is written where all three are legitimately in scope: the root of the crate that assembles
+// the lexer, the substrate and the dialects. That keeps it ONE site rather than one per dialect —
+// a per-dialect assertion is a thing a third dialect can be added without — and it compiles in
+// exactly the configurations the substrate itself does, since `mod lossless` carries the same cfg.
+//
+// The predicate is the substrate's own `MAX_DOOR_BRACKETS`, which is
+// `MAX_GREEN_DEPTH / GREEN_LEVELS_PER_BRACKET`; over integers that is the same set of accepted
+// values as `HARD_MAX * GREEN_LEVELS_PER_BRACKET <= MAX_GREEN_DEPTH`, so moving the assertion did
+// not widen it. The plant that proves it is live is a `HARD_MAX` of 342: that value passes
+// `HARD_MAX`'s OWN 1.9x margin assertion, so every gate that predates this invariant admits it,
+// and it is exactly the edit that reopens the projection window.
+#[cfg(feature = "rowan")]
+const _: () = assert!(
+  smear_lexer::limits::HARD_MAX <= lossless::project::MAX_DOOR_BRACKETS,
+  "the lossless doors can accept a document whose green tree is deeper than the projection's walks \
+   will descend, so a projection would refuse a parse this crate just produced. Raising HARD_MAX \
+   means re-running WORST_DOOR_GREEN_TREE's shape table, not relaxing this."
+);
+
 /// Name-node carrier shared by the GraphQL-family dialect ASTs.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod name;

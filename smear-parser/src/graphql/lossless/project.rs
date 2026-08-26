@@ -125,7 +125,8 @@ use crate::{
     syntactic::definition::classify_location,
   },
   lossless::project::{
-    Recovery, node_extent, reject_holes, to_range, to_span, verify_source, verify_source_at,
+    Recovery, Unverified, node_extent, reject_holes, to_range, to_span, verify_source,
+    verify_source_at, verify_source_counted,
   },
 };
 
@@ -159,6 +160,44 @@ type Node<'g> = crate::lossless::project::Node<'g, GraphQLLang>;
 type Token<'g> = crate::lossless::project::Token<'g, GraphQLLang>;
 
 type Out<T> = Result<T, ProjectError>;
+
+impl Unverified {
+  /// The reason a [`ProjectError`] from a whole-root verification names.
+  ///
+  /// The two are established by one walk and were collapsed into one name at this boundary — the
+  /// third time on al8n/smear#198 that two abandonments with different remedies met a channel that
+  /// could carry one. The others were an arena refusal wearing the budget's `None` and a stale pair
+  /// wearing the budget's refusal; this one is a shape wearing a mismatch.
+  ///
+  /// # Why the constructor is here and the type is in the substrate
+  ///
+  /// [`Unverified`] is what a dialect-free verification answers, so it belongs to the substrate.
+  /// *Building* one out of a [`ProjectError`] is something only a projection door does, and the
+  /// only doors that exist are this module's two — [`Verified::new`] and
+  /// [`recovered_top_level`]. A `pub(crate)` item in the substrate with no in-crate caller is
+  /// `dead_code` under `-Dwarnings` whenever the crate is built with no dialect at all, which is
+  /// what `lossless-coverage` and `cargo hack --each-feature` do.
+  ///
+  /// The first repair for that was a `#[cfg(feature = "graphql")]` on the item where it stood,
+  /// and it was the wrong one: `tests/lossless_isolation.rs` pins every dialect-facing gate in the
+  /// substrate at `any(feature = "graphql", feature = "graphqlx")` precisely so that a generic
+  /// layer cannot acquire a favourite dialect, and the narrower gate is that drift by definition.
+  /// The `dead_code` denial was not noise to silence — it was the substrate reporting that the
+  /// item had no business living there. Moving it to the dialect that reads it discharges both:
+  /// the gate comes from `pub mod graphql`, which already carries one, and the substrate goes back
+  /// to naming no dialect at all.
+  ///
+  /// A GraphQLx projection door, when there is one, writes its own — over its own `SyntaxKind`,
+  /// with its own `ProjectErrorKind`. That is a second three-line `match` rather than a shared
+  /// generic one, and it is the right trade: the alternative puts a `pub(crate)` item back in the
+  /// substrate whose liveness depends on which dialects are compiled.
+  pub(crate) fn of(error: &ProjectError) -> Self {
+    match error.kind() {
+      ProjectErrorKind::TooDeep { limit } => Self::TooDeep { limit: *limit },
+      _ => Self::SourceMismatch,
+    }
+  }
+}
 
 /// Project a lossless parse to the AST the syntactic parser produces for `source`.
 ///
@@ -241,11 +280,14 @@ pub fn project_executable_document<'src>(
 ///
 /// # What counts as a top-level element
 ///
-/// The definitions of the [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node when the
-/// parse has one — and the children of the tree's [`Root`](SyntaxKind::Root) when it does not.
-/// The second case is not hypothetical: the lost-node recovery class drops a failed document
-/// production's children straight under the root, so `"{ a }\nquery Bad("` has no document node
-/// at all and its one good operation is reachable only this way.
+/// Every child of the tree's [`Root`](SyntaxKind::Root), with the
+/// [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node stepped *through* rather than
+/// descended into as the whole population. Both halves of that are load-bearing. The lost-node
+/// recovery class drops a failed document production's children straight under the root, so
+/// `"{ a }\nquery Bad("` has no document node at all and its one good operation is reachable only
+/// from the root; and a gap tile can land beside an *empty* document node, so `"%"` has one
+/// top-level element and it is not the document node's child. Reading only the document node's
+/// children answered a complete [`Recovery`] for that second shape.
 ///
 /// ```
 /// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
@@ -258,18 +300,42 @@ pub fn project_executable_document<'src>(
 /// let parse = parse_executable_document(source);
 /// assert!(parse.has_errors());
 ///
-/// let (ast, recovery) = project_executable_document_recovered(&parse, source);
+/// let (ast, recovery) =
+///   project_executable_document_recovered(&parse, source).expect("one document");
 /// assert_eq!(ast.definitions().len(), 1);
 /// assert_eq!(recovery.projected(), 1);
 /// assert!(!recovery.is_complete());
+///
+/// // A `source` the parse does not describe is refused rather than projected — including one that
+/// // merely *extends* the parse's text, where every definition would have matched at its own
+/// // range and the recovery would have read as complete.
+/// let longer = format!("{source} query More {{ hero {{ name }} }}");
+/// assert!(project_executable_document_recovered(&parse, &longer).is_err());
 /// # }
 /// ```
 pub fn project_executable_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
-) -> (ExecutableDocument<&'src str>, Recovery) {
+) -> Result<(ExecutableDocument<&'src str>, Recovery), Unverified> {
   let (span, definitions, recovery) =
-    recovered_top_level(parse, executable_root, recoverable_entry, source);
+    recovered_top_level(parse, K::ExecutableDocument, recoverable_entry, source)?;
+  Ok((ExecutableDocument::new(span, definitions), recovery))
+}
+
+/// [`project_executable_document_recovered`] for a pair that already carries its verification.
+///
+/// Infallible: a [`Verified`] is the proof the fallible form's error half exists to report, so
+/// there is no error half left. See [`Verified`] for why the type exists rather than the check
+/// simply being moved.
+pub fn project_executable_document_verified<'src>(
+  pair: Verified<'_, 'src>,
+) -> (ExecutableDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level_verified(
+    pair.parse(),
+    K::ExecutableDocument,
+    recoverable_entry,
+    pair.source(),
+  );
   (ExecutableDocument::new(span, definitions), recovery)
 }
 
@@ -354,21 +420,41 @@ pub fn project_type_system_document<'src>(
 /// let parse = parse_type_system_document(source);
 /// assert!(parse.has_errors());
 ///
-/// let (ast, recovery) = project_type_system_document_recovered(&parse, source);
+/// let (ast, recovery) =
+///   project_type_system_document_recovered(&parse, source).expect("one document");
 /// assert_eq!(ast.definitions().len(), 1);
 /// assert_eq!(recovery.projected(), 1);
 /// assert!(!recovery.is_complete());
+///
+/// // And a `source` the parse does not describe is refused rather than projected.
+/// let longer = format!("{source} type Extra {{ n: Int }}");
+/// assert!(project_type_system_document_recovered(&parse, &longer).is_err());
 /// # }
 /// ```
 pub fn project_type_system_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
-) -> (TypeSystemDocument<&'src str>, Recovery) {
+) -> Result<(TypeSystemDocument<&'src str>, Recovery), Unverified> {
   let (span, definitions, recovery) = recovered_top_level(
     parse,
-    type_system_root,
+    K::TypeSystemDocument,
     recoverable_type_system_entry,
     source,
+  )?;
+  Ok((TypeSystemDocument::new(span, definitions), recovery))
+}
+
+/// [`project_type_system_document_recovered`] for a pair that already carries its verification.
+///
+/// [`project_executable_document_verified`]'s mirror at the SDL root.
+pub fn project_type_system_document_verified<'src>(
+  pair: Verified<'_, 'src>,
+) -> (TypeSystemDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level_verified(
+    pair.parse(),
+    K::TypeSystemDocument,
+    recoverable_type_system_entry,
+    pair.source(),
   );
   (TypeSystemDocument::new(span, definitions), recovery)
 }
@@ -386,24 +472,223 @@ impl super::ast::TypeSystemDocument {
   }
 }
 
+/// A parse and the source it was produced from, **verified once**.
+///
+/// # Why this is a type
+///
+/// Two properties a lossless door is asked for, which cannot both hold when the door is handed an
+/// unverified pair:
+///
+/// - a **source mismatch outranks a budget refusal**, because a stale pair is not a resource
+///   problem and telling a caller to raise a limit names a remedy that cannot work; and
+/// - the **ceiling is absolute**, because no input-linear work may run outside the ledger.
+///
+/// Deciding the first requires *finishing* the comparison; honouring the second requires being able
+/// to stop before finishing it. Whichever runs first, the other loses — and that is a property of
+/// the arguments, not of the ordering, so no rearrangement inside such a door satisfies both.
+///
+/// Moving the verification out of the bounded call is the only shape that does. A `Verified` is
+/// checked by whoever constructs it, once, and every door that takes one has nothing left to
+/// verify: it opens its ledger first and everything it then does is under it.
+/// [`project_executable_document_verified`] and its twin are infallible for the same reason — the
+/// only thing their fallible forms can answer with is the check this value already carries.
+/// al8n/smear#198.
+#[derive(Clone, Copy)]
+pub struct Verified<'p, 'src> {
+  parse: &'p Parse,
+  source: &'src str,
+  /// What projecting this pair costs, in elements — see [`Verified::projection_cost`].
+  elements: u32,
+}
+
+impl core::fmt::Debug for Verified<'_, '_> {
+  /// The source, and that the pair is verified. `Parse` is not `Debug` — a green tree has no useful
+  /// rendering — so the half that can be shown is.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("Verified")
+      .field("source", &self.source)
+      .finish_non_exhaustive()
+  }
+}
+
+impl<'p, 'src> Verified<'p, 'src> {
+  /// Verifies that `source` is the whole text `parse` was produced from.
+  ///
+  /// `O(tokens)` over the borrowed green root and allocation-free — see [`verify_parse`], which
+  /// is the same comparison and answers the same [`Unverified`]. This is where a caller pays for
+  /// it, and paying for it here is what lets a validation of this pair be bounded.
+  pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, Unverified> {
+    // Counted by the same walk that verifies, so the proof and the price are established together
+    // and cost one pass between them. See [`Verified::projection_cost`].
+    match verify_source_counted::<SyntaxKind>(parse.green(), source) {
+      Ok(elements) => Ok(Self {
+        parse,
+        source,
+        elements,
+      }),
+      // The counted walk distinguishes a byte divergence from a shape refusal; this used to answer
+      // one name for both, so a pair whose bytes agree exactly was reported as stale.
+      Err(refusal) => Err(Unverified::of(&refusal)),
+    }
+  }
+
+  /// What projecting this pair costs, in **elements** — one per green node and one per token.
+  ///
+  /// # A proof that does not bound what its consumer charges for is not a proof
+  ///
+  /// `Verified` proves the *bytes* agree. A door that then prices the projection from
+  /// `source.len()` is assuming bytes bound structure, and they do not:
+  /// [`finish_root`](crate::lossless::runner::finish_root) is public, so a caller can mint a
+  /// `Parse` from its own CST event stream, and a balanced pair of **zero-width** GraphQL nodes adds
+  /// structure without adding a byte. An empty source over a tree of a million empty top-level
+  /// nodes verifies against `""`, paid one unit, and then had every node visited.
+  ///
+  /// So the value carries the cost of the thing it proves, and the two measure the same quantity.
+  /// Saturating at [`u32::MAX`] — no budget any caller can name pays that, so a tree too large to
+  /// price refuses rather than wrapping into one it fits.
+  /// al8n/smear#198.
+  #[inline]
+  pub const fn projection_cost(&self) -> u32 {
+    self.elements
+  }
+
+  /// The parse half of the pair.
+  #[inline]
+  pub const fn parse(&self) -> &'p Parse {
+    self.parse
+  }
+
+  /// The source half of the pair.
+  #[inline]
+  pub const fn source(&self) -> &'src str {
+    self.source
+  }
+}
+
+/// That `parse` and `source` describe the same bytes, over the **whole root** — or the reason the
+/// pair is refused.
+///
+/// The recovering projection's precondition, and the one thing it cannot establish definition by
+/// definition. Each definition it projects is verified against `source` at that definition's own
+/// range, which refuses a pair whose bytes differ — and says nothing at all about a `source` that
+/// *begins* with the parse's text and then adds to it. There every definition matches, nothing is
+/// skipped, the [`Recovery`] reports complete, and whatever the caller appended is silently absent
+/// from the AST. A consumer that validated or built from that result would be answering about a
+/// prefix while believing it had the document.
+///
+/// [`verify_source`] over the parse's **green** root, which is the same comparison the fail-fast
+/// doors make and the reason they were safe. It is `O(tokens)`, it reads no `Parse` state beyond a
+/// borrow, and it allocates nothing.
+///
+/// This was `parse.syntax().text() == source` for one round, and that sentence was written about it
+/// too — wrongly. [`Parse::syntax`](crate::lossless::runner::Parse::syntax) *materialises rowan's red
+/// cursor*: it clones the `Arc` and allocates the root's cursor data, and `SyntaxText`'s equality
+/// then walks descendants through red nodes and tokens that are allocated and dropped as the walk
+/// passes them. A token-dense parse therefore made `Θ(elements)` transient allocations here, on
+/// every recovered projection and every lossless validation, and this helper is public and holds no
+/// budget. al8n/smear#198's nineteenth round.
+///
+/// The failure is worth recording where the mechanism is, because the fix is a function the crate
+/// already had and the round that introduced the defect is the round that **named** it: the
+/// fourteenth round's own diagnosis said the fail-fast doors never had the prefix defect precisely
+/// because they open with [`verify_source`] over the whole green root — and then wrote a second
+/// whole-root check beside it instead of calling that one.
+///
+/// The fail-fast doors never needed it: [`project_executable_document`] and its SDL twin open with
+/// [`verify_source`] over the whole green root, and that check compares *lengths* first, so an
+/// extended source is refused before a byte is walked. The recovering door was written from the
+/// **compositional** check instead — [`verify_source_at`], run once per definition — and that is
+/// the check with nothing to say about bytes no definition covers.
+///
+/// It is public because the check belongs to whoever holds the pair, and a caller may want the
+/// answer without projecting. Nothing has to call it to be safe: the recovering projections make
+/// the check themselves and answer [`Unverified`], so a consumer using them **directly** —
+/// with no validator and no door in front — cannot be handed a stale prefix either. al8n/smear#198.
+///
+/// # Why this is not a `bool`, and why the walk was not made conclusive instead
+///
+/// It was `matches_source`, returning `verify_source(..).is_ok()`, and that boolean was a lie
+/// about a pair it had no room to describe. [`verify_source`] refuses for two reasons and only
+/// one of them is *these are not the same document*: a tree deeper than
+/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) is refused for its **shape**,
+/// whatever its bytes say, so `.is_ok()` reported a parse whose every byte matches its source as
+/// stale. The two refusals have opposite remedies — a stale pair is re-parsed, and re-parsing a
+/// tree too deep to descend produces the same tree — so the boolean sent a caller to the one
+/// action that cannot work.
+///
+/// The other repair was to make the comparison iterative, so that [`Unverified::TooDeep`] could
+/// not arise here at all and the boolean became conclusive rather than merely wider. It does not
+/// survive being tried, for two reasons and either one is enough. A green node holds no parent
+/// pointer, so an iterative preorder needs an explicit stack as deep as the tree — an `O(depth)`
+/// heap allocation over a tree a caller minted, which trades a refusal this crate can name for an
+/// allocation nobody can refuse. And the third state is a property of the **pair** rather than of
+/// this walk: [`Verified::new`] answers for the same pair through [`verify_source_counted`], which
+/// is recursive and refuses, so a conclusive `Ok` here would be followed by a `TooDeep` at the door
+/// this exists to predict. Erasing a distinction in one of the two places that answer for a pair is
+/// how the two come to disagree. al8n/smear#198.
+pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
+  verify_source::<SyntaxKind>(parse.green(), source).map_err(|refusal| Unverified::of(&refusal))
+}
+
 /// The recovering top-level walk, shared by both single-half roots.
 ///
 /// One implementation rather than one per root, because what it computes is [`Recovery`], and
 /// `Recovery`'s documented meaning — *`skipped` is a bound on what was lost, counted per element*
 /// — has to be one statement about both doors rather than two statements that happen to agree
-/// today. The root lookup and the per-definition projection are the only things that differ, so
-/// they are the arguments; they are `fn` pointers rather than generic parameters so this
+/// today. The root's kind and the per-definition projection are the only things that differ, so
+/// they are the arguments; `entry_of` is a `fn` pointer rather than a generic parameter so this
 /// monomorphises once per root and nothing here becomes a shape a caller can dispatch through.
 ///
-/// Answers the surviving definitions, their span, and the tally.
+/// # Every element of the root, not every element of the document node
+///
+/// The walk starts at the **root** and steps *through* the document node rather than starting
+/// inside it. The two are not the same population: the parser can leave a gap tile beside the
+/// document node instead of within it, and `"%"` parses to exactly that — `ExecutableDocument@0..0`
+/// with `Gap@0..1` as its sibling. Iterating the document node's children saw nothing, counted
+/// nothing, and answered a complete [`Recovery`] over a document whose every byte had no AST
+/// image. Which is [`Unverified`]'s defect one level down: state derived from a population
+/// that can be empty while the thing it describes is not.
+///
+/// Answers the surviving definitions, their span, and the tally — or [`Unverified`],
+/// which is none of those three and so is not spelled as a value of any of them.
 fn recovered_top_level<'src, T>(
   parse: &Parse,
-  root_of: fn(Node<'_>) -> Option<Node<'_>>,
+  root_kind: SyntaxKind,
+  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
+  source: &'src str,
+) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
+  // Established once, over the whole root, before a single element is projected, and **returned**
+  // rather than folded into the tally. See [`verify_parse`] for why a per-definition check
+  // cannot see a prefix, and [`Unverified`] for why the answer is not a [`Recovery`]: a
+  // mismatched pair used to project nothing and count every top-level element as skipped, which is
+  // a true statement about a parse that *has* elements and an empty one about a parse that does
+  // not — and `Recovery::is_complete` answers `true` at zero skipped.
+  // `verify_source` rather than `verify_parse`: this walk wants the `ProjectError` to build its
+  // own `Unverified` from, and `verify_parse` has already made that conversion. The two carry the
+  // same two reasons — which is the point, and is what the predicate's `bool` used to throw away.
+  // al8n/smear#198.
+  if let Err(refusal) = verify_source::<SyntaxKind>(parse.green(), source) {
+    return Err(Unverified::of(&refusal));
+  }
+  Ok(recovered_top_level_verified(
+    parse, root_kind, entry_of, source,
+  ))
+}
+
+/// [`recovered_top_level`] for a pair whose verification is already established.
+///
+/// Infallible, because the only thing the fallible form can answer with is the check a
+/// [`Verified`] already carries. Splitting it is what lets a **bounded** caller exist at all: the
+/// check is `O(tokens)`, so a door that verifies inside its own call has an input-linear walk in
+/// front of its ledger, and one that takes a verified pair does not. al8n/smear#198.
+fn recovered_top_level_verified<'src, T>(
+  parse: &Parse,
+  root_kind: SyntaxKind,
   entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
   source: &'src str,
 ) -> (SimpleSpan, Vec<T>, Recovery) {
   let root = parse_root(parse);
-  let container = root_of(root).unwrap_or(root);
+  let container = child_node(root, root_kind).unwrap_or(root);
 
   let mut definitions = Vec::new();
   let mut skipped = 0u32;
@@ -411,19 +696,27 @@ fn recovered_top_level<'src, T>(
   // not of the bytes that were dropped: an AST span is an extent of the tokens its node covers,
   // and a skipped region is not one of them.
   let mut extent = Extent::default();
-  for element in container.children() {
+  let mut take = |element: NodeOrToken<Node<'_>, Token<'_>>| match element {
+    // Rubble the parser could not attach to a definition. Counted per token rather than per run:
+    // a bound on what was lost, which is what `Recovery::skipped` promises.
+    NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
+    NodeOrToken::Token(_) => {}
+    NodeOrToken::Node(child) => match entry_of(child, source) {
+      Ok((entry, piece)) => {
+        extent.cover(piece);
+        definitions.push(entry);
+      }
+      Err(_) => skipped = skipped.saturating_add(1),
+    },
+  };
+  for element in root.children() {
     match element {
-      // Rubble the parser could not attach to a definition. Counted per token rather than per
-      // run: a bound on what was lost, which is what `Recovery::skipped` promises.
-      NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
-      NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => match entry_of(child, source) {
-        Ok((entry, piece)) => {
-          extent.cover(piece);
-          definitions.push(entry);
-        }
-        Err(_) => skipped = skipped.saturating_add(1),
-      },
+      // The document node is stepped *through*: its children are the definitions. Everything else
+      // under the root is a top-level element in its own right — the lost-node class puts a failed
+      // production's children there, and the lexer's gap tiles land there when the document node
+      // came out empty.
+      NodeOrToken::Node(child) if child.kind() == root_kind => child.children().for_each(&mut take),
+      other => take(other),
     }
   }
 
@@ -578,7 +871,19 @@ const fn is_trivia(kind: SyntaxKind) -> bool {
 /// is the node's span. `None` — no non-trivia token anywhere under the node — is a finding rather
 /// than a fallback to the node's own range, which is why [`range`](Self::range) is fallible.
 #[derive(Debug, Clone, Copy, Default)]
-struct Extent(Option<TextRange>);
+struct Extent {
+  /// The cover of every non-trivia token folded in so far.
+  range: Option<TextRange>,
+  /// Set when [`Extent::unread`]'s descent hit
+  /// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH).
+  ///
+  /// The fold has no error channel — it is a `&mut self` accumulator threaded through
+  /// thirty-five call sites — so the refusal is **carried** rather than returned, and
+  /// [`Extent::range`] is where it becomes one. That reader already answers `Out<TextRange>`, so
+  /// nothing above it changes shape; what it must not do is answer a range it cannot establish.
+  /// al8n/smear#198.
+  too_deep: bool,
+}
 
 impl Extent {
   /// Widen to include `piece`.
@@ -588,7 +893,7 @@ impl Extent {
   /// is exactly the class `tests/support/span_extent.rs` exists to catch.
   #[inline]
   fn cover(&mut self, piece: TextRange) {
-    self.0 = Some(match self.0 {
+    self.range = Some(match self.range {
       Some(seen) => seen.cover(piece),
       None => piece,
     });
@@ -608,8 +913,13 @@ impl Extent {
   /// AST, but its bytes are part of the parent's, and nothing else has walked it.
   #[inline]
   fn unread(&mut self, child: Node<'_>) {
-    if let Some(piece) = node_extent(child, is_trivia) {
-      self.cover(piece);
+    match node_extent(child, is_trivia) {
+      Ok(Some(piece)) => self.cover(piece),
+      Ok(None) => {}
+      // The subtree is deeper than a walk will descend, so its extent is not knowable — and an
+      // all-trivia subtree's honest answer is `None`, which makes a manufactured range a different
+      // answer rather than a wider one. Carried to `Extent::range`.
+      Err(_) => self.too_deep = true,
     }
   }
 
@@ -632,12 +942,20 @@ impl Extent {
 
   #[inline]
   const fn get(self) -> Option<TextRange> {
-    self.0
+    self.range
   }
 
   #[inline]
   fn range(self, node: Node<'_>, wanted: &'static str) -> Out<TextRange> {
-    self.0.ok_or_else(|| missing(node, wanted))
+    if self.too_deep {
+      return Err(ProjectError::new(
+        ProjectErrorKind::TooDeep {
+          limit: crate::lossless::project::MAX_GREEN_DEPTH,
+        },
+        to_range(node.text_range()),
+      ));
+    }
+    self.range.ok_or_else(|| missing(node, wanted))
   }
 
   #[inline]
