@@ -795,15 +795,25 @@ where
     if !self.on(Rule::InputObjectFieldUniqueness) || fields.len() < 2 {
       return ControlFlow::Continue(());
     }
+    // **One slot appended behind its own field's accepted unit, and not `fields.len()` of them in
+    // front of the first.** A `resize(fields.len(), 0)` stood here, and it is the defect this whole
+    // branch exists to remove, reappearing in the machinery that removes it: the walk reaches an
+    // object literal through `visit_value`'s unknown-position arm before the value walk has charged
+    // it, so a literal writing `F` fields grew and kept `4F` bytes of meter with the ledger holding
+    // no room for the first field's unit. Measured under a ceiling that reaches the literal and
+    // cannot pay that unit: 4,224 bytes at 1,000 fields, 16,224 at 4,000, 64,224 at 16,000 and
+    // 256,224 at 64,000. `clear` first — `O(1)`, no drop glue, no allocation, and it is what leaves
+    // the table empty on a refusal rather than the previous literal's width — then one push per
+    // charge. `index_fragments` is the shape; three sites drifted from it.
+    // al8n/smear#198's twenty-fourth round.
     self.scratch.paid.clear();
-    self.scratch.paid.resize(fields.len(), 0);
     let mut deepest = 0u32;
     for field in fields {
       let name = field.field_name();
       self.spend(1, *name.as_span())?;
+      self.scratch.paid.push(1);
       deepest = deepest.max(units(name_bytes(name).len()));
     }
-    self.scratch.paid.fill(1);
 
     let base = self.scratch.keys.len();
     for index in 0..fields.len() {

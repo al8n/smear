@@ -2325,10 +2325,16 @@ where
       .iter()
       .filter(|row| row.named)
       .count();
+    // Indexed by **operation ordinal** rather than densely, because that is the slot `sort_metered`
+    // hands its comparator, so this one is a `resize` where the other three append. What it rests
+    // on is named rather than assumed: `prep` spends a unit per operation *before* pushing its row,
+    // so `operations.len()` slots sit behind `operations.len()` accepted units — the same standard
+    // `order.extend(0..count)` is held to. Gated on its reader all the same: with 5.2.2.1 off, or
+    // with one name to compare, nothing below reads a slot.
     self.scratch.paid.clear();
-    self.scratch.paid.resize(self.scratch.operations.len(), 0);
     let mut deepest = 0u32;
     if self.on(Rule::OperationNameUniqueness) && named > 1 {
+      self.scratch.paid.resize(self.scratch.operations.len(), 0);
       for index in 0..self.scratch.operations.len() {
         if !self.scratch.operations[index].named {
           continue;
@@ -3061,15 +3067,21 @@ where
     // 5.8.1's scan, for the depth a comparison actually reaches. al8n/smear#198's twenty-third
     // round.
     let sorted = indexed && definitions.len() > 1;
+    // **One slot appended behind its own declaration's accepted unit, and gated on the reader.** A
+    // `resize(definitions.len(), 0)` stood here, outside the `indexed` gate, and it is the `used`
+    // bitset's defect one buffer over: prep charges per **definition**, so an operation declaring
+    // `V` variables is one unit, and `4V` bytes of meter were allocated and zeroed in front of it —
+    // for a rule set that may read none of it. `clear` first, then one push per accepted charge, so
+    // a refusal leaves the table empty rather than the previous operation's width.
+    // al8n/smear#198's twenty-fourth round.
     self.scratch.paid.clear();
-    self.scratch.paid.resize(definitions.len(), 0);
     let mut deepest = 0u32;
     if indexed {
       for (index, described) in definitions.iter().enumerate() {
         if sorted {
           let variable = described.node().variable();
           self.spend(1, *variable.span())?;
-          self.scratch.paid[index] = 1;
+          self.scratch.paid.push(1);
           deepest = deepest.max(units(name_bytes(variable.name()).len()));
         }
         self.scratch.keys.push(index as u32);
