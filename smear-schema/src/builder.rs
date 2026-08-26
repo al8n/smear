@@ -402,6 +402,19 @@ impl Duplicates {
 /// The table is put back rather than reallocated, and [`Positions::drop`] is what puts it back:
 /// a slot left set would answer the *next* type's lookup with a position in a list that type
 /// does not have, which is a wrong span on a diagnostic rather than a cost.
+///
+/// # If you change this, a fixture dump will not tell you
+///
+/// The first-occurrence rule below was proved by *planting its negation* — recording the last
+/// occurrence instead — and the twenty hand-written fixtures this branch had used twice, **wide
+/// ones written for exactly this property included**, came back byte-identical. A duplicate field
+/// name is benign for every rule here unless the two occurrences differ in a way some rule reads,
+/// and hand-picking a fixture that satisfies that is harder than it looks.
+///
+/// What caught it was four thousand *derived* schemas: 320 923 diagnostics across eighteen kinds,
+/// of which the plant moved 197 804 lines. So the instrument for a change here is a derived
+/// corpus diffed against the previous commit's binary, not a fixture list — and the plant is what
+/// says the corpus can see the change at all. al8n/smear#198.
 enum Positions<'f, 's> {
   /// At or below [`NARROW_LIST`]: the scan, whose cost per lookup the ceiling on that constant is
   /// what bounds, exactly as the argument lists' scan is bounded.

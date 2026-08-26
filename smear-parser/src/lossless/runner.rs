@@ -100,6 +100,68 @@ impl<L: rowan::Language> Parse<L> {
   }
 }
 
+/// Why [`finish_root`] refused to mint a [`Parse`] out of a caller-built [`Cst`].
+///
+/// # Why this forwards the substrate's refusal instead of re-spelling it
+///
+/// The two mistakes a caller can make at this door have different remedies — a malformed event
+/// stream is a bug in the sink that emitted it, and a tree too deep for `rowan` to *release* is a
+/// shape that has to get shallower — so a caller has to be able to tell them apart. The type that
+/// tells them apart is [`FinishError`](tokora::cst::FinishError), and it is upstream's.
+///
+/// A smear-side enum mirroring it was considered, and it is worse for a reason that is not taste.
+/// `FinishError` is `#[non_exhaustive]`, this workspace tracks tokora's `main` **by branch** and
+/// commits no lock, so what the crate compiles against moves between builds of the same commit —
+/// the manifest says so outright. The depth refusal is the example rather than a hypothetical: it
+/// is absent from the revision this workspace resolved when the door was made fallible and
+/// present one commit later. A mirror could not carry the one variant that matters without
+/// pinning the dependency, and a mirror that omitted it would be a smear type asserting a variant
+/// set it does not own and cannot keep current.
+///
+/// So the coupling is real, and it is chosen rather than inherited: [`MintError::refusal`] hands
+/// back upstream's own enum and a caller classifies with exactly the precision the tokora it
+/// compiled against has. Against a revision that has no depth refusal there is nothing to
+/// classify, because every refusal really is a malformed stream — a fact about that revision, not
+/// a limitation of this type.
+///
+/// What the wrapper adds over returning `FinishError` bare is [`MintError::space`], the kind space
+/// whose sink emitted the stream. That is what the panic this replaced carried, and it is the only
+/// thing a runner shared by every dialect can say about *whose* stream it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MintError {
+  space: &'static str,
+  refusal: tokora::cst::FinishError,
+}
+
+impl MintError {
+  /// The kind space whose sink emitted the refused stream.
+  #[inline]
+  pub const fn space(&self) -> &'static str {
+    self.space
+  }
+
+  /// The substrate's own refusal, which is what classifies it.
+  #[inline]
+  pub const fn refusal(&self) -> tokora::cst::FinishError {
+    self.refusal
+  }
+}
+
+impl core::fmt::Display for MintError {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    write!(
+      f,
+      "the {} lossless event stream was refused: {}",
+      self.space, self.refusal
+    )
+  }
+}
+
+// No `source`: that would need `FinishError: core::error::Error` to be true of every revision this
+// crate may be compiled against, and the whole point of the type above is that the upstream enum
+// moves. `Display` carries the refusal's own message instead, so nothing is lost to a reader.
+impl core::error::Error for MintError {}
+
 /// Materialize `cst` at `root` and collect its diagnostics.
 ///
 /// Shared by every dialect's `parse_document` and by its per-production drivers, so the
@@ -109,7 +171,7 @@ impl<L: rowan::Language> Parse<L> {
 ///
 /// `space` is a `&'static str` argument rather than a [`KindSpace::NAME`](super::KindSpace::NAME)
 /// lookup so this function needs no `KindSpace` bound at all; the caller already has the name.
-/// The panic message keeps naming the dialect, which is the one thing that made it useful.
+/// [`MintError::space`] keeps naming the dialect, which is the one thing that made it useful.
 ///
 /// # Why the partial door
 ///
@@ -190,7 +252,7 @@ impl<L: rowan::Language> Parse<L> {
 ///
 /// Nothing else is relaxed. Balance underflow, close identity, retro-wrap integrity, kind
 /// hygiene, span discipline and the token-channel wall are enforced identically through both
-/// doors, so the panic below still guards a genuine sink bug — and it now names the
+/// doors, so the [`MintError`] below still reports a genuine sink bug — and it names the
 /// [`FinishError`](tokora::cst::FinishError) it refused, because a message that dropped it made
 /// #57 diagnosable only by patching this line.
 ///
@@ -223,18 +285,33 @@ impl<L: rowan::Language> Parse<L> {
 ///   any tree. Two halves of the problem are not, and neither is this door's to close:
 ///
 ///   - **Construction.** The over-deep tree is built by `finish_partial`, from events already
-///     recorded in the `Cst` this function is handed. There is nothing here to inspect and no way
-///     to refuse before the tree exists — that check belongs upstream, in the builder that sees the
-///     events as they arrive. This crate's own dialects are bounded by
-///     `crate::lossless::depth::descend` before they ever reach here; a `Cst` built elsewhere is
-///     not.
+///     recorded in the `Cst` this function is handed. There is nothing *here* to inspect and no way
+///     to refuse before the tree exists — [`Cst`] publishes no depth, no event count and no event
+///     access, and `finish_partial` consumes it by value — so the check belongs upstream, in the
+///     builder that sees the events as they arrive.
+///
+///     **Upstream now makes it, and this door forwards the refusal as a value.** tokora gates the
+///     one replay-walk door that pushes a builder node and answers a typed refusal, which arrives
+///     here as [`MintError`] rather than as a panic. What this function no longer does is assert
+///     that a refusal means a malformed stream: a depth refusal is a well-formed tree nobody could
+///     dispose of, which is a different mistake with a different remedy, and the caller is the one
+///     who can tell them apart.
+///
+///     **The forwarding is only as good as the revision it is compiled against.** This workspace
+///     names tokora by branch and commits no lock, so a build of this very commit may resolve a
+///     revision whose `finish_partial` has no depth ceiling at all; against that one the hazard
+///     below stands exactly as it did, because there is no refusal to forward. That is the
+///     residual, and it is the dependency edge's rather than this door's.
 ///   - **Destruction.** `rowan` drops a green tree recursively, so a tree deep enough to overflow
 ///     is a crash in its own destructor. That is reachable through `rowan`'s public builder without
 ///     this crate being involved at all, and no guard placed after materialisation can help: the
-///     value's mere existence is the hazard.
+///     value's mere existence is the hazard. Refusing at the open that would cross the ceiling is
+///     what makes the difference — the tree the failing call drops is one at or under it — and
+///     that is upstream's to do, for the same reason construction is.
 ///
-///   So the honest statement of this entry is that **the walks are bounded and the lifecycle is
-///   not**, and closing the lifecycle needs a change upstream rather than here.
+///   So the honest statement of this entry is that **the walks are bounded, construction is
+///   bounded by whatever substrate revision is resolved, and `rowan`'s own builder is bounded by
+///   nothing this crate can reach**.
 ///
 ///   The first version of this list said *three* walks and did not mention either lifecycle half.
 ///   That is worth recording where it happened: a general claim written without enumerating what it
@@ -250,11 +327,19 @@ impl<L: rowan::Language> Parse<L> {
 ///
 /// What is **not** in question is memory safety: every walk above is safe Rust over a green tree,
 /// and the failure modes are a stack overflow and an unpriced walk, not corruption.
+///
+/// # Errors
+///
+/// [`MintError`] when the substrate refuses to materialise the recorded stream, which its own
+/// [`FinishError`](tokora::cst::FinishError) classifies. It replaced a `panic!` on this line: a
+/// safe public function that aborts its caller's process cannot be the way a caller learns its
+/// own event stream was rejected, and the message it panicked with asserted a malformed stream,
+/// which is exactly what a depth refusal is not.
 pub fn finish_root<'inp, L, Lx, Em>(
   cst: Cst<'inp, Lx, Em>,
   root: u16,
   space: &'static str,
-) -> Parse<L>
+) -> Result<Parse<L>, MintError>
 where
   L: rowan::Language,
   Lx: Lexer<'inp>,
@@ -270,14 +355,67 @@ where
 {
   // `finish_partial`, NOT `finish`. See this function's `Why the partial door` note.
   let (green, emitter) = cst.finish_partial(root);
-  let green = green
-    .unwrap_or_else(|e| panic!("the {space} lossless sink emitted a malformed event stream: {e}"));
+  // The emitter is dropped on the refusal path on purpose. Its diagnostics describe a parse whose
+  // tree does not exist, and there is no `Parse` to hang them on; a caller whose stream was
+  // refused has a stream to fix, not diagnostics to route.
+  let green = green.map_err(|refusal| MintError { space, refusal })?;
 
-  Parse {
+  Ok(Parse {
     green,
     diagnostics: emitter.collect_diagnostics(),
     language: core::marker::PhantomData,
-  }
+  })
+}
+
+/// [`finish_root`] for a [`Cst`] one of *this crate's own* parsers built, where the refusal is
+/// unreachable and the dialect doors keep their infallible signatures.
+///
+/// # Panics
+///
+/// If the substrate refuses the stream, which no *production* in this crate can make it do. The
+/// depth refusal in particular cannot fire here, and the reason is three numbers rather than a
+/// wish:
+///
+/// - Every lossless door installs `min(requested, `[`HARD_MAX`]`)` as the parse's recursion
+///   budget, so no parse this crate performs holds more than [`HARD_MAX`] brackets open.
+/// - A selection chain at that maximum materialises **515** green levels. The tree costs two
+///   levels per open bracket plus three, measured on this crate's own `parse_document_with_limits`
+///   over `1..=256`, and the 24-bracket row of that same measurement is the **51** that
+///   `crate::lossless::project::MAX_GREEN_DEPTH`'s header already records — so the figure is
+///   checkable against a number that was recorded before this function existed.
+/// - tokora's tree ceiling, where the resolved revision has one, is above 515; where it has none
+///   there is nothing to trip.
+///
+/// So the claim is that 515 clears the substrate's ceiling, not that a refusal "cannot happen".
+/// Should a substrate ceiling ever drop under 515, or a door stop clamping to [`HARD_MAX`], this
+/// panics with both numbers in the message.
+///
+/// The other refusals are reachable, deliberately: a dialect's `test_support` probe severs the
+/// token channel to prove the `space` argument is threaded rather than assumed. That is why the
+/// message below reports the refusal it got rather than naming a cause.
+///
+/// [`HARD_MAX`]: smear_lexer::limits::HARD_MAX
+pub(crate) fn finish_parsed_root<'inp, L, Lx, Em>(
+  cst: Cst<'inp, Lx, Em>,
+  root: u16,
+  space: &'static str,
+) -> Parse<L>
+where
+  L: rowan::Language,
+  Lx: Lexer<'inp>,
+  Lx::Source: tokora::cst::CstText,
+  Lx::Offset: TryInto<u32>,
+  Em: DiagnosticSource,
+{
+  finish_root(cst, root, space).unwrap_or_else(|refused| {
+    panic!(
+      "{refused}. No production in this crate emits a stream this door refuses, and depth in \
+       particular cannot: every lossless door clamps the recursion budget to HARD_MAX = {}, and a \
+       selection chain at that maximum materialises 515 green levels, under the substrate's own \
+       tree ceiling",
+      smear_lexer::limits::HARD_MAX,
+    )
+  })
 }
 
 /// The emitter half of a lossless context, reduced to the one thing `finish_root` asks of it.

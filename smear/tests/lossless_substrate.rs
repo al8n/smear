@@ -312,7 +312,7 @@ fn a_declined_retro_wrap_is_not_counted() {
 /// nothing. An unclosed node is *not* the shape to probe with — `finish_partial` closes one by
 /// design, so it never reaches the arm.
 #[test]
-#[should_panic(expected = "the graphql lossless sink emitted a malformed event stream")]
+#[should_panic(expected = "the graphql lossless event stream was refused")]
 fn a_malformed_stream_panics_naming_the_dialect() {
   let _ = smear::parser::graphql::lossless::runner::test_support::structure_without_tokens("a", 0);
 }

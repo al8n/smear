@@ -77,9 +77,15 @@ pub(crate) type LosslessCst<'inp> =
 /// *tree's* root (`K::Root`) rather than the production's, which is why one wrapper covers three
 /// different document roots. Everything below that — the fallible-materialization contract and
 /// the diagnostic projection — is [`crate::lossless::runner::finish_root`]'s; this wrapper's
-/// whole content is *which* root kind and *which* dialect the panic names.
+/// whole content is *which* root kind and *which* dialect the refusal names.
+///
+/// The refusal itself is `crate::lossless::runner::finish_parsed_root`'s: these doors build the
+/// `Cst` they finish, under their own clamped recursion budget, so the substrate's refusal is
+/// unreachable from here and that function carries the numbers that say why. A caller finishing a
+/// `Cst` it built itself goes through the public [`crate::lossless::runner::finish_root`] and gets
+/// the refusal as a value.
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
-  crate::lossless::runner::finish_root(cst, K::Root.raw(), <K as KindSpace>::NAME)
+  crate::lossless::runner::finish_parsed_root(cst, K::Root.raw(), <K as KindSpace>::NAME)
 }
 
 /// One diagnostic a GraphQLx lossless parse recorded.
@@ -368,7 +374,9 @@ pub mod test_support {
   ///
   /// # Panics
   ///
-  /// Always, with the message `finish_root` composes.
+  /// Always, with the message `crate::lossless::runner::finish_parsed_root` composes around the
+  /// substrate's own refusal — which is why this probe is what proves the `space` argument is
+  /// threaded rather than assumed.
   ///
   /// [`cst_start_at`]: tokora::InputRef::cst_start_at
   /// [`cst_finish`]: tokora::InputRef::cst_finish
