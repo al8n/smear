@@ -1023,43 +1023,50 @@ where
   ) -> ControlFlow<(), Option<&'a str>> {
     let mut ledger = self.left;
     let mut refused = false;
-    let mut charge = || match ledger.take(1) {
-      Some(left) => {
-        ledger = left;
-        true
-      }
-      None => {
-        ledger = Ledger::Left(0);
-        refused = true;
-        false
-      }
-    };
     // The opening unit covers the emptiness test and the first `BYTES_PER_UNIT - 1` bytes, so the
     // running total after `k` bytes is exactly `units(k)` — `scan_eq`'s schedule, one operation
     // over.
-    let readable = if charge() {
-      let mut budgeted = BYTES_PER_UNIT - 1;
-      let mut read = 0usize;
-      loop {
-        if read >= spelling.len() {
-          break true;
+    //
+    // `charge` is declared inside this block, not the function, so its mutable borrow of `ledger`
+    // and `refused` ends where the block does — structurally, at the closing brace — rather than
+    // through a `drop(charge)` call. The closure has no `Drop` impl, so `drop()` was never a
+    // destructor here; it was only ever a way to say "end this borrow now", which the block says
+    // on its own.
+    let readable = {
+      let mut charge = || match ledger.take(1) {
+        Some(left) => {
+          ledger = left;
+          true
         }
-        if read == budgeted {
-          if !charge() {
+        None => {
+          ledger = Ledger::Left(0);
+          refused = true;
+          false
+        }
+      };
+      if charge() {
+        let mut budgeted = BYTES_PER_UNIT - 1;
+        let mut read = 0usize;
+        loop {
+          if read >= spelling.len() {
+            break true;
+          }
+          if read == budgeted {
+            if !charge() {
+              break false;
+            }
+            budgeted += BYTES_PER_UNIT;
+          }
+          let end = budgeted.min(spelling.len());
+          if !spelling[read..end].is_ascii() {
             break false;
           }
-          budgeted += BYTES_PER_UNIT;
+          read = end;
         }
-        let end = budgeted.min(spelling.len());
-        if !spelling[read..end].is_ascii() {
-          break false;
-        }
-        read = end;
+      } else {
+        false
       }
-    } else {
-      false
     };
-    drop(charge);
     self.left = ledger;
     if refused {
       self.refuse(blame)?;
