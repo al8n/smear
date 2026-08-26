@@ -480,8 +480,8 @@ impl Drop for Positions<'_, '_> {
   }
 }
 
-/// The first position of a name in one list, asked by names from a *second* list the reader walks
-/// at the same time — where the two lists **nest**.
+/// The first position of a name in one **written** list — a literal's own entries — asked by names
+/// from the declaration the reader is walking at the same time.
 ///
 /// # Why this is neither [`Duplicates`] nor [`Positions`], which are the two neighbours
 ///
@@ -492,12 +492,15 @@ impl Drop for Positions<'_, '_> {
 /// "does not survive the nesting", and which [`Positions`] takes only because draft §3.6.1's
 /// conformance pass holds one implementor's list at a time and nests no second index inside it.
 ///
-/// [`SchemaBuilder::check_const_value`] **is** the nesting case: an input-object literal's entry is
-/// itself a literal offered to a second input object, so the outer list's index is live while the
-/// inner one is built. One slot per symbol shared across that pair would have the inner list answer
-/// the outer's lookup, and [`Positions::drop`] would then clear a slot the outer still needs. So
-/// this is a value per list, reentrant because there is nothing to share, made out of the sorted
-/// pairs [`Duplicates`] already uses.
+/// A value per list rather than a table, because what these index is a **literal**: its entries
+/// belong to the one node that wrote them, so there is nothing for a table to be keyed by. The
+/// *declaration* side is the half that is a function of a type, and [`DeclaredNames`] is that half
+/// — which is also where the nesting hazard went. [`Positions`]'s payload could not have served
+/// either: one slot per [`Sym`] over the whole symbol space is a `&mut` scratch, and the checks
+/// that read literals run over [`Model`], the read-only half that carries no scratch to clear.
+///
+/// So this is one value per list, made out of the sorted pairs [`Duplicates`] already uses, built
+/// where the list is read and dropped before the frame that read it returns.
 ///
 /// # Sorting the pair, so `first` is still the first
 ///
@@ -519,16 +522,19 @@ impl Drop for Positions<'_, '_> {
 ///
 /// # What it replaces
 ///
-/// `declared.iter().find(..)`, restarted for every field an input-object literal writes, and
-/// `fields.iter().any(..)`, restarted for every required field the object declares — draft 5.6.2
-/// and 5.6.4's SDL twins, both `Θ(literal × declared)`. `input Wide` with `N` fields and one
-/// default writing those same `N` entries is `O(N)` of source, and was 1.98 in the exponent over
-/// 1 k–64 k, 2.02 over the top step, **3.197 s** at 64 k — on a schema `Schema::build` **accepts**.
-/// The same document pays it twice, because
-/// [`SchemaBuilder::validate_input_object_default_cycles`] builds its work list with the same scan,
-/// so both are indexed and the ladder becomes 0.99 and **42 ms** at 64 k. That exponent is read off
-/// a low end near one millisecond, so it is carried out to 256 k where the floor cannot be what is
-/// being measured: 1.12 over 64 k–256 k, 196 ms. al8n/smear#198.
+/// `fields.iter().any(..)`, restarted for every required field an input object declares — draft
+/// 5.6.4's SDL twin, `Θ(literal × required)` — and the same scan asked the other way round in
+/// [`SchemaBuilder::validate_input_object_default_cycles`], which reads one map node once per
+/// declared field. `input Wide` with `N` fields and one default writing those same `N` entries is
+/// `O(N)` of source, and both were `Θ(N²)` on it: 1.98 in the exponent over 1 k–64 k, 2.02 over the
+/// top step, **3.197 s** at 64 k — on a schema `Schema::build` **accepts**. Indexed, the ladder is
+/// 0.99 and **42 ms** at 64 k; read off a low end near one millisecond, so carried out to 256 k
+/// where the floor cannot be what is being measured: 1.12 over 64 k–256 k, 196 ms.
+///
+/// Draft 5.6.2's twin — `declared.iter().find(..)`, restarted for every field the literal writes —
+/// was the third, and is [`DeclaredNames`]'s: a scan over the *declaration* is a question one table
+/// per type answers for every literal at once, and a value per list answered it once per literal
+/// and once per nesting level. al8n/smear#198.
 enum Names {
   /// At or below [`NARROW_LIST`] asks: the scan, whose per-lookup cost that ceiling is what bounds,
   /// exactly as it bounds the declared argument lists'.
@@ -561,6 +567,91 @@ impl Names {
           _ => None,
         }
       }
+    }
+  }
+}
+
+/// The first position of each name one **input object declares**, addressed by name, built at most
+/// once per type and shared by every literal offered to it.
+///
+/// # Why the declared side is a table per type and the written side stays a value per list
+///
+/// [`Names`] is a value per list, and that is what made it correct for a nested literal — and also
+/// what made it a cost per level. [`SchemaBuilder::check_const_value`] recurses into a nested
+/// entry while the surrounding loop still needs the outer index, so a value built for the outer
+/// literal is *live* for the whole of the inner one, and one built for a sibling literal is built
+/// again from nothing. A directive default holding an `N`-deep literal of one `D`-wide input type,
+/// sixty-five fields per level with the recursive field first, therefore retained `Θ(N × D)` pairs
+/// and sorted `Θ(N × D log D)` of them on `Θ(N + D)` of SDL `Schema::build` **accepts** — and
+/// `Schema::build` carries no proof of a literal's depth, so a parser-bounded `N` still multiplies
+/// a large declaration by whatever that bound is, once per literal that reaches the type.
+///
+/// A declaration does not change while a literal is read, so the index a nested literal wants is
+/// the *same* index: it is a function of the type and not of the literal. One table keyed by type
+/// removes the rebuild and the retention together, which is what picks it over materialising each
+/// level's resolved fields and dropping the index before recursing — that removes only the
+/// retention, and leaves the sort per level standing.
+///
+/// A *written* list is not a function of any type, so there is nothing for a shared table to be
+/// keyed by, and [`Names`] stays what indexes one: the literal's own entries, asked by the names
+/// the declaration carries.
+///
+/// # The switch is on the asks this declaration has answered, not on one literal's
+///
+/// [`Names::over`] decides per literal, because a value per list knows nothing about the last one.
+/// A table does, and the two numbers it can compare are the right ones: `Q` lookups into a list of
+/// `D` names cost `Q × D` scanned and `D log D + Q log D` indexed, and `Q` is the number of asks
+/// this *declaration* has answered across the whole build rather than the width of whichever
+/// literal is asking now. So the sort is paid for once, by whichever ask crosses [`NARROW_LIST`],
+/// and a wide declaration asked one question by each of many small literals — the case a
+/// per-literal switch reads as narrow every time, and rescans in full every time — crosses it too.
+///
+/// What that costs before the index exists is at most [`NARROW_LIST`] scans of the declaration,
+/// which is the same constant times the same list the caller was walking regardless.
+///
+/// # What it replaces
+///
+/// `declared.iter().find(..)`, restarted for every field an input-object literal writes, and then
+/// [`Names::over`] rebuilt at every level and every sibling. The nested fixture above was 1.66 in
+/// the exponent over 16 k–64 k and 851 ms at 64 k, and is 1.03 and 20 ms. al8n/smear#198.
+#[derive(Debug, Default)]
+struct DeclaredNames {
+  /// One slot per type index, filled on demand: how many asks this declaration has answered by
+  /// scanning, and the sorted `(name, position)` index once one has paid for it.
+  of_type: Vec<(u32, Option<Vec<(Sym, u32)>>)>,
+}
+
+impl DeclaredNames {
+  /// The first position of `wanted` in `types[base]`'s declared input fields, or `None`.
+  ///
+  /// Sorted pairs order equal names by ascending position, so the head of a run is the first
+  /// occurrence and not merely one of them — the answer the scan it replaces gave, and the one a
+  /// type that declares a field twice needs, because moving it would move a blessed diagnostic
+  /// while looking like a cost change.
+  fn first(&mut self, types: &[RawType], base: usize, wanted: Sym) -> Option<usize> {
+    if self.of_type.len() < types.len() {
+      self.of_type.resize_with(types.len(), || (0, None));
+    }
+    let declared = &types[base].input_fields;
+    let (asks, order) = &mut self.of_type[base];
+    if order.is_none() {
+      if *asks < NARROW_LIST as u32 {
+        *asks += 1;
+        return declared.iter().position(|field| field.name.sym == wanted);
+      }
+      let mut sorted: Vec<(Sym, u32)> = declared
+        .iter()
+        .enumerate()
+        .map(|(at, field)| (field.name.sym, at as u32))
+        .collect();
+      sorted.sort_unstable();
+      *order = Some(sorted);
+    }
+    let order = order.as_ref().expect("the index was just filled");
+    let at = order.partition_point(|&(declared, _)| declared < wanted);
+    match order.get(at) {
+      Some(&(declared, position)) if declared == wanted => Some(position as usize),
+      _ => None,
     }
   }
 }
@@ -1196,6 +1287,9 @@ pub struct SchemaBuilder {
   extensions: Vec<RawExtension>,
   errors: Vec<SchemaError>,
   document: u32,
+  /// One lookup index per input object, shared by every literal validation. Empty until a
+  /// declaration is asked; see [`DeclaredNames`].
+  declared_names: DeclaredNames,
 }
 
 impl SchemaBuilder {
@@ -1269,6 +1363,16 @@ impl SchemaBuilder {
 
   /// The read side and the write side, borrowed apart. See [`Model`].
   fn split(&mut self) -> (Model<'_>, &mut Vec<SchemaError>) {
+    let (model, errors, _) = self.split_indexed();
+    (model, errors)
+  }
+
+  /// [`split`](SchemaBuilder::split), with the literal-checking index as a third disjoint borrow.
+  ///
+  /// A third field borrow rather than a local, because the index is a function of the declarations
+  /// alone: the checks that read literals are reached from four `&mut self` passes, and an index
+  /// per pass would sort one declaration once for each of them. See [`DeclaredNames`].
+  fn split_indexed(&mut self) -> (Model<'_>, &mut Vec<SchemaError>, &mut DeclaredNames) {
     (
       Model {
         types: &self.types,
@@ -1279,6 +1383,7 @@ impl SchemaBuilder {
         interner: &self.interner,
       },
       &mut self.errors,
+      &mut self.declared_names,
     )
   }
 
@@ -2454,10 +2559,11 @@ impl SchemaBuilder {
       }
 
       let built_in = self.types[index].built_in;
-      let (model, errors) = self.split();
+      let (model, errors, names) = self.split_indexed();
       Self::validate_arguments(
         model,
         errors,
+        names,
         ArgumentsOf::Field { ty: index, field },
         path,
         built_in,
@@ -2481,6 +2587,7 @@ impl SchemaBuilder {
   fn validate_arguments(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     args: ArgumentsOf,
     owner: Coordinate,
     built_in: bool,
@@ -2548,6 +2655,7 @@ impl SchemaBuilder {
         Self::check_const_value(
           model,
           errors,
+          names,
           default,
           ty.packed,
           Blame {
@@ -2749,7 +2857,7 @@ impl SchemaBuilder {
         .default_value
         .is_some()
       {
-        let (model, errors) = self.split();
+        let (model, errors, names) = self.split_indexed();
         let default = model.types[index].input_fields[position]
           .default_value
           .as_ref()
@@ -2757,6 +2865,7 @@ impl SchemaBuilder {
         Self::check_const_value(
           model,
           errors,
+          names,
           default,
           ty.packed,
           Blame {
@@ -2805,10 +2914,11 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::TooManyDirectiveArguments, &name, at);
       }
 
-      let (model, errors) = self.split();
+      let (model, errors, names) = self.split_indexed();
       Self::validate_arguments(
         model,
         errors,
+        names,
         ArgumentsOf::Directive { index },
         Coordinate::named(at.sym),
         built_in,
@@ -2834,16 +2944,16 @@ impl SchemaBuilder {
   /// be resolved before a value can be checked against it, and after
   /// [`SchemaBuilder::apply_extensions`] because a type and its extensions are one location.
   fn validate_directive_usages(&mut self) {
-    let (model, errors) = self.split();
-    Self::check_directive_uses(model, errors, DirectivesOf::Schema, Coordinate::schema());
+    let (model, errors, names) = self.split_indexed();
+    Self::check_directive_uses(model, errors, names, DirectivesOf::Schema, Coordinate::schema());
 
     for ty in 0..model.types.len() {
       let owner = Coordinate::named(model.types[ty].name.sym);
-      Self::check_directive_uses(model, errors, DirectivesOf::Type { ty }, owner);
+      Self::check_directive_uses(model, errors, names, DirectivesOf::Type { ty }, owner);
 
       for field in 0..model.types[ty].fields.len() {
         let path = owner.then(model.types[ty].fields[field].name.sym);
-        Self::check_directive_uses(model, errors, DirectivesOf::Field { ty, field }, path);
+        Self::check_directive_uses(model, errors, names, DirectivesOf::Field { ty, field }, path);
 
         // The gate decides whether this field's arguments are visited at all, which is also
         // what makes `DirectivesOf::FieldArgument`'s own refused arm unreachable: an `arg`
@@ -2854,6 +2964,7 @@ impl SchemaBuilder {
             Self::check_directive_uses(
               model,
               errors,
+              names,
               DirectivesOf::FieldArgument { ty, field, arg },
               path,
             );
@@ -2863,12 +2974,12 @@ impl SchemaBuilder {
 
       for field in 0..model.types[ty].input_fields.len() {
         let path = owner.then(model.types[ty].input_fields[field].name.sym);
-        Self::check_directive_uses(model, errors, DirectivesOf::InputField { ty, field }, path);
+        Self::check_directive_uses(model, errors, names, DirectivesOf::InputField { ty, field }, path);
       }
 
       for value in 0..model.types[ty].enum_values.len() {
         let path = owner.then(model.types[ty].enum_values[value].name.sym);
-        Self::check_directive_uses(model, errors, DirectivesOf::EnumValue { ty, value }, path);
+        Self::check_directive_uses(model, errors, names, DirectivesOf::EnumValue { ty, value }, path);
       }
     }
 
@@ -2881,6 +2992,7 @@ impl SchemaBuilder {
           Self::check_directive_uses(
             model,
             errors,
+            names,
             DirectivesOf::DirectiveArgument { directive, arg },
             path,
           );
@@ -2899,6 +3011,7 @@ impl SchemaBuilder {
   fn check_directive_uses(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     at: DirectivesOf,
     owner: Coordinate,
   ) {
@@ -2956,7 +3069,7 @@ impl SchemaBuilder {
         );
       }
 
-      Self::check_directive_arguments(model, errors, at, index, definition, owner);
+      Self::check_directive_arguments(model, errors, names, at, index, definition, owner);
     }
   }
 
@@ -2964,6 +3077,7 @@ impl SchemaBuilder {
   fn check_directive_arguments(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     at: DirectivesOf,
     index: usize,
     definition: usize,
@@ -3034,6 +3148,7 @@ impl SchemaBuilder {
       Self::check_const_value(
         model,
         errors,
+        names,
         &argument.value,
         expected.ty.packed,
         Blame {
@@ -3096,6 +3211,7 @@ impl SchemaBuilder {
   fn check_const_value(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
+    names: &mut DeclaredNames,
     value: &RawValue,
     expected: PackedType,
     blame: Blame,
@@ -3134,7 +3250,7 @@ impl SchemaBuilder {
         return;
       };
       for entry in entries {
-        Self::check_const_value(model, errors, entry, item, blame);
+        Self::check_const_value(model, errors, names, entry, item, blame);
       }
       return;
     }
@@ -3158,13 +3274,13 @@ impl SchemaBuilder {
         // away.
         let object = Coordinate::named(model.types[base].name.sym);
         let declared = &model.types[base].input_fields;
-        // One index per literal, and it has to be per literal: the recursion below offers a nested
-        // entry to a second input object while this one is still being read. [`Names`] carries why
-        // that rules out the table [`Positions`] uses, and what the scan it replaces cost.
-        let of_declared = Names::over(declared.len(), fields.len(), |at| declared[at].name.sym);
+        // One index per input OBJECT, held by the caller and shared by every literal offered to
+        // this type — the nested entry the recursion below is about to offer to a second one
+        // included. A value per literal is what this was, and it was live across that recursion
+        // and built again for every sibling; [`DeclaredNames`] carries what that cost.
         for field in fields {
-          let Some(expected) = of_declared
-            .first(declared.len(), field.name.sym, |at| declared[at].name.sym)
+          let Some(expected) = names
+            .first(model.types, base, field.name.sym)
             .map(|at| &declared[at])
           else {
             // Draft 5.6.2's SDL twin.
@@ -3193,7 +3309,8 @@ impl SchemaBuilder {
             );
             continue;
           }
-          Self::check_const_value(model, errors, &field.value, expected.ty.packed, blame);
+          let expected = expected.ty.packed;
+          Self::check_const_value(model, errors, names, &field.value, expected, blame);
         }
 
         // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
@@ -3202,7 +3319,10 @@ impl SchemaBuilder {
         //
         // Over the required positions rather than over the declaration, and the literal indexed
         // rather than rescanned: the two factors of the same product, one bounded by what this
-        // reports and the other by [`Names`]. Source order is the declaration's either way, because
+        // reports and the other by [`Names`] — which stays a value per list here, because what it
+        // indexes is the literal's own entries and no type keys those. It is built after the
+        // recursion above and dropped before this frame returns, so no second one is ever live
+        // inside it. Source order is the declaration's either way, because
         // `required_input_fields` is filled by ascending position.
         let required = &model.types[base].required_input_fields;
         let of_written = Names::over(fields.len(), required.len(), |at| fields[at].name.sym);
