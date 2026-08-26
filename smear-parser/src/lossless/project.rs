@@ -93,10 +93,10 @@ use tokora::SimpleSpan;
 ///
 /// This header used to rest on two figures — the deepest green tree in the repository's 472
 /// corpus fixtures is **12** levels, and the deepest document at
-/// [`MAX_NESTING_DEPTH`](smear_lexer::limits::MAX_NESTING_DEPTH)'s 24 open brackets materialises
+/// the lexer's default `MAX_NESTING_DEPTH` of 24 open brackets materialises
 /// **51** — and conclude that *nothing a parser produces comes near it*. **That conclusion was
 /// false, and the reason is the population.** The lossless doors do not clamp to
-/// `MAX_NESTING_DEPTH`; they clamp to [`HARD_MAX`](smear_lexer::limits::HARD_MAX), which is 256.
+/// `MAX_NESTING_DEPTH`; they clamp to the lexer's `HARD_MAX`, which is 256.
 /// A margin derived over 24 brackets was being stated over 256 of them, and at the top of that
 /// range the tree really did cross the old ceiling: a 254-bracket object-value chain parses
 /// clean and materialises **516** levels, so an ordinary `project` answered
@@ -125,7 +125,7 @@ use tokora::SimpleSpan;
 ///
 /// # Why 1024
 ///
-/// The same two-sided shape [`HARD_MAX`](smear_lexer::limits::HARD_MAX) is derived under, with
+/// The same two-sided shape the lexer's `HARD_MAX` is derived under, with
 /// the bounds swapped for this constant's own:
 ///
 /// | bound | from | value |
@@ -160,11 +160,10 @@ pub const MAX_GREEN_DEPTH: usize = 1024;
 /// The deepest green tree either dialect's own lossless doors will produce.
 ///
 /// A constant rather than only prose so the assertion below can read it, exactly as
-/// [`HARD_MAX`](smear_lexer::limits::HARD_MAX)'s `WORST_LOSSLESS_BOUNDARY` is.
+/// `HARD_MAX`'s own `WORST_LOSSLESS_BOUNDARY` is.
 ///
-/// Measured on `parse_document_with_limits` at a
-/// [`HARD_MAX`](smear_lexer::limits::HARD_MAX) ceiling, taking for each shape the deepest bracket
-/// count that still parses **clean**, over both dialects:
+/// Measured on `parse_document_with_limits` at a `HARD_MAX` ceiling, taking for each shape the
+/// deepest bracket count that still parses **clean**, over both dialects:
 ///
 /// | shape | brackets | levels | per bracket |
 /// |---|---|---|---|
@@ -205,24 +204,38 @@ const GREEN_LEVELS_PER_BRACKET: usize = 3;
 /// [`MAX_GREEN_DEPTH`] means re-running the bisection rather than editing one line.
 const WORST_GREEN_WALK_BOUNDARY: usize = 2861;
 
+/// The deepest bracket ceiling a lossless door may clamp to and still produce a tree these walks
+/// will descend.
+///
+/// **The obligation this module owes the other side of a relationship it must not name.**
+/// `MAX_GREEN_DEPTH` and the lexer's `HARD_MAX` live in different crates and had a relationship
+/// nothing enforced, so a margin derived at 24 brackets went on being stated over 256 of them.
+/// What closes that is one comparison — and this module is the dialect-*generic* substrate, which
+/// is parameterised over `L: Lexer` and may not name a concrete lexer crate at all: the rule is
+/// `lossless_isolation::SUBSTRATE_FORBIDDEN`, and `ALLOWED_CRATE_ROOTS` sanctions the lexer
+/// crate's `limits` root for the two dialect trees and deliberately not for this one. That scan
+/// is textual and carries no prose carve-out, which is why this paragraph does not spell the
+/// path either.
+///
+/// So the substrate states what it **affords**, in its own constants, and the crate root — which
+/// assembles the lexer, the substrate and the dialects, and is the one place entitled to see all
+/// three — performs the comparison. `smear_parser`'s own root carries it, unconditionally in every
+/// configuration that compiles this module, so the guarantee is one site and not one per dialect.
+///
+/// `MAX_GREEN_DEPTH / GREEN_LEVELS_PER_BRACKET` is the same predicate the assertion here used to
+/// spell as `HARD_MAX * GREEN_LEVELS_PER_BRACKET <= MAX_GREEN_DEPTH`: over integers the two agree
+/// at every value, so the move is a relocation and not a loosening. The plant that proves it is
+/// still live is a `HARD_MAX` of 342 — that value passes `HARD_MAX`'s OWN 1.9x margin assertion,
+/// so every gate that existed before al8n/smear#198's round admits it, and it is exactly the edit
+/// that reopens the projection window. 342 > 341, so the crate root refuses to compile.
+pub(crate) const MAX_DOOR_BRACKETS: usize = MAX_GREEN_DEPTH / GREEN_LEVELS_PER_BRACKET;
+
 // -- THE INVARIANT THAT WAS MISSING, AND THE WINDOW IT WOULD HAVE CLOSED ----------------------
 //
-// `MAX_GREEN_DEPTH` and `HARD_MAX` live in different crates and had a relationship nothing
-// enforced, so a margin derived at 24 brackets went on being stated over 256 of them. Three
-// assertions hold it now, and they fail on different edits: the first on a `HARD_MAX` raise, the
-// second on a `MAX_GREEN_DEPTH` cut, the third on a `MAX_GREEN_DEPTH` raise past what the native
-// stack affords.
-//
-// The first is the load-bearing one, and the plant that proves it is a `HARD_MAX` of 342: that
-// value passes `HARD_MAX`'s OWN 1.9x margin assertion, so every gate that existed before this
-// round admits it, and it is exactly the edit that reopens this window.
-const _: () = assert!(
-  smear_lexer::limits::HARD_MAX * GREEN_LEVELS_PER_BRACKET <= MAX_GREEN_DEPTH,
-  "the lossless doors can accept a document whose green tree is deeper than the walks here will \
-   descend, so a projection would refuse a parse this crate just produced. Raising HARD_MAX means \
-   re-running WORST_DOOR_GREEN_TREE's shape table, not relaxing this."
-);
-
+// Three assertions hold it, and they fail on different edits: the crate root's on a `HARD_MAX`
+// raise — see `MAX_DOOR_BRACKETS` for why it is written there and not here — the first below on a
+// `MAX_GREEN_DEPTH` cut, and the second on a `MAX_GREEN_DEPTH` raise past what the native stack
+// affords.
 const _: () = assert!(
   WORST_DOOR_GREEN_TREE <= MAX_GREEN_DEPTH,
   "the deepest tree the lossless doors were measured to produce does not fit under \

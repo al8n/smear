@@ -376,8 +376,8 @@ where
 /// depth refusal in particular cannot fire here, and the reason is three numbers rather than a
 /// wish:
 ///
-/// - Every lossless door installs `min(requested, `[`HARD_MAX`]`)` as the parse's recursion
-///   budget, so no parse this crate performs holds more than [`HARD_MAX`] brackets open.
+/// - Every lossless door installs `min(requested, HARD_MAX)` as the parse's recursion budget, so
+///   no parse this crate performs holds more than the lexer's `HARD_MAX` brackets open.
 /// - A selection chain at that maximum materialises **515** green levels. The tree costs two
 ///   levels per open bracket plus three, measured on this crate's own `parse_document_with_limits`
 ///   over `1..=256`, and the 24-bracket row of that same measurement is the **51** that
@@ -387,14 +387,16 @@ where
 ///   there is nothing to trip.
 ///
 /// So the claim is that 515 clears the substrate's ceiling, not that a refusal "cannot happen".
-/// Should a substrate ceiling ever drop under 515, or a door stop clamping to [`HARD_MAX`], this
-/// panics with both numbers in the message.
+/// Should a substrate ceiling ever drop under 515, or a door stop clamping to `HARD_MAX`, this
+/// panics with the ceiling in the message.
 ///
 /// The other refusals are reachable, deliberately: a dialect's `test_support` probe severs the
 /// token channel to prove the `space` argument is threaded rather than assumed. That is why the
 /// message below reports the refusal it got rather than naming a cause.
 ///
-/// [`HARD_MAX`]: smear_lexer::limits::HARD_MAX
+/// `HARD_MAX` is the lexer crate's, and this module does not name it: the substrate is generic
+/// over `L: Lexer`, and `crate::lossless::project::MAX_DOOR_BRACKETS` is the affordance it states
+/// instead — the crate root asserts the two against each other.
 // Gated on having a caller. `rowan` alone compiles this module with neither dialect, and the two
 // dialect runners are the only callers, so without this the one configuration that builds the
 // substrate without a dialect reports dead code — which `-D warnings` turns into a failure of a
@@ -415,10 +417,11 @@ where
   finish_root(cst, root, space).unwrap_or_else(|refused| {
     panic!(
       "{refused}. No production in this crate emits a stream this door refuses, and depth in \
-       particular cannot: every lossless door clamps the recursion budget to HARD_MAX = {}, and a \
-       selection chain at that maximum materialises 515 green levels, under the substrate's own \
-       tree ceiling",
-      smear_lexer::limits::HARD_MAX,
+       particular cannot: every lossless door clamps its recursion budget to a bracket ceiling the \
+       crate root asserts is at most MAX_DOOR_BRACKETS = {}, and a chain at that maximum \
+       materialises fewer green levels than MAX_GREEN_DEPTH = {}",
+      crate::lossless::project::MAX_DOOR_BRACKETS,
+      crate::lossless::project::MAX_GREEN_DEPTH,
     )
   })
 }
