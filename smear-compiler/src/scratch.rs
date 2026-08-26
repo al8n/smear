@@ -777,11 +777,15 @@ impl Names {
         // only one an adversary has — is rejected here without touching a byte.
         let (start, end) = self.ranges[id as usize];
         if self.hashes[id as usize] == hash && end - start == key.len() {
-          if !work.take_bytes(key.len()) {
-            return None;
-          }
-          if &self.bytes[start..end] == key {
-            return Some(id);
+          // Charged for the bytes the `memcmp` reads. Reaching here needs the whole stored hash
+          // **and** the length to agree, so the bytes are about to be equal and this ordinarily
+          // pays `byte_units(len)` exactly as the whole-length charge did; what it no longer does
+          // is bill a constructed hash collision for a pass that stops at its first differing
+          // byte. al8n/smear#198's twenty-third round.
+          match scan_eq(&self.bytes[start..end], key, |_| work.take(1)) {
+            Compared::Equal => return Some(id),
+            Compared::Differs => (),
+            Compared::Refused => return None,
           }
         }
         id = self.chain[id as usize];
@@ -948,12 +952,135 @@ const fn finalize(mut hash: u64) -> u64 {
 /// this unit is charged again in front of the `memcmp` a step that agrees on both goes on to make.
 #[inline]
 pub(crate) const fn byte_units(len: usize) -> u32 {
-  let units = len / 8 + 1;
+  let units = len / BYTES_PER_UNIT + 1;
   if units > u32::MAX as usize {
     u32::MAX
   } else {
     units as u32
   }
+}
+
+/// How many bytes one charged unit pays for.
+///
+/// Named rather than written a third time: [`units`](super::executable::units) and [`byte_units`]
+/// both compute `len / 8 + 1` from it, and [`scan_cmp`] and [`scan_eq`] charge the same ledger a
+/// unit at a time as they read, so their running total after `k` bytes has to be the number those
+/// two would have produced for `k`. Three spellings of the stride would be three ledgers over one
+/// pass.
+pub(crate) const BYTES_PER_UNIT: usize = 8;
+
+/// The answer a charged comparison gives, and the third arm is why it is not a `bool`.
+///
+/// [`Compared::Refused`] means the ledger had no room for the next run of bytes, so the comparison
+/// stopped **with no answer**. A caller that cannot tell "these differ" from "this was never read"
+/// reports a resource ceiling as a finding about the document, or a finding as a ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Compared {
+  /// Every byte agreed, and the lengths did.
+  Equal,
+  /// The lengths disagreed, or a run of bytes did.
+  Differs,
+  /// The ledger ran out of room for a run this comparison had not read yet.
+  Refused,
+}
+
+/// `left == right`, asking `charge` for each unit before the run of bytes it covers is read.
+///
+/// # A charge over a length in front of an operation that is sub-linear in it
+///
+/// al8n/smear#198's twenty-third round, and it is the four rounds before it asked one notch
+/// further in. Those asked *where* a charge stands: in front of the work, and in front of work
+/// that cannot return before the work the charge priced is done. This one asks what the charge
+/// **names**. `[u8] == [u8]` rejects unequal lengths without reading either spelling, and on equal
+/// lengths stops at the first byte that disagrees; `[u8]::cmp` stops at the first byte that
+/// disagrees whatever the lengths are. A charge of `units(len)` in front of either prices a pass
+/// the operation is sub-linear in — so two long spellings differing at their first byte were
+/// charged for the whole of both, and a document this crate accepts became
+/// [`Refusal::Budget`](super::Refusal::Budget).
+///
+/// The running total after `k` bytes is exactly `units(k)`: the opening unit covers the length
+/// test and the first [`BYTES_PER_UNIT`]` - 1` bytes, and every later one covers
+/// [`BYTES_PER_UNIT`]. A comparison that reads a whole `L`-byte spelling therefore costs what
+/// `units(L)` cost, which is what the measured figures in this crate's headers are about; one that
+/// reads less costs less; and nothing costs for bytes no comparison reached.
+///
+/// `charge` takes the 1-based index of the unit about to be spent and answers whether there was
+/// room. It is a closure rather than a ledger because the unit's *owner* differs by site: a
+/// comparison against a spelling an earlier comparison already paid a prefix of owes only the
+/// units past that prefix — which is what keeps a sort of `N` names inside the `N` whole spellings
+/// the prepayment used to charge, rather than `N log N` of them.
+#[inline]
+pub(crate) fn scan_eq(left: &[u8], right: &[u8], mut charge: impl FnMut(u32) -> bool) -> Compared {
+  // Unit one: the length test, and the first `BYTES_PER_UNIT - 1` bytes if it passes. This is the
+  // whole cost of an unequal-length comparison, which is the whole cost `[u8]::eq` pays for one.
+  if !charge(1) {
+    return Compared::Refused;
+  }
+  if left.len() != right.len() {
+    return Compared::Differs;
+  }
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < left.len() {
+    if read == budgeted {
+      unit += 1;
+      if !charge(unit) {
+        return Compared::Refused;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(left.len());
+    if left[read..end] != right[read..end] {
+      return Compared::Differs;
+    }
+    read = end;
+  }
+  Compared::Equal
+}
+
+/// `left.cmp(right)`, charging as [`scan_eq`] does, and **answering whatever the ledger says**.
+///
+/// # Why this one cannot stop
+///
+/// Its callers are `sort_unstable_by` and `binary_search_by`, and a comparator that starts
+/// answering differently part-way through is not a total order: the current sort detects exactly
+/// that and panics. So an exhausted ledger is reported alongside the true ordering and the caller
+/// refuses **after** the sort, rather than the comparison abandoning its answer.
+///
+/// What that costs is bounded, and by the bound the sort already had. `F` names of total length
+/// `D` cost at most `F log F` comparisons of at most `D / F` bytes each, so the whole sort is
+/// `D log F` however it is charged — the same "log factor at most thirty-two, a constant multiple
+/// and not a second factor" this module's fragment index has always rested on, and `F` itself is
+/// bounded by the ledger because the prep sweep charges a unit per definition before any sort
+/// exists. A refusal therefore finishes a sort whose total is a constant multiple of a document
+/// the parser has already walked, and refuses.
+#[inline]
+pub(crate) fn scan_cmp(
+  left: &[u8],
+  right: &[u8],
+  mut charge: impl FnMut(u32) -> bool,
+) -> (core::cmp::Ordering, bool) {
+  use core::cmp::Ordering;
+
+  let mut held = charge(1);
+  let shared = left.len().min(right.len());
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < shared {
+    if read == budgeted {
+      unit += 1;
+      held &= charge(unit);
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(shared);
+    match left[read..end].cmp(&right[read..end]) {
+      Ordering::Equal => read = end,
+      other => return (other, held),
+    }
+  }
+  (left.len().cmp(&right.len()), held)
 }
 
 /// One unit per element of a population, saturating at [`u32::MAX`].
@@ -1046,6 +1173,20 @@ pub struct Scratch {
   /// Segments stack — a scan pushes at `len`, sorts its own slice and truncates back — so an input
   /// object literal nested inside an argument list does not disturb the scan above it.
   pub(crate) keys: Vec<u32>,
+  /// How deep into each member's spelling a charged sort has already paid, in `units`.
+  ///
+  /// **A high-water mark per name, because a sort reads one name `log N` times.** Charging each
+  /// comparison in full would make an accepted document's sort cost `N log N` whole spellings
+  /// where the prepayment it replaces charged `N`; charging the first comparison only would leave
+  /// the rest free, and the rest is where the bytes are. So each comparison pays for the units it
+  /// deepens its two sides by and nothing else, and the total over the sort is the deepest prefix
+  /// of each name that any comparison examined — never more than the prepayment, and, for two long
+  /// names that differ at their first byte, two units instead of two whole spellings.
+  ///
+  /// Indexed by the **population's** own index, which is what the segment in [`Scratch::keys`]
+  /// holds. Cleared and resized at each sort door, behind that population's own per-member charge;
+  /// the doors do not nest, so one buffer serves all of them.
+  pub(crate) paid: Vec<u32>,
   /// Fragment ordinals reachable from some operation (draft 5.5.1.4).
   pub(crate) reachable: Vec<u64>,
   /// Fragment ordinals already entered during the current walk. See [`Visited`].
@@ -1154,6 +1295,7 @@ impl Scratch {
       values: Vec::new(),
       graph: Vec::new(),
       keys: Vec::new(),
+      paid: Vec::new(),
       reachable: Vec::new(),
       visited: Visited::new(),
       on_path: Vec::new(),
@@ -1198,6 +1340,7 @@ impl Scratch {
     self.values.clear();
     self.graph.clear();
     self.keys.clear();
+    self.paid.clear();
     self.reachable.clear();
     // Not cleared, and that is the point of the type: a mark is only current for one generation,
     // and retiring the generation makes every mark stale in `O(1)`. `Scratch::reset` clears without

@@ -3581,6 +3581,93 @@ fn every_uniqueness_prepayment_has_its_singleton_companion() {
   }
 }
 
+/// A sort is charged for the bytes its comparisons **read**, not for the spellings it is over.
+///
+/// # The prepayment the singleton gate did not reach
+///
+/// The round before this one paired every uniqueness prepayment with an `n <= 1` companion, so a
+/// lone 4,000-byte spelling is no longer charged for a sort that compares nothing. That is the
+/// `n = 1` endpoint. At every other one the charge was still a whole spelling per name, in front
+/// of `[u8]::cmp` — which stops at the first byte that disagrees. **Two** long names beginning `a`
+/// and `b` sort in two units and were charged for eight thousand, and a `validation_work` between
+/// the two turned a document this crate accepts into `Refusal::Budget`.
+///
+/// # The instrument
+///
+/// Each case writes two spellings that differ at their **first** byte, so no comparison anywhere
+/// can read past it, and pads them. The control is the same document with one-byte spellings. A
+/// difference in `min_budget` between the two is bytes the ledger charged for and nothing read.
+///
+/// The second half is the one the finding is about: the padded document is **valid** — no
+/// duplicate, nothing to report — and validating it under the control's own ceiling must still
+/// accept it. At `eb641d2` the fragment case costs 1,002 units more than its control and is
+/// refused under it.
+#[test]
+fn a_sort_is_charged_for_the_bytes_its_comparisons_read() {
+  let schema = build(SCHEMA);
+  const PAD: usize = 4_000;
+
+  /// A rule, and how to write two of the thing it sorts with `a`/`b` as their first bytes.
+  type Pair = (&'static str, Rule, fn(&str) -> String);
+
+  let cases: [Pair; 4] = [
+    // No spread, deliberately. A spread of a padded fragment is a *genuine* full-length
+    // comparison — the probe and the stored name are equal, so `find_fragment` reads every byte
+    // of both and is charged for them — and that real work would mask the sort's prepayment. The
+    // fragments are unused, which under this rule set is not a finding.
+    (
+      "5.5.1.1 fragment names",
+      Rule::FragmentNameUniqueness,
+      |n| {
+        std::format!(
+          "{{ dog {{ name }} }} fragment a{n} on Dog {{ name }} fragment b{n} on Dog {{ name }}"
+        )
+      },
+    ),
+    (
+      "5.2.2.1 operation names",
+      Rule::OperationNameUniqueness,
+      |n| std::format!("query a{n} {{ dog {{ name }} }} query b{n} {{ dog {{ name }} }}"),
+    ),
+    ("5.8.1 variable names", Rule::VariableUniqueness, |n| {
+      std::format!("query q($a{n}: Int, $b{n}: Int) {{ dog {{ name }} }}")
+    }),
+    (
+      "5.6.3 input field names",
+      Rule::InputObjectFieldUniqueness,
+      |n| std::format!("{{ dog {{ withOpts(opts: {{ a{n}: 1, b{n}: 2 }}) }} }}"),
+    ),
+  ];
+
+  for (what, rule, document) in cases {
+    let rules = RuleSet::only(rule);
+    let padded = "x".repeat(PAD);
+    let short = min_budget(&schema, &document(""), rules);
+    let wide = min_budget(&schema, &document(&padded), rules);
+    println!("{what}: 1-byte {short} units, {PAD}-byte {wide} units");
+    assert!(
+      wide.abs_diff(short) < 100,
+      "{what}: two {PAD}-byte spellings that differ at their first byte cost {} units more than \
+       two one-byte ones, for comparisons that read one byte",
+      wide.abs_diff(short)
+    );
+
+    // And the document the padding produces is still **accepted** under the control's ceiling,
+    // which is the half a cost comparison alone does not carry.
+    let budget = Budget::default().with_validation_work(short);
+    let accepted = run(&schema, &document(&padded), &budget, rules);
+    assert!(
+      !accepted.refused,
+      "{what}: a valid document was refused by a ceiling of {short} units"
+    );
+    assert_eq!(
+      accepted.emitted, 0,
+      "{what}: the padded document reported {:?}",
+      accepted.diagnostics
+    );
+  }
+}
+
 /// A verified pair makes the ceiling absolute: at `validation_work = 0` the bounded door does no
 /// work the input can grow.
 ///

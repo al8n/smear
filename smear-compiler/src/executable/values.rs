@@ -12,14 +12,14 @@ use tokora::{SimpleSpan, span::AsSpan};
 use smear_parser::graphql::ast::VariableValue;
 
 use super::{
-  Diagnostic, Rule, TypeId, Validator,
+  Diagnostic, Ledger, Meter, Rule, TypeId, Validator,
   nodes::{ArgumentLike, DirectiveLike, ObjectFieldLike, ValueLike, name_bytes},
-  units,
+  sort_metered, units,
 };
 use crate::{
   diagnostic::Context,
   schema::{DirectiveLocation, PackedType, Range32, Sym, TypeKind},
-  scratch::{NONE, ValueFrame, ValueLevel, count_units, set_bit},
+  scratch::{Compared, NONE, ValueFrame, ValueLevel, count_units, scan_cmp, scan_eq, set_bit},
 };
 
 /// The position a value sits in, as the two bits draft 5.8.5 asks about.
@@ -208,8 +208,13 @@ where
         self.scratch.keys.push(index as u32);
       }
     }
-    sort_keys(&mut self.scratch.keys[base..], |index| {
-      name_bytes(directives[index as usize].directive_name())
+    // Uncharged, for 5.4.2's reason: `check_directives`' `spend_names` has already paid one whole
+    // pass over every one of these spellings, for the `Schema::sym` loop that hashes every one of
+    // them — the loop directly above this one is that same hash, per directive, with no early exit
+    // before it.
+    sort_keys(&mut self.scratch.keys[base..], |a, b| {
+      name_bytes(directives[a as usize].directive_name())
+        .cmp(name_bytes(directives[b as usize].directive_name()))
     });
     let mut slot = base + 1;
     while slot < self.scratch.keys.len() {
@@ -294,8 +299,13 @@ where
       for index in 0..arguments.len() {
         self.scratch.keys.push(index as u32);
       }
-      sort_keys(&mut self.scratch.keys[base..], |index| {
-        name_bytes(arguments[index as usize].argument_name())
+      // Uncharged, and it is the one sort here that may be: `spend_names` above has already paid
+      // one whole pass over every one of these spellings, for the `Schema::sym` loop below that
+      // hashes every one of them end to end. The sort reads no name further than that pass did,
+      // and its `N log N` factor is the bounded constant this module's header names.
+      sort_keys(&mut self.scratch.keys[base..], |a, b| {
+        name_bytes(arguments[a as usize].argument_name())
+          .cmp(name_bytes(arguments[b as usize].argument_name()))
       });
       let mut slot = base + 1;
       while slot < self.scratch.keys.len() {
@@ -763,10 +773,18 @@ where
   /// [`Rule::InputObjectFieldUniqueness`] is the same sentence about object fields.
   /// al8n/smear#198's twenty-first round.
   ///
-  /// The prepayment is for the **sort**, and for nothing else any more: 5.6.4's scan charges each
-  /// spelling as it resolves it. A sort of one field compares nothing — the duplicate scan that
-  /// reads its output starts at `base + 1` — so the charge is paired with a length, which is the
-  /// same `n <= 1` companion every compare-what-was-written rule carries.
+  /// The charge admits the **sort**, and nothing else any more: 5.6.4's scan charges each spelling
+  /// as it resolves it. A sort of one field compares nothing — the duplicate scan that reads its
+  /// output starts at `base + 1` — so the charge is paired with a length, which is the same
+  /// `n <= 1` companion every compare-what-was-written rule carries.
+  ///
+  /// **One unit per field and not one spelling per field.** A whole spelling per name stood here,
+  /// and the only thing that reads these names is `[u8]::cmp` inside the sort and `[u8]::eq`
+  /// inside the scan — both of which stop at the first byte that disagrees. Unlike 5.4.2's and
+  /// 5.7.3's prepayments, which stand in front of a `Schema::sym` loop that hashes every name end
+  /// to end, this one had no such reader below it: `walk_value` resolves an object field only when
+  /// the position resolved to a type, and this rule fires either way. So the depth is taken inside
+  /// the comparisons, in `Meter`. al8n/smear#198's twenty-third round.
   fn check_object_field_uniqueness<F>(&mut self, fields: &'d [F]) -> ControlFlow<()>
   where
     F: ObjectFieldLike<S>,
@@ -774,22 +792,53 @@ where
     if !self.on(Rule::InputObjectFieldUniqueness) || fields.len() < 2 {
       return ControlFlow::Continue(());
     }
-    self.spend_names(fields.iter().map(ObjectFieldLike::field_name))?;
+    self.scratch.paid.clear();
+    self.scratch.paid.resize(fields.len(), 0);
+    let mut deepest = 0u32;
+    for field in fields {
+      let name = field.field_name();
+      self.spend(1, *name.as_span())?;
+      deepest = deepest.max(units(name_bytes(name).len()));
+    }
+    self.scratch.paid.fill(1);
 
     let base = self.scratch.keys.len();
     for index in 0..fields.len() {
       self.scratch.keys.push(index as u32);
     }
-    sort_keys(&mut self.scratch.keys[base..], |index| {
-      name_bytes(fields[index as usize].field_name())
-    });
+    let refused = {
+      let scratch = &mut *self.scratch;
+      let (ledger, refused) = sort_metered(
+        &mut scratch.keys[base..],
+        &mut scratch.paid,
+        self.left,
+        deepest,
+        |index| name_bytes(fields[index as usize].field_name()),
+      );
+      self.left = ledger;
+      refused
+    };
+    if refused {
+      return self.refuse(*fields[0].field_name().as_span());
+    }
     let mut slot = base + 1;
     while slot < self.scratch.keys.len() {
       let earlier = self.scratch.keys[slot - 1].min(self.scratch.keys[slot]);
       let later = self.scratch.keys[slot - 1].max(self.scratch.keys[slot]);
-      if name_bytes(fields[earlier as usize].field_name())
-        == name_bytes(fields[later as usize].field_name())
-      {
+      let scratch = &mut *self.scratch;
+      let mut meter = Meter::new(&mut scratch.paid, self.left, deepest);
+      let compared = meter.eq(
+        earlier as usize,
+        name_bytes(fields[earlier as usize].field_name()),
+        later as usize,
+        name_bytes(fields[later as usize].field_name()),
+      );
+      let (ledger, _) = meter.finish();
+      self.left = ledger;
+      if compared == Compared::Refused {
+        return self.refuse(*fields[later as usize].field_name().as_span());
+      }
+      if compared == Compared::Equal {
         let repeat = &fields[later as usize];
         let subject = self.subject_v(repeat.field_name())?;
         let diagnostic = Diagnostic::new(Rule::InputObjectFieldUniqueness, repeat.field_span())
@@ -985,39 +1034,130 @@ where
     let variables = self.variables;
     let base = self.variable_index.start() as usize;
     let end = self.variable_index.end() as usize;
-    // Charged only where there is an index to search. With no declarations — an operation that
-    // takes none, or a rule set that builds no index — `partition_point` runs zero comparisons and
-    // the existence test below never reaches its second operand, so not one byte of this spelling
-    // is read. The report's own copy is charged by `Validator::subject`, wherever it happens.
+    // **Charged for the bytes the searches read, not for the spelling they are over.** A whole
+    // pass over this usage's name stood here, gated on the index being non-empty, and the searches
+    // below are `<` and `==` — both of which stop at the first byte that disagrees. A usage whose
+    // name differs from every declaration at byte zero reads `log V` bytes and was charged for its
+    // whole length, so a long enough spelling refused an operation over a search that never left
+    // its first byte.
+    //
+    // The probe's own depth is the high-water: a comparison that reads `L` bytes of a stored name
+    // needed this spelling to agree for `L`, so paying for this side once, in front of each run
+    // some comparison is about to read, prices both. With no declarations `partition_point` runs
+    // zero comparisons and nothing is charged, which is the gate that used to stand here. The
+    // report's own copy is charged by `Validator::subject`, wherever it happens.
+    // al8n/smear#198's twenty-third round.
+    // The opening unit, taken once. A non-empty index invokes its predicate at least once, and
+    // unit one is exactly what that comparison's length test and first run of bytes cost.
     if end > base {
-      self.spend_name(name)?;
+      self.spend(1, *name.as_span())?;
     }
-    let lo = {
+    let mut paid = 1u32;
+    let mut ledger = self.left;
+    let mut refused = false;
+    // What a full pass over this spelling costs. A spelling under `BYTES_PER_UNIT` is that one
+    // unit, so the searches below can take no further one and run the plain comparison — decided
+    // out here rather than inside the predicate, for `sort_metered`'s reason.
+    let whole = units(bytes.len());
+    /// One unit for this spelling, if the run it pays for has not been paid for already.
+    ///
+    /// A macro rather than a `let`-bound closure, because the predicates below also *read* `paid`
+    /// to take the settled path and a closure holding it mutably would outlive that read.
+    macro_rules! charge {
+      () => {
+        |unit: u32| {
+          if unit <= paid {
+            return true;
+          }
+          paid = unit;
+          match ledger.take(1) {
+            Some(left) => {
+              ledger = left;
+              true
+            }
+            None => {
+              ledger = Ledger::Left(0);
+              refused = true;
+              false
+            }
+          }
+        }
+      };
+    }
+    let (lo, equal) = {
       let index = &self.scratch.keys[base..end];
       let named = |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
-      index.partition_point(|ordinal| named(ordinal) < bytes)
+      if whole <= 1 {
+        // Nothing left to charge, so these are the plain searches. See `sort_metered`.
+        let lo = index.partition_point(|ordinal| named(ordinal) < bytes);
+        (
+          lo,
+          index.get(lo).is_some_and(|ordinal| named(ordinal) == bytes),
+        )
+      } else {
+        let lo = index.partition_point(|ordinal| {
+          let (ordering, _) = scan_cmp(named(ordinal), bytes, charge!());
+          ordering.is_lt()
+        });
+        // One comparison decides existence, which is what 5.8.3 asks and what 5.8.5 needs the
+        // ordinal for. The run's *end* is a different question with exactly one reader.
+        let equal = index
+          .get(lo)
+          .is_some_and(|ordinal| scan_eq(named(ordinal), bytes, charge!()) == Compared::Equal);
+        (lo, equal)
+      }
     };
-    // One comparison decides existence, which is what 5.8.3 asks and what 5.8.5 needs the ordinal
-    // for. The run's *end* is a different question with exactly one reader.
-    let found = lo < end - base
-      && name_bytes(
-        variables[self.scratch.keys[base + lo] as usize]
-          .node()
-          .variable()
-          .name(),
-      ) == bytes;
+    self.left = ledger;
+    if refused {
+      return self.refuse(*name.as_span());
+    }
+    let found = lo < end - base && equal;
 
     // **Only draft 5.8.4 reads the `used` bitset**, so only 5.8.4 pays for filling it. The run was
     // walked, and charged, whenever any usage rule was on — and with `V` duplicate declarations
     // against `U` usages that is `O(U · V)` of marking that 5.8.3 and 5.8.5 never look at. A gate
     // named after a rule *family* is not a gate on the family's readers. al8n/smear#198.
     if found && self.marks_usage {
+      // The run's end, charged the same way and against the same high-water: the spelling's
+      // deepest paid prefix is already `lo`'s, so this search adds units only where it reads
+      // further than any comparison above it did — and where nothing is left to charge it is the
+      // plain search, for `sort_metered`'s reason.
+      let mut paid = 1u32;
+      let mut ledger = self.left;
+      let mut refused = false;
       let hi = {
         let index = &self.scratch.keys[base..end];
         let named =
           |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
-        index.partition_point(|ordinal| named(ordinal) <= bytes)
+        if whole <= 1 {
+          index.partition_point(|ordinal| named(ordinal) <= bytes)
+        } else {
+          index.partition_point(|ordinal| {
+            let (ordering, _) = scan_cmp(named(ordinal), bytes, |unit| {
+              if unit <= paid {
+                return true;
+              }
+              paid = unit;
+              match ledger.take(1) {
+                Some(left) => {
+                  ledger = left;
+                  true
+                }
+                None => {
+                  ledger = Ledger::Left(0);
+                  refused = true;
+                  false
+                }
+              }
+            });
+            ordering.is_le()
+          })
+        }
       };
+      self.left = ledger;
+      if refused {
+        return self.refuse(*name.as_span());
+      }
       self.spend((hi - lo) as u32, *name.as_span())?;
       let scratch = &mut *self.scratch;
       for slot in lo..hi {
@@ -1120,8 +1260,13 @@ fn level_frame(
 
 /// Sorts a duplicate-scan segment by name, breaking ties on the source index so the order is
 /// total and the earlier occurrence always sorts first.
-fn sort_keys<'a>(keys: &mut [u32], name: impl Fn(u32) -> &'a [u8]) {
-  keys.sort_unstable_by(|a, b| name(*a).cmp(name(*b)).then(a.cmp(b)));
+///
+/// `compare` rather than an accessor, because the two callers price their comparisons differently:
+/// 5.4.2's names are read again by a `Schema::sym` loop that hashes every one of them end to end
+/// and are prepaid for that pass, while 5.6.3's have no such reader and are charged for the depth
+/// each comparison reaches. The tie-break is the sort's own and belongs to neither.
+fn sort_keys(keys: &mut [u32], mut compare: impl FnMut(u32, u32) -> core::cmp::Ordering) {
+  keys.sort_unstable_by(|a, b| compare(*a, *b).then(a.cmp(b)));
 }
 
 /// Draft 5.8.5's `AreTypesCompatible`, as an integer walk over two packed references.

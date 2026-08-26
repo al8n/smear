@@ -218,6 +218,58 @@
 //!   is the eleventh round's singleton repair, and this is the check that it did not open the same
 //!   hole one dimension down.
 
+//! # The seventh crossing: is the operation *sub-linear* in what the charge measured?
+//!
+//! Five rounds have now asked where a charge stands. This one asks what it **names**, and it is
+//! the axis the four before it were each one notch short of.
+//!
+//! A charge computed from a `len()` is a *prepayment*: it is a claim that the operation below it
+//! reads that many bytes. The claim is correct in front of a hash, a copy or a `resize`, and it is
+//! false in front of a comparison — `[u8] == [u8]` rejects unequal lengths without reading either
+//! spelling, and `[u8]::cmp` stops at the first byte that disagrees. Every earlier round audited
+//! this same population, honestly, and passed the byte charges because they stood in the right
+//! *place*.
+//!
+//! Two consequences, and the second is the one that makes it a defect rather than an inefficiency.
+//! Two 32 KiB fragment names beginning `a` and `b` sort in two units and were charged eight
+//! thousand — so a `validation_work` between the two turned a document this crate **accepts** into
+//! [`Refusal::Budget`](super::Refusal::Budget). And two string spellings of 524,288 and 524,289
+//! bytes settle a draft 5.3.2 comparison on one integer load and were charged 65,537 units of
+//! `merge_work`, which replaced a real conflict diagnostic with a resource refusal.
+//!
+//! **The repair is structural rather than per-site**: a comparison charges a unit immediately
+//! before each run of bytes it is about to read ([`scan_eq`], [`scan_cmp`]), and a name a sort
+//! reads `log N` times carries the deepest prefix it has been charged for so there is no
+//! prepayment left anywhere to be wrong about. Every length-derived charge in this crate, with the
+//! verdict:
+//!
+//! | charge | the operation below it | verdict |
+//! |---|---|---|
+//! | `index_fragments`, per fragment name | the sort's `cmp` and the grouping's `eq` | **at consumption**, per name and per depth |
+//! | 5.2.2.1, per operation name | the same, one rule over | **at consumption** |
+//! | 5.8.1's index, per declaration | the same | **at consumption** |
+//! | 5.6.3, per input-object field | the same, and nothing else reads these names | **at consumption** |
+//! | `find_fragment`'s probe | `binary_search_by`'s `cmp` | **at consumption**, per probe depth |
+//! | 5.8.3/5.8.5's usage probe | two `partition_point`s and one `eq` | **at consumption**, same shape |
+//! | 5.2.4.1's response name | one `!=` against the stored first name | **at consumption**; compared once, so no depth to keep |
+//! | `Names::intern`'s chain step | one `memcmp`, behind a whole stored hash **and** a length | **at consumption**; the equal path is unchanged |
+//! | `merge::find`'s chain step | the same, one table over | **at consumption** |
+//! | the merge memo's row check | `[u32] == [u32]` | **at consumption**, per element |
+//! | `shallow_equal`'s five byte arms | `[u8] == [u8]` on two literals | **at consumption**; `shallow_units` is gone |
+//! | 5.4.2's `spend_names` | the `Schema::sym` loop below it, which hashes **every** name with no early exit | **kept** — the pass reads what the charge measured |
+//! | 5.7.3's `spend_names` | the same loop, one rule over | **kept** |
+//! | `spend_type`, `subject`, condition and field spellings | `Schema::sym`, or `S::clone` | **kept** — a hash and a copy read the whole key |
+//! | `scalar_accepts`' digits | `core::str::from_utf8` then `parse`, over an ASCII token the lexer produced | **kept** — the conversion has no early exit on that input, and the `<= 9` arm is a constant |
+//! | `count_units` over words, definitions, fragments, selections | a `resize` that writes every element, or a loop with no early exit | **kept** — counts, not lengths |
+//! | `resolve_frames`, `walk_value`'s depth, `same_value`'s stack | the slice each then walks, written once | **kept** |
+//!
+//! The row that had to be argued rather than read off is 5.4.2's and 5.7.3's. Their prepayment is
+//! **not** for the sort; it is for the resolution loop underneath, which reaches
+//! `Schema::sym(name_bytes(name))` as its first statement for every entry. The sort is a second
+//! reader of the same bytes and never reads a name further than that loop does, so it rides on the
+//! same charge — which is why those two keep a `spend_names` and 5.6.3, whose fields are resolved
+//! only when the position resolved to a type, does not.
+
 //! # The sixth crossing: is anything performed before the check that says it is unnecessary?
 //!
 //! A gate is a claim about *whether* work is needed. What sits **above** it is work done before
@@ -415,7 +467,7 @@ mod nodes;
 mod selections;
 mod values;
 
-use core::ops::ControlFlow;
+use core::{cmp::Ordering, ops::ControlFlow};
 
 use tokora::{SimpleSpan, span::AsSpan};
 
@@ -432,8 +484,8 @@ use super::{
     is_reserved,
   },
   scratch::{
-    Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, byte_units, clear_bit,
-    count_units, get_bit, push_frame, reset_bits, set_bit,
+    Compared, Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, byte_units,
+    clear_bit, count_units, get_bit, push_frame, reset_bits, scan_cmp, scan_eq, set_bit,
   },
 };
 
@@ -951,6 +1003,179 @@ pub(crate) const fn units(len: usize) -> u32 {
   }
 }
 
+/// A charged comparison over one population, and how deep into each member it has paid.
+///
+/// # What it is for
+///
+/// Three of this module's rules answer by **sorting** a list of names the client wrote and then
+/// scanning the neighbours. The charge in front of each used to be one whole spelling per name —
+/// [`Validator::spend_names`]' shape — and that is a prepayment in front of `[u8]::cmp`, which
+/// stops at the first byte that disagrees. Two 32 KiB fragment names beginning `a` and `b` cost
+/// two units to sort and were charged eight thousand, so a document this crate accepts came back
+/// [`Refusal::Budget`](super::Refusal::Budget).
+///
+/// # Why the depth is per name and not per comparison
+///
+/// Because a name is read `log N` times. Charging every comparison in full would make an accepted
+/// sort cost `N log N` whole spellings where the prepayment charged `N`, which is the *opposite*
+/// false refusal — so this keeps the deepest prefix each name has been charged for and a
+/// comparison pays only for the units it deepens its two sides by. The total over a whole sort is
+/// therefore never more than the prepayment it replaces, and for names that differ early it is a
+/// unit or two.
+///
+/// [`Ledger`] is [`Copy`], so the ledger travels *into* the comparator by value and comes back
+/// out at [`Meter::finish`]. That is what lets `sort_unstable_by` borrow the key segment mutably
+/// while the comparator charges: two disjoint fields of one [`Scratch`](super::Scratch), and no
+/// `&mut self` in the closure.
+pub(super) struct Meter<'p> {
+  /// Units already taken for each member's spelling, indexed as the population is.
+  paid: &'p mut [u32],
+  ledger: Ledger,
+  /// Whether any charge was refused. Read once, after the sort. See [`scan_cmp`].
+  refused: bool,
+  /// The largest [`units`] any member of this population costs, from the admission loop.
+  ///
+  /// **The whole-population form of [`Meter::settled`], and the reason it is worth a field.**
+  /// Every member is admitted for its opening unit before a comparison can happen, so a population
+  /// whose deepest spelling is one unit — every name under [`BYTES_PER_UNIT`], which is every
+  /// ordinary GraphQL name — cannot have a unit taken off it by any comparison at all. That is a
+  /// fact about the population and not about a pair, so it is decided once and the comparator
+  /// becomes `[u8]::cmp` behind a single integer compare rather than two bounds-checked loads a
+  /// comparison. Measured on 8,000 declarations: without it the sort is about 1.5× the plain one.
+  deepest: u32,
+}
+
+impl<'p> Meter<'p> {
+  /// A meter over `paid`, spending `ledger`, over a population whose deepest spelling costs
+  /// `deepest` units.
+  pub(super) fn new(paid: &'p mut [u32], ledger: Ledger, deepest: u32) -> Self {
+    Self {
+      paid,
+      ledger,
+      refused: false,
+      deepest,
+    }
+  }
+
+  /// Takes the units this comparison deepens `left` and `right` by, and answers whether both fit.
+  ///
+  /// `right` is `None` for a probe that is not a member of the population — a spread's spelling
+  /// against the fragment index, where the charge has always been the probe's one pass and the
+  /// stored side rides on it: a comparison reading `L` bytes of a stored name needed the probe to
+  /// agree for `L`, so the probe's own depth bounds both.
+  #[inline]
+  fn charge(&mut self, left: usize, right: Option<usize>, unit: u32) -> bool {
+    let second = match right {
+      Some(slot) if slot != left => Some(slot),
+      _ => None,
+    };
+    let mut held = true;
+    for slot in core::iter::once(left).chain(second) {
+      if unit <= self.paid[slot] {
+        continue;
+      }
+      self.paid[slot] = unit;
+      match self.ledger.take(1) {
+        Some(left) => self.ledger = left,
+        None => {
+          // `Left(0)` and not the untouched remainder, for `Validator::refuse`'s reason: an
+          // exhausted bound is the opposite of an absent one, and nothing after this may pass.
+          self.ledger = Ledger::Left(0);
+          self.refused = true;
+          held = false;
+        }
+      }
+    }
+    held
+  }
+
+  /// Whether both sides have already been charged to their full length.
+  ///
+  /// The steady state, and the reason this is asked rather than let fall out of [`Meter::charge`]:
+  /// once a name's whole spelling is paid for, no comparison over it can take another unit, so the
+  /// scan has nothing to do that `[u8]::cmp` does not do faster. Every name under
+  /// [`BYTES_PER_UNIT`] is in this state from its opening unit, which is every ordinary GraphQL
+  /// name — so a sort of short names runs the plain comparison behind two integer compares, and
+  /// the run-at-a-time scan is reached only where a spelling is long enough for its depth to
+  /// matter.
+  #[inline]
+  fn settled(&self, a: usize, left: &[u8], b: usize, right: &[u8]) -> bool {
+    self.deepest <= 1 || (self.paid[a] >= units(left.len()) && self.paid[b] >= units(right.len()))
+  }
+
+  /// `left.cmp(right)`, charged. Always answers; see [`scan_cmp`].
+  #[inline]
+  pub(super) fn cmp(&mut self, a: usize, left: &[u8], b: usize, right: &[u8]) -> Ordering {
+    if self.settled(a, left, b, right) {
+      return left.cmp(right);
+    }
+    let (ordering, _) = scan_cmp(left, right, |unit| self.charge(a, Some(b), unit));
+    ordering
+  }
+
+  /// `left == right`, charged, stopping at the refusal.
+  #[inline]
+  pub(super) fn eq(&mut self, a: usize, left: &[u8], b: usize, right: &[u8]) -> Compared {
+    if self.settled(a, left, b, right) {
+      return if left == right {
+        Compared::Equal
+      } else {
+        Compared::Differs
+      };
+    }
+    scan_eq(left, right, |unit| self.charge(a, Some(b), unit))
+  }
+
+  /// The ledger as this left it, and whether anything was refused.
+  pub(super) const fn finish(self) -> (Ledger, bool) {
+    (self.ledger, self.refused)
+  }
+}
+
+/// Sorts an ordinal segment by name, charging each comparison for the runs of bytes it reads.
+///
+/// One door for the four rules that sort a list of names with no `Schema::sym` pass under it —
+/// 5.5.1.1's fragment index, 5.2.2.1, 5.8.1's variable index and 5.6.3 — so the ordering, the
+/// tie-break and the charging cannot drift apart between them.
+///
+/// # The `deepest <= 1` arm is the plain sort, and it is exact rather than a heuristic
+///
+/// Every member is admitted for its opening unit before this runs, and a spelling under
+/// [`BYTES_PER_UNIT`] costs exactly that one unit — so when the population's deepest spelling is
+/// one unit, no comparison here can take another and [`Meter`] is provably a no-op. Taking the
+/// branch **outside** the comparator is what makes that free: inside it the decision is a load
+/// through a `&mut` the sort cannot prove loop-invariant, and 8,000 short declarations measured
+/// 0.79 ms against the plain sort's 0.60 for a meter that charged nothing at all. Out here the
+/// same document measures the plain sort, because it *is* the plain sort.
+///
+/// Every ordinary GraphQL name is on that arm. The metered one is for the spellings whose depth is
+/// the whole point — and there it is the plain sort's cost plus the units the comparisons actually
+/// read.
+fn sort_metered<'x, F>(
+  keys: &mut [u32],
+  paid: &mut [u32],
+  ledger: Ledger,
+  deepest: u32,
+  name: F,
+) -> (Ledger, bool)
+where
+  F: Fn(u32) -> &'x [u8],
+{
+  // Ties break on the ordinal, so the order is total and the first definition of a name is always
+  // its group's first element — which is the one every reader of a group resolves to.
+  if deepest <= 1 {
+    keys.sort_unstable_by(|a, b| name(*a).cmp(name(*b)).then(a.cmp(b)));
+    return (ledger, false);
+  }
+  let mut meter = Meter::new(paid, ledger, deepest);
+  keys.sort_unstable_by(|a, b| {
+    meter
+      .cmp(*a as usize, name(*a), *b as usize, name(*b))
+      .then(a.cmp(b))
+  });
+  meter.finish()
+}
+
 /// Which of this crate's two ledgers pays for a diagnostic subject's copy.
 ///
 /// [`Validator::subject`] is the only door to a subject and it charges before it copies; this says
@@ -1281,32 +1506,32 @@ where
   /// |---|---|---|---|
   /// | projection (lossless door only) | before `project_*` | bytes of `max(source, parse text)` | none — it is the door |
   /// | prep, per operation | before the row is pushed | one node | none — builds what every rule reads |
-  /// | prep, per fragment | before the row is pushed | bytes, for `index_fragments`' sort | none — same |
+  /// | prep, per fragment | before the row is pushed | one node | none — same |
   /// | `collect_definition_edges` | loop top, before `resolve` | depth | none — it is the traversal |
-  /// | ” spread name | before `find_fragment` | bytes | none |
-  /// | 5.2.2.1 operation names | before the sort | bytes | `OperationNameUniqueness` && **> 1 named operation** |
+  /// | ” spread name | **inside** `find_fragment`, per run its comparisons read | bytes, at consumption | none |
+  /// | 5.2.2.1 operation names | one unit before the sort, the rest **inside** each comparison | entries, then bytes at consumption | `OperationNameUniqueness` && **> 1 named operation** |
   /// | 5.5.1.2/5.5.1.3 | before `check_type_condition` | bytes | [`reports_type_conditions`] |
   /// | 5.5.2.2 cycles | before the edge is read | one edge | `FragmentSpreadsMustNotFormCycles` |
   /// | ” cycle subject | before the clone | bytes | ” — the population is edges, not fragments |
   /// | 5.5.1.4 reachability | before the group loop | entries | `FragmentsMustBeUsed` \|\| [`merges`] |
   /// | 5.2.4.1 collection | loop top, before `resolve` | depth | `SingleRootField` |
   /// | ” directive scan | before `conditional_directive` reads them | bytes | ” |
-  /// | ” **response name** | before the alias comparison | **bytes** | ” |
-  /// | ” condition / spread name | before `type_of` / `find_fragment` | bytes | ” && **a non-empty fragment table** |
+  /// | ” **response name** | **inside** the alias comparison, per run it reads | **bytes, at consumption** | ” |
+  /// | ” condition / spread name | before `type_of`; **inside** `find_fragment` | bytes; bytes at consumption | ” |
   /// | selection walk | loop top, before `resolve` | depth | none — it is the traversal |
   /// | ” field / inline condition | before each resolution | bytes | none |
-  /// | ” spread name | before `find_fragment` | bytes | **a non-empty fragment table** |
+  /// | ” spread name | **inside** `find_fragment` | bytes, at consumption | none — the search's own `n = 0` gate |
   /// | 5.7.x directives | head of `check_directives` | bytes | [`Validator::reaches_directives`] |
   /// | 5.4.x arguments | head of `check_arguments` | bytes | [`Validator::reaches_arguments`] |
   /// | 5.4.3 presence half | before **each written argument** the scan resolves | bytes | `check` && `RequiredArguments`; the scan stops where it matches |
-  /// | 5.6.3 field list | head of `check_input_object` | bytes | `InputObjectFieldUniqueness` && **> 1 field** |
+  /// | 5.6.3 field list | one unit per field, then **inside** each comparison | entries, then bytes at consumption | `InputObjectFieldUniqueness` && **> 1 field** |
   /// | 5.6.4 presence half | before **each written field** the scan resolves | bytes | `InputObjectRequiredFields`; the scan stops where it matches |
   /// | value walk | loop top, before `resolve` | depth | [`Validator::walks_values`], and the family's `HAS_VARIABLES` |
   /// | ” object field name | before the schema lookup | bytes | ” |
   /// | scalar / enum literal | before the coercion reads it | bytes | `check` && `ValuesOfCorrectType` |
-  /// | 5.8.1 index build | in the collection loop, before the sort | bytes | (`collects_usages` \|\| `VariableUniqueness`) && **> 1 declaration** |
+  /// | 5.8.1 index build | one unit per declaration, then **inside** each comparison | entries, then bytes at consumption | (`collects_usages` \|\| `VariableUniqueness`) && **> 1 declaration** |
   /// | variable declared type | before `pack_type` | bytes | `VariablesAreInputTypes` \|\| (`checks_values` && this definition has a default) |
-  /// | 5.8.3/5.8.5 usage | before the index search | bytes | [`collects_usages`] |
+  /// | 5.8.3/5.8.5 usage | **inside** the index search, per run its comparisons read | bytes, at consumption | [`collects_usages`] |
   /// | ” duplicate run | before the marking | entries | `AllVariablesUsed` — the bitset's only reader |
   /// | 5.6.1 OneOf subject | before the clone | bytes | `ValuesOfCorrectType` |
   /// | 5.8.5 usage type | before `pack_type` | bytes | `AllVariableUsagesAreAllowed` |
@@ -1328,11 +1553,17 @@ where
   /// # Four standing arguments the rows lean on
   ///
   /// - **Sorts.** 5.2.2.1, 5.4.2, 5.6.3, 5.7.3, 5.8.1 and the fragment index do `N log N`
-  ///   comparisons against `N` units of prepayment. `log N` is at most thirty-two whatever the
-  ///   document does — a bounded constant multiple of the charge, not a second factor a client can
-  ///   grow.
+  ///   comparisons against a charge whose *byte* term is `N` names deep at most. `log N` is at
+  ///   most thirty-two whatever the document does — a bounded constant multiple of the charge, not
+  ///   a second factor a client can grow. **Four of the six charge their bytes inside the
+  ///   comparator** ([`Meter`]), so the deepest prefix each name is read to is what it costs;
+  ///   5.4.2 and 5.7.3 keep a whole-spelling prepayment because a `Schema::sym` loop below each of
+  ///   them hashes every one of those names end to end, and a sort reads no name further than that
+  ///   pass does.
   /// - **Binary searches.** `find_fragment` and the variable index: the same argument one
-  ///   dimension smaller.
+  ///   dimension smaller, with the probe's own depth charged at consumption and the stored side
+  ///   riding on it — a comparison reading `L` bytes of a stored name needed the probe to agree
+  ///   for `L`.
   /// - **Schema lookups keyed by an already-charged name.** Free by construction — the schema is
   ///   the server's, so its group sizes are not an input.
   /// - **A diagnostic's subject clone.** Charged in the name's own bytes in front of every clone,
@@ -1447,9 +1678,20 @@ where
 
   /// Charges a whole list of names before anything sorts, hashes or compares any of them.
   ///
-  /// The prepayment shape. Three rules in this crate — 5.4.2, 5.6.3 and 5.7.3 — begin by *sorting*
-  /// a list of names the client wrote, and a per-item charge inside the loop that follows arrives
-  /// after `O(N log N)` comparisons have already happened.
+  /// **The prepayment shape, and it survives at exactly two callers — the two where the operation
+  /// below it reads every byte.** 5.4.2's and 5.7.3's lists are resolved, entry by entry, by a
+  /// loop whose first statement is `Schema::sym(name_bytes(name))`: a hash over the whole
+  /// spelling, with no early exit above it and none inside it. That pass is what this pays for.
+  /// The sort each of those rules runs first is a *second* reader of the same bytes and never
+  /// reads a name further than the hash does, so it rides on the same charge — `N log N`
+  /// comparisons against a charge that already covers `N` whole spellings.
+  ///
+  /// It stood at a third caller, 5.6.3's, where there is no such pass: `walk_value` resolves an
+  /// input-object field only when the position resolved to a type, and the uniqueness rule fires
+  /// either way. So the only readers there were `[u8]::cmp` and `[u8]::eq`, both of which stop at
+  /// the first byte that disagrees, and two 4,000-byte field names beginning `a` and `b` were
+  /// charged a thousand units for two. That caller charges one unit per field and takes the depth
+  /// inside its comparisons now; see [`Meter`]. al8n/smear#198's twenty-third round.
   pub(super) fn spend_names<'n, I>(&mut self, names: I) -> ControlFlow<()>
   where
     I: IntoIterator<Item = &'n Name<S>>,
@@ -1676,40 +1918,68 @@ where
     let document = self.document;
     let count = self.scratch.fragments.len() as u32;
 
-    // Prepaid for the **sort and the grouping**, and gated on there being two of something to
-    // compare — the `n <= 1` companion every compare-what-was-written rule carries, which draft
-    // 5.5.1.1's was delivered without.
+    // **The sort and the grouping are charged for the bytes their comparisons read.**
     //
-    // It used to sit in `prep`, one name at a time, where the count is not yet known. For a single
-    // fragment the sort compares nothing and the grouping loop's inner scan never runs, so the
-    // spelling was charged for nobody — a 32 KiB fragment name in a one-fragment document cost four
-    // thousand units to be sorted against itself.
+    // A whole spelling per fragment stood here, gated on there being two of something to compare —
+    // the `n <= 1` companion every compare-what-was-written rule carries, which draft 5.5.1.1's was
+    // delivered without, and which the round before this one added. That gate is about the `n = 1`
+    // endpoint; this is about every other one. `[u8]::cmp` stops at the first byte that disagrees,
+    // so two 32 KiB fragment names beginning `a` and `b` sort in two units and were charged eight
+    // thousand — and at a `validation_work` between the two, a document this crate **accepts** came
+    // back `Refusal::Budget`. A charge computed from a length in front of an operation that is
+    // sub-linear in that length is a prepayment, and the claim underneath it — that the operation
+    // reads what was charged — is the claim four earlier rounds of this issue each made in good
+    // faith about a different site. al8n/smear#198's twenty-third round.
     //
-    // The other reader of a stored fragment name is `find_fragment`'s comparator, and it needs no
-    // charge here at any count: `[u8]::cmp` stops at the first differing byte, so a comparison that
-    // reads `L` bytes of the stored name required the *spread* to share an `L`-byte prefix — and
-    // the spread's own spelling is charged in front of the search. al8n/smear#198's twenty-second
-    // round.
+    // What is charged instead: one unit per fragment for the row's admission, and then, inside the
+    // comparator and inside the grouping scan, one unit in front of each run of bytes a comparison
+    // is about to read that this name has not already been charged for. `Meter` holds those
+    // depths. The total is the deepest prefix of each name that some comparison examined, which is
+    // never more than the prepayment and, for names that differ early, is two units.
+    //
+    // The other reader of a stored fragment name is `find_fragment`'s comparator, which charges
+    // the *probe* the same way: a comparison that reads `L` bytes of a stored name required the
+    // spread to agree for `L`, so the probe's own depth bounds both sides.
+    self.scratch.paid.clear();
+    let mut deepest = 0u32;
     if count > 1 {
       for ordinal in 0..count {
+        // The row's admission — the comparator's opening unit, and the slot in `paid` behind it.
+        // A one-fragment document sorts nothing and admits nothing, which is the `n <= 1` gate.
         let row = self.scratch.fragments[ordinal as usize];
-        if let Some(body) = fragment(document, row.definition) {
-          self.spend_name(body.name())?;
-        }
+        let blame = row.span;
+        self.spend(1, blame)?;
+        self.scratch.paid.push(1);
+        deepest = deepest.max(units(
+          fragment_name(document, &self.scratch.fragments, ordinal).len(),
+        ));
       }
     }
 
-    {
+    let refused = {
       let scratch = &mut *self.scratch;
       scratch.order.extend(0..count);
       let rows = &scratch.fragments;
-      // Ties break on the ordinal, so the order is total and the first definition of a name is
-      // always the group's first element — which is the one spreads resolve to.
-      scratch.order.sort_unstable_by(|a, b| {
-        let left = fragment_name(document, rows, *a);
-        let right = fragment_name(document, rows, *b);
-        left.cmp(right).then(a.cmp(b))
-      });
+      let (ledger, refused) = sort_metered(
+        &mut scratch.order,
+        &mut scratch.paid,
+        self.left,
+        deepest,
+        |ordinal| fragment_name(document, rows, ordinal),
+      );
+      self.left = ledger;
+      refused
+    };
+    if refused {
+      // The sort finished before the refusal could be reported, which is `scan_cmp`'s header: a
+      // comparator that stops answering is not a total order, and the sort it would corrupt is
+      // bounded by the document the parser has already walked.
+      let blame = self
+        .scratch
+        .fragments
+        .first()
+        .map_or_else(|| SimpleSpan::new(0, 0), |row: &FragmentRow| row.span);
+      return self.refuse(blame);
     }
 
     let mut start = 0usize;
@@ -1717,10 +1987,23 @@ where
       let first = self.scratch.order[start];
       let name = fragment_name(document, &self.scratch.fragments, first);
       let mut end = start + 1;
-      while end < self.scratch.order.len()
-        && fragment_name(document, &self.scratch.fragments, self.scratch.order[end]) == name
-      {
-        end += 1;
+      while end < self.scratch.order.len() {
+        let next = self.scratch.order[end];
+        let other = fragment_name(document, &self.scratch.fragments, next);
+        // The grouping scan reads the same names the sort did and is charged the same way, so a
+        // run it walks costs the depth it agreed to and not the length it could have.
+        let scratch = &mut *self.scratch;
+        let mut meter = Meter::new(&mut scratch.paid, self.left, deepest);
+        let compared = meter.eq(first as usize, name, next as usize, other);
+        let (ledger, _) = meter.finish();
+        self.left = ledger;
+        match compared {
+          Compared::Equal => end += 1,
+          Compared::Differs => break,
+          Compared::Refused => {
+            return self.refuse(self.scratch.fragments[next as usize].span);
+          }
+        }
       }
       let group = range32(start as u32, end as u32);
       for slot in start..end {
@@ -1748,18 +2031,112 @@ where
   }
 
   /// Returns the ordinal a fragment name resolves to — the first definition of that name.
-  fn find_fragment(&self, name: &[u8]) -> Option<u32> {
+  /// **The probe is charged here, for the bytes its comparisons read.**
+  ///
+  /// Every caller used to spend one whole pass over the spelling in front of this, gated on the
+  /// index being non-empty, and the sentence justifying it was that a comparison reading `L` bytes
+  /// of a *stored* name needed the probe to agree for `L` — true, and an argument about the stored
+  /// side rather than about this one. `[u8]::cmp` stops at the first byte that disagrees, so a
+  /// spread whose name differs from every stored one at byte zero reads `log F` bytes and was
+  /// charged for its whole length. Four such charges on one document — two in `collect_edges` and
+  /// two in the selection walk — measured 2,000 units for 4,000-byte names over comparisons that
+  /// read one byte each. al8n/smear#198's twenty-third round.
+  ///
+  /// The probe's own depth still bounds both sides, so charging it — a unit in front of each run
+  /// the search is about to read, once, however many comparisons read it — leaves the stored side
+  /// riding on the same argument it always did, and leaves the total no larger than the pass this
+  /// replaces.
+  ///
+  /// `ledger` is which of this crate's two the caller's pass belongs to, for
+  /// [`Validator::subject`]'s reason: draft 5.3.2's engine searches this same index, and a
+  /// spread's lookup inside the merge expansion must not debit the validation bound.
+  fn find_fragment(
+    &mut self,
+    name: &[u8],
+    ledger: Charged,
+    blame: SimpleSpan,
+  ) -> ControlFlow<(), Option<u32>> {
+    // No index, no comparison, no charge — the `n = 0` gate every caller used to take for itself.
+    if self.scratch.order.is_empty() {
+      return ControlFlow::Continue(None);
+    }
     let document = self.document;
-    let rows = &self.scratch.fragments;
-    let order = &self.scratch.order;
-    let slot = order
-      .binary_search_by(|ordinal| fragment_name(document, rows, *ordinal).cmp(name))
-      .ok()?;
+    // The opening unit, taken once. `binary_search_by` over a non-empty index invokes its
+    // comparator at least once, and unit one is exactly what that comparison's length test and
+    // first run of bytes cost — so this is the first comparison's charge, hoisted out of it.
+    let mut paid = 1u32;
+    let mut refused = !match ledger {
+      Charged::Validation => match self.left.take(1) {
+        Some(left) => {
+          self.left = left;
+          true
+        }
+        None => false,
+      },
+      Charged::Merge => self.work.take(1),
+    };
+    let mut validation = self.left;
+    let mut merge = self.work;
+    // What a full pass over the probe costs. A spelling under `BYTES_PER_UNIT` is that one unit
+    // and no comparison here can take another, so the search is the plain one — the same exact
+    // arm `sort_metered` takes, and for the same reason: the decision is a load through a `&mut`
+    // the search cannot prove loop-invariant if it is made inside the comparator.
+    let whole = units(name.len());
+    let found = {
+      let rows = &self.scratch.fragments;
+      let order = &self.scratch.order;
+      if whole <= 1 || refused {
+        order.binary_search_by(|ordinal| fragment_name(document, rows, *ordinal).cmp(name))
+      } else {
+        order.binary_search_by(|ordinal| {
+          let stored = fragment_name(document, rows, *ordinal);
+          let (ordering, _) = scan_cmp(stored, name, |unit| {
+            if unit <= paid {
+              return true;
+            }
+            paid = unit;
+            let held = match ledger {
+              Charged::Validation => match validation.take(1) {
+                Some(left) => {
+                  validation = left;
+                  true
+                }
+                None => {
+                  validation = Ledger::Left(0);
+                  false
+                }
+              },
+              Charged::Merge => merge.take(1),
+            };
+            refused |= !held;
+            held
+          });
+          ordering
+        })
+      }
+    };
+    self.left = validation;
+    self.work = merge;
+    if refused {
+      // The search finished before the refusal could be reported, for `scan_cmp`'s reason: a
+      // comparator that stops answering is not a total order. `log F` further comparisons is what
+      // that costs, against an index the prep sweep charged a unit a fragment for.
+      return match ledger {
+        Charged::Validation => self.refuse(blame).map_continue(|()| None),
+        Charged::Merge => {
+          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+          ControlFlow::Break(())
+        }
+      };
+    }
+    let Ok(slot) = found else {
+      return ControlFlow::Continue(None);
+    };
     // Ties are ordered by ordinal, so walking back to the group's start finds the first
     // definition rather than whichever one the search landed on.
-    let ordinal = order[slot];
-    let group = rows[ordinal as usize].group;
-    order.get(group.start() as usize).copied()
+    let ordinal = self.scratch.order[slot];
+    let group = self.scratch.fragments[ordinal as usize].group;
+    ControlFlow::Continue(self.scratch.order.get(group.start() as usize).copied())
   }
 
   /// Walks every definition once, recording its fragment spreads as graph edges and reporting
@@ -1815,14 +2192,9 @@ where
       match selection {
         Selection::FragmentSpread(spread) => {
           let name = spread.name();
-          // `find_fragment` binary-searches the name index, so this reads the spelling about
-          // `log F` times — **when there is an index**. With no fragment declared the search
-          // invokes its comparator zero times and reads nothing, and the report below charges its
-          // own copy through `Validator::subject`. al8n/smear#198.
-          if !self.scratch.fragments.is_empty() {
-            self.spend_name(name)?;
-          }
-          let to = self.find_fragment(name_bytes(name));
+          // `find_fragment` charges the probe itself now, a unit in front of each run its
+          // comparisons read; the report below charges its own copy through `Validator::subject`.
+          let to = self.find_fragment(name_bytes(name), Charged::Validation, *name.as_span())?;
           if to.is_none() && self.on(Rule::FragmentSpreadTargetDefined) {
             let subject = self.subject_v(name)?;
             let diagnostic =
@@ -1866,22 +2238,34 @@ where
     // and a repair that removes a reader leaves every prepayment that named it over-charging. See
     // this module's header for the sweep that question implies.
     // Same shape one rule over, and found by crossing the audit's sub-shapes rather than named by
-    // review: this prepays 5.2.2.1's **sort**, and a sort of one named operation compares nothing,
+    // review: this admits 5.2.2.1's **sort**, and a sort of one named operation compares nothing,
     // as the group scan that reads it walks `start + 1..end` over an empty range.
+    //
+    // **One unit per name and not one spelling per name.** The whole spelling stood here, in front
+    // of `[u8]::cmp`, which stops at the first byte that disagrees — so two 4,000-byte operation
+    // names beginning `a` and `b` sorted in two units and were charged for a thousand. What each
+    // name owes is the deepest prefix some comparison examined, and that is taken inside the
+    // comparator and inside the group scan; this is the opening unit and the slot in `paid` behind
+    // it. al8n/smear#198's twenty-third round.
     let named = self
       .scratch
       .operations
       .iter()
       .filter(|row| row.named)
       .count();
+    self.scratch.paid.clear();
+    self.scratch.paid.resize(self.scratch.operations.len(), 0);
+    let mut deepest = 0u32;
     if self.on(Rule::OperationNameUniqueness) && named > 1 {
       for index in 0..self.scratch.operations.len() {
         if !self.scratch.operations[index].named {
           continue;
         }
-        let name = operation_name_bytes(document, &self.scratch.operations, index as u32);
         let span = self.scratch.operations[index].span;
-        self.spend(units(name.len()), span)?;
+        self.spend(1, span)?;
+        self.scratch.paid[index] = 1;
+        let name = operation_name_bytes(document, &self.scratch.operations, index as u32);
+        deepest = deepest.max(units(name.len()));
       }
     }
 
@@ -1913,27 +2297,43 @@ where
           self.scratch.keys.push(index as u32);
         }
       }
-      {
+      let refused = {
         let scratch = &mut *self.scratch;
         let rows = &scratch.operations;
-        // Ties break on the document index, so the first definition of a name is always the
-        // group's first element and every later one is blamed against it.
-        scratch.keys[base..].sort_unstable_by(|a, b| {
-          let left = operation_name_bytes(document, rows, *a);
-          let right = operation_name_bytes(document, rows, *b);
-          left.cmp(right).then(a.cmp(b))
-        });
+        let (ledger, refused) = sort_metered(
+          &mut scratch.keys[base..],
+          &mut scratch.paid,
+          self.left,
+          deepest,
+          |index| operation_name_bytes(document, rows, index),
+        );
+        self.left = ledger;
+        refused
+      };
+      if refused {
+        let blame = self.scratch.operations[self.scratch.keys[base] as usize].span;
+        return self.refuse(blame);
       }
       let mut start = base;
       while start < self.scratch.keys.len() {
         let first = self.scratch.keys[start];
         let name = operation_name_bytes(document, &self.scratch.operations, first);
         let mut end = start + 1;
-        while end < self.scratch.keys.len()
-          && operation_name_bytes(document, &self.scratch.operations, self.scratch.keys[end])
-            == name
-        {
-          end += 1;
+        while end < self.scratch.keys.len() {
+          let next = self.scratch.keys[end];
+          let other = operation_name_bytes(document, &self.scratch.operations, next);
+          let scratch = &mut *self.scratch;
+          let mut meter = Meter::new(&mut scratch.paid, self.left, deepest);
+          let compared = meter.eq(first as usize, name, next as usize, other);
+          let (ledger, _) = meter.finish();
+          self.left = ledger;
+          match compared {
+            Compared::Equal => end += 1,
+            Compared::Differs => break,
+            Compared::Refused => {
+              return self.refuse(self.scratch.operations[next as usize].span);
+            }
+          }
         }
         let related = self.scratch.operations[first as usize].span;
         for slot in start + 1..end {
@@ -2239,9 +2639,32 @@ where
             Some(seen) => {
               // Charged in **bytes**, because what happens next is a byte comparison, and the
               // iteration charge at the top of this loop prices a coordinate walk that costs no
-              // bytes at all. Two very long aliases sharing a prefix are compared end to end.
-              self.spend_name(response)?;
-              if name_bytes(seen) != name_bytes(response) {
+              // bytes at all. Two very long aliases sharing a prefix are compared end to end —
+              // and two that differ at their first byte are not, which is why the charge is taken
+              // inside the comparison rather than off the length in front of it. Each response
+              // name here is compared exactly once, against the stored first one, so there is no
+              // high-water to keep: the charge is what this one comparison read.
+              // al8n/smear#198's twenty-third round.
+              let mut ledger = self.left;
+              let mut refused = false;
+              let compared = scan_eq(name_bytes(seen), name_bytes(response), |_| {
+                match ledger.take(1) {
+                  Some(left) => {
+                    ledger = left;
+                    true
+                  }
+                  None => {
+                    ledger = Ledger::Left(0);
+                    refused = true;
+                    false
+                  }
+                }
+              });
+              self.left = ledger;
+              if refused {
+                return self.refuse(*response.as_span());
+              }
+              if compared == Compared::Differs {
                 multiple = true;
               }
             }
@@ -2265,13 +2688,12 @@ where
           }
         }
         Selection::FragmentSpread(spread) => {
-          // `find_fragment` binary-searches the name index and `condition_applies` below hashes
-          // the target's condition; both read bytes the document chose — and neither happens with
-          // no fragment declared, where the search compares nothing and there is no target.
-          if !self.scratch.fragments.is_empty() {
-            self.spend_name(spread.name())?;
-          }
-          let Some(ordinal) = self.find_fragment(name_bytes(spread.name())) else {
+          // `find_fragment` charges the probe for the bytes its comparisons read;
+          // `condition_applies` below hashes the target's condition end to end and is charged for
+          // the whole of it, at the site that reads it.
+          let name = spread.name();
+          let found = self.find_fragment(name_bytes(name), Charged::Validation, *name.as_span())?;
+          let Some(ordinal) = found else {
             continue;
           };
           if self.scratch.visited.visit(ordinal) {
@@ -2557,25 +2979,46 @@ where
     // 5.8.1 reads the index directly; 5.8.3 and 5.8.5 read it through the value walk. Nothing
     // else looks at it.
     let indexed = self.collects_usages || self.on(Rule::VariableUniqueness);
-    // The charge below is for the **sort**, and a one-element sort performs no comparison — as the
+    // The charge below admits the **sort**, and a one-element sort performs no comparison — as the
     // duplicate scan that reads its output starts at `base + 1` and performs none either. The
     // search side is charged separately, at the usage, where a singleton index does invoke its
     // predicate once. al8n/smear#198.
+    //
+    // **One unit per declaration and not one spelling per declaration.** The spelling stood here,
+    // in front of `[u8]::cmp`; the rest of each name is taken inside the comparator and inside
+    // 5.8.1's scan, for the depth a comparison actually reaches. al8n/smear#198's twenty-third
+    // round.
     let sorted = indexed && definitions.len() > 1;
+    self.scratch.paid.clear();
+    self.scratch.paid.resize(definitions.len(), 0);
+    let mut deepest = 0u32;
     if indexed {
       for (index, described) in definitions.iter().enumerate() {
         if sorted {
           let variable = described.node().variable();
-          self.spend(units(name_bytes(variable.name()).len()), *variable.span())?;
+          self.spend(1, *variable.span())?;
+          self.scratch.paid[index] = 1;
+          deepest = deepest.max(units(name_bytes(variable.name()).len()));
         }
         self.scratch.keys.push(index as u32);
       }
       let end = self.scratch.keys.len();
-      self.scratch.keys[base..end].sort_unstable_by(|a, b| {
-        let left = name_bytes(definitions[*a as usize].node().variable().name());
-        let right = name_bytes(definitions[*b as usize].node().variable().name());
-        left.cmp(right).then(a.cmp(b))
-      });
+      let refused = {
+        let scratch = &mut *self.scratch;
+        let (ledger, refused) = sort_metered(
+          &mut scratch.keys[base..end],
+          &mut scratch.paid,
+          self.left,
+          deepest,
+          |index| name_bytes(definitions[index as usize].node().variable().name()),
+        );
+        self.left = ledger;
+        refused
+      };
+      if refused {
+        let blame = *definitions[0].node().variable().span();
+        return self.refuse(blame);
+      }
       self.variable_index = Range32::new(base as u32, end as u32);
     }
     let end = self.variable_index.end() as usize;
@@ -2588,12 +3031,26 @@ where
         let later = self.scratch.keys[slot - 1].max(self.scratch.keys[slot]);
         let first = definitions[earlier as usize].node().variable();
         let repeat = definitions[later as usize].node().variable();
-        if name_bytes(first.name()) == name_bytes(repeat.name()) {
-          let subject = self.subject_v(repeat.name())?;
-          let diagnostic = Diagnostic::new(Rule::VariableUniqueness, *repeat.span())
-            .subject(subject)
-            .related(*first.span());
-          self.emit(diagnostic)?;
+        let scratch = &mut *self.scratch;
+        let mut meter = Meter::new(&mut scratch.paid, self.left, deepest);
+        let compared = meter.eq(
+          earlier as usize,
+          name_bytes(first.name()),
+          later as usize,
+          name_bytes(repeat.name()),
+        );
+        let (ledger, _) = meter.finish();
+        self.left = ledger;
+        match compared {
+          Compared::Refused => return self.refuse(*repeat.span()),
+          Compared::Equal => {
+            let subject = self.subject_v(repeat.name())?;
+            let diagnostic = Diagnostic::new(Rule::VariableUniqueness, *repeat.span())
+              .subject(subject)
+              .related(*first.span());
+            self.emit(diagnostic)?;
+          }
+          Compared::Differs => (),
         }
         slot += 1;
       }

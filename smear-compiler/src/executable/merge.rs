@@ -69,8 +69,8 @@ use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{
-    MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units,
-    count_units, get_bit, hash_bytes, hash_u32,
+    Compared, MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units,
+    count_units, get_bit, hash_bytes, hash_u32, scan_eq,
   },
 };
 
@@ -533,15 +533,15 @@ where
           });
         }
         Selection::FragmentSpread(spread) => {
-          let name = name_bytes(spread.name());
-          // `find_fragment` is a binary search whose comparator reads whole names, so the spelling
-          // is charged in front of it — and only when there is something to compare against. On an
-          // empty fragment table the search returns without a single comparison, which is the same
-          // `n = 0` gate `check_fragment_spread` takes.
-          if !self.scratch.fragments.is_empty() && !self.charge(byte_units(name.len())) {
-            return self.trip(Rule::MergeWorkBudget, self.budget.merge_work());
-          }
-          let Some(ordinal) = self.find_fragment(name) else {
+          let spelling = spread.name();
+          let name = name_bytes(spelling);
+          // `find_fragment` is a binary search whose comparator stops at the first byte that
+          // disagrees, so the spelling is charged **inside** it — a unit in front of each run the
+          // search is about to read, against this engine's own ledger. A whole pass stood here,
+          // and on an index nothing agrees with it billed a length no comparison examined. On an
+          // empty table the search returns without a comparison and without a charge.
+          let found = self.find_fragment(name, Charged::Merge, spelling.span())?;
+          let Some(ordinal) = found else {
             continue;
           };
           let target = self.scratch.fragments[ordinal as usize].definition;
@@ -672,11 +672,36 @@ where
         }
         let known = self.scratch.merge_memo[entry as usize];
         if known.hash == hash && known.rows.len() == rows.len() {
-          if !self.charge(rows.len()) {
+          // Charged per element the comparison reads. `[u32] == [u32]` stops at the first element
+          // that disagrees, so a whole-width charge in front of it priced a pass the operation is
+          // sub-linear in — two 65,536-row sets differing at row zero cost one integer compare and
+          // were charged 65,536 units, which is a resource refusal standing where a real draft
+          // 5.3.2 verdict belongs. al8n/smear#198's twenty-third round.
+          let mut work = self.work;
+          let (matched, refused) = {
+            let left = known.rows.slice(&self.scratch.merge_rows);
+            let right = rows.slice(&self.scratch.merge_rows);
+            let mut matched = true;
+            let mut refused = false;
+            for (a, b) in left.iter().zip(right) {
+              if !work.take(1) {
+                matched = false;
+                refused = true;
+                break;
+              }
+              if a != b {
+                matched = false;
+                break;
+              }
+            }
+            (matched, refused)
+          };
+          self.work = work;
+          if refused {
             self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
             return ControlFlow::Continue((rows, Claim::Refused));
           }
-          if known.rows.slice(&self.scratch.merge_rows) == rows.slice(&self.scratch.merge_rows) {
+          if matched {
             if rows.end() as usize == self.scratch.merge_rows.len()
               && known.rows.start() != rows.start()
             {
@@ -1176,12 +1201,20 @@ where
       }
       let entry = self.scratch.merge_hashes[index.entries + slot as usize];
       if entry.hash == wanted && entry.len == name.len() {
-        if !self.charge(byte_units(entry.len)) {
-          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-          return ControlFlow::Continue(Match::Refused);
-        }
-        if candidate(slot as usize) == name {
-          return ControlFlow::Continue(Match::At(slot as usize));
+        // Charged for the bytes the `memcmp` reads. The stored hash and the length have already
+        // agreed, so the ordinary outcome is equality and this pays `byte_units(len)` exactly as
+        // the whole-length charge did; a constructed hash collision no longer pays for a pass that
+        // stops at its first differing byte. al8n/smear#198's twenty-third round.
+        let mut work = self.work;
+        let compared = scan_eq(candidate(slot as usize), name, |_| work.take(1));
+        self.work = work;
+        match compared {
+          Compared::Equal => return ControlFlow::Continue(Match::At(slot as usize)),
+          Compared::Differs => (),
+          Compared::Refused => {
+            self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+            return ControlFlow::Continue(Match::Refused);
+          }
         }
       }
       slot = entry.next;
@@ -1357,14 +1390,18 @@ where
         // variable's name, and draft §2.1 puts no more of a ceiling on an `Int`'s digits or a
         // `String`'s characters than draft §2.1.9 does on a field name. Charging `depth` prices
         // the descent and says nothing about the `memcmp` at the bottom of it, so the bytes are
-        // charged before they are read — for the length the comparison can actually reach, which
-        // is the shorter of the two. Every other arm settles on a tag, a boolean or a length and
-        // costs nothing here. al8n/smear#196.
-        if !self.charge(shallow_units(a, b)) {
+        // charged before they are read — a unit at a time, in front of the run each one pays for.
+        // Every other arm settles on a tag, a boolean or a length and costs nothing here.
+        // al8n/smear#196, and al8n/smear#198's twenty-third round for the *amount*: the charge was
+        // `byte_units` of the shorter side, which prices a pass `[u8] == [u8]` does not make.
+        let mut work = self.work;
+        let equal = shallow_equal(a, b, |_| work.take(1));
+        self.work = work;
+        let Some(equal) = equal else {
           self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
           return ControlFlow::Continue(true);
-        }
-        if !shallow_equal(a, b) {
+        };
+        if !equal {
           return ControlFlow::Continue(false);
         }
         // Pairing this literal's fields by name is one lookup per field, so they are indexed once
@@ -1516,56 +1553,6 @@ fn buckets_for(count: usize) -> usize {
   count.checked_next_power_of_two().unwrap_or(count)
 }
 
-/// What comparing two values at their own level costs in bytes.
-///
-/// Zero for every arm [`shallow_equal`] settles on a tag, a boolean or a length — a `memcmp` is
-/// only reached by the four that compare source spellings and by the variable, which compares a
-/// name.
-///
-/// # And zero again whenever the two lengths differ
-///
-/// This charged `byte_units` of the *shorter* of the two, on the reasoning that a slice comparison
-/// cannot read past it. True, and it prices a comparison this code does not make: `[u8] == [u8]`
-/// settles unequal lengths **before** it reads a byte of either side. So two string spellings of
-/// 524,288 and 524,289 bytes cost one integer compare and were charged 65,537 units — the whole
-/// default `merge_work` and more, for an `O(1)` decision.
-///
-/// What that bought was not safety. The document has a real draft 5.3.2 conflict — the two
-/// literals differ — and the over-charge replaced that diagnostic with a resource refusal, so the
-/// caller is told the wrong thing about their own document; with `MergeWorkBudget` outside the
-/// rule set it becomes an `Err` carrying nothing at all. A ledger that overcharges is not a safer
-/// ledger, one dimension over from where al8n/smear#196 first said so. al8n/smear#196.
-fn shallow_units<S>(left: &InputValue<S>, right: &InputValue<S>) -> u32
-where
-  S: AsRef<[u8]>,
-{
-  /// What comparing two source spellings costs: nothing unless they are the same length, and then
-  /// one pass over that length.
-  fn spelling(left: &[u8], right: &[u8]) -> u32 {
-    if left.len() != right.len() {
-      return 0;
-    }
-    byte_units(left.len())
-  }
-
-  match (left, right) {
-    (InputValue::Int(a), InputValue::Int(b)) => spelling(a.source().as_ref(), b.source().as_ref()),
-    (InputValue::Float(a), InputValue::Float(b)) => {
-      spelling(a.source().as_ref(), b.source().as_ref())
-    }
-    (InputValue::String(a), InputValue::String(b)) => {
-      spelling(a.source().as_ref(), b.source().as_ref())
-    }
-    (InputValue::Enum(a), InputValue::Enum(b)) => {
-      spelling(a.source().as_ref(), b.source().as_ref())
-    }
-    (InputValue::Variable(a), InputValue::Variable(b)) => {
-      spelling(name_bytes(a.name()), name_bytes(b.name()))
-    }
-    _ => 0,
-  }
-}
-
 /// Follows a comparison stack's child-index chain into one of the two value trees.
 fn descend_value<'a, S>(
   root: &'a InputValue<S>,
@@ -1585,19 +1572,48 @@ fn descend_value<'a, S>(
 }
 
 /// Whether two values agree at their own level, ignoring their children.
-fn shallow_equal<S>(left: &InputValue<S>, right: &InputValue<S>) -> bool
+fn shallow_equal<S>(
+  left: &InputValue<S>,
+  right: &InputValue<S>,
+  charge: impl FnMut(u32) -> bool,
+) -> Option<bool>
 where
   S: AsRef<[u8]>,
 {
-  match (left, right) {
+  /// The five arms that read bytes, each charged for the run it is about to read.
+  ///
+  /// `None` is the ledger's refusal and not an answer, which is why this is an `Option<bool>` all
+  /// the way out: a comparison that stopped for want of budget has established nothing, and
+  /// reporting it as "these differ" would put a draft 5.3.2 conflict on a document that may have
+  /// none. The whole-length charge this replaces settled unequal lengths for `byte_units` of the
+  /// shorter side and read no byte at all — two string spellings of 524,288 and 524,289 bytes cost
+  /// one integer compare and were charged 65,537 units, the whole default `merge_work` and more,
+  /// which replaced a real conflict diagnostic with a resource refusal. al8n/smear#198.
+  fn spelling(left: &[u8], right: &[u8], charge: impl FnMut(u32) -> bool) -> Option<bool> {
+    match scan_eq(left, right, charge) {
+      Compared::Equal => Some(true),
+      Compared::Differs => Some(false),
+      Compared::Refused => None,
+    }
+  }
+
+  Some(match (left, right) {
     (InputValue::Null(_), InputValue::Null(_)) => true,
     (InputValue::Boolean(a), InputValue::Boolean(b)) => a.value() == b.value(),
-    (InputValue::Int(a), InputValue::Int(b)) => a.source().as_ref() == b.source().as_ref(),
-    (InputValue::Float(a), InputValue::Float(b)) => a.source().as_ref() == b.source().as_ref(),
-    (InputValue::String(a), InputValue::String(b)) => a.source().as_ref() == b.source().as_ref(),
-    (InputValue::Enum(a), InputValue::Enum(b)) => a.source().as_ref() == b.source().as_ref(),
+    (InputValue::Int(a), InputValue::Int(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
+    (InputValue::Float(a), InputValue::Float(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
+    (InputValue::String(a), InputValue::String(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
+    (InputValue::Enum(a), InputValue::Enum(b)) => {
+      return spelling(a.source().as_ref(), b.source().as_ref(), charge);
+    }
     (InputValue::Variable(a), InputValue::Variable(b)) => {
-      name_bytes(a.name()) == name_bytes(b.name())
+      return spelling(name_bytes(a.name()), name_bytes(b.name()), charge);
     }
     (InputValue::List(a), InputValue::List(b)) => a.values().len() == b.values().len(),
     // Equal widths, and the caller pairs the fields by name. A literal with a *repeated* field
@@ -1605,5 +1621,5 @@ where
     // refused the document, and apollo-compiler makes the same assumption here.
     (InputValue::Object(a), InputValue::Object(b)) => a.fields().len() == b.fields().len(),
     _ => false,
-  }
+  })
 }

@@ -18,7 +18,7 @@ use smear_parser::graphql::ast::{
 };
 
 use super::{
-  Rule, TypeId, Validator,
+  Charged, Rule, TypeId, Validator,
   nodes::{child_selection_set, fragment, name_bytes, root_selection_set},
 };
 use crate::{
@@ -303,11 +303,6 @@ where
     let check = frame.flags & Frame::CHECK != 0;
     let document = self.document;
     let name = spread.name();
-    // Nothing here reads the spelling when no fragment is declared: `find_fragment` returns on an
-    // empty index without a comparison, and the arms below it never run.
-    if !self.scratch.fragments.is_empty() {
-      self.spend_name(name)?;
-    }
 
     if let Some(directives) = spread.directives() {
       self.check_directives(
@@ -318,7 +313,11 @@ where
     }
 
     // 5.5.2.1 was reported while the graph was collected; here a miss simply has nothing to enter.
-    let Some(ordinal) = self.find_fragment(name_bytes(name)) else {
+    // The spelling is charged inside `find_fragment`, a unit in front of each run its comparisons
+    // read — and with no fragment declared the search returns without a comparison and without a
+    // charge, which is the `n = 0` gate that used to stand here.
+    let found = self.find_fragment(name_bytes(name), Charged::Validation, *name.as_span())?;
+    let Some(ordinal) = found else {
       return ControlFlow::Continue(None);
     };
     let row = self.scratch.fragments[ordinal as usize];
