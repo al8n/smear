@@ -578,8 +578,17 @@ impl Names {
   }
 }
 
-/// The first position of each name one **input object declares**, addressed by name, built at most
-/// once per type and shared by every literal offered to it.
+/// The first position of each name one **type declares** — an input object's fields, an enum's
+/// values — addressed by name, built at most once per type and shared by every literal offered to
+/// it.
+///
+/// # One slot per type, and a type declares one of these lists
+///
+/// [`RawType`] carries a list for every kind, but its `kind` is fixed before any of this runs —
+/// `apply_extensions` is finished by the time `validate` starts — and
+/// [`SchemaBuilder::check_const_value`] dispatches on that `kind`. So the two lists one slot may be
+/// asked about are never both asked about, and one `asks` count and one sort per type index cover
+/// both without a second table to resize and without a kind tag to keep them apart.
 ///
 /// # Why the declared side is a table per type and the written side stays a value per list
 ///
@@ -620,14 +629,29 @@ impl Names {
 ///
 /// `declared.iter().find(..)`, restarted for every field an input-object literal writes, and then
 /// [`Names::over`] rebuilt at every level and every sibling. The nested fixture above was 1.66 in
-/// the exponent over 16 k–64 k and 851 ms at 64 k, and is 1.03 and 20 ms. al8n/smear#198.
+/// the exponent over 16 k–64 k and 851 ms at 64 k, and is 1.03 and 20 ms.
+///
+/// And `enum_values.iter().any(..)`, restarted for every member an enum literal writes — the same
+/// mechanism a fourth time, in a spelling none of the three sweeps before it went looking for.
+/// `ok(p: [E] = [Vlast …M times])` in front of a `D`-value `enum E` is `Θ(M + D)` of SDL and was
+/// `Θ(M × D)` of build, on a default `Schema::build` **accepts**. The literal writes the LAST value
+/// because a scan reaching its answer at the first position hides the whole product.
+///
+/// **Swept on `M` and `D` independently, the product is invisible in the exponent**: with the other
+/// axis fixed at 4 000 the scan is 1.0 in the exponent over 1 k–128 k on both, because a fixed
+/// second factor is a constant. What it is worth is the constant — 314 ms at `M` = 128 k against
+/// 21 ms, 346 ms at `D` = 128 k against 54 ms — and the count, which is where a product shows:
+/// `M × D` declared slots examined, 512 000 000 at either end, against 1 843 232 and 10 562 912.
+/// Swept together at 1 k/4 k/16 k/64 k/128 k the exponent is the product's: **1.89** over the
+/// ladder and 1.98–2.15 over the top step, **10.1 s** and 16 384 000 000 slots examined at 128 k,
+/// against **1.05**, **78 ms** and 12 670 912. al8n/smear#198.
 #[derive(Debug, Default)]
 struct DeclaredNames {
   /// One slot per type index, filled on demand.
   of_type: Vec<Declaration>,
 }
 
-/// What one input object's declared names have cost so far, and the index once one is paid for.
+/// What one type's declared names have cost so far, and the index once one is paid for.
 #[derive(Debug, Default)]
 struct Declaration {
   /// Asks this declaration has answered by scanning, across the whole build.
@@ -638,26 +662,50 @@ struct Declaration {
 
 impl DeclaredNames {
   /// The first position of `wanted` in `types[base]`'s declared input fields, or `None`.
+  fn first(&mut self, types: &[RawType], base: usize, wanted: Sym) -> Option<usize> {
+    let declared = &types[base].input_fields;
+    self.position(types.len(), base, declared, |field| field.name.sym, wanted)
+  }
+
+  /// Whether `types[base]` declares `wanted` among its enum values.
+  ///
+  /// The membership half of the same question, asked of the other list one slot may hold — see the
+  /// header for why one slot holds both.
+  fn has_enum_value(&mut self, types: &[RawType], base: usize, wanted: Sym) -> bool {
+    let declared = &types[base].enum_values;
+    self
+      .position(types.len(), base, declared, |value| value.name.sym, wanted)
+      .is_some()
+  }
+
+  /// The first position of `wanted` in `declared`, `types` being how many slots the table needs and
+  /// `name` how a position of `declared` is read.
   ///
   /// Sorted pairs order equal names by ascending position, so the head of a run is the first
   /// occurrence and not merely one of them — the answer the scan it replaces gave, and the one a
-  /// type that declares a field twice needs, because moving it would move a blessed diagnostic
+  /// type that declares a name twice needs, because moving it would move a blessed diagnostic
   /// while looking like a cost change.
-  fn first(&mut self, types: &[RawType], base: usize, wanted: Sym) -> Option<usize> {
-    if self.of_type.len() < types.len() {
-      self.of_type.resize_with(types.len(), Declaration::default);
+  fn position<T>(
+    &mut self,
+    types: usize,
+    base: usize,
+    declared: &[T],
+    name: impl Fn(&T) -> Sym,
+    wanted: Sym,
+  ) -> Option<usize> {
+    if self.of_type.len() < types {
+      self.of_type.resize_with(types, Declaration::default);
     }
-    let declared = &types[base].input_fields;
     let slot = &mut self.of_type[base];
     if slot.order.is_none() {
       if slot.asks < NARROW_LIST as u32 {
         slot.asks += 1;
-        return declared.iter().position(|field| field.name.sym == wanted);
+        return declared.iter().position(|entry| name(entry) == wanted);
       }
       let mut sorted: Vec<(Sym, u32)> = declared
         .iter()
         .enumerate()
-        .map(|(at, field)| (field.name.sym, at as u32))
+        .map(|(at, entry)| (name(entry), at as u32))
         .collect();
       sorted.sort_unstable();
       slot.order = Some(sorted);
@@ -3392,13 +3440,16 @@ impl SchemaBuilder {
         }
       }
       TypeKind::Enum => {
+        // One index per ENUM, shared by every literal offered to it, for the reason the input
+        // object's is shared: the declaration is a function of the type, and a list literal writes
+        // as many members as it likes against it. `any` over the declared values, restarted per
+        // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
+        // other three did not reach — see its header.
         let member = match &value.shape {
-          RawShape::Enum(bytes) => model.interner.lookup(bytes).is_some_and(|sym| {
-            model.types[base]
-              .enum_values
-              .iter()
-              .any(|value| value.name.sym == sym)
-          }),
+          RawShape::Enum(bytes) => model
+            .interner
+            .lookup(bytes)
+            .is_some_and(|sym| names.has_enum_value(model.types, base, sym)),
           _ => false,
         };
         if !member {
