@@ -425,6 +425,21 @@ impl Visits {
     self.spend(byte_units(len), location)
   }
 
+  /// The fault a refusal reports, for a door that learned about the refusal from
+  /// [`Compared::Refused`] rather than from a `false` this type returned.
+  ///
+  /// One spelling of the refusal, so that a charged comparison and a charged pass cannot report
+  /// the same exhausted ceiling two different ways.
+  #[inline]
+  #[cold]
+  pub(super) const fn budget_fault(&self, location: SimpleSpan) -> Fault<'static> {
+    Fault {
+      raw: Raw::CollectionBudget { limit: self.limit },
+      location,
+      name: None,
+    }
+  }
+
   /// The ceiling, for the message that reports a refusal.
   #[inline]
   pub(super) const fn limit(&self) -> u32 {
@@ -757,7 +772,7 @@ mod table {
   };
   use smear_schema::{bucket, hash_bytes};
 
-  use super::{Fault, NONE, Visits, byte_units};
+  use super::{Compared, Fault, NONE, Visits, byte_units, metered_eq};
 
   /// One accepted charge, and the fragments it was taken over.
   ///
@@ -1064,9 +1079,15 @@ mod table {
         let fragment = self.defs[ordinal as usize];
         let spelling = fragment.name().source().as_ref();
         if self.hashes[ordinal as usize] == hash && spelling.len() == name.len() {
-          visits.spend_bytes(name.len(), location)?;
-          if spelling == name {
-            return Ok(Some((ordinal, fragment)));
+          // Charged for the bytes the `memcmp` reads, not for the length it is over. Reaching
+          // here needs the whole stored hash **and** the length to agree, so the bytes are about
+          // to be equal and this ordinarily pays `byte_units(len)` exactly as the whole-length
+          // charge did; what it no longer does is bill a genuine hash collision for a pass that
+          // stops at its first differing byte. al8n/smear#198's twenty-third round.
+          match metered_eq(spelling, name, visits) {
+            Compared::Equal => return Ok(Some((ordinal, fragment))),
+            Compared::Differs => (),
+            Compared::Refused => return Err(visits.budget_fault(location)),
           }
         }
         ordinal = self.chain[ordinal as usize];
@@ -1468,13 +1489,19 @@ impl Interner {
         // only one an adversary has — is rejected here without touching a byte.
         let (start, len) = self.spans[id as usize];
         if self.hashes[id as usize] == hash && len as usize == bytes.len() {
-          if !visits.take_bytes(bytes.len()) {
-            return Err(Unstored::Budget {
-              limit: visits.limit(),
-            });
-          }
-          if &self.names.as_bytes()[start as usize..(start + len) as usize] == bytes {
-            return Ok(id);
+          // Charged for what the `memcmp` reads. The stored hash and the length have both agreed,
+          // so the ordinary outcome is equality and this pays `byte_units(len)` exactly as the
+          // whole-length charge did; a constructed hash collision no longer pays for a pass that
+          // stops at its first differing byte. al8n/smear#198's twenty-third round.
+          let stored = &self.names.as_bytes()[start as usize..(start + len) as usize];
+          match metered_eq(stored, bytes, visits) {
+            Compared::Equal => return Ok(id),
+            Compared::Differs => (),
+            Compared::Refused => {
+              return Err(Unstored::Budget {
+                limit: visits.limit(),
+              });
+            }
           }
         }
         id = self.chain[id as usize];
@@ -2340,12 +2367,38 @@ pub(super) enum Admission<'a> {
 /// | `coerce_arguments`, the written argument names | `find` stops at the entry it matches, and the loop above it is over what the **schema** declares, so an undeclared entry is never read at all | **once per entry, behind a high-water mark**, in front of the comparison that reads it |
 ///
 /// Nothing in this ledger is left charging a population in front of work that can stop inside it.
-/// What *stays* as a charge in front of work that is genuinely unconditional: [`Fragments::build`]'s
-/// pass, taken over a slice length the pass then walks end to end; the fragment table's per-entry
-/// charges, each in front of the one comparison it prices; [`Interner::intern`]'s hash and copy,
-/// which read every byte of the key they are given; a type condition's spelling, handed whole to
-/// `Schema::sym`; one unit per selection examined; and one unit per definition draft §6.1 reads,
-/// which stops at the operation it finds and is charged per definition rather than for the slice.
+///
+/// # The question one notch further in: is the operation *sub-linear* in what the charge measured?
+///
+/// The table above is about **where** a charge stands. This one is about **what** it names, and it
+/// is al8n/smear#198's twenty-third round. A charge computed from a `len()` is a claim that the
+/// operation below it reads that many bytes; where the operation can answer without reading them,
+/// the charge is a prepayment and the claim is false — and the claim had by then been made in good
+/// faith, and been wrong, at four other shapes of this same site.
+///
+/// The operation that broke it is `[u8] == [u8]`. It **rejects unequal lengths without reading
+/// either spelling**, and on equal lengths stops at the first byte that disagrees. Three charges
+/// in this crate stood in front of one:
+///
+/// | charge | what the comparison actually reads | now |
+/// |---|---|---|
+/// | `Executor::coerce_arguments`, per written entry | two lengths, when no declared name is that long — `f(<L bytes>: 1, a: 1)` against `f(a: Int)` compared one length and was billed `byte_units(L)` | [`scan_eq`], **per entry and per depth**: the opening unit once, the runs past it as a comparison reaches them |
+/// | [`Interner::intern`]'s chain step | the stored key, once the whole hash and the length have already agreed | [`metered_eq`] — the same total on the equal path, and nothing for a collision's first differing byte |
+/// | the fragment table's chain step | the same, one table over | [`metered_eq`] |
+///
+/// What *stays* as a charge in front of work that is genuinely unconditional, with the operation
+/// that reads every byte named rather than assumed:
+///
+/// - [`Fragments::build`]'s two passes — `Table::charge` prices a slice `Table::fill` then walks
+///   end to end, hashing every selected name with [`hash_bytes`], and the loop has no early exit;
+/// - [`Interner::intern`]'s opening charge, in front of [`hash_bytes`] over the whole key, and its
+///   closing one, in front of the arena copy of the whole key;
+/// - the fragment table's probe charge, in front of [`hash_bytes`] over the whole probe;
+/// - a type condition's and a runtime type's spelling, handed whole to `Schema::sym`, which hashes
+///   before it compares anything;
+/// - a response key's spelling, for the same probe;
+/// - one unit per selection examined, and one per definition draft §6.1 reads — counts, not
+///   lengths, and each taken in front of the one step it prices.
 ///
 /// [`Fragments::build`]: Fragments::build
 /// [`Interner::intern`]: Interner::intern
@@ -2393,6 +2446,94 @@ fn scan_key<'a>(spelling: &'a [u8], mut paid: impl FnMut(u32) -> bool) -> Admiss
     // `unsafe`-free arithmetic is written out — see `name_key`'s header.
     Err(_) => Admission::Unreadable,
   }
+}
+
+/// The answer a charged comparison gives, and the third arm is why it is not a `bool`.
+///
+/// [`Compared::Refused`] means the ledger had no room for the next run of bytes, so the comparison
+/// **stopped with no answer** — the same distinction [`Admission::Refused`] draws one door over,
+/// and for the same reason: a caller that cannot tell "these differ" from "this was never read"
+/// reports a resource ceiling as a finding about the request, or a finding about the request as a
+/// resource ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Compared {
+  /// Every byte agreed, and the lengths did.
+  Equal,
+  /// The lengths disagreed, or a run of bytes did.
+  Differs,
+  /// The ledger ran out of room for a run this comparison had not read yet.
+  Refused,
+}
+
+/// `left == right`, charging `visits` a unit in front of each run of bytes it reads.
+///
+/// # A charge over a length in front of an operation that is sub-linear in it
+///
+/// This is al8n/smear#198's twenty-third round, and it is the same finding as
+/// [`metered_variable_key`]'s one notch further in. That round asked whether anything below a
+/// charge can *return* before the work the charge priced is done, moved the charges that could,
+/// and left the byte charges standing in front of `==`. Slice equality **rejects unequal lengths
+/// without reading either spelling**, and on equal lengths `memcmp` stops at the first byte that
+/// disagrees. So a charge of [`byte_units`]`(len)` in front of one prices a pass that a length
+/// test can decide in two loads.
+///
+/// The running total after `k` bytes is exactly `byte_units(k)`, as [`scan_key`]'s is: the opening
+/// unit covers the length test and the first `BYTES_PER_UNIT - 1` bytes, and every later one
+/// covers `BYTES_PER_UNIT`. A comparison that reads a whole `L`-byte spelling therefore costs what
+/// `take_bytes(L)` cost, which is the property the measured ladders in this crate's headers rest
+/// on; a comparison that reads less costs less; and nothing costs for bytes no `memcmp` reached.
+///
+/// # `charge` is a closure, because the unit's *owner* differs by site
+///
+/// Three policies use this scanner and they are not interchangeable, so the unit index is handed
+/// out rather than the decision:
+///
+/// - a **fresh** comparison pays every unit — a chain step's one `memcmp` against a stored key,
+///   which happens once per candidate per lookup;
+/// - a comparison against a spelling some **earlier** comparison already paid a prefix of pays
+///   only the units past that prefix, and raises it — the high-water in
+///   `Executor::coerce_arguments`, where draft §6.4.1's scan re-reads one written entry once per
+///   *declared* argument and charging each of those in full would put the schema's factor in the
+///   caller's ledger;
+/// - and a comparison whose opening unit some **enclosing** charge already took pays only the
+///   continuations.
+///
+/// `charge` is called with the 1-based index of the unit about to be spent, immediately before the
+/// run of bytes that unit pays for is read, and answers whether there was room.
+#[inline]
+pub(super) fn scan_eq(left: &[u8], right: &[u8], mut charge: impl FnMut(u32) -> bool) -> Compared {
+  // Unit one: the length test, and the first `BYTES_PER_UNIT - 1` bytes if it passes. This is the
+  // whole cost of an unequal-length comparison, which is the whole cost `[u8]::eq` pays for one.
+  if !charge(1) {
+    return Compared::Refused;
+  }
+  if left.len() != right.len() {
+    return Compared::Differs;
+  }
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < left.len() {
+    if read == budgeted {
+      unit += 1;
+      if !charge(unit) {
+        return Compared::Refused;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(left.len());
+    if left[read..end] != right[read..end] {
+      return Compared::Differs;
+    }
+    read = end;
+  }
+  Compared::Equal
+}
+
+/// [`scan_eq`] against `visits`, paying every unit it reads.
+#[inline]
+pub(super) fn metered_eq(left: &[u8], right: &[u8], visits: &mut Visits) -> Compared {
+  scan_eq(left, right, |_| visits.take(1))
 }
 
 /// Whether the directive's `if` argument is `true`, or why it could not be read as a boolean.

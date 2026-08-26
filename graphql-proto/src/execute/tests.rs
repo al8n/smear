@@ -1697,6 +1697,73 @@ fn a_matched_argument_does_not_pay_for_the_arguments_after_it() {
   );
 }
 
+/// Draft §6.4.1 step 5's scan is charged for the bytes its comparison **reads**.
+///
+/// # The fourth charge the corrected question convicted, one notch further in
+///
+/// The round before this one moved the whole-list charge over `written` in front of the one
+/// comparison that reads each entry, behind a high-water mark. That put the charge in the right
+/// *place* and left it the wrong *amount*: `written.name() == name_bytes` is slice equality, which
+/// rejects unequal lengths without reading either spelling and, on equal ones, stops at the first
+/// byte that disagrees. So an entry no declared name can possibly equal — because no declared name
+/// is that long — was charged `byte_units(L)` for two integer loads.
+///
+/// `f(<L bytes of undeclared name>: "v", a: "v")` against `f(a: String)` is the case: step 5's
+/// scan for `a` reads one length, skips the entry, matches at the second, and serves the field.
+/// At `eb641d2` the same request cost 8,193 units more than the one-byte control and was refused —
+/// `ArgumentBudget`, the field nulled — under a ceiling the control fits in.
+///
+/// Both halves again, because either alone is satisfiable by the wrong mechanism: the costs are
+/// equal, **and** the long form is served under a ceiling set to precisely the short one's cost.
+#[test]
+fn an_entry_of_another_length_is_charged_for_the_length_test_that_rejected_it() {
+  const SDL: &str = "type Query { f(a: String): String }";
+
+  // The control writes the same two entries with the same *shapes* and differs in one dimension
+  // only: the first entry's length. One byte is what the length test costs, and the ceiling below
+  // is therefore a quantity the padding cannot enter.
+  let padded = "z".repeat(SPELLING);
+  let long = std::format!("{{ f({padded}: \"v\", a: \"v\") }}");
+  let short = "{ f(z: \"v\", a: \"v\") }";
+
+  let (schema, short_document) = compile_against(SDL, short);
+  let spent_short = drive(&schema, &short_document, None);
+  assert_eq!(spent_short.resolved, 1, "the control resolved the field");
+  assert_eq!(
+    spent_short.kinds,
+    std::vec![],
+    "the control raised {:?}",
+    spent_short.messages
+  );
+
+  let (schema, long_document) = compile_against(SDL, &long);
+  let spent_long = drive(&schema, &long_document, None);
+  std::println!(
+    "one written entry no declared name can equal: 1-byte {} units, {SPELLING}-byte {} units",
+    spent_short.visits,
+    spent_long.visits
+  );
+  assert_eq!(
+    spent_long.visits, spent_short.visits,
+    "a {SPELLING}-byte entry no declared name can equal cost {} units against the one-byte \
+     control's {} — the scan compared two lengths in both",
+    spent_long.visits, spent_short.visits
+  );
+
+  let tight = drive(&schema, &long_document, Some(spent_short.visits));
+  assert_eq!(
+    tight.kinds,
+    std::vec![],
+    "a request §6.4.1 serves was refused by a ceiling of {}: {:?}",
+    spent_short.visits,
+    tight.messages
+  );
+  assert_eq!(
+    tight.resolved, 1,
+    "the field was nulled rather than resolved"
+  );
+}
+
 /// The metered scan and the whole-slice one admit exactly the same spellings.
 ///
 /// [`scan_key`] applies draft §2.1.9's rule a run of bytes at a time so the ledger can stop in the
@@ -4086,6 +4153,10 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
     // entry per argument the *schema* declares on the one field being coerced, so the peak is the
     // schema's widest argument list — a deployment constant, like `MAX_WRAPPERS`.
     ("scratch_args", held.scratch_args, SCHEMA_ARGUMENTS as u64),
+    // Draft §6.4.1's per-entry prefix high-water: one `u32` per *written* entry the scan admitted,
+    // and an admission is one unit taken against the visit ceiling before the push. Cleared with
+    // `scratch_args`, so its peak is one field's written list.
+    ("arg_prefix", held.arg_prefix, u64::from(VISITS)),
     // The fragment index, kept across every reset on purpose. **The document's size**, and its
     // pass is charged: `defs` and `chain` are one entry per fragment and `heads` is a power-of-two
     // bucket table at a load factor of a half.
