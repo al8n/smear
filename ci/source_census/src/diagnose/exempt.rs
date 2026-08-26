@@ -226,6 +226,38 @@ pub const EXEMPTIONS: &[Exemption] = &[
              on the sum would have to invent a primary location for a variant holding a hundred of \
              them.",
   },
+  // ── The lossless tower's caller-built door ───────────────────────────────────────────────────
+  Exemption {
+    path: "smear::parser::lossless::runner::MintError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `finish_root` refused to mint a `Parse` out of a caller-built `Cst`. Its subject \
+             is not text this crate parsed: the door takes an event stream a caller's sink \
+             emitted, so there is no source behind the refusal and no offset in one. \
+             `FinishError::TooDeep` carries a depth, which is a property of the tree the caller \
+             assembled rather than a place in a document, and `UnclosedNodes` is a property of \
+             the stream that built it. `Diagnose::primary` returns a `Location`, so answering the \
+             contract here would mean inventing a position for an error that has none — and a \
+             diagnostic that sends a reader somewhere meaningless is worse than one that sends \
+             them nowhere. \
+             \
+             THE ARGUMENT IS THE CLASS'S AND NOT THIS NAME'S: it holds of every refusal whose \
+             subject is a value the caller constructed rather than a span of input, which is what \
+             `proto::SetExtensionsError`, `proto::Full`, `proto::SourceEventError` and \
+             `proto::TooLarge` are already recorded as. `parser::graphql::lossless::Unverified` \
+             is this door's sibling — the same tower, refusing a `(parse, source)` pair the \
+             caller put together — and its record already reaches the same conclusion about \
+             `primary`, but files it under phase E for that phase to settle rather than as a \
+             standing exemption; the two rows should be read together. \
+             \
+             What the argument does NOT reach is a refusal that has an input and merely no span: \
+             `proto::StartError` is refused on a property of a whole document, a whole document \
+             IS a `Location`, and `Location::entire` is the spelling for one. `MintError::space` \
+             names the kind space whose sink emitted the stream and `MintError::refusal` hands \
+             back the substrate's own enum, which is the machine-readable part a code would \
+             otherwise have carried.",
+  },
   // ── §6 execution — al8n/smear#126 phase D ────────────────────────────────────────────────────
   //
   // The two are recorded separately and for different reasons, because they are different animals:
