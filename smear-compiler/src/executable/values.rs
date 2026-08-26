@@ -1220,8 +1220,15 @@ where
       // deepest paid prefix is already `lo`'s, so this search adds units only where it reads
       // further than any comparison above it did — and where nothing is left to charge it is the
       // plain search, for `sort_metered`'s reason.
-      let mut paid = 1u32;
-      let mut ledger = self.left;
+      //
+      // **That is what the sentence above says, and a `let mut paid = 1` stood here contradicting
+      // it.** The high-water is what keeps the metered form inside the prepayment it replaced —
+      // one pass over this usage's spelling, taken once in front of the whole function — and a
+      // second search restarting from unit one charges the spelling twice. A one-declaration,
+      // one-usage operation with a four-kilobyte variable name cost 1,015 units against 5.8.3's
+      // 513, so a caller whose `validation_work` sat between them had a valid document refused for
+      // switching draft 5.8.4 on. `paid`, `ledger` and the refusal are the ones the two searches
+      // above already carry. al8n/smear#198's twenty-fourth round.
       let hi = {
         let index = &self.scratch.keys[base..end];
         let named =
@@ -1232,23 +1239,7 @@ where
           }))
         } else {
           probe_partition(index.len(), |slot| {
-            probe_cmp(named(slot), bytes, |unit| {
-              if unit <= paid {
-                return true;
-              }
-              paid = unit;
-              match ledger.take(1) {
-                Some(left) => {
-                  ledger = left;
-                  true
-                }
-                None => {
-                  ledger = Ledger::Left(0);
-                  false
-                }
-              }
-            })
-            .map(Ordering::is_le)
+            probe_cmp(named(slot), bytes, charge!()).map(Ordering::is_le)
           })
         }
       };
