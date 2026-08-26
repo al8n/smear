@@ -42,7 +42,7 @@ use smear_parser::graphql::ast::{
   Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
   SelectionSet,
 };
-use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name};
+use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name, is_name_tail};
 
 use super::{
   Values,
@@ -108,13 +108,21 @@ pub(super) enum Unstored {
 /// al8n/smear#172.
 #[inline]
 pub(super) const fn byte_units(len: usize) -> u32 {
-  let units = len / 8 + 1;
+  let units = len / BYTES_PER_UNIT + 1;
   if units > u32::MAX as usize {
     u32::MAX
   } else {
     units as u32
   }
 }
+
+/// How many bytes one [`byte_units`] unit pays for.
+///
+/// Named rather than written twice: [`scan_key`] charges the same ledger a unit at a time as it
+/// examines a spelling, and its running total has to be the number [`byte_units`] would have
+/// produced for the bytes it has read. Two spellings of the stride would be two different ledgers
+/// over the same pass.
+const BYTES_PER_UNIT: usize = 8;
 
 /// An empty open-addressing slot, an unterminated chain, and "this key has no group yet".
 ///
@@ -2250,10 +2258,112 @@ pub fn variable_key(spelling: &[u8]) -> Option<&str> {
 ///   §7.1.7 puts under no lexical restriction at all.
 #[inline]
 pub(super) fn name_key(spelling: &[u8]) -> Option<&str> {
-  if !is_name(spelling) {
-    return None;
+  match scan_key(spelling, |_| true) {
+    Admission::Key(key) => Some(key),
+    // A meter that never refuses cannot produce `Admission::Refused`, and this door's answer for a
+    // spelling that is not a `Name` has always been `None`.
+    Admission::Unreadable | Admission::Refused => None,
   }
-  core::str::from_utf8(spelling).ok()
+}
+
+/// What reading a spelling as a name produced, and — for the metered door — whether it was read at
+/// all.
+///
+/// Three answers and not two, because the two failures are opposite findings about opposite
+/// parties. [`Unreadable`](Self::Unreadable) is about the *document*: these bytes are not a draft
+/// §2.1.9 `Name`, so they name no variable the request could have supplied, and both readers take
+/// their existing "not provided" branch. [`Refused`](Self::Refused) is about this *executor*: the
+/// ledger ran out with bytes still unexamined, so there is no finding about the spelling yet, and
+/// the caller reports a resource refusal naming the ceiling.
+///
+/// Collapsing them is the defect this type exists to prevent, and it is the sixth time on
+/// al8n/smear#198 that a distinction the code makes died at a boundary. See
+/// [`metered_variable_key`].
+pub(super) enum Admission<'a> {
+  /// The spelling is a `Name`, and this is the key to look up.
+  Key(&'a str),
+  /// The spelling is not a `Name`. Nothing about the ledger is being reported.
+  Unreadable,
+  /// The ledger had no room for the next run of bytes, so the scan stopped with no answer.
+  Refused,
+}
+
+/// [`variable_key`], charging `visits` for the bytes the draft §2.1.9 pass **examines**.
+///
+/// # A charge over the whole spelling stood in front of a scan that stops at its first byte
+///
+/// Both readers of a variable spelling used to `take_bytes(spelling.len())` and then call
+/// [`variable_key`]. The charge is correct about a spelling that *is* a name — `is_name`'s pass,
+/// the conversion and the driver's lookup each read all of it — and wrong about every spelling
+/// that is not, because [`is_name`] returns at the first byte outside the production. So
+/// `$1aaaa…a` of any length did one byte of admission work and was charged for the whole
+/// assembled length, and a caller who wrote a long enough one was told
+/// [`Raw::CollectionBudget`] — or, at draft §6.4.1's site, [`Raw::ArgumentBudget`] — where the
+/// finding is that the request supplied no such variable. The remedy printed with a budget refusal
+/// is a larger ceiling, so a caller was pointed at a knob that would not have changed the answer.
+///
+/// The charge is now taken a unit at a time in front of the run of bytes it pays for, so the
+/// running total after `k` bytes is exactly [`byte_units`]`(k)` — the opening unit covers seven
+/// bytes and each later one covers eight, which is what `len / 8 + 1` counts. A spelling refused at
+/// its first byte therefore costs one unit, the whole cost is paid only where the scan reached the
+/// end, and [`Admission::Refused`] means the ledger ran out of room for work this door was about to do.
+/// al8n/smear#198.
+///
+/// # One implementation, and one spelling of the rule underneath it
+///
+/// Both readers call this, for the reason [`variable_key`] is `pub` at all: two sites spelling
+/// "charge, then convert" is exactly the shape one of them can write half of, and this repair is
+/// the second time that shape has produced a defect at these same two sites.
+///
+/// The admission rule is still the schema arena's own. [`scan_key`] applies it through
+/// [`is_name`] for the first byte and [`is_name_tail`] for the runs after it, and `is_name` is
+/// *written in terms of* `is_name_tail` — so the byte rule has one spelling, the chunking cannot
+/// disagree with the whole-slice answer, and [`name_key`] reaches the same scan with a meter that
+/// never refuses.
+#[inline]
+pub(super) fn metered_variable_key<'a>(spelling: &'a [u8], visits: &mut Visits) -> Admission<'a> {
+  scan_key(spelling, |units| visits.take(units))
+}
+
+/// Reads `spelling` as a `Name`, asking `paid` for each unit before the bytes it covers are read.
+#[inline]
+fn scan_key<'a>(spelling: &'a [u8], mut paid: impl FnMut(u32) -> bool) -> Admission<'a> {
+  // `byte_units(0)`, and this door's fixed cost: the emptiness test and the first byte's admission
+  // are what a refusal at the first byte pays for, and nothing else.
+  if !paid(1) {
+    return Admission::Refused;
+  }
+  let Some(first) = spelling.first() else {
+    return Admission::Unreadable;
+  };
+  // The start rule, asked of the one byte it is about to read: a one-byte slice is a `Name` exactly
+  // when that byte may begin one.
+  if !is_name(core::slice::from_ref(first)) {
+    return Admission::Unreadable;
+  }
+  // How far the units taken so far reach. `byte_units(len)` is `len / BYTES_PER_UNIT + 1`, so the
+  // opening unit covers `BYTES_PER_UNIT - 1` bytes and every later one covers `BYTES_PER_UNIT`.
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 1;
+  while read < spelling.len() {
+    if read == budgeted {
+      if !paid(1) {
+        return Admission::Refused;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(spelling.len());
+    if !is_name_tail(&spelling[read..end]) {
+      return Admission::Unreadable;
+    }
+    read = end;
+  }
+  match core::str::from_utf8(spelling) {
+    Ok(key) => Admission::Key(key),
+    // Unreachable: a `Name` is ASCII. Written as the total conversion for the reason the crate's
+    // `unsafe`-free arithmetic is written out — see `name_key`'s header.
+    Err(_) => Admission::Unreadable,
+  }
 }
 
 /// Whether the directive's `if` argument is `true`, or why it could not be read as a boolean.
@@ -2345,9 +2455,35 @@ where
       // Draft §6.4.1 step 5.f's charge, at draft §6.3's site: `variable_key`'s §2.1.9 pass and the
       // driver's lookup each read every byte of the spelling, once per runtime position, and a
       // selection was one unit however long the name it names. `Executor::coerce_arguments` carries
-      // the measurement; the two readers of a variable spelling now charge alike.
-      visits.spend_bytes(spelling.len(), location)?;
-      match variable_key(spelling).and_then(|name| ctx.variable(name)) {
+      // the measurement; the two readers of a variable spelling charge alike because they charge
+      // through one function.
+      //
+      // Metered as the pass examines bytes rather than over the assembled length, because
+      // `is_name` stops at the first byte outside draft §2.1.9's production: an unreadable spelling
+      // long enough to cross the ceiling was refused with `CollectionBudget` where the finding is
+      // that no such variable was supplied, and the remedy printed with a budget refusal is a
+      // larger ceiling. See `metered_variable_key`.
+      let key = metered_variable_key(spelling, visits);
+      let supplied = match key {
+        Admission::Key(name) => ctx.variable(name),
+        // §6.3's answer for a spelling the driver's key space cannot express: no variable the
+        // request could have supplied, so the driver is not asked and the arm below is the one
+        // that was always right for it.
+        Admission::Unreadable => None,
+        // The one exit here that is about this executor rather than about the request, and the
+        // only one that may name a ceiling. Reached with bytes of the spelling still unexamined,
+        // so there is no finding about the variable yet.
+        Admission::Refused => {
+          return Err(Fault {
+            raw: Raw::CollectionBudget {
+              limit: visits.limit(),
+            },
+            location,
+            name: None,
+          });
+        }
+      };
+      match supplied {
         // The variable was not supplied, and that is the finding whether or not its spelling can
         // be quoted — so an arena with no room shortens the message and keeps the diagnosis. The
         // spelling travels as bytes because the caller has an arena to restore before it can mint

@@ -147,7 +147,8 @@ pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};
 pub use repr::{
   DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
   MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType,
-  Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_reserved,
+  Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_name_tail,
+  is_reserved,
 };
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.

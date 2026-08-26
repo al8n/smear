@@ -10,7 +10,11 @@
 use smear_parser::{
   graphql::{
     GraphQL,
-    ast::{ExecutableDocument, TypeSystemDocument},
+    ast::{
+      Argument, ArgumentList, Described, Directive, Directives, ExecutableDefinition,
+      ExecutableDocument, Field, InputValue, Name, OperationDefinition, Selection, SelectionSet,
+      TypeSystemDocument, VariableValue,
+    },
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
@@ -18,7 +22,9 @@ use smear_parser::{
 };
 use smear_schema::{MAX_FIELD_ARGUMENTS, Schema};
 
-use crate::{Extensions, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError, Values};
+use crate::{
+  Extensions, Kind, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError, Values,
+};
 
 // Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
 // compiles under `--no-default-features`, where `crate::std` is `alloc` and `ToString` is not in
@@ -27,7 +33,7 @@ use std::string::ToString;
 
 use core::num::NonZeroU32;
 
-use super::{Executor, Limits, NONE, State, node};
+use super::{Executor, Limits, NONE, State, Visits, node};
 
 const SDL: &str = r#"
 type Query {
@@ -1365,6 +1371,319 @@ fn a_condition_does_not_pay_for_the_arguments_after_if() {
     "one `@skip` usage cost {spent_long} units with {SUFFIX} arguments written after `if` and \
      {spent_short} with none. The scan compared one argument in both cases"
   );
+}
+
+// ------------------------------------------------------------------------------------------
+// draft §2.1.9's pass over a variable spelling, metered as it reads
+// ------------------------------------------------------------------------------------------
+
+/// A schema with the three shapes a variable spelling can be written into.
+const VARIABLES_SDL: &str =
+  "type Query { ok: String opt(a: String): String need(a: String!): String }";
+
+/// How long an unreadable spelling the fixtures assemble.
+///
+/// Only has to be past the budget the readable control needs; `byte_units` of this is 1,025, and
+/// every ceiling below is under a hundred.
+const SPELLING: usize = 8_192;
+
+fn assembled_span() -> tokora::SimpleSpan {
+  tokora::SimpleSpan::new(0, 0)
+}
+
+fn assembled_name(source: &[u8]) -> Name<&[u8]> {
+  Name::new(assembled_span(), source)
+}
+
+fn assembled_variable(spelling: &[u8]) -> InputValue<&[u8]> {
+  InputValue::Variable(VariableValue::new(
+    assembled_span(),
+    assembled_name(spelling),
+  ))
+}
+
+fn assembled_document(selection: Selection<&[u8]>) -> ExecutableDocument<&[u8]> {
+  ExecutableDocument::new(
+    assembled_span(),
+    std::vec![Described::new(
+      assembled_span(),
+      None,
+      ExecutableDefinition::Operation(OperationDefinition::Shorthand(SelectionSet::new(
+        assembled_span(),
+        std::vec![selection].into(),
+      ))),
+    )],
+  )
+}
+
+/// `{ ok @skip(if: $spelling) }` — draft §6.3's condition, read during collection.
+fn at_a_condition(spelling: &[u8]) -> ExecutableDocument<&[u8]> {
+  assembled_document(Selection::Field(Field::new(
+    assembled_span(),
+    None,
+    assembled_name(b"ok"),
+    None,
+    Some(Directives::new(
+      assembled_span(),
+      std::vec![Directive::new(
+        assembled_span(),
+        assembled_name(b"skip"),
+        Some(ArgumentList::new(
+          assembled_span(),
+          std::vec![Argument::new(
+            assembled_span(),
+            assembled_name(b"if"),
+            assembled_variable(spelling),
+          )],
+        )),
+      )],
+    )),
+    None,
+  )))
+}
+
+/// `{ field(a: $spelling) }` — draft §6.4.1 step 5.f's variable, read at resolution.
+fn at_an_argument<'a>(field: &'a [u8], spelling: &'a [u8]) -> ExecutableDocument<&'a [u8]> {
+  assembled_document(Selection::Field(Field::new(
+    assembled_span(),
+    None,
+    assembled_name(field),
+    Some(ArgumentList::new(
+      assembled_span(),
+      std::vec![Argument::new(
+        assembled_span(),
+        assembled_name(b"a"),
+        assembled_variable(spelling),
+      )],
+    )),
+    None,
+    None,
+  )))
+}
+
+/// What one assembled operation did: the ledger, the fields handed to the driver, and the errors.
+struct Assembled {
+  visits: u32,
+  resolved: usize,
+  kinds: std::vec::Vec<Kind>,
+  messages: std::vec::Vec<String>,
+}
+
+fn drive(schema: &Schema, document: &ExecutableDocument<&[u8]>, limit: Option<u32>) -> Assembled {
+  let mut space = Space;
+  let limits = match limit {
+    Some(limit) => Limits {
+      max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
+      ..Limits::default()
+    },
+    None => Limits::default(),
+  };
+  let mut executor = Executor::with_limits(schema, document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let mut resolved = 0;
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    resolved += 1;
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let visits = executor.charges().visits;
+  let response = executor.poll_response().expect("nothing is outstanding");
+  Assembled {
+    visits,
+    resolved,
+    kinds: response.errors().map(|error| error.kind()).collect(),
+    messages: response.errors().map(|error| error.to_string()).collect(),
+  }
+}
+
+/// An unreadable spelling costs the bytes draft §2.1.9's pass **read**, at draft §6.3's condition.
+///
+/// # The misclassification, not a slowdown
+///
+/// `condition_is_true` charged `byte_units(spelling.len())` and then called `variable_key`, whose
+/// `is_name` returns at the first byte outside the production. So a spelling rejected at byte
+/// **zero** did one byte of admission work and was billed for the whole assembled length — and a
+/// caller who assembled a long enough one was told `CollectionBudget`, whose printed remedy is a
+/// larger ceiling, where the finding is `ConditionFault::VariableMissing`: the request supplied no
+/// such variable, and no ceiling anywhere would have changed that.
+///
+/// The control is the *same* rejection one byte long, so the ceiling below is a quantity the long
+/// spelling's length cannot enter. At `33001c2` the long form costs `short + 1024` and is refused
+/// under it; the assertion that the two costs are equal is the one that cannot be satisfied by a
+/// harness that drives nothing.
+#[test]
+fn an_unreadable_condition_variable_is_charged_for_the_byte_that_refused_it() {
+  let (schema, _) = compile_against(VARIABLES_SDL, "{ ok }");
+  let mut long = std::vec![b'a'; SPELLING];
+  long[0] = b'1';
+
+  let short = drive(&schema, &at_a_condition(b"1"), None);
+  let refused_at_the_first_byte = std::vec![Kind::DirectiveCondition];
+  assert_eq!(
+    short.kinds, refused_at_the_first_byte,
+    "{:?}",
+    short.messages
+  );
+
+  let tight = drive(&schema, &at_a_condition(&long), Some(short.visits));
+  assert_eq!(
+    tight.kinds, refused_at_the_first_byte,
+    "a {SPELLING}-byte spelling rejected at its first byte reported {:?} under a ceiling of {} — \
+     the exact cost of the same rejection one byte long",
+    tight.messages, short.visits
+  );
+  assert_eq!(
+    tight.visits, short.visits,
+    "the ledger read {} units for a spelling whose scan examined one byte, and {} for the same \
+     scan over one byte of spelling",
+    tight.visits, short.visits
+  );
+}
+
+/// The same spelling at draft §6.4.1 step 5.f, where the misclassification nulls a served field.
+///
+/// # Why this site is the sharper one
+///
+/// Step 5.d's answer for a spelling that names no variable is `hasValue = false`, and for an
+/// **optional** argument with no default that is `continue` — the field is resolved, with that
+/// argument absent, and the response carries it. The charge in front of `variable_key` turned that
+/// request into `Coercion::Refused`: `ArgumentBudget`, the field nulled, and at a subscription's
+/// source field `StartError::SourceFieldArgumentBudget` instead of a stream. A resource refusal for
+/// a request the executor was about to serve, which is the `Coercion::FieldError`-versus-`Refused`
+/// distinction this branch built being decided by a charge rather than by the work.
+///
+/// The three arms are asserted together, because the repair is that they stay *different*:
+/// optional serves (`Coercion::Coerced`), non-null raises §6.4.1's own field error
+/// (`Coercion::FieldError`, `ArgumentVariableMissing`), and neither names a ceiling.
+#[test]
+fn an_unreadable_argument_variable_serves_the_optional_argument_it_names() {
+  let (schema, _) = compile_against(VARIABLES_SDL, "{ ok }");
+  let mut long = std::vec![b'a'; SPELLING];
+  long[0] = b'1';
+
+  // The ceiling: what the same rejection costs one byte long, at the same position.
+  let short = drive(&schema, &at_an_argument(b"opt", b"1"), None);
+  assert_eq!(short.kinds, std::vec![], "{:?}", short.messages);
+  assert_eq!(
+    short.resolved, 1,
+    "the control's optional argument was served"
+  );
+
+  let tight = drive(&schema, &at_an_argument(b"opt", &long), Some(short.visits));
+  assert_eq!(
+    tight.kinds,
+    std::vec![],
+    "a {SPELLING}-byte spelling rejected at its first byte reported {:?} for an OPTIONAL argument \
+     under a ceiling of {}",
+    tight.messages,
+    short.visits
+  );
+  assert_eq!(
+    tight.resolved, 1,
+    "the field was nulled rather than resolved, so step 5.d's `hasValue = false` did not reach \
+     step 5.h's `continue`"
+  );
+  assert_eq!(
+    tight.visits, short.visits,
+    "the ledger read {} units for a scan that examined one byte, and {} for the same scan over \
+     one byte of spelling",
+    tight.visits, short.visits
+  );
+
+  // The half a repair that simply stopped charging would also satisfy: a spelling that **is** a
+  // name is read to its end by all three of `is_name`, the conversion and the driver's lookup, so
+  // it still costs `byte_units` of its whole length — the number the header's measured ladder is
+  // written in, unchanged by metering it a unit at a time.
+  {
+    use crate::collect::byte_units;
+
+    let one = drive(&schema, &at_an_argument(b"opt", b"a"), None);
+    let many = drive(
+      &schema,
+      &at_an_argument(b"opt", &std::vec![b'a'; SPELLING]),
+      None,
+    );
+    assert_eq!(
+      many.visits - one.visits,
+      byte_units(SPELLING) - byte_units(1),
+      "a readable {SPELLING}-byte spelling cost {} units where a one-byte one cost {}",
+      many.visits,
+      one.visits
+    );
+  }
+
+  // The other arm of step 5.h: a non-null argument with no default is §6.4.1's own field error,
+  // and it is *still* not a budget refusal at any length.
+  let required = drive(
+    &schema,
+    &at_an_argument(b"need", &long),
+    Some(short.visits + 8),
+  );
+  assert_eq!(
+    required.kinds,
+    std::vec![Kind::ArgumentVariableMissing],
+    "{:?}",
+    required.messages
+  );
+  assert_eq!(
+    required.resolved, 0,
+    "a field whose non-null argument has no value is not handed to the driver"
+  );
+}
+
+/// The metered scan and the whole-slice one admit exactly the same spellings.
+///
+/// [`scan_key`] applies draft §2.1.9's rule a run of bytes at a time so the ledger can stop in the
+/// middle of it, and `is_name` applies it to the whole slice at once. The chunking is where those
+/// two can disagree — a run boundary inside a name is not a name boundary — so the agreement is
+/// asserted rather than argued, across every length that straddles one.
+#[test]
+fn the_metered_scan_admits_what_the_whole_slice_rule_admits() {
+  use crate::collect::{Admission, metered_variable_key};
+
+  let mut visits = Visits::new(u32::MAX);
+  let mut check = |spelling: &[u8]| {
+    let admitted = matches!(
+      metered_variable_key(spelling, &mut visits),
+      Admission::Key(_)
+    );
+    assert_eq!(
+      admitted,
+      smear_schema::is_name(spelling),
+      "the two rules disagree about {spelling:?}"
+    );
+  };
+
+  for spelling in [
+    &b""[..],
+    b"_",
+    b"a",
+    b"1",
+    b"_0aZ",
+    b"a b",
+    b"a-b",
+    "caf\u{e9}".as_bytes(),
+    b"\xff\x9f",
+  ] {
+    check(spelling);
+  }
+  // Every length across three unit boundaries, with the one byte outside the production walked to
+  // each position in turn — which is what a chunked scan can get wrong and a whole-slice one
+  // cannot.
+  for len in 1..=24usize {
+    let name = std::vec![b'a'; len];
+    check(&name);
+    for at in 0..len {
+      let mut broken = name.clone();
+      broken[at] = b'-';
+      check(&broken);
+      let mut digit = name.clone();
+      digit[at] = b'0';
+      check(&digit);
+    }
+  }
 }
 
 /// A name interned out of the *document* is charged like any other, so a colliding set of them
