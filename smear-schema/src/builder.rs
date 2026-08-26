@@ -3694,6 +3694,23 @@ impl SchemaBuilder {
   /// loop, and the descent, which is why `N` input objects defaulting to `{}` of one wide type cost
   /// `O(N)` rather than a fresh `Θ(width)` work list each.
   ///
+  /// **How that rule is decided is not the rule.** Written out as "every declared field", it read
+  /// the whole declaration once to clear `asked` and once again to answer — *whatever the descent
+  /// was about to do*, the descent that pushes no work at all included. Its complement is the
+  /// subset that decides it: `coverable` holds, per object, the fields that are not inert, so
+  /// "every declared field was asked or is inert" is "every coverable field was asked", and an
+  /// object with none of them is canonical for nothing having been asked. That is what makes the
+  /// no-map descent `O(1)` — a value unwrapping to no map node runs the draft's "for each field in
+  /// `inputObject`" zero times, so it asks nothing, and it covers `target` exactly when `target`
+  /// has nothing to cover. `asked` is stamped with the descent that wrote it rather than cleared
+  /// for it, so the other width-proportional pass goes too.
+  ///
+  /// The population that stood in for the rule before this was **`N` input types with a valid
+  /// `w: [Wide] = []` in front of a `D`-field `Wide` holding one defaulted input-object field**:
+  /// each empty list produces no map, so it can settle nothing, and it repeated both `D`-wide
+  /// passes. `Θ(N + D)` of accepted SDL, `Θ(N × D)` of build — 1.90 in the exponent over
+  /// 16 k–128 k and **34.9 s** at 128 k, against 1.06 and **160 ms**. al8n/smear#198.
+  ///
   /// # Over the split, and the factor here is not a count of fields
   ///
   /// Every literal this walk descends into belongs to a field it is *not* reporting on, and the
@@ -3745,14 +3762,49 @@ impl SchemaBuilder {
     }
     let total_fields = field_base[count];
 
+    // The fields a frame has to have ASKED for its work to cover `(object, {})`, per object, as
+    // one flat list with `coverable_base` addressing it — the shape `field_base` above already
+    // uses. A field naming no input object, or carrying no default, returns immediately whichever
+    // way it is asked, so it is inert and covering it is nothing to cover; every other declared
+    // field is here, and `canonical` is exactly "every one of mine was asked".
+    //
+    // Derived once, in `Θ(input fields)`, so that a descent's two questions are answered over
+    // this subset rather than over the whole declaration. What that replaces is the reason:
+    // every descent cleared and resized `asked` to the target's full declared width and then
+    // scanned every declaration, EVEN WHEN `map_nodes` produced no map at all and the frame it
+    // pushed had no work in it. `N` input types with a valid `w: [Wide] = []` in front of a
+    // `D`-field `Wide` is `Θ(N + D)` of SDL `Schema::build` ACCEPTS: an empty list unwraps to no
+    // map, so it can settle nothing and repeats both `D`-wide passes `N` times. 1.90 in the
+    // exponent over 16 k–128 k and 34.9 s at 128 k. al8n/smear#198.
+    let mut coverable_base: Vec<usize> = vec![0; count + 1];
+    let mut coverable: Vec<u32> = Vec::new();
+    for index in 0..count {
+      for (at, field) in model.types[index].input_fields.iter().enumerate() {
+        let base = field.ty.packed.base_id();
+        if base != UNRESOLVED
+          && model.types[base.get() as usize].kind == TypeKind::InputObject
+          && field.default_value.is_some()
+        {
+          coverable.push(at as u32);
+        }
+      }
+      coverable_base[index + 1] = coverable.len();
+    }
+
     let mut implicated = vec![false; count];
     // Objects a completed *canonical* exploration proved clean; the header says why only that one
     // counts, and why what it proves is transitive.
     let mut settled = vec![false; count];
     let mut on_path = vec![false; total_fields];
-    // Which of a target's declared fields this descent asks with nothing supplied, reused across
-    // pushes: it decides one `bool` per frame and is dead the moment the frame exists.
-    let mut asked: Vec<bool> = Vec::new();
+    // Which input field this descent asked with nothing supplied, addressed by the same dense id
+    // `on_path` uses, and STAMPED with the descent that asked rather than cleared for it: the
+    // answer is read over the coverable subset, which may be empty while the declaration is wide,
+    // so a clear proportional to the declaration is one of the two passes this removes. `u64`
+    // because a stamp that wraps is a stamp that answers for a descent that did not ask, and no
+    // walk can make 2^64 of them; zero is therefore never a live stamp, which is what lets the
+    // whole array start there.
+    let mut asked: Vec<u64> = vec![0; total_fields];
+    let mut descent: u64 = 0;
 
     for start in 0..count {
       if model.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
@@ -3841,38 +3893,43 @@ impl SchemaBuilder {
           }
         };
 
-        asked.clear();
-        asked.resize(declared.len(), false);
+        // The header's condition, over the subset that can fail it. A field asked with nothing
+        // supplied is the one whose *own* default this frame descends into, which is what the
+        // empty-map call does to every field; an inert field is covered by being inert. So this
+        // frame's work is the canonical exploration of `target` exactly when every coverable
+        // field of `target` was asked — and only then may retiring it settle `target` for the
+        // starts and descents that follow. That is the rule 1260027 wrote, unchanged; what
+        // changed is that it is decided over `coverable` instead of by rescanning `declared`.
+        let coverable_here = &coverable[coverable_base[target]..coverable_base[target + 1]];
         let mut work = Vec::new();
-        for map in &maps {
-          // The scan [`Names`] was written for, asked the other way round: one lookup per declared
-          // field into one map node, so a wide input object in front of a literal that writes its
-          // fields was `Θ(declared × written)` here as well as at
-          // [`SchemaBuilder::check_const_value`].
-          let of_entry = Names::over(map.len(), declared.len(), |at| map[at].name.sym);
-          for (index, declared_field) in declared.iter().enumerate() {
-            let supplied = of_entry
-              .first(map.len(), declared_field.name.sym, |at| map[at].name.sym)
-              .map(|at| &map[at].value);
-            asked[index] |= supplied.is_none();
-            work.push((index, supplied));
+        let canonical = if maps.is_empty() {
+          // The draft's "for each field in inputObject" runs once per map node, so no map is no
+          // work — and no work asks nothing, which covers `target` only when there is nothing of
+          // `target` to cover. Decided here in `O(1)` rather than by two passes over a
+          // declaration this frame is not going to read.
+          coverable_here.is_empty()
+        } else {
+          descent += 1;
+          for map in &maps {
+            // The scan [`Names`] was written for, asked the other way round: one lookup per
+            // declared field into one map node, so a wide input object in front of a literal that
+            // writes its fields was `Θ(declared × written)` here as well as at
+            // [`SchemaBuilder::check_const_value`].
+            let of_entry = Names::over(map.len(), declared.len(), |at| map[at].name.sym);
+            for (index, declared_field) in declared.iter().enumerate() {
+              let supplied = of_entry
+                .first(map.len(), declared_field.name.sym, |at| map[at].name.sym)
+                .map(|at| &map[at].value);
+              if supplied.is_none() {
+                asked[field_base[target] + index] = descent;
+              }
+              work.push((index, supplied));
+            }
           }
-        }
-        // The header's condition. A field asked with nothing supplied is the one whose *own*
-        // default this frame descends into, which is what the empty-map call does to every field;
-        // a field naming no input object, or carrying no default, returns immediately whichever
-        // way it is asked, so covering it is nothing to cover. Both together are what make this
-        // frame's work the canonical exploration of `target` — and only then may retiring it
-        // settle `target` for the starts and descents that follow.
-        let canonical = declared.iter().enumerate().all(|(index, field)| {
-          if asked[index] {
-            return true;
-          }
-          let base = field.ty.packed.base_id();
-          base == UNRESOLVED
-            || model.types[base.get() as usize].kind != TypeKind::InputObject
-            || field.default_value.is_none()
-        });
+          coverable_here
+            .iter()
+            .all(|&at| asked[field_base[target] + at as usize] == descent)
+        };
         stack.push(Frame {
           pushed,
           work,
