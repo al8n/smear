@@ -1274,6 +1274,99 @@ fn a_refused_probe_run_stops_at_the_refusal() {
   );
 }
 
+/// Draft §6.3 step 3.a returns at the first `@skip` that says so, and the ledger stops there too.
+///
+/// **The regression for a charge in front of work the taken branch does not do.** `included` spent
+/// the whole directive list's length before either pass, so a *valid* field whose first directive
+/// removes it — one comparison, and then the collector is done with the selection — was refused
+/// with `CollectionBudget` for a suffix nothing read. Charging first is what makes "units spent"
+/// equal "work done"; charging for a branch that is not taken makes it "work the client wrote",
+/// which is a different quantity and refuses operations this executor was about to serve.
+///
+/// Both halves are asserted, because either alone can be satisfied by the wrong mechanism: the
+/// long list costs exactly what the short one costs, and the operation is then served under a
+/// budget set to precisely that. At 555deb7 the first is `short + 1600`.
+#[test]
+fn a_skipped_selection_does_not_pay_for_the_directives_after_the_skip() {
+  /// Past any plausible slack in the budget below, so a refusal cannot be a near miss.
+  const SUFFIX: usize = 1_600;
+  const SDL: &str = "type Query { a: String b: String }\ndirective @custom repeatable on FIELD";
+
+  let mut long = std::string::String::from("{ a @skip(if: true)");
+  for _ in 0..SUFFIX {
+    long.push_str(" @custom");
+  }
+  long.push_str(" b }");
+  let short = "{ a @skip(if: true) b }";
+
+  // The budget the suffix-free form needs, and nothing over: tight enough that one unit for one
+  // unread directive crosses it, so being served is a statement about the charge and not slack.
+  let spent_short = collection_work(SDL, short);
+
+  let (schema, document) = compile_against(SDL, &long);
+  let mut space = Space;
+  let limits = Limits {
+    max_selection_visits: NonZeroU32::new(spent_short).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut executor = Executor::with_limits(&schema, &document, limits);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    executor.handle_resolved(&mut space, id, Value::Text);
+  }
+  let errors = {
+    let response = executor.poll_response().expect("nothing is outstanding");
+    response.error_count()
+  };
+  assert_eq!(
+    errors, 0,
+    "a valid operation was refused by a ceiling of {spent_short} — the exact cost of the same \
+     operation without the {SUFFIX} directives step 3.a never reaches"
+  );
+
+  let spent_long = collection_work(SDL, &long);
+  assert_eq!(
+    spent_long, spent_short,
+    "the same field, skipped by the same first directive, cost {spent_long} units with a \
+     {SUFFIX}-directive suffix and {spent_short} without one. Step 3.a examined one directive in \
+     both, so the difference is a charge for comparisons that never happened"
+  );
+}
+
+/// The scan for `if` at one `@skip` usage stops at `if`, and the ledger stops there too.
+///
+/// The sibling of the test above, at the second charge the same round added. `condition_is_true`
+/// spent the usage's whole argument list before a `find` that returns at the first `if`, so the
+/// arguments after it were priced and never compared.
+///
+/// **The fixture is deliberately not a validated document**, and that is the point rather than a
+/// gap: draft 5.4.1 and 5.7.3 leave a conforming `@skip` exactly one argument, so on validated
+/// input there is no suffix and no difference to see. This executor does not validate — the whole
+/// collection ledger exists because what reaches it is what the *client* wrote — so the population
+/// with a suffix is the unvalidated one, and it is the one the charge has to be honest about.
+#[test]
+fn a_condition_does_not_pay_for_the_arguments_after_if() {
+  const SUFFIX: usize = 1_600;
+
+  let mut long = std::string::String::from("{ a @skip(if: true");
+  for index in 0..SUFFIX {
+    long.push_str(&std::format!(" x{index}: 1"));
+  }
+  long.push_str(") }");
+  let short = "{ a @skip(if: true) }";
+
+  let spent_short = collection_work(ONE_FIELD, short);
+  let spent_long = collection_work(ONE_FIELD, &long);
+  assert_eq!(
+    spent_long, spent_short,
+    "one `@skip` usage cost {spent_long} units with {SUFFIX} arguments written after `if` and \
+     {spent_short} with none. The scan compared one argument in both cases"
+  );
+}
+
 /// A name interned out of the *document* is charged like any other, so a colliding set of them
 /// cannot outrun the budget.
 ///

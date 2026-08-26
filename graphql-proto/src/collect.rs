@@ -2086,7 +2086,7 @@ fn applies(schema: &Schema, condition: &[u8], object_type: TypeId) -> bool {
 /// `{ f @include(if: $unreadable) @skip(if: true) }` produces no error. Reading them in document
 /// order would raise one, and the reference implementation does not.
 ///
-/// # The list is charged, because the two passes are over what the *request* wrote
+/// # The directives are charged, because the two passes are over what the *request* wrote
 ///
 /// A selection costs one unit however many directives it carries, and both passes walk all of them
 /// at every runtime position the selection is collected for. `{ bulk { f @skip(if: false) × 1600 }
@@ -2098,7 +2098,26 @@ fn applies(schema: &Schema, condition: &[u8], object_type: TypeId) -> bool {
 /// length-first against an ASCII literal, so what the client chooses here is the **count**, and the
 /// two passes are a constant on it rather than a second factor. That is the distinction the
 /// ledger's table draws — a budget on one factor of a product is the defect; a budget off by a
-/// fixed two is a unit. al8n/smear#198.
+/// fixed two is a unit.
+///
+/// # The unit is spent at the directive, because step 3.a does not read the rest
+///
+/// The first revision of this spent the whole list's length before either pass. That is the
+/// charge-first discipline overshot: **step 3.a returns as soon as a `@skip` says so**, so
+/// `{ f @skip(if: true) @custom × 1600 }` — a *valid* field, one directive examined — was refused
+/// with `CollectionBudget` for 1,600 directives nothing read. A charge in front of work the taken
+/// branch does not do is not a bound on anything; it is a refusal of input the executor was about
+/// to serve for free.
+///
+/// So the unit is spent inside the first loop, in front of the comparison that reads that
+/// directive. The second loop needs none of its own and is not left uncharged either: it runs only
+/// where the first reached the end, so every directive it can examine was already charged before
+/// the first loop read it — which is what keeps the count above exact rather than doubling it, and
+/// what keeps the whole list's measured numbers the numbers for a list that *is* fully read.
+///
+/// It also retires the [`u32::MAX`] saturation this charge used to need. A length that does not
+/// fit the counter is a length the counter has stopped tracking, and one unit at a time never
+/// reaches for a number it cannot spell. al8n/smear#198.
 fn included<'a, S, V>(
   directives: Option<&'a Directives<S>>,
   ctx: &mut V,
@@ -2113,8 +2132,13 @@ where
     return Ok(true);
   };
   let written = directives.directives();
-  visits.spend(u32::try_from(written.len()).unwrap_or(u32::MAX), location)?;
   for directive in written {
+    // In front of the comparison that reads THIS directive, and not in front of the list. Step
+    // 3.a returns the moment a `@skip` says so, and a charge over the whole list made the ledger
+    // refuse a valid `{ f @skip(if: true) @custom … }` for a suffix nothing read. The second pass
+    // is prepaid by this one: it runs only where this loop reached the end, so every directive it
+    // can examine was charged before this loop read it.
+    visits.spend(1, location)?;
     if directive.name().source().as_ref() == b"skip" && condition_is_true(directive, ctx, visits)? {
       return Ok(false);
     }
@@ -2277,19 +2301,25 @@ where
     .arguments()
     .map(|arguments| arguments.arguments())
     .unwrap_or(&[]);
-  // The scan for `if` reads every argument the *request* wrote at this usage, and this runs once
+  // The scan for `if` reads the arguments the *request* wrote at this usage, and this runs once
   // per runtime position the selection is collected for — so `@skip(a0: 1 … a1599: 1, if: false)`
   // did 1,600 comparisons at every position for the one unit the selection cost. Charged in
   // entries and not in bytes: a name compared against an ASCII literal is settled by its length
-  // first, so what the client chooses here is the count. al8n/smear#198.
-  visits.spend(
-    u32::try_from(written.len()).unwrap_or(u32::MAX),
-    *directive.span(),
-  )?;
-  let argument = written
-    .iter()
-    .find(|argument| argument.name().source().as_ref() == b"if");
-  let Some(argument) = argument else {
+  // first, so what the client chooses here is the count.
+  //
+  // One unit per argument the scan actually compares, spent in front of that comparison. The scan
+  // stops at `if`, so a charge over the whole list priced arguments it was never going to read —
+  // and a written list is not a validated one, which is the population that has any past the
+  // first. al8n/smear#198.
+  let mut found = None;
+  for argument in written {
+    visits.spend(1, *directive.span())?;
+    if argument.name().source().as_ref() == b"if" {
+      found = Some(argument);
+      break;
+    }
+  }
+  let Some(argument) = found else {
     return Err(Fault {
       raw: Raw::DirectiveCondition {
         fault: ConditionFault::Missing,
