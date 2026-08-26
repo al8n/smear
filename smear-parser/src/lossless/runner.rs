@@ -395,6 +395,11 @@ where
 /// message below reports the refusal it got rather than naming a cause.
 ///
 /// [`HARD_MAX`]: smear_lexer::limits::HARD_MAX
+// Gated on having a caller. `rowan` alone compiles this module with neither dialect, and the two
+// dialect runners are the only callers, so without this the one configuration that builds the
+// substrate without a dialect reports dead code — which `-D warnings` turns into a failure of a
+// leg nothing else in this file exercises.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn finish_parsed_root<'inp, L, Lx, Em>(
   cst: Cst<'inp, Lx, Em>,
   root: u16,

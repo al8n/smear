@@ -1514,8 +1514,10 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
   );
 
   // The ceiling is not in the way of anything real: the deepest green tree in this repository's
-  // corpus is twelve levels, and the deepest document the lexer accepts at all materialises
-  // fifty-one.
+  // corpus is twelve levels. What the *doors* can produce is a different and much larger
+  // population — `HARD_MAX` brackets, not `MAX_NESTING_DEPTH`, reaching 516 levels — and reading
+  // the second off the first is what opened the window `MAX_GREEN_DEPTH`'s header now records.
+  // That obligation is a `const` assertion beside the constant; this cell is about the corpus.
   let deepest = corpus("valid_")
     .into_iter()
     .map(|(_, src)| depth_of(parse_document(&src).green()))

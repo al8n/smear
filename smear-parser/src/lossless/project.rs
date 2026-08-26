@@ -84,13 +84,30 @@ use tokora::SimpleSpan;
 /// Every other ceiling this workspace exposes — the merge bounds, the validation ledger, the
 /// lexer's own nesting limit — bounds *work*, and a caller can want more of it. This one bounds
 /// **native stack frames**, and the right value is a property of the runtime rather than of the
-/// document. A caller who raised it would be configuring a segmentation fault back in, and one who
-/// lowered it would break nothing, because nothing a parser produces comes near it.
+/// document. A caller who raised it would be configuring a segmentation fault back in; a caller
+/// who lowered it would start refusing documents this crate's own parser accepts, because what a
+/// parser produces reaches **516** of these levels and the assertion below is what keeps that
+/// under the ceiling.
 ///
-/// The measured facts it is set against: the deepest green tree in this repository's 472 corpus
-/// fixtures is **12** levels, and the deepest document the lexer will accept at all — its
-/// `MAX_NESTING_DEPTH` of 24 open brackets — materialises **51**. This is an order of magnitude
-/// above the second number and nearly two above the first.
+/// # The population this is derived over, which is not the one it used to name
+///
+/// This header used to rest on two figures — the deepest green tree in the repository's 472
+/// corpus fixtures is **12** levels, and the deepest document at
+/// [`MAX_NESTING_DEPTH`](smear_lexer::limits::MAX_NESTING_DEPTH)'s 24 open brackets materialises
+/// **51** — and conclude that *nothing a parser produces comes near it*. **That conclusion was
+/// false, and the reason is the population.** The lossless doors do not clamp to
+/// `MAX_NESTING_DEPTH`; they clamp to [`HARD_MAX`](smear_lexer::limits::HARD_MAX), which is 256.
+/// A margin derived over 24 brackets was being stated over 256 of them, and at the top of that
+/// range the tree really did cross the old ceiling: a 254-bracket object-value chain parses
+/// clean and materialises **516** levels, so an ordinary `project` answered
+/// `TooDeep { limit: 512 }` on a document this crate's own parser had just accepted with no
+/// diagnostic at all. The window was per-shape rather than per-bracket-count — it opened at 253
+/// brackets for an object-value chain and at 255 for a selection chain — which is itself the
+/// tell that a single fitted formula was the wrong instrument. al8n/smear#198.
+///
+/// So the figure below is derived over the population that reaches it, and both ends are now
+/// asserted rather than argued. See `WORST_DOOR_GREEN_TREE` for what the doors produce and
+/// `WORST_GREEN_WALK_BOUNDARY` for what the walks can afford.
 ///
 /// # Why any bound is needed here at all
 ///
@@ -105,7 +122,119 @@ use tokora::SimpleSpan;
 /// green tree recursively, so a tree deep enough to overflow this walk was already deep enough to
 /// overflow its own `Drop`, in the caller's code, before any of these functions saw it. That route
 /// is `rowan`'s and is reachable without this crate; see `crate::lossless::runner::finish_root`.
-pub const MAX_GREEN_DEPTH: usize = 512;
+///
+/// # Why 1024
+///
+/// The same two-sided shape [`HARD_MAX`](smear_lexer::limits::HARD_MAX) is derived under, with
+/// the bounds swapped for this constant's own:
+///
+/// | bound | from | value |
+/// |---|---|---|
+/// | lower: the tree the doors produce | `WORST_DOOR_GREEN_TREE` | **516** |
+/// | upper: the 1.9x margin | `floor(2861 x 10 / 19)`, asserted below | **1505** |
+///
+/// The admissible interval is `[516, 1505]` and the value is taken at the top of the power-of-two
+/// ladder inside it, which is the same tie-break `HARD_MAX` applies for the same reason. At 1024
+/// the margin over the worst measured walk is **2.79x**, wider than the 1.9x that interval was
+/// cut at.
+///
+/// **What it costs on the smallest stack this crate supports.** 2 MiB — what `std::thread::spawn`,
+/// a tokio worker and the libtest harness each give — divided by the 2 861 levels the worst walk
+/// reaches on it is **733 bytes a level**, so a walk at the full ceiling occupies about **750 KiB**
+/// and leaves 1.3 MiB. The old 512 occupied about 375 KiB, so this is 375 KiB more of a budget
+/// that had 1.7 MiB spare. For scale, one lossless *production* frame is 3 125 bytes a level on
+/// the same stack (`HARD_MAX`'s table): a green walk's frame is 4.3x cheaper, which is why the
+/// parser's permissiveness never has to pay for this.
+///
+/// **`HARD_MAX` was the other candidate and was refused on its own derivation.** Lowering it to
+/// ~252 would hold the old 512, and it would narrow what the parser *accepts*: a caller on a
+/// larger stack asking `parse_document_with_limits` for 253-256 brackets gets a clean parse today
+/// and would get a positioned nesting diagnostic instead. `HARD_MAX`'s header takes the low side
+/// of its own interval only because too-high there is a **process abort**; nothing aborts here,
+/// the projection answers a typed refusal, so that asymmetry does not transfer and only the cost
+/// does. What would have reversed this: an empty interval — a worst-walk boundary under about
+/// 1 000 levels, where `MAX_GREEN_DEPTH` could not clear `WORST_DOOR_GREEN_TREE` and keep the
+/// 1.9x margin. It is 2 861, so the interval is wide and the parser keeps its reach.
+pub const MAX_GREEN_DEPTH: usize = 1024;
+
+/// The deepest green tree either dialect's own lossless doors will produce.
+///
+/// A constant rather than only prose so the assertion below can read it, exactly as
+/// [`HARD_MAX`](smear_lexer::limits::HARD_MAX)'s `WORST_LOSSLESS_BOUNDARY` is.
+///
+/// Measured on `parse_document_with_limits` at a
+/// [`HARD_MAX`](smear_lexer::limits::HARD_MAX) ceiling, taking for each shape the deepest bracket
+/// count that still parses **clean**, over both dialects:
+///
+/// | shape | brackets | levels | per bracket |
+/// |---|---|---|---|
+/// | object value `{ a: { a: … } }` | 254 | **516** | 2.020 |
+/// | selection set `{ a { a … } }` | 255 | 515 | 2.008 |
+/// | list value `[[…]]` | 254 | 262 | 1.020 |
+/// | list type `[[…]]` | 255 | 261 | 1.012 |
+///
+/// GraphQLx measures identically on every row it shares and is never worse, which is worth
+/// stating because `HARD_MAX`'s own table found GraphQLx the worse of the two by 0.3%.
+///
+/// **The obvious relationship is wrong, and this is why the number is recorded rather than
+/// computed.** `2 x brackets + 3` is what a selection chain costs and it gives 515; the object
+/// value chain costs 2.020 a bracket and reaches 516, one level *above* it. A formula fitted to
+/// the first shape anyone measures is how this drifts again, so the fitted relationship is not
+/// what the assertions use — `GREEN_LEVELS_PER_BRACKET` is, and it is an integer above every
+/// row of this table.
+const WORST_DOOR_GREEN_TREE: usize = 516;
+
+/// Green levels one open bracket can add to the tree.
+///
+/// Three, where the worst row of `WORST_DOOR_GREEN_TREE`'s table measures 2.020. It is the
+/// coefficient the scaling assertion below uses, and it is deliberately the next integer above
+/// every measured shape rather than the measured maximum: the table is nine shape-and-dialect
+/// pairs, which is an enumeration and not a proof, so the coefficient carries the margin for the
+/// shape nobody has written yet.
+const GREEN_LEVELS_PER_BRACKET: usize = 3;
+
+/// The deepest the worst depth-bounded walk here recurses on a 2 MiB debug thread before the
+/// native stack ends it.
+///
+/// `node_extent` / `extent_of`, identical in both dialects, bisected one child process per depth:
+/// 2 861 returns and 2 862 dies. Its neighbours have more room — `reject_holes` 3 656,
+/// `verify_source_counted` 4 113, `verify_source` 4 388 — so the ceiling is set against this one.
+///
+/// A `const` rather than only prose for the reason `HARD_MAX`'s twin is: the assertion below is
+/// checked against a **recorded** number, not against the machine, and raising
+/// [`MAX_GREEN_DEPTH`] means re-running the bisection rather than editing one line.
+const WORST_GREEN_WALK_BOUNDARY: usize = 2861;
+
+// -- THE INVARIANT THAT WAS MISSING, AND THE WINDOW IT WOULD HAVE CLOSED ----------------------
+//
+// `MAX_GREEN_DEPTH` and `HARD_MAX` live in different crates and had a relationship nothing
+// enforced, so a margin derived at 24 brackets went on being stated over 256 of them. Three
+// assertions hold it now, and they fail on different edits: the first on a `HARD_MAX` raise, the
+// second on a `MAX_GREEN_DEPTH` cut, the third on a `MAX_GREEN_DEPTH` raise past what the native
+// stack affords.
+//
+// The first is the load-bearing one, and the plant that proves it is a `HARD_MAX` of 342: that
+// value passes `HARD_MAX`'s OWN 1.9x margin assertion, so every gate that existed before this
+// round admits it, and it is exactly the edit that reopens this window.
+const _: () = assert!(
+  smear_lexer::limits::HARD_MAX * GREEN_LEVELS_PER_BRACKET <= MAX_GREEN_DEPTH,
+  "the lossless doors can accept a document whose green tree is deeper than the walks here will \
+   descend, so a projection would refuse a parse this crate just produced. Raising HARD_MAX means \
+   re-running WORST_DOOR_GREEN_TREE's shape table, not relaxing this."
+);
+
+const _: () = assert!(
+  WORST_DOOR_GREEN_TREE <= MAX_GREEN_DEPTH,
+  "the deepest tree the lossless doors were measured to produce does not fit under \
+   MAX_GREEN_DEPTH, so a projection refuses a parse this crate just produced"
+);
+
+const _: () = assert!(
+  MAX_GREEN_DEPTH * 19 <= WORST_GREEN_WALK_BOUNDARY * 10,
+  "MAX_GREEN_DEPTH leaves less than the 1.9x margin it was derived at under the worst measured \
+   native-stack boundary of the walks it bounds. Raising it needs a new bisection, not a new \
+   constant."
+);
 
 /// How a depth-bounded green walk stopped: on a divergence, or on the ceiling.
 ///
@@ -191,7 +320,8 @@ pub enum ProjectErrorKind<K> {
   },
   /// The tree nests deeper than any walk here will descend.
   ///
-  /// Not reachable from a parsed document — see [`MAX_GREEN_DEPTH`] for the measured margin. It
+  /// Not reachable from a parsed document — [`MAX_GREEN_DEPTH`] carries the assertion that keeps
+  /// it unreachable, and the window where it briefly was not. It
   /// exists because these helpers take an arbitrary `GreenNodeData` and a recursive walk over an
   /// unproved one is a stack overflow rather than a refusal.
   TooDeep {
