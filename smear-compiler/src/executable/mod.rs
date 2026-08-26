@@ -238,10 +238,10 @@
 //! `merge_work`, which replaced a real conflict diagnostic with a resource refusal.
 //!
 //! **The repair is structural rather than per-site**: a comparison charges a unit immediately
-//! before each run of bytes it is about to read ([`scan_eq`], [`scan_cmp`]), and a name a sort
-//! reads `log N` times carries the deepest prefix it has been charged for so there is no
-//! prepayment left anywhere to be wrong about. Every length-derived charge in this crate, with the
-//! verdict:
+//! before each run of bytes it is about to read ([`scan_eq`], [`scan_cmp`], [`probe_cmp`]), and a
+//! name a sort reads `log N` times carries the deepest prefix it has been charged for so there is
+//! no prepayment left anywhere to be wrong about. Every length-derived charge in this crate, with
+//! the verdict:
 //!
 //! | charge | the operation below it | verdict |
 //! |---|---|---|
@@ -249,8 +249,8 @@
 //! | 5.2.2.1, per operation name | the same, one rule over | **at consumption** |
 //! | 5.8.1's index, per declaration | the same | **at consumption** |
 //! | 5.6.3, per input-object field | the same, and nothing else reads these names | **at consumption** |
-//! | `find_fragment`'s probe | `binary_search_by`'s `cmp` | **at consumption**, per probe depth |
-//! | 5.8.3/5.8.5's usage probe | two `partition_point`s and one `eq` | **at consumption**, same shape |
+//! | `find_fragment`'s probe | [`probe_slot`]'s `cmp` | **at consumption**, per probe depth |
+//! | 5.8.3/5.8.5's usage probe | two [`probe_partition`]s and one `eq` | **at consumption**, same shape |
 //! | 5.2.4.1's response name | one `!=` against the stored first name | **at consumption**; compared once, so no depth to keep |
 //! | `Names::intern`'s chain step | one `memcmp`, behind a whole stored hash **and** a length | **at consumption**; the equal path is unchanged |
 //! | `merge::find`'s chain step | the same, one table over | **at consumption** |
@@ -485,7 +485,7 @@ use super::{
   },
   scratch::{
     Compared, Edge, FragmentRow, Frame, GraphFrame, NONE, OperationRow, Work, byte_units,
-    clear_bit, count_units, get_bit, push_frame, reset_bits, scan_cmp, scan_eq, set_bit,
+    clear_bit, count_units, get_bit, probe_cmp, push_frame, reset_bits, scan_cmp, scan_eq, set_bit,
   },
 };
 
@@ -1176,6 +1176,57 @@ where
   meter.finish()
 }
 
+/// `keys.binary_search_by(cmp).ok()`, abandoning the search at the first refused charge.
+///
+/// # A search is not a sort, and the argument that lets a sort finish is about sorting
+///
+/// [`sort_metered`]'s lookup twin. [`scan_cmp`]'s header says a charged comparator cannot stop
+/// answering because `sort_unstable_by` panics on a comparator that is not a total order, and that
+/// sentence was read here as a fact about charged comparators. It is a fact about
+/// `sort_unstable_by`. **Nothing consumes a refused lookup's answer** — the caller returns the
+/// refusal — so the search needs no ordering, and every comparison it makes after the first charge
+/// it cannot pay is work performed with no budget left. A valid document with one fragment and a
+/// matching four-kilobyte spread name compared all 4,002 bytes under a ceiling that could not pay
+/// the opening unit, and discarded the result. al8n/smear#198's twenty-fourth round.
+///
+/// [`None`] is the refusal and `Some(None)` is a name the index does not hold. The slot sequence
+/// and the early return on [`Ordering::Equal`] are `binary_search_by`'s own, so a probe that is
+/// never refused reads exactly the elements — and pays exactly the units — the plain search does.
+#[inline]
+fn probe_slot(len: usize, mut cmp: impl FnMut(usize) -> Option<Ordering>) -> Option<Option<usize>> {
+  let mut lo = 0usize;
+  let mut hi = len;
+  while lo < hi {
+    let mid = lo + (hi - lo) / 2;
+    match cmp(mid)? {
+      Ordering::Less => lo = mid + 1,
+      Ordering::Greater => hi = mid,
+      Ordering::Equal => return Some(Some(mid)),
+    }
+  }
+  Some(None)
+}
+
+/// `keys.partition_point(pred)`, abandoning the search at the first refused charge.
+///
+/// [`probe_slot`]'s bounds-shaped sibling; see it for why a lookup stops where a sort cannot.
+/// `pred` answers [`None`] when the ledger refused, and the slot sequence is `partition_point`'s
+/// own.
+#[inline]
+fn probe_partition(len: usize, mut pred: impl FnMut(usize) -> Option<bool>) -> Option<usize> {
+  let mut lo = 0usize;
+  let mut hi = len;
+  while lo < hi {
+    let mid = lo + (hi - lo) / 2;
+    if pred(mid)? {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  Some(lo)
+}
+
 /// Which of this crate's two ledgers pays for a diagnostic subject's copy.
 ///
 /// [`Validator::subject`] is the only door to a subject and it charges before it copies; this says
@@ -1563,7 +1614,8 @@ where
   /// - **Binary searches.** `find_fragment` and the variable index: the same argument one
   ///   dimension smaller, with the probe's own depth charged at consumption and the stored side
   ///   riding on it — a comparison reading `L` bytes of a stored name needed the probe to agree
-  ///   for `L`.
+  ///   for `L`. A search also **stops** at the first charge it cannot pay, which a sort may not;
+  ///   see [`probe_slot`].
   /// - **Schema lookups keyed by an already-charged name.** Free by construction — the schema is
   ///   the server's, so its group sizes are not an input.
   /// - **A diagnostic's subject clone.** Charged in the name's own bytes in front of every clone,
@@ -2030,6 +2082,24 @@ where
     ControlFlow::Continue(())
   }
 
+  /// The refusal a charged **lookup** returns, against whichever of this crate's two ledgers the
+  /// caller's pass spends.
+  ///
+  /// One door for [`Validator::find_fragment`]'s two exits — the opening unit, and a comparison
+  /// part-way through the search — so the merge ledger's trip and the validation ledger's cannot
+  /// come apart between them. It returns `Option<u32>` for `find_fragment`'s signature; the
+  /// [`ControlFlow::Continue`] arm is unreachable, since both ledgers break.
+  #[cold]
+  fn refuse_lookup(&mut self, ledger: Charged, blame: SimpleSpan) -> ControlFlow<(), Option<u32>> {
+    match ledger {
+      Charged::Validation => self.refuse(blame).map_continue(|()| None),
+      Charged::Merge => {
+        self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
+        ControlFlow::Break(())
+      }
+    }
+  }
+
   /// Returns the ordinal a fragment name resolves to — the first definition of that name.
   /// **The probe is charged here, for the bytes its comparisons read.**
   ///
@@ -2061,11 +2131,15 @@ where
       return ControlFlow::Continue(None);
     }
     let document = self.document;
-    // The opening unit, taken once. `binary_search_by` over a non-empty index invokes its
-    // comparator at least once, and unit one is exactly what that comparison's length test and
-    // first run of bytes cost — so this is the first comparison's charge, hoisted out of it.
+    // The opening unit, taken once. `probe_slot` over a non-empty index invokes its comparator at
+    // least once, and unit one is exactly what that comparison's length test and first run of
+    // bytes cost — so this is the first comparison's charge, hoisted out of it.
+    //
+    // **And a refusal here returns here.** It used to fall through to the plain search, on the
+    // reading of `scan_cmp` that `probe_slot` corrects: a spread whose name matches a stored one
+    // compared its whole spelling with the ledger already at zero, and the answer was discarded.
     let mut paid = 1u32;
-    let mut refused = !match ledger {
+    let held = match ledger {
       Charged::Validation => match self.left.take(1) {
         Some(left) => {
           self.left = left;
@@ -2075,6 +2149,9 @@ where
       },
       Charged::Merge => self.work.take(1),
     };
+    if !held {
+      return self.refuse_lookup(ledger, blame);
+    }
     let mut validation = self.left;
     let mut merge = self.work;
     // What a full pass over the probe costs. A spelling under `BYTES_PER_UNIT` is that one unit
@@ -2085,17 +2162,22 @@ where
     let found = {
       let rows = &self.scratch.fragments;
       let order = &self.scratch.order;
-      if whole <= 1 || refused {
-        order.binary_search_by(|ordinal| fragment_name(document, rows, *ordinal).cmp(name))
+      if whole <= 1 {
+        // Nothing left to charge, so this is `binary_search_by` itself: a search with nothing to
+        // charge has nothing to abandon.
+        Some(
+          order
+            .binary_search_by(|ordinal| fragment_name(document, rows, *ordinal).cmp(name))
+            .ok(),
+        )
       } else {
-        order.binary_search_by(|ordinal| {
-          let stored = fragment_name(document, rows, *ordinal);
-          let (ordering, _) = scan_cmp(stored, name, |unit| {
+        probe_slot(order.len(), |slot| {
+          probe_cmp(fragment_name(document, rows, order[slot]), name, |unit| {
             if unit <= paid {
               return true;
             }
             paid = unit;
-            let held = match ledger {
+            match ledger {
               Charged::Validation => match validation.take(1) {
                 Some(left) => {
                   validation = left;
@@ -2107,29 +2189,19 @@ where
                 }
               },
               Charged::Merge => merge.take(1),
-            };
-            refused |= !held;
-            held
-          });
-          ordering
+            }
+          })
         })
       }
     };
     self.left = validation;
     self.work = merge;
-    if refused {
-      // The search finished before the refusal could be reported, for `scan_cmp`'s reason: a
-      // comparator that stops answering is not a total order. `log F` further comparisons is what
-      // that costs, against an index the prep sweep charged a unit a fragment for.
-      return match ledger {
-        Charged::Validation => self.refuse(blame).map_continue(|()| None),
-        Charged::Merge => {
-          self.trip(Rule::MergeWorkBudget, self.budget.merge_work())?;
-          ControlFlow::Break(())
-        }
-      };
-    }
-    let Ok(slot) = found else {
+    // The search abandoned itself at the first charge it could not pay, so what stands here is a
+    // refusal and not `log F` further comparisons over an index with nothing left to pay for them.
+    let Some(found) = found else {
+      return self.refuse_lookup(ledger, blame);
+    };
+    let Some(slot) = found else {
       return ControlFlow::Continue(None);
     };
     // Ties are ordered by ordinal, so walking back to the group's start finds the first

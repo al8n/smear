@@ -1041,12 +1041,13 @@ pub(crate) fn scan_eq(left: &[u8], right: &[u8], mut charge: impl FnMut(u32) -> 
 
 /// `left.cmp(right)`, charging as [`scan_eq`] does, and **answering whatever the ledger says**.
 ///
-/// # Why this one cannot stop
+/// # Why this one cannot stop, and why that is a fact about *sorting*
 ///
-/// Its callers are `sort_unstable_by` and `binary_search_by`, and a comparator that starts
-/// answering differently part-way through is not a total order: the current sort detects exactly
-/// that and panics. So an exhausted ledger is reported alongside the true ordering and the caller
-/// refuses **after** the sort, rather than the comparison abandoning its answer.
+/// Its one caller is `sort_unstable_by`, through [`Meter::cmp`](super::executable::Meter::cmp),
+/// and a comparator that starts answering differently part-way through is not a total order: the
+/// current sort detects exactly that and panics. So an exhausted ledger is reported alongside the
+/// true ordering and the caller refuses **after** the sort, rather than the comparison abandoning
+/// its answer.
 ///
 /// What that costs is bounded, and by the bound the sort already had. `F` names of total length
 /// `D` cost at most `F log F` comparisons of at most `D / F` bytes each, so the whole sort is
@@ -1055,6 +1056,16 @@ pub(crate) fn scan_eq(left: &[u8], right: &[u8], mut charge: impl FnMut(u32) -> 
 /// bounded by the ledger because the prep sweep charges a unit per definition before any sort
 /// exists. A refusal therefore finishes a sort whose total is a constant multiple of a document
 /// the parser has already walked, and refuses.
+///
+/// **A lookup borrowed that argument and is not entitled to it.** `binary_search_by` and
+/// `partition_point` were comparators of this one too, on the sentence above read as a fact about
+/// charged comparators rather than about `sort_unstable_by`. A search whose result is about to be
+/// discarded needs no ordering at all — nothing consumes its answer — so it can stop at the first
+/// charge it cannot pay, and every comparison it makes after that is work performed with no budget
+/// left. [`probe_cmp`] is that comparator, and the searches are
+/// [`probe_slot`](super::executable::probe_slot) and
+/// [`probe_partition`](super::executable::probe_partition).
+/// al8n/smear#198's twenty-fourth round.
 #[inline]
 pub(crate) fn scan_cmp(
   left: &[u8],
@@ -1081,6 +1092,46 @@ pub(crate) fn scan_cmp(
     }
   }
   (left.len().cmp(&right.len()), held)
+}
+
+/// `left.cmp(right)`, charging as [`scan_eq`] does, and **stopping at the refusal**.
+///
+/// [`scan_cmp`]'s lookup twin, and [`None`] is a comparison that was never finished: the ledger had
+/// no room for a run this comparison had not read yet, exactly as [`Compared::Refused`] says it for
+/// equality. See [`scan_cmp`] for why the sorting one cannot do this and a search can.
+///
+/// The running total after `k` bytes is [`scan_eq`]'s, so a comparison that is never refused costs
+/// what the same comparison through [`scan_cmp`] cost.
+#[inline]
+pub(crate) fn probe_cmp(
+  left: &[u8],
+  right: &[u8],
+  mut charge: impl FnMut(u32) -> bool,
+) -> Option<core::cmp::Ordering> {
+  use core::cmp::Ordering;
+
+  if !charge(1) {
+    return None;
+  }
+  let shared = left.len().min(right.len());
+  let mut budgeted = BYTES_PER_UNIT - 1;
+  let mut read = 0usize;
+  let mut unit = 1u32;
+  while read < shared {
+    if read == budgeted {
+      unit += 1;
+      if !charge(unit) {
+        return None;
+      }
+      budgeted += BYTES_PER_UNIT;
+    }
+    let end = budgeted.min(shared);
+    match left[read..end].cmp(&right[read..end]) {
+      Ordering::Equal => read = end,
+      other => return Some(other),
+    }
+  }
+  Some(left.len().cmp(&right.len()))
 }
 
 /// One unit per element of a population, saturating at [`u32::MAX`].

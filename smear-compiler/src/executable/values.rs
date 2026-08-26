@@ -5,7 +5,7 @@
 //! value families ([`ValueLike`]). The value walk is iterative for the same reason the selection
 //! walk is: a literal's nesting is chosen by whoever wrote the document.
 
-use core::ops::ControlFlow;
+use core::{cmp::Ordering, ops::ControlFlow};
 
 use tokora::{SimpleSpan, span::AsSpan};
 
@@ -14,13 +14,14 @@ use smear_parser::graphql::ast::VariableValue;
 use super::{
   Diagnostic, Ledger, Meter, Rule, TypeId, Validator,
   nodes::{ArgumentLike, DirectiveLike, ObjectFieldLike, ValueLike, name_bytes},
-  sort_metered, units,
+  probe_partition, sort_metered, units,
 };
 use crate::{
   diagnostic::Context,
   schema::{DirectiveLocation, PackedType, Range32, Sym, TypeKind},
   scratch::{
-    BYTES_PER_UNIT, Compared, NONE, ValueFrame, ValueLevel, count_units, scan_cmp, scan_eq, set_bit,
+    BYTES_PER_UNIT, Compared, NONE, ValueFrame, ValueLevel, count_units, probe_cmp, scan_eq,
+    set_bit,
   },
 };
 
@@ -1096,7 +1097,9 @@ where
     //
     // Two partition points rather than a `binary_search`, because what the rules need is the run's
     // **bounds** and not a member of it: a `binary_search` over duplicates lands wherever it
-    // likes. The run is contiguous and ordered by ordinal, so `lo` is the lowest-numbered
+    // likes. Both are `probe_partition` rather than the standard library's, so that a probe with
+    // nothing left to spend stops rather than finishing its `log V` comparisons; see that
+    // function. The run is contiguous and ordered by ordinal, so `lo` is the lowest-numbered
     // definition of the name — the one the scan's `first.get_or_insert` picked, and the one the
     // type check below reads — and `lo..hi` is every definition of it, which is what gets marked.
     // Every one of them, not only the first: a duplicated variable is 5.8.1's business, and
@@ -1154,27 +1157,42 @@ where
         }
       };
     }
+    // **The searches abandon themselves at the first charge they cannot pay.** `partition_point`
+    // stood here, and it runs its whole `log V` comparisons however the ledger answers — the
+    // reading of `scan_cmp` that `probe_partition`'s header corrects. Nothing consumes a refused
+    // probe's answer, so there is no ordering to keep total and no reason to finish.
+    // al8n/smear#198's twenty-fourth round.
     let (lo, equal) = {
       let index = &self.scratch.keys[base..end];
-      let named = |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
+      let named =
+        |slot: usize| name_bytes(variables[index[slot] as usize].node().variable().name());
+      // The arm is chosen out here rather than inside the predicate, for `sort_metered`'s reason:
+      // with nothing left to charge these are the plain searches — `partition_point` itself, since
+      // a search with nothing to charge has nothing to abandon — and a predicate holding the
+      // ledger by `&mut` is not one the search can prove loop-invariant.
       if whole <= 1 {
-        // Nothing left to charge, so these are the plain searches. See `sort_metered`.
-        let lo = index.partition_point(|ordinal| named(ordinal) < bytes);
-        (
-          lo,
-          index.get(lo).is_some_and(|ordinal| named(ordinal) == bytes),
-        )
-      } else {
-        let lo = index.partition_point(|ordinal| {
-          let (ordering, _) = scan_cmp(named(ordinal), bytes, charge!());
-          ordering.is_lt()
+        let lo = index.partition_point(|slot| {
+          name_bytes(variables[*slot as usize].node().variable().name()) < bytes
         });
         // One comparison decides existence, which is what 5.8.3 asks and what 5.8.5 needs the
         // ordinal for. The run's *end* is a different question with exactly one reader.
-        let equal = index
-          .get(lo)
-          .is_some_and(|ordinal| scan_eq(named(ordinal), bytes, charge!()) == Compared::Equal);
+        let equal = index.get(lo).is_some_and(|slot| {
+          name_bytes(variables[*slot as usize].node().variable().name()) == bytes
+        });
         (lo, equal)
+      } else {
+        let lo = probe_partition(index.len(), |slot| {
+          probe_cmp(named(slot), bytes, charge!()).map(Ordering::is_lt)
+        });
+        match lo {
+          Some(lo) if lo < index.len() => {
+            let equal = scan_eq(named(lo), bytes, charge!()) == Compared::Equal;
+            (lo, equal)
+          }
+          Some(lo) => (lo, false),
+          // Refused part-way through the search, so `refused` is set and the check below returns.
+          None => (0, false),
+        }
       }
     };
     self.left = ledger;
@@ -1194,16 +1212,17 @@ where
       // plain search, for `sort_metered`'s reason.
       let mut paid = 1u32;
       let mut ledger = self.left;
-      let mut refused = false;
       let hi = {
         let index = &self.scratch.keys[base..end];
         let named =
-          |ordinal: &u32| name_bytes(variables[*ordinal as usize].node().variable().name());
+          |slot: usize| name_bytes(variables[index[slot] as usize].node().variable().name());
         if whole <= 1 {
-          index.partition_point(|ordinal| named(ordinal) <= bytes)
+          Some(index.partition_point(|slot| {
+            name_bytes(variables[*slot as usize].node().variable().name()) <= bytes
+          }))
         } else {
-          index.partition_point(|ordinal| {
-            let (ordering, _) = scan_cmp(named(ordinal), bytes, |unit| {
+          probe_partition(index.len(), |slot| {
+            probe_cmp(named(slot), bytes, |unit| {
               if unit <= paid {
                 return true;
               }
@@ -1215,19 +1234,18 @@ where
                 }
                 None => {
                   ledger = Ledger::Left(0);
-                  refused = true;
                   false
                 }
               }
-            });
-            ordering.is_le()
+            })
+            .map(Ordering::is_le)
           })
         }
       };
       self.left = ledger;
-      if refused {
+      let Some(hi) = hi else {
         return self.refuse(*name.as_span());
-      }
+      };
       self.spend((hi - lo) as u32, *name.as_span())?;
       let scratch = &mut *self.scratch;
       for slot in lo..hi {
