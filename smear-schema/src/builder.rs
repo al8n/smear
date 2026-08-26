@@ -247,6 +247,15 @@ struct Blame {
   document: u32,
 }
 
+/// The graph node a type reference reaches, dropped when the reference never resolved.
+///
+/// See [`SchemaBuilder::cyclic_directives`] for what the offset addresses.
+fn push_type(base: TypeId, first_type_node: u32, reaches: &mut Vec<u32>) {
+  if base != UNRESOLVED {
+    reaches.push(first_type_node + base.get());
+  }
+}
+
 /// The width at or below which a list finds its duplicates by scanning the names before them.
 ///
 /// Sixty-four because that is where this crate has already measured the scan's quadratic term to
@@ -355,6 +364,105 @@ impl Duplicates {
         let at = first[position] as usize;
         (at != position).then_some(at)
       }
+    }
+  }
+}
+
+/// The position of a name in one type's field list, asked by a name from a *different* list.
+///
+/// # Why this is not [`Duplicates`], which is the neighbouring question
+///
+/// [`Duplicates`] is addressed by **position**: `first(position, name)` answers "did an earlier
+/// position of *this* list write this name", and its [`Duplicates::Index`] payload is one entry
+/// per position with the names already discarded. Draft §3.6.1's conformance pass asks the other
+/// question — "which position of the *implementor's* list wrote the name this *interface* field
+/// carries" — and the sorted pairs that built that payload are gone by the time it could be
+/// asked. So the type is not reusable here, and neither is its `Vec<u32>`.
+///
+/// # What it replaces
+///
+/// `model.types[index].fields.iter().position(..)`, restarted for every interface field. A valid
+/// interface and object with the same `N` fields in source order did `N(N+1)/2` symbol
+/// comparisons, and **nothing bounds a field list** — the argument [`NARROW_LIST`] already makes
+/// about enum values and fields is that four-figure lists are ordinary, so a ceiling here would
+/// refuse valid documents rather than bound the scan. Fitted at 1.83 in the exponent over
+/// 1 k–64 k and 2.00 over the top step of that ladder, 1.507 s at 64 k, on a document
+/// `Schema::build` **accepts**; 1.03 and 40 ms with the list indexed. al8n/smear#198.
+///
+/// # A table indexed by [`Sym`], which [`Duplicates`] rejected for a reason that is not this site's
+///
+/// That header rules the shape out because it "does not survive the nesting": a field list is
+/// walked *around* its arguments' lists, so one slot per symbol shared across a nested pair has
+/// the inner list erase the outer's record of the same name. This pass nests no second field
+/// index inside the first — it holds one implementor's list while reading interface *names* —
+/// so the condition that shape fails under is absent, and what is left is `O(1)` per lookup
+/// against the sorted index's `O(log N)`, over one table for the whole pass instead of one
+/// allocation per implementing type.
+///
+/// The table is put back rather than reallocated, and [`Positions::drop`] is what puts it back:
+/// a slot left set would answer the *next* type's lookup with a position in a list that type
+/// does not have, which is a wrong span on a diagnostic rather than a cost.
+enum Positions<'f, 's> {
+  /// At or below [`NARROW_LIST`]: the scan, whose cost per lookup the ceiling on that constant is
+  /// what bounds, exactly as the argument lists' scan is bounded.
+  Scan(&'f [RawField]),
+  /// Past it: `Sym` to the first position of `fields` that wrote it, [`Positions::ABSENT`]
+  /// everywhere else, over a table sized to the whole symbol space.
+  Index {
+    fields: &'f [RawField],
+    of_sym: &'s mut [u32],
+  },
+}
+
+impl<'f, 's> Positions<'f, 's> {
+  /// No position wrote this name. Not a position a document can reach: a field needs bytes, a
+  /// span is a `u32`, so a list of `u32::MAX` fields does not fit in a document this crate can
+  /// address.
+  const ABSENT: u32 = u32::MAX;
+
+  /// Resolves one type's field list, borrowing the pass's table only when the list is wide
+  /// enough to want it. `symbols` is the interner's width, which is what the table is addressed
+  /// by; it is grown once, on the first wide list, and never for a schema that has none.
+  fn over(fields: &'f [RawField], symbols: usize, of_sym: &'s mut Vec<u32>) -> Self {
+    if fields.len() <= NARROW_LIST {
+      return Self::Scan(fields);
+    }
+    if of_sym.len() < symbols {
+      of_sym.resize(symbols, Self::ABSENT);
+    }
+    for (at, field) in fields.iter().enumerate() {
+      let slot = &mut of_sym[field.name.sym.get() as usize];
+      // First occurrence wins, which is what the scan answered. A type that writes one name twice
+      // is a `DuplicateFieldName` already, and the span every rule below blames is the first
+      // one's; letting the second overwrite it would move a blessed diagnostic while looking
+      // like a cost change.
+      if *slot == Self::ABSENT {
+        *slot = at as u32;
+      }
+    }
+    Self::Index { fields, of_sym }
+  }
+
+  /// The first position that wrote `name`, or `None`.
+  fn of(&self, name: Sym) -> Option<usize> {
+    match self {
+      Self::Scan(fields) => fields.iter().position(|field| field.name.sym == name),
+      Self::Index { of_sym, .. } => match of_sym[name.get() as usize] {
+        Self::ABSENT => None,
+        at => Some(at as usize),
+      },
+    }
+  }
+}
+
+impl Drop for Positions<'_, '_> {
+  /// Clears exactly the slots this list wrote, which is `O(fields)` and not `O(symbols)`.
+  fn drop(&mut self) {
+    let Self::Index { fields, of_sym } = self else {
+      return;
+    };
+    for field in *fields {
+      of_sym[field.name.sym.get() as usize] = Self::ABSENT;
     }
   }
 }
@@ -3024,8 +3132,22 @@ impl SchemaBuilder {
   /// through the error list, the two halves borrowed apart. Nothing about which diagnostic is
   /// reported, in what order, or with which span depends on that — the loops below are the ones
   /// that were here, reading `&model.types[…]` where they read a copy. al8n/smear#198.
+  ///
+  /// # The third product, which is neither a copy nor a ceiling's
+  ///
+  /// Finding the implementor's field restarted a linear scan of its **whole** field list for
+  /// every interface field, so a valid interface and object with the same `N` fields in source
+  /// order — the honest case, not an adversarial one — did `N(N+1)/2` symbol comparisons.
+  /// [`Positions`] indexes that list once per implementing type and the loop reads it, at 1.83
+  /// in the exponent over 1 k–64 k before and 1.03 after. Its header carries why the shape
+  /// [`Duplicates`] rejected is the right one *here*, and why the first occurrence still wins.
   fn validate_interface_implementations(&mut self) {
     let (model, errors) = self.split();
+    let symbols = model.interner.len() as usize;
+    // One table for the whole pass, lazily grown by the first implementing type wide enough to
+    // index and handed back to the next one by [`Positions::drop`]. A schema whose types
+    // implement nothing, or implement narrowly, never allocates it.
+    let mut of_sym: Vec<u32> = Vec::new();
     for index in 0..model.types.len() {
       if !matches!(
         model.types[index].kind,
@@ -3041,6 +3163,9 @@ impl SchemaBuilder {
       }
       let owner = model.text(model.types[index].name.sym).to_owned();
       let declared: &[Located] = &model.types[index].implements;
+      // Built once per implementing type and read by every interface it declares, which is the
+      // whole of the repair: the loop below is the one that was here, in the order it was in.
+      let positions = Positions::over(&model.types[index].fields, symbols, &mut of_sym);
 
       for entry in declared {
         let Some(interface) = model.type_index(entry.sym) else {
@@ -3075,11 +3200,7 @@ impl SchemaBuilder {
         let interface_fields: &[RawField] = &model.types[interface].fields;
         for interface_field in interface_fields {
           let field_name = model.text(interface_field.name.sym).to_owned();
-          let Some(position) = model.types[index]
-            .fields
-            .iter()
-            .position(|f| f.name.sym == interface_field.name.sym)
-          else {
+          let Some(position) = positions.of(interface_field.name.sym) else {
             push_owned(
               errors,
               SchemaErrorKind::MissingInterfaceField,
@@ -3449,99 +3570,217 @@ impl SchemaBuilder {
 
   /// Draft §3.13.1: a directive definition must not refer to itself, directly or indirectly.
   ///
-  /// One reachability walk per directive, over two interleaved worklists — directives to expand
-  /// and types to expand — with a visited bit each. Iterative on purpose: the type graph's depth
-  /// is bounded by nothing but the document, and a recursive walk would put an SDL's input-object
-  /// chain on the call stack.
+  /// The rule is exactly "is this directive reachable from itself", over one graph with two kinds
+  /// of node — a directive, and a type an argument accepts — because the path between two
+  /// directives runs through the types their arguments name.
   ///
-  /// The cycle is only reported on the directive the walk *started* from. A directive `@b` that
-  /// merely uses a self-referential `@a` is not itself self-referential, and blaming it would put
-  /// the diagnostic on the wrong definition — the same refinement apollo-compiler makes.
+  /// # What a walk per directive cost, on a document `Schema::build` accepts
+  ///
+  /// The shape that stood here ran one reachability walk from every directive, and allocated the
+  /// two schema-wide visitation vectors **inside** that loop. Two independent `Θ(N²)` terms came
+  /// out of that, and both were measured on documents `Schema::build` **accepts**:
+  ///
+  /// - The **initialisation**, which `N` distinct zero-argument directives with no dependency
+  ///   edge at all — nothing to walk, nothing to find — paid in full. It is the quieter of the
+  ///   two, because ingesting `N` definitions is itself linear and hides it: 1.39 in the exponent
+  ///   over 1 k–256 k, and only over the ladder's top step, 1.62, does the square show. 793 ms at
+  ///   256 k, against 106 ms and 1.04 now.
+  /// - The **traversal**, which a long *acyclic* chain `@d0 ← @d1 ← … ← @dN` paid by being walked
+  ///   again from every starting directive — a term stamping the visitation would have left
+  ///   exactly where it was. 1.97 in the exponent over 1 k–64 k, 2.04 over the top step, and
+  ///   26.1 s at 64 k, against 56 ms and 1.07 now.
+  ///
+  /// al8n/smear#198.
+  ///
+  /// # One graph, one pass
+  ///
+  /// [`SchemaBuilder::cyclic_directives`] builds that graph once and runs Tarjan over it, so
+  /// every directive's answer comes out of a single `O(nodes + edges)` traversal. "Reachable from
+  /// itself" is "in a strongly connected component with a second member, or carrying an edge to
+  /// itself", and the second disjunct is not a special case to be tidied away: a directive naming
+  /// itself directly is a component of one, which is otherwise indistinguishable from an acyclic
+  /// node.
+  ///
+  /// # What does not change
+  ///
+  /// The cycle is still reported only on the directive that is on it. A directive `@b` that
+  /// merely uses a self-referential `@a` is not itself self-referential — `@a` is not reachable
+  /// *back* to `@b`, so they are not in one component — and blaming it would put the diagnostic
+  /// on the wrong definition, the same refinement apollo-compiler makes.
+  ///
+  /// Diagnostics are emitted by ascending directive index, which is the order the definitions
+  /// were read in, which is the order the walk-per-directive loop produced them in.
   fn validate_directive_cycles(&mut self) {
     let directives = self.directives.len();
     if directives == 0 {
       return;
     }
-    let types = self.types.len();
-    let mut cyclic: Vec<usize> = Vec::new();
-
-    for start in 0..directives {
-      let mut seen_directives = vec![false; directives];
-      let mut seen_types = vec![false; types];
-      let mut pending_directives: Vec<usize> = Vec::new();
-      let mut pending_types: Vec<usize> = Vec::new();
-
-      // Seed with what the definition itself names: the directives applied to its arguments, and
-      // the types those arguments accept — unless the ceiling holds that list, in which case the
-      // walk seeds nothing. A cycle through a directive that will not build is a second diagnostic
-      // about a schema the first one has already refused.
-      if let Args::Bounded(args) = self.directives[start].args.read() {
-        for arg in args {
-          self.push_directive_uses(&arg.directives, &mut pending_directives);
-          self.push_type(arg.ty.packed.base_id(), &mut pending_types);
-        }
+    let cyclic = self.cyclic_directives();
+    for (index, &on_cycle) in cyclic.iter().enumerate() {
+      if !on_cycle {
+        continue;
       }
-
-      let mut found = false;
-      while !found {
-        if let Some(next) = pending_directives.pop() {
-          if next == start {
-            found = true;
-            break;
-          }
-          if seen_directives[next] {
-            continue;
-          }
-          seen_directives[next] = true;
-          if let Args::Bounded(args) = self.directives[next].args.read() {
-            for arg in args {
-              self.push_directive_uses(&arg.directives, &mut pending_directives);
-              self.push_type(arg.ty.packed.base_id(), &mut pending_types);
-            }
-          }
-          continue;
-        }
-        let Some(next) = pending_types.pop() else {
-          break;
-        };
-        if seen_types[next] {
-          continue;
-        }
-        seen_types[next] = true;
-        let raw = &self.types[next];
-        self.push_directive_uses(&raw.directives, &mut pending_directives);
-        for field in &raw.input_fields {
-          self.push_directive_uses(&field.directives, &mut pending_directives);
-          self.push_type(field.ty.packed.base_id(), &mut pending_types);
-        }
-        for value in &raw.enum_values {
-          self.push_directive_uses(&value.directives, &mut pending_directives);
-        }
-      }
-
-      if found {
-        cyclic.push(start);
-      }
-    }
-
-    for index in cyclic {
       let at = self.directives[index].name;
       let name = self.text(at.sym).to_owned();
       self.push(SchemaErrorKind::SelfReferentialDirective, &name, at);
     }
   }
 
-  fn push_directive_uses(&self, uses: &[RawDirectiveUse], pending: &mut Vec<usize>) {
-    for used in uses {
-      if let Some(index) = self.directive_index(used.name.sym) {
-        pending.push(index);
+  /// Which directives are reachable from themselves, one bit per directive index.
+  ///
+  /// # The graph
+  ///
+  /// Node `d` below [`SchemaBuilder::directives`]`.len()` is that directive; node
+  /// `directives + t` is type `t`. The edges are the steps the walk this replaces took, and they
+  /// are the same steps: a directive reaches the directives written on its arguments and the base
+  /// types its arguments accept; a type reaches the directives written on it, on its input fields
+  /// and on its enum values, and the base types its input fields accept.
+  ///
+  /// A directive whose argument list a ceiling refused reaches **nothing**, exactly as it seeded
+  /// nothing before. A cycle through a directive that will not build is a second diagnostic about
+  /// a schema the first one has already refused.
+  ///
+  /// # Compressed rows, and why the edges are counted before they are written
+  ///
+  /// [`SchemaBuilder::dependencies`] is asked twice — once to size each row, once to fill it —
+  /// rather than pushing into a vector per node, because one row per node is `nodes` allocations
+  /// and this is two. The scratch it writes through is reused across both passes and every node.
+  fn cyclic_directives(&self) -> Vec<bool> {
+    let directives = self.directives.len();
+    let nodes = directives + self.types.len();
+
+    let mut reaches: Vec<u32> = Vec::new();
+    let mut offset: Vec<usize> = vec![0; nodes + 1];
+    for node in 0..nodes {
+      self.dependencies(node, &mut reaches);
+      offset[node + 1] = reaches.len();
+    }
+    for node in 0..nodes {
+      offset[node + 1] += offset[node];
+    }
+    let mut edges: Vec<u32> = vec![0; offset[nodes]];
+    for node in 0..nodes {
+      self.dependencies(node, &mut reaches);
+      edges[offset[node]..offset[node + 1]].copy_from_slice(&reaches);
+    }
+
+    // Tarjan, iterative for the reason the walk it replaces was iterative: the type graph's depth
+    // is bounded by nothing but the document, and a recursive walk would put an SDL's
+    // input-object chain on the call stack.
+    //
+    // Discovery indices start at one so that zero means "not yet visited". A sentinel at the top
+    // of the range would be a second thing the counter must never reach; this way the counter has
+    // only its own width to respect.
+    const UNVISITED: u32 = 0;
+    let mut discovered: Vec<u32> = vec![UNVISITED; nodes];
+    let mut low: Vec<u32> = vec![0; nodes];
+    let mut stacked: Vec<bool> = vec![false; nodes];
+    let mut component: Vec<u32> = Vec::new();
+    /// A node and the edge of its row to read next.
+    type Descent = (u32, usize);
+    let mut descent: Vec<Descent> = Vec::new();
+    let mut next_discovery: u32 = 1;
+    let mut cyclic = vec![false; directives];
+
+    for root in 0..nodes {
+      if discovered[root] != UNVISITED {
+        continue;
       }
+      discovered[root] = next_discovery;
+      low[root] = next_discovery;
+      next_discovery += 1;
+      component.push(root as u32);
+      stacked[root] = true;
+      descent.push((root as u32, offset[root]));
+
+      while let Some(&(node, cursor)) = descent.last() {
+        let node = node as usize;
+        if cursor < offset[node + 1] {
+          descent
+            .last_mut()
+            .expect("the frame just read is still on the descent")
+            .1 = cursor + 1;
+          let next = edges[cursor] as usize;
+          if next == node && node < directives {
+            // A component of one, which nothing below can tell from an acyclic node.
+            cyclic[node] = true;
+          }
+          if discovered[next] == UNVISITED {
+            discovered[next] = next_discovery;
+            low[next] = next_discovery;
+            next_discovery += 1;
+            component.push(next as u32);
+            stacked[next] = true;
+            descent.push((next as u32, offset[next]));
+          } else if stacked[next] {
+            low[node] = low[node].min(discovered[next]);
+          }
+          continue;
+        }
+
+        descent.pop();
+        if let Some(&(parent, _)) = descent.last() {
+          low[parent as usize] = low[parent as usize].min(low[node]);
+        }
+        if low[node] != discovered[node] {
+          continue;
+        }
+        // The component is the tail of the stack above this node, which is its root.
+        let at = component
+          .iter()
+          .rposition(|&member| member as usize == node)
+          .expect("a component's root is on the component stack");
+        // Two members mean every member reaches every other, so every directive among them
+        // reaches itself.
+        let closed = component.len() - at > 1;
+        for &member in &component[at..] {
+          stacked[member as usize] = false;
+          if closed && (member as usize) < directives {
+            cyclic[member as usize] = true;
+          }
+        }
+        component.truncate(at);
+      }
+    }
+
+    cyclic
+  }
+
+  /// The nodes one node of [`SchemaBuilder::cyclic_directives`]'s graph reaches in one step,
+  /// written into `reaches`, which is cleared first.
+  fn dependencies(&self, node: usize, reaches: &mut Vec<u32>) {
+    reaches.clear();
+    let directives = self.directives.len();
+    let first_type_node = directives as u32;
+
+    if node < directives {
+      // Unless the ceiling holds this list, in which case the definition reaches nothing.
+      let Args::Bounded(args) = self.directives[node].args.read() else {
+        return;
+      };
+      for arg in args {
+        self.push_directive_uses(&arg.directives, reaches);
+        push_type(arg.ty.packed.base_id(), first_type_node, reaches);
+      }
+      return;
+    }
+
+    let raw = &self.types[node - directives];
+    self.push_directive_uses(&raw.directives, reaches);
+    for field in &raw.input_fields {
+      self.push_directive_uses(&field.directives, reaches);
+      push_type(field.ty.packed.base_id(), first_type_node, reaches);
+    }
+    for value in &raw.enum_values {
+      self.push_directive_uses(&value.directives, reaches);
     }
   }
 
-  fn push_type(&self, base: TypeId, pending: &mut Vec<usize>) {
-    if base != UNRESOLVED {
-      pending.push(base.get() as usize);
+  fn push_directive_uses(&self, uses: &[RawDirectiveUse], reaches: &mut Vec<u32>) {
+    for used in uses {
+      if let Some(index) = self.directive_index(used.name.sym) {
+        reaches.push(index as u32);
+      }
     }
   }
 
