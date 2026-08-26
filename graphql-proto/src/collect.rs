@@ -2320,6 +2320,35 @@ pub(super) enum Admission<'a> {
 /// *written in terms of* `is_name_tail` — so the byte rule has one spelling, the chunking cannot
 /// disagree with the whole-slice answer, and [`name_key`] reaches the same scan with a meter that
 /// never refuses.
+///
+/// # The question, re-asked of every charge this branch adds or moves
+///
+/// The round that classified the four charges added with these asked whether a short-circuiting
+/// **loop** stood above each. Two moved, and these two stayed on the ground that each sits
+/// "immediately in front of `variable_key` plus the driver lookup of that one name". A function is
+/// not a loop and `variable_key` short-circuits anyway, so the question was one notch too narrow.
+/// It is: **is there any work below this charge that can return before the work the charge priced
+/// is done** — a loop, a function, a validator, a driver call. The whole collection ledger under
+/// that question:
+///
+/// | charge | what can return early below it | now |
+/// |---|---|---|
+/// | [`included`], one unit per directive a selection carries | draft §6.3 step 3.a returns at the first `@skip` that removes the selection, and step 3.b never runs | **moved into the scan**, one unit in front of the comparison that reads that directive |
+/// | [`condition_is_true`], one unit per argument at a `@skip`/`@include` usage | the scan for `if` stops at `if` | **moved into the scan**, same shape |
+/// | `condition_is_true`, the condition variable's spelling | `is_name` returns at the first byte outside draft §2.1.9's production | **incremental**, through this function |
+/// | `Executor::coerce_arguments`, the argument's variable spelling | the same pass, and the consequence is worse — an optional argument's `hasValue = false` is a *served* field | **incremental**, through this function |
+/// | `coerce_arguments`, the written argument names | `find` stops at the entry it matches, and the loop above it is over what the **schema** declares, so an undeclared entry is never read at all | **once per entry, behind a high-water mark**, in front of the comparison that reads it |
+///
+/// Nothing in this ledger is left charging a population in front of work that can stop inside it.
+/// What *stays* as a charge in front of work that is genuinely unconditional: [`Fragments::build`]'s
+/// pass, taken over a slice length the pass then walks end to end; the fragment table's per-entry
+/// charges, each in front of the one comparison it prices; [`Interner::intern`]'s hash and copy,
+/// which read every byte of the key they are given; a type condition's spelling, handed whole to
+/// `Schema::sym`; one unit per selection examined; and one unit per definition draft §6.1 reads,
+/// which stops at the operation it finds and is charged per definition rather than for the slice.
+///
+/// [`Fragments::build`]: Fragments::build
+/// [`Interner::intern`]: Interner::intern
 #[inline]
 pub(super) fn metered_variable_key<'a>(spelling: &'a [u8], visits: &mut Visits) -> Admission<'a> {
   scan_key(spelling, |units| visits.take(units))

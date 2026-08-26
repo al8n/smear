@@ -1469,7 +1469,11 @@ struct Assembled {
   messages: std::vec::Vec<String>,
 }
 
-fn drive(schema: &Schema, document: &ExecutableDocument<&[u8]>, limit: Option<u32>) -> Assembled {
+fn drive<S: AsRef<[u8]>>(
+  schema: &Schema,
+  document: &ExecutableDocument<S>,
+  limit: Option<u32>,
+) -> Assembled {
   let mut space = Space;
   let limits = match limit {
     Some(limit) => Limits {
@@ -1630,6 +1634,66 @@ fn an_unreadable_argument_variable_serves_the_optional_argument_it_names() {
   assert_eq!(
     required.resolved, 0,
     "a field whose non-null argument has no value is not handed to the driver"
+  );
+}
+
+/// Draft §6.4.1 step 5's scan stops at the argument it matches, and the ledger stops there too.
+///
+/// # The third charge the corrected question convicted
+///
+/// A whole-list charge over `written` stood in front of `written.iter().find(..)`. On a document
+/// draft 5.4.1 admits it is honest in aggregate — every written argument is compared while the
+/// scan looks for its own declared counterpart — and this executor does not validate, which is the
+/// entire reason the ledger exists. On the unvalidated population the two come apart: the loop
+/// below is over what the **schema** declares, so an undeclared entry is never read, and
+/// `f(a: "v", j0: "v" … j1599: "v")` against `f(a: String)` compared **one** name and was charged
+/// for 1,601. That is `ArgumentBudget` with the field nulled for a request this executor was about
+/// to serve, which is the misclassification `metered_variable_key`'s header tabulates.
+///
+/// The repair is a high-water mark rather than a charge inside the scan, because a charge inside
+/// the scan is `declared × written` — the schema's factor entering a caller's ledger, measured to
+/// refuse a full-occupancy response at about thirteen declared arguments. Each entry pays once,
+/// the first time any scan reaches it.
+///
+/// Both halves, because either alone is satisfiable by the wrong mechanism: the two costs are
+/// equal, and the long form is then served under a ceiling set to precisely the short one's cost.
+#[test]
+fn a_matched_argument_does_not_pay_for_the_arguments_after_it() {
+  /// Past any plausible slack in the budget below, so a refusal cannot be a near miss.
+  const SUFFIX: usize = 1_600;
+  const SDL: &str = "type Query { f(a: String): String }";
+
+  let mut long = std::string::String::from("{ f(a: \"v\"");
+  for index in 0..SUFFIX {
+    long.push_str(&std::format!(" j{index}: \"v\""));
+  }
+  long.push_str(") }");
+  let short = "{ f(a: \"v\") }";
+
+  let (schema, short_document) = compile_against(SDL, short);
+  let spent_short = drive(&schema, &short_document, None);
+  assert_eq!(spent_short.resolved, 1, "the control resolved the field");
+
+  let (schema, long_document) = compile_against(SDL, &long);
+  let spent_long = drive(&schema, &long_document, None);
+  assert_eq!(
+    spent_long.visits, spent_short.visits,
+    "one declared argument matched at the first written entry cost {} units with a {SUFFIX}-entry \
+     suffix and {} without one — the scan compared one name in both",
+    spent_long.visits, spent_short.visits
+  );
+
+  let tight = drive(&schema, &long_document, Some(spent_short.visits));
+  assert_eq!(
+    tight.kinds,
+    std::vec![],
+    "a request whose undeclared entries §6.4.1 never reads was refused by a ceiling of {}: {:?}",
+    spent_short.visits,
+    tight.messages
+  );
+  assert_eq!(
+    tight.resolved, 1,
+    "the field was nulled rather than resolved"
   );
 }
 
