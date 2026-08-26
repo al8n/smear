@@ -1006,6 +1006,21 @@ struct RawType {
   directives: Vec<RawDirectiveUse>,
   /// The interface closure, filled in during validation.
   closure: Vec<u32>,
+  /// The resolved type index of each of [`members`](RawType::members), sorted, filled in during
+  /// validation beside the closure.
+  ///
+  /// Draft §3.6.1's covariance check asks "is this object a member of that union" once per field an
+  /// interface declares, and [`Model::is_sub_type`] answered it by scanning `members` and resolving
+  /// each entry's name. `Θ(interface fields × union members)`, with a ceiling on neither: a
+  /// `K`-member union behind `F` interface fields whose implementor names the LAST member is
+  /// `Θ(F + K)` of SDL and was `Θ(F × K)` of build — with `F = K`, 1.48 in the exponent over
+  /// 1 k–16 k, 1.81 over the top step and **156.6 ms** at 16 000, on a schema `Schema::build`
+  /// **accepts**, against 0.95 and **28.2 ms**. Sorted once per union, the answer is a binary
+  /// search.
+  ///
+  /// Empty for every other kind, and empty for a member that names nothing — which is the
+  /// `UndefinedUnionMember` refusal, and an answer of `false` either way.
+  sorted_members: Vec<u32>,
   /// The positions of [`input_fields`](RawType::input_fields) that [`RawInput::is_required`]
   /// answers `true` for, filled in during validation beside the closure.
   ///
@@ -1033,6 +1048,7 @@ impl RawType {
       enum_values: Vec::new(),
       directives: Vec::new(),
       closure: Vec::new(),
+      sorted_members: Vec::new(),
       required_input_fields: Vec::new(),
     }
   }
@@ -1165,6 +1181,21 @@ impl<'a> Model<'a> {
   /// Whether `candidate` is one of `abstract_type`'s possible types, in the draft's wider sense:
   /// union membership, or the interface closure — which, unlike the runtime possible-object
   /// bitsets, includes interfaces implementing interfaces.
+  ///
+  /// # Both arms are searched, not scanned
+  ///
+  /// This runs once per field an interface declares, per type implementing it, and both
+  /// populations it consults are the document's. `members.iter().any(..)` and
+  /// `closure.contains(..)` were therefore two products, one per arm — see
+  /// [`RawType::sorted_members`] for the union half's numbers, and the closure half is the same
+  /// sentence about an object's interface list: `Θ(interface fields × closure)`, answered on the
+  /// first entry only when the interface asked about happens to sort first. `F` fields typed as the
+  /// LAST of a `K`-interface closure, `F = K`, is 1.18 in the exponent over 1 k–16 k, 1.34 over the
+  /// top step and 38.5 ms at 16 000, against 1.07, 1.14 and 26.6 ms.
+  ///
+  /// Both lists are already sorted where they are built — [`SchemaBuilder::compute_closures`] sorts
+  /// the closure, [`SchemaBuilder::index_union_members`] the members — so neither arm needed an
+  /// index built here, only a search instead of a walk.
   fn is_sub_type(&self, candidate: TypeId, abstract_type: TypeId) -> bool {
     if candidate == UNRESOLVED || abstract_type == UNRESOLVED {
       return false;
@@ -1172,12 +1203,13 @@ impl<'a> Model<'a> {
     let target = &self.types[abstract_type.get() as usize];
     match target.kind {
       TypeKind::Union => target
-        .members
-        .iter()
-        .any(|member| self.type_index(member.sym) == Some(candidate.get() as usize)),
+        .sorted_members
+        .binary_search(&candidate.get())
+        .is_ok(),
       TypeKind::Interface => self.types[candidate.get() as usize]
         .closure
-        .contains(&abstract_type.get()),
+        .binary_search(&abstract_type.get())
+        .is_ok(),
       _ => false,
     }
   }
@@ -2255,6 +2287,7 @@ impl SchemaBuilder {
     self.resolve_roots();
     self.resolve_type_refs();
     self.compute_closures();
+    self.index_union_members();
     self.collect_required_input_fields();
     self.validate_types();
     self.validate_directive_definitions();
@@ -2507,6 +2540,26 @@ impl SchemaBuilder {
         // Break the cycle so nothing downstream walks it.
         self.types[index].closure.retain(|id| *id != index as u32);
       }
+    }
+  }
+
+  /// Fills [`RawType::sorted_members`], one pass over the members the whole schema declares.
+  ///
+  /// Here rather than at ingest because an `extend union` appends to `members` after the definition
+  /// was read, and after [`SchemaBuilder::resolve_type_refs`] because it is the resolved index that
+  /// is stored. Nothing it reads changes during validation.
+  fn index_union_members(&mut self) {
+    for index in 0..self.types.len() {
+      if self.types[index].kind != TypeKind::Union {
+        continue;
+      }
+      let mut sorted: Vec<u32> = self.types[index]
+        .members
+        .iter()
+        .filter_map(|member| self.type_index(member.sym).map(|at| at as u32))
+        .collect();
+      sorted.sort_unstable();
+      self.types[index].sorted_members = sorted;
     }
   }
 
@@ -3537,6 +3590,10 @@ impl SchemaBuilder {
     // index and handed back to the next one by [`Positions::drop`]. A schema whose types
     // implement nothing, or implement narrowly, never allocates it.
     let mut of_sym: Vec<u32> = Vec::new();
+    // One `bool` per type index, marking the interfaces THIS type declares, for the transitivity
+    // rule below. Same table for the whole pass and cleared by the declaration that wrote it, so a
+    // schema whose types implement nothing never allocates it. See the rule's own comment.
+    let mut declared_here: Vec<bool> = Vec::new();
     for index in 0..model.types.len() {
       if !matches!(
         model.types[index].kind,
@@ -3555,6 +3612,14 @@ impl SchemaBuilder {
       // Built once per implementing type and read by every interface it declares, which is the
       // whole of the repair: the loop below is the one that was here, in the order it was in.
       let positions = Positions::over(&model.types[index].fields, symbols, &mut of_sym);
+      if declared_here.len() < model.types.len() {
+        declared_here.resize(model.types.len(), false);
+      }
+      for entry in declared {
+        if let Some(at) = model.type_index(entry.sym) {
+          declared_here[at] = true;
+        }
+      }
 
       for entry in declared {
         let Some(interface) = model.type_index(entry.sym) else {
@@ -3565,14 +3630,20 @@ impl SchemaBuilder {
         }
 
         // Transitivity: every interface the interface implements must also be declared here.
+        //
+        // Read off the mark rather than by rescanning `declared`. The scan was
+        // `Θ(Σ closure × declared)` with a ceiling on neither factor, and it answered on the first
+        // entry only when the missing one happened to be written first: `interface J{i} implements
+        // I` for `K` values of `i`, and `type T implements J0 & … & J{K-1} & I`, is `Θ(K)` of SDL
+        // and `Θ(K²)` here — 1.71 in the exponent over 1 k–16 k, 1.87 over the top step and
+        // **187.3 ms** at `K` = 16 000, on a schema `Schema::build` **accepts**. Writing `I` first
+        // instead hides the whole product, which is why the fixture writes it last.
         let required: &[u32] = &model.types[interface].closure;
         for &needed in required {
           if needed as usize == index {
             continue;
           }
-          let is_declared = declared
-            .iter()
-            .any(|d| model.type_index(d.sym) == Some(needed as usize));
+          let is_declared = declared_here[needed as usize];
           if !is_declared {
             let subject = model.text(model.types[needed as usize].name.sym).to_owned();
             push_owned(
@@ -3693,6 +3764,14 @@ impl SchemaBuilder {
               );
             }
           }
+        }
+      }
+
+      // Exactly the slots this declaration wrote, which is `O(declared)` and not `O(types)` — the
+      // same accounting [`Positions::drop`] does one line above, for the same table.
+      for entry in declared {
+        if let Some(at) = model.type_index(entry.sym) {
+          declared_here[at] = false;
         }
       }
     }
