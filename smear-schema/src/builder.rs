@@ -982,6 +982,22 @@ struct RawField {
   ty: RawTypeRef,
   args: Declared<MAX_FIELD_ARGUMENTS>,
   directives: Vec<RawDirectiveUse>,
+  /// Whether `@deprecated` is written on this field, decided once where the list is built.
+  ///
+  /// Draft `IsValidImplementation` 2.6 asks it of BOTH sides of every pair the conformance pass
+  /// forms, and [`is_deprecated`] answers by scanning a written directive list and comparing each
+  /// name's *text*. The pair count is the rule's own extent — an implementor's field against an
+  /// interface's, once each — but the scan is a third factor multiplying it, and nothing bounds a
+  /// field's directive list. `K` interfaces declaring one field, in front of one implementor whose
+  /// field carries `D` directives, asks the implementor's own list `K` times: `Θ(K + D)` of SDL,
+  /// `Θ(K × D)` of build — 1.77 in the exponent over 500–8 000 with `K = D`, 1.97 over the top
+  /// step and **299.5 ms** at 8 000, on a schema `Schema::build` **accepts**, against 0.78, 1.05
+  /// and **10.3 ms**.
+  ///
+  /// A bit on the field rather than a table beside the pass, because the answer is a property of
+  /// the declaration and not of the pair: an extension appends new fields and never edits one that
+  /// is already here, so what is decided at ingest is still true at conformance. al8n/smear#198.
+  deprecated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1907,11 +1923,13 @@ impl SchemaBuilder {
         };
         let directives =
           self.directive_uses(field.directives(), DirectiveLocation::FieldDefinition);
+        let deprecated = is_deprecated(&self.interner, &directives);
         RawField {
           name,
           ty,
           args: args.into(),
           directives,
+          deprecated,
         }
       })
       .collect()
@@ -3687,9 +3705,7 @@ impl SchemaBuilder {
           // `IsValidImplementation` 2.6: "if `field` is deprecated then `implementedField` must
           // also be deprecated". The span is the implementing field, which is where the edit goes;
           // `related` points at the interface field, which is the other half of the obligation.
-          if is_deprecated(model.interner, &own.directives)
-            && !is_deprecated(model.interner, &interface_field.directives)
-          {
+          if own.deprecated && !interface_field.deprecated {
             push_related(
               errors,
               SchemaErrorKind::InterfaceFieldNotDeprecated,
