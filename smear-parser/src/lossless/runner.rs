@@ -275,14 +275,17 @@ impl core::error::Error for MintError {}
 ///   carries its own element count for exactly this reason; anything else that sizes work from a
 ///   length is making the same assumption.
 /// - **Depth is not bounded by the lexer's ceiling.** **Four** green-tree walks in
-///   `crate::lossless::project` recurse — `verify_source_at`, `verify_source_counted`,
+///   `crate::lossless::project` recursed — `verify_source_at`, `verify_source_counted`,
 ///   `reject_holes`, and the mutually recursive `node_extent`/`extent_of` pair — and each rested on
 ///   a comment naming the lexer's `MAX_NESTING_DEPTH` as the bound on the tree's depth. A minted
 ///   stream honours no such ceiling.
 ///
-///   Each carries its own counter now and refuses at
-///   [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH), so **these walks** are safe on
-///   any tree. Two halves of the problem are not, and neither is this door's to close:
+///   Each carried a counter and refused at
+///   [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH), which was called safe on any
+///   tree and was not: a counter bounds a depth and the frames were the host's, so a walk on a
+///   thread too small to hold the ceiling aborted before reaching the refusal. **None of the four
+///   spends a native frame per level now**, so the refusal is reached on any stack. Three halves of
+///   the problem are still open, and none of them is this door's to close:
 ///
 ///   - **Construction.** The over-deep tree is built by `finish_partial`, from events already
 ///     recorded in the `Cst` this function is handed. There is nothing *here* to inspect and no way
@@ -308,10 +311,17 @@ impl core::error::Error for MintError {}
 ///     value's mere existence is the hazard. Refusing at the open that would cross the ceiling is
 ///     what makes the difference — the tree the failing call drops is one at or under it — and
 ///     that is upstream's to do, for the same reason construction is.
+///   - **Projection.** What the four walks above *gate* is the dialect projection's own node
+///     dispatch, which is a native recursion with no counter of its own. It is bounded only by
+///     `MAX_GREEN_DEPTH` being small enough, and in an unoptimised build it is not: measured on a
+///     2 MiB thread, the projection descends 514 green levels and aborts at 516, which is exactly
+///     what the doors produce at the lexer's `HARD_MAX`. See
+///     `crate::lossless::project::MAX_GREEN_DEPTH` and the constant beside it.
 ///
-///   So the honest statement of this entry is that **the walks are bounded, construction is
-///   bounded by whatever substrate revision is resolved, and `rowan`'s own builder is bounded by
-///   nothing this crate can reach**.
+///   So the honest statement of this entry is that **the walks spend no native stack, construction
+///   is bounded by whatever substrate revision is resolved, `rowan`'s own builder is bounded by
+///   nothing this crate can reach, and the projection behind the walks is bounded by a ceiling that
+///   does not clear it in a debug build**.
 ///
 ///   The first version of this list said *three* walks and did not mention either lifecycle half.
 ///   That is worth recording where it happened: a general claim written without enumerating what it
