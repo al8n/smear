@@ -19,7 +19,7 @@ use tokora::{
   ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source,
   cache::PeekedTokenExt,
   try_parse_input::ParseAttempt,
-  utils::{DowncastRef, IntoComponents, typenum::U1},
+  utils::{DowncastRef, typenum::U1},
 };
 
 use super::GraphQL;
@@ -156,10 +156,10 @@ where
     }
   }
 
-  name(inp).map(|name| {
-    let (span, source) = name.into_components();
-    ast::FragmentName::new(span, source)
-  })
+  // Rebranding, not rebuilding: taking the name apart and handing the pieces to
+  // `FragmentName::new` would declare whatever came back valid, which is wrong for any name this
+  // production recovered rather than read.
+  name(inp).map(ast::FragmentName::from_name)
 }
 
 impl<S> ast::Name<S> {

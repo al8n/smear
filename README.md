@@ -168,6 +168,7 @@ smear = { version = "0.0.0", features = ["validator"] }
 ### Parsing
 
 ```rust
+# #[cfg(all(feature = "parser", feature = "graphql"))] {
 use smear::{
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
@@ -189,6 +190,7 @@ let document = Parser::with_parser::<
 .expect("the query parses");
 
 assert_eq!(document.definitions().len(), 1);
+# }
 ```
 
 ### Validating
