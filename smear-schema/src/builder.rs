@@ -145,7 +145,7 @@ const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
 /// `Schema::name`, or a literal the coercion table reads — so the dedup below is already the
 /// strongest bound of its kind and there is no copy left to remove. The checked conversion is what
 /// makes the growth harmless.
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Interner {
   strings: Vec<u8>,
   spans: Vec<(u32, u32)>,
@@ -156,6 +156,27 @@ struct Interner {
   /// build's refusal. Holding the placeholder here rather than a bare flag is what makes one
   /// refusal cost one span however many spellings follow it.
   refused: Option<Sym>,
+}
+
+impl core::fmt::Debug for Interner {
+  /// The arena's *shape*, never its contents.
+  ///
+  /// A derived `Debug` renders `strings` as one decimal integer per interned byte and `map` as a
+  /// second copy of every spelling — so formatting a [`SchemaBuilder`] printed the caller's whole
+  /// literal and name arenas twice, up to [`MAX_ARENA_BYTES`] each. That is the same instruction
+  /// the [`RawShape`] impl below follows, in the other direction: a walk whose output is chosen by
+  /// the document rather than by the type is not a `Debug`, it is a dump.
+  ///
+  /// What a reader loses is the spellings, which are the caller's own bytes and are reachable
+  /// through [`Interner::bytes`]; what a reader gains is the three numbers a build is ever
+  /// debugged against.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("Interner")
+      .field("symbols", &self.spans.len())
+      .field("bytes", &self.strings.len())
+      .field("refused", &self.refused.is_some())
+      .finish()
+  }
 }
 
 impl Interner {
@@ -874,7 +895,7 @@ struct RawTypeRef {
 /// nothing about a usage can be decided at ingest. What is only knowable *here* is the syntactic
 /// position, so [`RawDirectiveUse::location`] is recorded at ingest and everything else is
 /// deferred to [`SchemaBuilder::validate_directive_usages`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawDirectiveUse {
   name: Located,
   /// The whole `@name(…)`, which is what a missing argument is blamed on: there is no argument to
@@ -884,7 +905,7 @@ struct RawDirectiveUse {
   args: Vec<RawArgument>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawArgument {
   name: Located,
   value: RawValue,
@@ -967,7 +988,7 @@ struct RawArgument {
 pub const MAX_CONST_VALUE_DEPTH: usize = 1024;
 
 /// A constant literal, reduced to what a type check reads, with the position to blame.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawValue {
   span: SimpleSpan,
   shape: RawShape,
@@ -1029,11 +1050,27 @@ impl Drop for RawValue {
   /// [`SchemaBuilder::const_value`], which refuses past [`MAX_CONST_VALUE_DEPTH`] open containers,
   /// so the branching nesting this walks is bounded by that ceiling before the value exists.
   ///
-  /// # What this does not repair
+  /// # The other two derived walks are gone rather than unreachable
   ///
-  /// The derived `Debug` and `Clone` still descend one frame per level. Neither is reachable today:
-  /// nothing in this crate formats or clones a [`RawValue`], and the type is private. What this
-  /// removes is the one of the three that fires without a call being made.
+  /// A release was the one of the three that fires without a call being made, and for one round it
+  /// was the only one repaired: `Debug` and `Clone` were left derived, on the argument that nothing
+  /// in this crate formats or clones a [`RawValue`] and the type is private.
+  ///
+  /// **The privacy argument was wrong about `Debug`, and it was wrong at the public door.**
+  /// [`SchemaBuilder`] derives `Debug`; its `types` and `extensions` reach a [`RawValue`] through
+  /// [`RawType`], [`RawField`], [`RawDirectiveUse`] and [`RawArgument`], so `{builder:?}` between
+  /// [`SchemaBuilder::document`] and [`SchemaBuilder::finish`] — which the chaining `&mut Self`
+  /// invites — walked the whole literal one native frame per level. Measured on
+  /// `aarch64-apple-darwin`, unoptimised, formatting a builder holding one list literal nested `D`
+  /// levels: **1 016 to 1 037 bytes of stack per level**, dying at `D` = 130 on a 128 KiB thread,
+  /// 256 on 256 KiB, 508 on 512 KiB and 1 012 on 1 MiB. The death is
+  /// `fatal runtime error: stack overflow` — an abort, not a diagnostic and not a `catch_unwind`.
+  /// [`MAX_CONST_VALUE_DEPTH`] does not bound it: 1 024 levels is what the ceiling *admits*, and
+  /// that is a megabyte of frames.
+  ///
+  /// So [`RawShape`] formats itself without descending, and `Clone` is not derived anywhere on this
+  /// family at all. A trait that is not implemented cannot be reached by a caller nobody has
+  /// written yet, which is the difference between this and an unreachability argument.
   fn drop(&mut self) {
     let mut sources: Vec<Spent> = Vec::new();
     spend(&mut self.shape, &mut sources);
@@ -1130,7 +1167,6 @@ impl Drop for RawValue {
 /// every retained byte is a distinct spelling the coercion table reads, so there is no copy left
 /// to remove. What changed is which sentence is load-bearing — the ceiling, not a `pub(crate)` on
 /// a constructor.
-#[derive(Debug, Clone)]
 enum RawShape {
   Null,
   Boolean,
@@ -1167,6 +1203,34 @@ enum RawShape {
   Refused,
 }
 
+impl core::fmt::Debug for RawShape {
+  /// Formats a literal's shape **without descending into it**, which is the whole of the impl.
+  ///
+  /// A derived `Debug` here is a recursive walk with a native frame per level, reachable from
+  /// [`SchemaBuilder`]'s own derived `Debug` — see [`RawValue`]'s release for the measurement and
+  /// for why the depth ceiling is not a bound on it. Formatting the two containers as a count is
+  /// the answer rather than an iterative renderer for the same reason the count is enough: a
+  /// literal's *contents* are the caller's bytes and are unbounded in width as well as depth, so a
+  /// `Debug` that printed them would be sized by the document either way.
+  ///
+  /// What a reader loses is a list's entries and an object's fields. What survives is every
+  /// question a builder is actually debugged against — which shape a literal reduced to, how wide
+  /// its top level is, and whether the ceiling refused it.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Null => f.write_str("Null"),
+      Self::Boolean => f.write_str("Boolean"),
+      Self::Int(sym) => f.debug_tuple("Int").field(sym).finish(),
+      Self::Float(sym) => f.debug_tuple("Float").field(sym).finish(),
+      Self::String => f.write_str("String"),
+      Self::Enum(sym) => f.debug_tuple("Enum").field(sym).finish(),
+      Self::List(values) => write!(f, "List({} entries)", values.len()),
+      Self::Object(fields) => write!(f, "Object({} fields)", fields.len()),
+      Self::Refused => f.write_str("Refused"),
+    }
+  }
+}
+
 impl RawShape {
   /// The shape, as the coercion table names it — `None` for a refused subtree, which has no
   /// content for the table to read and no answer to give it.
@@ -1197,13 +1261,13 @@ impl RawShape {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawObjectField {
   name: Located,
   value: RawValue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawInput {
   name: Located,
   ty: RawTypeRef,
@@ -1263,19 +1327,23 @@ mod declared {
   ///
   /// # And what no reader can reach, because it is no longer here
   ///
-  /// A gate on the read is still a gate on *readers*. `Declared` derives [`Clone`], and a derived
-  /// `Clone` copies the private field without asking [`Declared::read`] anything — so interface
-  /// conformance, which copies a whole `RawField` once per implementor *before* it reaches the
-  /// gate, performed `Θ(implementors × declared)` deep [`RawInput`] clones over a document of size
-  /// `O(implementors + declared)` and only then refused the schema. The ceiling kept the
-  /// diagnostics and lost the resource.
+  /// A gate on the read is still a gate on *readers*. `Declared` derived [`Clone`] when this
+  /// module landed, and a derived `Clone` copies the private field without asking
+  /// [`Declared::read`] anything — so interface conformance, which copies a whole `RawField` once
+  /// per implementor *before* it reaches the gate, performed `Θ(implementors × declared)` deep
+  /// [`RawInput`] clones over a document of size `O(implementors + declared)` and only then refused
+  /// the schema. The ceiling kept the diagnostics and lost the resource.
   ///
   /// So the refusal is a *state* rather than a comparison, decided in `Declared::from` and holding
   /// nothing: `args` is `None`, and the `Vec` is dropped at the moment the length is first known.
-  /// There is no payload for `Clone` to copy, none for `Debug` to format, and none for a `Deref`,
-  /// a serialiser or an iterator adaptor written later to reach. The guarantee stops depending on
-  /// every reader remembering, on every derive having been audited, and on this module's boundary
-  /// holding against traits nobody has written yet.
+  /// There is no payload for a `Deref`, a serialiser or an iterator adaptor written later to
+  /// reach. The guarantee stops depending on every reader remembering, on every derive having been
+  /// audited, and on this module's boundary holding against traits nobody has written yet.
+  ///
+  /// `Clone` is no longer derived here — nor anywhere on the [`RawValue`] family, whose release
+  /// carries why — so the copy the paragraph above measured is now unwritable rather than
+  /// unwritten. The state is still what the guarantee rests on: it is what makes the *`Debug`* on
+  /// this type, and any trait a later round adds, cost nothing over an over-limit list.
   ///
   /// # Why at construction, and not later
   ///
@@ -1307,7 +1375,7 @@ mod declared {
   /// so a schema carrying `TooManyFieldArguments` or `TooManyDirectiveArguments` is never handed
   /// out; every diagnostic a refused list suppresses is one about a document that is refused
   /// already, for a reason the refusal names. al8n/smear#198.
-  #[derive(Debug, Clone)]
+  #[derive(Debug)]
   pub(super) struct Declared<const CEILING: u32> {
     /// The declared arguments, or `None` — the ceiling refused this list and the arguments were
     /// dropped where that was decided. The two states are not "long" and "short" but "may be read"
@@ -1361,10 +1429,10 @@ mod declared {
 
   /// Where the ceiling is applied, and the only way a `Vec<RawInput>` becomes a `Declared`.
   ///
-  /// The over-limit arm drops `args` instead of storing it. The copy a derived `Clone` would make,
-  /// the walk a reader would have done, and the bytes the list would have occupied for the rest of
-  /// the build are then work that does not exist, rather than work every consumer is trusted to
-  /// decline.
+  /// The over-limit arm drops `args` instead of storing it. The copy a derived `Clone` used to
+  /// make, the walk a reader would have done, and the bytes the list would have occupied for the
+  /// rest of the build are then work that does not exist, rather than work every consumer is
+  /// trusted to decline.
   impl<const CEILING: u32> From<Vec<RawInput>> for Declared<CEILING> {
     fn from(args: Vec<RawInput>) -> Self {
       match args.len() > CEILING as usize {
@@ -1375,7 +1443,7 @@ mod declared {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawField {
   name: Located,
   ty: RawTypeRef,
@@ -1399,13 +1467,13 @@ struct RawField {
   deprecated: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawEnumValue {
   name: Located,
   directives: Vec<RawDirectiveUse>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawType {
   name: Located,
   kind: TypeKind,
@@ -1469,7 +1537,7 @@ impl RawType {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawDirectiveDef {
   name: Located,
   args: Declared<MAX_DIRECTIVE_ARGUMENTS>,
@@ -1479,7 +1547,7 @@ struct RawDirectiveDef {
 }
 
 /// A type extension, converted to owned form and applied once every document has been read.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 struct RawExtension {
   target: Option<Located>,
   kind: Option<TypeKind>,

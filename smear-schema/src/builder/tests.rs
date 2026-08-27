@@ -342,3 +342,98 @@ fn a_distinct_literal_spelling_does_not_cost_its_own_source_bytes() {
     );
   }
 }
+
+/// Formatting a builder does not spend a native frame per level of a literal it retains.
+///
+/// # The door
+///
+/// [`SchemaBuilder`] derives [`Debug`] and is public; `types` reaches a [`RawValue`] through
+/// [`RawType`], [`RawField`], [`RawDirectiveUse`] and [`RawArgument`]; and
+/// [`SchemaBuilder::document`] returns `&mut Self`, so a caller holding the builder between it and
+/// [`SchemaBuilder::finish`] can format one. A derived [`RawShape`] `Debug` walked the literal
+/// recursively from there — measured at `0fa6ec1` on `aarch64-apple-darwin`, unoptimised, as
+/// **1 016 to 1 037 bytes of stack per level**, aborting with `fatal runtime error: stack overflow`
+/// at 130 levels on a 128 KiB thread and at 1 012 on a 1 MiB one. [`MAX_CONST_VALUE_DEPTH`] admits
+/// 1 024.
+///
+/// # Why the assertion is on the output and not on the stack
+///
+/// A stack overflow aborts the process, so a cell that provoked one would take the whole harness
+/// with it rather than fail. The rendered length is the exact proxy: the derived walk emitted one
+/// `RawValue { span: .., shape: List([` per level, so its output grew with the depth by
+/// construction — 1 584 bytes at 8 levels against 69 656 at 1 024. A formatter whose output does
+/// not move with the depth did not descend.
+#[test]
+fn a_deep_literal_formats_without_a_frame_per_level() {
+  /// `scalar Foo @x(a: [[[…]]])`, `depth` containers deep, assembled with a loop.
+  fn document(depth: usize) -> TypeSystemDocument<&'static str> {
+    let span = SimpleSpan::const_new(0, 0);
+    let mut value = ConstInputValue::List(ConstList::new(span, Nested::new(std::vec![])));
+    for _ in 1..depth {
+      value = ConstInputValue::List(ConstList::new(span, Nested::new(std::vec![value])));
+    }
+    let directive = ConstDirective::new(
+      span,
+      Name::new(span, "x"),
+      Some(ConstArguments::new(
+        span,
+        std::vec![ConstArgument::new(span, Name::new(span, "a"), value)],
+      )),
+    );
+    TypeSystemDocument::new(
+      span,
+      std::vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+        span,
+        None,
+        TypeSystemDefinition::Type(TypeDefinition::Scalar(ScalarTypeDefinition::new(
+          span,
+          Name::new(span, "Foo"),
+          Some(ConstDirectives::new(span, std::vec![directive])),
+        ))),
+      ))],
+    )
+  }
+
+  fn rendered(depth: usize) -> String {
+    let mut builder = SchemaBuilder::new();
+    builder.document(&document(depth));
+    std::format!("{builder:?}")
+  }
+
+  let shallow = rendered(1);
+  let at_the_ceiling = rendered(MAX_CONST_VALUE_DEPTH);
+  assert_eq!(
+    shallow.len(),
+    at_the_ceiling.len(),
+    "a literal a thousand levels deeper rendered {} bytes more, so the formatter descended it",
+    at_the_ceiling.len().abs_diff(shallow.len())
+  );
+  assert!(
+    shallow.contains("List(0 entries)") && at_the_ceiling.contains("List(1 entries)"),
+    "the shape is still named and still says how wide its top level is: {at_the_ceiling}"
+  );
+
+  // The control: an ordinary literal still renders every shape it holds, and the two arenas
+  // render their size rather than the caller's bytes.
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse(
+    "scalar Foo\ndirective @x(a: Int = 1, b: [Int] = [1, 2], c: In = { p: 1.5 }) on \
+     SCALAR\ninput In { p: Float }\ntype Query { ok: Int }",
+  ));
+  let ordinary = std::format!("{builder:?}");
+  for expected in [
+    "Int(Sym(",
+    "List(2 entries)",
+    "Object(1 fields)",
+    "literals: Interner { symbols: 3, bytes: 5, refused: false }",
+  ] {
+    assert!(
+      ordinary.contains(expected),
+      "{expected} is missing: {ordinary}"
+    );
+  }
+  assert!(
+    !ordinary.contains("strings: ["),
+    "an arena renders its size, not one decimal integer per interned byte: {ordinary}"
+  );
+}
