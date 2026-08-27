@@ -75,7 +75,7 @@
 //! All four of them recursed, and each carried a counter that refused at [`MAX_GREEN_DEPTH`]. A
 //! counter cannot bound a native stack — the frames are the host's and the stack is the caller's —
 //! so a tree the counter would have refused took the process first on any thread too small to hold
-//! the ceiling's worth of frames, and the typed refusal was never reached. [`Descent`] is what they
+//! the ceiling's worth of frames, and the typed refusal was never reached. `Descent` is what they
 //! run on now: it adopts the tree's own child iterators rather than copying children out, keeps one
 //! entry per branching ancestor, and drops a source the moment its last child is taken. The counter
 //! survives, and its header says what it now answers for.
@@ -99,7 +99,7 @@ use tokora::SimpleSpan;
 /// Measured on `aarch64-apple-darwin`, unoptimised, one child process per depth, the tree built on
 /// one thread and the walk run on another of the stated size: `node_extent` aborted at **726**
 /// levels on 512 KiB and `reject_holes` at **927**; `verify_source` and `verify_source_counted`
-/// aborted at **566** and **530** on 256 KiB. All four are below the ceiling. See [`Descent`],
+/// aborted at **566** and **530** on 256 KiB. All four are below the ceiling. See `Descent`,
 /// which is what they run on now and which reaches the verdict on any stack.
 ///
 /// # So what does it bound, and why does it stay
