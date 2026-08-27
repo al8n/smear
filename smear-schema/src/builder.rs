@@ -30,7 +30,7 @@ use tokora::{Parse as _, Parser, SimpleSpan, span::AsSpan};
 use smear_parser::graphql::{
   GraphQL,
   ast::{
-    ConstDirectives, ConstInputValue, DirectiveDefinition, EnumTypeDefinition,
+    ConstDirectives, ConstInputValue, ConstObjectField, DirectiveDefinition, EnumTypeDefinition,
     EnumValuesDefinition, FieldsDefinition, ImplementInterfaces, InputFieldsDefinition,
     InputObjectTypeDefinition, InputValueDefinition, InterfaceTypeDefinition, Location, Name,
     ObjectTypeDefinition, OperationType, ScalarTypeDefinition, SchemaDefinition, Type,
@@ -45,11 +45,12 @@ use self::declared::{Args, ArgsMut, Declared};
 use super::{
   builtin,
   error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
-  literal::{BuiltInScalar, LiteralShape},
+  literal::{BuiltInScalar, LiteralShape, fits_i32, is_finite},
   repr::{
     DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
-    MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, NameIndex, PackedType, Range32,
-    RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_reserved,
+    MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType,
+    Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name,
+    is_reserved,
   },
 };
 
@@ -70,35 +71,202 @@ const ONE_OF: &str = "oneOf";
 // interning
 // ---------------------------------------------------------------------------------------------
 
+/// The largest arena an [`Interner`] will fill, in bytes.
+///
+/// # Why `u32::MAX` — the interval, then the pick inside it
+///
+/// | bound | from | value |
+/// |---|---|---|
+/// | lower: the arena a **parsed** document needs | one copy per distinct spelling, and a parsed document's leaves hold disjoint token spans | **that document's own source** |
+/// | upper: the last offset a span can name | [`Interner::spans`] is a `(u32, u32)` pair of byte offsets into [`Interner::strings`] | **`u32::MAX`** |
+///
+/// The lower row is why a ceiling at the top of the interval refuses nothing this workspace
+/// parses. A `TypeSystemDocument` that `type_system_document` produced over one source has one
+/// leaf per token and the tokens are disjoint, so the sum of its spellings is at most that source
+/// — and a source this workspace accepts is itself addressed by `u32` spans. The two rows meet,
+/// so there is no interval to pick inside.
+///
+/// **For a tree a caller assembles the row has no bottom, and that is what the ceiling is for.**
+/// `Name::new` is public, and `IntValue::graphql` and its two siblings are public associated
+/// parsers, so `N` leaves may be `N` overlapping suffixes of one `B`-byte buffer: `B(B+1)/2`
+/// interned bytes from `B` of input, which reaches four gigabytes at `B ≈ 92 682` — a 92 KB
+/// input. [`RawShape`] carries the measurement. So this is not slack a caller can plan around; it
+/// is the width of the offset, and refusing at it is what the offset is worth.
+///
+/// The upper row is the representation and not a preference. `bytes()` answers
+/// `strings[start..end]`, and past `u32::MAX` bytes there is no `start` to record — the cast that
+/// used to record one wrapped, which is the defect this constant closes rather than a capacity it
+/// buys. See [`SchemaErrorKind::TooManyInternedBytes`] for what a build past it sees, and the
+/// [`Interner`] header for the two failures wrapping produced.
+const MAX_ARENA_BYTES: u32 = u32::MAX;
+
+/// The largest number of distinct spellings an [`Interner`] will hold.
+///
+/// The width of the [`Sym`] that addresses them, for the same reason [`MAX_ARENA_BYTES`] is the
+/// width of an offset — and it is the *slack* bound of the pair. A spelling costs at least one
+/// byte of arena, so `spans.len() <= strings.len() + 1` always holds and [`MAX_ARENA_BYTES`] is
+/// reached first from every direction but one: the single empty spelling, which the map admits
+/// once and then deduplicates. It is checked anyway, because "the other guard covers it" is a
+/// property of today's call sites rather than of this type.
+///
+/// **Not [`MAX_SYMBOLS`].** That is the bound [`NameIndex::build`] can *index*, it is `1 << 30`,
+/// and `flatten` still refuses against it as [`SchemaErrorKind::TooManyNames`]. This one is the
+/// bound a `Sym` can *address*, which is the cast's own question.
+const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
+
+/// The largest possible-object table this addresses, in `u64` words.
+///
+/// `TypeDef::possible_start` is a `u32` **word** offset into one table, so past this a composite's
+/// offset wraps and `Schema::possible_objects` hands back another type's bitset. Derived from that
+/// width and from nothing else; the resource question below it is asked of the allocator rather
+/// than of a constant, because 34 GB is not a number a caller can plan around either.
+const MAX_POSSIBLE_WORDS: u32 = u32::MAX;
+
 /// The growable half of the name arena.
 ///
 /// The finished [`Schema`] keeps `strings` and `spans` and a probe-only [`NameIndex`]; this map
 /// exists only while building, which is why the schema has no hash map in it at all.
-#[derive(Debug, Default)]
+///
+/// # The offsets are checked, and here is what they did when they were not
+///
+/// A span is a pair of `u32` **byte offsets** into `strings`, and the three that record one were
+/// `… .len() as u32`. Two of them index `strings`, so they wrap at four gigabytes of interned
+/// bytes; the third counts symbols and needs four billion of them, which is the bar a review of
+/// this type read all three against. Measured on this type at `fcac941`,
+/// `aarch64-apple-darwin`, release, by padding `strings` and interning `"beta"` after `"alpha"`:
+///
+/// | `strings.len()` | span recorded | `bytes()` |
+/// |---|---|---|
+/// | `u32::MAX` | `(4294967295, 3)` | **panic**: `slice index starts at 4294967295 but ends at 3` |
+/// | `2^32` | `(0, 4)` | **`"alph"`** — the wrong spelling, handed back through `Schema::name` |
+///
+/// Neither is a capacity limit a caller can plan around: the first ends the process and the second
+/// answers a question wrongly, both on a path that returns `Result`. Four gigabytes arrives from a
+/// 92 KB input, through either arena: `Name::new` is public and `EnumValue::graphql` is a public
+/// associated parser, so `N` leaves may be `N` overlapping suffixes of one `B`-byte buffer —
+/// `B(B+1)/2` interned bytes from `B`, which crosses `u32::MAX` at `B ≈ 92 682`. [`RawShape`]
+/// carries the measurement. The ceilings above turn both rows into
+/// [`SchemaErrorKind::TooManyInternedBytes`].
+///
+/// The quadratic growth itself is not bounded here, and for the two populations that still reach
+/// it that is not a duplicate of the ceiling: every retained byte is a *distinct* spelling — a name
+/// the finished [`Schema`] hands back through `Schema::name`, or an enum member's spelling that
+/// only the declared members can rule on — so the dedup below is the strongest bound of its kind
+/// and there is no copy left to remove. The checked conversion is what makes the growth harmless.
+/// The two numeric literal arms used to be a third population and are not one any more: they
+/// retain nothing at all, which is a stronger answer than a ceiling and is not available to these
+/// two.
+#[derive(Default)]
 struct Interner {
   strings: Vec<u8>,
   spans: Vec<(u32, u32)>,
   map: BTreeMap<Box<[u8]>, u32>,
+  /// The symbol a refused intern answers with, minted at the first refusal.
+  ///
+  /// `Some` is the arena saying it stopped growing, and [`SchemaBuilder::finish`] reads it as the
+  /// build's refusal. Holding the placeholder here rather than a bare flag is what makes one
+  /// refusal cost one span however many spellings follow it.
+  refused: Option<Sym>,
+}
+
+impl core::fmt::Debug for Interner {
+  /// The arena's *shape*, never its contents.
+  ///
+  /// A derived `Debug` renders `strings` as one decimal integer per interned byte and `map` as a
+  /// second copy of every spelling — so formatting a [`SchemaBuilder`] printed the caller's whole
+  /// literal and name arenas twice, up to [`MAX_ARENA_BYTES`] each. That is the same instruction
+  /// the [`RawShape`] impl below follows, in the other direction: a walk whose output is chosen by
+  /// the document rather than by the type is not a `Debug`, it is a dump.
+  ///
+  /// What a reader loses is the spellings, which are the caller's own bytes and are reachable
+  /// through [`Interner::bytes`]; what a reader gains is the three numbers a build is ever
+  /// debugged against.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("Interner")
+      .field("symbols", &self.spans.len())
+      .field("bytes", &self.strings.len())
+      .field("refused", &self.refused.is_some())
+      .finish()
+  }
 }
 
 impl Interner {
   fn intern(&mut self, bytes: &[u8]) -> Sym {
+    self.intern_within(bytes, MAX_ARENA_BYTES, MAX_ARENA_SYMBOLS)
+  }
+
+  /// [`Interner::intern`] with the two ceilings supplied.
+  ///
+  /// The ceilings are parameters rather than constants read inside so that a test can stand at the
+  /// boundary: the real one is four gigabytes of interned bytes, which no suite allocates. This is
+  /// the whole mechanism — [`Interner::intern`] adds only the two numbers — so a cell driven to an
+  /// injected ceiling exercises the same guards a document past the real one would.
+  fn intern_within(&mut self, bytes: &[u8], max_bytes: u32, max_symbols: u32) -> Sym {
     if let Some(sym) = self.map.get(bytes) {
       return Sym::new(*sym);
     }
-    let start = self.strings.len() as u32;
+    // Each of the three was a `len() as u32`, and each is asked before anything grows: a refusal
+    // that has already pushed the bytes is a refusal with a wrapped arena behind it.
+    let (Ok(start), Ok(width), Ok(sym)) = (
+      u32::try_from(self.strings.len()),
+      u32::try_from(bytes.len()),
+      u32::try_from(self.spans.len()),
+    ) else {
+      return self.refuse();
+    };
+    let Some(end) = start.checked_add(width).filter(|end| *end <= max_bytes) else {
+      return self.refuse();
+    };
+    if sym >= max_symbols {
+      return self.refuse();
+    }
     self.strings.extend_from_slice(bytes);
-    let end = self.strings.len() as u32;
-    let sym = self.spans.len() as u32;
     self.spans.push((start, end));
     self.map.insert(bytes.to_owned().into_boxed_slice(), sym);
     Sym::new(sym)
+  }
+
+  /// The symbol a refused intern answers with: an empty spelling, minted once.
+  ///
+  /// A real in-range symbol rather than a sentinel, because a [`Sym`] is a **dense index** in this
+  /// builder — [`Positions`] addresses a table by it, `set_type_index` resizes one to it — so a
+  /// symbol outside the arena is an out-of-bounds read or a four-billion-slot `resize`, which is a
+  /// worse failure than the one being repaired. The empty range is in bounds for every arena,
+  /// including one that holds nothing.
+  ///
+  /// The build is over by the time anything reads it: [`SchemaBuilder::finish`] turns a refusal
+  /// into [`SchemaErrorKind::TooManyInternedBytes`] before the §3 passes run, so the collisions a
+  /// shared placeholder would make are never reported.
+  fn refuse(&mut self) -> Sym {
+    if let Some(sym) = self.refused {
+      return sym;
+    }
+    let sym = match u32::try_from(self.spans.len()) {
+      // One slot short of the width, so that pushing the placeholder cannot be the thing that
+      // overflows `len`.
+      Ok(sym) if sym < u32::MAX => {
+        self.spans.push((0, 0));
+        sym
+      }
+      // The symbol space is full as well. Symbol zero exists, because filling it took `2^32`
+      // accepted interns.
+      _ => 0,
+    };
+    let sym = Sym::new(sym);
+    self.refused = Some(sym);
+    sym
   }
 
   fn lookup(&self, bytes: &[u8]) -> Option<Sym> {
     self.map.get(bytes).copied().map(Sym::new)
   }
 
+  /// The spelling `sym` was interned with.
+  ///
+  /// Indexed rather than probed: `intern_within` records a span only after establishing
+  /// `start <= end <= strings.len()`, and `sym` is the index it returned, so both reads are in
+  /// bounds by construction. A `get` here would answer a future break with the empty spelling
+  /// instead of saying so.
   fn bytes(&self, sym: Sym) -> &[u8] {
     let (start, end) = self.spans[sym.get() as usize];
     &self.strings[start as usize..end as usize]
@@ -110,7 +278,11 @@ impl Interner {
   }
 
   fn len(&self) -> u32 {
-    self.spans.len() as u32
+    // `intern_within` refuses past `MAX_ARENA_SYMBOLS`, so this is the count rather than a wrap of
+    // it. Saturating rather than `as` is what makes that a claim a reader can check: a count past
+    // the width answers `u32::MAX`, which `flatten` refuses as `SchemaErrorKind::TooManyNames`
+    // instead of returning a schema addressed by the low bits of it.
+    u32::try_from(self.spans.len()).unwrap_or(u32::MAX)
   }
 }
 
@@ -734,7 +906,7 @@ struct RawTypeRef {
 /// nothing about a usage can be decided at ingest. What is only knowable *here* is the syntactic
 /// position, so [`RawDirectiveUse::location`] is recorded at ingest and everything else is
 /// deferred to [`SchemaBuilder::validate_directive_usages`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawDirectiveUse {
   name: Located,
   /// The whole `@name(…)`, which is what a missing argument is blamed on: there is no argument to
@@ -744,67 +916,390 @@ struct RawDirectiveUse {
   args: Vec<RawArgument>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawArgument {
   name: Located,
   value: RawValue,
 }
 
+/// How many nested list and input-object literals one constant value may open.
+///
+/// # Why a ceiling exists here at all
+///
+/// `SchemaBuilder::const_value` folds a constant literal with an explicit stack — one frame per
+/// open container — and every one of those frames, plus the output vector it carries, is reached
+/// through an **infallible** allocation. [`Schema::build`] and [`SchemaBuilder::document`] take a
+/// `&TypeSystemDocument<S>`, and every carrier on the route to a constant literal has a public
+/// constructor, so the literal's nesting is the *caller's* and not a parser's. Without a ceiling a
+/// hand-built literal is a process abort — `memory allocation of N bytes failed` — where the whole
+/// point of the door is that it answers [`SchemaErrors`].
+///
+/// This is the difference between here and al8n/smear#199, which met the same growth inside a
+/// `Drop`: a `Drop` has no return value and no caller to tell, so stating the bound was the honest
+/// answer there. `Schema::build` returns a `Result`. **Refusing is available, so refusing is what
+/// happens** — and it happens before the frame is pushed, not after the allocator has been asked.
+///
+/// # Why 1024 — the interval, then the pick inside it
+///
+/// | bound | from | value |
+/// |---|---|---|
+/// | lower: the deepest literal smear's own doors produce | the lossless door at `HARD_MAX`, measured | **255** |
+/// | upper: the deepest literal any tree a projection descends can carry | `MAX_GREEN_DEPTH`, one green level per container at least | **1024** |
+///
+/// The lower row is measured rather than reasoned. `parse_type_system_document_with_limits` at
+/// `LosslessLimits::with_max_nesting_depth(HARD_MAX)` over `scalar Foo @x(a: [[…1…]])`, projected
+/// with `project_type_system_document`: 255 brackets parses clean and yields **255 open containers**
+/// (256 levels counting the innermost leaf); 256 brackets does not parse clean at all, because the
+/// `(` of the argument list spends one of the same budget. So 255 is what the door at the widest
+/// ceiling smear itself installs can hand this function, and a ceiling below it would make the
+/// builder refuse a document this workspace's own parser had just accepted — the window
+/// al8n/smear#198 closed on the projection side.
+///
+/// The upper row is the point past which a higher ceiling buys a caller nothing. A literal
+/// container costs at least one green level, so a tree that `smear_parser::lossless::project`'s
+/// walks will descend at all — they refuse past `MAX_GREEN_DEPTH`, 1024 — carries at most 1024 of
+/// them; the shape that comes closest is the list value at 1.020 green levels a bracket, which
+/// reaches 1003. Above the row, the only literals admitted are ones no smear door can deliver,
+/// which is precisely the population this ceiling exists to bound.
+///
+/// **The pick is the top of the interval, and the asymmetry runs the other way from `HARD_MAX`'s.**
+/// A ceiling that is too low refuses a literal a door could have produced. A ceiling that is too
+/// high does *not* re-open the abort — the storage is still bounded, by a bigger constant — so
+/// nothing here trades a diagnostic against a crash, and the only cost of the top of the interval
+/// is the number in the next section.
+///
+/// # What it costs, measured
+///
+/// Peak live bytes across the whole `Schema::build`, `aarch64-apple-darwin`, unoptimised, the
+/// document built before the instrument is armed, against a build over `type Query { ok: Int }`
+/// that peaks at **67 940** bytes with no literal in it at all:
+///
+/// | literal | peak | over the floor |
+/// |---|---|---|
+/// | 1024 nested lists — exactly the ceiling, not refused | **139 637** | 2.06x |
+/// | 1024 nested one-field objects — the same | **164 189** | 2.42x |
+/// | any list chain past the ceiling: 1 025, 2 001, 20 001, 200 001 containers | **140 007** | 2.06x |
+/// | any object chain past it | **164 583** | 2.42x |
+///
+/// The last two rows are one number each and not a range: the peak, and the allocation count with
+/// it, stop moving with the literal's depth altogether — 200 001 containers cost what 1 025 do. So
+/// the ceiling turns an unbounded, caller-chosen amplification into about 160 KiB. See
+/// `SchemaBuilder::const_value` for the per-level bands those two rows sit at the end of, and for
+/// what the ceiling does *not* cover: a literal's **width** costs one reduced value an entry, which
+/// has no ceiling and is measured there against the band an ordinary literal-free document opens.
+///
+/// # What a caller past it sees
+///
+/// [`SchemaErrorKind::ConstantValueTooDeep`], once for the literal, at the span of the first
+/// container past the ceiling and naming the argument or input value the literal was written for.
+/// The refused container is replaced by a marker that stands for the skipped subtree and answers
+/// no question about it — not by an empty container, which is a claim about content nothing read —
+/// so the rest of the document is still checked and every other defect in it still reported. And
+/// the build refuses, because a non-empty error list is what `SchemaBuilder::finish` reads.
+pub const MAX_CONST_VALUE_DEPTH: usize = 1024;
+
 /// A constant literal, reduced to what a type check reads, with the position to blame.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawValue {
   span: SimpleSpan,
   shape: RawShape,
 }
 
+/// A container of children a release has taken over but not drained.
+enum Spent {
+  /// A list literal's entries, drained where they were allocated.
+  Values(vec::IntoIter<RawValue>),
+  /// An object literal's fields, drained where they were allocated.
+  Fields(vec::IntoIter<RawObjectField>),
+}
+
+/// Hands `shape`'s children over, leaving it a leaf.
+///
+/// `mem::take` rather than a read: the container is moved out whole, so no element is ever copied
+/// from one buffer to another and the caller can release what is left in a single frame.
+fn spend(shape: &mut RawShape, sources: &mut Vec<Spent>) {
+  match shape {
+    RawShape::List(values) if !values.is_empty() => {
+      sources.push(Spent::Values(core::mem::take(values).into_iter()));
+    }
+    RawShape::Object(fields) if !fields.is_empty() => {
+      sources.push(Spent::Fields(core::mem::take(fields).into_iter()));
+    }
+    _ => {}
+  }
+}
+
+impl Drop for RawValue {
+  /// Releases a literal without a native frame per level.
+  ///
+  /// # Why this exists at all
+  ///
+  /// [`SchemaBuilder::const_value`] builds one of these for every constant literal in the document,
+  /// mirroring the literal's own shape, and the literal's depth is the caller's:
+  /// [`Schema::build`] takes a `&TypeSystemDocument<S>` and every carrier on the route to a const
+  /// directive argument has a public constructor. Making that reduction a loop moved the abort
+  /// rather than removing it — measured on `aarch64-apple-darwin`, unoptimised, with the document
+  /// built on another thread, `Schema::build` went from dying at **1 545** levels of list literal on
+  /// a 2 MiB thread to dying at **7 737**, and the second number is this glue at 271 bytes a level
+  /// where the reduction cost 1 357. A release is not a call anyone makes and there is no
+  /// diagnostic to return, so it goes the same way the parser's value tree went in al8n/smear#199.
+  ///
+  /// # The invariant
+  ///
+  /// **Anything not handed over is released here, so anything not handed over must be a leaf.** A
+  /// child released inside this loop re-enters this `drop`, and that is exactly two frames deep
+  /// because [`spend`] has already emptied its container: the re-entered call finds nothing to hand
+  /// over, allocates nothing, and returns.
+  ///
+  /// A source is dropped the moment its last child is taken, so a chain of one-element lists costs
+  /// one entry at any depth rather than one per level; a container is taken over whole, so a
+  /// literal of a million scalars costs one entry too. What is left is one entry per ancestor with
+  /// an unvisited child — the literal's *branching* nesting.
+  ///
+  /// `sources` grows through an infallible `push` like every other work list here, and here that is
+  /// answerable rather than merely stated: the only thing that builds a [`RawValue`] is
+  /// [`SchemaBuilder::const_value`], which refuses past [`MAX_CONST_VALUE_DEPTH`] open containers,
+  /// so the branching nesting this walks is bounded by that ceiling before the value exists.
+  ///
+  /// # The other two derived walks are gone rather than unreachable
+  ///
+  /// A release was the one of the three that fires without a call being made, and for one round it
+  /// was the only one repaired: `Debug` and `Clone` were left derived, on the argument that nothing
+  /// in this crate formats or clones a [`RawValue`] and the type is private.
+  ///
+  /// **The privacy argument was wrong about `Debug`, and it was wrong at the public door.**
+  /// [`SchemaBuilder`] derives `Debug`; its `types` and `extensions` reach a [`RawValue`] through
+  /// [`RawType`], [`RawField`], [`RawDirectiveUse`] and [`RawArgument`], so `{builder:?}` between
+  /// [`SchemaBuilder::document`] and [`SchemaBuilder::finish`] — which the chaining `&mut Self`
+  /// invites — walked the whole literal one native frame per level. Measured on
+  /// `aarch64-apple-darwin`, unoptimised, formatting a builder holding one list literal nested `D`
+  /// levels: **1 016 to 1 037 bytes of stack per level**, dying at `D` = 130 on a 128 KiB thread,
+  /// 256 on 256 KiB, 508 on 512 KiB and 1 012 on 1 MiB. The death is
+  /// `fatal runtime error: stack overflow` — an abort, not a diagnostic and not a `catch_unwind`.
+  /// [`MAX_CONST_VALUE_DEPTH`] does not bound it: 1 024 levels is what the ceiling *admits*, and
+  /// that is a megabyte of frames.
+  ///
+  /// So [`RawShape`] formats itself without descending, and `Clone` is not derived anywhere on this
+  /// family at all. A trait that is not implemented cannot be reached by a caller nobody has
+  /// written yet, which is the difference between this and an unreachability argument.
+  fn drop(&mut self) {
+    let mut sources: Vec<Spent> = Vec::new();
+    spend(&mut self.shape, &mut sources);
+    loop {
+      let mut value = match sources.last_mut() {
+        None => return,
+        Some(Spent::Values(rest)) => {
+          let Some(value) = rest.next() else {
+            sources.pop();
+            continue;
+          };
+          if rest.as_slice().is_empty() {
+            sources.pop();
+          }
+          value
+        }
+        Some(Spent::Fields(rest)) => {
+          let Some(field) = rest.next() else {
+            sources.pop();
+            continue;
+          };
+          if rest.as_slice().is_empty() {
+            sources.pop();
+          }
+          // The name is a `Located`, which owns nothing this loop can reach.
+          field.value
+        }
+      };
+      spend(&mut value.shape, &mut sources);
+      // Released here with an empty container: one re-entry, no descent.
+    }
+  }
+}
+
 /// The literal itself.
 ///
-/// Only the two numeric arms keep their spelling — that is what the range checks read — and only
-/// the enum arm keeps its name. Everything else is decided by shape alone, so a `String`'s bytes
-/// are dropped rather than copied into the builder.
-#[derive(Debug, Clone)]
+/// Everything a type check reads, and nothing else. Only the enum arm keeps bytes; the two numeric
+/// arms keep a **verdict**; every other arm is decided by shape alone, so a `String`'s bytes are
+/// dropped rather than copied into the builder.
+///
+/// # What keeping a spelling cost, and why only one arm still does
+///
+/// Each of the three non-obvious arms once held a `Box<[u8]>` filled with `source().as_ref().into()`
+/// — **an allocation and a copy per occurrence**. That is the one place in this reduction where the
+/// output is not injective into the tree it reads, and the amplification is unbounded from a
+/// bounded input: `ConstInputValue` is public and `Clone`, a clone of a leaf copies the `S` and not
+/// the bytes behind it, so `N` clones of one `B`-byte literal are `O(B + N)` live in the caller's
+/// hand and were `O(N × B)` retained here. Measured on `aarch64-apple-darwin`, unoptimised, as the
+/// band between the peak live bytes of the caller's own tree and the peak across `Schema::build`
+/// over it, `N` list entries each a clone of one parsed `B`-byte leaf:
+///
+/// | | `B` = 8 | 64 | 256 | 1 024 | 4 096 |
+/// |---|---|---|---|---|---|
+/// | `N` = 1 000 | 78 710 | 134 710 | 326 710 | 1 094 710 | 4 166 710 |
+/// | 8 000 | 470 710 | 918 710 | 2 454 710 | 8 598 710 | **33 174 710** |
+///
+/// The fit is exact and it has two terms: `∂/∂N` is `B + 48` and `∂/∂B` is `N`. The 48 is the
+/// [`RawValue`] the reduction is entitled to — one per `ConstInputValue`, which is what makes the
+/// rest of it injective — and the `N × B` beside it was that copy. The caller's own tree over the
+/// same grid is `88N` and does not move with `B` at all.
+///
+/// **[`MAX_CONST_VALUE_DEPTH`] does not see it**: the shape above is one list one level deep, so
+/// the ceiling is read once with no frame open. A width ceiling would not have been the answer
+/// either — the population that reaches this is ordinary valid documents, and a constant that
+/// admitted them would have to admit the amplification too.
+///
+/// Interning replaced the copy with a [`Sym`] into [`SchemaBuilder`]'s literal arena, so the
+/// retained bytes became **one copy per distinct spelling** rather than one per occurrence. That
+/// bounds repetition and nothing else, and a parse is not injective into the bytes it reads:
+/// `IntValue::graphql` is a **public** associated parser — `graphql_slice_api!` generates one for
+/// each of the three arms — so a caller may run it over every suffix of one buffer and hold `B`
+/// leaves that borrow the same `B` bytes. Measured through `Schema::build`'s own door, as the
+/// literal arena after one assembled document whose single list holds those leaves:
+///
+/// | `B` | 10 | 30 | 100 | 300 |
+/// |---|---|---|---|---|
+/// | `Int`, interned | 55 | 465 | 5 050 | 45 150 |
+/// | `Int`, reduced | **0** | **0** | **0** | **0** |
+/// | `Float`, interned | 52 | 462 | 5 047 | 45 147 |
+/// | `Float`, reduced | **0** | **0** | **0** | **0** |
+/// | `Enum`, interned | 55 | 465 | 5 050 | 45 150 |
+///
+/// The interned fit is `B(B+1)/2` exactly and the ratio is `(B+1)/2`, so there is no size at which
+/// it flattens. (`Float`'s row is three short because the last two suffixes of any buffer are not
+/// floats.)
+///
+/// # The two numeric arms: a verdict retains nothing
+///
+/// `fits_i32` and `is_finite` are **all** a numeric spelling is ever read for — see
+/// [`LiteralShape`] — and both are answerable where the literal is read. So they are answered
+/// there, and what this enum carries is the `bool`. The growth is not bounded, it is *gone*: zero
+/// retained at every `B` above, and one range decision per literal instead of one per check.
+///
+/// The trade this reverses was made deliberately and is worth naming. Keeping the spelling let all
+/// three arms share one mechanism, at the price of a bound; the price was justified by
+/// `BuiltInScalar::accepts`'s parameter being the shared contract that
+/// `the_two_coercion_tables_agree` holds the compiler's second table against. That test is
+/// **behavioural** — it drives `Schema::build` and the request door over the same twenty literals
+/// past six scalars and compares verdicts — so it neither mentions `accepts` nor compiles against
+/// it, and it passes unchanged. What the uniformity actually bought was a bound the suffix grid
+/// above then proved does not hold.
+///
+/// # The enum arm keeps interning, and here is what bounds it
+///
+/// An enum member's spelling is not resolved here. It is looked up in the **name** arena against
+/// the members the document declares, in `check_const_value`, and a member declared further down
+/// the document — or in a later one — is not a symbol when the literal is reduced. There is no
+/// verdict to compute at reduction time, because the fact the verdict would be about does not
+/// exist yet.
+///
+/// Interning it into the name arena instead would resolve that ordering and is the wrong trade
+/// twice: a spelling that names no declared member would mint a symbol in a space that is
+/// **dense-indexed** — `type_of_sym`, `directive_of_sym` and `Positions`'s table are all
+/// `Θ(symbols)` — and it would ride into the finished [`Schema`], whose arena outlives the build,
+/// where today the literal arena is dropped by [`SchemaBuilder::flatten`].
+///
+/// So it stays, and what bounds it is [`MAX_ARENA_BYTES`] rather than this reduction: past four
+/// gigabytes the arena refuses and the build answers [`SchemaErrorKind::TooManyInternedBytes`],
+/// which arrives at `B ≈ 92 682` — a 92 KB input. What does **not** bound it: dedup, because the
+/// spellings are genuinely distinct; [`MAX_CONST_VALUE_DEPTH`], because this is width and not
+/// depth; and the privacy of the leaf constructors, because `EnumValue::graphql` is public. The
+/// family is one door wide now instead of three.
 enum RawShape {
   Null,
   Boolean,
-  Int(Box<[u8]>),
-  Float(Box<[u8]>),
+  /// An integer literal, reduced to [`fits_i32`](crate::literal::fits_i32).
+  Int(bool),
+  /// A floating-point literal, reduced to [`is_finite`](crate::literal::is_finite).
+  Float(bool),
   String,
-  Enum(Box<[u8]>),
+  /// An enum member's spelling, interned. The one arm that still retains bytes; see the header.
+  Enum(Sym),
   List(Vec<RawValue>),
   Object(Vec<RawObjectField>),
+  /// A container past [`MAX_CONST_VALUE_DEPTH`], standing for the whole subtree it opened.
+  ///
+  /// **Not a shape any caller wrote.** It is the reduction saying it stopped here, and the
+  /// [`SchemaErrorKind::ConstantValueTooDeep`] naming the literal is already in the error list by
+  /// the time anything reads it. Every walk over a [`RawValue`] treats it as terminal and asks it
+  /// nothing, because there is nothing to ask: the content it stands for was never built.
+  ///
+  /// What stood here was an empty container of the refused kind, and that is a statement about
+  /// the skipped content rather than an absence of one — a statement no reader can tell from the
+  /// caller's own `[]` or `{}`. [`SchemaBuilder::check_const_value`] read it as an object with no
+  /// fields and reported every required field of the target missing from a subtree that may
+  /// supply all of them; [`map_nodes`] offered it to the cycle rule as a map node supplying
+  /// nothing, which is what makes that rule descend into a field's *own* default. A validator
+  /// that invents defects is worse than one that stops, because the stop is visible.
+  ///
+  /// **What dropping the kind costs, measured.** The empty container carried one TRUE fact beside
+  /// the false one — whether the refused node was a list or a map — and the coercion table could
+  /// answer from it: `input B { s: Int, a: B }` with a chain whose innermost `s` is refused
+  /// reported `ConstantValueTooDeep` *and* the coercion failure at that node, and now reports only
+  /// the first. That verdict is about the refused node itself, on a document the ceiling is
+  /// already refusing, so it is redundant rather than lost — and keeping the kind would put
+  /// "which container is this" back in front of every walk, which is the question the sentinel
+  /// made unsafe to ask. A coercion failure ELSEWHERE in the same literal is unaffected: the root
+  /// of a literal is never refused, because the ceiling is read with no frame open.
+  Refused,
+}
+
+impl core::fmt::Debug for RawShape {
+  /// Formats a literal's shape **without descending into it**, which is the whole of the impl.
+  ///
+  /// A derived `Debug` here is a recursive walk with a native frame per level, reachable from
+  /// [`SchemaBuilder`]'s own derived `Debug` — see [`RawValue`]'s release for the measurement and
+  /// for why the depth ceiling is not a bound on it. Formatting the two containers as a count is
+  /// the answer rather than an iterative renderer for the same reason the count is enough: a
+  /// literal's *contents* are the caller's bytes and are unbounded in width as well as depth, so a
+  /// `Debug` that printed them would be sized by the document either way.
+  ///
+  /// What a reader loses is a list's entries and an object's fields. What survives is every
+  /// question a builder is actually debugged against — which shape a literal reduced to, how wide
+  /// its top level is, and whether the ceiling refused it.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Null => f.write_str("Null"),
+      Self::Boolean => f.write_str("Boolean"),
+      Self::Int(fits_i32) => f.debug_tuple("Int").field(fits_i32).finish(),
+      Self::Float(is_finite) => f.debug_tuple("Float").field(is_finite).finish(),
+      Self::String => f.write_str("String"),
+      Self::Enum(sym) => f.debug_tuple("Enum").field(sym).finish(),
+      Self::List(values) => write!(f, "List({} entries)", values.len()),
+      Self::Object(fields) => write!(f, "Object({} fields)", fields.len()),
+      Self::Refused => f.write_str("Refused"),
+    }
+  }
 }
 
 impl RawShape {
-  /// The shape, as the coercion table names it.
-  const fn shape(&self) -> LiteralShape {
+  /// The shape, as the coercion table names it — `None` for a refused subtree, which has no
+  /// content for the table to read and no answer to give it.
+  const fn shape(&self) -> Option<LiteralShape> {
     match self {
-      Self::Null => LiteralShape::Null,
-      Self::Boolean => LiteralShape::Boolean,
-      Self::Int(_) => LiteralShape::Int,
-      Self::Float(_) => LiteralShape::Float,
-      Self::String => LiteralShape::String,
-      Self::Enum(_) => LiteralShape::Enum,
-      Self::List(_) => LiteralShape::List,
-      Self::Object(_) => LiteralShape::Object,
-    }
-  }
-
-  /// The retained spelling the numeric ranges read, empty for every other shape.
-  fn spelling(&self) -> &[u8] {
-    match self {
-      Self::Int(bytes) | Self::Float(bytes) => bytes,
-      _ => &[],
+      Self::Null => Some(LiteralShape::Null),
+      Self::Boolean => Some(LiteralShape::Boolean),
+      Self::Int(fits_i32) => Some(LiteralShape::Int {
+        fits_i32: *fits_i32,
+      }),
+      Self::Float(is_finite) => Some(LiteralShape::Float {
+        is_finite: *is_finite,
+      }),
+      Self::String => Some(LiteralShape::String),
+      Self::Enum(_) => Some(LiteralShape::Enum),
+      Self::List(_) => Some(LiteralShape::List),
+      Self::Object(_) => Some(LiteralShape::Object),
+      Self::Refused => None,
     }
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawObjectField {
   name: Located,
   value: RawValue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawInput {
   name: Located,
   ty: RawTypeRef,
@@ -864,19 +1359,23 @@ mod declared {
   ///
   /// # And what no reader can reach, because it is no longer here
   ///
-  /// A gate on the read is still a gate on *readers*. `Declared` derives [`Clone`], and a derived
-  /// `Clone` copies the private field without asking [`Declared::read`] anything — so interface
-  /// conformance, which copies a whole `RawField` once per implementor *before* it reaches the
-  /// gate, performed `Θ(implementors × declared)` deep [`RawInput`] clones over a document of size
-  /// `O(implementors + declared)` and only then refused the schema. The ceiling kept the
-  /// diagnostics and lost the resource.
+  /// A gate on the read is still a gate on *readers*. `Declared` derived [`Clone`] when this
+  /// module landed, and a derived `Clone` copies the private field without asking
+  /// [`Declared::read`] anything — so interface conformance, which copies a whole `RawField` once
+  /// per implementor *before* it reaches the gate, performed `Θ(implementors × declared)` deep
+  /// [`RawInput`] clones over a document of size `O(implementors + declared)` and only then refused
+  /// the schema. The ceiling kept the diagnostics and lost the resource.
   ///
   /// So the refusal is a *state* rather than a comparison, decided in `Declared::from` and holding
   /// nothing: `args` is `None`, and the `Vec` is dropped at the moment the length is first known.
-  /// There is no payload for `Clone` to copy, none for `Debug` to format, and none for a `Deref`,
-  /// a serialiser or an iterator adaptor written later to reach. The guarantee stops depending on
-  /// every reader remembering, on every derive having been audited, and on this module's boundary
-  /// holding against traits nobody has written yet.
+  /// There is no payload for a `Deref`, a serialiser or an iterator adaptor written later to
+  /// reach. The guarantee stops depending on every reader remembering, on every derive having been
+  /// audited, and on this module's boundary holding against traits nobody has written yet.
+  ///
+  /// `Clone` is no longer derived here — nor anywhere on the [`RawValue`] family, whose release
+  /// carries why — so the copy the paragraph above measured is now unwritable rather than
+  /// unwritten. The state is still what the guarantee rests on: it is what makes the *`Debug`* on
+  /// this type, and any trait a later round adds, cost nothing over an over-limit list.
   ///
   /// # Why at construction, and not later
   ///
@@ -908,7 +1407,7 @@ mod declared {
   /// so a schema carrying `TooManyFieldArguments` or `TooManyDirectiveArguments` is never handed
   /// out; every diagnostic a refused list suppresses is one about a document that is refused
   /// already, for a reason the refusal names. al8n/smear#198.
-  #[derive(Debug, Clone)]
+  #[derive(Debug)]
   pub(super) struct Declared<const CEILING: u32> {
     /// The declared arguments, or `None` — the ceiling refused this list and the arguments were
     /// dropped where that was decided. The two states are not "long" and "short" but "may be read"
@@ -962,10 +1461,10 @@ mod declared {
 
   /// Where the ceiling is applied, and the only way a `Vec<RawInput>` becomes a `Declared`.
   ///
-  /// The over-limit arm drops `args` instead of storing it. The copy a derived `Clone` would make,
-  /// the walk a reader would have done, and the bytes the list would have occupied for the rest of
-  /// the build are then work that does not exist, rather than work every consumer is trusted to
-  /// decline.
+  /// The over-limit arm drops `args` instead of storing it. The copy a derived `Clone` used to
+  /// make, the walk a reader would have done, and the bytes the list would have occupied for the
+  /// rest of the build are then work that does not exist, rather than work every consumer is
+  /// trusted to decline.
   impl<const CEILING: u32> From<Vec<RawInput>> for Declared<CEILING> {
     fn from(args: Vec<RawInput>) -> Self {
       match args.len() > CEILING as usize {
@@ -976,7 +1475,7 @@ mod declared {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawField {
   name: Located,
   ty: RawTypeRef,
@@ -1000,13 +1499,13 @@ struct RawField {
   deprecated: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawEnumValue {
   name: Located,
   directives: Vec<RawDirectiveUse>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawType {
   name: Located,
   kind: TypeKind,
@@ -1070,7 +1569,7 @@ impl RawType {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct RawDirectiveDef {
   name: Located,
   args: Declared<MAX_DIRECTIVE_ARGUMENTS>,
@@ -1080,7 +1579,7 @@ struct RawDirectiveDef {
 }
 
 /// A type extension, converted to owned form and applied once every document has been read.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 struct RawExtension {
   target: Option<Located>,
   kind: Option<TypeKind>,
@@ -1158,6 +1657,8 @@ struct Model<'a> {
   directive_of_sym: &'a [u32],
   schema_directives: &'a [RawDirectiveUse],
   interner: &'a Interner,
+  /// The literal spellings, deduplicated. See [`SchemaBuilder::literals`].
+  literals: &'a Interner,
 }
 
 impl<'a> Model<'a> {
@@ -1389,6 +1890,20 @@ fn push_related(
 #[derive(Debug, Default)]
 pub struct SchemaBuilder {
   interner: Interner,
+  /// The spellings the **enum** arm keeps, one copy per distinct spelling.
+  ///
+  /// The one arm of the three that still retains bytes, because its verdict is not decidable where
+  /// the literal is read: see [`RawShape`] for that, for what the numeric arms retain instead, and
+  /// for the measurement of what interning replaced.
+  ///
+  /// A second arena rather than a second use of `interner`, for two reasons that both bite. The
+  /// name arena's symbol space is dense-indexed — `type_of_sym`, `directive_of_sym` and
+  /// `Positions`'s table are all `Θ(symbols)` — so a member spelling that names nothing declared
+  /// would widen every one of them for a lookup that can never hit; and the finished [`Schema`]
+  /// keeps that arena, so the spelling would outlive the build that read it. This one is dropped
+  /// with the builder: [`SchemaBuilder::flatten`] destructures the name arena out and lets the rest
+  /// go.
+  literals: Interner,
   types: Vec<RawType>,
   /// `Sym` to an index into `types`, dense over the symbol space; `u32::MAX` for "not a type".
   type_of_sym: Vec<u32>,
@@ -1442,18 +1957,54 @@ impl SchemaBuilder {
 
   /// Consumes the builder and produces a schema, or every reason it is not one.
   pub fn finish(mut self) -> Result<Schema, SchemaErrors> {
+    // The arenas are asked twice, around the only step after ingest that interns: ingest reads
+    // the document's own names and literals, injection reads the built-ins', and applying an
+    // extension only resolves symbols already in. The first ask is what keeps injection from
+    // running over a refused arena at all — every built-in name would come back as the same
+    // placeholder, and `type_definition` would file each one as a redefinition of the last.
+    if let Some(refusal) = self.arena_refusal() {
+      return Err(refusal);
+    }
+
     // Injection precedes extension so that `extend scalar Int @tag(...)` — extending something
     // the specification provided rather than something the document defined — is not reported as
     // an undefined target. Whether a built-in is injected at all is decided by the *definitions*,
     // all of which are already in, so the order does not change what gets replaced.
     self.inject_built_ins();
     self.apply_extensions();
+
+    if let Some(refusal) = self.arena_refusal() {
+      return Err(refusal);
+    }
+
     self.validate();
 
     if !self.errors.is_empty() {
       return Err(SchemaErrors::new(self.errors));
     }
     self.flatten()
+  }
+
+  /// The one diagnostic a build whose arena stopped growing can honestly make.
+  ///
+  /// Exactly one, and everything accumulated before it is dropped rather than reported beside it.
+  /// A refused arena answers every later spelling with the same placeholder, so what the rules see
+  /// is one name defined over and over: padding an arena to `u32::MAX` under a document holding a
+  /// single type produced **fifteen** duplicate-definition diagnostics, none of which is about
+  /// anything the caller wrote. A refusal ends the document, the way a nesting refusal does —
+  /// al8n/smear#179.
+  ///
+  /// The span is the document's default rather than a position, because there is no position: the
+  /// arena is full, not the spelling that found it full, and the next spelling of any length would
+  /// have been refused just the same.
+  fn arena_refusal(&self) -> Option<SchemaErrors> {
+    (self.interner.refused.is_some() || self.literals.refused.is_some()).then(|| {
+      SchemaErrors::new(vec![SchemaError::new(
+        SchemaErrorKind::TooManyInternedBytes,
+        "schema",
+        SimpleSpan::default(),
+      )])
+    })
   }
 
   // -- error helpers --------------------------------------------------------------------------
@@ -1499,6 +2050,7 @@ impl SchemaBuilder {
         directive_of_sym: &self.directive_of_sym,
         schema_directives: &self.schema_directives,
         interner: &self.interner,
+        literals: &self.literals,
       },
       &mut self.errors,
       &mut self.declared_names,
@@ -1781,10 +2333,12 @@ impl SchemaBuilder {
         .interfaces()
         .iter()
         .map(|name| {
-          let bytes = name.source().as_ref().to_owned();
+          // Interned from the borrowed slice: `to_owned()` stood here, which is an allocation and
+          // a copy of a caller-sized name per interface written, and the interner copies what it
+          // keeps anyway. The borrow is the argument's and not `self`'s, so nothing needed it.
           let span = *name.as_span();
           let document = self.document;
-          let sym = self.interner.intern(&bytes);
+          let sym = self.interner.intern(name.source().as_ref());
           Located {
             sym,
             span,
@@ -1806,10 +2360,10 @@ impl SchemaBuilder {
         .members()
         .iter()
         .map(|name| {
-          let bytes = name.source().as_ref().to_owned();
+          // The same removal as [`SchemaBuilder::implements`]'s, for the same reason.
           let span = *name.as_span();
           let document = self.document;
-          let sym = self.interner.intern(&bytes);
+          let sym = self.interner.intern(name.source().as_ref());
           Located {
             sym,
             span,
@@ -1848,7 +2402,7 @@ impl SchemaBuilder {
             .iter()
             .map(|argument| RawArgument {
               name: self.located(argument.name()),
-              value: self.const_value(argument.value()),
+              value: self.const_value(argument.name(), argument.value()),
             })
             .collect(),
         };
@@ -1864,41 +2418,269 @@ impl SchemaBuilder {
 
   /// Reduces a constant literal to the shape and spelling a type check reads.
   ///
-  /// Recursive, and bounded the same way [`SchemaBuilder::type_ref`] is: the AST handed in was
-  /// built by a recursive-descent parser and will be dropped recursively, so a literal deep enough
-  /// to overflow here could not have been parsed in the first place. That is not true of the type
-  /// *graph*, which is why the cycle walks in this file are iterative and this is not.
-  fn const_value<S>(&mut self, value: &ConstInputValue<S>) -> RawValue
+  /// # Why this is a loop
+  ///
+  /// It recursed, on the argument that the AST handed in was built by a recursive-descent parser
+  /// and would be dropped recursively, so a literal deep enough to overflow here could not have
+  /// been parsed in the first place. **Neither half of that argument holds.**
+  ///
+  /// The parser is not the only way in. [`Schema::build`] and [`SchemaBuilder::document`] take a
+  /// `&TypeSystemDocument<S>`, and the carriers on the route to a constant literal — a scalar
+  /// definition, a const directive, a const argument, and the value enum itself — each have a
+  /// public constructor, so `scalar Foo @x(a: [[[…]]])` is safe code no parse ever saw. And
+  /// al8n/smear#199 gave the value tree an iterative release, so the drop that was supposed to give
+  /// out first no longer does.
+  ///
+  /// Measured on `aarch64-apple-darwin`, unoptimised, one child process per depth with the document
+  /// built on another thread: `Schema::build` over exactly that document aborted at **1 545** levels
+  /// of list literal on a 2 MiB thread — libtest's, tokio's and `std::thread::spawn`'s — 389 on
+  /// 512 KiB and 196 on 256 KiB. An object literal is worse by about a tenth.
+  ///
+  /// # What the loop holds
+  ///
+  /// One frame per **open container**, holding the output vector that container is being built
+  /// into, and the *borrowed* iterator over its remaining children. Children are never copied into
+  /// a work list, so the peak follows the literal's nesting and not its width.
+  ///
+  /// **It is not free, and it is not smaller than what it builds.** Measured on the same host, as
+  /// peak live bytes across the whole `Schema::build` with the document built before the instrument
+  /// is armed: a flat literal of N empty lists peaks at **48 bytes an entry**, which is the
+  /// [`RawValue`] tree and nothing else — one frame serves the whole width, and the allocation count
+  /// does not move with N at all (215 either side of an eightfold widening). A chain of N
+  /// one-element lists peaks between **138 and 224 bytes a container**, an object chain between
+  /// **162 and 248**, because there is a frame per container and the `Vec` holding them doubles: the
+  /// low end of each band is a count just under a power of two and the high end is a count just over
+  /// one. So on the adversarial shape the frames are two to four times the tree they are producing.
+  ///
+  /// An earlier revision of this paragraph recorded the chain band as *199 to 223*. The high end is
+  /// right and the low end was a sample rather than a minimum: at 1 001 containers the reading is
+  /// 138.4 bytes each and at 8 001 it is 138.1, because the frame vector's capacity is then almost
+  /// exactly the count. The band is the doubling, so both of its ends have to be taken from where
+  /// the doubling puts them.
+  ///
+  /// # Why a loop still needed a ceiling
+  ///
+  /// Making the walk iterative moved the growth from the native stack to the heap, and that is the
+  /// point — but `frames.push` and `Vec::with_capacity` are **infallible** allocation paths, so a
+  /// caller-built literal deep enough still ends the process rather than the build. That is the
+  /// abort al8n/smear#199 had no answer for, because it was inside a `Drop`; here there is one.
+  /// [`Schema::build`] returns `Result<_, SchemaErrors>`, so the ceiling is a refusal a caller can
+  /// read: past [`MAX_CONST_VALUE_DEPTH`] open containers the literal is refused with
+  /// [`SchemaErrorKind::ConstantValueTooDeep`], **before** the frame that would have carried it is
+  /// pushed and before its output vector is reserved.
+  ///
+  /// The refusal is per literal and it substitutes [`RawShape::Refused`], so the walk finishes and
+  /// every other defect in the document is still reported. It substitutes a MARKER and not an empty
+  /// container of the refused kind, which is what stood here: an empty container is a claim about
+  /// the skipped content — "this object supplies no fields" — and it is a claim no reader can tell
+  /// from the caller's own `{}`. [`SchemaBuilder::check_const_value`] believed it and reported
+  /// every required field of the target missing from a subtree that may supply all of them. Only
+  /// the first refused container is reported: the levels under it are never read, so there is
+  /// nothing further to say about them.
+  ///
+  /// **What the ceiling does and does not cover.** It bounds the growth that follows the literal's
+  /// *nesting* — the frame stack and the one output vector per level — which is the term with no
+  /// bound in the input. It does not bound the growth that follows the literal's *width*: a list of
+  /// a million entries still reserves a million [`RawValue`]s, 48 bytes each, and an object's
+  /// fields 72.
+  ///
+  /// An earlier revision justified leaving that uncovered with "the width-driven request is
+  /// proportional to a tree the allocator has already satisfied once", and **that is not an
+  /// argument**: the caller's tree is still LIVE while the reduction runs, so having fitted the
+  /// tree says nothing about fitting the tree *and* its reduction. What stands here instead is a
+  /// measurement of the band those two footprints leave between them — the allocator limits that
+  /// admit the caller's document and abort the build. Peak live bytes, `aarch64-apple-darwin`,
+  /// unoptimised, one process per row, N = 8 000:
+  ///
+  /// | document | building it peaks at | `Schema::build` peaks at | band |
+  /// |---|---|---|---|
+  /// | hand-built list literal, N entries | 709 289 | 1 162 639 | **453 350** — 0.64x |
+  /// | hand-built object literal, N fields | 1 157 291 | 1 803 383 | **646 092** — 0.56x |
+  /// | the same list literal, PARSED from SDL | 1 104 538 | 1 207 552 | **103 014** — 0.09x |
+  /// | N one-field object types, **no literal at all** | 12 277 717 | 33 292 363 | **21 014 646** — 1.71x |
+  ///
+  /// The band is real and it is this reduction's: 48N of the first row's is the output vector, a
+  /// limit of 900 000 bytes on that row aborts at the 384 000-byte reservation, and the width term
+  /// is 48.0 bytes an entry fitted over 1 000–8 000 (72.0 for the object row).
+  ///
+  /// **And a width ceiling still could not buy anything, which is what the last row is for.** That
+  /// row is ordinary SDL `Schema::build` accepts, no ceiling refuses, and no literal appears in it
+  /// — every allocation it makes is sized by the input just as this one is — and its band is 46
+  /// times wider absolutely and 2.7 times wider against its own document. A caller whose allocator
+  /// limit sits in this reduction's band has one sitting in that document's band too, so refusing
+  /// wide literals would leave the abort exactly where it was and read as a guarantee it does not
+  /// keep. The set `try_reserve` would have to reach to keep it is not "the sites whose size is
+  /// chosen by the input" narrowed down — the last row is what happens when every such site is
+  /// counted, and it is the whole builder.
+  ///
+  /// The parsed row says the same thing from the other side: at N = 8 000 the parse peaks 358 336
+  /// bytes above the AST it leaves resident, so on the route a deployment actually takes the
+  /// reduction fits almost entirely inside a band the parse has already opened — the band widens by
+  /// 3.9 bytes an entry there rather than 48.
+  ///
+  /// What separates this from the depth term is not the size of the band but the shape of the
+  /// growth. The reduction is injective into the tree it reads — one [`RawValue`] per
+  /// `ConstInputValue` (48 against 88 bytes) and one [`RawObjectField`] per `ConstObjectField` (72
+  /// against 144) — so widening the literal cannot make the output outgrow the input that named
+  /// it. Past the ceiling above, the frames were two to four times the tree they produced and
+  /// nothing in the input bounded how many of them there were.
+  ///
+  /// An object field's name is interned when the field is reached and not when it is queued, so the
+  /// symbols are minted in the same order the recursion minted them; the name waits on its own
+  /// frame while the value below it is reduced, which is what `pending` is for.
+  fn const_value<S>(&mut self, subject: &Name<S>, value: &ConstInputValue<S>) -> RawValue
   where
     S: AsRef<[u8]>,
   {
-    let span = *value.as_span();
-    let shape = match value {
-      ConstInputValue::Null(_) => RawShape::Null,
-      ConstInputValue::Boolean(_) => RawShape::Boolean,
-      ConstInputValue::String(_) => RawShape::String,
-      ConstInputValue::Int(int) => RawShape::Int(int.source().as_ref().into()),
-      ConstInputValue::Float(float) => RawShape::Float(float.source().as_ref().into()),
-      ConstInputValue::Enum(member) => RawShape::Enum(member.source().as_ref().into()),
-      ConstInputValue::List(list) => RawShape::List(
-        list
-          .values()
-          .iter()
-          .map(|entry| self.const_value(entry))
-          .collect(),
-      ),
-      ConstInputValue::Object(object) => RawShape::Object(
-        object
-          .fields()
-          .iter()
-          .map(|field| RawObjectField {
-            name: self.located(field.name()),
-            value: self.const_value(field.value()),
-          })
-          .collect(),
-      ),
-    };
-    RawValue { span, shape }
+    /// A container whose children are still being reduced.
+    enum Frame<'a, S> {
+      List {
+        span: SimpleSpan,
+        values: Vec<RawValue>,
+        rest: core::slice::Iter<'a, ConstInputValue<S>>,
+      },
+      Object {
+        span: SimpleSpan,
+        fields: Vec<RawObjectField>,
+        /// The name of the field whose value is being reduced right now.
+        ///
+        /// One at a time, because the walk is depth-first: a frame reaches its next field only
+        /// once the previous field's whole subtree has been folded into `fields`.
+        pending: Option<Located>,
+        rest: core::slice::Iter<'a, ConstObjectField<S>>,
+      },
+    }
+
+    let mut frames: Vec<Frame<'_, S>> = Vec::new();
+    let mut answer: Option<RawValue> = None;
+    let mut current: Option<&ConstInputValue<S>> = Some(value);
+    // Where the first container past `MAX_CONST_VALUE_DEPTH` was written, once one has been.
+    let mut refused: Option<SimpleSpan> = None;
+
+    loop {
+      let Some(value) = current.take() else {
+        // Nothing in hand: take the next child of the innermost open container, or close it.
+        match frames.last_mut() {
+          None => break,
+          Some(Frame::List { rest, .. }) => match rest.next() {
+            Some(entry) => current = Some(entry),
+            None => {
+              let Some(Frame::List { span, values, .. }) = frames.pop() else {
+                unreachable!("the frame just matched as a list")
+              };
+              emit(
+                &mut frames,
+                &mut answer,
+                RawValue {
+                  span,
+                  shape: RawShape::List(values),
+                },
+              );
+            }
+          },
+          Some(Frame::Object { rest, pending, .. }) => match rest.next() {
+            Some(field) => {
+              *pending = Some(self.located(field.name()));
+              current = Some(field.value());
+            }
+            None => {
+              let Some(Frame::Object { span, fields, .. }) = frames.pop() else {
+                unreachable!("the frame just matched as an object")
+              };
+              emit(
+                &mut frames,
+                &mut answer,
+                RawValue {
+                  span,
+                  shape: RawShape::Object(fields),
+                },
+              );
+            }
+          },
+        }
+        continue;
+      };
+
+      let span = *value.as_span();
+      let shape = match value {
+        ConstInputValue::Null(_) => RawShape::Null,
+        ConstInputValue::Boolean(_) => RawShape::Boolean,
+        ConstInputValue::String(_) => RawShape::String,
+        // Reduced to the verdict where the spelling is in hand, so nothing is retained: see
+        // [`RawShape`] for what retaining it cost and [`LiteralShape`] for why this is the same
+        // answer read at a different time.
+        ConstInputValue::Int(int) => RawShape::Int(fits_i32(int.source().as_ref())),
+        ConstInputValue::Float(float) => RawShape::Float(is_finite(float.source().as_ref())),
+        // The one arm that cannot: an enum member's spelling is resolved against the declared
+        // members, and a member declared later in this document — or in a later one — is not a
+        // symbol yet. Interned rather than copied, one copy per distinct spelling.
+        ConstInputValue::Enum(member) => {
+          RawShape::Enum(self.literals.intern(member.source().as_ref()))
+        }
+        // The ceiling is read BEFORE either allocation the arm would make — the frame and the
+        // output vector it reserves — so the refusal costs nothing the abort it replaces would
+        // have spent. `RawShape::Refused` takes the subtree's place, which is what lets the walk
+        // finish and the rest of the document still be checked WITHOUT any walk behind this one
+        // reading a claim about what was skipped. The kind is not kept: nothing downstream asks a
+        // refused subtree a question, so a list one and an object one would answer alike.
+        ConstInputValue::List(list) => {
+          if frames.len() < MAX_CONST_VALUE_DEPTH {
+            let entries = list.values();
+            frames.push(Frame::List {
+              span,
+              values: Vec::with_capacity(entries.len()),
+              rest: entries.iter(),
+            });
+            continue;
+          }
+          refused.get_or_insert(span);
+          RawShape::Refused
+        }
+        ConstInputValue::Object(object) => {
+          if frames.len() < MAX_CONST_VALUE_DEPTH {
+            let fields = object.fields();
+            frames.push(Frame::Object {
+              span,
+              fields: Vec::with_capacity(fields.len()),
+              pending: None,
+              rest: fields.iter(),
+            });
+            continue;
+          }
+          refused.get_or_insert(span);
+          RawShape::Refused
+        }
+      };
+      emit(&mut frames, &mut answer, RawValue { span, shape });
+    }
+
+    if let Some(span) = refused {
+      // Rendered lossily for the same reason `located` renders an invalid name that way: the
+      // subject is a caller's `S`, and a refusal must not be the thing that decides it is UTF-8.
+      let name = String::from_utf8_lossy(subject.source().as_ref()).into_owned();
+      self.errors.push(
+        SchemaError::new(SchemaErrorKind::ConstantValueTooDeep, &name, span)
+          .in_document(self.document),
+      );
+    }
+
+    /// Folds a finished value into the container it belongs to, or into the answer.
+    fn emit<S>(frames: &mut [Frame<'_, S>], answer: &mut Option<RawValue>, value: RawValue) {
+      match frames.last_mut() {
+        None => *answer = Some(value),
+        Some(Frame::List { values, .. }) => values.push(value),
+        Some(Frame::Object {
+          fields, pending, ..
+        }) => fields.push(RawObjectField {
+          name: pending
+            .take()
+            .expect("an object frame reached a value with no field name waiting on it"),
+          value,
+        }),
+      }
+    }
+
+    answer.expect("the walk folds exactly one value into the answer")
   }
 
   fn fields<S>(&mut self, fields: Option<&FieldsDefinition<S>>) -> Vec<RawField>
@@ -1968,7 +2750,7 @@ impl SchemaBuilder {
         let ty = self.type_ref(value.ty());
         let default_value = value
           .default_value()
-          .map(|default| self.const_value(default.value()));
+          .map(|default| self.const_value(value.name(), default.value()));
         let default = match &default_value {
           None => DefaultKind::Absent,
           Some(value) if matches!(value.shape, RawShape::Null) => DefaultKind::Null,
@@ -2005,50 +2787,76 @@ impl SchemaBuilder {
   }
 
   /// Flattens a type reference into a base name plus a wrapper word.
+  ///
+  /// # The chain is walked once and remembered in a fixed window
+  ///
+  /// This recursed, one native frame per `[`, on the argument [`SchemaBuilder::const_value`]'s
+  /// header used to make for both of them: the AST came from a recursive-descent parser and would
+  /// be dropped recursively anyway. **Neither half of that holds.** `Type: From<ListType<Self>>` is
+  /// public, so the chain is built with a loop and no parser sees it; and al8n/smear#199 gave the
+  /// enum an iterative release, so the drop that was supposed to give out first no longer does.
+  /// Measured on `aarch64-apple-darwin`, unoptimised, one child process per depth with the document
+  /// built on another thread: `Schema::build` over `type Q { f: [[…Int…]] }` aborted at **4 524**
+  /// brackets on a 2 MiB thread and **570** on 256 KiB.
+  ///
+  /// The wrappers are applied innermost first and the chain is walked outermost first, so something
+  /// has to be remembered across the turn. It is **not** the chain: [`PackedType`] holds
+  /// [`MAX_WRAPPERS`] codes and saturates, and every list level costs at least one code, so no level
+  /// outside the innermost `MAX_WRAPPERS` can change either the word or the `too_deep` flag. What is
+  /// kept is a ring of that many `required` bits — a fixed 15 bytes, at any depth.
   fn type_ref<S>(&mut self, ty: &Type<Name<S>>) -> RawTypeRef
   where
     S: AsRef<[u8]>,
   {
-    match ty {
-      Type::Name(named) => {
-        let base = self.located(named.name());
-        let packed = PackedType::named(base.sym, UNRESOLVED);
-        let (packed, too_deep) = if named.required() {
-          match packed.push_non_null() {
-            Some(packed) => (packed, false),
-            None => (packed, true),
-          }
-        } else {
-          (packed, false)
-        };
-        RawTypeRef {
-          base,
-          span: *named.span(),
-          packed,
-          too_deep,
+    /// The innermost levels whose `required` bit can still reach the packed word.
+    const WINDOW: usize = MAX_WRAPPERS as usize;
+
+    // The outermost span is the reference's, and the walk below leaves it behind at the first step.
+    let span = match ty {
+      Type::Name(named) => *named.span(),
+      Type::List(list) => *list.span(),
+    };
+    let mut window = [false; WINDOW];
+    let mut levels = 0usize;
+    let mut cursor = ty;
+    let named = loop {
+      match cursor {
+        Type::Name(named) => break named,
+        Type::List(list) => {
+          window[levels % WINDOW] = list.required();
+          levels += 1;
+          cursor = list.ty();
         }
       }
-      Type::List(list) => {
-        let inner = self.type_ref(list.ty());
-        let mut too_deep = inner.too_deep;
-        let mut packed = inner.packed;
-        match packed.push_list() {
-          Some(next) => packed = next,
-          None => too_deep = true,
+    };
+
+    let base = self.located(named.name());
+    let mut packed = PackedType::named(base.sym, UNRESOLVED);
+    // A level the window could not hold is a level whose `list` code the word had no room for:
+    // `WINDOW` levels fill it on their own, so anything past that is refused before it is read.
+    let mut too_deep = levels > WINDOW;
+    let push =
+      |packed: &mut PackedType, too_deep: &mut bool, code: fn(PackedType) -> Option<PackedType>| {
+        match code(*packed) {
+          Some(next) => *packed = next,
+          None => *too_deep = true,
         }
-        if list.required() {
-          match packed.push_non_null() {
-            Some(next) => packed = next,
-            None => too_deep = true,
-          }
-        }
-        RawTypeRef {
-          base: inner.base,
-          span: *list.span(),
-          packed,
-          too_deep,
-        }
+      };
+    if named.required() {
+      push(&mut packed, &mut too_deep, PackedType::push_non_null);
+    }
+    for level in (levels.saturating_sub(WINDOW)..levels).rev() {
+      push(&mut packed, &mut too_deep, PackedType::push_list);
+      if window[level % WINDOW] {
+        push(&mut packed, &mut too_deep, PackedType::push_non_null);
       }
+    }
+
+    RawTypeRef {
+      base,
+      span,
+      packed,
+      too_deep,
     }
   }
 
@@ -3398,6 +4206,30 @@ impl SchemaBuilder {
   /// input-object literal naming a field the type does not declare, or omitting a required one, is
   /// the same mistake with the same coordinate wherever the literal is written, and giving it two
   /// names would say otherwise.
+  ///
+  /// # Why it is a loop
+  ///
+  /// It descended one native frame per level of literal, through two sites: a list entry offered to
+  /// the item type, and an input-object field offered to its declared type. The first is bounded —
+  /// [`PackedType`] holds [`MAX_WRAPPERS`] wrappers and a list position past that has no item type
+  /// to strip — and **the second is not**: `input A { a: A }` is a legal nullable self-reference, so
+  /// `{ a: { a: … } }` offered to `A` descends as far as the literal goes. Measured on
+  /// `aarch64-apple-darwin`, unoptimised, one child process per depth with the document built on
+  /// another thread: `Schema::build` over exactly that aborted at **1 327** levels on a 2 MiB
+  /// thread, 334 on 512 KiB and 168 on 256 KiB — shallower than
+  /// [`SchemaBuilder::const_value`]'s own boundary, so it is the first thing to give out once that
+  /// one is a loop.
+  ///
+  /// What replaces the frames is one entry per **open literal**, holding the borrowed iterator over
+  /// what is left of it. Nothing about which diagnostic is reported, in what order, or with which
+  /// span changes: a level's fields are all offered before the level is closed, and the omitted-
+  /// required pass runs at that close, exactly where the frame used to return.
+  ///
+  /// `levels` grows infallibly, and it is bounded by the literal rather than by the type graph: the
+  /// walk descends only where the literal does, and the literal was built by
+  /// [`SchemaBuilder::const_value`] under [`MAX_CONST_VALUE_DEPTH`]. `input A { a: A }` is still a
+  /// legal self-reference and the type side is still unbounded; what ends the descent is the value,
+  /// which now has an end.
   fn check_const_value(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
@@ -3406,6 +4238,34 @@ impl SchemaBuilder {
     expected: PackedType,
     blame: Blame,
   ) {
+    /// A container the check has opened and not finished.
+    ///
+    /// One entry per **open literal**, holding the borrowed iterator over what is left of it — so
+    /// the peak follows the literal's nesting and never its width, and no entry is ever a copy of a
+    /// child. That is the same shape [`SchemaBuilder::const_value`] builds the literal with.
+    enum Level<'a> {
+      /// A list literal's entries, every one of them offered to the same item type.
+      Entries {
+        rest: core::slice::Iter<'a, RawValue>,
+        item: PackedType,
+      },
+      /// An input-object literal's fields, plus what the omitted-required pass will need once they
+      /// run out.
+      Fields {
+        rest: core::slice::Iter<'a, RawObjectField>,
+        base: usize,
+        written: &'a [RawObjectField],
+        span: SimpleSpan,
+      },
+    }
+
+    /// What the innermost open level had left, read without holding a borrow on the stack.
+    enum Step<'a> {
+      Entry(&'a RawValue, PackedType),
+      Field(&'a RawObjectField, usize),
+      Close,
+    }
+
     let reject = |errors: &mut Vec<SchemaError>, span| {
       let subject = model.text(blame.subject).to_owned();
       push_at(
@@ -3418,152 +4278,213 @@ impl SchemaBuilder {
       );
     };
 
-    if matches!(value.shape, RawShape::Null) {
-      if expected.is_non_null() {
-        reject(errors, value.span);
-      }
-      return;
-    }
+    let mut levels: Vec<Level<'_>> = Vec::new();
+    let mut current: Option<(&RawValue, PackedType)> = Some((value, expected));
 
-    // Strip the outer non-null, then apply the singleton-to-list coercion: a non-list value in a
-    // list position is the one-element list containing it, at any depth.
-    let mut expected = expected.nullable();
-    while expected.is_list() && !matches!(value.shape, RawShape::List(_)) {
-      let Some(item) = expected.list_item() else {
-        break;
-      };
-      expected = item.nullable();
-    }
-
-    if expected.is_list() {
-      let (Some(item), RawShape::List(entries)) = (expected.list_item(), &value.shape) else {
-        return;
-      };
-      for entry in entries {
-        Self::check_const_value(model, errors, names, entry, item, blame);
-      }
-      return;
-    }
-
-    let base = expected.base_id();
-    if base == UNRESOLVED {
-      return;
-    }
-    let base = base.get() as usize;
-
-    match model.types[base].kind {
-      TypeKind::InputObject => {
-        let RawShape::Object(fields) = &value.shape else {
-          reject(errors, value.span);
-          return;
+    loop {
+      let Some((value, expected)) = current.take() else {
+        let step = match levels.last_mut() {
+          None => return,
+          Some(Level::Entries { rest, item }) => match rest.next() {
+            Some(entry) => Step::Entry(entry, *item),
+            None => Step::Close,
+          },
+          Some(Level::Fields { rest, base, .. }) => match rest.next() {
+            Some(field) => Step::Field(field, *base),
+            None => Step::Close,
+          },
         };
-        // The literal is named by the input object it is being offered to, not by the argument
-        // that carries it: `In.y` is what apollo's `UndefinedInputValue` says and what a nested
-        // literal needs, because `Query.@v.p` cannot tell an offending field of the outer object
-        // from one of the inner. The span still points at the field, so the usage is one lookup
-        // away.
-        let object = Coordinate::named(model.types[base].name.sym);
-        let declared = &model.types[base].input_fields;
-        // One index per input OBJECT, held by the caller and shared by every literal offered to
-        // this type — the nested entry the recursion below is about to offer to a second one
-        // included. A value per literal is what this was, and it was live across that recursion
-        // and built again for every sibling; [`DeclaredNames`] carries what that cost.
-        for field in fields {
-          let Some(expected) = names
-            .first(model.types, base, field.name.sym)
-            .map(|at| &declared[at])
-          else {
-            // Draft 5.6.2's SDL twin.
-            let name = model.text(field.name.sym).to_owned();
-            push_owned(
-              errors,
-              SchemaErrorKind::UndefinedInputObjectField,
-              &name,
-              model.owner(object),
-              field.name,
-            );
+        match step {
+          Step::Entry(entry, item) => current = Some((entry, item)),
+          Step::Field(field, base) => {
+            let object = Coordinate::named(model.types[base].name.sym);
+            let Some(declared) = names
+              .first(model.types, base, field.name.sym)
+              .map(|at| &model.types[base].input_fields[at])
+            else {
+              // Draft 5.6.2's SDL twin.
+              let name = model.text(field.name.sym).to_owned();
+              push_owned(
+                errors,
+                SchemaErrorKind::UndefinedInputObjectField,
+                &name,
+                model.owner(object),
+                field.name,
+              );
+              continue;
+            };
+            // Draft 5.6.4's SDL twin, the explicit-`null` half. Reported here rather than let
+            // through to the value check below so that `{ x: null }` for a required `x` produces
+            // the obligation once, and not also a non-null coercion failure.
+            if declared.is_required() && matches!(field.value.shape, RawShape::Null) {
+              let name = model.text(field.name.sym).to_owned();
+              push_at(
+                errors,
+                SchemaErrorKind::MissingRequiredInputObjectField,
+                &name,
+                model.owner(object),
+                field.value.span,
+                blame.document,
+              );
+              continue;
+            }
+            current = Some((&field.value, declared.ty.packed));
+          }
+          Step::Close => {
+            let Some(Level::Fields {
+              base,
+              written,
+              span,
+              ..
+            }) = levels.pop()
+            else {
+              // A list level has nothing owed when its entries run out.
+              continue;
+            };
+            // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself
+            // is what the omission is blamed on — the same choice `check_directive_arguments` makes
+            // for an omitted required argument.
+            //
+            // Over the required positions rather than over the declaration, and the literal indexed
+            // rather than rescanned: the two factors of the same product, one bounded by what this
+            // reports and the other by [`Names`] — which stays a value per list here, because what
+            // it indexes is the literal's own entries and no type keys those. It is built once this
+            // level's fields are all done and dropped before the next step, so no second one is
+            // ever live under it. Source order is the declaration's either way, because
+            // `required_input_fields` is filled by ascending position.
+            let object = Coordinate::named(model.types[base].name.sym);
+            let required = &model.types[base].required_input_fields;
+            let of_written = Names::over(written.len(), required.len(), |at| written[at].name.sym);
+            for &position in required {
+              let declared = &model.types[base].input_fields[position as usize];
+              if of_written
+                .first(written.len(), declared.name.sym, |at| written[at].name.sym)
+                .is_some()
+              {
+                continue;
+              }
+              let name = model.text(declared.name.sym).to_owned();
+              push_at(
+                errors,
+                SchemaErrorKind::MissingRequiredInputObjectField,
+                &name,
+                model.owner(object),
+                span,
+                blame.document,
+              );
+            }
+          }
+        }
+        continue;
+      };
+
+      // A subtree `const_value` refused. Every question below is a question about the literal's
+      // own content, and the content is not here — so none of them has an answer, and answering
+      // anyway is how this pass fabricated a defect. Terminal: the walk resumes with the siblings,
+      // which ARE here, and the build refuses on the `ConstantValueTooDeep` already in the list.
+      if matches!(value.shape, RawShape::Refused) {
+        continue;
+      }
+
+      if matches!(value.shape, RawShape::Null) {
+        if expected.is_non_null() {
+          reject(errors, value.span);
+        }
+        continue;
+      }
+
+      // Strip the outer non-null, then apply the singleton-to-list coercion: a non-list value in a
+      // list position is the one-element list containing it, at any depth.
+      let mut expected = expected.nullable();
+      while expected.is_list() && !matches!(value.shape, RawShape::List(_)) {
+        let Some(item) = expected.list_item() else {
+          break;
+        };
+        expected = item.nullable();
+      }
+
+      if expected.is_list() {
+        let (Some(item), RawShape::List(entries)) = (expected.list_item(), &value.shape) else {
+          continue;
+        };
+        levels.push(Level::Entries {
+          rest: entries.iter(),
+          item,
+        });
+        continue;
+      }
+
+      let base = expected.base_id();
+      if base == UNRESOLVED {
+        continue;
+      }
+      let base = base.get() as usize;
+
+      match model.types[base].kind {
+        TypeKind::InputObject => {
+          let RawShape::Object(fields) = &value.shape else {
+            reject(errors, value.span);
             continue;
           };
-          // Draft 5.6.4's SDL twin, the explicit-`null` half. Reported here rather than let
-          // through to the value check below so that `{ x: null }` for a required `x` produces the
-          // obligation once, and not also a non-null coercion failure.
-          if expected.is_required() && matches!(field.value.shape, RawShape::Null) {
-            let name = model.text(field.name.sym).to_owned();
-            push_at(
-              errors,
-              SchemaErrorKind::MissingRequiredInputObjectField,
-              &name,
-              model.owner(object),
-              field.value.span,
-              blame.document,
-            );
-            continue;
+          // The literal is named by the input object it is being offered to, not by the argument
+          // that carries it: `In.y` is what apollo's `UndefinedInputValue` says and what a nested
+          // literal needs, because `Query.@v.p` cannot tell an offending field of the outer object
+          // from one of the inner. The span still points at the field, so the usage is one lookup
+          // away. The level below carries the coordinate implicitly, as `base`.
+          //
+          // One index per input OBJECT, held by the caller and shared by every literal offered to
+          // this type — the nested entry the level below is about to offer to a second one
+          // included. A value per literal is what this was, and it was live across that recursion
+          // and built again for every sibling; [`DeclaredNames`] carries what that cost.
+          levels.push(Level::Fields {
+            rest: fields.iter(),
+            base,
+            written: fields,
+            span: value.span,
+          });
+        }
+        TypeKind::Enum => {
+          // One index per ENUM, shared by every literal offered to it, for the reason the input
+          // object's is shared: the declaration is a function of the type, and a list literal writes
+          // as many members as it likes against it. `any` over the declared values, restarted per
+          // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
+          // other three did not reach — see its header.
+          //
+          // The written member is resolved against the NAME arena here rather than where it was
+          // reduced, and that ordering is load-bearing: a literal is reduced as its definition is
+          // read, so an enum value declared further down the document — or in a later one — is not
+          // a symbol yet. What the literal interner holds is the spelling; what says whether it
+          // names a member is this lookup, and it runs once every declaration is in.
+          let member = match &value.shape {
+            RawShape::Enum(spelling) => model
+              .interner
+              .lookup(model.literals.bytes(*spelling))
+              .is_some_and(|sym| names.has_enum_value(model.types, base, sym)),
+            _ => false,
+          };
+          if !member {
+            reject(errors, value.span);
           }
-          let expected = expected.ty.packed;
-          Self::check_const_value(model, errors, names, &field.value, expected, blame);
         }
-
-        // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
-        // what the omission is blamed on — the same choice `check_directive_arguments` makes for
-        // an omitted required argument.
-        //
-        // Over the required positions rather than over the declaration, and the literal indexed
-        // rather than rescanned: the two factors of the same product, one bounded by what this
-        // reports and the other by [`Names`] — which stays a value per list here, because what it
-        // indexes is the literal's own entries and no type keys those. It is built after the
-        // recursion above and dropped before this frame returns, so no second one is ever live
-        // inside it. Source order is the declaration's either way, because
-        // `required_input_fields` is filled by ascending position.
-        let required = &model.types[base].required_input_fields;
-        let of_written = Names::over(fields.len(), required.len(), |at| fields[at].name.sym);
-        for &position in required {
-          let expected = &declared[position as usize];
-          if of_written
-            .first(fields.len(), expected.name.sym, |at| fields[at].name.sym)
-            .is_some()
-          {
-            continue;
+        TypeKind::Scalar => {
+          // A custom scalar accepts every literal, so only the five built-ins have anything to say.
+          let name = model.text(model.types[base].name.sym);
+          let accepted = match value.shape.shape() {
+            // Terminal above, so this is unreachable rather than lenient — and it is written as
+            // "nothing to reject" because a refused subtree has no shape the table could weigh.
+            None => true,
+            Some(shape) => {
+              BuiltInScalar::from_name(name.as_bytes()).is_none_or(|scalar| scalar.accepts(shape))
+            }
+          };
+          if !accepted {
+            reject(errors, value.span);
           }
-          let name = model.text(expected.name.sym).to_owned();
-          push_at(
-            errors,
-            SchemaErrorKind::MissingRequiredInputObjectField,
-            &name,
-            model.owner(object),
-            value.span,
-            blame.document,
-          );
         }
+        // An object, interface or union declared as an argument type is already the
+        // `DirectiveArgumentTypeNotInputType` refusal; there is no value that would fit it.
+        TypeKind::Object | TypeKind::Interface | TypeKind::Union => {}
       }
-      TypeKind::Enum => {
-        // One index per ENUM, shared by every literal offered to it, for the reason the input
-        // object's is shared: the declaration is a function of the type, and a list literal writes
-        // as many members as it likes against it. `any` over the declared values, restarted per
-        // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
-        // other three did not reach — see its header.
-        let member = match &value.shape {
-          RawShape::Enum(bytes) => model
-            .interner
-            .lookup(bytes)
-            .is_some_and(|sym| names.has_enum_value(model.types, base, sym)),
-          _ => false,
-        };
-        if !member {
-          reject(errors, value.span);
-        }
-      }
-      TypeKind::Scalar => {
-        // A custom scalar accepts every literal, so only the five built-ins have anything to say.
-        let name = model.text(model.types[base].name.sym);
-        let accepted = BuiltInScalar::from_name(name.as_bytes())
-          .is_none_or(|scalar| scalar.accepts(value.shape.shape(), value.shape.spelling()));
-        if !accepted {
-          reject(errors, value.span);
-        }
-      }
-      // An object, interface or union declared as an argument type is already the
-      // `DirectiveArgumentTypeNotInputType` refusal; there is no value that would fit it.
-      TypeKind::Object | TypeKind::Interface | TypeKind::Union => {}
     }
   }
 
@@ -4565,6 +5486,70 @@ impl SchemaBuilder {
     }
     let possible_words = objects.len().div_ceil(64).max(1) as u32;
 
+    // The possible-object table, sized before a word of it is written.
+    //
+    // # An object's row is a shared slice, not a row of its own
+    //
+    // `possible` was one row of `possible_words` words per *composite*, and an object is a
+    // composite, so an ordinary document of `N` object types — `type T implements Node` repeated,
+    // which is what a generated schema looks like — allocated `N × ceil(N / 64)` words. Measured
+    // on `aarch64-apple-darwin`, over SDL `Schema::build` accepts, ratios per doubling 3.97 / 3.98
+    // / 3.93:
+    //
+    // | object types | SDL bytes | table bytes | over the SDL |
+    // |---|---|---|---|
+    // | 500 | 18 940 | 32 512 | 1.7x |
+    // | 1 000 | 37 940 | 129 024 | 3.4x |
+    // | 2 000 | 76 940 | 514 048 | 6.7x |
+    // | 4 000 | 154 940 | 2 020 032 | 13.0x |
+    //
+    // By that law 100 000 object types — about 2.3 MB of SDL — is 1.25 GB, and the `resize` that
+    // reached it was infallible, so the process aborted. **This one needs no assembled AST**: it is
+    // the only member of the family on the honest population.
+    //
+    // An object's set is a singleton, `{itself}`, so `N` of the `N + abstract` rows differed only
+    // in *where* their one bit was. The rows for objects therefore overlap inside a shared
+    // identity block, one block per bit position: block `b` is `2 × words - 1` words, all zero
+    // except the middle one, which is `1 << b`. The object with ordinal `k` reads the `words`-long
+    // window starting `words - 1 - k / 64` into block `k % 64`, which puts that middle word at
+    // position `k / 64` of the window — exactly the row `set_bit` used to write. The window is
+    // inside its block at both ends because `0 <= k / 64 <= words - 1`.
+    //
+    // Nothing above this changes: `possible_start` is still a word offset, `possible_objects` still
+    // hands back `possible_words` words, and the four readers on `Schema` are untouched. What
+    // changes is the size, from `objects × ceil(objects / 64)` words to `min(64, objects) ×
+    // (2 × ceil(objects / 64) - 1)` — under two words per object, linear — plus one row per
+    // interface and union, which is the term this does not remove.
+    //
+    // # Why the table is materialised at all
+    //
+    // `flatten` never asks the relation: it writes the table and reads nothing back. Every query is
+    // a later caller's, and every one of them is per *request* — draft 5.5.2.3 once per fragment
+    // spread, §6.3's `DoesFragmentTypeApply` once per conditioned selection per response object,
+    // and the executor's abstract-type resolution once per abstract-typed value. Answering on
+    // demand from the tables this is derived from means visiting every type, because a `Schema`
+    // records the relation the other way round — an object names its interfaces, and there is no
+    // implementor list to intersect. Measured in release on the same schemas, one
+    // `possible_objects_intersect` over two disjoint interfaces: **21 ns against 7.656 µs at 4 000
+    // objects, 349x**, and 282x to 393x across the ladder. That trades a startup allocation for
+    // per-request work, which is the opposite of what this module is for.
+    let abstract_rows = raw_types
+      .iter()
+      .filter(|raw| raw.kind.is_abstract())
+      .count();
+    let Some(mut possible) = possible_table(
+      objects.len(),
+      abstract_rows,
+      possible_words,
+      MAX_POSSIBLE_WORDS,
+    ) else {
+      return Err(SchemaErrors::new(vec![SchemaError::new(
+        SchemaErrorKind::PossibleTypeTableTooLarge,
+        "schema",
+        SimpleSpan::default(),
+      )]));
+    };
+
     // Every interface's implementors, from the closures that name them, in one pass over the
     // objects.
     //
@@ -4633,7 +5618,6 @@ impl SchemaBuilder {
     let mut interfaces: Vec<TypeId> = Vec::new();
     let mut members: Vec<TypeId> = Vec::new();
     let mut enum_values: Vec<Sym> = Vec::new();
-    let mut possible: Vec<u64> = Vec::new();
 
     for (index, raw) in raw_types.iter().enumerate() {
       let id = TypeId::new(index as u32);
@@ -4750,32 +5734,34 @@ impl SchemaBuilder {
         _ => Range32::EMPTY,
       };
 
-      let possible_start = if raw.kind.is_composite() {
-        let start = possible.len() as u32;
-        possible.resize(possible.len() + possible_words as usize, 0);
-        match raw.kind {
-          TypeKind::Object => {
-            set_bit(&mut possible, start, ordinal_of[index]);
-          }
-          TypeKind::Union => {
-            for member in &raw.members {
-              if let Some(target) = id_of(member.sym) {
-                let ordinal = ordinal_of[target.get() as usize];
-                set_bit(&mut possible, start, ordinal);
-              }
-            }
-          }
-          TypeKind::Interface => {
-            let row = implementor_base[index] as usize..implementor_base[index + 1] as usize;
-            for &ordinal in &implementors[row] {
+      let possible_start = match raw.kind {
+        // The window into the shared identity block, described where the table is sized. No row is
+        // allocated and no bit is written: the block already says `{itself}`.
+        TypeKind::Object => {
+          let ordinal = ordinal_of[index];
+          (ordinal % 64) * (2 * possible_words - 1) + possible_words - 1 - ordinal / 64
+        }
+        TypeKind::Union => {
+          let start = possible.len() as u32;
+          possible.resize(possible.len() + possible_words as usize, 0);
+          for member in &raw.members {
+            if let Some(target) = id_of(member.sym) {
+              let ordinal = ordinal_of[target.get() as usize];
               set_bit(&mut possible, start, ordinal);
             }
           }
-          _ => {}
+          start
         }
-        start
-      } else {
-        TypeDef::NONE
+        TypeKind::Interface => {
+          let start = possible.len() as u32;
+          possible.resize(possible.len() + possible_words as usize, 0);
+          let row = implementor_base[index] as usize..implementor_base[index + 1] as usize;
+          for &ordinal in &implementors[row] {
+            set_bit(&mut possible, start, ordinal);
+          }
+          start
+        }
+        _ => TypeDef::NONE,
       };
 
       let mut flags = TypeFlags::EMPTY;
@@ -4844,6 +5830,7 @@ impl SchemaBuilder {
       strings,
       spans,
       map: _,
+      refused: _,
     } = interner;
     let strings = strings.into_boxed_slice();
     let spans = spans.into_boxed_slice();
@@ -4889,6 +5876,44 @@ impl SchemaBuilder {
   }
 }
 
+/// The possible-object table, sized and reserved before a bit of it is written, or `None` when it
+/// does not fit.
+///
+/// Returns the table holding only its **identity blocks** — the shared storage every object type's
+/// bitset is a window into, described in [`SchemaBuilder::flatten`]. One row per interface and
+/// union is appended by the caller as it walks the types.
+///
+/// `max_words` is a parameter rather than [`MAX_POSSIBLE_WORDS`] read inside, for the reason
+/// [`Interner::intern_within`] takes its two: the shipped ceiling is four billion words and no
+/// suite allocates 34 GB, so a cell driven to an injected ceiling exercises the same guard a
+/// document past the real one would. `flatten` adds only the constant.
+fn possible_table(
+  objects: usize,
+  abstract_rows: usize,
+  words: u32,
+  max_words: u32,
+) -> Option<Vec<u64>> {
+  // One block per bit position that some object's ordinal uses, `2 * words - 1` words each.
+  let blocks = objects.min(64) as u64;
+  let block = 2 * words as u64 - 1;
+  // In `u64` throughout: the two products are `Θ(objects)` and `Θ(interfaces × objects / 64)`, and
+  // both overflow a 32-bit `usize` long before they reach the ceiling below.
+  let len = (blocks * block).checked_add(abstract_rows as u64 * words as u64)?;
+  if len > max_words as u64 {
+    return None;
+  }
+  let mut table: Vec<u64> = Vec::new();
+  // Fallible, because this one is reachable from ordinary parsed SDL: an infallible `resize` past
+  // what the host has aborts the process, and there is a `Result` here to answer with instead.
+  table.try_reserve_exact(usize::try_from(len).ok()?).ok()?;
+  for bit in 0..blocks {
+    table.resize(table.len() + words as usize - 1, 0);
+    table.push(1u64 << bit);
+    table.resize(table.len() + words as usize - 1, 0);
+  }
+  Some(table)
+}
+
 fn set_bit(words: &mut [u64], start: u32, ordinal: u32) {
   if ordinal == TypeDef::NONE {
     return;
@@ -4907,17 +5932,49 @@ fn set_bit(words: &mut [u64], start: u32, ordinal: u32) {
 /// [`SchemaBuilder::validate_input_object_default_cycles`] hold one work list per level instead of
 /// a second stack for it.
 ///
-/// Recursive — but over a *literal*, whose depth the parser has already bounded, and not over the
-/// type graph, whose depth it has not. That is the same line [`SchemaBuilder::const_value`] draws.
+/// It recursed, on the line [`SchemaBuilder::const_value`] used to draw — over a *literal*, whose
+/// depth the parser has already bounded, rather than over the type graph, whose depth it has not.
+/// **The parser is not the only thing that builds a literal**, and `const_value`'s own header
+/// derives the public route that builds one at any depth. The list nesting is walked with an
+/// explicit stack of borrowed iterators instead: one entry per open list, never one per item, and
+/// document order preserved because each level is drained before the level under it is resumed.
+/// That stack is bounded the same way the other two literal walks are — by
+/// [`MAX_CONST_VALUE_DEPTH`], applied where the literal is built.
 fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
-  match &value.shape {
-    RawShape::List(items) => {
-      for item in items {
-        map_nodes(item, out);
+  let mut rest: Vec<core::slice::Iter<'a, RawValue>> = Vec::new();
+  let mut current = Some(value);
+  loop {
+    let Some(value) = current.take() else {
+      match rest.last_mut() {
+        None => return,
+        Some(items) => match items.next() {
+          Some(item) => current = Some(item),
+          None => {
+            rest.pop();
+          }
+        },
       }
+      continue;
+    };
+    // Exhaustive rather than `_`, so that a shape added later has to be decided here instead of
+    // defaulting to "contributes nothing" — which is the right answer for every scalar and the
+    // wrong one for anything that can hold a field.
+    match &value.shape {
+      RawShape::List(items) => rest.push(items.iter()),
+      RawShape::Object(fields) => out.push(fields),
+      // A refused subtree contributes NO map node, and an empty one is not the same answer: a map
+      // node is the claim "these are the fields this node supplies", so an empty one says every
+      // field was omitted — which is exactly the ask that makes the caller descend into a field's
+      // own `defaultValue` and mark it on the path. Contributing none says nothing at all about
+      // content that was never read.
+      RawShape::Refused => {}
+      RawShape::Null
+      | RawShape::Boolean
+      | RawShape::Int(_)
+      | RawShape::Float(_)
+      | RawShape::String
+      | RawShape::Enum(_) => {}
     }
-    RawShape::Object(fields) => out.push(fields),
-    _ => {}
   }
 }
 
@@ -4932,6 +5989,9 @@ fn map_operation(operation: &OperationType) -> RootOperation {
 fn map_location(location: &Location) -> Option<DirectiveLocation> {
   DirectiveLocation::from_name(location.as_str())
 }
+
+#[cfg(test)]
+mod tests;
 
 /// The name of a type definition, as a `&str` over the built-in SDL's `&'static str` source.
 ///

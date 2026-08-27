@@ -140,7 +140,7 @@ pub use repr::name::{bucket, hash_bytes};
 
 #[cfg(feature = "build")]
 #[cfg_attr(docsrs, doc(cfg(feature = "build")))]
-pub use builder::SchemaBuilder;
+pub use builder::{MAX_CONST_VALUE_DEPTH, SchemaBuilder};
 #[cfg(feature = "build")]
 #[cfg_attr(docsrs, doc(cfg(feature = "build")))]
 pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};

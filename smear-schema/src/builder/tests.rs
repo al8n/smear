@@ -1,0 +1,625 @@
+//! What the arena does at its ceilings, and what an ordinary build pays for the question.
+//!
+//! # Why the ceilings are injected rather than reached
+//!
+//! [`MAX_ARENA_BYTES`] is four gigabytes of interned bytes. No suite allocates that, so every cell
+//! below drives [`Interner::intern_within`] — the whole mechanism, with the two ceilings as
+//! parameters — at a ceiling it can stand on. [`Interner::intern`] adds only the two constants, and
+//! `the_shipped_ceilings_are_the_widths_they_address` is what keeps those two numbers from drifting
+//! away from the widths they are derived from.
+//!
+//! The unchecked arithmetic these replaced was measured at the real boundary, at `fcac941`, by
+//! padding `strings` directly; the two rows are in the [`Interner`] header. They are not cells here
+//! because a 4 GiB resize is not something a test run should do.
+
+use smear_parser::graphql::ast::{
+  ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstList, Described, EnumValue,
+  FloatValue, IntValue, Nested,
+};
+
+use super::*;
+
+/// `type Query { ok: Int }` and friends, through the same door `Schema::build` uses.
+fn parse(sdl: &'static str) -> TypeSystemDocument<&'static str> {
+  Parser::with_parser::<
+    GraphqlLexer<'static, str>,
+    TypeSystemDocument<&'static str>,
+    GraphqlErrors<&'static str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(sdl)
+  .expect("the fixture SDL parses")
+}
+
+/// The two shipped ceilings are the widths their derivations name.
+///
+/// A constant that drifts off the width it is derived from is the failure the derivation cannot
+/// see: the guard still refuses, at a number that no longer means anything.
+#[test]
+fn the_shipped_ceilings_are_the_widths_they_address() {
+  assert_eq!(MAX_ARENA_BYTES, u32::MAX, "a span's offsets are `u32`");
+  assert_eq!(MAX_ARENA_SYMBOLS, u32::MAX, "a `Sym` is a `u32`");
+}
+
+/// Exactly at the byte ceiling a spelling is interned; one byte past it the arena refuses.
+///
+/// Both halves, because a ceiling that only ever refuses is indistinguishable from a prohibition —
+/// and because the accepting half is what says the guard is `<=` rather than `<`.
+#[test]
+fn the_byte_ceiling_is_a_price_at_it_and_a_refusal_one_past_it() {
+  let mut interner = Interner::default();
+  let alpha = interner.intern_within(b"alpha", 8, MAX_ARENA_SYMBOLS);
+  let beta = interner.intern_within(b"bet", 8, MAX_ARENA_SYMBOLS);
+
+  assert_eq!(interner.bytes(alpha), b"alpha");
+  assert_eq!(interner.bytes(beta), b"bet");
+  assert_eq!(
+    interner.spans[beta.get() as usize],
+    (5, 8),
+    "a spelling ending exactly at the ceiling is interned"
+  );
+  assert!(interner.refused.is_none());
+
+  let past = interner.intern_within(b"c", 8, MAX_ARENA_SYMBOLS);
+  assert_eq!(
+    interner.refused,
+    Some(past),
+    "one byte past the ceiling is a refusal, and the arena says so"
+  );
+}
+
+/// A refused spelling answers an empty one, and nothing that was already interned moves.
+///
+/// This is the differential against `fcac941`, at an injected ceiling instead of at four
+/// gigabytes: the wrapped cast recorded `(4294967295, 3)` and `(0, 4)` there, so `bytes()` either
+/// panicked on the inverted range or handed back a *different* name's bytes. Here the span is
+/// never recorded at all.
+#[test]
+fn a_refused_spelling_is_empty_rather_than_a_slice_of_another_one() {
+  let mut interner = Interner::default();
+  let alpha = interner.intern_within(b"alpha", 5, MAX_ARENA_SYMBOLS);
+  let refused = interner.intern_within(b"beta", 5, MAX_ARENA_SYMBOLS);
+
+  assert_eq!(
+    interner.bytes(refused),
+    b"",
+    "the placeholder spells nothing; wrapping spelled `alph`"
+  );
+  assert_eq!(
+    interner.strings.len(),
+    5,
+    "a refusal grows the byte arena by nothing"
+  );
+  assert_eq!(
+    interner.bytes(alpha),
+    b"alpha",
+    "and leaves every span already recorded where it was"
+  );
+  assert_eq!(
+    interner.lookup(b"beta"),
+    None,
+    "a refused spelling is not in the arena, so nothing can find it there"
+  );
+}
+
+/// However many spellings an arena turns away, it mints one placeholder.
+#[test]
+fn every_refusal_after_the_first_answers_the_same_symbol() {
+  let mut interner = Interner::default();
+  interner.intern_within(b"alpha", 5, MAX_ARENA_SYMBOLS);
+  let first = interner.intern_within(b"beta", 5, MAX_ARENA_SYMBOLS);
+  let spans = interner.spans.len();
+
+  for spelling in [&b"gamma"[..], b"delta", b"epsilon"] {
+    assert_eq!(
+      interner.intern_within(spelling, 5, MAX_ARENA_SYMBOLS),
+      first
+    );
+  }
+  assert_eq!(
+    interner.spans.len(),
+    spans,
+    "a refused arena stops growing rather than growing by a span per refusal"
+  );
+}
+
+/// The symbol count is the other cast, and it refuses on its own ceiling.
+///
+/// Unreachable through [`Interner::intern`] — a spelling costs a byte, so [`MAX_ARENA_BYTES`] is
+/// hit first — and guarded anyway, which is what this cell is for: the guard is a property of the
+/// type rather than of the call sites it has today.
+#[test]
+fn the_symbol_ceiling_refuses_rather_than_wrapping_the_index() {
+  let mut interner = Interner::default();
+  let alpha = interner.intern_within(b"alpha", MAX_ARENA_BYTES, 2);
+  let beta = interner.intern_within(b"beta", MAX_ARENA_BYTES, 2);
+  assert_eq!(interner.bytes(alpha), b"alpha");
+  assert_eq!(interner.bytes(beta), b"beta");
+  assert!(interner.refused.is_none(), "two symbols is the ceiling");
+
+  let past = interner.intern_within(b"gamma", MAX_ARENA_BYTES, 2);
+  assert_eq!(interner.refused, Some(past));
+  assert_eq!(interner.bytes(past), b"");
+  assert_eq!(
+    interner.strings.len(),
+    9,
+    "the refusal is asked before anything grows, so the bytes are not spent either"
+  );
+}
+
+/// A build whose arena refused answers a typed refusal, not a wrong name and not a panic.
+///
+/// The document is ordinary and the ceiling is not: a real one takes 92 KB of overlapping suffixes
+/// through the public `Name::new`, and what this pins is the answer rather than the route to it.
+#[test]
+fn a_refused_arena_is_a_typed_refusal() {
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse("type Query { ok: Int }"));
+  // Zero bytes of room, which is the arena four gigabytes in.
+  let refused = builder
+    .interner
+    .intern_within(b"Whatever", 0, MAX_ARENA_SYMBOLS);
+  assert_eq!(builder.interner.bytes(refused), b"");
+
+  let errors = builder
+    .finish()
+    .expect_err("an arena that refused a spelling is not a schema");
+  assert_eq!(
+    errors.kinds(),
+    std::vec![SchemaErrorKind::TooManyInternedBytes],
+    "the refusal is the only thing the build has to say: {errors}"
+  );
+}
+
+/// A refusal ends the document rather than joining the diagnostics computed against it.
+///
+/// The document below is refused on its own merits before the arena stops growing, and the answer
+/// is still the one error: a refused arena hands every later spelling the same placeholder, so
+/// nothing a rule computes over it is about anything the caller wrote. Padding an arena to
+/// `u32::MAX` under a one-type document produced fifteen duplicate-definition diagnostics from the
+/// built-in injection alone.
+#[test]
+fn a_refused_arena_ends_the_document_rather_than_joining_its_diagnostics() {
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse("type Query { ok: Int }\ntype Query { ok: Int }"));
+  assert!(
+    !builder.errors.is_empty(),
+    "the fixture is refused on its own merits, which is the point of it"
+  );
+
+  builder
+    .interner
+    .intern_within(b"Whatever", 0, MAX_ARENA_SYMBOLS);
+  let errors = builder
+    .finish()
+    .expect_err("an arena that refused a spelling is not a schema");
+  assert_eq!(
+    errors.kinds(),
+    std::vec![SchemaErrorKind::TooManyInternedBytes],
+    "{errors}"
+  );
+}
+
+/// The literal arena is the second one, and the guard is on the type, so it is covered too.
+#[test]
+fn the_literal_arena_refuses_on_the_same_guard() {
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse(
+    "type Query { ok: Int }\nscalar Custom\ndirective @x(a: Custom = 42) on SCALAR",
+  ));
+  let refused = builder.literals.intern_within(b"43", 0, MAX_ARENA_SYMBOLS);
+  assert_eq!(builder.literals.bytes(refused), b"");
+
+  let errors = builder
+    .finish()
+    .expect_err("a literal arena that refused a spelling is not a schema either");
+  assert_eq!(
+    errors.kinds(),
+    std::vec![SchemaErrorKind::TooManyInternedBytes],
+    "{errors}"
+  );
+}
+
+/// The control: an ordinary schema reaches neither ceiling and reads back exactly what it interned.
+///
+/// The guard is two comparisons on a path that already allocates a `Box<[u8]>` and inserts it into
+/// a `BTreeMap`, so what this cell says is that the answer did not move; the cost is measured out
+/// of suite and recorded in the pull request.
+#[test]
+fn an_ordinary_schema_reaches_neither_ceiling() {
+  const SDL: &str = "type Query { hero(episode: Episode = NEWHOPE): Character }
+     interface Character { name: String! friends: [Character] }
+     type Human implements Character { name: String! friends: [Character] height: Float }
+     enum Episode { NEWHOPE EMPIRE JEDI }
+     input Filter { since: Int = 1977 name: String }";
+
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse(SDL));
+  builder.document(&parse("scalar Custom"));
+
+  for (at, &(start, end)) in builder.interner.spans.iter().enumerate() {
+    let sym = Sym::new(at as u32);
+    assert!(start <= end, "span {at} is inverted: {start}..{end}");
+    assert_eq!(
+      builder.interner.lookup(builder.interner.bytes(sym)),
+      Some(sym),
+      "symbol {at} does not read back as itself"
+    );
+  }
+  assert!(builder.interner.refused.is_none());
+  assert!(builder.literals.refused.is_none());
+
+  let schema = builder.finish().expect("an ordinary schema builds");
+  assert!(schema.type_by_name(b"Human").is_some());
+  assert!(schema.type_by_name(b"Episode").is_some());
+}
+
+/// A numeric literal retains **nothing**, and an enum member's spelling still costs its own bytes.
+///
+/// # What this cell is for
+///
+/// Two review rounds rested on the claim that a *distinct* spelling costs its own bytes in some
+/// source: the three leaf constructors are `pub(crate)`, so a caller's only route to one of these
+/// arms is a parse or a clone. The premise is true — `IntValue::new` is `pub(crate)`,
+/// `FromComponents` is implemented in `smear-parser` only for `Name`, there is no `DerefMut` — and
+/// the conclusion still does not follow, because a parse is not injective into the bytes it reads.
+/// `IntValue::graphql` is a public associated parser, so `B` parses of the `B` suffixes of one
+/// buffer yield `B` distinct spellings borrowing the same `B` bytes, and the arena was `B(B+1)/2`
+/// over a `B`-byte buffer, exactly.
+///
+/// The two numeric arms no longer retain a spelling at all: `fits_i32` and `is_finite` are all one
+/// is ever read for and both are decided where the literal is read, so the row is a flat zero.
+/// The enum arm cannot be reduced the same way — its spelling is resolved later, against members
+/// that may not be symbols yet — so it still interns, and this cell holds both facts at once.
+/// [`RawShape`] carries the grid and the reasoning; [`MAX_ARENA_BYTES`] is what bounds the row
+/// that is still quadratic.
+#[test]
+fn a_numeric_literal_retains_nothing_and_an_enum_member_retains_its_spelling() {
+  /// `scalar Foo @x(a: [<every suffix of `buffer`, parsed as `Arm`>])`, assembled rather than
+  /// parsed.
+  fn document<'a>(
+    buffer: &'a str,
+    take: usize,
+    leaf: impl Fn(&'a str) -> ConstInputValue<&'a str>,
+  ) -> TypeSystemDocument<&'a str> {
+    let span = SimpleSpan::const_new(0, 0);
+    let leaves = (0..take).map(|at| leaf(&buffer[at..])).collect::<Vec<_>>();
+    let directive = ConstDirective::new(
+      span,
+      Name::new(span, "x"),
+      Some(ConstArguments::new(
+        span,
+        vec![ConstArgument::new(
+          span,
+          Name::new(span, "a"),
+          ConstInputValue::List(ConstList::new(span, Nested::new(leaves))),
+        )],
+      )),
+    );
+    TypeSystemDocument::new(
+      span,
+      vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+        span,
+        None,
+        TypeSystemDefinition::Type(TypeDefinition::Scalar(ScalarTypeDefinition::new(
+          span,
+          Name::new(span, "Foo"),
+          Some(ConstDirectives::new(span, vec![directive])),
+        ))),
+      ))],
+    )
+  }
+
+  fn arena(document: &TypeSystemDocument<&str>) -> (usize, usize) {
+    let mut builder = SchemaBuilder::new();
+    builder.document(document);
+    assert!(
+      builder.literals.refused.is_none(),
+      "none of this is anywhere near the ceiling that bounds it"
+    );
+    (builder.literals.spans.len(), builder.literals.strings.len())
+  }
+
+  for width in [10usize, 30, 100, 300] {
+    // Nonzero digits only: a leading zero is not an `IntValue`, so every suffix has to start with
+    // one for the parse to succeed.
+    let digits: String = "123456789".chars().cycle().take(width).collect();
+    let (ints, int_bytes) = arena(&document(&digits, width, |spelling| {
+      ConstInputValue::Int(
+        Parser::with_parser::<GraphqlLexer<'_, str>, IntValue<&str>, GraphqlErrors<&str>, _, GraphQL>(
+          IntValue::graphql,
+        )
+        .parse_str(spelling)
+        .expect("a run of nonzero digits is an IntValue"),
+      )
+    }));
+    assert_eq!(
+      (ints, int_bytes),
+      (0, 0),
+      "{width} `Int` leaves interned {ints} spellings and {int_bytes} bytes; a range verdict \
+       retains neither"
+    );
+
+    // The last two suffixes of `9…9.5` are `.5` and `5`, neither of which is a `FloatValue`.
+    let mut floats: String = "9".repeat(width - 2);
+    floats.push_str(".5");
+    let (seen, float_bytes) = arena(&document(&floats, width - 2, |spelling| {
+      ConstInputValue::Float(
+        Parser::with_parser::<
+          GraphqlLexer<'_, str>,
+          FloatValue<&str>,
+          GraphqlErrors<&str>,
+          _,
+          GraphQL,
+        >(FloatValue::graphql)
+        .parse_str(spelling)
+        .expect("every other suffix of `9…9.5` is a FloatValue"),
+      )
+    }));
+    assert_eq!(
+      (seen, float_bytes),
+      (0, 0),
+      "{width} `Float` leaves interned {seen} spellings and {float_bytes} bytes"
+    );
+
+    // The arm that still retains, and it is still exactly `B(B+1)/2`.
+    let members: String = "abcdefghij".chars().cycle().take(width).collect();
+    let (enums, enum_bytes) = arena(&document(&members, width, |spelling| {
+      ConstInputValue::Enum(
+        Parser::with_parser::<
+          GraphqlLexer<'_, str>,
+          EnumValue<&str>,
+          GraphqlErrors<&str>,
+          _,
+          GraphQL,
+        >(EnumValue::graphql)
+        .parse_str(spelling)
+        .expect("every suffix of a run of letters is an EnumValue"),
+      )
+    }));
+    assert_eq!(
+      enums, width,
+      "every suffix is a distinct spelling, so none of them deduplicates"
+    );
+    assert_eq!(
+      enum_bytes,
+      width * (width + 1) / 2,
+      "{width} bytes of source retained {enum_bytes} bytes of literal arena for the one arm whose \
+       verdict is not decidable where the literal is read"
+    );
+  }
+}
+
+/// Formatting a builder does not spend a native frame per level of a literal it retains.
+///
+/// # The door
+///
+/// [`SchemaBuilder`] derives [`Debug`] and is public; `types` reaches a [`RawValue`] through
+/// [`RawType`], [`RawField`], [`RawDirectiveUse`] and [`RawArgument`]; and
+/// [`SchemaBuilder::document`] returns `&mut Self`, so a caller holding the builder between it and
+/// [`SchemaBuilder::finish`] can format one. A derived [`RawShape`] `Debug` walked the literal
+/// recursively from there — measured at `0fa6ec1` on `aarch64-apple-darwin`, unoptimised, as
+/// **1 016 to 1 037 bytes of stack per level**, aborting with `fatal runtime error: stack overflow`
+/// at 130 levels on a 128 KiB thread and at 1 012 on a 1 MiB one. [`MAX_CONST_VALUE_DEPTH`] admits
+/// 1 024.
+///
+/// # Why the assertion is on the output and not on the stack
+///
+/// A stack overflow aborts the process, so a cell that provoked one would take the whole harness
+/// with it rather than fail. The rendered length is the exact proxy: the derived walk emitted one
+/// `RawValue { span: .., shape: List([` per level, so its output grew with the depth by
+/// construction — 1 584 bytes at 8 levels against 69 656 at 1 024. A formatter whose output does
+/// not move with the depth did not descend.
+#[test]
+fn a_deep_literal_formats_without_a_frame_per_level() {
+  /// `scalar Foo @x(a: [[[…]]])`, `depth` containers deep, assembled with a loop.
+  fn document(depth: usize) -> TypeSystemDocument<&'static str> {
+    let span = SimpleSpan::const_new(0, 0);
+    let mut value = ConstInputValue::List(ConstList::new(span, Nested::new(std::vec![])));
+    for _ in 1..depth {
+      value = ConstInputValue::List(ConstList::new(span, Nested::new(std::vec![value])));
+    }
+    let directive = ConstDirective::new(
+      span,
+      Name::new(span, "x"),
+      Some(ConstArguments::new(
+        span,
+        std::vec![ConstArgument::new(span, Name::new(span, "a"), value)],
+      )),
+    );
+    TypeSystemDocument::new(
+      span,
+      std::vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+        span,
+        None,
+        TypeSystemDefinition::Type(TypeDefinition::Scalar(ScalarTypeDefinition::new(
+          span,
+          Name::new(span, "Foo"),
+          Some(ConstDirectives::new(span, std::vec![directive])),
+        ))),
+      ))],
+    )
+  }
+
+  fn rendered(depth: usize) -> String {
+    let mut builder = SchemaBuilder::new();
+    builder.document(&document(depth));
+    std::format!("{builder:?}")
+  }
+
+  let shallow = rendered(1);
+  let at_the_ceiling = rendered(MAX_CONST_VALUE_DEPTH);
+  assert_eq!(
+    shallow.len(),
+    at_the_ceiling.len(),
+    "a literal a thousand levels deeper rendered {} bytes more, so the formatter descended it",
+    at_the_ceiling.len().abs_diff(shallow.len())
+  );
+  assert!(
+    shallow.contains("List(0 entries)") && at_the_ceiling.contains("List(1 entries)"),
+    "the shape is still named and still says how wide its top level is: {at_the_ceiling}"
+  );
+
+  // The control: an ordinary literal still renders every shape it holds, and the two arenas
+  // render their size rather than the caller's bytes.
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse(
+    "scalar Foo\ndirective @x(a: Int = 1, b: [Int] = [1, 2], c: In = { p: 1.5 }) on \
+     SCALAR\ninput In { p: Float }\ntype Query { ok: Int }",
+  ));
+  let ordinary = std::format!("{builder:?}");
+  for expected in [
+    "Int(true)",
+    "List(2 entries)",
+    "Object(1 fields)",
+    "literals: Interner { symbols: ",
+    ", bytes: ",
+    ", refused: false }",
+  ] {
+    assert!(
+      ordinary.contains(expected),
+      "{expected} is missing: {ordinary}"
+    );
+  }
+  assert!(
+    !ordinary.contains("strings: ["),
+    "an arena renders its size, not one decimal integer per interned byte: {ordinary}"
+  );
+}
+
+/// An object type's possible-object bitset is `{itself}` and costs no row of its own.
+///
+/// # The door
+///
+/// `possible` was one `ceil(objects / 64)`-word row per **composite**, and an object is a
+/// composite, so `N` object types cost `N × ceil(N / 64)` words — `Θ(N²)` from `Θ(N)` of ordinary
+/// parsed SDL, with no assembled AST anywhere. Measured on `aarch64-apple-darwin` over SDL
+/// `Schema::build` accepts, at 500/1 000/2 000/4 000 object types each implementing one interface:
+/// 32 512, 129 024, 514 048 and 2 020 032 bytes, ratios per doubling 3.97 / 3.98 / 3.93, which puts
+/// 100 000 object types at about 1.25 GB — reached through an infallible `resize`.
+///
+/// An object's row is a singleton, so the rows overlap inside one shared identity block per bit
+/// position and the same four sizes are 7 744, 16 000, 32 512 and 64 504 bytes: 2.07 / 2.03 / 1.98
+/// per doubling, a constant 0.41x of the SDL that produced them. What this cell pins is that the
+/// sharing did not change an answer — the window really is `{itself}`, at an ordinal past the first
+/// word, and beside a union and an interface that still have rows of their own.
+#[test]
+fn an_objects_bitset_is_itself_and_costs_no_row() {
+  // Past 64 objects, so ordinals span more than one word and the window into a block is not
+  // trivially at offset zero.
+  const OBJECTS: usize = 200;
+  let mut sdl =
+    String::from("type Query { ok: Int }\ninterface Node { id: Int }\nunion Pair = T0 | T199\n");
+  for at in 0..OBJECTS {
+    sdl.push_str(&std::format!("type T{at} implements Node {{ id: Int }}\n"));
+  }
+  let sdl: &'static str = std::boxed::Box::leak(sdl.into_boxed_str());
+  let schema = Schema::build(&parse(sdl)).expect("an ordinary schema");
+
+  let id = |name: &[u8]| schema.type_by_name(name).expect("defined").0;
+  let names = |ids: Vec<TypeId>| {
+    let mut out: Vec<&str> = ids
+      .into_iter()
+      .map(|id| schema.name(schema.type_def(id).name()))
+      .collect();
+    out.sort_unstable();
+    out
+  };
+
+  for at in 0..OBJECTS {
+    let object = id(std::format!("T{at}").as_bytes());
+    assert_eq!(
+      names(schema.possible_object_ids(object).collect()),
+      std::vec![std::format!("T{at}")],
+      "an object's possible set is itself and nothing else"
+    );
+    assert!(schema.is_possible_object(object, object));
+    assert!(schema.possible_objects_intersect(object, id(b"Node")));
+  }
+  assert!(!schema.possible_objects_intersect(id(b"T0"), id(b"T1")));
+  assert_eq!(
+    names(schema.possible_object_ids(id(b"Pair")).collect()),
+    std::vec!["T0", "T199"],
+    "a union still has a row of its own"
+  );
+  assert_eq!(
+    schema.possible_object_ids(id(b"Node")).count(),
+    OBJECTS,
+    "so does an interface"
+  );
+  assert!(schema.possible_objects(id(b"Query")).is_some());
+
+  // `Query` and the 200 `T`s are objects; `Node` and `Pair` are the only rows.
+  let words = schema.possible_words() as usize;
+  assert_eq!(
+    schema.possible.len(),
+    64 * (2 * words - 1) + 2 * words,
+    "one shared block per bit position, and one row per abstract type"
+  );
+  assert!(
+    schema.possible.len() < (OBJECTS + 3) * words,
+    "which is smaller than a row per composite, or the sharing bought nothing"
+  );
+}
+
+/// Exactly at the table's word ceiling it is built; one word past it the build refuses.
+///
+/// Both halves, because a ceiling that only ever refuses is indistinguishable from a prohibition.
+/// [`MAX_POSSIBLE_WORDS`] is four billion words — 34 GB — so this drives [`possible_table`], which
+/// is the whole mechanism with the ceiling as a parameter, exactly as the arena cells drive
+/// [`Interner::intern_within`].
+#[test]
+fn the_possible_table_is_a_price_at_its_ceiling_and_a_refusal_one_past_it() {
+  assert_eq!(
+    MAX_POSSIBLE_WORDS,
+    u32::MAX,
+    "`TypeDef::possible_start` is a `u32` word offset"
+  );
+
+  // 100 objects is two words, so 64 blocks of 3 words; 4 abstract types are 4 rows of 2.
+  let words = 100usize.div_ceil(64) as u32;
+  let exact = 64 * (2 * words as usize - 1) + 4 * words as usize;
+  let table = possible_table(100, 4, words, exact as u32).expect("a table exactly at the ceiling");
+  assert_eq!(table.len(), 64 * (2 * words as usize - 1));
+  assert_eq!(
+    table.capacity(),
+    exact,
+    "reserved once for the whole table, rows included"
+  );
+  assert!(
+    possible_table(100, 4, words, exact as u32 - 1).is_none(),
+    "one word past the ceiling is a refusal"
+  );
+
+  // The dimension that is still quadratic is the one the ceiling is for: abstract types times
+  // objects. Objects alone cost under two words each and cannot reach it.
+  assert!(
+    possible_table(
+      1 << 20,
+      1 << 20,
+      (1u32 << 20).div_ceil(64),
+      MAX_POSSIBLE_WORDS
+    )
+    .is_none(),
+    "a million interfaces beside a million objects is 17 billion words"
+  );
+  assert!(
+    possible_table(1 << 20, 0, (1u32 << 20).div_ceil(64), MAX_POSSIBLE_WORDS).is_some(),
+    "a million objects with no abstract type is two megawords"
+  );
+}
+
+/// A refused table is one diagnostic, and it is the one the build can honestly make.
+#[test]
+fn a_refused_possible_table_is_a_typed_refusal() {
+  let kinds = SchemaErrorKind::ALL
+    .iter()
+    .filter(|kind| kind.code().as_str() == "smear::schema::possible-type-table-too-large")
+    .count();
+  assert_eq!(kinds, 1, "the refusal has a code of its own");
+  assert_eq!(
+    SchemaErrorKind::PossibleTypeTableTooLarge.severity(),
+    crate::diagnostic::Severity::Error
+  );
+}
