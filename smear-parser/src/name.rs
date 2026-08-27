@@ -4,13 +4,16 @@
 //! general-purpose [`Ident`](tokora::types::Ident), while preserving the
 //! dialect marker in its type.
 
-use core::ops::{Deref, DerefMut};
+use core::ops::Deref;
 
 use tokora::{
   SimpleSpan,
   error::ErrorNode,
   span::{AsSpan, IntoSpan},
-  types::Ident,
+  types::{
+    Ident,
+    recovery::{Components, FromComponents},
+  },
   utils::IntoComponents,
 };
 
@@ -30,6 +33,26 @@ pub struct Name<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Ident<S, Span, 
 ///
 /// Vanilla GraphQL fragments use this wrapper; GraphQLx has no fragment
 /// grammar.
+///
+/// # The exclusion is held by the absence of *every* way in, not by one of them
+///
+/// A crate-private constructor bounds nothing on its own. What a caller needs in order to seat an
+/// arbitrary spelling in a value of this type is a `&mut` to the wrapped [`Name`] — and
+/// `DerefMut` handed exactly that out, publicly, so `*fragment = Name::new(span, "on")` built a
+/// `FragmentName` spelled `on` in safe code with the constructor still crate-private. Withholding
+/// [`FromComponents`] while that impl stood enforced nothing.
+///
+/// So the surface is enumerated rather than argued: [`new`](Self::new) and
+/// [`from_name`](Self::from_name) are `pub(crate)`; there is no [`FromComponents`], no `From`, no
+/// [`ErrorNode`], no `Default`; the field is private and there is no public `_mut` accessor; and
+/// [`Deref`] is immutable with **no `DerefMut` beside it**. `AsRef<Name>` and `Deref` read the
+/// wrapped name, and [`IntoComponents`] takes the whole carrier apart — reading out is
+/// unconditional, putting back is not. Every remaining route to a value of this type runs through
+/// a syntactic production, which is where `FragmentName : Name but not on` is decided.
+///
+/// A `&mut FragmentName` is still perfectly usable: whole-carrier assignment from another
+/// `FragmentName` type-checks, and every such value came from a production. What is gone is the
+/// write typed as the *wrapped* type, which is the one that bypassed the rule.
 #[cfg(feature = "graphql")]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(transparent)]
@@ -41,8 +64,30 @@ impl<S, Span, Lang: ?Sized> FragmentName<S, Span, Lang> {
   pub(crate) const fn new(span: Span, source: S) -> Self {
     Self(Name::new(span, source))
   }
+
+  /// Rebrands a parsed [`Name`] as a fragment name, carrying its recovery status across
+  /// unchanged.
+  ///
+  /// This exists so a production that already holds a `Name` never has to take it apart and put
+  /// it back together through [`new`](Self::new), which declares whatever it builds valid. It is
+  /// the same reason tokora pairs its decomposition with an inverse — except that the public
+  /// inverse cannot be offered *here*: [`FromComponents`] is a public trait, and an impl of it
+  /// for this type would hand any caller a constructor for the one name node whose grammar rule
+  /// (`Name` but not `on`) only the syntactic productions establish. That exclusion is why `new`
+  /// is crate-private, and it outranks the convenience of a public rebuild, so the status-carrying
+  /// route stays crate-private beside it.
+  ///
+  /// Withholding the trait is one clause of that argument and not the whole of it — see the type's
+  /// own documentation for the enumeration. A public `DerefMut` was a public `Name`-typed setter
+  /// for this private field and made the rest of the clause vacuous; it is gone.
+  #[inline]
+  pub(crate) const fn from_name(name: Name<S, Span, Lang>) -> Self {
+    Self(name)
+  }
 }
 
+/// Reads the wrapped [`Name`]. **Deliberately not paired with `DerefMut`** — see the type's
+/// documentation for the enumeration a `Name`-typed setter would have emptied.
 #[cfg(feature = "graphql")]
 impl<S: ?Sized, Span, Lang: ?Sized> Deref for FragmentName<S, Span, Lang> {
   type Target = Name<S, Span, Lang>;
@@ -50,14 +95,6 @@ impl<S: ?Sized, Span, Lang: ?Sized> Deref for FragmentName<S, Span, Lang> {
   #[inline]
   fn deref(&self) -> &Self::Target {
     &self.0
-  }
-}
-
-#[cfg(feature = "graphql")]
-impl<S: ?Sized, Span, Lang: ?Sized> DerefMut for FragmentName<S, Span, Lang> {
-  #[inline]
-  fn deref_mut(&mut self) -> &mut Self::Target {
-    &mut self.0
   }
 }
 
@@ -98,7 +135,12 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FragmentName<S, Span, Lang> {
 
 #[cfg(feature = "graphql")]
 impl<S, Span, Lang: ?Sized> IntoComponents for FragmentName<S, Span, Lang> {
-  type Components = (Span, S);
+  /// The wrapped [`Name`]'s decomposition, which is the inner
+  /// [`Ident`](tokora::types::Ident)'s: span, spelling, and recovery status.
+  ///
+  /// Reading the status out is unconditional; putting one back is not — see
+  /// [`from_name`](Self::from_name) for why this type has no public inverse.
+  type Components = Components<Span, S>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -134,19 +176,36 @@ impl<S: ?Sized, Span, Lang: ?Sized> Name<S, Span, Lang> {
   }
 }
 
+/// Reads the wrapped [`Ident`]: its span, its spelling, and its recovery status.
+///
+/// # There is no `DerefMut`, and the recovery status is why
+///
+/// This carrier is `repr(transparent)` over an `Ident`, so the status is a *field of the wrapped
+/// value* rather than something this type keeps alongside it. A `DerefMut` therefore did not hand
+/// out a payload — it handed out the whole record, status included, typed as `Ident`. Safe code
+/// could take a [`Name::error`](tokora::error::ErrorNode::error) placeholder and run
+/// `*name = Ident::new(span, "field")`, and the same value went from
+/// [`Status::Error`](tokora::types::Status::Error) to `Status::Valid` with nothing calling
+/// [`into_components`](IntoComponents::into_components) and no diagnostic anywhere: precisely the
+/// laundering tokora#320 widened `Components` to prevent, reached one door over. A generic AST
+/// transformation that assigns through a `&mut` target does that silently.
+///
+/// What replaces it is the pair that was the point of that widening.
+/// [`IntoComponents`] reads the status out and [`FromComponents`] puts one back, so a rebuild
+/// states the status it is rebuilding with instead of inheriting whatever `Ident::new` declares.
+/// A `&mut Name` still accepts a whole `Name` — including one built by `from_components` — so
+/// replacement is unaffected; what is gone is the write that named the wrapped type and skipped
+/// this one.
+///
+/// Reading is untouched: `Deref` reaches every `&self` method the `Ident` has, and the two `&mut
+/// self` ones it also reached — `Ident::span_mut` and `Ident::source_mut` — had no caller anywhere
+/// in this workspace.
 impl<S: ?Sized, Span, Lang: ?Sized> Deref for Name<S, Span, Lang> {
   type Target = Ident<S, Span, Lang>;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
     &self.0
-  }
-}
-
-impl<S: ?Sized, Span, Lang: ?Sized> DerefMut for Name<S, Span, Lang> {
-  #[inline]
-  fn deref_mut(&mut self) -> &mut Self::Target {
-    &mut self.0
   }
 }
 
@@ -181,16 +240,32 @@ impl<S: ?Sized, Span, Lang: ?Sized> AsSpan<Span> for Name<S, Span, Lang> {
 impl<S, Span, Lang: ?Sized> IntoSpan<Span> for Name<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
-    self.into_components().0
+    self.into_components().span
   }
 }
 
 impl<S, Span, Lang: ?Sized> IntoComponents for Name<S, Span, Lang> {
-  type Components = (Span, S);
+  /// The span, the spelling, **and the recovery status** — the inner
+  /// [`Ident`](tokora::types::Ident)'s own decomposition, passed through unchanged.
+  ///
+  /// This carrier is `repr(transparent)` over an `Ident`, so the status is not a part it could
+  /// choose to keep or drop: it is a field of the value being taken apart. Returning the pair
+  /// this used to return dropped it, which is the one thing a decomposition must not do — a
+  /// caller who rebuilt through [`Name::new`] got a placeholder relabelled as valid syntax.
+  /// [`FromComponents`] is the inverse over this same type, so the round trip is an identity in
+  /// all three states.
+  type Components = Components<Span, S>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
     self.0.into_components()
+  }
+}
+
+impl<S, Span, Lang: ?Sized> FromComponents for Name<S, Span, Lang> {
+  #[inline]
+  fn from_components(components: Self::Components) -> Self {
+    Self(Ident::from_components(components))
   }
 }
 
@@ -213,7 +288,16 @@ where
 mod tests {
   use std::string::String;
 
-  use tokora::{span::AsSpan, types::Ident, utils::IntoComponents};
+  use tokora::{
+    SimpleSpan,
+    error::ErrorNode,
+    span::AsSpan,
+    types::{
+      Ident, Status,
+      recovery::{Components, FromComponents, RecoveryState},
+    },
+    utils::IntoComponents,
+  };
 
   use super::Name;
 
@@ -232,7 +316,35 @@ mod tests {
     assert_eq!(ident.as_span(), &CustomSpan(1));
 
     let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(2), "field");
-    assert_eq!(name.into_components(), (CustomSpan(2), "field"));
+    let Components {
+      span,
+      payload,
+      status,
+    } = name.into_components();
+    assert_eq!(span, CustomSpan(2));
+    assert_eq!(payload, "field");
+    assert_eq!(status, Status::Valid);
+  }
+
+  #[test]
+  fn decomposing_a_placeholder_and_rebuilding_it_keeps_the_placeholder() {
+    // The pair this used to decompose into had no room for the status, so the only rebuild
+    // available was `Name::new`, which declares its result valid. That turned a recovery
+    // placeholder into ordinary syntax on the way through.
+    for (name, expected) in [
+      (Name::<&str>::error(SimpleSpan::new(0, 5)), Status::Error),
+      (
+        Name::<&str>::missing(SimpleSpan::new(5, 5)),
+        Status::Missing,
+      ),
+      (
+        Name::<&str>::new(SimpleSpan::new(0, 5), "field"),
+        Status::Valid,
+      ),
+    ] {
+      assert_eq!(name.status(), expected);
+      assert_eq!(Name::from_components(name.into_components()), name);
+    }
   }
 
   #[test]
