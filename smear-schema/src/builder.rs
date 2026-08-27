@@ -4161,6 +4161,7 @@ impl SchemaBuilder {
           // as many members as it likes against it. `any` over the declared values, restarted per
           // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
           // other three did not reach — see its header.
+          //
           // The written member is resolved against the NAME arena here rather than where it was
           // reduced, and that ordering is load-bearing: a literal is reduced as its definition is
           // read, so an enum value declared further down the document — or in a later one — is not
