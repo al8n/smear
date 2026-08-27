@@ -33,15 +33,20 @@ use std::{
 
 use smear::{
   diagnostic::{Diagnose, DiagnoseExt},
-  lexer::tokora::{Parse as _, Parser},
+  lexer::tokora::{Parse as _, Parser, SimpleSpan},
   parser::graphql::{
     GraphQL,
-    ast::{ExecutableDocument, TypeSystemDocument},
+    ast::{
+      ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList,
+      Described, ExecutableDocument, Name, Nested, ScalarTypeDefinition, TypeDefinition,
+      TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+    },
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   validator::{
-    Budget, Collect, Count, Diagnostic, First, Ignore, Schema, Scratch, validate_executable,
+    Budget, Collect, Count, Diagnostic, First, Ignore, Schema, Scratch, schema::SchemaBuilder,
+    validate_executable,
   },
 };
 
@@ -52,32 +57,53 @@ use smear::{
 thread_local! {
   /// Allocation events on this thread. `alloc`, `alloc_zeroed` and a growing `realloc` all count.
   static ALLOCATIONS: Cell<u64> = const { Cell::new(0) };
+  /// Bytes this thread holds from the allocator right now.
+  static LIVE: Cell<usize> = const { Cell::new(0) };
+  /// The high-water mark of [`LIVE`] since it was last armed.
+  static PEAK: Cell<usize> = const { Cell::new(0) };
 }
 
 struct Counting;
 
-/// Counts every allocation event and forwards to the system allocator.
+/// Counts every allocation event, tracks the live and peak byte figures, and forwards to the
+/// system allocator.
 ///
-/// The counter is thread-local and updated through `try_with`, so an allocation made while the
+/// The counters are thread-local and updated through `try_with`, so an allocation made while the
 /// thread's local storage is being set up or torn down is simply not counted rather than
 /// re-entering it.
+///
+/// # Two instruments, because they answer different questions
+///
+/// The event count is what pins "the steady state allocates nothing" — a claim about *whether* the
+/// allocator is asked at all. The byte figure is what pins an **amplification**: a reduction that
+/// makes one allocation per element passes an event count no matter how big each one is, so a copy
+/// whose size the caller chose is invisible to it. See
+/// [`a_literal_leaf_costs_the_build_one_copy_per_distinct_spelling`].
 unsafe impl GlobalAlloc for Counting {
   unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
     bump();
+    grew(layout.size());
     unsafe { System.alloc(layout) }
   }
 
   unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
     bump();
+    grew(layout.size());
     unsafe { System.alloc_zeroed(layout) }
   }
 
   unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
     bump();
+    if new_size >= layout.size() {
+      grew(new_size - layout.size());
+    } else {
+      shrank(layout.size() - new_size);
+    }
     unsafe { System.realloc(ptr, layout, new_size) }
   }
 
   unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+    shrank(layout.size());
     unsafe { System.dealloc(ptr, layout) }
   }
 }
@@ -89,11 +115,39 @@ fn bump() {
   let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
 }
 
+fn grew(bytes: usize) {
+  let _ = LIVE.try_with(|live| {
+    let now = live.get() + bytes;
+    live.set(now);
+    let _ = PEAK.try_with(|peak| {
+      if now > peak.get() {
+        peak.set(now);
+      }
+    });
+  });
+}
+
+fn shrank(bytes: usize) {
+  let _ = LIVE.try_with(|live| live.set(live.get().saturating_sub(bytes)));
+}
+
 /// Runs `body` and returns how many allocation events it caused on this thread.
 fn allocations(body: impl FnOnce()) -> u64 {
   let before = ALLOCATIONS.with(Cell::get);
   body();
   ALLOCATIONS.with(Cell::get) - before
+}
+
+/// Runs `body` and returns the highest live-byte figure this thread reached inside it, measured
+/// from what was already live when it started.
+///
+/// The subject's own inputs are therefore *below* the window — they are live before it opens — and
+/// what comes back is what the body itself added at its worst moment.
+fn peak_bytes(body: impl FnOnce()) -> usize {
+  let before = LIVE.with(Cell::get);
+  PEAK.with(|peak| peak.set(before));
+  body();
+  PEAK.with(Cell::get) - before
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -660,5 +714,153 @@ fn the_whole_root_check_allocates_nothing() {
   assert!(
     red > 2_000,
     "the red-cursor comparison allocated only {red} times, so it is not the contrast this claims"
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// the width axis of the constant-literal reduction
+// ---------------------------------------------------------------------------------------------
+
+/// Widening a literal's spelling costs the build a constant, not a constant per occurrence.
+///
+/// # The defect, and why every gate in front of it was blind
+///
+/// `SchemaBuilder::const_value` reduces a constant literal to a private tree, and its `Int`, `Float`
+/// and `Enum` arms kept the literal's spelling. They kept it with `source().as_ref().into()` — a
+/// `Box<[u8]>` allocated and filled **per occurrence**. `ConstInputValue` is public and `Clone`, and
+/// a clone of a leaf copies the `S` rather than the bytes behind it, so `N` clones of one `B`-byte
+/// literal are `O(B + N)` bytes in the caller's hand and were `O(N × B)` retained inside the build:
+/// 8 000 clones of a 4 KiB spelling took `Schema::build`'s peak from 471 KiB to **33 MiB**, on a
+/// document with nothing whatever wrong with it.
+///
+/// `MAX_CONST_VALUE_DEPTH` does not look at this — the shape is one list one level deep — and
+/// neither did anything else here:
+///
+/// * The **event count** above is blind by construction. One `Box<[u8]>` per leaf is one event per
+///   leaf whatever `B` is, so the ceiling
+///   [`a_warm_schema_build_allocates_only_for_the_schema`] pins does not move.
+/// * The **byte** figure this test reads was fitted, before the repair, over a corpus that varied
+///   only `N`. It read 48.0 bytes an entry and agreed with the claim that the reduction is
+///   injective into the tree it reads — because every spelling in that corpus was short, so `B`
+///   never varied and the `N × B` term never separated from the `48 × N` one.
+///
+/// So the measurement below varies `B` **and** `N`, and asserts about the interaction rather than
+/// about either slope: the cost of widening the spelling must be the same at `N` occurrences as at
+/// `2N`. Before the repair it doubles with `N`; after it, the spelling is interned and the whole
+/// widening costs two copies — the literal arena's bytes and its map key — whatever `N` is.
+#[cfg(feature = "std")]
+#[test]
+fn a_literal_leaf_costs_the_build_one_copy_per_distinct_spelling() {
+  /// An ordinary spelling: the control, and the subtrahend of every difference below.
+  const SHORT: usize = 8;
+  /// The same literal, wider. Nothing else about the document changes.
+  const WIDE: usize = 4_096;
+  /// Occurrences of the one leaf. Doubled for the second reading.
+  const OCCURRENCES: usize = 2_000;
+
+  /// A query root, a scalar that accepts every literal, and the directive that carries one.
+  const DECLARATIONS: &str = "type Query { ok: Int }
+     scalar Custom
+     directive @x(a: [Custom]) on SCALAR";
+
+  /// Peak live bytes across a `Schema::build` over `count` clones of ONE parsed `width`-byte leaf.
+  ///
+  /// The caller's own tree is built before the window opens, so what comes back is the reduction's
+  /// own footprint and not the document's. The build is required to succeed: a bound that refused
+  /// this would be a prohibition rather than a price, and the control row is what says so.
+  fn peak_over_clones(width: usize, count: usize) -> usize {
+    let sdl = std::format!("scalar L @x(a: {})", "1".repeat(width));
+    let parsed = parse_sdl(&sdl);
+    let TypeSystemDefinitionOrExtension::Definition(described) = &parsed.definitions()[0] else {
+      panic!("a definition")
+    };
+    let TypeSystemDefinition::Type(TypeDefinition::Scalar(scalar)) = described.node() else {
+      panic!("a scalar")
+    };
+    let directive = &scalar.directives().expect("directives").directives()[0];
+    let leaf = directive.arguments().expect("arguments").arguments()[0].value();
+
+    let declarations = parse_sdl(DECLARATIONS);
+    let span = SimpleSpan::const_new(0, 0);
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+      // The clone the caller pays nothing for: an `&str` copied, not `width` bytes.
+      entries.push(leaf.clone());
+    }
+    let literal = TypeSystemDocument::new(
+      span,
+      std::vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+        span,
+        None,
+        TypeSystemDefinition::Type(TypeDefinition::Scalar(ScalarTypeDefinition::new(
+          span,
+          Name::new(span, "Foo"),
+          Some(ConstDirectives::new(
+            span,
+            std::vec![ConstDirective::new(
+              span,
+              Name::new(span, "x"),
+              Some(ConstArguments::new(
+                span,
+                std::vec![ConstArgument::new(
+                  span,
+                  Name::new(span, "a"),
+                  ConstInputValue::List(ConstList::new(span, Nested::new(entries))),
+                )],
+              )),
+            )],
+          )),
+        ))),
+      ))],
+    );
+
+    let mut built = None;
+    let peak = peak_bytes(|| {
+      let mut builder = SchemaBuilder::new();
+      builder.document(&declarations);
+      builder.document(&literal);
+      built = Some(builder.finish().is_ok());
+    });
+    assert_eq!(
+      built,
+      Some(true),
+      "a list of {count} constant literals spelled in {width} bytes was refused; whatever bounds \
+       this reduction has to be a price on the copy and not a prohibition on the document"
+    );
+    peak
+  }
+
+  // The once-per-process built-in parse is not what any reading below is about.
+  let warm = Schema::build(&parse_sdl(MINIMAL)).expect("the minimal SDL is a schema");
+  std::hint::black_box(&warm);
+
+  let short = peak_over_clones(SHORT, OCCURRENCES);
+  let wide = peak_over_clones(WIDE, OCCURRENCES);
+  let short_twice = peak_over_clones(SHORT, 2 * OCCURRENCES);
+  let wide_twice = peak_over_clones(WIDE, 2 * OCCURRENCES);
+
+  // The instrument discriminates: the tree the reduction is ENTITLED to is one reduced value per
+  // literal, and doubling the occurrences has to show up as that. Without this line, a byte counter
+  // that never moved would satisfy every assertion below.
+  let per_occurrence = short_twice - short;
+  assert!(
+    per_occurrence >= 40 * OCCURRENCES,
+    "doubling the entries moved the peak by only {per_occurrence} bytes over {OCCURRENCES} added \
+     literals, so the byte instrument is not reading the reduction at all"
+  );
+
+  let widening = wide - short;
+  let widening_twice = wide_twice - short_twice;
+  assert_eq!(
+    widening, widening_twice,
+    "widening the spelling from {SHORT} to {WIDE} bytes cost {widening} bytes at {OCCURRENCES} \
+     occurrences and {widening_twice} at twice that, so the copy is per occurrence and the literal \
+     amplifies: a caller holding O(B + N) bytes hands this build O(N × B)"
+  );
+  assert!(
+    widening <= 4 * (WIDE - SHORT),
+    "widening the spelling by {} bytes cost {widening}, over the two copies interning it is \
+     entitled to",
+    WIDE - SHORT
   );
 }

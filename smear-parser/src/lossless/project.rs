@@ -910,9 +910,12 @@ struct Descent<T, I> {
 /// public item to a private one and a `-D warnings` build says so. Changing it means changing all
 /// of them, and they are named here so that the change is a list rather than a search:
 /// [`verify_source`] and [`MAX_GREEN_DEPTH`] in this module, and `Verified::new` and `verify_parse`
-/// in `crate::graphql::lossless::project`. The same number is also read by
-/// `smear/tests/validator_allocation.rs`'s `the_whole_root_check_allocates_nothing`, which measures
-/// the zero the four of them promise.
+/// in the GraphQL dialect's own `lossless::project`. That one is named by dialect rather than by
+/// path because `smear/tests/lossless_isolation.rs`'s `the_substrate_names_no_dialect` reads this
+/// file for the path's spelling and cannot tell a doc comment from a use — the substrate naming a
+/// dialect module is what that gate refuses, and it grants prose no exemption. The same number is
+/// also read by `smear/tests/validator_allocation.rs`'s `the_whole_root_check_allocates_nothing`,
+/// which measures the zero the four of them promise.
 const INLINE: usize = 16;
 
 impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {

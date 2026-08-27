@@ -934,14 +934,48 @@ impl Drop for RawValue {
 /// Only the two numeric arms keep their spelling — that is what the range checks read — and only
 /// the enum arm keeps its name. Everything else is decided by shape alone, so a `String`'s bytes
 /// are dropped rather than copied into the builder.
+///
+/// # The three that keep one keep a symbol, not the bytes
+///
+/// Each of those three arms held a `Box<[u8]>` and filled it with `source().as_ref().into()` —
+/// **an allocation and a copy per occurrence**. That is the one place in this reduction where the
+/// output is not injective into the tree it reads, and the amplification is unbounded from a
+/// bounded input: `ConstInputValue` is public and `Clone`, a clone of a leaf copies the `S` and not
+/// the bytes behind it, so `N` clones of one `B`-byte literal are `O(B + N)` live in the caller's
+/// hand and were `O(N × B)` retained here. Measured on `aarch64-apple-darwin`, unoptimised, as the
+/// band between the peak live bytes of the caller's own tree and the peak across `Schema::build`
+/// over it, `N` list entries each a clone of one parsed `B`-byte leaf:
+///
+/// | | `B` = 8 | 64 | 256 | 1 024 | 4 096 |
+/// |---|---|---|---|---|---|
+/// | `N` = 1 000 | 78 710 | 134 710 | 326 710 | 1 094 710 | 4 166 710 |
+/// | 8 000 | 470 710 | 918 710 | 2 454 710 | 8 598 710 | **33 174 710** |
+///
+/// The fit is exact and it has two terms: `∂/∂N` is `B + 48` and `∂/∂B` is `N`. The 48 is the
+/// [`RawValue`] the reduction is entitled to — one per `ConstInputValue`, which is what makes the
+/// rest of it injective — and the `N × B` beside it is this copy. The caller's own tree over the
+/// same grid is `88N` and does not move with `B` at all.
+///
+/// **[`MAX_CONST_VALUE_DEPTH`] does not see it**: the shape above is one list one level deep, so
+/// the ceiling is read once with no frame open. A width ceiling would not have been the answer
+/// either — the population that reaches this is ordinary valid documents, and a constant that
+/// admitted them would have to admit the amplification too.
+///
+/// So the three arms hold a [`Sym`] into [`SchemaBuilder`]'s literal interner, a second
+/// [`Interner`] beside the name arena, and the retained bytes are **one copy per distinct
+/// spelling**. That is a bound the input has already paid: the leaf constructors — `IntValue::new`
+/// and its two siblings — are `pub(crate)`, so the only way a caller obtains one of these three
+/// arms is to parse it or to clone one it parsed, and a *distinct* spelling therefore costs its own
+/// bytes in some source. Cloning, which costs the caller nothing, now costs this reduction four
+/// bytes.
 #[derive(Debug, Clone)]
 enum RawShape {
   Null,
   Boolean,
-  Int(Box<[u8]>),
-  Float(Box<[u8]>),
+  Int(Sym),
+  Float(Sym),
   String,
-  Enum(Box<[u8]>),
+  Enum(Sym),
   List(Vec<RawValue>),
   Object(Vec<RawObjectField>),
   /// A container past [`MAX_CONST_VALUE_DEPTH`], standing for the whole subtree it opened.
@@ -988,11 +1022,15 @@ impl RawShape {
     }
   }
 
-  /// The retained spelling the numeric ranges read, empty for every other shape.
-  fn spelling(&self) -> &[u8] {
+  /// The retained spelling the numeric ranges read, `None` for every other shape.
+  ///
+  /// A symbol rather than the bytes, resolved through [`Model::spelling`]: the bytes live once per
+  /// distinct spelling in the literal interner, and handing them out from here would put the
+  /// interner's lifetime on this method.
+  const fn spelling(&self) -> Option<Sym> {
     match self {
-      Self::Int(bytes) | Self::Float(bytes) => bytes,
-      _ => &[],
+      Self::Int(sym) | Self::Float(sym) => Some(*sym),
+      _ => None,
     }
   }
 }
@@ -1357,11 +1395,25 @@ struct Model<'a> {
   directive_of_sym: &'a [u32],
   schema_directives: &'a [RawDirectiveUse],
   interner: &'a Interner,
+  /// The literal spellings, deduplicated. See [`SchemaBuilder::literals`].
+  literals: &'a Interner,
 }
 
 impl<'a> Model<'a> {
   fn text(&self, sym: Sym) -> &'a str {
     self.interner.text(sym)
+  }
+
+  /// The bytes behind a literal's retained spelling, empty where the shape retains none.
+  ///
+  /// Empty for `None` rather than refusing it, because that is what the two shapes with no
+  /// spelling to keep mean to [`BuiltInScalar::accepts`]: the range arms are the only readers and
+  /// they are reached only from the two numeric shapes.
+  fn spelling(&self, sym: Option<Sym>) -> &'a [u8] {
+    match sym {
+      Some(sym) => self.literals.bytes(sym),
+      None => &[],
+    }
   }
 
   fn owner(&self, at: Coordinate) -> String {
@@ -1588,6 +1640,19 @@ fn push_related(
 #[derive(Debug, Default)]
 pub struct SchemaBuilder {
   interner: Interner,
+  /// The spellings a literal's three retaining arms keep, one copy per **distinct** spelling.
+  ///
+  /// A second arena rather than a second use of `interner`, for two reasons that both bite. The
+  /// name arena's symbol space is dense-indexed — `type_of_sym`, `directive_of_sym` and
+  /// `Positions`'s table are all `Θ(symbols)` — so interning `42` there would widen every one of
+  /// them for a spelling no name lookup can ever hit; and the finished [`Schema`] keeps that arena,
+  /// whose ASCII-name invariant is what makes `Schema::name` infallible, while a literal's spelling
+  /// is a caller's bytes and answers `is_name` for none of the three arms. This one is dropped with
+  /// the builder: [`SchemaBuilder::flatten`] destructures the name arena out and lets the rest go.
+  ///
+  /// See [`RawShape`] for what it is bounding and for the two-dimensional measurement of what it
+  /// replaced.
+  literals: Interner,
   types: Vec<RawType>,
   /// `Sym` to an index into `types`, dense over the symbol space; `u32::MAX` for "not a type".
   type_of_sym: Vec<u32>,
@@ -1698,6 +1763,7 @@ impl SchemaBuilder {
         directive_of_sym: &self.directive_of_sym,
         schema_directives: &self.schema_directives,
         interner: &self.interner,
+        literals: &self.literals,
       },
       &mut self.errors,
       &mut self.declared_names,
@@ -1980,10 +2046,12 @@ impl SchemaBuilder {
         .interfaces()
         .iter()
         .map(|name| {
-          let bytes = name.source().as_ref().to_owned();
+          // Interned from the borrowed slice: `to_owned()` stood here, which is an allocation and
+          // a copy of a caller-sized name per interface written, and the interner copies what it
+          // keeps anyway. The borrow is the argument's and not `self`'s, so nothing needed it.
           let span = *name.as_span();
           let document = self.document;
-          let sym = self.interner.intern(&bytes);
+          let sym = self.interner.intern(name.source().as_ref());
           Located {
             sym,
             span,
@@ -2005,10 +2073,10 @@ impl SchemaBuilder {
         .members()
         .iter()
         .map(|name| {
-          let bytes = name.source().as_ref().to_owned();
+          // The same removal as [`SchemaBuilder::implements`]'s, for the same reason.
           let span = *name.as_span();
           let document = self.document;
-          let sym = self.interner.intern(&bytes);
+          let sym = self.interner.intern(name.source().as_ref());
           Located {
             sym,
             span,
@@ -2251,9 +2319,16 @@ impl SchemaBuilder {
         ConstInputValue::Null(_) => RawShape::Null,
         ConstInputValue::Boolean(_) => RawShape::Boolean,
         ConstInputValue::String(_) => RawShape::String,
-        ConstInputValue::Int(int) => RawShape::Int(int.source().as_ref().into()),
-        ConstInputValue::Float(float) => RawShape::Float(float.source().as_ref().into()),
-        ConstInputValue::Enum(member) => RawShape::Enum(member.source().as_ref().into()),
+        // Interned rather than copied, and see [`RawShape`] for the measurement: `.into()` here was
+        // an allocation and a copy of the caller's spelling PER OCCURRENCE, which is the one term
+        // in this reduction that a bounded input does not bound.
+        ConstInputValue::Int(int) => RawShape::Int(self.literals.intern(int.source().as_ref())),
+        ConstInputValue::Float(float) => {
+          RawShape::Float(self.literals.intern(float.source().as_ref()))
+        }
+        ConstInputValue::Enum(member) => {
+          RawShape::Enum(self.literals.intern(member.source().as_ref()))
+        }
         // The ceiling is read BEFORE either allocation the arm would make — the frame and the
         // output vector it reserves — so the refusal costs nothing the abort it replaces would
         // have spent. `RawShape::Refused` takes the subtree's place, which is what lets the walk
@@ -4086,10 +4161,15 @@ impl SchemaBuilder {
           // as many members as it likes against it. `any` over the declared values, restarted per
           // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
           // other three did not reach — see its header.
+          // The written member is resolved against the NAME arena here rather than where it was
+          // reduced, and that ordering is load-bearing: a literal is reduced as its definition is
+          // read, so an enum value declared further down the document — or in a later one — is not
+          // a symbol yet. What the literal interner holds is the spelling; what says whether it
+          // names a member is this lookup, and it runs once every declaration is in.
           let member = match &value.shape {
-            RawShape::Enum(bytes) => model
+            RawShape::Enum(spelling) => model
               .interner
-              .lookup(bytes)
+              .lookup(model.literals.bytes(*spelling))
               .is_some_and(|sym| names.has_enum_value(model.types, base, sym)),
             _ => false,
           };
@@ -4105,7 +4185,7 @@ impl SchemaBuilder {
             // "nothing to reject" because a refused subtree has no shape the table could weigh.
             None => true,
             Some(shape) => BuiltInScalar::from_name(name.as_bytes())
-              .is_none_or(|scalar| scalar.accepts(shape, value.shape.spelling())),
+              .is_none_or(|scalar| scalar.accepts(shape, model.spelling(value.shape.spelling()))),
           };
           if !accepted {
             reject(errors, value.span);
