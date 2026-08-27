@@ -11,13 +11,18 @@
 //! It would be tidier if that meant one table. It does not. This module is the **builder's**
 //! decision, reduced to what it depends on: the shape of the literal ([`LiteralShape`]), which
 //! built-in scalar it is being offered to ([`BuiltInScalar`]), and — for the two numeric ranges —
-//! the literal's retained spelling. The executable rules answer the same question in
-//! `smear-compiler`'s `executable::values::scalar_accepts`, over the syntactic AST and against
-//! interned `Sym`s rather than names, with its own copies of [`fits_i32`], [`fits_id`] and
-//! [`is_finite`]. Plain prose and not a link: that module is in a crate ABOVE this one, so
-//! rustdoc cannot resolve it from here and a dev-dependency added to make it resolve would put a
-//! cycle in the dev graph to satisfy a comment. Its only caller is
+//! the verdict [`fits_i32`] or [`is_finite`] returned where that literal was read. The executable
+//! rules answer the same question in `smear-compiler`'s `executable::values::scalar_accepts`, over
+//! the syntactic AST and against interned `Sym`s rather than names, with its own copies of
+//! [`fits_i32`], `fits_id` and [`is_finite`]. Plain prose and not a link: that module is in a
+//! crate ABOVE this one, so rustdoc cannot resolve it from here and a dev-dependency added to make
+//! it resolve would put a cycle in the dev graph to satisfy a comment. Its only caller is
 //! [`SchemaBuilder`](super::builder)'s constant-value check.
+//!
+//! The two doors read the range at different *times* and that is not a divergence: the request
+//! door holds the document while it validates it, so it can read a spelling whenever it likes,
+//! while this one outlives the document it was built from and would have to **store** anything it
+//! wanted to read later. [`LiteralShape`]'s header carries what storing it cost.
 //!
 //! Two implementations of one paragraph can drift, and the drift is invisible from either side —
 //! a completeness audit forced this module's `ID` range arm to `true` and the whole gate set,
@@ -39,16 +44,37 @@
 ///
 /// A variable is not a shape a coercion table can rule on — whether it fits is draft 5.8.5's
 /// question about its *declaration* — so callers resolve that arm before they get here.
+///
+/// # The two numeric arms carry a verdict, not a spelling
+///
+/// [`BuiltInScalar::accepts`] took the literal's retained source bytes beside the shape, and read
+/// them for exactly two questions — [`fits_i32`] and [`is_finite`] — asked of exactly two arms.
+/// Keeping the bytes to ask those questions later is what made a constant literal's spelling
+/// something the builder had to *store*, one copy per distinct spelling, and a parse is not
+/// injective into the bytes it reads: `B` parses of the `B` suffixes of one buffer through the
+/// public `IntValue::graphql` mint `B` distinct spellings over the same `B` bytes, so the arena was
+/// `B(B+1)/2`. See `SchemaBuilder`'s `RawShape` for the grid.
+///
+/// Both questions are answerable where the literal is read. Asking them there and carrying the
+/// answer retains **zero** bytes and asks each question once per literal rather than once per
+/// check. What it costs is that this type is no longer one byte and no longer a bare tag — the
+/// `==` comparisons in `accepts` became patterns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum LiteralShape {
   /// The `null` literal.
   Null,
   /// `true` or `false`.
   Boolean,
-  /// An integer literal.
-  Int,
-  /// A floating-point literal.
-  Float,
+  /// An integer literal, with whether its spelling fit GraphQL's 32-bit signed range.
+  Int {
+    /// [`fits_i32`], decided where the literal was read.
+    fits_i32: bool,
+  },
+  /// A floating-point literal, with whether its spelling named a finite double.
+  Float {
+    /// [`is_finite`], decided where the literal was read.
+    is_finite: bool,
+  },
   /// A string literal, inline or block.
   String,
   /// An unquoted enum member name.
@@ -88,27 +114,28 @@ impl BuiltInScalar {
     })
   }
 
-  /// Returns whether this scalar accepts a literal of `shape` spelled `spelling`.
+  /// Returns whether this scalar accepts a literal of `shape`.
   ///
-  /// `spelling` is the literal's retained source bytes, and is read only for `Int` and `Float`,
-  /// whose acceptance depends on range rather than on shape. Anything else may pass an empty
-  /// slice.
-  pub(crate) fn accepts(self, shape: LiteralShape, spelling: &[u8]) -> bool {
+  /// The two range questions are read off [`LiteralShape`] rather than re-decided from a spelling
+  /// the builder had to keep for the purpose; that type's header carries what keeping it cost.
+  pub(crate) fn accepts(self, shape: LiteralShape) -> bool {
     match self {
       // The specification's `Int` input coercion takes integer literals only, in 32-bit range.
-      Self::Int => shape == LiteralShape::Int && fits_i32(spelling),
+      Self::Int => matches!(shape, LiteralShape::Int { fits_i32: true }),
       // The coercion rules let an `Int` literal stand for a `Float`.
       Self::Float => match shape {
-        LiteralShape::Float => is_finite(spelling),
-        LiteralShape::Int => true,
+        LiteralShape::Float { is_finite } => is_finite,
+        LiteralShape::Int { .. } => true,
         _ => false,
       },
       Self::String => shape == LiteralShape::String,
       Self::Boolean => shape == LiteralShape::Boolean,
-      // `ID` accepts both spellings an identifier is written with.
+      // `ID` accepts both spellings an identifier is written with, and its integer arm is the
+      // *same* range an `Int` literal is allowed to carry in the first place — which is why it
+      // reads the same verdict rather than a `fits_id` of its own.
       Self::ID => match shape {
         LiteralShape::String => true,
-        LiteralShape::Int => fits_id(spelling),
+        LiteralShape::Int { fits_i32 } => fits_i32,
         _ => false,
       },
     }
@@ -127,15 +154,6 @@ pub(crate) fn fits_i32(spelling: &[u8]) -> bool {
   core::str::from_utf8(spelling).is_ok_and(|text| text.parse::<i32>().is_ok())
 }
 
-/// Whether an `Int` literal may stand for an `ID`.
-///
-/// The specification's `ID` input coercion accepts integer values, and the range that matters is
-/// the one an `Int` literal is allowed to carry in the first place.
-#[inline]
-pub(crate) fn fits_id(spelling: &[u8]) -> bool {
-  fits_i32(spelling)
-}
-
 /// Whether a `Float` literal's spelling names a finite double.
 pub(crate) fn is_finite(spelling: &[u8]) -> bool {
   core::str::from_utf8(spelling).is_ok_and(|text| text.parse::<f64>().is_ok_and(f64::is_finite))
@@ -144,6 +162,20 @@ pub(crate) fn is_finite(spelling: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
   use super::{BuiltInScalar, LiteralShape, fits_i32, is_finite};
+
+  /// An `Int` literal's shape, with the range verdict the reduction decides.
+  fn int(spelling: &[u8]) -> LiteralShape {
+    LiteralShape::Int {
+      fits_i32: fits_i32(spelling),
+    }
+  }
+
+  /// A `Float` literal's shape, likewise.
+  fn float(spelling: &[u8]) -> LiteralShape {
+    LiteralShape::Float {
+      is_finite: is_finite(spelling),
+    }
+  }
 
   #[test]
   fn names_resolve_only_the_five() {
@@ -164,13 +196,13 @@ mod tests {
   #[test]
   fn coercion_follows_the_specification() {
     // The two widenings the specification grants, and nothing else.
-    assert!(BuiltInScalar::Float.accepts(LiteralShape::Int, b"1"));
-    assert!(BuiltInScalar::ID.accepts(LiteralShape::Int, b"4"));
-    assert!(BuiltInScalar::ID.accepts(LiteralShape::String, b""));
-    assert!(!BuiltInScalar::Int.accepts(LiteralShape::Float, b"1.0"));
-    assert!(!BuiltInScalar::String.accepts(LiteralShape::Int, b"4"));
-    assert!(!BuiltInScalar::Boolean.accepts(LiteralShape::Int, b"1"));
-    assert!(!BuiltInScalar::Int.accepts(LiteralShape::String, b""));
+    assert!(BuiltInScalar::Float.accepts(int(b"1")));
+    assert!(BuiltInScalar::ID.accepts(int(b"4")));
+    assert!(BuiltInScalar::ID.accepts(LiteralShape::String));
+    assert!(!BuiltInScalar::Int.accepts(float(b"1.0")));
+    assert!(!BuiltInScalar::String.accepts(int(b"4")));
+    assert!(!BuiltInScalar::Boolean.accepts(int(b"1")));
+    assert!(!BuiltInScalar::Int.accepts(LiteralShape::String));
 
     // No built-in scalar takes a container or a bare enum member.
     for scalar in [
@@ -181,7 +213,7 @@ mod tests {
       BuiltInScalar::ID,
     ] {
       for shape in [LiteralShape::List, LiteralShape::Object, LiteralShape::Enum] {
-        assert!(!scalar.accepts(shape, b""), "{scalar:?} took {shape:?}");
+        assert!(!scalar.accepts(shape), "{scalar:?} took {shape:?}");
       }
     }
   }
@@ -197,8 +229,8 @@ mod tests {
     assert!(!fits_i32(b"-2147483649"));
     assert!(!fits_i32(b"99999999999999999999"));
 
-    assert!(!BuiltInScalar::Int.accepts(LiteralShape::Int, b"2147483648"));
-    assert!(BuiltInScalar::Float.accepts(LiteralShape::Int, b"2147483648"));
+    assert!(!BuiltInScalar::Int.accepts(int(b"2147483648")));
+    assert!(BuiltInScalar::Float.accepts(int(b"2147483648")));
 
     // `ID`'s integer arm is the *same* range, and it is the branch `accepts` reaches only from
     // inside the range in the case above. A completeness audit forced that arm to `true` and every
@@ -207,17 +239,17 @@ mod tests {
     // can ever see it. These assertions and
     // `values_of_correct_type_reads_the_whole_coercion_table` in `tests/validator_rules.rs` are
     // what make the branch reachable by a gate.
-    assert!(BuiltInScalar::ID.accepts(LiteralShape::Int, b"2147483647"));
-    assert!(BuiltInScalar::ID.accepts(LiteralShape::Int, b"-2147483648"));
-    assert!(!BuiltInScalar::ID.accepts(LiteralShape::Int, b"2147483648"));
-    assert!(!BuiltInScalar::ID.accepts(LiteralShape::Int, b"-2147483649"));
-    assert!(!BuiltInScalar::ID.accepts(LiteralShape::Int, b"99999999999999"));
+    assert!(BuiltInScalar::ID.accepts(int(b"2147483647")));
+    assert!(BuiltInScalar::ID.accepts(int(b"-2147483648")));
+    assert!(!BuiltInScalar::ID.accepts(int(b"2147483648")));
+    assert!(!BuiltInScalar::ID.accepts(int(b"-2147483649")));
+    assert!(!BuiltInScalar::ID.accepts(int(b"99999999999999")));
     // A *string* `ID` is unbounded, which is what the range arm must not accidentally constrain.
-    assert!(BuiltInScalar::ID.accepts(LiteralShape::String, b"99999999999999"));
+    assert!(BuiltInScalar::ID.accepts(LiteralShape::String));
 
     assert!(is_finite(b"1.0"));
     assert!(is_finite(b"-1.5e3"));
     assert!(!is_finite(b"1e400"));
-    assert!(!BuiltInScalar::Float.accepts(LiteralShape::Float, b"1e400"));
+    assert!(!BuiltInScalar::Float.accepts(float(b"1e400")));
   }
 }

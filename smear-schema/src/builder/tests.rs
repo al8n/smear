@@ -13,8 +13,8 @@
 //! because a 4 GiB resize is not something a test run should do.
 
 use smear_parser::graphql::ast::{
-  ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstList, Described, IntValue,
-  Nested,
+  ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstList, Described, EnumValue,
+  FloatValue, IntValue, Nested,
 };
 
 use super::*;
@@ -255,42 +255,36 @@ fn an_ordinary_schema_reaches_neither_ceiling() {
   assert!(schema.type_by_name(b"Episode").is_some());
 }
 
-/// A *distinct* literal spelling does **not** cost its own source bytes, and this is the door.
+/// A numeric literal retains **nothing**, and an enum member's spelling still costs its own bytes.
 ///
 /// # What this cell is for
 ///
-/// Two review rounds rested on the opposite claim, which read: the three leaf constructors are
-/// `pub(crate)`, so a caller's only route to one of these arms is a parse or a clone, so a distinct
-/// spelling costs its own bytes in some source. The premise is true — `IntValue::new` is
-/// `pub(crate)`, `FromComponents` is implemented in `smear-parser` only for `Name`, there is no
-/// `DerefMut` — and the conclusion still does not follow, because a parse is not injective into the
-/// bytes it reads. `IntValue::graphql` is a public associated parser, so `B` parses of the `B`
-/// suffixes of one buffer yield `B` distinct spellings borrowing the same `B` bytes.
+/// Two review rounds rested on the claim that a *distinct* spelling costs its own bytes in some
+/// source: the three leaf constructors are `pub(crate)`, so a caller's only route to one of these
+/// arms is a parse or a clone. The premise is true — `IntValue::new` is `pub(crate)`,
+/// `FromComponents` is implemented in `smear-parser` only for `Name`, there is no `DerefMut` — and
+/// the conclusion still does not follow, because a parse is not injective into the bytes it reads.
+/// `IntValue::graphql` is a public associated parser, so `B` parses of the `B` suffixes of one
+/// buffer yield `B` distinct spellings borrowing the same `B` bytes, and the arena was `B(B+1)/2`
+/// over a `B`-byte buffer, exactly.
 ///
-/// The claim had never had a cell in either direction. It has one now, and it fires the way the
-/// claim said it could not: the arena is `B(B+1)/2` bytes over a `B`-byte buffer, exactly.
-/// [`RawShape`] carries the same numbers as a table, and [`MAX_ARENA_BYTES`] is what makes the
-/// growth harmless.
+/// The two numeric arms no longer retain a spelling at all: `fits_i32` and `is_finite` are all one
+/// is ever read for and both are decided where the literal is read, so the row is a flat zero.
+/// The enum arm cannot be reduced the same way — its spelling is resolved later, against members
+/// that may not be symbols yet — so it still interns, and this cell holds both facts at once.
+/// [`RawShape`] carries the grid and the reasoning; [`MAX_ARENA_BYTES`] is what bounds the row
+/// that is still quadratic.
 #[test]
-fn a_distinct_literal_spelling_does_not_cost_its_own_source_bytes() {
-  /// `scalar Foo @x(a: [<every suffix of `buffer`>])`, assembled rather than parsed.
-  fn document(buffer: &str) -> TypeSystemDocument<&str> {
+fn a_numeric_literal_retains_nothing_and_an_enum_member_retains_its_spelling() {
+  /// `scalar Foo @x(a: [<every suffix of `buffer`, parsed as `Arm`>])`, assembled rather than
+  /// parsed.
+  fn document<'a>(
+    buffer: &'a str,
+    take: usize,
+    leaf: impl Fn(&'a str) -> ConstInputValue<&'a str>,
+  ) -> TypeSystemDocument<&'a str> {
     let span = SimpleSpan::const_new(0, 0);
-    let leaves = (0..buffer.len())
-      .map(|at| {
-        let spelling = &buffer[at..];
-        let leaf = Parser::with_parser::<
-          GraphqlLexer<'_, str>,
-          IntValue<&str>,
-          GraphqlErrors<&str>,
-          _,
-          GraphQL,
-        >(IntValue::graphql)
-        .parse_str(spelling)
-        .expect("a run of nonzero digits is an IntValue");
-        ConstInputValue::Int(leaf)
-      })
-      .collect::<Vec<_>>();
+    let leaves = (0..take).map(|at| leaf(&buffer[at..])).collect::<Vec<_>>();
     let directive = ConstDirective::new(
       span,
       Name::new(span, "x"),
@@ -317,28 +311,82 @@ fn a_distinct_literal_spelling_does_not_cost_its_own_source_bytes() {
     )
   }
 
+  fn arena(document: &TypeSystemDocument<&str>) -> (usize, usize) {
+    let mut builder = SchemaBuilder::new();
+    builder.document(document);
+    assert!(
+      builder.literals.refused.is_none(),
+      "none of this is anywhere near the ceiling that bounds it"
+    );
+    (builder.literals.spans.len(), builder.literals.strings.len())
+  }
+
   for width in [10usize, 30, 100, 300] {
     // Nonzero digits only: a leading zero is not an `IntValue`, so every suffix has to start with
     // one for the parse to succeed.
-    let buffer: String = "123456789".chars().cycle().take(width).collect();
-    let mut builder = SchemaBuilder::new();
-    builder.document(&document(&buffer));
-
+    let digits: String = "123456789".chars().cycle().take(width).collect();
+    let (ints, int_bytes) = arena(&document(&digits, width, |spelling| {
+      ConstInputValue::Int(
+        Parser::with_parser::<GraphqlLexer<'_, str>, IntValue<&str>, GraphqlErrors<&str>, _, GraphQL>(
+          IntValue::graphql,
+        )
+        .parse_str(spelling)
+        .expect("a run of nonzero digits is an IntValue"),
+      )
+    }));
     assert_eq!(
-      builder.literals.spans.len(),
-      width,
+      (ints, int_bytes),
+      (0, 0),
+      "{width} `Int` leaves interned {ints} spellings and {int_bytes} bytes; a range verdict \
+       retains neither"
+    );
+
+    // The last two suffixes of `9…9.5` are `.5` and `5`, neither of which is a `FloatValue`.
+    let mut floats: String = "9".repeat(width - 2);
+    floats.push_str(".5");
+    let (seen, float_bytes) = arena(&document(&floats, width - 2, |spelling| {
+      ConstInputValue::Float(
+        Parser::with_parser::<
+          GraphqlLexer<'_, str>,
+          FloatValue<&str>,
+          GraphqlErrors<&str>,
+          _,
+          GraphQL,
+        >(FloatValue::graphql)
+        .parse_str(spelling)
+        .expect("every other suffix of `9…9.5` is a FloatValue"),
+      )
+    }));
+    assert_eq!(
+      (seen, float_bytes),
+      (0, 0),
+      "{width} `Float` leaves interned {seen} spellings and {float_bytes} bytes"
+    );
+
+    // The arm that still retains, and it is still exactly `B(B+1)/2`.
+    let members: String = "abcdefghij".chars().cycle().take(width).collect();
+    let (enums, enum_bytes) = arena(&document(&members, width, |spelling| {
+      ConstInputValue::Enum(
+        Parser::with_parser::<
+          GraphqlLexer<'_, str>,
+          EnumValue<&str>,
+          GraphqlErrors<&str>,
+          _,
+          GraphQL,
+        >(EnumValue::graphql)
+        .parse_str(spelling)
+        .expect("every suffix of a run of letters is an EnumValue"),
+      )
+    }));
+    assert_eq!(
+      enums, width,
       "every suffix is a distinct spelling, so none of them deduplicates"
     );
     assert_eq!(
-      builder.literals.strings.len(),
+      enum_bytes,
       width * (width + 1) / 2,
-      "{width} bytes of source retained {} bytes of literal arena; the claim was that a distinct \
-       spelling costs its own source bytes",
-      builder.literals.strings.len()
-    );
-    assert!(
-      builder.literals.refused.is_none(),
-      "and none of this is anywhere near the ceiling that bounds it"
+      "{width} bytes of source retained {enum_bytes} bytes of literal arena for the one arm whose \
+       verdict is not decidable where the literal is read"
     );
   }
 }
@@ -422,10 +470,12 @@ fn a_deep_literal_formats_without_a_frame_per_level() {
   ));
   let ordinary = std::format!("{builder:?}");
   for expected in [
-    "Int(Sym(",
+    "Int(true)",
     "List(2 entries)",
     "Object(1 fields)",
-    "literals: Interner { symbols: 3, bytes: 5, refused: false }",
+    "literals: Interner { symbols: ",
+    ", bytes: ",
+    ", refused: false }",
   ] {
     assert!(
       ordinary.contains(expected),

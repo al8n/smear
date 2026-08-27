@@ -45,7 +45,7 @@ use self::declared::{Args, ArgsMut, Declared};
 use super::{
   builtin,
   error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
-  literal::{BuiltInScalar, LiteralShape},
+  literal::{BuiltInScalar, LiteralShape, fits_i32, is_finite},
   repr::{
     DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
     MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType,
@@ -134,17 +134,20 @@ const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
 ///
 /// Neither is a capacity limit a caller can plan around: the first ends the process and the second
 /// answers a question wrongly, both on a path that returns `Result`. Four gigabytes arrives from a
-/// 92 KB input, through either arena: `Name::new` is public and `IntValue::graphql` and its two
-/// siblings are public associated parsers, so `N` leaves may be `N` overlapping suffixes of one
-/// `B`-byte buffer — `B(B+1)/2` interned bytes from `B`, which crosses `u32::MAX` at
-/// `B ≈ 92 682`. [`RawShape`] carries the measurement. The ceilings above turn both rows into
+/// 92 KB input, through either arena: `Name::new` is public and `EnumValue::graphql` is a public
+/// associated parser, so `N` leaves may be `N` overlapping suffixes of one `B`-byte buffer —
+/// `B(B+1)/2` interned bytes from `B`, which crosses `u32::MAX` at `B ≈ 92 682`. [`RawShape`]
+/// carries the measurement. The ceilings above turn both rows into
 /// [`SchemaErrorKind::TooManyInternedBytes`].
 ///
-/// The quadratic growth itself is not bounded here and is not a duplicate of it: every retained
-/// byte is a *distinct* spelling — a name the finished [`Schema`] hands back through
-/// `Schema::name`, or a literal the coercion table reads — so the dedup below is already the
-/// strongest bound of its kind and there is no copy left to remove. The checked conversion is what
-/// makes the growth harmless.
+/// The quadratic growth itself is not bounded here, and for the two populations that still reach
+/// it that is not a duplicate of the ceiling: every retained byte is a *distinct* spelling — a name
+/// the finished [`Schema`] hands back through `Schema::name`, or an enum member's spelling that
+/// only the declared members can rule on — so the dedup below is the strongest bound of its kind
+/// and there is no copy left to remove. The checked conversion is what makes the growth harmless.
+/// The two numeric literal arms used to be a third population and are not one any more: they
+/// retain nothing at all, which is a stronger answer than a ceiling and is not available to these
+/// two.
 #[derive(Default)]
 struct Interner {
   strings: Vec<u8>,
@@ -1107,14 +1110,14 @@ impl Drop for RawValue {
 
 /// The literal itself.
 ///
-/// Only the two numeric arms keep their spelling — that is what the range checks read — and only
-/// the enum arm keeps its name. Everything else is decided by shape alone, so a `String`'s bytes
-/// are dropped rather than copied into the builder.
+/// Everything a type check reads, and nothing else. Only the enum arm keeps bytes; the two numeric
+/// arms keep a **verdict**; every other arm is decided by shape alone, so a `String`'s bytes are
+/// dropped rather than copied into the builder.
 ///
-/// # The three that keep one keep a symbol, not the bytes
+/// # What keeping a spelling cost, and why only one arm still does
 ///
-/// Each of those three arms held a `Box<[u8]>` and filled it with `source().as_ref().into()` —
-/// **an allocation and a copy per occurrence**. That is the one place in this reduction where the
+/// Each of the three non-obvious arms once held a `Box<[u8]>` filled with `source().as_ref().into()`
+/// — **an allocation and a copy per occurrence**. That is the one place in this reduction where the
 /// output is not injective into the tree it reads, and the amplification is unbounded from a
 /// bounded input: `ConstInputValue` is public and `Clone`, a clone of a leaf copies the `S` and not
 /// the bytes behind it, so `N` clones of one `B`-byte literal are `O(B + N)` live in the caller's
@@ -1129,7 +1132,7 @@ impl Drop for RawValue {
 ///
 /// The fit is exact and it has two terms: `∂/∂N` is `B + 48` and `∂/∂B` is `N`. The 48 is the
 /// [`RawValue`] the reduction is entitled to — one per `ConstInputValue`, which is what makes the
-/// rest of it injective — and the `N × B` beside it is this copy. The caller's own tree over the
+/// rest of it injective — and the `N × B` beside it was that copy. The caller's own tree over the
 /// same grid is `88N` and does not move with `B` at all.
 ///
 /// **[`MAX_CONST_VALUE_DEPTH`] does not see it**: the shape above is one list one level deep, so
@@ -1137,42 +1140,71 @@ impl Drop for RawValue {
 /// either — the population that reaches this is ordinary valid documents, and a constant that
 /// admitted them would have to admit the amplification too.
 ///
-/// So the three arms hold a [`Sym`] into [`SchemaBuilder`]'s literal interner, a second
-/// [`Interner`] beside the name arena, and the retained bytes are **one copy per distinct
-/// spelling**. Cloning, which costs the caller nothing, now costs this reduction four bytes.
-///
-/// # Dedup bounds repetition and nothing else, and here is the measurement
-///
-/// An earlier reading of this had the three leaf constructors — `IntValue::new` and its two
-/// siblings — being `pub(crate)`, therefore a caller's only route to one of these arms being a
-/// parse or a clone, therefore a *distinct* spelling costing its own bytes in some source. The
-/// first two steps hold; the third does not follow, because a parse is not injective into the
-/// bytes it reads. `IntValue::graphql` is a **public** associated parser — `graphql_slice_api!`
-/// generates one for each of the three — so a caller may run it over every suffix of one buffer
-/// and hold `B` leaves that borrow the same `B` bytes. Measured through `Schema::build`'s own
-/// door, as the literal arena after one assembled document whose single list holds those leaves:
+/// Interning replaced the copy with a [`Sym`] into [`SchemaBuilder`]'s literal arena, so the
+/// retained bytes became **one copy per distinct spelling** rather than one per occurrence. That
+/// bounds repetition and nothing else, and a parse is not injective into the bytes it reads:
+/// `IntValue::graphql` is a **public** associated parser — `graphql_slice_api!` generates one for
+/// each of the three arms — so a caller may run it over every suffix of one buffer and hold `B`
+/// leaves that borrow the same `B` bytes. Measured through `Schema::build`'s own door, as the
+/// literal arena after one assembled document whose single list holds those leaves:
 ///
 /// | `B` | 10 | 30 | 100 | 300 |
 /// |---|---|---|---|---|
-/// | literal-arena bytes | 55 | 465 | 5 050 | 45 150 |
-/// | over the buffer | 5.5x | 15.5x | 50.5x | 150.5x |
+/// | `Int`, interned | 55 | 465 | 5 050 | 45 150 |
+/// | `Int`, reduced | **0** | **0** | **0** | **0** |
+/// | `Float`, interned | 52 | 462 | 5 047 | 45 147 |
+/// | `Float`, reduced | **0** | **0** | **0** | **0** |
+/// | `Enum`, interned | 55 | 465 | 5 050 | 45 150 |
 ///
-/// The fit is `B(B+1)/2` exactly and the ratio is `(B+1)/2`, so there is no size at which it
-/// flattens. The name arena has the same shape through `Name::new`, which is public and needs no
-/// parse at all.
+/// The interned fit is `B(B+1)/2` exactly and the ratio is `(B+1)/2`, so there is no size at which
+/// it flattens. (`Float`'s row is three short because the last two suffixes of any buffer are not
+/// floats.)
 ///
-/// What bounds it is [`MAX_ARENA_BYTES`] rather than this reduction: past four gigabytes the arena
-/// refuses and the build answers [`SchemaErrorKind::TooManyInternedBytes`], which arrives at
-/// `B ≈ 92 682` — a 92 KB input. Bounding the *growth* is a separate design and this is not it:
-/// every retained byte is a distinct spelling the coercion table reads, so there is no copy left
-/// to remove. What changed is which sentence is load-bearing — the ceiling, not a `pub(crate)` on
-/// a constructor.
+/// # The two numeric arms: a verdict retains nothing
+///
+/// `fits_i32` and `is_finite` are **all** a numeric spelling is ever read for — see
+/// [`LiteralShape`] — and both are answerable where the literal is read. So they are answered
+/// there, and what this enum carries is the `bool`. The growth is not bounded, it is *gone*: zero
+/// retained at every `B` above, and one range decision per literal instead of one per check.
+///
+/// The trade this reverses was made deliberately and is worth naming. Keeping the spelling let all
+/// three arms share one mechanism, at the price of a bound; the price was justified by
+/// `BuiltInScalar::accepts`'s parameter being the shared contract that
+/// `the_two_coercion_tables_agree` holds the compiler's second table against. That test is
+/// **behavioural** — it drives `Schema::build` and the request door over the same twenty literals
+/// past six scalars and compares verdicts — so it neither mentions `accepts` nor compiles against
+/// it, and it passes unchanged. What the uniformity actually bought was a bound the suffix grid
+/// above then proved does not hold.
+///
+/// # The enum arm keeps interning, and here is what bounds it
+///
+/// An enum member's spelling is not resolved here. It is looked up in the **name** arena against
+/// the members the document declares, in `check_const_value`, and a member declared further down
+/// the document — or in a later one — is not a symbol when the literal is reduced. There is no
+/// verdict to compute at reduction time, because the fact the verdict would be about does not
+/// exist yet.
+///
+/// Interning it into the name arena instead would resolve that ordering and is the wrong trade
+/// twice: a spelling that names no declared member would mint a symbol in a space that is
+/// **dense-indexed** — `type_of_sym`, `directive_of_sym` and `Positions`'s table are all
+/// `Θ(symbols)` — and it would ride into the finished [`Schema`], whose arena outlives the build,
+/// where today the literal arena is dropped by [`SchemaBuilder::flatten`].
+///
+/// So it stays, and what bounds it is [`MAX_ARENA_BYTES`] rather than this reduction: past four
+/// gigabytes the arena refuses and the build answers [`SchemaErrorKind::TooManyInternedBytes`],
+/// which arrives at `B ≈ 92 682` — a 92 KB input. What does **not** bound it: dedup, because the
+/// spellings are genuinely distinct; [`MAX_CONST_VALUE_DEPTH`], because this is width and not
+/// depth; and the privacy of the leaf constructors, because `EnumValue::graphql` is public. The
+/// family is one door wide now instead of three.
 enum RawShape {
   Null,
   Boolean,
-  Int(Sym),
-  Float(Sym),
+  /// An integer literal, reduced to [`fits_i32`](crate::literal::fits_i32).
+  Int(bool),
+  /// A floating-point literal, reduced to [`is_finite`](crate::literal::is_finite).
+  Float(bool),
   String,
+  /// An enum member's spelling, interned. The one arm that still retains bytes; see the header.
   Enum(Sym),
   List(Vec<RawValue>),
   Object(Vec<RawObjectField>),
@@ -1220,8 +1252,8 @@ impl core::fmt::Debug for RawShape {
     match self {
       Self::Null => f.write_str("Null"),
       Self::Boolean => f.write_str("Boolean"),
-      Self::Int(sym) => f.debug_tuple("Int").field(sym).finish(),
-      Self::Float(sym) => f.debug_tuple("Float").field(sym).finish(),
+      Self::Int(fits_i32) => f.debug_tuple("Int").field(fits_i32).finish(),
+      Self::Float(is_finite) => f.debug_tuple("Float").field(is_finite).finish(),
       Self::String => f.write_str("String"),
       Self::Enum(sym) => f.debug_tuple("Enum").field(sym).finish(),
       Self::List(values) => write!(f, "List({} entries)", values.len()),
@@ -1238,25 +1270,17 @@ impl RawShape {
     match self {
       Self::Null => Some(LiteralShape::Null),
       Self::Boolean => Some(LiteralShape::Boolean),
-      Self::Int(_) => Some(LiteralShape::Int),
-      Self::Float(_) => Some(LiteralShape::Float),
+      Self::Int(fits_i32) => Some(LiteralShape::Int {
+        fits_i32: *fits_i32,
+      }),
+      Self::Float(is_finite) => Some(LiteralShape::Float {
+        is_finite: *is_finite,
+      }),
       Self::String => Some(LiteralShape::String),
       Self::Enum(_) => Some(LiteralShape::Enum),
       Self::List(_) => Some(LiteralShape::List),
       Self::Object(_) => Some(LiteralShape::Object),
       Self::Refused => None,
-    }
-  }
-
-  /// The retained spelling the numeric ranges read, `None` for every other shape.
-  ///
-  /// A symbol rather than the bytes, resolved through [`Model::spelling`]: the bytes live once per
-  /// distinct spelling in the literal interner, and handing them out from here would put the
-  /// interner's lifetime on this method.
-  const fn spelling(&self) -> Option<Sym> {
-    match self {
-      Self::Int(sym) | Self::Float(sym) => Some(*sym),
-      _ => None,
     }
   }
 }
@@ -1634,18 +1658,6 @@ impl<'a> Model<'a> {
     self.interner.text(sym)
   }
 
-  /// The bytes behind a literal's retained spelling, empty where the shape retains none.
-  ///
-  /// Empty for `None` rather than refusing it, because that is what the two shapes with no
-  /// spelling to keep mean to [`BuiltInScalar::accepts`]: the range arms are the only readers and
-  /// they are reached only from the two numeric shapes.
-  fn spelling(&self, sym: Option<Sym>) -> &'a [u8] {
-    match sym {
-      Some(sym) => self.literals.bytes(sym),
-      None => &[],
-    }
-  }
-
   fn owner(&self, at: Coordinate) -> String {
     render_owner(self.interner, at)
   }
@@ -1870,18 +1882,19 @@ fn push_related(
 #[derive(Debug, Default)]
 pub struct SchemaBuilder {
   interner: Interner,
-  /// The spellings a literal's three retaining arms keep, one copy per **distinct** spelling.
+  /// The spellings the **enum** arm keeps, one copy per distinct spelling.
+  ///
+  /// The one arm of the three that still retains bytes, because its verdict is not decidable where
+  /// the literal is read: see [`RawShape`] for that, for what the numeric arms retain instead, and
+  /// for the measurement of what interning replaced.
   ///
   /// A second arena rather than a second use of `interner`, for two reasons that both bite. The
   /// name arena's symbol space is dense-indexed — `type_of_sym`, `directive_of_sym` and
-  /// `Positions`'s table are all `Θ(symbols)` — so interning `42` there would widen every one of
-  /// them for a spelling no name lookup can ever hit; and the finished [`Schema`] keeps that arena,
-  /// whose ASCII-name invariant is what makes `Schema::name` infallible, while a literal's spelling
-  /// is a caller's bytes and answers `is_name` for none of the three arms. This one is dropped with
-  /// the builder: [`SchemaBuilder::flatten`] destructures the name arena out and lets the rest go.
-  ///
-  /// See [`RawShape`] for what it is bounding and for the two-dimensional measurement of what it
-  /// replaced.
+  /// `Positions`'s table are all `Θ(symbols)` — so a member spelling that names nothing declared
+  /// would widen every one of them for a lookup that can never hit; and the finished [`Schema`]
+  /// keeps that arena, so the spelling would outlive the build that read it. This one is dropped
+  /// with the builder: [`SchemaBuilder::flatten`] destructures the name arena out and lets the rest
+  /// go.
   literals: Interner,
   types: Vec<RawType>,
   /// `Sym` to an index into `types`, dense over the symbol space; `u32::MAX` for "not a type".
@@ -2585,13 +2598,14 @@ impl SchemaBuilder {
         ConstInputValue::Null(_) => RawShape::Null,
         ConstInputValue::Boolean(_) => RawShape::Boolean,
         ConstInputValue::String(_) => RawShape::String,
-        // Interned rather than copied, and see [`RawShape`] for the measurement: `.into()` here was
-        // an allocation and a copy of the caller's spelling PER OCCURRENCE, which is the one term
-        // in this reduction that a bounded input does not bound.
-        ConstInputValue::Int(int) => RawShape::Int(self.literals.intern(int.source().as_ref())),
-        ConstInputValue::Float(float) => {
-          RawShape::Float(self.literals.intern(float.source().as_ref()))
-        }
+        // Reduced to the verdict where the spelling is in hand, so nothing is retained: see
+        // [`RawShape`] for what retaining it cost and [`LiteralShape`] for why this is the same
+        // answer read at a different time.
+        ConstInputValue::Int(int) => RawShape::Int(fits_i32(int.source().as_ref())),
+        ConstInputValue::Float(float) => RawShape::Float(is_finite(float.source().as_ref())),
+        // The one arm that cannot: an enum member's spelling is resolved against the declared
+        // members, and a member declared later in this document — or in a later one — is not a
+        // symbol yet. Interned rather than copied, one copy per distinct spelling.
         ConstInputValue::Enum(member) => {
           RawShape::Enum(self.literals.intern(member.source().as_ref()))
         }
@@ -4451,8 +4465,9 @@ impl SchemaBuilder {
             // Terminal above, so this is unreachable rather than lenient — and it is written as
             // "nothing to reject" because a refused subtree has no shape the table could weigh.
             None => true,
-            Some(shape) => BuiltInScalar::from_name(name.as_bytes())
-              .is_none_or(|scalar| scalar.accepts(shape, model.spelling(value.shape.spelling()))),
+            Some(shape) => {
+              BuiltInScalar::from_name(name.as_bytes()).is_none_or(|scalar| scalar.accepts(shape))
+            }
           };
           if !accepted {
             reject(errors, value.span);
