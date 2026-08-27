@@ -4569,6 +4569,39 @@ impl SchemaBuilder {
   /// reported, in what order, or with which span depends on that — the loops below are the ones
   /// that were here, reading `&model.types[…]` where they read a copy. al8n/smear#198.
   ///
+  /// # Every dimension a document chooses here, and the one that is not linear in what it wrote
+  ///
+  /// The three products above were each found by a review that named one shape. This is the census
+  /// they were the exceptions to — one ladder per dimension the document picks, each doubled to the
+  /// top of the range, with the pass timed on its own. Measured on the shape this pass runs over,
+  /// not on the whole build:
+  ///
+  /// | dimension | fixture | ladder | SDL per doubling | this pass | exponent in SDL |
+  /// |---|---|---|---|---|---|
+  /// | implementing types | one interface, `K` objects | 1 k–16 k | 2.03 | 2.0 | 1.00 |
+  /// | interfaces one type declares | `type T implements J0 & … & J{K-1} & I` | 1 k–16 k | 2.03 | 1.9 | 0.97 |
+  /// | the same, refused | `I` omitted from `T`, so `K` diagnostics | 1 k–16 k | 2.03 | 1.90 | 0.91 |
+  /// | fields per interface | one interface of `M` fields | 1 k–16 k | 2.06 | 2.0 | 0.97 |
+  /// | **their product** | `K` interfaces of 32 fields, one implementor | 500–8 k | 2.00 | 1.98 | 0.99 |
+  /// | arguments per field | — | — | — | — | bounded |
+  /// | declared × what each declares | the transitively complete chain | 125–1 k | 4.09 | 6.88–7.70 | **1.46** |
+  ///
+  /// The argument dimension is the one with a ceiling on it, and it is the only one that needs one:
+  /// [`MAX_FIELD_ARGUMENTS`] holds **both** sides of the two loops draft `IsValidImplementation`
+  /// 2.4 and 2.5 scan against each other, so their product is at most 4 096 per field pair however
+  /// the document is written. Everything above it is a list this pass reads once per implementing
+  /// type, and an implementing type that reads a list is a type that had to declare one.
+  ///
+  /// The last row is `Θ(SDL^1.46)` and it does not have a repair in it. `interface I{k} implements
+  /// I0 & … & I{k-1}` is what §3.7.1 requires a chain to be spelled as, so its SDL is already
+  /// `Θ(N²)`, and the rule obliges every `(T, I, J)` triple with `I` declared by `T` and `J`
+  /// declared by `I` — `Θ(N³)`, 137 ms at `N` = 1 000 over 3.43 MB of SDL. The reference
+  /// implementation states the rule over the same triples and pays the same product; verifying
+  /// that a relation is transitively closed *while naming each pair that is not* is that product.
+  /// What was NOT the rule's is that this loop used to read `J` out of a transitive closure rather
+  /// than out of `I`'s declared list, which is unbounded above it on a document the build refuses
+  /// — that is [`SchemaBuilder::compute_closures`]'s header and it is repaired there.
+  ///
   /// # The third product, which is neither a copy nor a ceiling's
   ///
   /// Finding the implementor's field restarted a linear scan of its **whole** field list for
