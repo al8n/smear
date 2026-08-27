@@ -4697,10 +4697,22 @@ impl SchemaBuilder {
     // index and handed back to the next one by [`Positions::drop`]. A schema whose types
     // implement nothing, or implement narrowly, never allocates it.
     let mut of_sym: Vec<u32> = Vec::new();
-    // One `bool` per type index, marking the interfaces THIS type declares, for the transitivity
+    // One byte per type index, marking the interfaces THIS type declares, for the transitivity
     // rule below. Same table for the whole pass and cleared by the declaration that wrote it, so a
     // schema whose types implement nothing never allocates it. See the rule's own comment.
-    let mut declared_here: Vec<bool> = Vec::new();
+    //
+    // THREE STATES AND NOT A `bool`, because the enumeration asks two questions of one slot and
+    // the second is what bounds it. `DECLARED` answers "is this pair already satisfied", which is
+    // what decides whether a reached type is named. `ROOTED` answers "has this interface already
+    // been the root of an enumeration for this implementor", which is what makes a DUPLICATE
+    // `implements` entry cost nothing — see the rule's own comment for why a second enumeration
+    // from the same root reports nothing and reads everything. `ROOTED` implies `DECLARED`, since
+    // a root is an entry of this declaration, which is why it is one table rather than two and why
+    // the ordinary read is `== NOT_DECLARED` rather than a second test.
+    const NOT_DECLARED: u8 = 0;
+    const DECLARED: u8 = 1;
+    const ROOTED: u8 = 2;
+    let mut declared_here: Vec<u8> = Vec::new();
     // The transitivity rule's own three, for the same reason and with the same lifetime.
     // `reached` marks a type this implementor's ancestor enumeration has already answered for —
     // one diagnostic per `(implementor, interface)` pair rather than one per path that arrives at
@@ -4734,12 +4746,14 @@ impl SchemaBuilder {
       // whole of the repair: the loop below is the one that was here, in the order it was in.
       let positions = Positions::over(&model.types[index].fields, symbols, &mut of_sym);
       if declared_here.len() < model.types.len() {
-        declared_here.resize(model.types.len(), false);
+        declared_here.resize(model.types.len(), NOT_DECLARED);
         reached.resize(model.types.len(), false);
       }
+      // Every entry, duplicates included: this pass is what the ordinary `DECLARED` read answers
+      // from, and it runs to completion before any slot is promoted to `ROOTED` below.
       for entry in declared {
         if let Some(at) = model.type_index(entry.sym) {
-          declared_here[at] = true;
+          declared_here[at] = DECLARED;
         }
       }
 
@@ -4785,9 +4799,38 @@ impl SchemaBuilder {
         // stops with it so a truncated build pays for the list it delivered and not for the one it
         // did not.
         //
-        // `reached` is what makes it one diagnostic per `(implementor, interface)` pair rather
-        // than one per path arriving at it, and that is also what charges the walk to its own
-        // output: every node it expands past the declared list is a node it reported.
+        // # What the ceiling rests on, which is the frontier's two push sites and not a count
+        //
+        // The ceiling counts diagnostics and the cost is scans, so the two are only tied together
+        // by an invariant over where the frontier is pushed. It has exactly two push sites and
+        // each is charged to something the document wrote:
+        //
+        // * the ROOT push, once per DISTINCT declared entry — the `ROOTED` mark is what makes it
+        //   once, and it is charged to a resolved `implements` reference;
+        // * the TRANSITIVE push, immediately below `named += 1` and reachable only through the
+        //   `reached` mark, so it is charged to a diagnostic and stops with the ceiling.
+        //
+        // Both marks are set BEFORE the push and cleared only when the implementor is done, and a
+        // `ROOTED` slot is `DECLARED`, so the transitive site can never re-push a root. Therefore
+        // no type is expanded twice for one implementor, and this implementor's whole enumeration
+        // reads at most `Σ over the schema |closure|` — the document's own resolved
+        // `implements` references — however its declarations are spelled.
+        //
+        // "One node expanded per diagnostic named" is the weaker claim that was here, and
+        // DUPLICATE ENTRIES are what made it false. `type Query implements Hub & … & Hub` with a
+        // `Hub` declaring 16 384 interfaces resolves every occurrence to the same root: the first
+        // names 16 384 pairs and marks every one of them `reached`, and each of the other 16 383
+        // re-reads the whole closure and names NOTHING — 268 million iterations under 1 MiB of
+        // SDL, with no 16 385th missing pair to trip `truncated`, so the ceiling never fired.
+        // `reached` suppressed the diagnostic body and not the scan. Widening the duplicate count
+        // alone bought 16 384 iterations per six bytes: 738 ms at 976 KiB, 1.489 s at 1.33 MiB,
+        // linear in the duplicates and unbounded above. It is `ROOTED` that charges that shape,
+        // and the two-push-site invariant is what says the next shape of it cannot exist.
+        //
+        // The identity is a BOUND rather than an equality, and the bound is the rule's own: a
+        // root's scan is one `(T, I, J)` triple per entry, which is exactly what draft §3.7.1
+        // obliges this rule to check, and the header's census prices it. What the ceiling stops is
+        // the other site.
         //
         // # What the exhaustive set is checked against
         //
@@ -4807,7 +4850,8 @@ impl SchemaBuilder {
         // and `Θ(K²)` here — 1.71 in the exponent over 1 k–16 k, 1.87 over the top step and
         // **187.3 ms** at `K` = 16 000, on a schema `Schema::build` **accepts**. Writing `I` first
         // instead hides the whole product, which is why the fixture writes it last.
-        if !truncated {
+        if !truncated && declared_here[interface] != ROOTED {
+          declared_here[interface] = ROOTED;
           frontier.push(interface as u32);
           while let Some(current) = frontier.pop() {
             // `closure` and not `implements`: [`SchemaBuilder::compute_closures`] has already
@@ -4822,7 +4866,7 @@ impl SchemaBuilder {
               }
               reached[needed] = true;
               trail.push(needed as u32);
-              if !declared_here[needed] {
+              if declared_here[needed] == NOT_DECLARED {
                 if named == MAX_MISSING_TRANSITIVE_INTERFACES {
                   truncated = true;
                   frontier.clear();
@@ -4961,10 +5005,12 @@ impl SchemaBuilder {
       }
 
       // Exactly the slots this declaration wrote, which is `O(declared)` and not `O(types)` — the
-      // same accounting [`Positions::drop`] does one line above, for the same table.
+      // same accounting [`Positions::drop`] does one line above, for the same table. A `ROOTED`
+      // slot is one of them: it was promoted from a `DECLARED` this list wrote, so clearing by
+      // `declared` clears both states and the next implementor sees `NOT_DECLARED` everywhere.
       for entry in declared {
         if let Some(at) = model.type_index(entry.sym) {
-          declared_here[at] = false;
+          declared_here[at] = NOT_DECLARED;
         }
       }
       // And exactly the slots the enumeration wrote, which is what makes one table serve every
