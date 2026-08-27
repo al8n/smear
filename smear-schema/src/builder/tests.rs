@@ -172,6 +172,35 @@ fn a_refused_arena_is_a_typed_refusal() {
   );
 }
 
+/// A refusal ends the document rather than joining the diagnostics computed against it.
+///
+/// The document below is refused on its own merits before the arena stops growing, and the answer
+/// is still the one error: a refused arena hands every later spelling the same placeholder, so
+/// nothing a rule computes over it is about anything the caller wrote. Padding an arena to
+/// `u32::MAX` under a one-type document produced fifteen duplicate-definition diagnostics from the
+/// built-in injection alone.
+#[test]
+fn a_refused_arena_ends_the_document_rather_than_joining_its_diagnostics() {
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse("type Query { ok: Int }\ntype Query { ok: Int }"));
+  assert!(
+    !builder.errors.is_empty(),
+    "the fixture is refused on its own merits, which is the point of it"
+  );
+
+  builder
+    .interner
+    .intern_within(b"Whatever", 0, MAX_ARENA_SYMBOLS);
+  let errors = builder
+    .finish()
+    .expect_err("an arena that refused a spelling is not a schema");
+  assert_eq!(
+    errors.kinds(),
+    std::vec![SchemaErrorKind::TooManyInternedBytes],
+    "{errors}"
+  );
+}
+
 /// The literal arena is the second one, and the guard is on the type, so it is covered too.
 #[test]
 fn the_literal_arena_refuses_on_the_same_guard() {

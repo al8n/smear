@@ -1872,24 +1872,18 @@ impl SchemaBuilder {
     // the specification provided rather than something the document defined — is not reported as
     // an undefined target. Whether a built-in is injected at all is decided by the *definitions*,
     // all of which are already in, so the order does not change what gets replaced.
+    // Asked twice, around the only step after ingest that interns: ingest reads the document's
+    // own names and literals, injection reads the built-ins', and applying an extension only
+    // resolves symbols already in. The first call is what keeps injection from running over a
+    // refused arena at all — every built-in name would come back as the same placeholder, and
+    // `type_definition` would file each one as a redefinition of the last.
+    if let Some(refusal) = self.arena_refusal() {
+      return Err(refusal);
+    }
     self.inject_built_ins();
     self.apply_extensions();
-
-    // Every intern this build performs has happened by here — ingest does the document's own
-    // names and literals, injection does the built-ins', and applying an extension only reads
-    // symbols already in — so one reading of the arenas covers both.
-    //
-    // Before the passes rather than beside their diagnostics, because a refused arena is a
-    // statement about this builder and not about the document: every rule below addresses a name
-    // by its symbol, and a refusal answers them all with one placeholder. Running them over that
-    // reports the collisions the placeholder makes rather than anything a caller wrote.
-    if self.interner.refused.is_some() || self.literals.refused.is_some() {
-      self.errors.push(SchemaError::new(
-        SchemaErrorKind::TooManyInternedBytes,
-        "schema",
-        SimpleSpan::default(),
-      ));
-      return Err(SchemaErrors::new(self.errors));
+    if let Some(refusal) = self.arena_refusal() {
+      return Err(refusal);
     }
 
     self.validate();
@@ -1898,6 +1892,28 @@ impl SchemaBuilder {
       return Err(SchemaErrors::new(self.errors));
     }
     self.flatten()
+  }
+
+  /// The one diagnostic a build whose arena stopped growing can honestly make.
+  ///
+  /// Exactly one, and everything accumulated before it is dropped rather than reported beside it.
+  /// A refused arena answers every later spelling with the same placeholder, so what the rules see
+  /// is one name defined over and over: padding an arena to `u32::MAX` under a document holding a
+  /// single type produced **fifteen** duplicate-definition diagnostics, none of which is about
+  /// anything the caller wrote. A refusal ends the document, the way a nesting refusal does —
+  /// al8n/smear#179.
+  ///
+  /// The span is the document's default rather than a position, because there is no position: the
+  /// arena is full, not the spelling that found it full, and the next spelling of any length would
+  /// have been refused just the same.
+  fn arena_refusal(&self) -> Option<SchemaErrors> {
+    (self.interner.refused.is_some() || self.literals.refused.is_some()).then(|| {
+      SchemaErrors::new(vec![SchemaError::new(
+        SchemaErrorKind::TooManyInternedBytes,
+        "schema",
+        SimpleSpan::default(),
+      )])
+    })
   }
 
   // -- error helpers --------------------------------------------------------------------------
