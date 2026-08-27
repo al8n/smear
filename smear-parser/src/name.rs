@@ -10,7 +10,10 @@ use tokora::{
   SimpleSpan,
   error::ErrorNode,
   span::{AsSpan, IntoSpan},
-  types::Ident,
+  types::{
+    Ident,
+    recovery::{Components, FromComponents},
+  },
   utils::IntoComponents,
 };
 
@@ -40,6 +43,22 @@ impl<S, Span, Lang: ?Sized> FragmentName<S, Span, Lang> {
   #[inline]
   pub(crate) const fn new(span: Span, source: S) -> Self {
     Self(Name::new(span, source))
+  }
+
+  /// Rebrands a parsed [`Name`] as a fragment name, carrying its recovery status across
+  /// unchanged.
+  ///
+  /// This exists so a production that already holds a `Name` never has to take it apart and put
+  /// it back together through [`new`](Self::new), which declares whatever it builds valid. It is
+  /// the same reason tokora pairs its decomposition with an inverse — except that the public
+  /// inverse cannot be offered *here*: [`FromComponents`] is a public trait, and an impl of it
+  /// for this type would hand any caller a constructor for the one name node whose grammar rule
+  /// (`Name` but not `on`) only the syntactic productions establish. That exclusion is why `new`
+  /// is crate-private, and it outranks the convenience of a public rebuild, so the status-carrying
+  /// route stays crate-private beside it.
+  #[inline]
+  pub(crate) const fn from_name(name: Name<S, Span, Lang>) -> Self {
+    Self(name)
   }
 }
 
@@ -98,7 +117,12 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FragmentName<S, Span, Lang> {
 
 #[cfg(feature = "graphql")]
 impl<S, Span, Lang: ?Sized> IntoComponents for FragmentName<S, Span, Lang> {
-  type Components = (Span, S);
+  /// The wrapped [`Name`]'s decomposition, which is the inner
+  /// [`Ident`](tokora::types::Ident)'s: span, spelling, and recovery status.
+  ///
+  /// Reading the status out is unconditional; putting one back is not — see
+  /// [`from_name`](Self::from_name) for why this type has no public inverse.
+  type Components = Components<Span, S>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -181,16 +205,32 @@ impl<S: ?Sized, Span, Lang: ?Sized> AsSpan<Span> for Name<S, Span, Lang> {
 impl<S, Span, Lang: ?Sized> IntoSpan<Span> for Name<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
-    self.into_components().0
+    self.into_components().span
   }
 }
 
 impl<S, Span, Lang: ?Sized> IntoComponents for Name<S, Span, Lang> {
-  type Components = (Span, S);
+  /// The span, the spelling, **and the recovery status** — the inner
+  /// [`Ident`](tokora::types::Ident)'s own decomposition, passed through unchanged.
+  ///
+  /// This carrier is `repr(transparent)` over an `Ident`, so the status is not a part it could
+  /// choose to keep or drop: it is a field of the value being taken apart. Returning the pair
+  /// this used to return dropped it, which is the one thing a decomposition must not do — a
+  /// caller who rebuilt through [`Name::new`] got a placeholder relabelled as valid syntax.
+  /// [`FromComponents`] is the inverse over this same type, so the round trip is an identity in
+  /// all three states.
+  type Components = Components<Span, S>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
     self.0.into_components()
+  }
+}
+
+impl<S, Span, Lang: ?Sized> FromComponents for Name<S, Span, Lang> {
+  #[inline]
+  fn from_components(components: Self::Components) -> Self {
+    Self(Ident::from_components(components))
   }
 }
 
@@ -213,7 +253,16 @@ where
 mod tests {
   use std::string::String;
 
-  use tokora::{span::AsSpan, types::Ident, utils::IntoComponents};
+  use tokora::{
+    SimpleSpan,
+    error::ErrorNode,
+    span::AsSpan,
+    types::{
+      Ident, Status,
+      recovery::{Components, FromComponents, RecoveryState},
+    },
+    utils::IntoComponents,
+  };
 
   use super::Name;
 
@@ -232,7 +281,35 @@ mod tests {
     assert_eq!(ident.as_span(), &CustomSpan(1));
 
     let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(2), "field");
-    assert_eq!(name.into_components(), (CustomSpan(2), "field"));
+    let Components {
+      span,
+      payload,
+      status,
+    } = name.into_components();
+    assert_eq!(span, CustomSpan(2));
+    assert_eq!(payload, "field");
+    assert_eq!(status, Status::Valid);
+  }
+
+  #[test]
+  fn decomposing_a_placeholder_and_rebuilding_it_keeps_the_placeholder() {
+    // The pair this used to decompose into had no room for the status, so the only rebuild
+    // available was `Name::new`, which declares its result valid. That turned a recovery
+    // placeholder into ordinary syntax on the way through.
+    for (name, expected) in [
+      (Name::<&str>::error(SimpleSpan::new(0, 5)), Status::Error),
+      (
+        Name::<&str>::missing(SimpleSpan::new(5, 5)),
+        Status::Missing,
+      ),
+      (
+        Name::<&str>::new(SimpleSpan::new(0, 5), "field"),
+        Status::Valid,
+      ),
+    ] {
+      assert_eq!(name.status(), expected);
+      assert_eq!(Name::from_components(name.into_components()), name);
+    }
   }
 
   #[test]
