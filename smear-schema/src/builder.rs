@@ -1000,10 +1000,12 @@ pub const MAX_CONST_VALUE_DEPTH: usize = 1024;
 
 /// The most `(type, undeclared transitive interface)` pairs one build reports.
 ///
-/// # The one draft §3 rule whose output is not linear in the document that buys it
+/// # The first of the two draft §3 rules whose output is not linear in the document that buys it
 ///
-/// Every other refusal in this module is one per element the document wrote: a field, an
-/// argument, a directive usage, a name. Draft §3.6.1/§3.7.1 is not — it obliges a type to declare
+/// Every refusal in this module but these two is one per element the document wrote: a field, an
+/// argument, a directive usage, a name — the other is
+/// [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`]'s, and its header carries the same argument over
+/// the other half of the same pass. Draft §3.6.1/§3.7.1 is not — it obliges a type to declare
 /// every interface its declared interfaces declare, transitively, and a document may write `Θ(K)`
 /// of SDL whose distinct violations number `Θ(K²)`:
 ///
@@ -1055,6 +1057,117 @@ pub const MAX_CONST_VALUE_DEPTH: usize = 1024;
 /// pass. And the build refuses, because a non-empty error list is what [`SchemaBuilder::finish`]
 /// reads.
 pub const MAX_MISSING_TRANSITIVE_INTERFACES: usize = 16_384;
+
+/// The most draft `IsValidImplementation` mismatches one build reports.
+///
+/// # The second rule with that shape, and it is the other half of the same pass
+///
+/// Draft §3.6.3's `IsValidImplementation` obliges an implementing type to answer *every field of
+/// every interface it declares*, and every argument of every one of those fields. So its
+/// diagnostics are one per `(implementor, declared interface, interface field)` triple, and a
+/// document buys the triples by writing only two of the three factors:
+///
+/// ```graphql
+/// interface I { f0: ID!  f1: ID!  # … f{M-1}
+/// }
+/// type T0 implements I { z: Int }  # … T{K-1}, each declaring `I` and covering none of it
+/// ```
+///
+/// `Θ(M + K)` of SDL, `M × K` distinct [`SchemaErrorKind::MissingInterfaceField`]s — each with its
+/// own owner, subject and span, so this is the rule's answer and not repetition around it — the
+/// repetitions a duplicate `implements` entry used to buy are already gone, removed by the
+/// `ROOTED` guard in the pass this ceiling belongs to. **`M` = `K` = 8 192 is 366 KiB of SDL and
+/// 67 108 864 diagnostics.**
+///
+/// # Why all six of the rule's kinds are charged and not the two that fire on an absence
+///
+/// `MissingInterfaceField` and [`SchemaErrorKind::MissingInterfaceFieldArgument`] fire on what the
+/// implementor did *not* write, which is what makes the shape above cost `Θ(1)` of SDL per
+/// diagnostic. The other four — [`SchemaErrorKind::InvalidInterfaceFieldType`],
+/// [`SchemaErrorKind::InterfaceFieldNotDeprecated`],
+/// [`SchemaErrorKind::InvalidInterfaceFieldArgumentType`] and
+/// [`SchemaErrorKind::UnexpectedRequiredArgument`] — each need a field the implementor *did*
+/// write, and the reading that follows from it is that the document paid for them in SDL. **It did
+/// not**, because the declared list is a third factor: `K` interfaces of `K` fields beside `K`
+/// types declaring all of them and writing all `K` fields with the wrong type is `Θ(K²)` of SDL
+/// and `K³` diagnostics, every one of them an `InvalidInterfaceFieldType` over a field its
+/// implementor wrote out in full.
+///
+/// | `K` | SDL | diagnostics | peak, uncapped |
+/// |---|---|---|---|
+/// | 16 | 7 075 | 4 096 | 520 208 |
+/// | 32 | 27 971 | 32 768 | 3 335 928 |
+/// | 64 | 111 235 | 262 144 | 24 879 920 |
+/// | 128 | 454 459 | 2 097 152 | **194 464 528** |
+///
+/// 8.00 per doubling on the diagnostics against 4.00 for the SDL — **1.50 in the exponent**. So
+/// the ceiling is the rule's and not one kind's, and all six push sites are charged against it.
+///
+/// # The number, and what it costs
+///
+/// Peak live bytes across `Schema::build`, `aarch64-apple-darwin`, release, on the `M` = `K`
+/// shape above with the document parsed before the instrument is armed:
+///
+/// | `M` = `K` | SDL | mismatches the rule owes | reported | build | peak | uncapped build | uncapped peak |
+/// |---|---|---|---|---|---|---|---|
+/// | 1 024 | 44 923 | 1 048 576 | 16 384 | 1.99 ms | 2.47 MB | 46.4 ms | 93.16 MB |
+/// | 2 048 | 92 027 | 4 194 304 | 16 384 | 3.23 ms | 3.48 MB | 188.9 ms | 375.00 MB |
+/// | 4 096 | 186 235 | 16 777 216 | 16 384 | 5.70 ms | 5.49 MB | 786.1 ms | 1504.93 MB |
+/// | 8 192 | 374 651 | 67 108 864 | 16 384 | 18.90 ms | 9.51 MB | 3769.7 ms | **6029.69 MB** |
+///
+/// A diagnostic of this family costs 89.9 bytes measured over that population, so the ceiling is
+/// 1.47 MB of diagnostics and it is flat down the column; what still moves across the rows is the
+/// document, not the list. The `K` = 128 row of the section above is the same statement for the
+/// four kinds that need a written field: 194.46 MB and 266.4 ms uncapped, **6.59 MB and 8.9 ms**
+/// with the ceiling.
+///
+/// **The interval, and why the pick is not the middle of it.** The low end is what a document
+/// whose mismatches it *did* pay for in SDL can reach: the four kinds above need a written field,
+/// so a schema that declares one interface per implementor cannot earn more of them than it wrote
+/// field declarations — 16 384 of them is 203 467 bytes, **199 KiB**, on the fixture above written
+/// with every field present and wrong, and that document reports all 16 384 with
+/// [`SchemaErrors::is_exhaustive`] still `true`. Below the ceiling, therefore, sits every document
+/// under that size whose diagnostics are charged to what it wrote, and the schemas that reach it
+/// are the ones whose count comes out of the product rather than out of the text. The high end is
+/// the column above: 16 384 at 89.9 bytes is 1.47 MB against 6.03 GB, and raising it buys nothing
+/// but bytes at 89.9 each. The pick is the same number as
+/// [`MAX_MISSING_TRANSITIVE_INTERFACES`] because the derivation is the same one over a population
+/// of the same character — a caller that reads one list reads the other — and **not** because the
+/// two share a budget; they do not, and the paragraph below is why.
+///
+/// It is not a per-implementor allowance, for the reason [`MAX_MISSING_TRANSITIVE_INTERFACES`]
+/// gives about a per-type one: `A` per implementor is `K × A` for the pass, so the peak would
+/// track the document instead of being a constant, and `SchemaErrors::is_exhaustive` would then
+/// answer a different question for each of the two ceilings.
+///
+/// # Why this is a second budget and not a share of the first
+///
+/// A single budget spent by both rules would make [`SchemaErrors::is_exhaustive`] answer for one
+/// list rather than two, and could not be gamed by spreading a document's cost across the
+/// families. It loses on what it costs a caller, and the cost is measurable rather than argued.
+/// The two lists are interleaved per implementing type, so a shared budget lets a document whose
+/// transitivity list fills the ceiling report **none** of its missing fields — a family it never
+/// mentions, discovered only after the first is repaired and the build is run again — and which
+/// family is starved depends on the order the types happen to appear in. Round 3's hub at
+/// `K` = 2 000, which owes 4 000 000 transitive pairs, with one further type missing one interface
+/// field: **16 384 pairs and that one `MissingInterfaceField`** under two budgets; under one, the
+/// same 16 384 pairs and `W.q` gone.
+///
+/// Separate budgets guarantee each list its own first 16 384. What the shared budget buys against
+/// that is a factor of two on the worst case, and a factor of two on a constant is a constant: the
+/// total is `2 × 16 384` diagnostics however a document spreads itself, which is the property a
+/// ceiling exists for. Separate constants are also separately derivable, which the sections above
+/// and [`MAX_MISSING_TRANSITIVE_INTERFACES`]'s are; one number covering both would be one
+/// derivation applied to a population it was not taken over.
+///
+/// # What a caller past it sees
+///
+/// The first 16 384 mismatches, in the order the builder found them, and
+/// [`SchemaErrors::is_exhaustive`] reading `false` — which `Display` renders. Every other rule
+/// still runs and every other diagnostic is still reported, this pass's transitivity half
+/// included: the ceiling stops one list, not the pass. And the build refuses, because a non-empty
+/// error list is what [`SchemaBuilder::finish`] reads.
+pub const MAX_INTERFACE_IMPLEMENTATION_MISMATCHES: usize = 16_384;
 
 /// A constant literal, reduced to what a type check reads, with the position to blame.
 #[derive(Debug)]
@@ -1889,6 +2002,27 @@ fn is_deprecated(interner: &Interner, directives: &[RawDirectiveUse]) -> bool {
     .any(|used| interner.text(used.name.sym) == DEPRECATED)
 }
 
+/// Charges one draft `IsValidImplementation` mismatch against
+/// [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`], and answers whether it may be reported.
+///
+/// `false` is the ceiling, and it means *stop* rather than *skip*: the caller reports nothing and
+/// leaves the loop, which is what keeps the count and the scan on the same side of the ceiling.
+/// Skipping instead would pay the whole `Θ(implementors × declared × fields)` product to deliver a
+/// list that stopped growing at the first 16 384.
+///
+/// A free function and not a closure because the count is read at six push sites inside three
+/// nested loops, each of which is already holding the error list and the model apart across
+/// [`SchemaBuilder::split`].
+#[inline]
+fn charge(mismatches: &mut usize, truncated: &mut bool) -> bool {
+  if *mismatches == MAX_INTERFACE_IMPLEMENTATION_MISMATCHES {
+    *truncated = true;
+    return false;
+  }
+  *mismatches += 1;
+  true
+}
+
 fn push_owned(
   errors: &mut Vec<SchemaError>,
   kind: SchemaErrorKind,
@@ -1981,8 +2115,16 @@ pub struct SchemaBuilder {
   /// One lookup index per input object, shared by every literal validation. Empty until a
   /// declaration is asked; see [`DeclaredNames`].
   declared_names: DeclaredNames,
-  /// Set when [`MAX_MISSING_TRANSITIVE_INTERFACES`] stopped the transitivity list, and read by
-  /// [`SchemaBuilder::finish`] to decide which [`SchemaErrors`] constructor the refusal takes.
+  /// Set when either of the two ceilings that stop a list rather than the pass —
+  /// [`MAX_MISSING_TRANSITIVE_INTERFACES`] and [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`] —
+  /// stopped one, and read by [`SchemaBuilder::finish`] to decide which [`SchemaErrors`]
+  /// constructor the refusal takes.
+  ///
+  /// ONE FLAG FOR BOTH, because [`SchemaErrors::is_exhaustive`] answers whether a ceiling stopped
+  /// the list and not which. The budgets are separate — one list truncating must not delete the
+  /// other, which is [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`]'s own header — and what a caller
+  /// reads off the result is the same sentence either way: something the builder had to say is
+  /// not here.
   truncated: bool,
 }
 
@@ -2041,9 +2183,11 @@ impl SchemaBuilder {
     self.validate();
 
     if !self.errors.is_empty() {
-      // The one ceiling that stops a list rather than the pass: see
-      // [`MAX_MISSING_TRANSITIVE_INTERFACES`]. Every other refusal path below and above this one
-      // hands `SchemaErrors::new` a list that is every reason it has.
+      // The two ceilings that stop a list rather than the pass: see
+      // [`MAX_MISSING_TRANSITIVE_INTERFACES`] and [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`],
+      // which are the two halves of `SchemaBuilder::validate_interface_implementations` and hold
+      // separate budgets against one flag. Every other refusal path below and above this one hands
+      // `SchemaErrors::new` a list that is every reason it has.
       return Err(if self.truncated {
         SchemaErrors::truncated(self.errors)
       } else {
@@ -4649,12 +4793,14 @@ impl SchemaBuilder {
   /// reported, in what order, or with which span depends on that — the loops below are the ones
   /// that were here, reading `&model.types[…]` where they read a copy. al8n/smear#198.
   ///
-  /// # Every dimension a document chooses here, and the one that is not linear in what it wrote
+  /// # Every dimension a document chooses here, and the two that are not linear in what it wrote
   ///
   /// The three products above were each found by a review that named one shape. This is the census
   /// they were the exceptions to — one ladder per dimension the document picks, each doubled to the
   /// top of the range, with the pass timed on its own. Measured on the shape this pass runs over,
-  /// not on the whole build:
+  /// not on the whole build. **Every fixture in it is a document whose implementors COVER their
+  /// interfaces**, which is the qualifier that made it read as complete when it was not; the
+  /// refused counterparts are the second table.
   ///
   /// | dimension | fixture | ladder | SDL per doubling | this pass | exponent in SDL |
   /// |---|---|---|---|---|---|
@@ -4666,11 +4812,26 @@ impl SchemaBuilder {
   /// | arguments per field | — | — | — | — | bounded |
   /// | declared × what each declares | the transitively complete chain | 125–1 k | 4.09 | 6.88–7.70 | **1.46** |
   ///
-  /// The argument dimension is the one with a ceiling on it, and it is the only one that needs one:
   /// [`MAX_FIELD_ARGUMENTS`] holds **both** sides of the two loops draft `IsValidImplementation`
-  /// 2.4 and 2.5 scan against each other, so their product is at most 4 096 per field pair however
-  /// the document is written. Everything above it is a list this pass reads once per implementing
-  /// type, and an implementing type that reads a list is a type that had to declare one.
+  /// 2.4 and 2.5 scan against each other, so the argument row's product is at most 4 096 per field
+  /// pair however the document is written. Everything above it is a list this pass reads once per
+  /// implementing type, and an implementing type that reads a list is a type that had to declare
+  /// one.
+  ///
+  /// **What every row above has in common is that its implementors answer their interfaces.** Turn
+  /// the same dimensions into a document that does not, and the count is the product rather than
+  /// the sum — the pairs are still one per obligation §3.6.3 states, so this is the rule's output
+  /// and not waste around it, and [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`] is what bounds the
+  /// list. Whole-build figures, since on these shapes the build *is* this pass:
+  ///
+  /// | dimension | fixture | ladder | SDL/doubling | diagnostics/doubling | exponent in SDL | uncapped peak at the top | capped |
+  /// |---|---|---|---|---|---|---|---|
+  /// | implementors × fields | one interface of `M` fields, `K` types covering none | 1 k–8 k | 2.02 | 4.00 | **1.97** | 6029.69 MB | 16 384 / 9.51 MB |
+  /// | implementors × declared × fields | `K` interfaces of `K` fields, `K` types writing every field wrong | 16–128 | 4.00 | 8.00 | **1.50** | 194.46 MB | 16 384 / 6.59 MB |
+  ///
+  /// The second row is what says the ceiling belongs to the rule and not to the two kinds that
+  /// fire on an absence: every diagnostic in it is an [`SchemaErrorKind::InvalidInterfaceFieldType`]
+  /// over a field its implementor wrote out in full, and it is still `Θ(SDL^1.50)`.
   ///
   /// The last row is `Θ(SDL^1.46)` and it does not have a repair in it. `interface I{k} implements
   /// I0 & … & I{k-1}` is what §3.7.1 requires a chain to be spelled as, so its SDL is already
@@ -4727,6 +4888,15 @@ impl SchemaBuilder {
     // rule below carries on.
     let mut named: usize = 0;
     let mut truncated = false;
+    // The field-coverage half's own, and it is a SECOND budget rather than a share of the first:
+    // the two lists are interleaved per implementing type, so one budget would let a document's
+    // missing transitive declarations consume the whole of it and report none of its missing
+    // fields — a family it would never mention, with which one is starved decided by the order the
+    // types appear in. [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`] carries the rest of that, and
+    // the sum of two constants is still a constant. Both flags feed one
+    // [`SchemaErrors::is_exhaustive`], which asks whether a ceiling stopped the list and not which.
+    let mut mismatches: usize = 0;
+    let mut mismatches_truncated = false;
     for index in 0..model.types.len() {
       if !matches!(
         model.types[index].kind,
@@ -4772,8 +4942,12 @@ impl SchemaBuilder {
         // `I`'s closure, and field coverage re-reads `I`'s whole field list. The second is
         // `Θ(entries × fields)` with a ceiling on neither factor — one interface of `M` covered
         // fields declared `M` times is 20.1 ms at `M` = 2 048 and 1.211 s at 16 384, 4× per
-        // doubling, and the same shape MISSING its fields is 4 196 351 diagnostics and 711 MB out
-        // of 33 KiB of SDL at `M` = 2 048.
+        // doubling, and the same shape MISSING its fields was 4 196 351 diagnostics and 711 MB out
+        // of 33 KiB of SDL at `M` = 2 048. Both halves of that are still this guard's:
+        // `MAX_INTERFACE_IMPLEMENTATION_MISMATCHES` now bounds the list, so the second figure
+        // would be the ceiling and not 4 196 351 — but it bounds a list and not a SCAN, and the
+        // first figure is a document that earns no diagnostic at all, which no ceiling on
+        // diagnostics can see.
         //
         // A DUPLICATE ENTRY IS ITSELF A REFUSAL, which is what makes a second pass a repetition
         // rather than a reason. [`SchemaBuilder::validate_implements`] runs earlier in the same
@@ -4955,110 +5129,142 @@ impl SchemaBuilder {
         // [`SchemaErrorKind::MissingInterfaceField`] blames it; the guard's own comment carries
         // why that span is one the error list already names, and therefore why reporting once, at
         // the first entry, is the same information.
-        let interface_fields: &[RawField] = &model.types[interface].fields;
-        for interface_field in interface_fields {
-          let Some(position) = positions.of(interface_field.name.sym) else {
-            push_owned(
-              errors,
-              SchemaErrorKind::MissingInterfaceField,
-              model.text(interface_field.name.sym),
-              owner.clone(),
-              *entry,
-            );
-            continue;
-          };
-          let own: &RawField = &model.types[index].fields[position];
-
-          if !model.is_valid_implementation_type(own.ty.packed, interface_field.ty.packed) {
-            let path = owner_path(&[&owner, model.text(interface_field.name.sym)]);
-            let expected = model.render_type(interface_field.ty.packed);
-            push_owned(
-              errors,
-              SchemaErrorKind::InvalidInterfaceFieldType,
-              &expected,
-              path,
-              own.name,
-            );
-          }
-
-          // `IsValidImplementation` 2.6: "if `field` is deprecated then `implementedField` must
-          // also be deprecated". The span is the implementing field, which is where the edit goes;
-          // `related` points at the interface field, which is the other half of the obligation.
-          if own.deprecated && !interface_field.deprecated {
-            push_related(
-              errors,
-              SchemaErrorKind::InterfaceFieldNotDeprecated,
-              model.text(interface_field.name.sym),
-              Some(owner.clone()),
-              own.name,
-              interface_field.name.span,
-            );
-          }
-
-          // Draft `IsValidImplementation` 2.4 and 2.5 read both argument lists, and each loop
-          // scans the other list once per entry — `Θ(own × interface)`, which is the third
-          // consumer review found walking a list a ceiling had already refused. Both sides are
-          // asked, and it has to be both: a refused list is not an empty one, so pairing a
-          // refused side against a live one would report every argument of the live side as
-          // missing from a list nobody may look at. That is exactly the diagnostic truncating an
-          // over-limit list would have invented, reached from the other direction.
-          let (Args::Bounded(interface_args), Args::Bounded(own_args)) =
-            (interface_field.args.read(), own.args.read())
-          else {
-            continue;
-          };
-
-          for interface_arg in interface_args {
-            match own_args
-              .iter()
-              .find(|a| a.name.sym == interface_arg.name.sym)
-            {
-              None => {
-                let path = owner_path(&[&owner, model.text(interface_field.name.sym)]);
-                push_owned(
-                  errors,
-                  SchemaErrorKind::MissingInterfaceFieldArgument,
-                  model.text(interface_arg.name.sym),
-                  path,
-                  own.name,
-                );
+        // THE CEILING IS THE PASS'S, AND IT IS THIS RULE'S OWN RATHER THAN A SHARE OF THE
+        // TRANSITIVITY LIST'S. `MAX_INTERFACE_IMPLEMENTATION_MISMATCHES` is where the six rules
+        // below stop; its header carries the shape that makes them quadratic in a linear document,
+        // why all six push sites are charged and not only the two that fire on an absence, and why
+        // one budget shared with `MAX_MISSING_TRANSITIVE_INTERFACES` would let a document report
+        // none of its missing fields at all.
+        //
+        // THE CHARGE IS BEFORE THE PUSH AND THE REFUSAL LEAVES THE LOOP, so the count is exactly
+        // the ceiling rather than the ceiling plus one field pair's arguments, and a build that
+        // trips it pays for the list it delivered and not for the one it did not. Skipping the
+        // push and carrying on would leave the whole `Θ(implementors × declared × fields)` scan in
+        // front of a list that stopped growing.
+        if !mismatches_truncated {
+          let interface_fields: &[RawField] = &model.types[interface].fields;
+          'fields: for interface_field in interface_fields {
+            let Some(position) = positions.of(interface_field.name.sym) else {
+              if !charge(&mut mismatches, &mut mismatches_truncated) {
+                break 'fields;
               }
-              Some(own_arg) => {
-                if own_arg.ty.packed != interface_arg.ty.packed {
-                  let path = owner_path(&[
-                    &owner,
-                    model.text(interface_field.name.sym),
-                    model.text(interface_arg.name.sym),
-                  ]);
-                  let expected = model.render_type(interface_arg.ty.packed);
+              push_owned(
+                errors,
+                SchemaErrorKind::MissingInterfaceField,
+                model.text(interface_field.name.sym),
+                owner.clone(),
+                *entry,
+              );
+              continue;
+            };
+            let own: &RawField = &model.types[index].fields[position];
+
+            if !model.is_valid_implementation_type(own.ty.packed, interface_field.ty.packed) {
+              if !charge(&mut mismatches, &mut mismatches_truncated) {
+                break 'fields;
+              }
+              let path = owner_path(&[&owner, model.text(interface_field.name.sym)]);
+              let expected = model.render_type(interface_field.ty.packed);
+              push_owned(
+                errors,
+                SchemaErrorKind::InvalidInterfaceFieldType,
+                &expected,
+                path,
+                own.name,
+              );
+            }
+
+            // `IsValidImplementation` 2.6: "if `field` is deprecated then `implementedField` must
+            // also be deprecated". The span is the implementing field, which is where the edit goes;
+            // `related` points at the interface field, which is the other half of the obligation.
+            if own.deprecated && !interface_field.deprecated {
+              if !charge(&mut mismatches, &mut mismatches_truncated) {
+                break 'fields;
+              }
+              push_related(
+                errors,
+                SchemaErrorKind::InterfaceFieldNotDeprecated,
+                model.text(interface_field.name.sym),
+                Some(owner.clone()),
+                own.name,
+                interface_field.name.span,
+              );
+            }
+
+            // Draft `IsValidImplementation` 2.4 and 2.5 read both argument lists, and each loop
+            // scans the other list once per entry — `Θ(own × interface)`, which is the third
+            // consumer review found walking a list a ceiling had already refused. Both sides are
+            // asked, and it has to be both: a refused list is not an empty one, so pairing a
+            // refused side against a live one would report every argument of the live side as
+            // missing from a list nobody may look at. That is exactly the diagnostic truncating an
+            // over-limit list would have invented, reached from the other direction.
+            let (Args::Bounded(interface_args), Args::Bounded(own_args)) =
+              (interface_field.args.read(), own.args.read())
+            else {
+              continue;
+            };
+
+            for interface_arg in interface_args {
+              match own_args
+                .iter()
+                .find(|a| a.name.sym == interface_arg.name.sym)
+              {
+                None => {
+                  if !charge(&mut mismatches, &mut mismatches_truncated) {
+                    break 'fields;
+                  }
+                  let path = owner_path(&[&owner, model.text(interface_field.name.sym)]);
                   push_owned(
                     errors,
-                    SchemaErrorKind::InvalidInterfaceFieldArgumentType,
-                    &expected,
+                    SchemaErrorKind::MissingInterfaceFieldArgument,
+                    model.text(interface_arg.name.sym),
                     path,
-                    own_arg.name,
+                    own.name,
                   );
+                }
+                Some(own_arg) => {
+                  if own_arg.ty.packed != interface_arg.ty.packed {
+                    if !charge(&mut mismatches, &mut mismatches_truncated) {
+                      break 'fields;
+                    }
+                    let path = owner_path(&[
+                      &owner,
+                      model.text(interface_field.name.sym),
+                      model.text(interface_arg.name.sym),
+                    ]);
+                    let expected = model.render_type(interface_arg.ty.packed);
+                    push_owned(
+                      errors,
+                      SchemaErrorKind::InvalidInterfaceFieldArgumentType,
+                      &expected,
+                      path,
+                      own_arg.name,
+                    );
+                  }
                 }
               }
             }
-          }
 
-          for own_arg in own_args {
-            let declared_by_interface = interface_args
-              .iter()
-              .any(|a| a.name.sym == own_arg.name.sym);
-            if declared_by_interface {
-              continue;
-            }
-            if own_arg.ty.packed.is_non_null() && !own_arg.default.is_present() {
-              let path = owner_path(&[&owner, model.text(interface_field.name.sym)]);
-              push_owned(
-                errors,
-                SchemaErrorKind::UnexpectedRequiredArgument,
-                model.text(own_arg.name.sym),
-                path,
-                own_arg.name,
-              );
+            for own_arg in own_args {
+              let declared_by_interface = interface_args
+                .iter()
+                .any(|a| a.name.sym == own_arg.name.sym);
+              if declared_by_interface {
+                continue;
+              }
+              if own_arg.ty.packed.is_non_null() && !own_arg.default.is_present() {
+                if !charge(&mut mismatches, &mut mismatches_truncated) {
+                  break 'fields;
+                }
+                let path = owner_path(&[&owner, model.text(interface_field.name.sym)]);
+                push_owned(
+                  errors,
+                  SchemaErrorKind::UnexpectedRequiredArgument,
+                  model.text(own_arg.name.sym),
+                  path,
+                  own_arg.name,
+                );
+              }
             }
           }
         }
@@ -5080,7 +5286,7 @@ impl SchemaBuilder {
       }
       trail.clear();
     }
-    self.truncated |= truncated;
+    self.truncated |= truncated | mismatches_truncated;
   }
 
   /// Draft §3.10.1: an input-object cycle must have at least one nullable or list link.

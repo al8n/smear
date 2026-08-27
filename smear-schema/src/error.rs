@@ -1185,19 +1185,27 @@ impl core::error::Error for SchemaError {}
 ///
 /// # The one clause that is conditional, and the method that answers it
 ///
-/// One rule's output is not linear in the document that buys it. Draft §3.6.1/§3.7.1 oblige a
-/// type to declare every interface its declared interfaces declare, transitively, and *naming
-/// each pair that is not declared* is quadratic in the schema by construction — `Θ(K)` of SDL can
-/// ask for `Θ(K²)` distinct pairs, whichever way the rule is read, and
-/// [`MAX_MISSING_TRANSITIVE_INTERFACES`](super::MAX_MISSING_TRANSITIVE_INTERFACES) is where that
-/// list stops. Nothing else in draft §3 has that shape: every other refusal is one per element
-/// the document wrote.
+/// Two rules' output is not linear in the document that buys it, and they are the two halves of
+/// one pass over `implements`.
 ///
-/// So the sentence above holds with exactly one exception, and the exception is not silent.
-/// [`SchemaErrors::is_exhaustive`] is `false` precisely when a ceiling stopped the list, and
+/// Draft §3.6.1/§3.7.1 oblige a type to declare every interface its declared interfaces declare,
+/// transitively, and *naming each pair that is not declared* is quadratic in the schema by
+/// construction — `Θ(K)` of SDL can ask for `Θ(K²)` distinct pairs, whichever way the rule is
+/// read, and [`MAX_MISSING_TRANSITIVE_INTERFACES`](super::MAX_MISSING_TRANSITIVE_INTERFACES) is
+/// where that list stops.
+///
+/// Draft §3.6.3 obliges an implementing type to answer every field, and every field's every
+/// argument, of every interface it declares — so an interface of `M` fields beside `K` types that
+/// declare it and cover none of it is `Θ(M + K)` of SDL and `M × K` distinct mismatches, and
+/// [`MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`](super::MAX_INTERFACE_IMPLEMENTATION_MISMATCHES) is
+/// where that one stops. Each list has its own budget, so truncating one never deletes the other.
+///
+/// Nothing else in draft §3 has that shape: every other refusal is one per element the document
+/// wrote. So the sentence above holds with exactly two exceptions, and neither is silent.
+/// [`SchemaErrors::is_exhaustive`] is `false` precisely when a ceiling stopped a list, and
 /// `Display` says so; on every other build — including every build of a document with fewer
-/// missing transitive declarations than that ceiling, which is every honest one — it is `true`
-/// and "every reason" is the whole claim.
+/// missing transitive declarations, and fewer interface mismatches, than those ceilings, which is
+/// every honest one — it is `true` and "every reason" is the whole claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaErrors {
   errors: Vec<SchemaError>,
@@ -1223,8 +1231,8 @@ impl SchemaErrors {
 
   /// Returns whether this list is *every* reason the build failed.
   ///
-  /// `false` means a ceiling stopped the list before the builder ran out of reasons — see this
-  /// type's header for the one rule that has one — so repairing everything reported can still
+  /// `false` means a ceiling stopped a list before the builder ran out of reasons — see this
+  /// type's header for the two rules that have one — so repairing everything reported can still
   /// leave the document refused. `true` is the ordinary answer, and it is the whole guarantee:
   /// nothing was dropped, and one repair pass over this list is one repair pass over the
   /// document's refusals.
