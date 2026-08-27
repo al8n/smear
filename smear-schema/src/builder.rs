@@ -3359,7 +3359,7 @@ impl SchemaBuilder {
   /// one — a traversal that marks cannot emit a node twice — kept where the list is built rather
   /// than rested on the [`SchemaErrorKind::DuplicateImplementsInterface`] that
   /// [`SchemaBuilder::validate_implements`] separately raises for the only input that could
-  /// produce one. The sort is load-bearing beyond order: [`SchemaBuilder::is_sub_type`] binary
+  /// produce one. The sort is load-bearing beyond order: [`Model::is_sub_type`] binary
   /// searches this list, and so does the cycle question below. One `bool` per type index is what
   /// [`Positions`] and the transitivity rule's own `declared_here` still are. al8n/smear#198,
   /// and #202's second follow-up.
@@ -3388,7 +3388,7 @@ impl SchemaBuilder {
     // exhaustive differential over every four-type interface graph is what checked it.
     //
     // The second step is a binary search of a list this pass sorted and
-    // [`SchemaBuilder::is_sub_type`] already reads that way, `Θ(declared × log declared)` over the
+    // [`Model::is_sub_type`] already reads that way, `Θ(declared × log declared)` over the
     // schema — and it is HERE rather than in the rule's own loop, which is the one loop in the
     // build whose trip count is a product of two dimensions the document chooses. Measured on the
     // transitively complete chain at `N` = 500, interleaved, five reps: 19.5 ms for that loop as
