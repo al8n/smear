@@ -815,16 +815,16 @@ struct RawArgument {
 /// the ceiling turns an unbounded, caller-chosen amplification into about 160 KiB. See
 /// `SchemaBuilder::const_value` for the per-level bands those two rows sit at the end of, and for
 /// what the ceiling does *not* cover: a literal's **width** costs one reduced value an entry, which
-/// needs no ceiling because the caller is holding a larger `ConstInputValue` per entry while it
-/// runs.
+/// has no ceiling and is measured there against the band an ordinary literal-free document opens.
 ///
 /// # What a caller past it sees
 ///
 /// [`SchemaErrorKind::ConstantValueTooDeep`], once for the literal, at the span of the first
 /// container past the ceiling and naming the argument or input value the literal was written for.
-/// The refused container is reduced to an empty one of its own kind, so the rest of the document
-/// is still checked and every other defect in it still reported — and the build refuses, because a
-/// non-empty error list is what `SchemaBuilder::finish` reads.
+/// The refused container is replaced by a marker that stands for the skipped subtree and answers
+/// no question about it — not by an empty container, which is a claim about content nothing read —
+/// so the rest of the document is still checked and every other defect in it still reported. And
+/// the build refuses, because a non-empty error list is what `SchemaBuilder::finish` reads.
 pub const MAX_CONST_VALUE_DEPTH: usize = 1024;
 
 /// A constant literal, reduced to what a type check reads, with the position to blame.
@@ -944,20 +944,47 @@ enum RawShape {
   Enum(Box<[u8]>),
   List(Vec<RawValue>),
   Object(Vec<RawObjectField>),
+  /// A container past [`MAX_CONST_VALUE_DEPTH`], standing for the whole subtree it opened.
+  ///
+  /// **Not a shape any caller wrote.** It is the reduction saying it stopped here, and the
+  /// [`SchemaErrorKind::ConstantValueTooDeep`] naming the literal is already in the error list by
+  /// the time anything reads it. Every walk over a [`RawValue`] treats it as terminal and asks it
+  /// nothing, because there is nothing to ask: the content it stands for was never built.
+  ///
+  /// What stood here was an empty container of the refused kind, and that is a statement about
+  /// the skipped content rather than an absence of one — a statement no reader can tell from the
+  /// caller's own `[]` or `{}`. [`SchemaBuilder::check_const_value`] read it as an object with no
+  /// fields and reported every required field of the target missing from a subtree that may
+  /// supply all of them; [`map_nodes`] offered it to the cycle rule as a map node supplying
+  /// nothing, which is what makes that rule descend into a field's *own* default. A validator
+  /// that invents defects is worse than one that stops, because the stop is visible.
+  ///
+  /// **What dropping the kind costs, measured.** The empty container carried one TRUE fact beside
+  /// the false one — whether the refused node was a list or a map — and the coercion table could
+  /// answer from it: `input B { s: Int, a: B }` with a chain whose innermost `s` is refused
+  /// reported `ConstantValueTooDeep` *and* the coercion failure at that node, and now reports only
+  /// the first. That verdict is about the refused node itself, on a document the ceiling is
+  /// already refusing, so it is redundant rather than lost — and keeping the kind would put
+  /// "which container is this" back in front of every walk, which is the question the sentinel
+  /// made unsafe to ask. A coercion failure ELSEWHERE in the same literal is unaffected: the root
+  /// of a literal is never refused, because the ceiling is read with no frame open.
+  Refused,
 }
 
 impl RawShape {
-  /// The shape, as the coercion table names it.
-  const fn shape(&self) -> LiteralShape {
+  /// The shape, as the coercion table names it — `None` for a refused subtree, which has no
+  /// content for the table to read and no answer to give it.
+  const fn shape(&self) -> Option<LiteralShape> {
     match self {
-      Self::Null => LiteralShape::Null,
-      Self::Boolean => LiteralShape::Boolean,
-      Self::Int(_) => LiteralShape::Int,
-      Self::Float(_) => LiteralShape::Float,
-      Self::String => LiteralShape::String,
-      Self::Enum(_) => LiteralShape::Enum,
-      Self::List(_) => LiteralShape::List,
-      Self::Object(_) => LiteralShape::Object,
+      Self::Null => Some(LiteralShape::Null),
+      Self::Boolean => Some(LiteralShape::Boolean),
+      Self::Int(_) => Some(LiteralShape::Int),
+      Self::Float(_) => Some(LiteralShape::Float),
+      Self::String => Some(LiteralShape::String),
+      Self::Enum(_) => Some(LiteralShape::Enum),
+      Self::List(_) => Some(LiteralShape::List),
+      Self::Object(_) => Some(LiteralShape::Object),
+      Self::Refused => None,
     }
   }
 
@@ -2087,20 +2114,61 @@ impl SchemaBuilder {
   /// [`SchemaErrorKind::ConstantValueTooDeep`], **before** the frame that would have carried it is
   /// pushed and before its output vector is reserved.
   ///
-  /// The refusal is per literal and it substitutes an *empty container of the refused kind*, so the
-  /// walk finishes, every other defect in the document is still reported, and the coercion check
-  /// behind this sees a list where a list was written. Only the first refused container is
-  /// reported: the levels under it are never read, so there is nothing further to say about them.
+  /// The refusal is per literal and it substitutes [`RawShape::Refused`], so the walk finishes and
+  /// every other defect in the document is still reported. It substitutes a MARKER and not an empty
+  /// container of the refused kind, which is what stood here: an empty container is a claim about
+  /// the skipped content — "this object supplies no fields" — and it is a claim no reader can tell
+  /// from the caller's own `{}`. [`SchemaBuilder::check_const_value`] believed it and reported
+  /// every required field of the target missing from a subtree that may supply all of them. Only
+  /// the first refused container is reported: the levels under it are never read, so there is
+  /// nothing further to say about them.
   ///
   /// **What the ceiling does and does not cover.** It bounds the growth that follows the literal's
   /// *nesting* — the frame stack and the one output vector per level — which is the term with no
   /// bound in the input. It does not bound the growth that follows the literal's *width*: a list of
-  /// a million entries still reserves a million [`RawValue`]s. That term needs no ceiling, because
-  /// the caller is holding a `ConstInputValue` per entry while this runs and one of those is larger
-  /// than one `RawValue`, so the reduction's width cost is bounded by input already in memory. It
-  /// is also why fallible reservation is not what stands here: `try_reserve` would convert a
-  /// width-driven failure into a refusal, but the width-driven request is proportional to a tree the
-  /// allocator has already satisfied once, where the depth-driven one was proportional to nothing.
+  /// a million entries still reserves a million [`RawValue`]s, 48 bytes each, and an object's
+  /// fields 72.
+  ///
+  /// An earlier revision justified leaving that uncovered with "the width-driven request is
+  /// proportional to a tree the allocator has already satisfied once", and **that is not an
+  /// argument**: the caller's tree is still LIVE while the reduction runs, so having fitted the
+  /// tree says nothing about fitting the tree *and* its reduction. What stands here instead is a
+  /// measurement of the band those two footprints leave between them — the allocator limits that
+  /// admit the caller's document and abort the build. Peak live bytes, `aarch64-apple-darwin`,
+  /// unoptimised, one process per row, N = 8 000:
+  ///
+  /// | document | building it peaks at | `Schema::build` peaks at | band |
+  /// |---|---|---|---|
+  /// | hand-built list literal, N entries | 709 289 | 1 162 639 | **453 350** — 0.64x |
+  /// | hand-built object literal, N fields | 1 157 291 | 1 803 383 | **646 092** — 0.56x |
+  /// | the same list literal, PARSED from SDL | 1 104 538 | 1 207 552 | **103 014** — 0.09x |
+  /// | N one-field object types, **no literal at all** | 12 277 717 | 33 292 363 | **21 014 646** — 1.71x |
+  ///
+  /// The band is real and it is this reduction's: 48N of the first row's is the output vector, a
+  /// limit of 900 000 bytes on that row aborts at the 384 000-byte reservation, and the width term
+  /// is 48.0 bytes an entry fitted over 1 000–8 000 (72.0 for the object row).
+  ///
+  /// **And a width ceiling still could not buy anything, which is what the last row is for.** That
+  /// row is ordinary SDL `Schema::build` accepts, no ceiling refuses, and no literal appears in it
+  /// — every allocation it makes is sized by the input just as this one is — and its band is 46
+  /// times wider absolutely and 2.7 times wider against its own document. A caller whose allocator
+  /// limit sits in this reduction's band has one sitting in that document's band too, so refusing
+  /// wide literals would leave the abort exactly where it was and read as a guarantee it does not
+  /// keep. The set `try_reserve` would have to reach to keep it is not "the sites whose size is
+  /// chosen by the input" narrowed down — the last row is what happens when every such site is
+  /// counted, and it is the whole builder.
+  ///
+  /// The parsed row says the same thing from the other side: at N = 8 000 the parse peaks 358 336
+  /// bytes above the AST it leaves resident, so on the route a deployment actually takes the
+  /// reduction fits almost entirely inside a band the parse has already opened — the band widens by
+  /// 3.9 bytes an entry there rather than 48.
+  ///
+  /// What separates this from the depth term is not the size of the band but the shape of the
+  /// growth. The reduction is injective into the tree it reads — one [`RawValue`] per
+  /// `ConstInputValue` (48 against 88 bytes) and one [`RawObjectField`] per `ConstObjectField` (72
+  /// against 144) — so widening the literal cannot make the output outgrow the input that named
+  /// it. Past the ceiling above, the frames were two to four times the tree they produced and
+  /// nothing in the input bounded how many of them there were.
   ///
   /// An object field's name is interned when the field is reached and not when it is queued, so the
   /// symbols are minted in the same order the recursion minted them; the name waits on its own
@@ -2188,8 +2256,10 @@ impl SchemaBuilder {
         ConstInputValue::Enum(member) => RawShape::Enum(member.source().as_ref().into()),
         // The ceiling is read BEFORE either allocation the arm would make — the frame and the
         // output vector it reserves — so the refusal costs nothing the abort it replaces would
-        // have spent. An empty container of the refused kind takes the subtree's place, which is
-        // what lets the walk finish and the rest of the document still be checked.
+        // have spent. `RawShape::Refused` takes the subtree's place, which is what lets the walk
+        // finish and the rest of the document still be checked WITHOUT any walk behind this one
+        // reading a claim about what was skipped. The kind is not kept: nothing downstream asks a
+        // refused subtree a question, so a list one and an object one would answer alike.
         ConstInputValue::List(list) => {
           if frames.len() < MAX_CONST_VALUE_DEPTH {
             let entries = list.values();
@@ -2201,7 +2271,7 @@ impl SchemaBuilder {
             continue;
           }
           refused.get_or_insert(span);
-          RawShape::List(Vec::new())
+          RawShape::Refused
         }
         ConstInputValue::Object(object) => {
           if frames.len() < MAX_CONST_VALUE_DEPTH {
@@ -2215,7 +2285,7 @@ impl SchemaBuilder {
             continue;
           }
           refused.get_or_insert(span);
-          RawShape::Object(Vec::new())
+          RawShape::Refused
         }
       };
       emit(&mut frames, &mut answer, RawValue { span, shape });
@@ -3945,6 +4015,14 @@ impl SchemaBuilder {
         continue;
       };
 
+      // A subtree `const_value` refused. Every question below is a question about the literal's
+      // own content, and the content is not here — so none of them has an answer, and answering
+      // anyway is how this pass fabricated a defect. Terminal: the walk resumes with the siblings,
+      // which ARE here, and the build refuses on the `ConstantValueTooDeep` already in the list.
+      if matches!(value.shape, RawShape::Refused) {
+        continue;
+      }
+
       if matches!(value.shape, RawShape::Null) {
         if expected.is_non_null() {
           reject(errors, value.span);
@@ -4022,8 +4100,13 @@ impl SchemaBuilder {
         TypeKind::Scalar => {
           // A custom scalar accepts every literal, so only the five built-ins have anything to say.
           let name = model.text(model.types[base].name.sym);
-          let accepted = BuiltInScalar::from_name(name.as_bytes())
-            .is_none_or(|scalar| scalar.accepts(value.shape.shape(), value.shape.spelling()));
+          let accepted = match value.shape.shape() {
+            // Terminal above, so this is unreachable rather than lenient — and it is written as
+            // "nothing to reject" because a refused subtree has no shape the table could weigh.
+            None => true,
+            Some(shape) => BuiltInScalar::from_name(name.as_bytes())
+              .is_none_or(|scalar| scalar.accepts(shape, value.shape.spelling())),
+          };
           if !accepted {
             reject(errors, value.span);
           }
@@ -5399,10 +5482,24 @@ fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
       }
       continue;
     };
+    // Exhaustive rather than `_`, so that a shape added later has to be decided here instead of
+    // defaulting to "contributes nothing" — which is the right answer for every scalar and the
+    // wrong one for anything that can hold a field.
     match &value.shape {
       RawShape::List(items) => rest.push(items.iter()),
       RawShape::Object(fields) => out.push(fields),
-      _ => {}
+      // A refused subtree contributes NO map node, and an empty one is not the same answer: a map
+      // node is the claim "these are the fields this node supplies", so an empty one says every
+      // field was omitted — which is exactly the ask that makes the caller descend into a field's
+      // own `defaultValue` and mark it on the path. Contributing none says nothing at all about
+      // content that was never read.
+      RawShape::Refused => {}
+      RawShape::Null
+      | RawShape::Boolean
+      | RawShape::Int(_)
+      | RawShape::Float(_)
+      | RawShape::String
+      | RawShape::Enum(_) => {}
     }
   }
 }
