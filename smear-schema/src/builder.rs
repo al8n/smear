@@ -71,35 +71,170 @@ const ONE_OF: &str = "oneOf";
 // interning
 // ---------------------------------------------------------------------------------------------
 
+/// The largest arena an [`Interner`] will fill, in bytes.
+///
+/// # Why `u32::MAX` — the interval, then the pick inside it
+///
+/// | bound | from | value |
+/// |---|---|---|
+/// | lower: the arena a **parsed** document needs | one copy per distinct spelling, and a parsed document's leaves hold disjoint token spans | **that document's own source** |
+/// | upper: the last offset a span can name | [`Interner::spans`] is a `(u32, u32)` pair of byte offsets into [`Interner::strings`] | **`u32::MAX`** |
+///
+/// The lower row is why a ceiling at the top of the interval refuses nothing this workspace
+/// parses. A `TypeSystemDocument` that `type_system_document` produced over one source has one
+/// leaf per token and the tokens are disjoint, so the sum of its spellings is at most that source
+/// — and a source this workspace accepts is itself addressed by `u32` spans. The two rows meet,
+/// so there is no interval to pick inside.
+///
+/// **For a tree a caller assembles the row has no bottom, and that is what the ceiling is for.**
+/// `Name::new` is public, and `IntValue::graphql` and its two siblings are public associated
+/// parsers, so `N` leaves may be `N` overlapping suffixes of one `B`-byte buffer: `B(B+1)/2`
+/// interned bytes from `B` of input, which reaches four gigabytes at `B ≈ 92 682` — a 92 KB
+/// input. [`RawShape`] carries the measurement. So this is not slack a caller can plan around; it
+/// is the width of the offset, and refusing at it is what the offset is worth.
+///
+/// The upper row is the representation and not a preference. `bytes()` answers
+/// `strings[start..end]`, and past `u32::MAX` bytes there is no `start` to record — the cast that
+/// used to record one wrapped, which is the defect this constant closes rather than a capacity it
+/// buys. See [`SchemaErrorKind::TooManyInternedBytes`] for what a build past it sees, and the
+/// [`Interner`] header for the two failures wrapping produced.
+const MAX_ARENA_BYTES: u32 = u32::MAX;
+
+/// The largest number of distinct spellings an [`Interner`] will hold.
+///
+/// The width of the [`Sym`] that addresses them, for the same reason [`MAX_ARENA_BYTES`] is the
+/// width of an offset — and it is the *slack* bound of the pair. A spelling costs at least one
+/// byte of arena, so `spans.len() <= strings.len() + 1` always holds and [`MAX_ARENA_BYTES`] is
+/// reached first from every direction but one: the single empty spelling, which the map admits
+/// once and then deduplicates. It is checked anyway, because "the other guard covers it" is a
+/// property of today's call sites rather than of this type.
+///
+/// **Not [`MAX_SYMBOLS`].** That is the bound [`NameIndex::build`] can *index*, it is `1 << 30`,
+/// and `flatten` still refuses against it as [`SchemaErrorKind::TooManyNames`]. This one is the
+/// bound a `Sym` can *address*, which is the cast's own question.
+const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
+
 /// The growable half of the name arena.
 ///
 /// The finished [`Schema`] keeps `strings` and `spans` and a probe-only [`NameIndex`]; this map
 /// exists only while building, which is why the schema has no hash map in it at all.
+///
+/// # The offsets are checked, and here is what they did when they were not
+///
+/// A span is a pair of `u32` **byte offsets** into `strings`, and the three that record one were
+/// `… .len() as u32`. Two of them index `strings`, so they wrap at four gigabytes of interned
+/// bytes; the third counts symbols and needs four billion of them, which is the bar a review of
+/// this type read all three against. Measured on this type at `fcac941`,
+/// `aarch64-apple-darwin`, release, by padding `strings` and interning `"beta"` after `"alpha"`:
+///
+/// | `strings.len()` | span recorded | `bytes()` |
+/// |---|---|---|
+/// | `u32::MAX` | `(4294967295, 3)` | **panic**: `slice index starts at 4294967295 but ends at 3` |
+/// | `2^32` | `(0, 4)` | **`"alph"`** — the wrong spelling, handed back through `Schema::name` |
+///
+/// Neither is a capacity limit a caller can plan around: the first ends the process and the second
+/// answers a question wrongly, both on a path that returns `Result`. Four gigabytes arrives from a
+/// 92 KB input, through either arena: `Name::new` is public and `IntValue::graphql` and its two
+/// siblings are public associated parsers, so `N` leaves may be `N` overlapping suffixes of one
+/// `B`-byte buffer — `B(B+1)/2` interned bytes from `B`, which crosses `u32::MAX` at
+/// `B ≈ 92 682`. [`RawShape`] carries the measurement. The ceilings above turn both rows into
+/// [`SchemaErrorKind::TooManyInternedBytes`].
+///
+/// The quadratic growth itself is not bounded here and is not a duplicate of it: every retained
+/// byte is a *distinct* spelling — a name the finished [`Schema`] hands back through
+/// `Schema::name`, or a literal the coercion table reads — so the dedup below is already the
+/// strongest bound of its kind and there is no copy left to remove. The checked conversion is what
+/// makes the growth harmless.
 #[derive(Debug, Default)]
 struct Interner {
   strings: Vec<u8>,
   spans: Vec<(u32, u32)>,
   map: BTreeMap<Box<[u8]>, u32>,
+  /// The symbol a refused intern answers with, minted at the first refusal.
+  ///
+  /// `Some` is the arena saying it stopped growing, and [`SchemaBuilder::finish`] reads it as the
+  /// build's refusal. Holding the placeholder here rather than a bare flag is what makes one
+  /// refusal cost one span however many spellings follow it.
+  refused: Option<Sym>,
 }
 
 impl Interner {
   fn intern(&mut self, bytes: &[u8]) -> Sym {
+    self.intern_within(bytes, MAX_ARENA_BYTES, MAX_ARENA_SYMBOLS)
+  }
+
+  /// [`Interner::intern`] with the two ceilings supplied.
+  ///
+  /// The ceilings are parameters rather than constants read inside so that a test can stand at the
+  /// boundary: the real one is four gigabytes of interned bytes, which no suite allocates. This is
+  /// the whole mechanism — [`Interner::intern`] adds only the two numbers — so a cell driven to an
+  /// injected ceiling exercises the same guards a document past the real one would.
+  fn intern_within(&mut self, bytes: &[u8], max_bytes: u32, max_symbols: u32) -> Sym {
     if let Some(sym) = self.map.get(bytes) {
       return Sym::new(*sym);
     }
-    let start = self.strings.len() as u32;
+    // Each of the three was a `len() as u32`, and each is asked before anything grows: a refusal
+    // that has already pushed the bytes is a refusal with a wrapped arena behind it.
+    let (Ok(start), Ok(width), Ok(sym)) = (
+      u32::try_from(self.strings.len()),
+      u32::try_from(bytes.len()),
+      u32::try_from(self.spans.len()),
+    ) else {
+      return self.refuse();
+    };
+    let Some(end) = start.checked_add(width).filter(|end| *end <= max_bytes) else {
+      return self.refuse();
+    };
+    if sym >= max_symbols {
+      return self.refuse();
+    }
     self.strings.extend_from_slice(bytes);
-    let end = self.strings.len() as u32;
-    let sym = self.spans.len() as u32;
     self.spans.push((start, end));
     self.map.insert(bytes.to_owned().into_boxed_slice(), sym);
     Sym::new(sym)
+  }
+
+  /// The symbol a refused intern answers with: an empty spelling, minted once.
+  ///
+  /// A real in-range symbol rather than a sentinel, because a [`Sym`] is a **dense index** in this
+  /// builder — [`Positions`] addresses a table by it, `set_type_index` resizes one to it — so a
+  /// symbol outside the arena is an out-of-bounds read or a four-billion-slot `resize`, which is a
+  /// worse failure than the one being repaired. The empty range is in bounds for every arena,
+  /// including one that holds nothing.
+  ///
+  /// The build is over by the time anything reads it: [`SchemaBuilder::finish`] turns a refusal
+  /// into [`SchemaErrorKind::TooManyInternedBytes`] before the §3 passes run, so the collisions a
+  /// shared placeholder would make are never reported.
+  fn refuse(&mut self) -> Sym {
+    if let Some(sym) = self.refused {
+      return sym;
+    }
+    let sym = match u32::try_from(self.spans.len()) {
+      // One slot short of the width, so that pushing the placeholder cannot be the thing that
+      // overflows `len`.
+      Ok(sym) if sym < u32::MAX => {
+        self.spans.push((0, 0));
+        sym
+      }
+      // The symbol space is full as well. Symbol zero exists, because filling it took `2^32`
+      // accepted interns.
+      _ => 0,
+    };
+    let sym = Sym::new(sym);
+    self.refused = Some(sym);
+    sym
   }
 
   fn lookup(&self, bytes: &[u8]) -> Option<Sym> {
     self.map.get(bytes).copied().map(Sym::new)
   }
 
+  /// The spelling `sym` was interned with.
+  ///
+  /// Indexed rather than probed: `intern_within` records a span only after establishing
+  /// `start <= end <= strings.len()`, and `sym` is the index it returned, so both reads are in
+  /// bounds by construction. A `get` here would answer a future break with the empty spelling
+  /// instead of saying so.
   fn bytes(&self, sym: Sym) -> &[u8] {
     let (start, end) = self.spans[sym.get() as usize];
     &self.strings[start as usize..end as usize]
@@ -111,7 +246,11 @@ impl Interner {
   }
 
   fn len(&self) -> u32 {
-    self.spans.len() as u32
+    // `intern_within` refuses past `MAX_ARENA_SYMBOLS`, so this is the count rather than a wrap of
+    // it. Saturating rather than `as` is what makes that a claim a reader can check: a count past
+    // the width answers `u32::MAX`, which `flatten` refuses as `SchemaErrorKind::TooManyNames`
+    // instead of returning a schema addressed by the low bits of it.
+    u32::try_from(self.spans.len()).unwrap_or(u32::MAX)
   }
 }
 
@@ -963,11 +1102,34 @@ impl Drop for RawValue {
 ///
 /// So the three arms hold a [`Sym`] into [`SchemaBuilder`]'s literal interner, a second
 /// [`Interner`] beside the name arena, and the retained bytes are **one copy per distinct
-/// spelling**. That is a bound the input has already paid: the leaf constructors — `IntValue::new`
-/// and its two siblings — are `pub(crate)`, so the only way a caller obtains one of these three
-/// arms is to parse it or to clone one it parsed, and a *distinct* spelling therefore costs its own
-/// bytes in some source. Cloning, which costs the caller nothing, now costs this reduction four
-/// bytes.
+/// spelling**. Cloning, which costs the caller nothing, now costs this reduction four bytes.
+///
+/// # Dedup bounds repetition and nothing else, and here is the measurement
+///
+/// An earlier reading of this had the three leaf constructors — `IntValue::new` and its two
+/// siblings — being `pub(crate)`, therefore a caller's only route to one of these arms being a
+/// parse or a clone, therefore a *distinct* spelling costing its own bytes in some source. The
+/// first two steps hold; the third does not follow, because a parse is not injective into the
+/// bytes it reads. `IntValue::graphql` is a **public** associated parser — `graphql_slice_api!`
+/// generates one for each of the three — so a caller may run it over every suffix of one buffer
+/// and hold `B` leaves that borrow the same `B` bytes. Measured through `Schema::build`'s own
+/// door, as the literal arena after one assembled document whose single list holds those leaves:
+///
+/// | `B` | 10 | 30 | 100 | 300 |
+/// |---|---|---|---|---|
+/// | literal-arena bytes | 55 | 465 | 5 050 | 45 150 |
+/// | over the buffer | 5.5x | 15.5x | 50.5x | 150.5x |
+///
+/// The fit is `B(B+1)/2` exactly and the ratio is `(B+1)/2`, so there is no size at which it
+/// flattens. The name arena has the same shape through `Name::new`, which is public and needs no
+/// parse at all.
+///
+/// What bounds it is [`MAX_ARENA_BYTES`] rather than this reduction: past four gigabytes the arena
+/// refuses and the build answers [`SchemaErrorKind::TooManyInternedBytes`], which arrives at
+/// `B ≈ 92 682` — a 92 KB input. Bounding the *growth* is a separate design and this is not it:
+/// every retained byte is a distinct spelling the coercion table reads, so there is no copy left
+/// to remove. What changed is which sentence is load-bearing — the ceiling, not a `pub(crate)` on
+/// a constructor.
 #[derive(Debug, Clone)]
 enum RawShape {
   Null,
@@ -1712,6 +1874,24 @@ impl SchemaBuilder {
     // all of which are already in, so the order does not change what gets replaced.
     self.inject_built_ins();
     self.apply_extensions();
+
+    // Every intern this build performs has happened by here — ingest does the document's own
+    // names and literals, injection does the built-ins', and applying an extension only reads
+    // symbols already in — so one reading of the arenas covers both.
+    //
+    // Before the passes rather than beside their diagnostics, because a refused arena is a
+    // statement about this builder and not about the document: every rule below addresses a name
+    // by its symbol, and a refusal answers them all with one placeholder. Running them over that
+    // reports the collisions the placeholder makes rather than anything a caller wrote.
+    if self.interner.refused.is_some() || self.literals.refused.is_some() {
+      self.errors.push(SchemaError::new(
+        SchemaErrorKind::TooManyInternedBytes,
+        "schema",
+        SimpleSpan::default(),
+      ));
+      return Err(SchemaErrors::new(self.errors));
+    }
+
     self.validate();
 
     if !self.errors.is_empty() {
@@ -5476,6 +5656,7 @@ impl SchemaBuilder {
       strings,
       spans,
       map: _,
+      refused: _,
     } = interner;
     let strings = strings.into_boxed_slice();
     let spans = spans.into_boxed_slice();
@@ -5596,6 +5777,9 @@ fn map_operation(operation: &OperationType) -> RootOperation {
 fn map_location(location: &Location) -> Option<DirectiveLocation> {
   DirectiveLocation::from_name(location.as_str())
 }
+
+#[cfg(test)]
+mod tests;
 
 /// The name of a type definition, as a `&str` over the built-in SDL's `&'static str` source.
 ///

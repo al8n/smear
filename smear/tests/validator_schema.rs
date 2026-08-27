@@ -92,6 +92,14 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
      distinct identifiers, so the limit is unreachable in a test.",
   ),
   (
+    SchemaErrorKind::TooManyInternedBytes,
+    "the arena addresses its bytes with 32-bit offsets, so the ceiling is four gigabytes of \
+     interned spelling — reachable from a 92 KB hand-assembled AST, whose overlapping suffixes \
+     are quadratic, and not from anything a test should allocate. `smear-schema`'s \
+     `builder::tests` fires it through `Interner::intern_within`, which is the same mechanism \
+     with the two ceilings as parameters, and pins the accepting side beside it.",
+  ),
+  (
     SchemaErrorKind::ConstantValueTooDeep,
     "`MAX_CONST_VALUE_DEPTH` is 1024 open containers and it is derived to sit above what every \
      smear door produces — the lossless door at `HARD_MAX` reaches 255 — so no SDL this harness \

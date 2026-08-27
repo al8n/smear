@@ -93,6 +93,27 @@ pub enum SchemaErrorKind {
   /// A capacity limit of this implementation ([`MAX_SYMBOLS`](super::MAX_SYMBOLS)), not a
   /// specification rule.
   TooManyNames,
+  /// The spellings a build interns do not fit the offsets that address them.
+  ///
+  /// A sibling of [`TooManyNames`](Self::TooManyNames) rather than the same rule, and the two
+  /// count different things. That one counts **symbols** against the width the name index can
+  /// address; this one counts the **bytes behind them** against the width a span into the arena is
+  /// written in. The builder holds a spelling as a `(u32, u32)` pair of byte offsets into one
+  /// growable arena, so an arena past `u32::MAX` bytes has no offset left to name its next entry
+  /// with — and every symbol costs at least one byte, so this is the lower of the two bars by a
+  /// wide margin.
+  ///
+  /// Raised for the literal arena as well as the name arena, which is why the kind is not spelled
+  /// in terms of names: one interner type holds both, and a literal's spelling is not a name.
+  ///
+  /// **No document this workspace parses reaches it.** A parsed document's leaves hold disjoint
+  /// token spans, so the arena it fills is at most its own source. What reaches it is a tree a
+  /// caller assembles: `Name::new` is public, and so are the three leaves' associated parsers, so
+  /// `N` leaves may be `N` overlapping suffixes of one `B`-byte buffer — `B(B+1)/2` interned bytes
+  /// from `B` of input, which crosses the ceiling at `B ≈ 92 682`, a 92 KB input. Refusing is what
+  /// the offsets are worth: wrapping one handed a *different* spelling's bytes back through
+  /// `Schema::name`, or inverted the range and panicked.
+  TooManyInternedBytes,
 
   // -- §3.6 Objects, §3.7 Interfaces --------------------------------------------------------
   /// An object or interface type defines no fields (draft §3.6.1, §3.7.1).
@@ -344,6 +365,7 @@ impl SchemaErrorKind {
     Self::ConstantValueTooDeep,
     Self::InvalidName,
     Self::TooManyNames,
+    Self::TooManyInternedBytes,
     Self::EmptyFieldsDefinition,
     Self::DuplicateFieldName,
     Self::ReservedFieldName,
@@ -419,6 +441,7 @@ impl SchemaErrorKind {
       Self::ConstantValueTooDeep => "constant value nests too deeply",
       Self::InvalidName => "not a GraphQL name",
       Self::TooManyNames => "too many distinct names",
+      Self::TooManyInternedBytes => "too many interned bytes",
       Self::EmptyFieldsDefinition => "type defines no fields",
       Self::DuplicateFieldName => "duplicate field",
       Self::ReservedFieldName => "field name is reserved for introspection",
@@ -522,6 +545,7 @@ impl SchemaErrorKind {
       Self::ConstantValueTooDeep => Code::new("smear::schema::constant-value-too-deep"),
       Self::InvalidName => Code::new("smear::schema::invalid-name"),
       Self::TooManyNames => Code::new("smear::schema::too-many-names"),
+      Self::TooManyInternedBytes => Code::new("smear::schema::too-many-interned-bytes"),
       Self::EmptyFieldsDefinition => Code::new("smear::schema::empty-fields-definition"),
       Self::DuplicateFieldName => Code::new("smear::schema::duplicate-field-name"),
       Self::ReservedFieldName => Code::new("smear::schema::reserved-field-name"),
@@ -637,6 +661,7 @@ impl SchemaErrorKind {
       | Self::ConstantValueTooDeep
       | Self::InvalidName
       | Self::TooManyNames
+      | Self::TooManyInternedBytes
       | Self::EmptyFieldsDefinition
       | Self::DuplicateFieldName
       | Self::ReservedFieldName
@@ -738,6 +763,9 @@ impl SchemaErrorKind {
         "reducing a literal costs storage per level of nesting, so this implementation bounds it; no document any smear parser produces comes near the ceiling.",
       ),
       Self::InvalidName => Some("a GraphQL name is spelled `/[_A-Za-z][_0-9A-Za-z]*/`."),
+      Self::TooManyInternedBytes => Some(
+        "a spelling is addressed by 32-bit byte offsets into one arena, so the arena is bounded; no document reaches the bound, and an assembled AST that does is refused rather than truncated.",
+      ),
       Self::EmptyFieldsDefinition => {
         Some("an object or interface type must define at least one field.")
       }
@@ -901,6 +929,7 @@ impl SchemaErrorKind {
       | Self::ConstantValueTooDeep
       | Self::InvalidName
       | Self::TooManyNames
+      | Self::TooManyInternedBytes
       | Self::EmptyFieldsDefinition
       | Self::ReservedFieldName
       | Self::FieldTypeNotOutputType
