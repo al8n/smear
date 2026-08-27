@@ -3303,58 +3303,98 @@ impl SchemaBuilder {
 
   /// Fills every type's interface closure, reporting interfaces that implement themselves.
   ///
-  /// # The membership mark, and why `contains` was the same product a fourth time
+  /// # The closure of a schema that is built is the list the document already wrote
   ///
-  /// The walk below is a depth-first traversal that must not visit a node twice, and "have I got
-  /// this one already" was asked by scanning the closure built so far — `Θ(popped × closure)`,
-  /// with a ceiling on neither. `type T implements I0 & … & I{K-1}` in front of `K` interfaces that
-  /// implement nothing is `Θ(K)` of SDL, `Θ(K²)` of walk, and a schema `Schema::build` **accepts**:
-  /// 2.15 in the exponent over 2 k–4 k and 16.0 ms at `K` = 4 000, of which the traversal is the
-  /// term that grows.
+  /// Draft §3.6.1/§3.7.1 oblige a type to declare every interface its declared interfaces declare,
+  /// transitively. [`SchemaBuilder::validate_interface_implementations`] enforces that, and this
+  /// pass is entitled to the consequence: on a document the build **accepts**, `implements` is
+  /// already transitively closed, so the closure IS the declared list — resolved, deduplicated
+  /// and sorted. A traversal has nothing left to discover, and the reference implementation
+  /// spells both this list and that rule over the immediate declarations for the same reason.
   ///
-  /// One `bool` per type index answers it in `O(1)`, and the marks are cleared by walking the
-  /// closure this type just built rather than the table — `O(closure)`, not `O(types)`, which is
-  /// what lets one table serve every type in the schema. It is the shape [`Positions`] takes for
-  /// the same reason, minus the reentrancy question: this walk nests no second closure inside the
-  /// one it is building. Lazily grown, so a schema whose types implement nothing never allocates
-  /// it. The closure is pushed in the traversal order it was pushed in and sorted exactly where it
-  /// was sorted, so what a later pass reads is unchanged. al8n/smear#198.
+  /// A depth-first traversal stood here anyway, and it ran **before** the check whose result it
+  /// was standing on. So the population it walked was never the accepted one: it was every
+  /// document, and on a refused one the two lists are as far apart as the document cares to
+  /// write them.
+  ///
+  /// `interface I{k} implements I{k-1}` for `N` interfaces — each declaring only its immediate
+  /// parent, which is the mistake §3.7.1 exists to name — is `Θ(N)` of SDL and was `Θ(N²)` of walk
+  /// **and of retained bytes**, bought before the diagnostic that rejects the document is raised:
+  ///
+  /// | `N` | SDL | closure entries stored | walk | peak bytes |
+  /// |---|---|---|---|---|
+  /// | 1 000 | 42 787 | 499 500 | 5.62 ms | 3.2 MB |
+  /// | 2 000 | 87 786 | 1 999 000 | 24.9 ms | 11.8 MB |
+  /// | 4 000 | 177 786 | 7 998 000 | 95.9 ms | 45.2 MB |
+  /// | 8 000 | 357 786 | 31 996 000 | **398 ms** | **177 MB** |
+  ///
+  /// 1.97 in the exponent over the document's own bytes, on 349 KiB of SDL.
+  ///
+  /// The **accepted** population pays it too, one exponent lower. A transitively complete chain —
+  /// `interface I{k} implements I0 & … & I{k-1}`, which is what §3.7.1 requires a chain to be
+  /// spelled as — is `Θ(N²)` of SDL, and the walk re-read every ancestor's whole declared list on
+  /// the way past it: `Θ(N³)`, 1.47 in the exponent over its own bytes, **6.97 s** at `N` = 2 000
+  /// against 14.3 MB of SDL.
+  ///
+  /// Resolving the declared list is 1.00 in the exponent on both, and it is a smaller number as
+  /// well as a flatter one: 8 000 interfaces cost 7 999 entries, 187 us and 3.97 MB where the walk
+  /// cost 31 996 000, 398 ms and 177 MB, and the whole build over that document goes from 3.14 s
+  /// and **3.17 GB** to 8.6 ms and 4.85 MB. What the accepted chain stores is unchanged to the
+  /// entry, which is the claim — the same list, not a smaller one.
+  ///
+  /// # What the walk was carrying that a resolved list is not
+  ///
+  /// Two things, and both survive.
+  ///
+  /// An interface that implements itself was found by asking whether the closure contained its
+  /// own index — true exactly when the interface is reachable from itself, so it caught a cycle
+  /// of any length and not only `interface I implements I`. A declared list reaches one step, so
+  /// the loop below asks the second step outright, and no further: a cycle of three or more is
+  /// refused by the transitive interface it fails to declare, which is what the reference
+  /// implementation reports for it too. The loop's own comment carries where that question may
+  /// be asked and what it costs in the one place it may not.
+  ///
+  /// The membership mark that #198 put here to answer "have I got this one already" in `O(1)` is
+  /// what a `sort_unstable` + `dedup` answers now. It is the walk's own property and not a new
+  /// one — a traversal that marks cannot emit a node twice — kept where the list is built rather
+  /// than rested on the [`SchemaErrorKind::DuplicateImplementsInterface`] that
+  /// [`SchemaBuilder::validate_implements`] separately raises for the only input that could
+  /// produce one. The sort is load-bearing beyond order: [`SchemaBuilder::is_sub_type`] binary
+  /// searches this list, and so does the cycle question below. One `bool` per type index is what
+  /// [`Positions`] and the transitivity rule's own `declared_here` still are. al8n/smear#198,
+  /// and #202's second follow-up.
   fn compute_closures(&mut self) {
     let count = self.types.len();
-    let mut member: Vec<bool> = Vec::new();
     for index in 0..count {
       if self.types[index].implements.is_empty() {
         continue;
       }
-      if member.len() < count {
-        member.resize(count, false);
-      }
-      let mut closure: Vec<u32> = Vec::new();
-      let mut stack: Vec<u32> = Vec::new();
+      let mut closure: Vec<u32> = Vec::with_capacity(self.types[index].implements.len());
       for declared in &self.types[index].implements {
         if let Some(target) = self.type_index(declared.sym) {
-          stack.push(target as u32);
+          closure.push(target as u32);
         }
-      }
-      while let Some(next) = stack.pop() {
-        if member[next as usize] {
-          continue;
-        }
-        member[next as usize] = true;
-        closure.push(next);
-        for declared in &self.types[next as usize].implements {
-          if let Some(target) = self.type_index(declared.sym) {
-            stack.push(target as u32);
-          }
-        }
-      }
-      for &id in &closure {
-        member[id as usize] = false;
       }
       closure.sort_unstable();
+      closure.dedup();
       self.types[index].closure = closure;
     }
 
+    // Reachable from itself, which is what the walk answered by asking whether the closure it had
+    // just built contained the type it had built it for. Two steps is as far as the declared list
+    // reaches, and it is as far as this has to: a cycle longer than that is refused by the
+    // transitive interface it fails to declare — the rule at
+    // [`SchemaBuilder::validate_interface_implementations`] carries that argument, and the
+    // exhaustive differential over every four-type interface graph is what checked it.
+    //
+    // The second step is a binary search of a list this pass sorted and
+    // [`SchemaBuilder::is_sub_type`] already reads that way, `Θ(declared × log declared)` over the
+    // schema — and it is HERE rather than in the rule's own loop, which is the one loop in the
+    // build whose trip count is a product of two dimensions the document chooses. Measured on the
+    // transitively complete chain at `N` = 500, interleaved, five reps: 19.5 ms for that loop as
+    // it stands against 51-72 ms with this question asked inside it, in three shapes — a branch
+    // per entry, the same branch with the report `#[cold]` and out of line, and the search hoisted
+    // to once per pair. All three cost it; none of them belongs to it.
     for index in 0..count {
       if self.types[index].kind != TypeKind::Interface {
         continue;
@@ -3365,6 +3405,21 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::SelfImplementingInterface, &subject, at);
         // Break the cycle so nothing downstream walks it.
         self.types[index].closure.retain(|id| *id != index as u32);
+        continue;
+      }
+      let two_step = {
+        let types = &self.types;
+        types[index].closure.iter().any(|&other| {
+          types[other as usize]
+            .closure
+            .binary_search(&(index as u32))
+            .is_ok()
+        })
+      };
+      if two_step {
+        let at = self.types[index].name;
+        let subject = self.text(at.sym).to_owned();
+        self.push(SchemaErrorKind::SelfImplementingInterface, &subject, at);
       }
     }
   }
@@ -4569,6 +4624,28 @@ impl SchemaBuilder {
         }
 
         // Transitivity: every interface the interface implements must also be declared here.
+        //
+        // `closure` is the interface's own declared list — [`SchemaBuilder::compute_closures`]
+        // carries why the transitive one it used to be is the same list on every document this
+        // rule lets through, and what a walk in front of the rule cost on every document it does
+        // not. Which documents this accepts is unchanged by that, and the argument is short: a
+        // document whose every type declares what its declared interfaces declare has an
+        // `implements` relation that is already transitively closed, which is the fixed point the
+        // walk was computing. What a **refused** document gets is the reference implementation's
+        // diagnostic set rather than its transitive closure — `T must implement J because I
+        // implements J`, once per pair the document wrote, instead of once per pair reachable from
+        // one it wrote. A chain of `N` interfaces declaring only their immediate parent is `Θ(N)`
+        // of SDL and was `Θ(N²)` diagnostics here: 7 994 001 of them on 174 KiB at `N` = 4 000,
+        // 652 ms in this pass and 792 MB of peak across the build. The same chain is `N - 2` now,
+        // each naming the one interface its own parent adds. Checked rather than argued —
+        // exhaustively over every implements-graph on four types under every interface/object
+        // labelling, 1 048 576 documents, and over 600 000 random graphs on five to seven: the
+        // accept/refuse verdict never moves, and the diagnostics are always a sub-multiset.
+        // al8n/smear#202's second follow-up.
+        //
+        // `needed == index` is `T implements I` where `I implements T`, which is a cycle and not a
+        // missing declaration; [`SchemaBuilder::compute_closures`] reports it, for the reason its
+        // own comment gives about which loop that question may be asked in.
         //
         // Read off the mark rather than by rescanning `declared`. The scan was
         // `Θ(Σ closure × declared)` with a ceiling on neither factor, and it answered on the first
