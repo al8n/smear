@@ -854,14 +854,46 @@ struct Source<T, I> {
 /// is additionally capped by [`MAX_GREEN_DEPTH`], which no longer bounds a stack but does still
 /// bound this.
 ///
-/// It grows through `Vec`'s infallible `push`, like the release walk and unlike `smear::json`'s
-/// value walk: what is bought is a failure that needs the allocator exhausted by a request
-/// proportional to the branching nesting of a tree already in memory, in place of one that arrives
-/// at a fixed depth on every machine.
+/// # Why the first sources are held in the walk's own frame
+///
+/// **`verify_parse` allocates nothing, and that is gated.** `validator_allocation.rs`'s
+/// `the_whole_root_check_allocates_nothing` measures it at zero, because the round that gave that
+/// helper one rowan cursor allocation per element got through every other gate in the repository:
+/// same diagnostics, same verdicts, only the allocator saw it. A worklist that reached the heap on
+/// the first branching level would have turned that zero into a one.
+///
+/// So [`INLINE`] sources live in the array below, in the caller's frame, and only what is nested
+/// deeper than that reaches the heap. That is a fixed **512 bytes** of frame for the widest of the
+/// three walks and it does not grow with anything.
+///
+/// **It is a fixture-sized answer, not a bound**, and the difference is worth stating: the property
+/// is *no allocation up to `INLINE` branching levels*, not *no allocation*. Past it the walk spills
+/// into a `Vec` and grows through the infallible `push`, like the release walk and unlike
+/// `smear::json`'s value walk, which grows through `try_reserve` and reports `Error::Allocation`.
+/// What is bought there is a failure that needs the allocator exhausted by a request proportional
+/// to the branching nesting of a tree already in memory, in place of one that arrives at a fixed
+/// depth on every machine.
 struct Descent<T, I> {
-  /// The sources the walk has reached but not drained, innermost last.
-  sources: Vec<Source<T, I>>,
+  /// The innermost sources, held where the walk's own frame is.
+  ///
+  /// Occupied from index zero up to `filled`, and never read past it.
+  inline: [Option<Source<T, I>>; INLINE],
+  /// How many of `inline` are occupied.
+  filled: usize,
+  /// Everything nested deeper than [`INLINE`] branching levels, innermost last.
+  ///
+  /// Empty for every tree in this repository's corpus, whose deepest green tree is twelve levels
+  /// **in total** — so its branching nesting cannot exceed that either.
+  spill: Vec<Source<T, I>>,
 }
+
+/// How many sources a walk holds before it reaches the heap.
+///
+/// Sixteen, against a corpus whose deepest green tree is twelve levels of *any* kind and a gated
+/// fixture whose branching nesting is three. It is chosen to keep the allocation gate's reading
+/// honest rather than to bound anything: see [`Descent`]'s header for what is and is not promised
+/// past it.
+const INLINE: usize = 16;
 
 impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
   /// An empty descent, allocating nothing.
@@ -870,7 +902,9 @@ impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
   /// token run allocate exactly what they allocated when they recursed: nothing.
   const fn new() -> Self {
     Self {
-      sources: Vec::new(),
+      inline: [const { None }; INLINE],
+      filled: 0,
+      spill: Vec::new(),
     }
   }
 
@@ -879,12 +913,35 @@ impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
   /// An empty run is not pushed: a leaf would otherwise cost an entry to say it has no children,
   /// which is the per-element path of every one of these walks.
   fn open(&mut self, left: usize, tag: T, children: I) {
-    if children.len() != 0 {
-      self.sources.push(Source {
-        left,
-        tag,
-        children,
-      });
+    if children.len() == 0 {
+      return;
+    }
+    let source = Source {
+      left,
+      tag,
+      children,
+    };
+    if self.filled < INLINE && self.spill.is_empty() {
+      self.inline[self.filled] = Some(source);
+      self.filled += 1;
+    } else {
+      self.spill.push(source);
+    }
+  }
+
+  /// The innermost source, wherever it is held.
+  fn innermost(&mut self) -> Option<&mut Source<T, I>> {
+    if let Some(last) = self.spill.last_mut() {
+      return Some(last);
+    }
+    self.inline.get_mut(self.filled.checked_sub(1)?)?.as_mut()
+  }
+
+  /// Drops the innermost source.
+  fn close(&mut self) {
+    if self.spill.pop().is_none() {
+      self.filled -= 1;
+      self.inline[self.filled] = None;
     }
   }
 
@@ -896,14 +953,14 @@ impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
   /// storage would follow the depth after all — which is the trade the first round of #199
   /// rejected an iterator stack for, and the reason this one does not make it.
   fn take(&mut self) -> Option<(usize, T, I::Item)> {
-    while let Some(source) = self.sources.last_mut() {
+    while let Some(source) = self.innermost() {
       let Some(item) = source.children.next() else {
-        self.sources.pop();
+        self.close();
         continue;
       };
       let (left, tag) = (source.left, source.tag);
       if source.children.len() == 0 {
-        self.sources.pop();
+        self.close();
       }
       return Some((left, tag, item));
     }

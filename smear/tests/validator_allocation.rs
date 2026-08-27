@@ -608,6 +608,17 @@ fn read_the_whole_contract(subject: &dyn Diagnose, sink: &mut StackBuffer<512>) 
 ///
 /// The subject is `verify_parse` itself rather than the door, because the door legitimately
 /// allocates — it projects an AST — while this helper is public, holds no budget, and must not.
+///
+/// # What the zero means now that the walk is not a recursion
+///
+/// The comparison holds an explicit stack of borrowed child iterators rather than a native frame
+/// per level, and the first `Descent::INLINE` of those live in its own frame. So the reading below
+/// is *no allocation up to that many branching levels*, and not *no allocation at any shape*: a
+/// tree nested deeper than the inline capacity spills into a `Vec` and this fixture would read one.
+/// The fixture's own branching nesting is three and the repository's deepest corpus green tree is
+/// twelve levels of any kind, so what the zero covers is every tree either of them contains. The
+/// per-element cost this exists against — one allocation per element walked past — is what the
+/// discrimination below still reads off the red tree.
 #[cfg(all(feature = "graphql", feature = "rowan"))]
 #[test]
 fn the_whole_root_check_allocates_nothing() {
