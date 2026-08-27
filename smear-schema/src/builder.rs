@@ -4697,18 +4697,18 @@ impl SchemaBuilder {
     // index and handed back to the next one by [`Positions::drop`]. A schema whose types
     // implement nothing, or implement narrowly, never allocates it.
     let mut of_sym: Vec<u32> = Vec::new();
-    // One byte per type index, marking the interfaces THIS type declares, for the transitivity
-    // rule below. Same table for the whole pass and cleared by the declaration that wrote it, so a
-    // schema whose types implement nothing never allocates it. See the rule's own comment.
+    // One byte per type index, marking the interfaces THIS type declares, for the rules below.
+    // Same table for the whole pass and cleared by the declaration that wrote it, so a schema
+    // whose types implement nothing never allocates it. See the rules' own comments.
     //
-    // THREE STATES AND NOT A `bool`, because the enumeration asks two questions of one slot and
-    // the second is what bounds it. `DECLARED` answers "is this pair already satisfied", which is
-    // what decides whether a reached type is named. `ROOTED` answers "has this interface already
-    // been the root of an enumeration for this implementor", which is what makes a DUPLICATE
-    // `implements` entry cost nothing — see the rule's own comment for why a second enumeration
-    // from the same root reports nothing and reads everything. `ROOTED` implies `DECLARED`, since
-    // a root is an entry of this declaration, which is why it is one table rather than two and why
-    // the ordinary read is `== NOT_DECLARED` rather than a second test.
+    // THREE STATES AND NOT A `bool`, because two questions are asked of one slot and the second is
+    // what bounds the pass. `DECLARED` answers "is this pair already satisfied", which is what
+    // decides whether a reached type is named. `ROOTED` answers "has this interface already been
+    // read for this implementor", which is what makes a DUPLICATE `implements` entry cost nothing:
+    // it gates the transitive enumeration AND the field-coverage loop, which are the two rules
+    // that read a declared entry's own lists. `ROOTED` implies `DECLARED`, since a root is an
+    // entry of this declaration, which is why it is one table rather than two and why the ordinary
+    // read is `== NOT_DECLARED` rather than a second test.
     const NOT_DECLARED: u8 = 0;
     const DECLARED: u8 = 1;
     const ROOTED: u8 = 2;
@@ -4765,6 +4765,44 @@ impl SchemaBuilder {
           continue;
         }
 
+        // ONE PASS PER DISTINCT RESOLVED INTERFACE, and it is the same root for both rules below.
+        //
+        // `type T implements I & I & … & I` resolves every occurrence to the same interface, and
+        // both rules then ask the same question of the same two lists: the enumeration re-reads
+        // `I`'s closure, and field coverage re-reads `I`'s whole field list. The second is
+        // `Θ(entries × fields)` with a ceiling on neither factor — one interface of `M` covered
+        // fields declared `M` times is 20.1 ms at `M` = 2 048 and 1.211 s at 16 384, 4× per
+        // doubling, and the same shape MISSING its fields is 4 196 351 diagnostics and 711 MB out
+        // of 33 KiB of SDL at `M` = 2 048.
+        //
+        // A DUPLICATE ENTRY IS ITSELF A REFUSAL, which is what makes a second pass a repetition
+        // rather than a reason. [`SchemaBuilder::validate_implements`] runs earlier in the same
+        // [`SchemaBuilder::validate`] and raises
+        // [`SchemaErrorKind::DuplicateImplementsInterface`] at EVERY repeated position, carrying
+        // that position's own span and the first occurrence's as its related one — so a document
+        // that reaches this loop with a duplicate is already refused, and every span a second
+        // occurrence could name here is one the error list already names. Five of the six rules
+        // below blame the implementor's own field or argument, so a second occurrence's report is
+        // equal to the first's byte for byte; the sixth,
+        // [`SchemaErrorKind::MissingInterfaceField`], blames the `entry`, and that span is
+        // exactly its duplicate diagnostic's. Reporting once, at the first entry, therefore
+        // removes repetitions and no reason. Checked over 200 000 random documents: no verdict
+        // moves, no `is_exhaustive` moves, the 29 230 accepted schemas' fingerprints are
+        // identical, and the remaining list is a SUBSEQUENCE of the old one on every document —
+        // so nothing is added and nothing reorders. 649 352 diagnostics go, 589 007 of them
+        // byte-identical copies of one still in the list and 60 345 of them
+        // `MissingInterfaceField` at a span some `DuplicateImplementsInterface` still names, with
+        // that diagnostic's own related span carrying the surviving copy. Nothing else.
+        //
+        // PROMOTED HERE AND NOT INSIDE THE ENUMERATION, so that this is the same dedup on both
+        // sides of [`MAX_MISSING_TRANSITIVE_INTERFACES`]. A mark set under `!truncated` would
+        // make which entries are read depend on where the ceiling fell, and a document that
+        // truncated would then report its later duplicates again.
+        if declared_here[interface] == ROOTED {
+          continue;
+        }
+        declared_here[interface] = ROOTED;
+
         // Transitivity: every interface reachable from a declared one must also be declared here.
         //
         // # The enumeration is HERE, and it is charged to what it reports
@@ -4805,8 +4843,9 @@ impl SchemaBuilder {
         // by an invariant over where the frontier is pushed. It has exactly two push sites and
         // each is charged to something the document wrote:
         //
-        // * the ROOT push, once per DISTINCT declared entry — the `ROOTED` mark is what makes it
-        //   once, and it is charged to a resolved `implements` reference;
+        // * the ROOT push, once per DISTINCT declared entry — the `ROOTED` mark set just above
+        //   this block is what makes it once, and it is charged to a resolved `implements`
+        //   reference;
         // * the TRANSITIVE push, immediately below `named += 1` and reachable only through the
         //   `reached` mark, so it is charged to a diagnostic and stops with the ceiling.
         //
@@ -4850,8 +4889,7 @@ impl SchemaBuilder {
         // and `Θ(K²)` here — 1.71 in the exponent over 1 k–16 k, 1.87 over the top step and
         // **187.3 ms** at `K` = 16 000, on a schema `Schema::build` **accepts**. Writing `I` first
         // instead hides the whole product, which is why the fixture writes it last.
-        if !truncated && declared_here[interface] != ROOTED {
-          declared_here[interface] = ROOTED;
+        if !truncated {
           frontier.push(interface as u32);
           while let Some(current) = frontier.pop() {
             // `closure` and not `implements`: [`SchemaBuilder::compute_closures`] has already
@@ -4910,13 +4948,13 @@ impl SchemaBuilder {
         // schema written once, 4.584 MB and 4.71 ms against 4.535 MB and 4.58 ms, the difference
         // being exactly the 8 192 names.
         //
-        // WHAT THIS DOES NOT REPAIR is the trip count. `type T implements I & I & … & I` reads the
-        // whole of `I`'s field list once per occurrence, which is `Θ(entries × fields)` on a
-        // document already refused for the duplicate itself, and the residue above is that loop
-        // with the allocation taken out of it. Deduplicating HERE is not the same decision as
-        // deduplicating the transitivity root: a duplicate entry has a span of its own and every
-        // rule below blames it, so `type T implements I & I` missing a field of `I` reports it
-        // twice today, once per entry. That is a diagnostic change and it is not this commit's.
+        // THE TRIP COUNT IS THE `ROOTED` GUARD'S, above. This loop reads `I`'s whole field list,
+        // and it used to read it once per occurrence of `I` in the declared list — `Θ(entries ×
+        // fields)`, on a document already refused for the duplicate itself. What made that a
+        // decision rather than a patch is that a duplicate entry has a span of its own and
+        // [`SchemaErrorKind::MissingInterfaceField`] blames it; the guard's own comment carries
+        // why that span is one the error list already names, and therefore why reporting once, at
+        // the first entry, is the same information.
         let interface_fields: &[RawField] = &model.types[interface].fields;
         for interface_field in interface_fields {
           let Some(position) = positions.of(interface_field.name.sym) else {
