@@ -24,7 +24,8 @@ use smear::{
   parser::graphql::{
     GraphQL,
     ast::{
-      Described, Name, ScalarTypeDefinition, TypeDefinition, TypeSystemDefinition,
+      ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList,
+      Described, Name, Nested, ScalarTypeDefinition, TypeDefinition, TypeSystemDefinition,
       TypeSystemDefinitionOrExtension, TypeSystemDocument,
     },
     error::GraphqlErrors,
@@ -1139,6 +1140,88 @@ type Query @v(p: [{ x: 1 }, { x: \"no\" }]) { ok: Int }";
   assert_eq!(error.subject(), "p");
   let span = error.span();
   assert_eq!(&SDL[span.start()..span.end()], "\"no\"");
+}
+
+/// A literal deeper than any parse can carry is reduced, checked and released without recursing.
+///
+/// # What was wrong
+///
+/// `SchemaBuilder::const_value` descended a constant literal one native frame per level, on the
+/// argument that the AST came from a recursive-descent parser and would be dropped recursively
+/// anyway. Neither half holds. The route below is public — a scalar definition, a const directive,
+/// a const argument, a const list — so the literal is built with a loop and no parser sees it; and
+/// al8n/smear#199 gave the value tree an iterative release, so the drop that was supposed to give
+/// out first no longer does. `type_ref`, `check_const_value`, `map_nodes` and `RawValue`'s own
+/// release were the same shape, each one the next to give out as the one in front of it was
+/// repaired.
+///
+/// Measured at `8b73965`, `aarch64-apple-darwin`, unoptimised, one child process per depth with the
+/// document built on another thread: `Schema::build` over exactly this shape aborted at **1 545**
+/// levels on a 2 MiB thread — libtest's own — 389 on 512 KiB and 196 on 256 KiB.
+///
+/// # There is no red side here
+///
+/// A stack overflow is `SIGABRT`, which no `#[should_panic]` sees and which takes the harness with
+/// it, so what this pins is the green side: the build returns on a stack far too small to have held
+/// the recursion. The fixture picks its own stack for the reason `ast_release.rs` does — on
+/// libtest's 2 MiB the old boundary was 1 545 and a 20 000-level fixture would have proved the same
+/// thing more expensively, while a 512 KiB thread puts it fifty times past the boundary and costs
+/// nothing, since a walk that does not recurse needs no more stack at 20 000 levels than at one.
+/// `Schema::build` has a fixed floor of about 160 KiB of its own — it parses the built-in SDL — so
+/// the thread cannot be smaller than that whatever the literal does.
+#[test]
+fn a_hand_built_literal_deeper_than_any_parse_is_reduced_without_recursing() {
+  /// Fifty times the depth at which this aborted on [`STACK`] before the repair.
+  const DEPTH: usize = 20_000;
+  /// Above `Schema::build`'s own fixed floor and far below what the old recursion needed.
+  const STACK: usize = 512 * 1024;
+
+  std::thread::Builder::new()
+    .stack_size(STACK)
+    .spawn(|| {
+      let span = SimpleSpan::const_new(0, 0);
+      let empty = || ConstInputValue::List(ConstList::new(span, Nested::empty()));
+      let mut value = empty();
+      for _ in 0..DEPTH {
+        value = ConstInputValue::List(ConstList::new(span, Nested::new(vec![value])));
+      }
+
+      let directive = ConstDirective::new(
+        span,
+        Name::new(span, "x"),
+        Some(ConstArguments::new(
+          span,
+          vec![ConstArgument::new(span, Name::new(span, "a"), value)],
+        )),
+      );
+      let scalar = ScalarTypeDefinition::new(
+        span,
+        Name::new(span, "Foo"),
+        Some(ConstDirectives::new(span, vec![directive])),
+      );
+      let document = TypeSystemDocument::<&str>::new(
+        span,
+        vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+          span,
+          None,
+          TypeSystemDefinition::Type(TypeDefinition::Scalar(scalar)),
+        ))],
+      );
+
+      // The verdict is beside the point — `@x` is undefined, so this refuses — and the point is
+      // that it refuses at all instead of aborting, and that the `RawValue` it built is released on
+      // the way out without a frame per level either.
+      let refused = Schema::build(&document).expect_err("`@x` is not a defined directive");
+      assert!(
+        refused
+          .iter()
+          .any(|error| matches!(error.kind(), SchemaErrorKind::UndefinedDirective)),
+        "{refused}"
+      );
+    })
+    .expect("a fixture thread")
+    .join()
+    .expect("the fixture thread returned");
 }
 
 /// The one kind no parsed document can reach, reached the only other way it can be.

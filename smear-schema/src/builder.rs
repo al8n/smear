@@ -30,7 +30,7 @@ use tokora::{Parse as _, Parser, SimpleSpan, span::AsSpan};
 use smear_parser::graphql::{
   GraphQL,
   ast::{
-    ConstDirectives, ConstInputValue, DirectiveDefinition, EnumTypeDefinition,
+    ConstDirectives, ConstInputValue, ConstObjectField, DirectiveDefinition, EnumTypeDefinition,
     EnumValuesDefinition, FieldsDefinition, ImplementInterfaces, InputFieldsDefinition,
     InputObjectTypeDefinition, InputValueDefinition, InterfaceTypeDefinition, Location, Name,
     ObjectTypeDefinition, OperationType, ScalarTypeDefinition, SchemaDefinition, Type,
@@ -48,8 +48,9 @@ use super::{
   literal::{BuiltInScalar, LiteralShape},
   repr::{
     DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
-    MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, NameIndex, PackedType, Range32,
-    RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_reserved,
+    MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType,
+    Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name,
+    is_reserved,
   },
 };
 
@@ -755,6 +756,96 @@ struct RawArgument {
 struct RawValue {
   span: SimpleSpan,
   shape: RawShape,
+}
+
+/// A container of children a release has taken over but not drained.
+enum Spent {
+  /// A list literal's entries, drained where they were allocated.
+  Values(vec::IntoIter<RawValue>),
+  /// An object literal's fields, drained where they were allocated.
+  Fields(vec::IntoIter<RawObjectField>),
+}
+
+/// Hands `shape`'s children over, leaving it a leaf.
+///
+/// `mem::take` rather than a read: the container is moved out whole, so no element is ever copied
+/// from one buffer to another and the caller can release what is left in a single frame.
+fn spend(shape: &mut RawShape, sources: &mut Vec<Spent>) {
+  match shape {
+    RawShape::List(values) if !values.is_empty() => {
+      sources.push(Spent::Values(core::mem::take(values).into_iter()));
+    }
+    RawShape::Object(fields) if !fields.is_empty() => {
+      sources.push(Spent::Fields(core::mem::take(fields).into_iter()));
+    }
+    _ => {}
+  }
+}
+
+impl Drop for RawValue {
+  /// Releases a literal without a native frame per level.
+  ///
+  /// # Why this exists at all
+  ///
+  /// [`SchemaBuilder::const_value`] builds one of these for every constant literal in the document,
+  /// mirroring the literal's own shape, and the literal's depth is the caller's:
+  /// [`Schema::build`] takes a `&TypeSystemDocument<S>` and every carrier on the route to a const
+  /// directive argument has a public constructor. Making that reduction a loop moved the abort
+  /// rather than removing it — measured on `aarch64-apple-darwin`, unoptimised, with the document
+  /// built on another thread, `Schema::build` went from dying at **1 545** levels of list literal on
+  /// a 2 MiB thread to dying at **7 737**, and the second number is this glue at 271 bytes a level
+  /// where the reduction cost 1 357. A release is not a call anyone makes and there is no
+  /// diagnostic to return, so it goes the same way the parser's value tree went in al8n/smear#199.
+  ///
+  /// # The invariant
+  ///
+  /// **Anything not handed over is released here, so anything not handed over must be a leaf.** A
+  /// child released inside this loop re-enters this `drop`, and that is exactly two frames deep
+  /// because [`spend`] has already emptied its container: the re-entered call finds nothing to hand
+  /// over, allocates nothing, and returns.
+  ///
+  /// A source is dropped the moment its last child is taken, so a chain of one-element lists costs
+  /// one entry at any depth rather than one per level; a container is taken over whole, so a
+  /// literal of a million scalars costs one entry too. What is left is one entry per ancestor with
+  /// an unvisited child — the literal's *branching* nesting.
+  ///
+  /// # What this does not repair
+  ///
+  /// The derived `Debug` and `Clone` still descend one frame per level. Neither is reachable today:
+  /// nothing in this crate formats or clones a [`RawValue`], and the type is private. What this
+  /// removes is the one of the three that fires without a call being made.
+  fn drop(&mut self) {
+    let mut sources: Vec<Spent> = Vec::new();
+    spend(&mut self.shape, &mut sources);
+    loop {
+      let mut value = match sources.last_mut() {
+        None => return,
+        Some(Spent::Values(rest)) => {
+          let Some(value) = rest.next() else {
+            sources.pop();
+            continue;
+          };
+          if rest.as_slice().is_empty() {
+            sources.pop();
+          }
+          value
+        }
+        Some(Spent::Fields(rest)) => {
+          let Some(field) = rest.next() else {
+            sources.pop();
+            continue;
+          };
+          if rest.as_slice().is_empty() {
+            sources.pop();
+          }
+          // The name is a `Located`, which owns nothing this loop can reach.
+          field.value
+        }
+      };
+      spend(&mut value.shape, &mut sources);
+      // Released here with an empty container: one re-entry, no descent.
+    }
+  }
 }
 
 /// The literal itself.
@@ -1864,41 +1955,162 @@ impl SchemaBuilder {
 
   /// Reduces a constant literal to the shape and spelling a type check reads.
   ///
-  /// Recursive, and bounded the same way [`SchemaBuilder::type_ref`] is: the AST handed in was
-  /// built by a recursive-descent parser and will be dropped recursively, so a literal deep enough
-  /// to overflow here could not have been parsed in the first place. That is not true of the type
-  /// *graph*, which is why the cycle walks in this file are iterative and this is not.
+  /// # Why this is a loop
+  ///
+  /// It recursed, on the argument that the AST handed in was built by a recursive-descent parser
+  /// and would be dropped recursively, so a literal deep enough to overflow here could not have
+  /// been parsed in the first place. **Neither half of that argument holds.**
+  ///
+  /// The parser is not the only way in. [`Schema::build`] and [`SchemaBuilder::document`] take a
+  /// `&TypeSystemDocument<S>`, and the carriers on the route to a constant literal — a scalar
+  /// definition, a const directive, a const argument, and the value enum itself — each have a
+  /// public constructor, so `scalar Foo @x(a: [[[…]]])` is safe code no parse ever saw. And
+  /// al8n/smear#199 gave the value tree an iterative release, so the drop that was supposed to give
+  /// out first no longer does.
+  ///
+  /// Measured on `aarch64-apple-darwin`, unoptimised, one child process per depth with the document
+  /// built on another thread: `Schema::build` over exactly that document aborted at **1 545** levels
+  /// of list literal on a 2 MiB thread — libtest's, tokio's and `std::thread::spawn`'s — 389 on
+  /// 512 KiB and 196 on 256 KiB. An object literal is worse by about a tenth.
+  ///
+  /// # What the loop holds
+  ///
+  /// One frame per **open container**, holding the output vector that container is being built
+  /// into, and the *borrowed* iterator over its remaining children. Children are never copied into
+  /// a work list, so the peak follows the literal's nesting and not its width.
+  ///
+  /// **It is not free, and it is not smaller than what it builds.** Measured on the same host, as
+  /// peak live bytes across the whole `Schema::build`: a flat literal of N empty lists peaks at
+  /// **48 bytes an entry**, which is the [`RawValue`] tree and nothing else — one frame serves the
+  /// whole width. A chain of N one-element lists peaks at **199 to 223 bytes a level** against the
+  /// same 48 of output, because there is a frame per level and the `Vec` holding them doubles, so
+  /// where the reading falls inside a doubling is most of that band's width. So on the adversarial
+  /// shape the frames are about three times the tree they are producing — which is the honest bound
+  /// rather than a constant one, and it buys a build that returns `SchemaErrors` where it used to
+  /// abort.
+  ///
+  /// An object field's name is interned when the field is reached and not when it is queued, so the
+  /// symbols are minted in the same order the recursion minted them; the name waits on its own
+  /// frame while the value below it is reduced, which is what `pending` is for.
   fn const_value<S>(&mut self, value: &ConstInputValue<S>) -> RawValue
   where
     S: AsRef<[u8]>,
   {
-    let span = *value.as_span();
-    let shape = match value {
-      ConstInputValue::Null(_) => RawShape::Null,
-      ConstInputValue::Boolean(_) => RawShape::Boolean,
-      ConstInputValue::String(_) => RawShape::String,
-      ConstInputValue::Int(int) => RawShape::Int(int.source().as_ref().into()),
-      ConstInputValue::Float(float) => RawShape::Float(float.source().as_ref().into()),
-      ConstInputValue::Enum(member) => RawShape::Enum(member.source().as_ref().into()),
-      ConstInputValue::List(list) => RawShape::List(
-        list
-          .values()
-          .iter()
-          .map(|entry| self.const_value(entry))
-          .collect(),
-      ),
-      ConstInputValue::Object(object) => RawShape::Object(
-        object
-          .fields()
-          .iter()
-          .map(|field| RawObjectField {
-            name: self.located(field.name()),
-            value: self.const_value(field.value()),
-          })
-          .collect(),
-      ),
-    };
-    RawValue { span, shape }
+    /// A container whose children are still being reduced.
+    enum Frame<'a, S> {
+      List {
+        span: SimpleSpan,
+        values: Vec<RawValue>,
+        rest: core::slice::Iter<'a, ConstInputValue<S>>,
+      },
+      Object {
+        span: SimpleSpan,
+        fields: Vec<RawObjectField>,
+        /// The name of the field whose value is being reduced right now.
+        ///
+        /// One at a time, because the walk is depth-first: a frame reaches its next field only
+        /// once the previous field's whole subtree has been folded into `fields`.
+        pending: Option<Located>,
+        rest: core::slice::Iter<'a, ConstObjectField<S>>,
+      },
+    }
+
+    let mut frames: Vec<Frame<'_, S>> = Vec::new();
+    let mut answer: Option<RawValue> = None;
+    let mut current: Option<&ConstInputValue<S>> = Some(value);
+
+    loop {
+      let Some(value) = current.take() else {
+        // Nothing in hand: take the next child of the innermost open container, or close it.
+        match frames.last_mut() {
+          None => break,
+          Some(Frame::List { rest, .. }) => match rest.next() {
+            Some(entry) => current = Some(entry),
+            None => {
+              let Some(Frame::List { span, values, .. }) = frames.pop() else {
+                unreachable!("the frame just matched as a list")
+              };
+              emit(
+                &mut frames,
+                &mut answer,
+                RawValue {
+                  span,
+                  shape: RawShape::List(values),
+                },
+              );
+            }
+          },
+          Some(Frame::Object { rest, pending, .. }) => match rest.next() {
+            Some(field) => {
+              *pending = Some(self.located(field.name()));
+              current = Some(field.value());
+            }
+            None => {
+              let Some(Frame::Object { span, fields, .. }) = frames.pop() else {
+                unreachable!("the frame just matched as an object")
+              };
+              emit(
+                &mut frames,
+                &mut answer,
+                RawValue {
+                  span,
+                  shape: RawShape::Object(fields),
+                },
+              );
+            }
+          },
+        }
+        continue;
+      };
+
+      let span = *value.as_span();
+      let shape = match value {
+        ConstInputValue::Null(_) => RawShape::Null,
+        ConstInputValue::Boolean(_) => RawShape::Boolean,
+        ConstInputValue::String(_) => RawShape::String,
+        ConstInputValue::Int(int) => RawShape::Int(int.source().as_ref().into()),
+        ConstInputValue::Float(float) => RawShape::Float(float.source().as_ref().into()),
+        ConstInputValue::Enum(member) => RawShape::Enum(member.source().as_ref().into()),
+        ConstInputValue::List(list) => {
+          let entries = list.values();
+          frames.push(Frame::List {
+            span,
+            values: Vec::with_capacity(entries.len()),
+            rest: entries.iter(),
+          });
+          continue;
+        }
+        ConstInputValue::Object(object) => {
+          let fields = object.fields();
+          frames.push(Frame::Object {
+            span,
+            fields: Vec::with_capacity(fields.len()),
+            pending: None,
+            rest: fields.iter(),
+          });
+          continue;
+        }
+      };
+      emit(&mut frames, &mut answer, RawValue { span, shape });
+    }
+
+    /// Folds a finished value into the container it belongs to, or into the answer.
+    fn emit<S>(frames: &mut [Frame<'_, S>], answer: &mut Option<RawValue>, value: RawValue) {
+      match frames.last_mut() {
+        None => *answer = Some(value),
+        Some(Frame::List { values, .. }) => values.push(value),
+        Some(Frame::Object {
+          fields, pending, ..
+        }) => fields.push(RawObjectField {
+          name: pending
+            .take()
+            .expect("an object frame reached a value with no field name waiting on it"),
+          value,
+        }),
+      }
+    }
+
+    answer.expect("the walk folds exactly one value into the answer")
   }
 
   fn fields<S>(&mut self, fields: Option<&FieldsDefinition<S>>) -> Vec<RawField>
@@ -2005,50 +2217,76 @@ impl SchemaBuilder {
   }
 
   /// Flattens a type reference into a base name plus a wrapper word.
+  ///
+  /// # The chain is walked once and remembered in a fixed window
+  ///
+  /// This recursed, one native frame per `[`, on the argument [`SchemaBuilder::const_value`]'s
+  /// header used to make for both of them: the AST came from a recursive-descent parser and would
+  /// be dropped recursively anyway. **Neither half of that holds.** `Type: From<ListType<Self>>` is
+  /// public, so the chain is built with a loop and no parser sees it; and al8n/smear#199 gave the
+  /// enum an iterative release, so the drop that was supposed to give out first no longer does.
+  /// Measured on `aarch64-apple-darwin`, unoptimised, one child process per depth with the document
+  /// built on another thread: `Schema::build` over `type Q { f: [[…Int…]] }` aborted at **4 524**
+  /// brackets on a 2 MiB thread and **570** on 256 KiB.
+  ///
+  /// The wrappers are applied innermost first and the chain is walked outermost first, so something
+  /// has to be remembered across the turn. It is **not** the chain: [`PackedType`] holds
+  /// [`MAX_WRAPPERS`] codes and saturates, and every list level costs at least one code, so no level
+  /// outside the innermost `MAX_WRAPPERS` can change either the word or the `too_deep` flag. What is
+  /// kept is a ring of that many `required` bits — a fixed 15 bytes, at any depth.
   fn type_ref<S>(&mut self, ty: &Type<Name<S>>) -> RawTypeRef
   where
     S: AsRef<[u8]>,
   {
-    match ty {
-      Type::Name(named) => {
-        let base = self.located(named.name());
-        let packed = PackedType::named(base.sym, UNRESOLVED);
-        let (packed, too_deep) = if named.required() {
-          match packed.push_non_null() {
-            Some(packed) => (packed, false),
-            None => (packed, true),
-          }
-        } else {
-          (packed, false)
-        };
-        RawTypeRef {
-          base,
-          span: *named.span(),
-          packed,
-          too_deep,
+    /// The innermost levels whose `required` bit can still reach the packed word.
+    const WINDOW: usize = MAX_WRAPPERS as usize;
+
+    // The outermost span is the reference's, and the walk below leaves it behind at the first step.
+    let span = match ty {
+      Type::Name(named) => *named.span(),
+      Type::List(list) => *list.span(),
+    };
+    let mut window = [false; WINDOW];
+    let mut levels = 0usize;
+    let mut cursor = ty;
+    let named = loop {
+      match cursor {
+        Type::Name(named) => break named,
+        Type::List(list) => {
+          window[levels % WINDOW] = list.required();
+          levels += 1;
+          cursor = list.ty();
         }
       }
-      Type::List(list) => {
-        let inner = self.type_ref(list.ty());
-        let mut too_deep = inner.too_deep;
-        let mut packed = inner.packed;
-        match packed.push_list() {
-          Some(next) => packed = next,
-          None => too_deep = true,
+    };
+
+    let base = self.located(named.name());
+    let mut packed = PackedType::named(base.sym, UNRESOLVED);
+    // A level the window could not hold is a level whose `list` code the word had no room for:
+    // `WINDOW` levels fill it on their own, so anything past that is refused before it is read.
+    let mut too_deep = levels > WINDOW;
+    let push =
+      |packed: &mut PackedType, too_deep: &mut bool, code: fn(PackedType) -> Option<PackedType>| {
+        match code(*packed) {
+          Some(next) => *packed = next,
+          None => *too_deep = true,
         }
-        if list.required() {
-          match packed.push_non_null() {
-            Some(next) => packed = next,
-            None => too_deep = true,
-          }
-        }
-        RawTypeRef {
-          base: inner.base,
-          span: *list.span(),
-          packed,
-          too_deep,
-        }
+      };
+    if named.required() {
+      push(&mut packed, &mut too_deep, PackedType::push_non_null);
+    }
+    for level in (levels.saturating_sub(WINDOW)..levels).rev() {
+      push(&mut packed, &mut too_deep, PackedType::push_list);
+      if window[level % WINDOW] {
+        push(&mut packed, &mut too_deep, PackedType::push_non_null);
       }
+    }
+
+    RawTypeRef {
+      base,
+      span,
+      packed,
+      too_deep,
     }
   }
 
@@ -3398,6 +3636,24 @@ impl SchemaBuilder {
   /// input-object literal naming a field the type does not declare, or omitting a required one, is
   /// the same mistake with the same coordinate wherever the literal is written, and giving it two
   /// names would say otherwise.
+  ///
+  /// # Why it is a loop
+  ///
+  /// It descended one native frame per level of literal, through two sites: a list entry offered to
+  /// the item type, and an input-object field offered to its declared type. The first is bounded —
+  /// [`PackedType`] holds [`MAX_WRAPPERS`] wrappers and a list position past that has no item type
+  /// to strip — and **the second is not**: `input A { a: A }` is a legal nullable self-reference, so
+  /// `{ a: { a: … } }` offered to `A` descends as far as the literal goes. Measured on
+  /// `aarch64-apple-darwin`, unoptimised, one child process per depth with the document built on
+  /// another thread: `Schema::build` over exactly that aborted at **1 327** levels on a 2 MiB
+  /// thread, 334 on 512 KiB and 168 on 256 KiB — shallower than
+  /// [`SchemaBuilder::const_value`]'s own boundary, so it is the first thing to give out once that
+  /// one is a loop.
+  ///
+  /// What replaces the frames is one entry per **open literal**, holding the borrowed iterator over
+  /// what is left of it. Nothing about which diagnostic is reported, in what order, or with which
+  /// span changes: a level's fields are all offered before the level is closed, and the omitted-
+  /// required pass runs at that close, exactly where the frame used to return.
   fn check_const_value(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
@@ -3406,6 +3662,34 @@ impl SchemaBuilder {
     expected: PackedType,
     blame: Blame,
   ) {
+    /// A container the check has opened and not finished.
+    ///
+    /// One entry per **open literal**, holding the borrowed iterator over what is left of it — so
+    /// the peak follows the literal's nesting and never its width, and no entry is ever a copy of a
+    /// child. That is the same shape [`SchemaBuilder::const_value`] builds the literal with.
+    enum Level<'a> {
+      /// A list literal's entries, every one of them offered to the same item type.
+      Entries {
+        rest: core::slice::Iter<'a, RawValue>,
+        item: PackedType,
+      },
+      /// An input-object literal's fields, plus what the omitted-required pass will need once they
+      /// run out.
+      Fields {
+        rest: core::slice::Iter<'a, RawObjectField>,
+        base: usize,
+        written: &'a [RawObjectField],
+        span: SimpleSpan,
+      },
+    }
+
+    /// What the innermost open level had left, read without holding a borrow on the stack.
+    enum Step<'a> {
+      Entry(&'a RawValue, PackedType),
+      Field(&'a RawObjectField, usize),
+      Close,
+    }
+
     let reject = |errors: &mut Vec<SchemaError>, span| {
       let subject = model.text(blame.subject).to_owned();
       push_at(
@@ -3418,152 +3702,193 @@ impl SchemaBuilder {
       );
     };
 
-    if matches!(value.shape, RawShape::Null) {
-      if expected.is_non_null() {
-        reject(errors, value.span);
-      }
-      return;
-    }
+    let mut levels: Vec<Level<'_>> = Vec::new();
+    let mut current: Option<(&RawValue, PackedType)> = Some((value, expected));
 
-    // Strip the outer non-null, then apply the singleton-to-list coercion: a non-list value in a
-    // list position is the one-element list containing it, at any depth.
-    let mut expected = expected.nullable();
-    while expected.is_list() && !matches!(value.shape, RawShape::List(_)) {
-      let Some(item) = expected.list_item() else {
-        break;
-      };
-      expected = item.nullable();
-    }
-
-    if expected.is_list() {
-      let (Some(item), RawShape::List(entries)) = (expected.list_item(), &value.shape) else {
-        return;
-      };
-      for entry in entries {
-        Self::check_const_value(model, errors, names, entry, item, blame);
-      }
-      return;
-    }
-
-    let base = expected.base_id();
-    if base == UNRESOLVED {
-      return;
-    }
-    let base = base.get() as usize;
-
-    match model.types[base].kind {
-      TypeKind::InputObject => {
-        let RawShape::Object(fields) = &value.shape else {
-          reject(errors, value.span);
-          return;
+    loop {
+      let Some((value, expected)) = current.take() else {
+        let step = match levels.last_mut() {
+          None => return,
+          Some(Level::Entries { rest, item }) => match rest.next() {
+            Some(entry) => Step::Entry(entry, *item),
+            None => Step::Close,
+          },
+          Some(Level::Fields { rest, base, .. }) => match rest.next() {
+            Some(field) => Step::Field(field, *base),
+            None => Step::Close,
+          },
         };
-        // The literal is named by the input object it is being offered to, not by the argument
-        // that carries it: `In.y` is what apollo's `UndefinedInputValue` says and what a nested
-        // literal needs, because `Query.@v.p` cannot tell an offending field of the outer object
-        // from one of the inner. The span still points at the field, so the usage is one lookup
-        // away.
-        let object = Coordinate::named(model.types[base].name.sym);
-        let declared = &model.types[base].input_fields;
-        // One index per input OBJECT, held by the caller and shared by every literal offered to
-        // this type — the nested entry the recursion below is about to offer to a second one
-        // included. A value per literal is what this was, and it was live across that recursion
-        // and built again for every sibling; [`DeclaredNames`] carries what that cost.
-        for field in fields {
-          let Some(expected) = names
-            .first(model.types, base, field.name.sym)
-            .map(|at| &declared[at])
-          else {
-            // Draft 5.6.2's SDL twin.
-            let name = model.text(field.name.sym).to_owned();
-            push_owned(
-              errors,
-              SchemaErrorKind::UndefinedInputObjectField,
-              &name,
-              model.owner(object),
-              field.name,
-            );
+        match step {
+          Step::Entry(entry, item) => current = Some((entry, item)),
+          Step::Field(field, base) => {
+            let object = Coordinate::named(model.types[base].name.sym);
+            let Some(declared) = names
+              .first(model.types, base, field.name.sym)
+              .map(|at| &model.types[base].input_fields[at])
+            else {
+              // Draft 5.6.2's SDL twin.
+              let name = model.text(field.name.sym).to_owned();
+              push_owned(
+                errors,
+                SchemaErrorKind::UndefinedInputObjectField,
+                &name,
+                model.owner(object),
+                field.name,
+              );
+              continue;
+            };
+            // Draft 5.6.4's SDL twin, the explicit-`null` half. Reported here rather than let
+            // through to the value check below so that `{ x: null }` for a required `x` produces
+            // the obligation once, and not also a non-null coercion failure.
+            if declared.is_required() && matches!(field.value.shape, RawShape::Null) {
+              let name = model.text(field.name.sym).to_owned();
+              push_at(
+                errors,
+                SchemaErrorKind::MissingRequiredInputObjectField,
+                &name,
+                model.owner(object),
+                field.value.span,
+                blame.document,
+              );
+              continue;
+            }
+            current = Some((&field.value, declared.ty.packed));
+          }
+          Step::Close => {
+            let Some(Level::Fields {
+              base,
+              written,
+              span,
+              ..
+            }) = levels.pop()
+            else {
+              // A list level has nothing owed when its entries run out.
+              continue;
+            };
+            // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself
+            // is what the omission is blamed on — the same choice `check_directive_arguments` makes
+            // for an omitted required argument.
+            //
+            // Over the required positions rather than over the declaration, and the literal indexed
+            // rather than rescanned: the two factors of the same product, one bounded by what this
+            // reports and the other by [`Names`] — which stays a value per list here, because what
+            // it indexes is the literal's own entries and no type keys those. It is built once this
+            // level's fields are all done and dropped before the next step, so no second one is
+            // ever live under it. Source order is the declaration's either way, because
+            // `required_input_fields` is filled by ascending position.
+            let object = Coordinate::named(model.types[base].name.sym);
+            let required = &model.types[base].required_input_fields;
+            let of_written = Names::over(written.len(), required.len(), |at| written[at].name.sym);
+            for &position in required {
+              let declared = &model.types[base].input_fields[position as usize];
+              if of_written
+                .first(written.len(), declared.name.sym, |at| written[at].name.sym)
+                .is_some()
+              {
+                continue;
+              }
+              let name = model.text(declared.name.sym).to_owned();
+              push_at(
+                errors,
+                SchemaErrorKind::MissingRequiredInputObjectField,
+                &name,
+                model.owner(object),
+                span,
+                blame.document,
+              );
+            }
+          }
+        }
+        continue;
+      };
+
+      if matches!(value.shape, RawShape::Null) {
+        if expected.is_non_null() {
+          reject(errors, value.span);
+        }
+        continue;
+      }
+
+      // Strip the outer non-null, then apply the singleton-to-list coercion: a non-list value in a
+      // list position is the one-element list containing it, at any depth.
+      let mut expected = expected.nullable();
+      while expected.is_list() && !matches!(value.shape, RawShape::List(_)) {
+        let Some(item) = expected.list_item() else {
+          break;
+        };
+        expected = item.nullable();
+      }
+
+      if expected.is_list() {
+        let (Some(item), RawShape::List(entries)) = (expected.list_item(), &value.shape) else {
+          continue;
+        };
+        levels.push(Level::Entries {
+          rest: entries.iter(),
+          item,
+        });
+        continue;
+      }
+
+      let base = expected.base_id();
+      if base == UNRESOLVED {
+        continue;
+      }
+      let base = base.get() as usize;
+
+      match model.types[base].kind {
+        TypeKind::InputObject => {
+          let RawShape::Object(fields) = &value.shape else {
+            reject(errors, value.span);
             continue;
           };
-          // Draft 5.6.4's SDL twin, the explicit-`null` half. Reported here rather than let
-          // through to the value check below so that `{ x: null }` for a required `x` produces the
-          // obligation once, and not also a non-null coercion failure.
-          if expected.is_required() && matches!(field.value.shape, RawShape::Null) {
-            let name = model.text(field.name.sym).to_owned();
-            push_at(
-              errors,
-              SchemaErrorKind::MissingRequiredInputObjectField,
-              &name,
-              model.owner(object),
-              field.value.span,
-              blame.document,
-            );
-            continue;
+          // The literal is named by the input object it is being offered to, not by the argument
+          // that carries it: `In.y` is what apollo's `UndefinedInputValue` says and what a nested
+          // literal needs, because `Query.@v.p` cannot tell an offending field of the outer object
+          // from one of the inner. The span still points at the field, so the usage is one lookup
+          // away. The level below carries the coordinate implicitly, as `base`.
+          //
+          // One index per input OBJECT, held by the caller and shared by every literal offered to
+          // this type — the nested entry the level below is about to offer to a second one
+          // included. A value per literal is what this was, and it was live across that recursion
+          // and built again for every sibling; [`DeclaredNames`] carries what that cost.
+          levels.push(Level::Fields {
+            rest: fields.iter(),
+            base,
+            written: fields,
+            span: value.span,
+          });
+        }
+        TypeKind::Enum => {
+          // One index per ENUM, shared by every literal offered to it, for the reason the input
+          // object's is shared: the declaration is a function of the type, and a list literal writes
+          // as many members as it likes against it. `any` over the declared values, restarted per
+          // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
+          // other three did not reach — see its header.
+          let member = match &value.shape {
+            RawShape::Enum(bytes) => model
+              .interner
+              .lookup(bytes)
+              .is_some_and(|sym| names.has_enum_value(model.types, base, sym)),
+            _ => false,
+          };
+          if !member {
+            reject(errors, value.span);
           }
-          let expected = expected.ty.packed;
-          Self::check_const_value(model, errors, names, &field.value, expected, blame);
         }
-
-        // Draft 5.6.4's SDL twin, the omitted half. Nothing was written, so the literal itself is
-        // what the omission is blamed on — the same choice `check_directive_arguments` makes for
-        // an omitted required argument.
-        //
-        // Over the required positions rather than over the declaration, and the literal indexed
-        // rather than rescanned: the two factors of the same product, one bounded by what this
-        // reports and the other by [`Names`] — which stays a value per list here, because what it
-        // indexes is the literal's own entries and no type keys those. It is built after the
-        // recursion above and dropped before this frame returns, so no second one is ever live
-        // inside it. Source order is the declaration's either way, because
-        // `required_input_fields` is filled by ascending position.
-        let required = &model.types[base].required_input_fields;
-        let of_written = Names::over(fields.len(), required.len(), |at| fields[at].name.sym);
-        for &position in required {
-          let expected = &declared[position as usize];
-          if of_written
-            .first(fields.len(), expected.name.sym, |at| fields[at].name.sym)
-            .is_some()
-          {
-            continue;
+        TypeKind::Scalar => {
+          // A custom scalar accepts every literal, so only the five built-ins have anything to say.
+          let name = model.text(model.types[base].name.sym);
+          let accepted = BuiltInScalar::from_name(name.as_bytes())
+            .is_none_or(|scalar| scalar.accepts(value.shape.shape(), value.shape.spelling()));
+          if !accepted {
+            reject(errors, value.span);
           }
-          let name = model.text(expected.name.sym).to_owned();
-          push_at(
-            errors,
-            SchemaErrorKind::MissingRequiredInputObjectField,
-            &name,
-            model.owner(object),
-            value.span,
-            blame.document,
-          );
         }
+        // An object, interface or union declared as an argument type is already the
+        // `DirectiveArgumentTypeNotInputType` refusal; there is no value that would fit it.
+        TypeKind::Object | TypeKind::Interface | TypeKind::Union => {}
       }
-      TypeKind::Enum => {
-        // One index per ENUM, shared by every literal offered to it, for the reason the input
-        // object's is shared: the declaration is a function of the type, and a list literal writes
-        // as many members as it likes against it. `any` over the declared values, restarted per
-        // written member, is [`DeclaredNames`]'s mechanism in a spelling the sweeps that found the
-        // other three did not reach — see its header.
-        let member = match &value.shape {
-          RawShape::Enum(bytes) => model
-            .interner
-            .lookup(bytes)
-            .is_some_and(|sym| names.has_enum_value(model.types, base, sym)),
-          _ => false,
-        };
-        if !member {
-          reject(errors, value.span);
-        }
-      }
-      TypeKind::Scalar => {
-        // A custom scalar accepts every literal, so only the five built-ins have anything to say.
-        let name = model.text(model.types[base].name.sym);
-        let accepted = BuiltInScalar::from_name(name.as_bytes())
-          .is_none_or(|scalar| scalar.accepts(value.shape.shape(), value.shape.spelling()));
-        if !accepted {
-          reject(errors, value.span);
-        }
-      }
-      // An object, interface or union declared as an argument type is already the
-      // `DirectiveArgumentTypeNotInputType` refusal; there is no value that would fit it.
-      TypeKind::Object | TypeKind::Interface | TypeKind::Union => {}
     }
   }
 
@@ -4907,17 +5232,33 @@ fn set_bit(words: &mut [u64], start: u32, ordinal: u32) {
 /// [`SchemaBuilder::validate_input_object_default_cycles`] hold one work list per level instead of
 /// a second stack for it.
 ///
-/// Recursive — but over a *literal*, whose depth the parser has already bounded, and not over the
-/// type graph, whose depth it has not. That is the same line [`SchemaBuilder::const_value`] draws.
+/// It recursed, on the line [`SchemaBuilder::const_value`] used to draw — over a *literal*, whose
+/// depth the parser has already bounded, rather than over the type graph, whose depth it has not.
+/// **The parser is not the only thing that builds a literal**, and `const_value`'s own header
+/// derives the public route that builds one at any depth. The list nesting is walked with an
+/// explicit stack of borrowed iterators instead: one entry per open list, never one per item, and
+/// document order preserved because each level is drained before the level under it is resumed.
 fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
-  match &value.shape {
-    RawShape::List(items) => {
-      for item in items {
-        map_nodes(item, out);
+  let mut rest: Vec<core::slice::Iter<'a, RawValue>> = Vec::new();
+  let mut current = Some(value);
+  loop {
+    let Some(value) = current.take() else {
+      match rest.last_mut() {
+        None => return,
+        Some(items) => match items.next() {
+          Some(item) => current = Some(item),
+          None => {
+            rest.pop();
+          }
+        },
       }
+      continue;
+    };
+    match &value.shape {
+      RawShape::List(items) => rest.push(items.iter()),
+      RawShape::Object(fields) => out.push(fields),
+      _ => {}
     }
-    RawShape::Object(fields) => out.push(fields),
-    _ => {}
   }
 }
 
