@@ -487,3 +487,139 @@ fn a_deep_literal_formats_without_a_frame_per_level() {
     "an arena renders its size, not one decimal integer per interned byte: {ordinary}"
   );
 }
+
+/// An object type's possible-object bitset is `{itself}` and costs no row of its own.
+///
+/// # The door
+///
+/// `possible` was one `ceil(objects / 64)`-word row per **composite**, and an object is a
+/// composite, so `N` object types cost `N × ceil(N / 64)` words — `Θ(N²)` from `Θ(N)` of ordinary
+/// parsed SDL, with no assembled AST anywhere. Measured on `aarch64-apple-darwin` over SDL
+/// `Schema::build` accepts, at 500/1 000/2 000/4 000 object types each implementing one interface:
+/// 32 512, 129 024, 514 048 and 2 020 032 bytes, ratios per doubling 3.97 / 3.98 / 3.93, which puts
+/// 100 000 object types at about 1.25 GB — reached through an infallible `resize`.
+///
+/// An object's row is a singleton, so the rows overlap inside one shared identity block per bit
+/// position and the same four sizes are 7 744, 16 000, 32 512 and 64 504 bytes: 2.07 / 2.03 / 1.98
+/// per doubling, a constant 0.41x of the SDL that produced them. What this cell pins is that the
+/// sharing did not change an answer — the window really is `{itself}`, at an ordinal past the first
+/// word, and beside a union and an interface that still have rows of their own.
+#[test]
+fn an_objects_bitset_is_itself_and_costs_no_row() {
+  // Past 64 objects, so ordinals span more than one word and the window into a block is not
+  // trivially at offset zero.
+  const OBJECTS: usize = 200;
+  let mut sdl =
+    String::from("type Query { ok: Int }\ninterface Node { id: Int }\nunion Pair = T0 | T199\n");
+  for at in 0..OBJECTS {
+    sdl.push_str(&std::format!("type T{at} implements Node {{ id: Int }}\n"));
+  }
+  let sdl: &'static str = std::boxed::Box::leak(sdl.into_boxed_str());
+  let schema = Schema::build(&parse(sdl)).expect("an ordinary schema");
+
+  let id = |name: &[u8]| schema.type_by_name(name).expect("defined").0;
+  let names = |ids: Vec<TypeId>| {
+    let mut out: Vec<&str> = ids
+      .into_iter()
+      .map(|id| schema.name(schema.type_def(id).name()))
+      .collect();
+    out.sort_unstable();
+    out
+  };
+
+  for at in 0..OBJECTS {
+    let object = id(std::format!("T{at}").as_bytes());
+    assert_eq!(
+      names(schema.possible_object_ids(object).collect()),
+      std::vec![std::format!("T{at}")],
+      "an object's possible set is itself and nothing else"
+    );
+    assert!(schema.is_possible_object(object, object));
+    assert!(schema.possible_objects_intersect(object, id(b"Node")));
+  }
+  assert!(!schema.possible_objects_intersect(id(b"T0"), id(b"T1")));
+  assert_eq!(
+    names(schema.possible_object_ids(id(b"Pair")).collect()),
+    std::vec!["T0", "T199"],
+    "a union still has a row of its own"
+  );
+  assert_eq!(
+    schema.possible_object_ids(id(b"Node")).count(),
+    OBJECTS,
+    "so does an interface"
+  );
+  assert!(schema.possible_objects(id(b"Query")).is_some());
+
+  // `Query` and the 200 `T`s are objects; `Node` and `Pair` are the only rows.
+  let words = schema.possible_words() as usize;
+  assert_eq!(
+    schema.possible.len(),
+    64 * (2 * words - 1) + 2 * words,
+    "one shared block per bit position, and one row per abstract type"
+  );
+  assert!(
+    schema.possible.len() < (OBJECTS + 3) * words,
+    "which is smaller than a row per composite, or the sharing bought nothing"
+  );
+}
+
+/// Exactly at the table's word ceiling it is built; one word past it the build refuses.
+///
+/// Both halves, because a ceiling that only ever refuses is indistinguishable from a prohibition.
+/// [`MAX_POSSIBLE_WORDS`] is four billion words — 34 GB — so this drives [`possible_table`], which
+/// is the whole mechanism with the ceiling as a parameter, exactly as the arena cells drive
+/// [`Interner::intern_within`].
+#[test]
+fn the_possible_table_is_a_price_at_its_ceiling_and_a_refusal_one_past_it() {
+  assert_eq!(
+    MAX_POSSIBLE_WORDS,
+    u32::MAX,
+    "`TypeDef::possible_start` is a `u32` word offset"
+  );
+
+  // 100 objects is two words, so 64 blocks of 3 words; 4 abstract types are 4 rows of 2.
+  let words = 100usize.div_ceil(64) as u32;
+  let exact = 64 * (2 * words as usize - 1) + 4 * words as usize;
+  let table = possible_table(100, 4, words, exact as u32).expect("a table exactly at the ceiling");
+  assert_eq!(table.len(), 64 * (2 * words as usize - 1));
+  assert_eq!(
+    table.capacity(),
+    exact,
+    "reserved once for the whole table, rows included"
+  );
+  assert!(
+    possible_table(100, 4, words, exact as u32 - 1).is_none(),
+    "one word past the ceiling is a refusal"
+  );
+
+  // The dimension that is still quadratic is the one the ceiling is for: abstract types times
+  // objects. Objects alone cost under two words each and cannot reach it.
+  assert!(
+    possible_table(
+      1 << 20,
+      1 << 20,
+      (1u32 << 20).div_ceil(64),
+      MAX_POSSIBLE_WORDS
+    )
+    .is_none(),
+    "a million interfaces beside a million objects is 17 billion words"
+  );
+  assert!(
+    possible_table(1 << 20, 0, (1u32 << 20).div_ceil(64), MAX_POSSIBLE_WORDS).is_some(),
+    "a million objects with no abstract type is two megawords"
+  );
+}
+
+/// A refused table is one diagnostic, and it is the one the build can honestly make.
+#[test]
+fn a_refused_possible_table_is_a_typed_refusal() {
+  let kinds = SchemaErrorKind::ALL
+    .iter()
+    .filter(|kind| kind.code().as_str() == "smear::schema::possible-type-table-too-large")
+    .count();
+  assert_eq!(kinds, 1, "the refusal has a code of its own");
+  assert_eq!(
+    SchemaErrorKind::PossibleTypeTableTooLarge.severity(),
+    crate::diagnostic::Severity::Error
+  );
+}

@@ -9,7 +9,7 @@
 //! stops firing fails. The alternative — a builder exercised only on good input — is the defect
 //! class this suite exists to close, so the floor is checked rather than reviewed.
 //!
-//! Two kinds are excused, each with a written reason, in [`UNFIREABLE`].
+//! The kinds with no fixture are excused, each with a written reason, in [`UNFIREABLE`].
 
 // Every fixture and assertion below calls into `smear::validator`, which does not exist in the
 // crate's API surface with the feature off. Every other file in this directory gates itself to
@@ -98,6 +98,13 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
      are quadratic, and not from anything a test should allocate. `smear-schema`'s \
      `builder::tests` fires it through `Interner::intern_within`, which is the same mechanism \
      with the two ceilings as parameters, and pins the accepting side beside it.",
+  ),
+  (
+    SchemaErrorKind::PossibleTypeTableTooLarge,
+    "the table addresses its words with a 32-bit offset, so the ceiling is four billion `u64` \
+     words — 34 GB — and below it the refusal is the host's allocator saying no. `smear-schema`'s \
+     `builder::tests` fires it through `possible_table`, which is the same mechanism with the \
+     ceiling as a parameter, and pins the accepting side beside it.",
   ),
   (
     SchemaErrorKind::ConstantValueTooDeep,

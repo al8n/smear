@@ -114,6 +114,14 @@ const MAX_ARENA_BYTES: u32 = u32::MAX;
 /// bound a `Sym` can *address*, which is the cast's own question.
 const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
 
+/// The largest possible-object table this addresses, in `u64` words.
+///
+/// `TypeDef::possible_start` is a `u32` **word** offset into one table, so past this a composite's
+/// offset wraps and `Schema::possible_objects` hands back another type's bitset. Derived from that
+/// width and from nothing else; the resource question below it is asked of the allocator rather
+/// than of a constant, because 34 GB is not a number a caller can plan around either.
+const MAX_POSSIBLE_WORDS: u32 = u32::MAX;
+
 /// The growable half of the name arena.
 ///
 /// The finished [`Schema`] keeps `strings` and `spans` and a probe-only [`NameIndex`]; this map
@@ -5478,6 +5486,70 @@ impl SchemaBuilder {
     }
     let possible_words = objects.len().div_ceil(64).max(1) as u32;
 
+    // The possible-object table, sized before a word of it is written.
+    //
+    // # An object's row is a shared slice, not a row of its own
+    //
+    // `possible` was one row of `possible_words` words per *composite*, and an object is a
+    // composite, so an ordinary document of `N` object types — `type T implements Node` repeated,
+    // which is what a generated schema looks like — allocated `N × ceil(N / 64)` words. Measured
+    // on `aarch64-apple-darwin`, over SDL `Schema::build` accepts, ratios per doubling 3.97 / 3.98
+    // / 3.93:
+    //
+    // | object types | SDL bytes | table bytes | over the SDL |
+    // |---|---|---|---|
+    // | 500 | 18 940 | 32 512 | 1.7x |
+    // | 1 000 | 37 940 | 129 024 | 3.4x |
+    // | 2 000 | 76 940 | 514 048 | 6.7x |
+    // | 4 000 | 154 940 | 2 020 032 | 13.0x |
+    //
+    // By that law 100 000 object types — about 2.3 MB of SDL — is 1.25 GB, and the `resize` that
+    // reached it was infallible, so the process aborted. **This one needs no assembled AST**: it is
+    // the only member of the family on the honest population.
+    //
+    // An object's set is a singleton, `{itself}`, so `N` of the `N + abstract` rows differed only
+    // in *where* their one bit was. The rows for objects therefore overlap inside a shared
+    // identity block, one block per bit position: block `b` is `2 × words - 1` words, all zero
+    // except the middle one, which is `1 << b`. The object with ordinal `k` reads the `words`-long
+    // window starting `words - 1 - k / 64` into block `k % 64`, which puts that middle word at
+    // position `k / 64` of the window — exactly the row `set_bit` used to write. The window is
+    // inside its block at both ends because `0 <= k / 64 <= words - 1`.
+    //
+    // Nothing above this changes: `possible_start` is still a word offset, `possible_objects` still
+    // hands back `possible_words` words, and the four readers on `Schema` are untouched. What
+    // changes is the size, from `objects × ceil(objects / 64)` words to `min(64, objects) ×
+    // (2 × ceil(objects / 64) - 1)` — under two words per object, linear — plus one row per
+    // interface and union, which is the term this does not remove.
+    //
+    // # Why the table is materialised at all
+    //
+    // `flatten` never asks the relation: it writes the table and reads nothing back. Every query is
+    // a later caller's, and every one of them is per *request* — draft 5.5.2.3 once per fragment
+    // spread, §6.3's `DoesFragmentTypeApply` once per conditioned selection per response object,
+    // and the executor's abstract-type resolution once per abstract-typed value. Answering on
+    // demand from the tables this is derived from means visiting every type, because a `Schema`
+    // records the relation the other way round — an object names its interfaces, and there is no
+    // implementor list to intersect. Measured in release on the same schemas, one
+    // `possible_objects_intersect` over two disjoint interfaces: **21 ns against 7.656 µs at 4 000
+    // objects, 349x**, and 282x to 393x across the ladder. That trades a startup allocation for
+    // per-request work, which is the opposite of what this module is for.
+    let abstract_rows = raw_types
+      .iter()
+      .filter(|raw| raw.kind.is_abstract())
+      .count();
+    let Some(mut possible) = possible_table(
+      objects.len(),
+      abstract_rows,
+      possible_words,
+      MAX_POSSIBLE_WORDS,
+    ) else {
+      return Err(SchemaErrors::new(vec![SchemaError::new(
+        SchemaErrorKind::PossibleTypeTableTooLarge,
+        "schema",
+        SimpleSpan::default(),
+      )]));
+    };
+
     // Every interface's implementors, from the closures that name them, in one pass over the
     // objects.
     //
@@ -5546,7 +5618,6 @@ impl SchemaBuilder {
     let mut interfaces: Vec<TypeId> = Vec::new();
     let mut members: Vec<TypeId> = Vec::new();
     let mut enum_values: Vec<Sym> = Vec::new();
-    let mut possible: Vec<u64> = Vec::new();
 
     for (index, raw) in raw_types.iter().enumerate() {
       let id = TypeId::new(index as u32);
@@ -5663,32 +5734,34 @@ impl SchemaBuilder {
         _ => Range32::EMPTY,
       };
 
-      let possible_start = if raw.kind.is_composite() {
-        let start = possible.len() as u32;
-        possible.resize(possible.len() + possible_words as usize, 0);
-        match raw.kind {
-          TypeKind::Object => {
-            set_bit(&mut possible, start, ordinal_of[index]);
-          }
-          TypeKind::Union => {
-            for member in &raw.members {
-              if let Some(target) = id_of(member.sym) {
-                let ordinal = ordinal_of[target.get() as usize];
-                set_bit(&mut possible, start, ordinal);
-              }
-            }
-          }
-          TypeKind::Interface => {
-            let row = implementor_base[index] as usize..implementor_base[index + 1] as usize;
-            for &ordinal in &implementors[row] {
+      let possible_start = match raw.kind {
+        // The window into the shared identity block, described where the table is sized. No row is
+        // allocated and no bit is written: the block already says `{itself}`.
+        TypeKind::Object => {
+          let ordinal = ordinal_of[index];
+          (ordinal % 64) * (2 * possible_words - 1) + possible_words - 1 - ordinal / 64
+        }
+        TypeKind::Union => {
+          let start = possible.len() as u32;
+          possible.resize(possible.len() + possible_words as usize, 0);
+          for member in &raw.members {
+            if let Some(target) = id_of(member.sym) {
+              let ordinal = ordinal_of[target.get() as usize];
               set_bit(&mut possible, start, ordinal);
             }
           }
-          _ => {}
+          start
         }
-        start
-      } else {
-        TypeDef::NONE
+        TypeKind::Interface => {
+          let start = possible.len() as u32;
+          possible.resize(possible.len() + possible_words as usize, 0);
+          let row = implementor_base[index] as usize..implementor_base[index + 1] as usize;
+          for &ordinal in &implementors[row] {
+            set_bit(&mut possible, start, ordinal);
+          }
+          start
+        }
+        _ => TypeDef::NONE,
       };
 
       let mut flags = TypeFlags::EMPTY;
@@ -5801,6 +5874,44 @@ impl SchemaBuilder {
       roots,
     })
   }
+}
+
+/// The possible-object table, sized and reserved before a bit of it is written, or `None` when it
+/// does not fit.
+///
+/// Returns the table holding only its **identity blocks** — the shared storage every object type's
+/// bitset is a window into, described in [`SchemaBuilder::flatten`]. One row per interface and
+/// union is appended by the caller as it walks the types.
+///
+/// `max_words` is a parameter rather than [`MAX_POSSIBLE_WORDS`] read inside, for the reason
+/// [`Interner::intern_within`] takes its two: the shipped ceiling is four billion words and no
+/// suite allocates 34 GB, so a cell driven to an injected ceiling exercises the same guard a
+/// document past the real one would. `flatten` adds only the constant.
+fn possible_table(
+  objects: usize,
+  abstract_rows: usize,
+  words: u32,
+  max_words: u32,
+) -> Option<Vec<u64>> {
+  // One block per bit position that some object's ordinal uses, `2 * words - 1` words each.
+  let blocks = objects.min(64) as u64;
+  let block = 2 * words as u64 - 1;
+  // In `u64` throughout: the two products are `Θ(objects)` and `Θ(interfaces × objects / 64)`, and
+  // both overflow a 32-bit `usize` long before they reach the ceiling below.
+  let len = (blocks * block).checked_add(abstract_rows as u64 * words as u64)?;
+  if len > max_words as u64 {
+    return None;
+  }
+  let mut table: Vec<u64> = Vec::new();
+  // Fallible, because this one is reachable from ordinary parsed SDL: an infallible `resize` past
+  // what the host has aborts the process, and there is a `Result` here to answer with instead.
+  table.try_reserve_exact(usize::try_from(len).ok()?).ok()?;
+  for bit in 0..blocks {
+    table.resize(table.len() + words as usize - 1, 0);
+    table.push(1u64 << bit);
+    table.resize(table.len() + words as usize - 1, 0);
+  }
+  Some(table)
 }
 
 fn set_bit(words: &mut [u64], start: u32, ordinal: u32) {

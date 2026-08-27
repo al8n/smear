@@ -115,6 +115,20 @@ pub enum SchemaErrorKind {
   /// `Schema::name`, or inverted the range and panicked.
   TooManyInternedBytes,
 
+  /// The possible-object table does not fit: past `u32::MAX` words, or the host refused it.
+  ///
+  /// A composite type's possible runtime objects are a bitset, `ceil(objects / 64)` words wide, and
+  /// the table addresses each one with a 32-bit word offset. Object rows share one identity block —
+  /// see `SchemaBuilder::flatten` — so `N` object types cost under two words each; what is left is
+  /// one row per interface and union, `interfaces × ceil(objects / 64)` words, and neither
+  /// dimension is bounded by anything but this.
+  ///
+  /// **Reachable from ordinary parsed SDL**, unlike the two ceilings above, which is why the
+  /// allocation is fallible rather than assumed: an infallible `resize` past what the host has
+  /// aborts the process, and a wrapped offset would hand a composite *another* type's bitset back
+  /// through `Schema::possible_objects`. Both are refusals here.
+  PossibleTypeTableTooLarge,
+
   // -- §3.6 Objects, §3.7 Interfaces --------------------------------------------------------
   /// An object or interface type defines no fields (draft §3.6.1, §3.7.1).
   EmptyFieldsDefinition,
@@ -366,6 +380,7 @@ impl SchemaErrorKind {
     Self::InvalidName,
     Self::TooManyNames,
     Self::TooManyInternedBytes,
+    Self::PossibleTypeTableTooLarge,
     Self::EmptyFieldsDefinition,
     Self::DuplicateFieldName,
     Self::ReservedFieldName,
@@ -442,6 +457,7 @@ impl SchemaErrorKind {
       Self::InvalidName => "not a GraphQL name",
       Self::TooManyNames => "too many distinct names",
       Self::TooManyInternedBytes => "too many interned bytes",
+      Self::PossibleTypeTableTooLarge => "possible-object table too large",
       Self::EmptyFieldsDefinition => "type defines no fields",
       Self::DuplicateFieldName => "duplicate field",
       Self::ReservedFieldName => "field name is reserved for introspection",
@@ -546,6 +562,7 @@ impl SchemaErrorKind {
       Self::InvalidName => Code::new("smear::schema::invalid-name"),
       Self::TooManyNames => Code::new("smear::schema::too-many-names"),
       Self::TooManyInternedBytes => Code::new("smear::schema::too-many-interned-bytes"),
+      Self::PossibleTypeTableTooLarge => Code::new("smear::schema::possible-type-table-too-large"),
       Self::EmptyFieldsDefinition => Code::new("smear::schema::empty-fields-definition"),
       Self::DuplicateFieldName => Code::new("smear::schema::duplicate-field-name"),
       Self::ReservedFieldName => Code::new("smear::schema::reserved-field-name"),
@@ -662,6 +679,7 @@ impl SchemaErrorKind {
       | Self::InvalidName
       | Self::TooManyNames
       | Self::TooManyInternedBytes
+      | Self::PossibleTypeTableTooLarge
       | Self::EmptyFieldsDefinition
       | Self::DuplicateFieldName
       | Self::ReservedFieldName
@@ -765,6 +783,9 @@ impl SchemaErrorKind {
       Self::InvalidName => Some("a GraphQL name is spelled `/[_A-Za-z][_0-9A-Za-z]*/`."),
       Self::TooManyInternedBytes => Some(
         "a spelling is addressed by 32-bit byte offsets into one arena, so the arena is bounded; no document reaches the bound, and an assembled AST that does is refused rather than truncated.",
+      ),
+      Self::PossibleTypeTableTooLarge => Some(
+        "one bitset per interface and union, one bit per object type, is what makes a fragment spread's applicability a word comparison; reduce the abstract types or the object types.",
       ),
       Self::EmptyFieldsDefinition => {
         Some("an object or interface type must define at least one field.")
@@ -930,6 +951,7 @@ impl SchemaErrorKind {
       | Self::InvalidName
       | Self::TooManyNames
       | Self::TooManyInternedBytes
+      | Self::PossibleTypeTableTooLarge
       | Self::EmptyFieldsDefinition
       | Self::ReservedFieldName
       | Self::FieldTypeNotOutputType
