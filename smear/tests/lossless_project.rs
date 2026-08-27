@@ -1404,11 +1404,20 @@ fn a_gap_beside_the_document_node_is_counted() {
 /// named three and missed the fourth, which is what a general claim recorded without enumerating
 /// its members looks like when the artifact *is* the enumeration.
 ///
-/// Each carries its own counter now and refuses at `MAX_GREEN_DEPTH`, so an unproved tree is a
-/// `ProjectErrorKind::TooDeep` rather than a stack overflow. The projection doors inherit it
-/// without a counter of their own: every one of them opens with a verification, and
-/// `Verified::new` runs the counted form — so a `Verified` is now proof of the tree's depth as
-/// well as of its bytes.
+/// Each then carried its own counter and refused at `MAX_GREEN_DEPTH` — which is what this cell
+/// pins — and **the counter was not what made them safe**. A counter bounds a depth; the frames
+/// belonged to the host and the stack to whichever thread the caller walked on, so a walk on a
+/// thread too small to hold the ceiling aborted before reaching the refusal. Measured out of suite,
+/// one child process per depth, the tree built on one thread and the walk run on another: 726
+/// levels of `node_extent` and 927 of `reject_holes` on 512 KiB, 566 and 530 of the two
+/// verifications on 256 KiB. None of the four spends a native frame per level now, so the refusal
+/// below is reached on any stack.
+///
+/// The projection doors inherit the ceiling without a counter of their own: every one of them opens
+/// with a verification, and `Verified::new` runs the counted form — so a `Verified` is proof of the
+/// tree's depth as well as of its bytes. What that ceiling now stands in front of is the
+/// projection's *own* recursion, which still spends a frame per level; `MAX_GREEN_DEPTH`'s header
+/// carries the window that leaves open.
 ///
 /// # What this pins, and what it cannot
 ///
@@ -1529,6 +1538,88 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
     "the corpus reaches {deepest} levels, so {MAX_GREEN_DEPTH} is no longer an order of magnitude \
      of headroom"
   );
+}
+
+/// The refusal is reached on a stack that cannot hold the ceiling in native frames.
+///
+/// # There is no red side in this file either
+///
+/// A stack overflow is `SIGABRT`, which takes the harness with it and which no `#[should_panic]`
+/// sees, so what this can pin is the green side: the four walks answer `TooDeep` on a thread far
+/// too small to have held 1 024 frames of any of them. A regression takes the whole file down
+/// loudly rather than passing quietly, which is the arrangement `ast_release.rs` uses for the same
+/// reason.
+///
+/// # Why the fixture picks its own stack, and which one
+///
+/// Because the boundary is a property of the stack and libtest's is not this file's to know. At
+/// `8b73965`, measured out of suite one child process per depth with the tree built on another
+/// thread, these walks reached **2 MiB** without dying — the ceiling refused first — so a fixture
+/// run on libtest's own thread would have passed before the repair and proved nothing. On 512 KiB
+/// `node_extent` aborted at 726 levels and `reject_holes` at 927; on the **128 KiB** this test
+/// spawns, all four die an order of magnitude below the ceiling. Sizing the stack is what makes the
+/// fixture decisive instead of a bet on the runner, and it costs nothing, since a walk that does
+/// not recurse needs no more of it at 1 032 levels than at one.
+#[test]
+fn the_ceiling_is_reached_on_a_stack_too_small_to_hold_it() {
+  use smear::parser::lossless::project::{
+    MAX_GREEN_DEPTH, Node, node_extent, reject_holes, verify_source, verify_source_counted,
+  };
+
+  /// An order of magnitude under every boundary the four walks were measured at on this stack.
+  const STACK: usize = 128 * 1024;
+
+  let over = MAX_GREEN_DEPTH + 8;
+  let mut tree = Tree::new();
+  tree.open(K::Root);
+  for _ in 0..over {
+    tree.open(K::SelectionSet);
+  }
+  for _ in 0..over {
+    tree.close();
+  }
+  tree.close();
+  let root = tree.finish();
+
+  // The tree is built here and walked there, which is the shape the defect needs: nothing ties a
+  // `Parse` to the thread that produced it, and only the walking thread's stack is at stake.
+  let green: rowan::GreenNode = root.green().to_owned();
+  std::thread::Builder::new()
+    .stack_size(STACK)
+    .spawn(move || {
+      let too_deep = ProjectErrorKind::TooDeep {
+        limit: MAX_GREEN_DEPTH,
+      };
+      let node = Node::<GraphQLLang>::new(&green, rowan::TextSize::new(0));
+      assert_eq!(
+        *verify_source::<K>(&green, "")
+          .expect_err("`verify_source` descended a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+      assert_eq!(
+        *verify_source_counted::<K>(&green, "")
+          .map(|_| ())
+          .expect_err("`verify_source_counted` descended a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+      assert_eq!(
+        *reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
+          .expect_err("`reject_holes` descended a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+      assert_eq!(
+        *node_extent(node, |kind| matches!(kind, K::Space | K::Comment))
+          .expect_err("`node_extent` manufactured an extent for a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+    })
+    .expect("a fixture thread")
+    .join()
+    .expect("the fixture thread returned");
 }
 
 /// The green tree's depth, for the margin assertion above.

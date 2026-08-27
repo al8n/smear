@@ -617,15 +617,27 @@ impl<'p, 'src> Verified<'p, 'src> {
 /// action that cannot work.
 ///
 /// The other repair was to make the comparison iterative, so that [`Unverified::TooDeep`] could
-/// not arise here at all and the boolean became conclusive rather than merely wider. It does not
-/// survive being tried, for two reasons and either one is enough. A green node holds no parent
-/// pointer, so an iterative preorder needs an explicit stack as deep as the tree — an `O(depth)`
-/// heap allocation over a tree a caller minted, which trades a refusal this crate can name for an
-/// allocation nobody can refuse. And the third state is a property of the **pair** rather than of
-/// this walk: [`Verified::new`] answers for the same pair through [`verify_source_counted`], which
-/// is recursive and refuses, so a conclusive `Ok` here would be followed by a `TooDeep` at the door
-/// this exists to predict. Erasing a distinction in one of the two places that answer for a pair is
-/// how the two come to disagree. al8n/smear#198.
+/// not arise here at all and the boolean became conclusive rather than merely wider. **The
+/// comparison is iterative now and the boolean still does not come back**, and the two reasons the
+/// round that wrote this gave are worth separating, because one of them was wrong and the other was
+/// right about something else.
+///
+/// The first said an iterative preorder needs an explicit stack as deep as the tree — an
+/// `O(depth)` heap allocation over a tree a caller minted, trading a refusal this crate can name
+/// for an allocation nobody can refuse. That is not what it costs. A source is a *borrowed*
+/// iterator over children `rowan` already allocated, one entry per branching ancestor rather than
+/// one per level, and it is dropped the moment its last child is taken — so a chain of any depth
+/// holds one entry. What the argument compared, besides, was an allocator exhausted by a request
+/// proportional to a tree already in memory against a stack overflow that arrives at a fixed depth
+/// on every machine; the second is the worse failure and it was the one actually happening.
+/// `crate::lossless::project::Descent` carries the measurement.
+///
+/// The second is still standing and is why the refusal stays: the third state is a property of the
+/// **pair** rather than of this walk. [`Verified::new`] answers for the same pair through
+/// [`verify_source_counted`], and both of those refuse past
+/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) — not because either walk would
+/// run out of stack, but because the projection behind them would. Erasing a distinction in one of
+/// the two places that answer for a pair is how the two come to disagree. al8n/smear#198.
 pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
   verify_source::<SyntaxKind>(parse.green(), source).map_err(|refusal| Unverified::of(&refusal))
 }

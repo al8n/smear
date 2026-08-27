@@ -69,6 +69,16 @@
 //! [`verify_source`] is that comparison, made **once per door**: a preorder walk with an offset
 //! accumulator, effectively a chunked `memcmp` over the whole file. Per-token access after it is
 //! plain slicing.
+//!
+//! # No walk here spends a native frame per level
+//!
+//! All four of them recursed, and each carried a counter that refused at [`MAX_GREEN_DEPTH`]. A
+//! counter cannot bound a native stack — the frames are the host's and the stack is the caller's —
+//! so a tree the counter would have refused took the process first on any thread too small to hold
+//! the ceiling's worth of frames, and the typed refusal was never reached. [`Descent`] is what they
+//! run on now: it adopts the tree's own child iterators rather than copying children out, keeps one
+//! entry per branching ancestor, and drops a source the moment its last child is taken. The counter
+//! survives, and its header says what it now answers for.
 
 use core::{fmt, iter::FusedIterator, marker::PhantomData, ops::Range};
 
@@ -77,17 +87,32 @@ use rowan::{
 };
 use tokora::SimpleSpan;
 
-/// The deepest green tree any walk in this module will descend.
+/// The deepest green tree a projection door will accept.
 ///
-/// # It bounds a crash, so it is a constant and not a knob
+/// # It stopped bounding this module's walks, and that is the whole of this branch
 ///
-/// Every other ceiling this workspace exposes — the merge bounds, the validation ledger, the
-/// lexer's own nesting limit — bounds *work*, and a caller can want more of it. This one bounds
-/// **native stack frames**, and the right value is a property of the runtime rather than of the
-/// document. A caller who raised it would be configuring a segmentation fault back in; a caller
-/// who lowered it would start refusing documents this crate's own parser accepts, because what a
-/// parser produces reaches **516** of these levels and the assertion below is what keeps that
-/// under the ceiling.
+/// It used to read *the deepest green tree any walk in this module will descend*, and every one of
+/// those walks recursed with this number as its counter. **A counter cannot bound a native stack.**
+/// The frames belong to the host and the stack belongs to whichever thread the caller walks on, so
+/// a tree this constant would have refused at 1024 levels took the process first on any thread too
+/// small to hold 1024 frames — and the typed refusal it was supposed to produce was never reached.
+/// Measured on `aarch64-apple-darwin`, unoptimised, one child process per depth, the tree built on
+/// one thread and the walk run on another of the stated size: `node_extent` aborted at **726**
+/// levels on 512 KiB and `reject_holes` at **927**; `verify_source` and `verify_source_counted`
+/// aborted at **566** and **530** on 256 KiB. All four are below the ceiling. See [`Descent`],
+/// which is what they run on now and which reaches the verdict on any stack.
+///
+/// # So what does it bound, and why does it stay
+///
+/// **The recursion behind these walks, which is the dialect projection's own.** A fail-fast door
+/// opens with [`verify_source`] over the whole green root and a [`reject_holes`] scan over the same
+/// tree, and only then dispatches on node kinds — and *that* dispatch is a native recursion, one
+/// frame per grammar-nesting level, with no counter of its own in either dialect. The two gate
+/// walks are what stand in front of it, and this is the depth they let past.
+///
+/// A caller who calls the four walks directly gets a refusal at this depth for the same reason: the
+/// number is the door's admission ceiling, and answering it in one place is what keeps the doors and
+/// the helpers from disagreeing about which trees are projectable.
 ///
 /// # The population this is derived over, which is not the one it used to name
 ///
@@ -97,7 +122,7 @@ use tokora::SimpleSpan;
 /// **51** — and conclude that *nothing a parser produces comes near it*. **That conclusion was
 /// false, and the reason is the population.** The lossless doors do not clamp to
 /// `MAX_NESTING_DEPTH`; they clamp to the lexer's `HARD_MAX`, which is 256.
-/// A margin derived over 24 brackets was being stated over 256 of them, and at the top of that
+/// A margin derived at 24 brackets was being stated over 256 of them, and at the top of that
 /// range the tree really did cross the old ceiling: a 254-bracket object-value chain parses
 /// clean and materialises **516** levels, so an ordinary `project` answered
 /// `TooDeep { limit: 512 }` on a document this crate's own parser had just accepted with no
@@ -105,56 +130,41 @@ use tokora::SimpleSpan;
 /// brackets for an object-value chain and at 255 for a selection chain — which is itself the
 /// tell that a single fitted formula was the wrong instrument. al8n/smear#198.
 ///
-/// So the figure below is derived over the population that reaches it, and both ends are now
-/// asserted rather than argued. See `WORST_DOOR_GREEN_TREE` for what the doors produce and
-/// `WORST_GREEN_WALK_BOUNDARY` for what the walks can afford.
+/// So the figure below is derived over the population that reaches it. `WORST_DOOR_GREEN_TREE` is
+/// what the doors produce and it is asserted; `WORST_PROJECTION_GREEN_TREE` is what the recursion
+/// this gate stands in front of can afford, and it is **not** asserted, for the reason recorded
+/// beside it.
 ///
 /// # Why any bound is needed here at all
 ///
 /// These helpers take a `&GreenNodeData`, and `rowan`'s builder is public, so the tree can come
 /// from anywhere — including `finish_root`, which finishes an event stream this crate did not
-/// emit. A recursive walk over an unproved tree is a stack overflow rather than a refusal, and a
-/// crash is worse than every charge defect al8n/smear#198 has found. Each walk therefore carries
-/// its own counter and refuses on its own terms, which is what "independently bounded" has to mean
-/// when the caller supplies the tree.
+/// emit. A projection over an unproved tree is a stack overflow rather than a refusal, and a crash
+/// is worse than every charge defect al8n/smear#198 has found. The gate walks are what refuse on
+/// the projection's behalf, which is what "independently bounded" has to mean when the caller
+/// supplies the tree and the walk that would die is not the one holding the counter.
 ///
 /// What this does **not** bound is the tree's *construction* or its *destruction*: `rowan` drops a
-/// green tree recursively, so a tree deep enough to overflow this walk was already deep enough to
-/// overflow its own `Drop`, in the caller's code, before any of these functions saw it. That route
-/// is `rowan`'s and is reachable without this crate; see `crate::lossless::runner::finish_root`.
+/// green tree recursively, so a tree deep enough to overflow the projection was already deep enough
+/// to overflow its own `Drop`, in the caller's code, before any of these functions saw it. That
+/// route is `rowan`'s and is reachable without this crate; see `crate::lossless::runner::finish_root`.
 ///
 /// # Why 1024
 ///
-/// The same two-sided shape the lexer's `HARD_MAX` is derived under, with
-/// the bounds swapped for this constant's own:
+/// The interval it used to be cut from had this constant's own native-stack boundary at the top of
+/// it. There is no such boundary any more, so what is left is the lower bound and the tie-break:
 ///
 /// | bound | from | value |
 /// |---|---|---|
 /// | lower: the tree the doors produce | `WORST_DOOR_GREEN_TREE` | **516** |
-/// | upper: the 1.9x margin | `floor(2861 x 10 / 19)`, asserted below | **1505** |
+/// | upper: none this module can state | see `WORST_PROJECTION_GREEN_TREE` | — |
 ///
-/// The admissible interval is `[516, 1505]` and the value is taken at the top of the power-of-two
-/// ladder inside it, which is the same tie-break `HARD_MAX` applies for the same reason. At 1024
-/// the margin over the worst measured walk is **2.79x**, wider than the 1.9x that interval was
-/// cut at.
+/// 1024 is the value the old interval `[516, 1505]` was taken at, and it is kept rather than raised
+/// because nothing here wants a wider one: raising it widens only what the projection is handed.
 ///
-/// **What it costs on the smallest stack this crate supports.** 2 MiB — what `std::thread::spawn`,
-/// a tokio worker and the libtest harness each give — divided by the 2 861 levels the worst walk
-/// reaches on it is **733 bytes a level**, so a walk at the full ceiling occupies about **750 KiB**
-/// and leaves 1.3 MiB. The old 512 occupied about 375 KiB, so this is 375 KiB more of a budget
-/// that had 1.7 MiB spare. For scale, one lossless *production* frame is 3 125 bytes a level on
-/// the same stack (`HARD_MAX`'s table): a green walk's frame is 4.3x cheaper, which is why the
-/// parser's permissiveness never has to pay for this.
-///
-/// **`HARD_MAX` was the other candidate and was refused on its own derivation.** Lowering it to
-/// ~252 would hold the old 512, and it would narrow what the parser *accepts*: a caller on a
-/// larger stack asking `parse_document_with_limits` for 253-256 brackets gets a clean parse today
-/// and would get a positioned nesting diagnostic instead. `HARD_MAX`'s header takes the low side
-/// of its own interval only because too-high there is a **process abort**; nothing aborts here,
-/// the projection answers a typed refusal, so that asymmetry does not transfer and only the cost
-/// does. What would have reversed this: an empty interval — a worst-walk boundary under about
-/// 1 000 levels, where `MAX_GREEN_DEPTH` could not clear `WORST_DOOR_GREEN_TREE` and keep the
-/// 1.9x margin. It is 2 861, so the interval is wide and the parser keeps its reach.
+/// **What it costs a caller is now nothing.** The walks allocate one worklist entry per branching
+/// ancestor and no native frame at all, so a tree at the full ceiling occupies a few tens of bytes
+/// of heap instead of the **750 KiB** of stack the old header priced at 733 bytes a level.
 pub const MAX_GREEN_DEPTH: usize = 1024;
 
 /// The deepest green tree either dialect's own lossless doors will produce.
@@ -192,17 +202,37 @@ const WORST_DOOR_GREEN_TREE: usize = 516;
 /// shape nobody has written yet.
 const GREEN_LEVELS_PER_BRACKET: usize = 3;
 
-/// The deepest the worst depth-bounded walk here recurses on a 2 MiB debug thread before the
-/// native stack ends it.
+/// The deepest green tree a **dialect projection** was measured to descend before the native stack
+/// ends it.
 ///
-/// `node_extent` / `extent_of`, identical in both dialects, bisected one child process per depth:
-/// 2 861 returns and 2 862 dies. Its neighbours have more room — `reject_holes` 3 656,
-/// `verify_source_counted` 4 113, `verify_source` 4 388 — so the ceiling is set against this one.
+/// Not this module's walks: they no longer have such a number, which is what
+/// [`MAX_GREEN_DEPTH`]'s header is about. This is the recursion those walks gate — the projection's
+/// own node dispatch, one native frame per grammar-nesting level, in both dialects and with no
+/// counter of its own.
 ///
-/// A `const` rather than only prose for the reason `HARD_MAX`'s twin is: the assertion below is
-/// checked against a **recorded** number, not against the machine, and raising
-/// [`MAX_GREEN_DEPTH`] means re-running the bisection rather than editing one line.
-const WORST_GREEN_WALK_BOUNDARY: usize = 2861;
+/// Measured on `aarch64-apple-darwin`, **unoptimised**, on a 2 MiB thread — what
+/// `std::thread::spawn`, a tokio worker and the libtest harness each give — with the parse
+/// performed on another thread so only the projection's frames are on this one. One child process
+/// per bracket count, `project_type_system_document` over `scalar Foo @x(a: {a: … 1 … })`:
+/// 253 brackets and **514** levels returned, 254 brackets and **516** levels aborted with
+/// `SIGABRT`. That is 4 080 bytes of frame per green level, against a green *walk*'s 733.
+///
+/// # The window this opens, which is not this branch's to close
+///
+/// `WORST_DOOR_GREEN_TREE` is **516**, so at the top of `HARD_MAX` the doors produce exactly the
+/// tree the projection cannot descend: 254 and 255 brackets of object value parse clean and abort
+/// the process in `project_type_system_document`. No ceiling reachable from here closes it. Cutting
+/// [`MAX_GREEN_DEPTH`] under 516 makes a projection refuse a parse this crate just produced, which
+/// is the window al8n/smear#198 closed; and it would take `MAX_DOOR_BRACKETS` below `HARD_MAX`,
+/// which the crate root refuses to compile. The two repairs that do close it are a lower `HARD_MAX`
+/// and a projection that does not recurse, and both are a different change from this one.
+///
+/// **In an optimised build there is no window at all**, and that is the qualification the number
+/// above must be read with: release, same host, `project_type_system_document` returned at every
+/// bracket count `HARD_MAX` admits, on stacks down to 256 KiB, at 393 bytes of frame per green
+/// level. So what is recorded here is a debug-profile abort — which is the profile `cargo test`
+/// runs in, and the profile every other boundary in this file is measured in.
+const WORST_PROJECTION_GREEN_TREE: usize = 514;
 
 /// The deepest bracket ceiling a lossless door may clamp to and still produce a tree these walks
 /// will descend.
@@ -232,26 +262,42 @@ pub(crate) const MAX_DOOR_BRACKETS: usize = MAX_GREEN_DEPTH / GREEN_LEVELS_PER_B
 
 // -- THE INVARIANT THAT WAS MISSING, AND THE WINDOW IT WOULD HAVE CLOSED ----------------------
 //
-// Three assertions hold it, and they fail on different edits: the crate root's on a `HARD_MAX`
-// raise — see `MAX_DOOR_BRACKETS` for why it is written there and not here — the first below on a
-// `MAX_GREEN_DEPTH` cut, and the second on a `MAX_GREEN_DEPTH` raise past what the native stack
-// affords.
+// Two assertions hold it now, and they fail on different edits: the crate root's on a `HARD_MAX`
+// raise — see `MAX_DOOR_BRACKETS` for why it is written there and not here — and the first below
+// on a `MAX_GREEN_DEPTH` cut.
 const _: () = assert!(
   WORST_DOOR_GREEN_TREE <= MAX_GREEN_DEPTH,
   "the deepest tree the lossless doors were measured to produce does not fit under \
    MAX_GREEN_DEPTH, so a projection refuses a parse this crate just produced"
 );
 
+// THE THIRD ASSERTION IS GONE, AND IT IS NOT TIDYING. It read
+//
+//   MAX_GREEN_DEPTH * 19 <= WORST_GREEN_WALK_BOUNDARY * 10
+//
+// over `WORST_GREEN_WALK_BOUNDARY = 2861`, the depth at which the worst of the four walks here ran
+// out of native stack on a 2 MiB debug thread. Those walks no longer run out of native stack at any
+// depth, so its subject does not exist and a passing assertion over it would say something true
+// about nothing.
+//
+// What it was *standing in for* is a real obligation and it does survive: the doors must not
+// produce a tree the walk behind this gate cannot descend. That walk is the projection's own
+// recursion, `WORST_PROJECTION_GREEN_TREE` is what it affords, and the comparison
+//
+//   WORST_DOOR_GREEN_TREE <= WORST_PROJECTION_GREEN_TREE
+//
+// is FALSE today — 516 against 514 — which is why it is written here rather than asserted. The
+// assertion below is a tripwire on that record instead: it fires the day the gap closes, so the
+// paragraph above cannot outlive the defect it describes.
 const _: () = assert!(
-  MAX_GREEN_DEPTH * 19 <= WORST_GREEN_WALK_BOUNDARY * 10,
-  "MAX_GREEN_DEPTH leaves less than the 1.9x margin it was derived at under the worst measured \
-   native-stack boundary of the walks it bounds. Raising it needs a new bisection, not a new \
-   constant."
+  WORST_PROJECTION_GREEN_TREE < WORST_DOOR_GREEN_TREE,
+  "the projection now descends every tree the doors produce, so WORST_PROJECTION_GREEN_TREE and \
+   the window its header records should be replaced by the assertion they stand in for"
 );
 
 /// How a depth-bounded green walk stopped: on a divergence, or on the ceiling.
 ///
-/// Two reasons one `Result` has to carry, so the walk stays a single recursion with a single exit.
+/// Two reasons one `Result` has to carry, so the walk stays a single loop with a single exit.
 enum Depth {
   /// The bytes stopped agreeing, over this range.
   Diverged(Range<usize>),
@@ -331,12 +377,12 @@ pub enum ProjectErrorKind<K> {
     /// The rule, named for a human.
     rule: &'static str,
   },
-  /// The tree nests deeper than any walk here will descend.
+  /// The tree nests deeper than a projection will descend.
   ///
   /// Not reachable from a parsed document — [`MAX_GREEN_DEPTH`] carries the assertion that keeps
   /// it unreachable, and the window where it briefly was not. It
-  /// exists because these helpers take an arbitrary `GreenNodeData` and a recursive walk over an
-  /// unproved one is a stack overflow rather than a refusal.
+  /// exists because these helpers take an arbitrary `GreenNodeData`, and what runs behind them once
+  /// they pass is a projection whose own node dispatch recurses.
   TooDeep {
     /// The limit that was reached.
     limit: usize,
@@ -766,6 +812,105 @@ impl<L> ExactSizeIterator for Children<'_, L> {
 
 impl<L> FusedIterator for Children<'_, L> {}
 
+/// One source of children a walk has reached but not drained.
+///
+/// The container is the tree's own — `rowan` hands out an iterator over the children it already
+/// allocated — so a source is **adopted** rather than copied into, and a node contributes exactly
+/// one of these however wide it is. That is the property `value/nesting.rs` records for the release
+/// walk, reached here through a borrowed iterator instead of an owned `Vec`.
+struct Source<T, I> {
+  /// The budget the walk still had when it entered the node whose children these are.
+  ///
+  /// Carried **per source** rather than as one counter beside the stack, and that is what lets a
+  /// spent source be dropped the moment its last child is taken: with the depth on the entry, the
+  /// walk reads its level off whatever source it comes back to, so pruning does not lose it. A
+  /// single counter would have to stay in step with a stack that no longer has one entry per
+  /// level, and the chain shapes are exactly where it would drift.
+  left: usize,
+  /// What the walk must remember about that node — its kind, for a refusal that names the parent,
+  /// or `()` for the three walks that need nothing.
+  tag: T,
+  children: I,
+}
+
+/// A depth-first descent over a borrowed tree, with the native stack left out of it.
+///
+/// # What replaced the native frame, and what it costs
+///
+/// These walks recursed, one frame per green level, and each carried a counter that refused at
+/// [`MAX_GREEN_DEPTH`]. **A counter cannot bound a native stack**: the frames are the host's and
+/// the stack is the caller's, so a tree the counter would have refused at 1024 levels aborted the
+/// process first on any thread too small to hold 1024 of them. Measured on `aarch64-apple-darwin`,
+/// unoptimised, one child process per depth, the walk run on a thread of the stated size while the
+/// tree was built on another: on 512 KiB `node_extent` aborted at 726 levels and `reject_holes` at
+/// 927, and on 256 KiB the two verifications aborted at 566 and 530 — every one of them below the
+/// ceiling they were supposed to refuse at, and none of them reached a `TooDeep` anybody could read.
+///
+/// What stands in the frame's place is one entry per **ancestor of the node in hand that still has
+/// an unvisited child**, and nothing else. A node is handed over whole, so a container ancestor
+/// costs one entry however wide it is; a source is dropped the moment its last child is taken, so a
+/// chain of single-child nodes costs one entry at any depth rather than one per level. The peak
+/// therefore follows the tree's *branching* nesting, and neither its width nor its depth — and it
+/// is additionally capped by [`MAX_GREEN_DEPTH`], which no longer bounds a stack but does still
+/// bound this.
+///
+/// It grows through `Vec`'s infallible `push`, like the release walk and unlike `smear::json`'s
+/// value walk: what is bought is a failure that needs the allocator exhausted by a request
+/// proportional to the branching nesting of a tree already in memory, in place of one that arrives
+/// at a fixed depth on every machine.
+struct Descent<T, I> {
+  /// The sources the walk has reached but not drained, innermost last.
+  sources: Vec<Source<T, I>>,
+}
+
+impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
+  /// An empty descent, allocating nothing.
+  ///
+  /// A subtree with no node in it never grows past this, so the three walks that fold over a
+  /// token run allocate exactly what they allocated when they recursed: nothing.
+  const fn new() -> Self {
+    Self {
+      sources: Vec::new(),
+    }
+  }
+
+  /// Hands a node's children over whole.
+  ///
+  /// An empty run is not pushed: a leaf would otherwise cost an entry to say it has no children,
+  /// which is the per-element path of every one of these walks.
+  fn open(&mut self, left: usize, tag: T, children: I) {
+    if children.len() != 0 {
+      self.sources.push(Source {
+        left,
+        tag,
+        children,
+      });
+    }
+  }
+
+  /// Takes one child from the innermost source that still has one, with that source's budget and
+  /// tag.
+  ///
+  /// The source is dropped the moment its last child is taken rather than when it is next reached.
+  /// Without that a chain of one-child nodes would leave a spent iterator behind per level and the
+  /// storage would follow the depth after all — which is the trade the first round of #199
+  /// rejected an iterator stack for, and the reason this one does not make it.
+  fn take(&mut self) -> Option<(usize, T, I::Item)> {
+    while let Some(source) = self.sources.last_mut() {
+      let Some(item) = source.children.next() else {
+        self.sources.pop();
+        continue;
+      };
+      let (left, tag) = (source.left, source.tag);
+      if source.children.len() == 0 {
+        self.sources.pop();
+      }
+      return Some((left, tag, item));
+    }
+    None
+  }
+}
+
 /// The token extent of `node` — its first non-trivia token's start to its last one's end.
 ///
 /// `None` when the subtree holds no non-trivia token at all, which for a node the grammar
@@ -803,10 +948,10 @@ where
 
 /// [`extent_of`] with the descent it and [`node_extent`] make into each other counted.
 ///
-/// The pair is **mutually recursive** and both halves are `pub`, so a caller-supplied tree drives
-/// the native stack. al8n/smear#198's audit of this named three recursive walks and missed this
-/// one, which is what a general claim recorded without enumerating its members looks like when the
-/// artifact *is* the enumeration.
+/// The pair used to be **mutually recursive** and both halves are `pub`, so a caller-supplied tree
+/// drove the native stack. al8n/smear#198's audit of this named three recursive walks and missed
+/// this one, which is what a general claim recorded without enumerating its members looks like when
+/// the artifact *is* the enumeration.
 ///
 /// # The ceiling is a refusal here, and the first version of it was not
 ///
@@ -818,6 +963,19 @@ where
 ///
 /// An approximate success is worse than a new channel, so the two public forms return
 /// [`ProjectErrorKind::TooDeep`] and say nothing they cannot establish. al8n/smear#198.
+///
+/// # Why the descent is a loop and the ceiling stayed anyway
+///
+/// The counter never bounded what it was written to bound — see [`Descent`], which measures where
+/// the native stack ended this walk *below* the ceiling on two ordinary thread sizes. So the walk
+/// is a loop and the counter is now only what it says it is: a refusal at a stated depth, reached
+/// on any stack.
+///
+/// **The fold does not care in what order it is folded**, which is what makes the loop a
+/// substitution rather than a rewrite: `TextRange::cover` is the least range containing both, so
+/// the answer is the cover of every non-trivia token in the run whatever order they arrive in. The
+/// loop still walks in document order, because a refusal has to name the *first* node past the
+/// ceiling and not whichever one a different order reached first.
 fn extent_of_bounded<'g, L: Language, I>(
   elements: I,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
@@ -827,34 +985,40 @@ where
   I: IntoIterator<Item = Element<'g, L>>,
 {
   let mut extent: Option<TextRange> = None;
+  // The caller's own stream is level zero and is not a source: it is not a `Children` and there is
+  // nothing to come back to it for, since the loop below drains everything a top-level element
+  // opens before the next one is read.
+  let mut descent: Descent<(), Children<'g, L>> = Descent::new();
   for element in elements {
-    let piece = match element {
-      NodeOrToken::Token(token) => {
-        if is_trivia(token.kind()) {
-          continue;
+    let mut item = Some((left, element));
+    while let Some((left, element)) = item {
+      let piece = match element {
+        NodeOrToken::Token(token) => (!is_trivia(token.kind())).then(|| token.text_range()),
+        NodeOrToken::Node(node) => {
+          match left.checked_sub(1) {
+            Some(left) => descent.open(left, (), node.children()),
+            None => {
+              return Err(ProjectError::new(
+                ProjectErrorKind::TooDeep {
+                  limit: MAX_GREEN_DEPTH,
+                },
+                to_range(node.text_range()),
+              ));
+            }
+          }
+          None
         }
-        Some(token.text_range())
+      };
+      if let Some(piece) = piece {
+        extent = Some(match extent {
+          // `cover` rather than `start..piece.end()`: a fold that assumed document order would
+          // produce an inverted range the moment it was handed a stream that was not in it, and
+          // an inverted span is exactly the class `tests/support/span_extent.rs` exists to catch.
+          Some(seen) => seen.cover(piece),
+          None => piece,
+        });
       }
-      NodeOrToken::Node(node) => match left.checked_sub(1) {
-        Some(left) => extent_of_bounded(node.children(), is_trivia, left)?,
-        None => {
-          return Err(ProjectError::new(
-            ProjectErrorKind::TooDeep {
-              limit: MAX_GREEN_DEPTH,
-            },
-            to_range(node.text_range()),
-          ));
-        }
-      },
-    };
-    if let Some(piece) = piece {
-      extent = Some(match extent {
-        // `cover` rather than `start..piece.end()`: a fold that assumed document order would
-        // produce an inverted range the moment it was handed a stream that was not in it, and
-        // an inverted span is exactly the class `tests/support/span_extent.rs` exists to catch.
-        Some(seen) => seen.cover(piece),
-        None => piece,
-      });
+      item = descent.take().map(|(left, (), element)| (left, element));
     }
   }
   Ok(extent)
@@ -906,8 +1070,8 @@ pub fn verify_source_counted<K>(
       len.min(source.len())..len.max(source.len()),
     ));
   }
-  // The same recursion `verify_source_at` makes, with a counter threaded through it; see that
-  // function for the depth argument.
+  // The same walk `verify_source_at` makes, with a counter threaded through it; see that function
+  // for the descent and for the depth argument.
   fn walk(
     green: &GreenNodeData,
     source: &[u8],
@@ -918,10 +1082,17 @@ pub fn verify_source_counted<K>(
     let Some(left) = left.checked_sub(1) else {
       return Err(Depth::TooDeep);
     };
-    for child in green.children() {
+    let mut descent: Descent<(), rowan::Children<'_>> = Descent::new();
+    descent.open(left, (), green.children());
+    while let Some((left, (), child)) = descent.take() {
       *elements = elements.saturating_add(1);
       match child {
-        NodeOrToken::Node(node) => walk(node, source, offset, elements, left)?,
+        NodeOrToken::Node(node) => {
+          let Some(left) = left.checked_sub(1) else {
+            return Err(Depth::TooDeep);
+          };
+          descent.open(left, (), node.children());
+        }
         NodeOrToken::Token(token) => {
           let text = token.text().as_bytes();
           let end = *offset + text.len();
@@ -981,12 +1152,11 @@ pub fn verify_source_at<K>(
   source: &str,
   base: usize,
 ) -> Result<(), ProjectError<K>> {
-  // Recursive rather than an explicit stack, which would need a `Vec` this walk otherwise has no
-  // reason to allocate. The depth is the tree's, and the tree's is the lexer's bracket budget
-  // (the lexer crate's `MAX_NESTING_DEPTH`) plus a grammar constant. That budget used to be
-  // tokora's inherited 500, which put this walk at a few tens of KiB of frames; smear issue #61
-  // replaced it with a number measured against a 2 MiB stack, so the bound this comment relies on
-  // got an order of magnitude cheaper rather than merely staying true.
+  // It recursed, on the argument that the depth is the tree's and the tree's is the lexer's
+  // bracket budget plus a grammar constant. **That argument is about the wrong tree**: this takes a
+  // `&GreenNodeData`, `rowan`'s builder is public, and a stack this crate does not own is what the
+  // frames are spent from. The explicit stack the old comment declined to allocate is the repair —
+  // see [`Descent`] for what it costs, which for a run of tokens is still nothing.
   fn walk(
     green: &GreenNodeData,
     source: &[u8],
@@ -996,9 +1166,16 @@ pub fn verify_source_at<K>(
     let Some(left) = left.checked_sub(1) else {
       return Err(Depth::TooDeep);
     };
-    for child in green.children() {
+    let mut descent: Descent<(), rowan::Children<'_>> = Descent::new();
+    descent.open(left, (), green.children());
+    while let Some((left, (), child)) = descent.take() {
       match child {
-        NodeOrToken::Node(node) => walk(node, source, offset, left)?,
+        NodeOrToken::Node(node) => {
+          let Some(left) = left.checked_sub(1) else {
+            return Err(Depth::TooDeep);
+          };
+          descent.open(left, (), node.children());
+        }
         NodeOrToken::Token(token) => {
           let text = token.text().as_bytes();
           let end = *offset + text.len();
@@ -1031,16 +1208,18 @@ pub fn reject_holes<L: Language>(
   node: Node<'_, L>,
   is_hole: impl Fn(L::Kind) -> bool + Copy,
 ) -> Result<(), ProjectError<L::Kind>> {
-  fn walk<L: Language>(
-    node: Node<'_, L>,
-    parent: L::Kind,
-    is_hole: impl Fn(L::Kind) -> bool + Copy,
-    left: usize,
-  ) -> Option<ProjectError<L::Kind>> {
-    // Its own counter, on its own terms: this takes a caller-supplied tree and a recursion over an
-    // unproved one is a stack overflow rather than a refusal. See [`MAX_GREEN_DEPTH`].
+  // Preorder, in document order, so the refusal names the first hole the document reaches — which
+  // is what makes the answer independent of how the scan is written. The parent kind travels on the
+  // source rather than in a parameter: it is the kind of the node whose children are being drained,
+  // and [`Descent::take`] hands it back with the child.
+  let mut descent: Descent<L::Kind, Children<'_, L>> = Descent::new();
+  let mut visiting = Some((MAX_GREEN_DEPTH, node.kind(), node));
+  while let Some((left, parent, node)) = visiting {
+    // Its own counter, on its own terms: this takes a caller-supplied tree, and what the counter
+    // answers for is the depth a projection will accept — not this walk's frames, which it does not
+    // have. See [`MAX_GREEN_DEPTH`] and [`Descent`].
     let Some(left) = left.checked_sub(1) else {
-      return Some(ProjectError::new(
+      return Err(ProjectError::new(
         ProjectErrorKind::TooDeep {
           limit: MAX_GREEN_DEPTH,
         },
@@ -1049,7 +1228,7 @@ pub fn reject_holes<L: Language>(
     };
     let kind = node.kind();
     if is_hole(kind) {
-      return Some(ProjectError::new(
+      return Err(ProjectError::new(
         ProjectErrorKind::UnexpectedChild {
           parent,
           found: kind,
@@ -1057,18 +1236,15 @@ pub fn reject_holes<L: Language>(
         to_range(node.text_range()),
       ));
     }
-    for child in node.children() {
-      if let NodeOrToken::Node(child) = child
-        && let Some(refusal) = walk(child, kind, is_hole, left)
-      {
-        return Some(refusal);
+    descent.open(left, kind, node.children());
+    visiting = loop {
+      match descent.take() {
+        Some((left, parent, NodeOrToken::Node(child))) => break Some((left, parent, child)),
+        // A token has no kind this scan can refuse and no children to descend into.
+        Some((_, _, NodeOrToken::Token(_))) => {}
+        None => break None,
       }
-    }
-    None
+    };
   }
-
-  match walk(node, node.kind(), is_hole, MAX_GREEN_DEPTH) {
-    Some(refusal) => Err(refusal),
-    None => Ok(()),
-  }
+  Ok(())
 }
