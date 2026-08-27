@@ -51,6 +51,7 @@ Rule::VariableUniqueness = smear::validation::variable-uniqueness
 Rule::VariablesAreInputTypes = smear::validation::variables-are-input-types
 SchemaErrorKind::ArgumentTypeNotInputType = smear::schema::argument-type-not-input-type
 SchemaErrorKind::CircularNonNullInputField = smear::schema::circular-non-null-input-field
+SchemaErrorKind::ConstantValueTooDeep = smear::schema::constant-value-too-deep
 SchemaErrorKind::DeprecatedRequiredArgument = smear::schema::deprecated-required-argument
 SchemaErrorKind::DeprecatedRequiredInputField = smear::schema::deprecated-required-input-field
 SchemaErrorKind::DirectiveArgumentTypeNotInputType = smear::schema::directive-argument-type-not-input-type

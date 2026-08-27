@@ -162,9 +162,19 @@ use tokora::SimpleSpan;
 /// 1024 is the value the old interval `[516, 1505]` was taken at, and it is kept rather than raised
 /// because nothing here wants a wider one: raising it widens only what the projection is handed.
 ///
-/// **What it costs a caller is now nothing.** The walks allocate one worklist entry per branching
-/// ancestor and no native frame at all, so a tree at the full ceiling occupies a few tens of bytes
-/// of heap instead of the **750 KiB** of stack the old header priced at 733 bytes a level.
+/// **What it costs a caller is a bounded worklist rather than 750 KiB of stack.** The walks spend no
+/// native frame at all; what they spend instead is one entry per branching ancestor, the first
+/// sixteen in the walk's own frame and the rest on the heap. An entry is **24 bytes** for the two
+/// verifications, 32 for `node_extent` and 40 for `reject_holes` — the tag and the child iterator
+/// differ — so a tree at the full ceiling holds at most 1024 of them, **at most 40 KiB of entries
+/// and up to twice that in vector capacity**, and zero for anything with sixteen or fewer branching
+/// ancestors. The recursion this replaced priced 733 bytes of stack a level and needed 750 KiB.
+///
+/// The first version of this paragraph said the cost "is now nothing" and priced the ceiling at
+/// "a few tens of bytes of heap". Both are the chain reading: a chain of single-child nodes does
+/// hold one entry at any depth, and that is not the shape the ceiling admits the most of. Measured
+/// on an ordinary parse rather than argued: `{ a { a … { b } … } }` at fifteen nested selection
+/// sets — 95 bytes, green tree 35 levels — spills for the first time, in all four walks at once.
 pub const MAX_GREEN_DEPTH: usize = 1024;
 
 /// The deepest green tree either dialect's own lossless doors will produce.
@@ -883,7 +893,9 @@ struct Descent<T, I> {
   /// Everything nested deeper than [`INLINE`] branching levels, innermost last.
   ///
   /// Empty for every tree in this repository's corpus, whose deepest green tree is twelve levels
-  /// **in total** — so its branching nesting cannot exceed that either.
+  /// **in total** — so its branching nesting cannot exceed that either. Not empty for a document
+  /// anybody could type: `{ a { a … { b } … } }` at fifteen nested selection sets is 95 bytes and
+  /// reaches this, measured.
   spill: Vec<Source<T, I>>,
 }
 
@@ -893,6 +905,14 @@ struct Descent<T, I> {
 /// fixture whose branching nesting is three. It is chosen to keep the allocation gate's reading
 /// honest rather than to bound anything: see [`Descent`]'s header for what is and is not promised
 /// past it.
+///
+/// **Four public contracts spell this number out**, because rustdoc will not resolve a link from a
+/// public item to a private one and a `-D warnings` build says so. Changing it means changing all
+/// of them, and they are named here so that the change is a list rather than a search:
+/// [`verify_source`] and [`MAX_GREEN_DEPTH`] in this module, and `Verified::new` and `verify_parse`
+/// in `crate::graphql::lossless::project`. The same number is also read by
+/// `smear/tests/validator_allocation.rs`'s `the_whole_root_check_allocates_nothing`, which measures
+/// the zero the four of them promise.
 const INLINE: usize = 16;
 
 impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
@@ -1181,10 +1201,27 @@ pub fn verify_source_counted<K>(
 /// The door check. It covers **every** byte the tree holds — punctuation, trivia and the leading
 /// and trailing bytes no node's extent reaches — where a per-token comparison only ever sees the
 /// tokens some constructor reads, and it is cheaper than that comparison because it reads the
-/// green tree: nothing is materialised, so nothing is allocated.
+/// green tree: nothing is materialised.
 ///
 /// A door that has run this may slice `source` by any token range in the tree directly: the
 /// ranges are in bounds and land on character boundaries by construction.
+///
+/// # Allocation
+///
+/// **Nothing through sixteen branching ancestors, and not at every shape.** Materialising nothing
+/// is not the same as allocating nothing, and this sentence used to say the second: the walk keeps
+/// one entry per ancestor of the node in hand that still has an unvisited child, the first sixteen
+/// of them in a fixed array in its own frame, and a seventeenth spills into a `Vec` through an
+/// infallible `push` — 24 bytes an entry, bounded by [`MAX_GREEN_DEPTH`] and by nothing smaller.
+///
+/// Sixteen **branching** ancestors is neither sixteen levels nor sixteen children. A chain of
+/// single-child nodes holds one entry however long it is, because a source is dropped the moment
+/// its last child is taken; a node is handed over whole, so a wide one is one entry too. What
+/// spends the array is a nesting in which each level still has something unread — which an ordinary
+/// nested selection set is. Measured on a GraphQL parse: `{ a { a … { b } … } }` at fifteen nested
+/// selection sets, **95 bytes**, green tree 35 levels, allocates once, for 96 bytes; at fourteen it
+/// allocates nothing. See this module's `Descent` for the trade that spill is, and why it is the
+/// better of the two failures on offer.
 ///
 /// The refusal names the first bytes that diverge — the divergent token's range, or the length
 /// the two disagree about when one runs out first.

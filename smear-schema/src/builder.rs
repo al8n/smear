@@ -751,6 +751,82 @@ struct RawArgument {
   value: RawValue,
 }
 
+/// How many nested list and input-object literals one constant value may open.
+///
+/// # Why a ceiling exists here at all
+///
+/// `SchemaBuilder::const_value` folds a constant literal with an explicit stack — one frame per
+/// open container — and every one of those frames, plus the output vector it carries, is reached
+/// through an **infallible** allocation. [`Schema::build`] and [`SchemaBuilder::document`] take a
+/// `&TypeSystemDocument<S>`, and every carrier on the route to a constant literal has a public
+/// constructor, so the literal's nesting is the *caller's* and not a parser's. Without a ceiling a
+/// hand-built literal is a process abort — `memory allocation of N bytes failed` — where the whole
+/// point of the door is that it answers [`SchemaErrors`].
+///
+/// This is the difference between here and al8n/smear#199, which met the same growth inside a
+/// `Drop`: a `Drop` has no return value and no caller to tell, so stating the bound was the honest
+/// answer there. `Schema::build` returns a `Result`. **Refusing is available, so refusing is what
+/// happens** — and it happens before the frame is pushed, not after the allocator has been asked.
+///
+/// # Why 1024 — the interval, then the pick inside it
+///
+/// | bound | from | value |
+/// |---|---|---|
+/// | lower: the deepest literal smear's own doors produce | the lossless door at `HARD_MAX`, measured | **255** |
+/// | upper: the deepest literal any tree a projection descends can carry | `MAX_GREEN_DEPTH`, one green level per container at least | **1024** |
+///
+/// The lower row is measured rather than reasoned. `parse_type_system_document_with_limits` at
+/// `LosslessLimits::with_max_nesting_depth(HARD_MAX)` over `scalar Foo @x(a: [[…1…]])`, projected
+/// with `project_type_system_document`: 255 brackets parses clean and yields **255 open containers**
+/// (256 levels counting the innermost leaf); 256 brackets does not parse clean at all, because the
+/// `(` of the argument list spends one of the same budget. So 255 is what the door at the widest
+/// ceiling smear itself installs can hand this function, and a ceiling below it would make the
+/// builder refuse a document this workspace's own parser had just accepted — the window
+/// al8n/smear#198 closed on the projection side.
+///
+/// The upper row is the point past which a higher ceiling buys a caller nothing. A literal
+/// container costs at least one green level, so a tree that `smear_parser::lossless::project`'s
+/// walks will descend at all — they refuse past `MAX_GREEN_DEPTH`, 1024 — carries at most 1024 of
+/// them; the shape that comes closest is the list value at 1.020 green levels a bracket, which
+/// reaches 1003. Above the row, the only literals admitted are ones no smear door can deliver,
+/// which is precisely the population this ceiling exists to bound.
+///
+/// **The pick is the top of the interval, and the asymmetry runs the other way from `HARD_MAX`'s.**
+/// A ceiling that is too low refuses a literal a door could have produced. A ceiling that is too
+/// high does *not* re-open the abort — the storage is still bounded, by a bigger constant — so
+/// nothing here trades a diagnostic against a crash, and the only cost of the top of the interval
+/// is the number in the next section.
+///
+/// # What it costs, measured
+///
+/// Peak live bytes across the whole `Schema::build`, `aarch64-apple-darwin`, unoptimised, the
+/// document built before the instrument is armed, against a build over `type Query { ok: Int }`
+/// that peaks at **67 940** bytes with no literal in it at all:
+///
+/// | literal | peak | over the floor |
+/// |---|---|---|
+/// | 1024 nested lists — exactly the ceiling, not refused | **139 637** | 2.06x |
+/// | 1024 nested one-field objects — the same | **164 189** | 2.42x |
+/// | any list chain past the ceiling: 1 025, 2 001, 20 001, 200 001 containers | **140 007** | 2.06x |
+/// | any object chain past it | **164 583** | 2.42x |
+///
+/// The last two rows are one number each and not a range: the peak, and the allocation count with
+/// it, stop moving with the literal's depth altogether — 200 001 containers cost what 1 025 do. So
+/// the ceiling turns an unbounded, caller-chosen amplification into about 160 KiB. See
+/// `SchemaBuilder::const_value` for the per-level bands those two rows sit at the end of, and for
+/// what the ceiling does *not* cover: a literal's **width** costs one reduced value an entry, which
+/// needs no ceiling because the caller is holding a larger `ConstInputValue` per entry while it
+/// runs.
+///
+/// # What a caller past it sees
+///
+/// [`SchemaErrorKind::ConstantValueTooDeep`], once for the literal, at the span of the first
+/// container past the ceiling and naming the argument or input value the literal was written for.
+/// The refused container is reduced to an empty one of its own kind, so the rest of the document
+/// is still checked and every other defect in it still reported — and the build refuses, because a
+/// non-empty error list is what `SchemaBuilder::finish` reads.
+pub const MAX_CONST_VALUE_DEPTH: usize = 1024;
+
 /// A constant literal, reduced to what a type check reads, with the position to blame.
 #[derive(Debug, Clone)]
 struct RawValue {
@@ -808,6 +884,11 @@ impl Drop for RawValue {
   /// one entry at any depth rather than one per level; a container is taken over whole, so a
   /// literal of a million scalars costs one entry too. What is left is one entry per ancestor with
   /// an unvisited child — the literal's *branching* nesting.
+  ///
+  /// `sources` grows through an infallible `push` like every other work list here, and here that is
+  /// answerable rather than merely stated: the only thing that builds a [`RawValue`] is
+  /// [`SchemaBuilder::const_value`], which refuses past [`MAX_CONST_VALUE_DEPTH`] open containers,
+  /// so the branching nesting this walks is bounded by that ceiling before the value exists.
   ///
   /// # What this does not repair
   ///
@@ -1939,7 +2020,7 @@ impl SchemaBuilder {
             .iter()
             .map(|argument| RawArgument {
               name: self.located(argument.name()),
-              value: self.const_value(argument.value()),
+              value: self.const_value(argument.name(), argument.value()),
             })
             .collect(),
         };
@@ -1980,19 +2061,51 @@ impl SchemaBuilder {
   /// a work list, so the peak follows the literal's nesting and not its width.
   ///
   /// **It is not free, and it is not smaller than what it builds.** Measured on the same host, as
-  /// peak live bytes across the whole `Schema::build`: a flat literal of N empty lists peaks at
-  /// **48 bytes an entry**, which is the [`RawValue`] tree and nothing else — one frame serves the
-  /// whole width. A chain of N one-element lists peaks at **199 to 223 bytes a level** against the
-  /// same 48 of output, because there is a frame per level and the `Vec` holding them doubles, so
-  /// where the reading falls inside a doubling is most of that band's width. So on the adversarial
-  /// shape the frames are about three times the tree they are producing — which is the honest bound
-  /// rather than a constant one, and it buys a build that returns `SchemaErrors` where it used to
-  /// abort.
+  /// peak live bytes across the whole `Schema::build` with the document built before the instrument
+  /// is armed: a flat literal of N empty lists peaks at **48 bytes an entry**, which is the
+  /// [`RawValue`] tree and nothing else — one frame serves the whole width, and the allocation count
+  /// does not move with N at all (215 either side of an eightfold widening). A chain of N
+  /// one-element lists peaks between **138 and 224 bytes a container**, an object chain between
+  /// **162 and 248**, because there is a frame per container and the `Vec` holding them doubles: the
+  /// low end of each band is a count just under a power of two and the high end is a count just over
+  /// one. So on the adversarial shape the frames are two to four times the tree they are producing.
+  ///
+  /// An earlier revision of this paragraph recorded the chain band as *199 to 223*. The high end is
+  /// right and the low end was a sample rather than a minimum: at 1 001 containers the reading is
+  /// 138.4 bytes each and at 8 001 it is 138.1, because the frame vector's capacity is then almost
+  /// exactly the count. The band is the doubling, so both of its ends have to be taken from where
+  /// the doubling puts them.
+  ///
+  /// # Why a loop still needed a ceiling
+  ///
+  /// Making the walk iterative moved the growth from the native stack to the heap, and that is the
+  /// point — but `frames.push` and `Vec::with_capacity` are **infallible** allocation paths, so a
+  /// caller-built literal deep enough still ends the process rather than the build. That is the
+  /// abort al8n/smear#199 had no answer for, because it was inside a `Drop`; here there is one.
+  /// [`Schema::build`] returns `Result<_, SchemaErrors>`, so the ceiling is a refusal a caller can
+  /// read: past [`MAX_CONST_VALUE_DEPTH`] open containers the literal is refused with
+  /// [`SchemaErrorKind::ConstantValueTooDeep`], **before** the frame that would have carried it is
+  /// pushed and before its output vector is reserved.
+  ///
+  /// The refusal is per literal and it substitutes an *empty container of the refused kind*, so the
+  /// walk finishes, every other defect in the document is still reported, and the coercion check
+  /// behind this sees a list where a list was written. Only the first refused container is
+  /// reported: the levels under it are never read, so there is nothing further to say about them.
+  ///
+  /// **What the ceiling does and does not cover.** It bounds the growth that follows the literal's
+  /// *nesting* — the frame stack and the one output vector per level — which is the term with no
+  /// bound in the input. It does not bound the growth that follows the literal's *width*: a list of
+  /// a million entries still reserves a million [`RawValue`]s. That term needs no ceiling, because
+  /// the caller is holding a `ConstInputValue` per entry while this runs and one of those is larger
+  /// than one `RawValue`, so the reduction's width cost is bounded by input already in memory. It
+  /// is also why fallible reservation is not what stands here: `try_reserve` would convert a
+  /// width-driven failure into a refusal, but the width-driven request is proportional to a tree the
+  /// allocator has already satisfied once, where the depth-driven one was proportional to nothing.
   ///
   /// An object field's name is interned when the field is reached and not when it is queued, so the
   /// symbols are minted in the same order the recursion minted them; the name waits on its own
   /// frame while the value below it is reduced, which is what `pending` is for.
-  fn const_value<S>(&mut self, value: &ConstInputValue<S>) -> RawValue
+  fn const_value<S>(&mut self, subject: &Name<S>, value: &ConstInputValue<S>) -> RawValue
   where
     S: AsRef<[u8]>,
   {
@@ -2018,6 +2131,8 @@ impl SchemaBuilder {
     let mut frames: Vec<Frame<'_, S>> = Vec::new();
     let mut answer: Option<RawValue> = None;
     let mut current: Option<&ConstInputValue<S>> = Some(value);
+    // Where the first container past `MAX_CONST_VALUE_DEPTH` was written, once one has been.
+    let mut refused: Option<SimpleSpan> = None;
 
     loop {
       let Some(value) = current.take() else {
@@ -2071,27 +2186,49 @@ impl SchemaBuilder {
         ConstInputValue::Int(int) => RawShape::Int(int.source().as_ref().into()),
         ConstInputValue::Float(float) => RawShape::Float(float.source().as_ref().into()),
         ConstInputValue::Enum(member) => RawShape::Enum(member.source().as_ref().into()),
+        // The ceiling is read BEFORE either allocation the arm would make — the frame and the
+        // output vector it reserves — so the refusal costs nothing the abort it replaces would
+        // have spent. An empty container of the refused kind takes the subtree's place, which is
+        // what lets the walk finish and the rest of the document still be checked.
         ConstInputValue::List(list) => {
-          let entries = list.values();
-          frames.push(Frame::List {
-            span,
-            values: Vec::with_capacity(entries.len()),
-            rest: entries.iter(),
-          });
-          continue;
+          if frames.len() < MAX_CONST_VALUE_DEPTH {
+            let entries = list.values();
+            frames.push(Frame::List {
+              span,
+              values: Vec::with_capacity(entries.len()),
+              rest: entries.iter(),
+            });
+            continue;
+          }
+          refused.get_or_insert(span);
+          RawShape::List(Vec::new())
         }
         ConstInputValue::Object(object) => {
-          let fields = object.fields();
-          frames.push(Frame::Object {
-            span,
-            fields: Vec::with_capacity(fields.len()),
-            pending: None,
-            rest: fields.iter(),
-          });
-          continue;
+          if frames.len() < MAX_CONST_VALUE_DEPTH {
+            let fields = object.fields();
+            frames.push(Frame::Object {
+              span,
+              fields: Vec::with_capacity(fields.len()),
+              pending: None,
+              rest: fields.iter(),
+            });
+            continue;
+          }
+          refused.get_or_insert(span);
+          RawShape::Object(Vec::new())
         }
       };
       emit(&mut frames, &mut answer, RawValue { span, shape });
+    }
+
+    if let Some(span) = refused {
+      // Rendered lossily for the same reason `located` renders an invalid name that way: the
+      // subject is a caller's `S`, and a refusal must not be the thing that decides it is UTF-8.
+      let name = String::from_utf8_lossy(subject.source().as_ref()).into_owned();
+      self.errors.push(
+        SchemaError::new(SchemaErrorKind::ConstantValueTooDeep, &name, span)
+          .in_document(self.document),
+      );
     }
 
     /// Folds a finished value into the container it belongs to, or into the answer.
@@ -2180,7 +2317,7 @@ impl SchemaBuilder {
         let ty = self.type_ref(value.ty());
         let default_value = value
           .default_value()
-          .map(|default| self.const_value(default.value()));
+          .map(|default| self.const_value(value.name(), default.value()));
         let default = match &default_value {
           None => DefaultKind::Absent,
           Some(value) if matches!(value.shape, RawShape::Null) => DefaultKind::Null,
@@ -3654,6 +3791,12 @@ impl SchemaBuilder {
   /// what is left of it. Nothing about which diagnostic is reported, in what order, or with which
   /// span changes: a level's fields are all offered before the level is closed, and the omitted-
   /// required pass runs at that close, exactly where the frame used to return.
+  ///
+  /// `levels` grows infallibly, and it is bounded by the literal rather than by the type graph: the
+  /// walk descends only where the literal does, and the literal was built by
+  /// [`SchemaBuilder::const_value`] under [`MAX_CONST_VALUE_DEPTH`]. `input A { a: A }` is still a
+  /// legal self-reference and the type side is still unbounded; what ends the descent is the value,
+  /// which now has an end.
   fn check_const_value(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
@@ -5238,6 +5381,8 @@ fn set_bit(words: &mut [u64], start: u32, ordinal: u32) {
 /// derives the public route that builds one at any depth. The list nesting is walked with an
 /// explicit stack of borrowed iterators instead: one entry per open list, never one per item, and
 /// document order preserved because each level is drained before the level under it is resumed.
+/// That stack is bounded the same way the other two literal walks are — by
+/// [`MAX_CONST_VALUE_DEPTH`], applied where the literal is built.
 fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
   let mut rest: Vec<core::slice::Iter<'a, RawValue>> = Vec::new();
   let mut current = Some(value);

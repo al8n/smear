@@ -68,6 +68,21 @@ pub enum SchemaErrorKind {
   /// Not a specification rule: [`MAX_WRAPPERS`](super::MAX_WRAPPERS) is this implementation's
   /// packing limit, and refusing is the only alternative to silently truncating a type.
   TypeReferenceTooDeep,
+  /// A constant literal opens more nested list and input-object literals than
+  /// [`MAX_CONST_VALUE_DEPTH`](super::MAX_CONST_VALUE_DEPTH).
+  ///
+  /// Not a specification rule, and not a packing limit either — what it bounds is the **storage
+  /// the reduction spends**. The builder folds a literal with an explicit stack of one frame per
+  /// open container, and both that stack and the output vector each frame carries grow through
+  /// *infallible* allocation, so an unbounded literal is a process abort rather than a refusal
+  /// anybody can read. [`Schema::build`](super::Schema::build) returns a `Result`, so refusing is
+  /// available and is what happens; the constant's own documentation carries the derivation, the
+  /// measured cost per level, and what a caller past it does instead.
+  ///
+  /// The subject is the argument or input value the literal was written for, and the span is the
+  /// first container past the ceiling. One diagnostic per literal: the refusal ends that literal,
+  /// and the levels under it are never read.
+  ConstantValueTooDeep,
   /// A name in the document is not spelled `/[_A-Za-z][_0-9A-Za-z]*/`.
   ///
   /// Unreachable from parsed input — the lexer's identifier rule is the same grammar — and
@@ -326,6 +341,7 @@ impl SchemaErrorKind {
     Self::ReservedTypeName,
     Self::UndefinedType,
     Self::TypeReferenceTooDeep,
+    Self::ConstantValueTooDeep,
     Self::InvalidName,
     Self::TooManyNames,
     Self::EmptyFieldsDefinition,
@@ -400,6 +416,7 @@ impl SchemaErrorKind {
       Self::ReservedTypeName => "type name is reserved for introspection",
       Self::UndefinedType => "undefined type",
       Self::TypeReferenceTooDeep => "type reference nests too deeply",
+      Self::ConstantValueTooDeep => "constant value nests too deeply",
       Self::InvalidName => "not a GraphQL name",
       Self::TooManyNames => "too many distinct names",
       Self::EmptyFieldsDefinition => "type defines no fields",
@@ -502,6 +519,7 @@ impl SchemaErrorKind {
       Self::ReservedTypeName => Code::new("smear::schema::reserved-type-name"),
       Self::UndefinedType => Code::new("smear::schema::undefined-type"),
       Self::TypeReferenceTooDeep => Code::new("smear::schema::type-reference-too-deep"),
+      Self::ConstantValueTooDeep => Code::new("smear::schema::constant-value-too-deep"),
       Self::InvalidName => Code::new("smear::schema::invalid-name"),
       Self::TooManyNames => Code::new("smear::schema::too-many-names"),
       Self::EmptyFieldsDefinition => Code::new("smear::schema::empty-fields-definition"),
@@ -616,6 +634,7 @@ impl SchemaErrorKind {
       | Self::ReservedTypeName
       | Self::UndefinedType
       | Self::TypeReferenceTooDeep
+      | Self::ConstantValueTooDeep
       | Self::InvalidName
       | Self::TooManyNames
       | Self::EmptyFieldsDefinition
@@ -714,6 +733,9 @@ impl SchemaErrorKind {
       }
       Self::TypeReferenceTooDeep => Some(
         "this implementation packs a bounded number of list and non-null wrappers into one type reference; flatten the type.",
+      ),
+      Self::ConstantValueTooDeep => Some(
+        "reducing a literal costs storage per level of nesting, so this implementation bounds it; no document any smear parser produces comes near the ceiling.",
       ),
       Self::InvalidName => Some("a GraphQL name is spelled `/[_A-Za-z][_0-9A-Za-z]*/`."),
       Self::EmptyFieldsDefinition => {
@@ -876,6 +898,7 @@ impl SchemaErrorKind {
       | Self::ReservedTypeName
       | Self::UndefinedType
       | Self::TypeReferenceTooDeep
+      | Self::ConstantValueTooDeep
       | Self::InvalidName
       | Self::TooManyNames
       | Self::EmptyFieldsDefinition

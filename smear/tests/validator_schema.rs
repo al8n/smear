@@ -32,8 +32,8 @@ use smear::{
     syntactic::{GraphqlLexer, type_system_document},
   },
   validator::schema::{
-    DefaultKind, RootOperation, Schema, SchemaBuilder, SchemaErrorKind, SchemaErrors, TypeKind,
-    builtin,
+    DefaultKind, MAX_CONST_VALUE_DEPTH, RootOperation, Schema, SchemaBuilder, SchemaErrorKind,
+    SchemaErrors, TypeKind, builtin,
   },
 };
 
@@ -90,6 +90,14 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
     SchemaErrorKind::TooManyNames,
     "the name index addresses 2^30 symbols; a document that interns more would need gigabytes of \
      distinct identifiers, so the limit is unreachable in a test.",
+  ),
+  (
+    SchemaErrorKind::ConstantValueTooDeep,
+    "`MAX_CONST_VALUE_DEPTH` is 1024 open containers and it is derived to sit above what every \
+     smear door produces — the lossless door at `HARD_MAX` reaches 255 — so no SDL this harness \
+     can parse reaches it. `a_literal_at_the_ceiling_is_a_price_and_one_past_it_is_a_refusal` \
+     fires it through the other door, a hand-assembled AST, and pins the accepting side beside \
+     it.",
   ),
 ];
 
@@ -1218,10 +1226,108 @@ fn a_hand_built_literal_deeper_than_any_parse_is_reduced_without_recursing() {
           .any(|error| matches!(error.kind(), SchemaErrorKind::UndefinedDirective)),
         "{refused}"
       );
+      // And past `MAX_CONST_VALUE_DEPTH` the depth itself is reported, which is what makes the
+      // build's answer a refusal rather than a truncation nobody was told about.
+      assert!(
+        refused
+          .iter()
+          .any(|error| matches!(error.kind(), SchemaErrorKind::ConstantValueTooDeep)),
+        "{refused}"
+      );
     })
     .expect("a fixture thread")
     .join()
     .expect("the fixture thread returned");
+}
+
+/// Exactly at the ceiling a literal is built; one container past it the build refuses.
+///
+/// # Why a ceiling at all, once the walk is a loop
+///
+/// Making the reduction iterative moved its growth from the native stack to the heap, and that was
+/// the point — but `frames.push` and `Vec::with_capacity` are **infallible**, so a caller-built
+/// literal deep enough still ended the process instead of the build. Measured out of suite at
+/// `96881f2`, `aarch64-apple-darwin`, unoptimised, as peak live bytes across `Schema::build` with
+/// the document built before the instrument was armed: 138 to 224 bytes for every container of a
+/// list chain and 162 to 248 for an object one, with no ceiling anywhere in it.
+///
+/// `Schema::build` returns a `Result`, so the answer here is a refusal rather than a documented
+/// bound — the thing al8n/smear#199 could not do inside a `Drop`. With the ceiling in, the same
+/// measurement reads **140 007 bytes for a list chain of 1 025 containers, of 2 001, of 20 001 and
+/// of 200 001** — one number, not a slope — against a 67 940-byte build with no literal in it.
+///
+/// # Why both halves are here
+///
+/// A bound that only ever refuses is indistinguishable from a prohibition. The accepting half is
+/// what says the ceiling is a price: 1 024 containers — four times the 255 the lossless door at
+/// `HARD_MAX` produces — is reduced, coerced against a custom scalar, and built into a schema.
+///
+/// The schema half is parsed and the literal half is hand-assembled, in two documents through one
+/// [`SchemaBuilder`], because no SDL this harness can parse reaches the ceiling and hand-writing a
+/// query root and a directive definition would put four hundred lines of constructor between the
+/// reader and the property.
+#[test]
+fn a_literal_at_the_ceiling_is_a_price_and_one_past_it_is_a_refusal() {
+  const DECLARATIONS: &str = "type Query { ok: Int }
+     scalar Custom
+     directive @x(a: Custom) on SCALAR";
+
+  /// `scalar Foo @x(a: [[…[]…]])`, with exactly `containers` nested list literals.
+  fn document(containers: usize) -> TypeSystemDocument<&'static str> {
+    let span = SimpleSpan::const_new(0, 0);
+    let mut value = ConstInputValue::List(ConstList::new(span, Nested::empty()));
+    for _ in 1..containers {
+      value = ConstInputValue::List(ConstList::new(span, Nested::new(vec![value])));
+    }
+    let directive = ConstDirective::new(
+      span,
+      Name::new(span, "x"),
+      Some(ConstArguments::new(
+        span,
+        vec![ConstArgument::new(span, Name::new(span, "a"), value)],
+      )),
+    );
+    TypeSystemDocument::new(
+      span,
+      vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+        span,
+        None,
+        TypeSystemDefinition::Type(TypeDefinition::Scalar(ScalarTypeDefinition::new(
+          span,
+          Name::new(span, "Foo"),
+          Some(ConstDirectives::new(span, vec![directive])),
+        ))),
+      ))],
+    )
+  }
+
+  fn build(containers: usize) -> Result<Schema, SchemaErrors> {
+    let declarations = parse(DECLARATIONS);
+    let literal = document(containers);
+    let mut builder = SchemaBuilder::new();
+    builder.document(&declarations);
+    builder.document(&literal);
+    builder.finish()
+  }
+
+  // A custom scalar accepts every literal, so nothing but the depth is in question here.
+  build(MAX_CONST_VALUE_DEPTH).unwrap_or_else(|errors| {
+    panic!("a literal of exactly {MAX_CONST_VALUE_DEPTH} containers was refused:\n{errors}")
+  });
+
+  let refused = build(MAX_CONST_VALUE_DEPTH + 1).expect_err("one container past the ceiling");
+  assert_eq!(
+    refused.kinds(),
+    std::vec![SchemaErrorKind::ConstantValueTooDeep],
+    "one container past the ceiling produced {:?}, and the refusal is supposed to be the only \
+     thing wrong with this document",
+    refused.kinds()
+  );
+  assert_eq!(
+    refused.iter().next().expect("one error").subject(),
+    "a",
+    "the refusal names the argument the literal was written for"
+  );
 }
 
 /// The one kind no parsed document can reach, reached the only other way it can be.

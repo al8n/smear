@@ -59,7 +59,9 @@
 //! is what [`Node::children`](crate::lossless::project::Node::children) accumulates, so
 //! the allocation per element it costs buys nothing here. The two whole-tree checks a door makes
 //! were already green; now the walk between them is too, and a fail-fast projection allocates for
-//! the AST it builds and for nothing else.
+//! the AST it builds, for the worklist entry each branching ancestor past the sixteenth costs the
+//! two checks, and for nothing else. [`verify_parse`] carries that second clause in full, with the
+//! 95-byte document that reaches it.
 //!
 //! Every span is the **token extent** of the constituents it covers — never the node's own
 //! range, which includes committed trivia. See [`crate::lossless::project`] for that
@@ -514,9 +516,22 @@ impl core::fmt::Debug for Verified<'_, '_> {
 impl<'p, 'src> Verified<'p, 'src> {
   /// Verifies that `source` is the whole text `parse` was produced from.
   ///
-  /// `O(tokens)` over the borrowed green root and allocation-free — see [`verify_parse`], which
-  /// is the same comparison and answers the same [`Unverified`]. This is where a caller pays for
-  /// it, and paying for it here is what lets a validation of this pair be bounded.
+  /// `O(tokens)` over the borrowed green root — see [`verify_parse`], which is the same comparison,
+  /// answers the same [`Unverified`], and carries the allocation contract below in full. This is
+  /// where a caller pays for it, and paying for it here is what lets a validation of this pair be
+  /// bounded.
+  ///
+  /// # Allocation
+  ///
+  /// **It allocates nothing through sixteen branching ancestors, and not at every shape.** The
+  /// comparison keeps one entry per ancestor of the node in hand that still has an unvisited child,
+  /// the first sixteen of them in a fixed array in its own frame; a seventeenth spills to the heap
+  /// through an infallible `push`, at 24 bytes an entry and bounded by
+  /// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH). Sixteen is not a depth — a
+  /// chain of single-child nodes holds one entry however long it is — but it is not far off, either:
+  /// measured, `{ a { a … { b } … } }` at fifteen nested selection sets is **95 bytes**, its green
+  /// tree is 35 levels against a ceiling of 1024, and it spills once, for 96 bytes. Fourteen is the
+  /// last one that does not.
   pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, Unverified> {
     // Counted by the same walk that verifies, so the proof and the price are established together
     // and cost one pass between them. See [`Verified::projection_cost`].
@@ -577,8 +592,31 @@ impl<'p, 'src> Verified<'p, 'src> {
 /// prefix while believing it had the document.
 ///
 /// [`verify_source`] over the parse's **green** root, which is the same comparison the fail-fast
-/// doors make and the reason they were safe. It is `O(tokens)`, it reads no `Parse` state beyond a
-/// borrow, and it allocates nothing.
+/// doors make and the reason they were safe. It is `O(tokens)` and it reads no `Parse` state beyond
+/// a borrow.
+///
+/// # Allocation
+///
+/// **It allocates nothing through sixteen branching ancestors, and not at every shape**, which is
+/// the half of this contract an earlier revision left out. The comparison keeps one entry per
+/// ancestor of the node in hand that still has an unvisited child, the first sixteen of them in a
+/// fixed array in its own frame; a seventeenth spills to the heap through an infallible `push`, at
+/// 24 bytes an entry and bounded by
+/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH).
+///
+/// The number is easier to reach than "sixteen levels" suggests, and the omission mattered for
+/// exactly that reason. It is not a depth: a chain of single-child nodes holds one entry however
+/// long it is. It is not a width either: a node is handed over whole, so a selection set with a
+/// thousand fields is one entry. It is the **branching** nesting — and an ordinary nested query has
+/// one branching ancestor per selection set. Measured: `{ a { a … { b } … } }` at fifteen nested
+/// selection sets is **95 bytes**, its green tree is 35 levels against a ceiling of 1024, and it
+/// spills once, for 96 bytes; at fourteen — 89 bytes — the reading is still zero.
+///
+/// What that buys is stated where the trade is made rather than hidden: the failure past sixteen
+/// needs an allocator exhausted by a request proportional to the branching nesting of a tree
+/// already in memory, where the recursion this replaced ran out of native stack at a fixed depth on
+/// every machine. `tests/validator_allocation.rs`'s `the_whole_root_check_allocates_nothing`
+/// measures the zero over a fixture whose branching nesting is three.
 ///
 /// This was `parse.syntax().text() == source` for one round, and that sentence was written about it
 /// too — wrongly. [`Parse::syntax`](crate::lossless::runner::Parse::syntax) *materialises rowan's red
