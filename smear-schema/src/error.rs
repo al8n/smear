@@ -1182,15 +1182,55 @@ impl core::error::Error for SchemaError {}
 ///
 /// The build does not stop at the first refusal: an SDL author wants the whole list, and the path
 /// runs once.
+///
+/// # The one clause that is conditional, and the method that answers it
+///
+/// One rule's output is not linear in the document that buys it. Draft §3.6.1/§3.7.1 oblige a
+/// type to declare every interface its declared interfaces declare, transitively, and *naming
+/// each pair that is not declared* is quadratic in the schema by construction — `Θ(K)` of SDL can
+/// ask for `Θ(K²)` distinct pairs, whichever way the rule is read, and
+/// [`MAX_MISSING_TRANSITIVE_INTERFACES`](super::MAX_MISSING_TRANSITIVE_INTERFACES) is where that
+/// list stops. Nothing else in draft §3 has that shape: every other refusal is one per element
+/// the document wrote.
+///
+/// So the sentence above holds with exactly one exception, and the exception is not silent.
+/// [`SchemaErrors::is_exhaustive`] is `false` precisely when a ceiling stopped the list, and
+/// `Display` says so; on every other build — including every build of a document with fewer
+/// missing transitive declarations than that ceiling, which is every honest one — it is `true`
+/// and "every reason" is the whole claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaErrors {
   errors: Vec<SchemaError>,
+  exhaustive: bool,
 }
 
 impl SchemaErrors {
-  /// Wraps a nonempty error list.
+  /// Wraps a nonempty error list that is every reason the build failed.
   pub(crate) fn new(errors: Vec<SchemaError>) -> Self {
-    Self { errors }
+    Self {
+      errors,
+      exhaustive: true,
+    }
+  }
+
+  /// Wraps a nonempty error list a ceiling stopped, which [`SchemaErrors::is_exhaustive`] reports.
+  pub(crate) fn truncated(errors: Vec<SchemaError>) -> Self {
+    Self {
+      errors,
+      exhaustive: false,
+    }
+  }
+
+  /// Returns whether this list is *every* reason the build failed.
+  ///
+  /// `false` means a ceiling stopped the list before the builder ran out of reasons — see this
+  /// type's header for the one rule that has one — so repairing everything reported can still
+  /// leave the document refused. `true` is the ordinary answer, and it is the whole guarantee:
+  /// nothing was dropped, and one repair pass over this list is one repair pass over the
+  /// document's refusals.
+  #[inline]
+  pub fn is_exhaustive(&self) -> bool {
+    self.exhaustive
   }
 
   /// Returns the errors.
@@ -1256,6 +1296,9 @@ impl core::fmt::Display for SchemaErrors {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let plural = if self.errors.len() == 1 { "" } else { "s" };
     write!(f, "{} schema error{plural}", self.errors.len())?;
+    if !self.exhaustive {
+      f.write_str(" (a ceiling stopped the list; more remain)")?;
+    }
     for error in &self.errors {
       write!(f, "\n  {error}")?;
     }
