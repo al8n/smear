@@ -166,7 +166,7 @@ pub(super) struct IntrospectedType<'a> {
   ///
   /// A union's members are only in `possibleTypes`, so there is nowhere else to read them. An
   /// interface's implementors are derivable from the objects' own `interfaces`, which is the same
-  /// path the SDL door takes and the one the build computes a transitive closure from — reading
+  /// path the SDL door takes and the one the build reads the implementor table out of — reading
   /// `possibleTypes` instead would make the implementor relation a second source of truth that a
   /// response could contradict.
   pub(super) possible_types: Option<Vec<TypeRef<'a>>>,
