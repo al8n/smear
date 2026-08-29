@@ -141,6 +141,13 @@ set -euo pipefail
 #   * `--self`, identical source both sides: **-1.88% to +2.19%**, worst ratio movement +0.077.
 #   * the prose-only commit of population 2 above: **-4.63% to +2.46%**, worst ratio movement
 #     +0.049.
+#   * this branch against its own merge-base, where the allocation gate reads +0.000% on every row
+#     and there is by construction nothing for the clock to find: **-8.16% to +6.41%**. That run is
+#     the one that matters most for the number below, and it is the reason the promotion criterion
+#     in `.github/workflows/perf.yml` is written as it is — **+6.41% is more than half of 12%, so
+#     on this evidence the wall-clock gate does NOT qualify for promotion and should not be made
+#     required.** It is recorded here rather than dropped because a floor measured on a quiet
+#     minute is not the floor.
 #   * two source plants that the allocation gate reads at exactly zero: a lost inline on the
 #     lexer's per-byte identifier predicate and a lost SIMD identifier skip, **both under +3.2%** —
 #     which is a finding about where this corpus spends its time, not about the gate.
