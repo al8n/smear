@@ -68,22 +68,59 @@ set -euo pipefail
 # THE CLAIM A CALLER RELIES ON: **this gate can see a 1% change in any workload's peak, at either
 # size, and any movement in its per-doubling ratio.**
 #
-# IS THE READING REPRODUCIBLE? MEASURED, NOT ASSUMED. Three invocations of the same binary on
-# `aarch64-apple-darwin`, release, produced **byte-identical JSON** — not "within noise", identical,
-# across all nine workloads at both sizes. Nothing on these paths is hash-seeded or
-# address-dependent in a way that reaches an allocation size, and a machine under load returns the
-# same number as an idle one. `--self` re-checks the stronger form of the same claim on whatever
-# host it runs on — two independent BUILDS of identical source rather than two runs of one binary —
-# and the `perf-floor` job in `.github/workflows/perf.yml` runs it on every push to the trunk.
+# It is not a round number picked for comfort. Four populations were measured on
+# `aarch64-apple-darwin`, release, before it was chosen.
 #
-# So this number is not a noise allowance; there is no noise. It is the allowance for changes that
-# legitimately move a peak without being a performance regression — a widened struct, an added
-# match arm, a `Vec` that now reserves one more element. On the replayed population below the
-# largest such incidental movement was **0.00%**: five recent merged commits, replayed against
-# their own parents with this instrument on top, moved every workload by exactly nothing except
-# where they moved the subject. 1% is therefore a wide margin over a measured zero, and it is set
-# there rather than at zero for one reason — a legitimate representation change is a real category
-# and reading its diff should not require an acceptance trailer for a rounding difference.
+#   1. **IS THE READING REPRODUCIBLE AT ALL? MEASURED, NOT ASSUMED.** Three invocations of the same
+#      binary produced **byte-identical JSON** — not "within noise", identical, across all nine
+#      workloads at both sizes. Then the stronger form: `--self` builds the identical source TWICE,
+#      in two directories, into two target directories, and measures both, and all nine came back
+#      at **exactly +0.000% at both sizes with the ratio unchanged to three decimals**. Nothing on
+#      these paths is hash-seeded or address-dependent in a way that reaches an allocation size,
+#      and a machine under load returns the same number as an idle one — the property the criterion
+#      benches in this repository do not have and cannot be given. `run.sh` re-checks the cheap
+#      half of this on every run (below) and the `perf-floor` job re-checks the whole of it on
+#      every push to the trunk.
+#
+#   2. **A prose-only change.** A commit adding one `///` line to `SchemaBuilder::compute_closures`
+#      and one `//` comment inside its hottest loop: all nine at **+0.000%**, both sizes, ratio
+#      unmoved. (The same commit read -4.63% to +2.46% on the wall-clock gate, which is that gate's
+#      floor and not a finding.)
+#
+#   3. **Real merged commits**, replayed against their own parents with this instrument on top —
+#      the population this gate will actually meet.
+#
+#      * `fcd7f5e` (#206, `fix(schema)!`, the refused population's closure walk) moved
+#        `schema_iface_mismatch` by **-72.12% / -92.25%** and `schema_transitive` by
+#        **-48.55% / -85.01%**, and took both of their ratios from **~3.9 to ~1.1**. That is this
+#        repository's own repair, retro-detected, and it is the strongest available statement that
+#        the two ceiling-shaped workloads read what they were built to read. Every other row was
+#        `+0.000%`; the largest INCIDENTAL movement the commit produced anywhere was **0.025%**, on
+#        `schema_real` at the small size, with its ratio moving 1.360 -> 1.361.
+#      * `0168942` (#202, `fix!`, eight walks over one structure) moved `schema_valid` by
+#        **-3.12% / -6.17%** — an improvement, in the axis it changed — and left **all eight other
+#        workloads at exactly +0.000%**.
+#
+#      A BOUND ON THAT POPULATION, recorded rather than glossed. It is two commits and not five,
+#      because the replay is limited by the `tokora` git edge: `8b73965` (#198) and everything
+#      before `bb279ea` (#203) needs an OLDER tokora than any current pin, and the base side fails
+#      to compile with `E0308` on `tokora::types::recovery::Components`. This script reports that
+#      as "the two revisions are not comparable by this instrument" and declines to answer, which
+#      is the correct behaviour and is why the number below is not derived downward from a
+#      population of two.
+#
+#   4. **A planted regression, at the shape the ceiling exists against.** Setting
+#      `MAX_INTERFACE_IMPLEMENTATION_MISMATCHES` to `usize::MAX` — the state before the repair —
+#      read `schema_iface_mismatch` at **+258.56% / +1190.72%**, ratio **1.099 -> 3.955**, with
+#      every other workload at `+0.000%` and the `parse` control flat, so the harness said by
+#      itself that the cost was inside the builder. And the converse plant, a linear scan in front
+#      of `SchemaBuilder::type_index`, is **invisible here** at +0.000% on every row while the
+#      wall-clock gate reads it at +26.66%: that pair is the whole argument for running two gates
+#      rather than one.
+#
+# So the margin is not for noise; there is none. It is for the changes that legitimately move a
+# peak without being a performance regression — a widened struct, an added match arm, a `Vec` that
+# reserves one more element — and population 3 says those cost hundredths of a per cent, not one.
 : "${PERF_ALLOC_THRESHOLD:=1.0}"
 
 # The ratio gate, in ABSOLUTE units of the ratio itself rather than per cent. A workload that read
@@ -94,17 +131,31 @@ set -euo pipefail
 
 # ── The wall-clock threshold ────────────────────────────────────────────────────────────────
 #
-# Derived from a self-comparison on the host, not chosen. `--self` builds the identical source
-# twice and interleaves the two binaries, so whatever it reports is the floor: two programs that do
-# exactly the same thing, differing only in which of them the runner was kinder to.
+# Derived from self-comparisons, not chosen. `--self` builds the identical source twice and
+# interleaves the two binaries, so whatever it reports is the floor: two programs that do exactly
+# the same thing, differing only in which of them the machine was kinder to.
 #
-# The number below is deliberately coarse and the header of `benches/solo/wall_clock.rs` says why
-# at length. The short form: the sibling instrument in `tokora` measured 4.3-4.8% run-to-run on a
-# DEDICATED machine and saw one run move nine unrelated benches +82% in lockstep, and a
-# GitHub-hosted runner is a shared machine. **Do not read this gate as seeing better than about a
-# 10% regression.** Re-derive it on the runner with `--self` — the `perf-floor` job does exactly
-# that on every push to the trunk, and if that job's floor ever exceeds this number the honest
-# response is to widen it or to retire the gate, not to re-run until it passes.
+# Measured on `aarch64-apple-darwin`, four interleaved rounds of five batches each, on a machine
+# carrying ~40 load average from unrelated work:
+#
+#   * `--self`, identical source both sides: **-1.88% to +2.19%**, worst ratio movement +0.077.
+#   * the prose-only commit of population 2 above: **-4.63% to +2.46%**, worst ratio movement
+#     +0.049.
+#   * two source plants that the allocation gate reads at exactly zero: a lost inline on the
+#     lexer's per-byte identifier predicate and a lost SIMD identifier skip, **both under +3.2%** —
+#     which is a finding about where this corpus spends its time, not about the gate.
+#   * the plant that does move: a linear scan in front of `SchemaBuilder::type_index`, at
+#     **+8.99% / +26.66%** on `schema_iface_mismatch` and **+5.54% / +18.04%** on
+#     `schema_transitive`, with the `parse` control family flat.
+#
+# **THESE NUMBERS ARE A FLOOR OBSERVATION AND NOT A RUNNER CALIBRATION, and the difference decides
+# how the threshold is set.** They were taken on a developer's machine; the gate runs on a shared
+# GitHub-hosted runner, where the sibling instrument in `tokora` measured 4.3-4.8% run-to-run on a
+# DEDICATED machine and saw one run move nine unrelated benches +82% in lockstep. So the number
+# below is deliberately far above the local floor. **Do not read this gate as seeing better than
+# about a 10% regression.** The `perf-floor` job re-derives the real floor with `--self` on every
+# push to the trunk, and if that job's floor ever approaches this number the honest response is to
+# widen it or to retire the gate, not to re-run until it passes.
 : "${PERF_WALL_THRESHOLD:=12.0}"
 : "${PERF_WALL_RATIO:=0.40}"
 
