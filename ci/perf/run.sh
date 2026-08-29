@@ -124,9 +124,10 @@ set -euo pipefail
 : "${PERF_ALLOC_THRESHOLD:=1.0}"
 
 # The ratio gate, in ABSOLUTE units of the ratio itself rather than per cent. A workload that read
-# 1.97 per doubling and now reads 2.07 has not changed law; one that reads 3.9 has. 0.15 is a
-# fifteenth of the distance between linear and quadratic, and on the replayed population every row
-# moved its ratio by less than 0.001.
+# 1.97 per doubling and now reads 2.07 has not changed law; one that reads 3.9 has. Linear is 2 and
+# quadratic is 4, so 0.15 is under a tenth of the distance between them — and on the replayed
+# population above, every row that was NOT the commit's subject moved its ratio by less than 0.002.
+# The subjects moved theirs by 2.8.
 : "${PERF_ALLOC_RATIO:=0.15}"
 
 # ── The wall-clock threshold ────────────────────────────────────────────────────────────────
