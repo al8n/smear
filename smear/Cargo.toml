@@ -617,8 +617,12 @@ required-features = ["rowan", "validator"]
 # either needs, and it keeps the counting allocator's process to itself.
 #
 # `required-features = ["validator"]` for the reason the block above gives at length: naming a
-# target is LOUD when its features are unmet (`exit 101, "requires the features: ..."`), and
-# `.github/workflows/perf.yml` reaches both by name for exactly that.
+# target is LOUD when its features are unmet (`exit 101, "requires the features: ..."`), and both
+# are reached BY NAME for exactly that — by `ci/perf/run.sh`, which `.github/workflows/perf.yml`
+# runs, in a single `cargo build --bench peak_alloc --bench wall_clock`. One bound worth stating
+# with it: that job is `continue-on-error`, so while these gates are advisory a rename would be a
+# red nobody has to act on rather than a red that blocks. Promoting the allocation gate — the
+# criterion is in `perf.yml`'s header — closes that too.
 
 [[bench]]
 name = "peak_alloc"
