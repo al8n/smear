@@ -577,6 +577,61 @@ path = "benches/comparative/apollo/validator_comparison.rs"
 harness = false
 required-features = ["rowan", "validator"]
 
+# ── THE TWO PERF GATES, AND WHY THEY ARE `[[bench]]` TARGETS HERE ───────────────────────────
+#
+# `ci/perf/run.sh` builds both of these on this branch and on its merge-base, in one run on one
+# runner, and compares. `benches/solo/perf/mod.rs` carries the corpus and the two-size design;
+# `.github/workflows/perf.yml` carries the jobs. What is decided HERE is where they live, and it
+# was not obvious.
+#
+# THE ALTERNATIVE THAT WAS REJECTED. The sibling `tokora` repository keeps its instruction-count
+# instrument as a separate workspace member, and that is right FOR THAT REPOSITORY: its benches are
+# a separate package because `criterion` pulls `alloca`, whose build script compiles C. This
+# workspace made the opposite choice deliberately — six `[[bench]]` targets moved back INTO the
+# crate they measure — and importing tokora's answer here would undo it for two measurable reasons.
+#
+#   1. **A new member would widen the workspace-wide resolve of `smear`.** These workloads need
+#      `validator`, which is NOT one of this package's default features and which no current member
+#      requests. The root `Cargo.toml`'s header is sixty lines about exactly this arithmetic: a
+#      member's feature request unifies across every bare workspace command, and it is how the
+#      entire lossless CST tower entered the Miri selection without anyone choosing it. A member
+#      naming `smear/validator` would put nine more integration targets into every `cargo test` and
+#      the draft §5 rule engine into every bare build, for the benefit of two gates.
+#   2. **The corpus reads this package's own fixtures.** `perf/mod.rs` `include_str!`s eight schemas
+#      and one executable out of `tests/fixtures/`. From here that is two directories up; from
+#      another member it is the `../../smear/tests/fixtures/...` reach the bench consolidation exists
+#      to have got rid of.
+#
+# WHAT `[[bench]]` BUYS OVER `[[example]]` OR `[[test]]`, since all three are plain binaries with
+# `harness = false`. Cargo does not build bench targets for `cargo test`, `cargo check` or
+# `cargo clippy` unless `--benches` or `--all-targets` is passed, and it DOES build examples for
+# every `cargo test`. So an example would put this corpus — which generates hundreds of kilobytes
+# of SDL and links the rule engine — into the compile of every ordinary test run; a bench does not.
+# `cargo bench` also runs them, which is what makes a local reading one command.
+#
+# NEITHER USES `criterion`, and that is not an oversight. A peak-byte figure is exact: it has no
+# distribution to estimate, no outlier to reject and no confidence interval to report, so a
+# statistical harness around it would be measuring the harness. The wall-clock one takes min-of-N
+# rather than criterion's mean because the noise on a shared runner is one-directional; its own
+# header carries that argument. `harness = false` with a hand-written `main` is the whole of what
+# either needs, and it keeps the counting allocator's process to itself.
+#
+# `required-features = ["validator"]` for the reason the block above gives at length: naming a
+# target is LOUD when its features are unmet (`exit 101, "requires the features: ..."`), and
+# `.github/workflows/perf.yml` reaches both by name for exactly that.
+
+[[bench]]
+name = "peak_alloc"
+path = "benches/solo/peak_alloc.rs"
+harness = false
+required-features = ["validator"]
+
+[[bench]]
+name = "wall_clock"
+path = "benches/solo/wall_clock.rs"
+harness = false
+required-features = ["validator"]
+
 # The two gates over the apollo harness. They are `[[test]]` targets living in `benches/` because
 # they share `support/` with the two benches above and cargo resolves `mod support;` against the
 # directory of the file that writes it — a target in `tests/` could reach the same source only
