@@ -259,12 +259,18 @@ def main():
 
   print()
   for row in failed:
+    # A workload whose small size reads zero has no ratio, so the line says so rather than
+    # formatting a `None`. Nothing in the current corpus does; a future one might, and a gate that
+    # tracebacks while reporting a real regression reports nothing.
+    if row["base_ratio"] is None or row["head_ratio"] is None:
+      shape = "ratio unavailable (the small size read zero)"
+    else:
+      shape = f"ratio {row['base_ratio']:.3f} -> {row['head_ratio']:.3f}"
     print(
       f"::error::{row['name']} ({args.kind}): {row['base_lo']:,.0f} -> {row['head_lo']:,.0f} at "
       f"n={head['workloads'][row['name']]['lo_size']} ({row['lo_pct']:+.3f}%), "
       f"{row['base_hi']:,.0f} -> {row['head_hi']:,.0f} at "
-      f"n={head['workloads'][row['name']]['hi_size']} ({row['hi_pct']:+.3f}%) {unit}; "
-      f"ratio {row['base_ratio']:.3f} -> {row['head_ratio']:.3f}."
+      f"n={head['workloads'][row['name']]['hi_size']} ({row['hi_pct']:+.3f}%) {unit}; {shape}."
     )
 
   print(
