@@ -603,8 +603,10 @@ pub fn json_destination(args: &[String]) -> Option<String> {
             .clone(),
         );
       }
+      // Consumed by `rounds` below; its value is skipped here so it cannot be read as a
+      // positional argument, which is what turned a valid `--rounds 5` into a panic once.
+      "--rounds" => index += 1,
       "--bench" | "--nocapture" => {}
-      other if other.starts_with("--rounds") => {}
       other => panic!("unrecognised argument: {other}"),
     }
     index += 1;
