@@ -294,6 +294,17 @@ for side in head base; do
       echo "::error::merge-base's library sources, so the two revisions are not comparable by it."
       echo "::error::Usually this is an API change under some member's \`src/\` that"
       echo "::error::\`benches/solo/perf/mod.rs\` names; the fix is in the instrument, not here."
+    else
+      # A HEAD-side failure is not a perf finding and should not be read as one. The tree does not
+      # compile, so every other job in this repository is failing too and this one has nothing to
+      # measure. Saying which of the two it is matters, because they license opposite responses:
+      # a base-side failure is fixed in the instrument, a head-side failure is fixed in the tree.
+      echo "::error::That is a statement about THIS TREE, not about performance: the branch does"
+      echo "::error::not compile, so there is nothing to measure and every other job is red too."
+      echo "::error::One cause is specific to this repository and worth checking first — \`tokora\`"
+      echo "::error::is a git dependency on a MOVING branch and no \`Cargo.lock\` is committed, so a"
+      echo "::error::build here can pick up an upstream commit this tree has never compiled"
+      echo "::error::against. The lock this run used is printed above; \`PERF_LOCK\` pins it."
     fi
     exit 1
   }
