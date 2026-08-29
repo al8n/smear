@@ -59,7 +59,7 @@
 # independently.
 #
 # Environment: PERF_ALLOC_THRESHOLD, PERF_ALLOC_RATIO, PERF_WALL_THRESHOLD, PERF_WALL_RATIO,
-# PERF_ROUNDS, PERF_INNER_ROUNDS, PERF_WORK, PERF_ONLY.
+# PERF_ROUNDS, PERF_INNER_ROUNDS, PERF_WORK, PERF_ONLY, PERF_LOCK.
 
 set -euo pipefail
 
@@ -172,13 +172,38 @@ for dir in $src_dirs; do
   fi
 done
 
-# One lock for both sides. `Cargo.lock` is gitignored here, so each side would otherwise resolve its
-# own — and with `tokora` on `branch = "main"` two resolves seconds apart can pick different
-# commits, which this gate would then read as a regression in smear. The head side resolves first
-# and the base side starts from that lock; cargo keeps every pin the base manifest can still
-# satisfy and changes only what it must. Whether it had to is PRINTED below rather than assumed.
+# ── ONE LOCK FOR BOTH SIDES, AND WHERE IT COMES FROM ────────────────────────────────────────
+#
+# `Cargo.lock` is gitignored here, so each side would otherwise resolve its own — and with `tokora`
+# on `branch = "main"` two resolves seconds apart can pick different commits, which this gate would
+# then read as a regression in smear. One lock is resolved and both sides get it; whether cargo had
+# to re-resolve for the base manifest is PRINTED below rather than assumed either way.
+#
+# WHICH lock, in order of preference, and the middle one was added after it bit:
+#
+#   1. `$PERF_LOCK`, if the caller names one. This is how a run is made reproducible across days.
+#   2. The repository's own `Cargo.lock`, if the working tree has one. A developer's tree has been
+#      resolved by whatever they last built, and that is the tokora this branch was written
+#      against. **MEASURED**: a replay run minutes after a green one failed to build the HEAD side
+#      with 34 errors in `smear-parser`, because `cargo generate-lockfile` had moved `tokora` from
+#      `3d5262a` to `79967b6` in between and the newer one had changed a bound. Nothing about smear
+#      had changed. The root `Cargo.toml` records this exposure as a known unpaid cost of the git
+#      edge; what it costs THIS gate is that a run can become unavailable for a reason on another
+#      repository's `main`, and preferring an already-resolved lock is the cheap half of the repair.
+#   3. A fresh resolve. This is what CI does, because the checkout has no lock — the same exposure
+#      every other job in this repository already carries, and not one this script can fix.
+if [ -n "${PERF_LOCK:-}" ] && [ -r "${PERF_LOCK}" ]; then
+  echo "perf: using the caller's lock: $PERF_LOCK"
+  cp "$PERF_LOCK" "$PERF_WORK/head/Cargo.lock"
+elif [ -r "$repo/Cargo.lock" ]; then
+  echo "perf: using the working tree's already-resolved Cargo.lock"
+  cp "$repo/Cargo.lock" "$PERF_WORK/head/Cargo.lock"
+else
+  echo "perf: no lock to start from; resolving one"
+fi
 ( cd "$PERF_WORK/head" && cargo generate-lockfile --quiet )
 cp "$PERF_WORK/head/Cargo.lock" "$PERF_WORK/base/Cargo.lock"
+grep -A2 '^name = "tokora"' "$PERF_WORK/head/Cargo.lock" | sed -n 's/^source = /perf: tokora /p' || true
 
 for side in head base; do
   dir="$PERF_WORK/$side"
