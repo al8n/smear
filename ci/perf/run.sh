@@ -192,6 +192,12 @@ done
 #      repository's `main`, and preferring an already-resolved lock is the cheap half of the repair.
 #   3. A fresh resolve. This is what CI does, because the checkout has no lock — the same exposure
 #      every other job in this repository already carries, and not one this script can fix.
+#
+# `cargo generate-lockfile` is run ONLY when there is nothing to start from, and that is not a
+# micro-optimisation. Its documented behaviour is to rebuild an existing lock "with the latest
+# available version of every package", which for a `branch = "main"` git dependency means it moves
+# the pin every time — so calling it after copying a good lock in undoes the copy. That is exactly
+# how the failure above reproduced a second time.
 if [ -n "${PERF_LOCK:-}" ] && [ -r "${PERF_LOCK}" ]; then
   echo "perf: using the caller's lock: $PERF_LOCK"
   cp "$PERF_LOCK" "$PERF_WORK/head/Cargo.lock"
@@ -200,8 +206,8 @@ elif [ -r "$repo/Cargo.lock" ]; then
   cp "$repo/Cargo.lock" "$PERF_WORK/head/Cargo.lock"
 else
   echo "perf: no lock to start from; resolving one"
+  ( cd "$PERF_WORK/head" && cargo generate-lockfile --quiet )
 fi
-( cd "$PERF_WORK/head" && cargo generate-lockfile --quiet )
 cp "$PERF_WORK/head/Cargo.lock" "$PERF_WORK/base/Cargo.lock"
 grep -A2 '^name = "tokora"' "$PERF_WORK/head/Cargo.lock" | sed -n 's/^source = /perf: tokora /p' || true
 
