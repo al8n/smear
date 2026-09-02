@@ -864,3 +864,393 @@ fn a_literal_leaf_costs_the_build_one_copy_per_distinct_spelling() {
     WIDE - SHORT
   );
 }
+
+// ---------------------------------------------------------------------------------------------
+// the width axis of the default-cycle settling rule
+// ---------------------------------------------------------------------------------------------
+
+/// Sibling literals descending into one input object cost its width **once**, not once each.
+///
+/// # The defect
+///
+/// `validate_input_object_default_cycles` settled per OBJECT: a frame could retire its object only
+/// when its work list asked every coverable field of that object with nothing supplied. `M` sibling
+/// literals that each supply one of `Leaf`'s fields make every frame non-canonical, so `Leaf` never
+/// settled, and each of the `M` descents built and walked a work list holding the `D` fields it did
+/// not supply. `Θ(M × D)` of walk on `Θ(M + D)` of SDL that `Schema::build` **accepts** —
+/// al8n/smear#200, measured at 313 ms for `M = 64_000, D = 128` against 28 ms once the rule settled
+/// per FIELD, and at 635 ms against 27 ms with `D` doubled.
+///
+/// # Why this reads allocation events and not a clock
+///
+/// The count is a property of the walk rather than of the machine it ran on, so it is the same
+/// number under a loaded CI runner as here, and a regression names itself instead of arriving as a
+/// threshold argument. It reads the walk because the work lists ARE the allocations: one `Vec` per
+/// frame, grown by the entries pushed into it.
+///
+/// The **peak** cannot see this at all. al8n/smear#198 already took the live work list from
+/// `M × D` entries to `M + D`, and only one level's list is live at a time — so the high-water mark
+/// is the same on both sides of this repair, to within the ninety-four bytes of the state array
+/// that replaced two.
+///
+/// # What is asserted, and why it is an interaction
+///
+/// Neither slope alone: the count grows with `M` for honest reasons — `M` map nodes, `M` supplied
+/// entries — and it grows with `D` for honest reasons too. What must not happen is the two
+/// multiplying. So the reading is what **widening `Leaf` costs**, at `M` siblings and again at
+/// `2M`: the same number if the width is paid once, twice the number if it is paid per sibling.
+#[cfg(feature = "std")]
+#[test]
+fn a_wide_input_object_costs_its_width_once_however_many_siblings_descend_into_it() {
+  /// Coverable fields of `Leaf` beyond the one every sibling supplies. The control.
+  const NARROW: usize = 8;
+  /// The same `Leaf`, wider. Nothing else about the document changes.
+  const WIDE: usize = 128;
+  /// Sibling literals in `Outer`'s default. Doubled for the second reading.
+  const SIBLINGS: usize = 2_000;
+
+  /// al8n/smear#200's shape: `siblings` map nodes, each supplying `g0` and omitting the rest, in
+  /// front of a `Leaf` of `width + 1` fields whose own defaults are all `{}`.
+  fn sdl(siblings: usize, width: usize) -> String {
+    let mut out = String::from("type Query { ok(o: Outer): Int }\ninput Outer { w: [Wide] = [");
+    for _ in 0..siblings {
+      out.push_str("{f: {g0: null}} ");
+    }
+    out.push_str("] }\ninput Wide { f: Leaf }\ninput Leaf {");
+    for index in 0..=width {
+      out.push_str(&std::format!(" g{index}: G = {{}}"));
+    }
+    out.push_str(" }\ninput G { x: Int }\n");
+    out
+  }
+
+  /// Allocation events across one `Schema::build` of that document, parsed outside the window.
+  ///
+  /// The build is required to succeed: this shape is accepted SDL, and a bound that refused it
+  /// would be a prohibition rather than a price.
+  fn events(siblings: usize, width: usize) -> u64 {
+    let source = sdl(siblings, width);
+    let document = parse_sdl(&source);
+    let mut ok = None;
+    let counted = allocations(|| ok = Some(Schema::build(&document).is_ok()));
+    assert_eq!(
+      ok,
+      Some(true),
+      "{siblings} siblings in front of a {width}-field input object was refused"
+    );
+    counted
+  }
+
+  // The once-per-process built-in parse is not what any reading below is about.
+  let warm = Schema::build(&parse_sdl(MINIMAL)).expect("the minimal SDL is a schema");
+  std::hint::black_box(&warm);
+
+  let narrow = events(SIBLINGS, NARROW);
+  let wide = events(SIBLINGS, WIDE);
+  let narrow_twice = events(2 * SIBLINGS, NARROW);
+  let wide_twice = events(2 * SIBLINGS, WIDE);
+
+  // The instrument discriminates: the walk is ENTITLED to a cost per sibling — each is a map node
+  // it reads and an entry it descends into — and doubling the siblings has to show up as that.
+  // Without this line, a counter that never moved would satisfy the assertion below.
+  let per_sibling = narrow_twice - narrow;
+  assert!(
+    per_sibling >= SIBLINGS as u64,
+    "doubling the siblings moved the count by only {per_sibling} over {SIBLINGS} added literals, \
+     so the instrument is not reading the walk at all"
+  );
+
+  let widening = wide - narrow;
+  let widening_twice = wide_twice - narrow_twice;
+  assert_eq!(
+    widening, widening_twice,
+    "widening `Leaf` from {NARROW} to {WIDE} coverable fields cost {widening} allocations at \
+     {SIBLINGS} siblings and {widening_twice} at twice that, so the width is paid per sibling: \
+     `Θ(M × D)` of walk on `Θ(M + D)` of SDL this build accepts"
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// the nesting axis of the same rule
+// ---------------------------------------------------------------------------------------------
+
+/// A re-entrant own-default chain pays one object's width once, not once per nested visit.
+///
+/// # The defect, and why the cell above is blind to it
+///
+/// The frame appended its omitted fields at DESCENT time, ahead of the supplied entries it also
+/// carried — and a supplied entry can re-enter the same target before any of those omissions has
+/// run. `M` nested visits to one `M + D`-wide object then each hold a width-sized work list that
+/// nothing has yet settled: `Θ(M × (M + D))` of work and of live storage out of `Θ(M + D)` of SDL
+/// that `Schema::build` **accepts**, ending in an allocator abort rather than a diagnostic. Stable
+/// compaction cannot reach it — the entries are already copied into the ancestors' lists.
+///
+/// ```graphql
+/// input Outer { w: Wide = {c0: {}} }
+/// input Wide  { c0: A0 = null … cM: AM = null   g0: G = {} … gD: G = {} }
+/// input Ai    { w: Wide = {c{i+1}: {}} }
+/// ```
+///
+/// Every default is shallow and every one of them is acyclic. The cell above varies siblings at
+/// ONE level and cannot see this: there, the frame that carries the width has no supplied entry to
+/// re-enter through. Found by an adversarial review of the sibling repair, against the tree.
+///
+/// The repair defers the omissions to the point where the supplied branches have returned, so a
+/// nested frame's live work is the literal it was handed. Measured at `M = 2000, D = 128`:
+/// 307 473 allocation events and a 133 MB peak before, **31 474** and **2.6 MB** after.
+///
+/// # Two readings, because they fail differently
+///
+/// **Events** count calls, so they are insensitive to the allocator's capacity ladder and the
+/// width interaction can be read off them directly: widening `Wide` must cost the same at `M`
+/// links as at `2M`. **Peak** counts bytes, and the model's own `Θ(M + D)` footprint is inside the
+/// window with its `Vec` doublings, so the width interaction there is a step function — what is
+/// asserted of the peak instead is its slope in `M`, which is the finding's own claim: doubling
+/// the links may not more than double the high-water mark.
+#[cfg(feature = "std")]
+#[test]
+fn a_reentrant_own_default_chain_pays_one_width_once_not_once_per_nested_visit() {
+  /// Coverable `G` fields on `Wide` beyond the chain's own. The control.
+  const NARROW: usize = 8;
+  /// The same `Wide`, wider. Nothing else about the document changes.
+  const WIDE: usize = 128;
+  /// Links in the re-entrant chain. Doubled for the second reading.
+  const LINKS: usize = 1_000;
+
+  fn sdl(links: usize, width: usize) -> String {
+    let mut out = String::from(
+      "type Query { ok(o: Outer): Int }\ninput Outer { w: Wide = {c0: {}} }\ninput Wide {",
+    );
+    for index in 0..=links {
+      out.push_str(&std::format!(" c{index}: A{index} = null"));
+    }
+    for index in 0..=width {
+      out.push_str(&std::format!(" g{index}: G = {{}}"));
+    }
+    out.push_str(" }\n");
+    for index in 0..links {
+      out.push_str(&std::format!(
+        "input A{index} {{ w: Wide = {{c{}: {{}}}} }}\n",
+        index + 1
+      ));
+    }
+    out.push_str(&std::format!(
+      "input A{links} {{ w: Wide }}\ninput G {{ x: Int }}\n"
+    ));
+    out
+  }
+
+  /// Allocation events and peak live bytes across one `Schema::build`, parsed outside the window.
+  fn reading(links: usize, width: usize) -> (u64, usize) {
+    let source = sdl(links, width);
+    let document = parse_sdl(&source);
+    let mut ok = None;
+    let mut events = 0;
+    let peak = peak_bytes(|| {
+      events = allocations(|| ok = Some(Schema::build(&document).is_ok()));
+    });
+    assert_eq!(
+      ok,
+      Some(true),
+      "a {links}-link chain through a {width}-wide input object was refused"
+    );
+    (events, peak)
+  }
+
+  // The once-per-process built-in parse is not what any reading below is about.
+  let warm = Schema::build(&parse_sdl(MINIMAL)).expect("the minimal SDL is a schema");
+  std::hint::black_box(&warm);
+
+  let (narrow, narrow_peak) = reading(LINKS, NARROW);
+  let (wide, wide_peak) = reading(LINKS, WIDE);
+  let (narrow_twice, narrow_twice_peak) = reading(2 * LINKS, NARROW);
+  let (wide_twice, wide_twice_peak) = reading(2 * LINKS, WIDE);
+
+  // The instruments discriminate: the walk is ENTITLED to a cost per link, and doubling the links
+  // has to show up in both readings. Without these, counters that never moved would satisfy
+  // everything below.
+  let per_link = narrow_twice - narrow;
+  assert!(
+    per_link >= LINKS as u64,
+    "doubling the links moved the event count by only {per_link} over {LINKS} added links, so the \
+     event instrument is not reading the walk"
+  );
+  assert!(
+    narrow_twice_peak > narrow_peak,
+    "doubling the links did not move the peak at all ({narrow_peak} then {narrow_twice_peak}), so \
+     the byte instrument is not reading the walk"
+  );
+
+  // The width, on the reading that can see it. One added coverable field is one field the walk
+  // asks once, wherever in the chain it happens to be asked, so the two figures are the same
+  // number up to a `Vec` growth step. A difference that SCALES with the links is the width paid
+  // per nested visit.
+  let widening = wide - narrow;
+  let widening_twice = wide_twice - narrow_twice;
+  let drift = widening_twice.abs_diff(widening);
+  assert!(
+    drift <= 64,
+    "widening `Wide` from {NARROW} to {WIDE} coverable `G` fields cost {widening} allocations at \
+     {LINKS} links and {widening_twice} at twice that, a difference of {drift}: the width is paid \
+     once per nested visit, so `Θ(M + D)` of SDL is `Θ(M × (M + D))` of walk"
+  );
+
+  // The slope, on the reading that carries the storage. The document at twice the links is twice
+  // the document; the high-water mark may not be four times the mark.
+  for (label, small, large) in [
+    ("narrow", narrow_peak, narrow_twice_peak),
+    ("wide", wide_peak, wide_twice_peak),
+  ] {
+    assert!(
+      large < 3 * small,
+      "doubling the links took the {label} peak from {small} to {large} bytes — more than the \
+       document doubled, so a nested visit is holding a width-sized work list of its own"
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// the nesting axis again, led by an omission rather than by a supplied entry
+// ---------------------------------------------------------------------------------------------
+
+/// A chain re-entered through an OMISSION pays the object's unrelated tail once for the build.
+///
+/// # The defect, and why the cell above is blind to it
+///
+/// Deferring the omissions to the retire step stops a frame holding the width while it waits on a
+/// SUPPLIED branch. It does not stop it holding the width while it waits on an OMITTED one: the
+/// list was still built in one go, and the first omission can re-enter the same object, so the
+/// rest of that list stays live while the child builds another.
+///
+/// ```graphql
+/// input Wide { c0: A0 = {} … cM: AM = {}   g0: G = {} … gD: G = {} }
+/// input Ai   { w: Wide = {c0: null … ci: null} }
+/// ```
+///
+/// `Wide` frame `i` is reached through `A{i-1}.w`'s own default, which supplies `c0 … c{i-1}`, so
+/// it omits `c{i} … cM` and every `g`. It asks `c{i}` first, and that descent re-enters `Wide`
+/// before the rest of frame `i`'s omissions run. `M` open frames, each retaining a `(M − i) + D`
+/// tail: `Θ(M × D + M²)` from `Θ(M² + D)` of accepted SDL, and `D` is free to be much larger
+/// than `M`. Every default is shallow and the schema is acyclic — the `c` fields on the path are
+/// supplied one level down, so nothing ever meets itself. Found by an adversarial review of the
+/// deferral, against the tree.
+///
+/// The repair deletes the list. A frame holds its supply span and one cursor into the object's
+/// coverable run, and asks for the next field of that run it can still learn from — one at a
+/// time. At `M = 1000, D = 1000`: **1 532 286 allocation events and a 70 MB peak before, 26 771
+/// and 50 MB after**, of which the 50 MB is the model rather than the walk.
+///
+/// # Why a lazy list would not have been enough
+///
+/// Deferring one field at a time is not the same as generating the list lazily. A frame that
+/// resumes after its descendants settled its whole tail still has to *step over* that tail to
+/// discover as much — `Θ(M × D)` of time for `Θ(M + D)` of it, the same exponent one reading
+/// across. The run is therefore read through a disjoint-set over run POSITIONS, unioned `p → p+1`
+/// at the one place a field settles, so a resumed frame steps over a settled tail in amortised
+/// constant time rather than walking it.
+///
+/// # What is asserted, and why the tail is wide
+///
+/// The interaction, on both readings, as in the cell above: widening `Wide` by `D` unrelated
+/// fields must cost the same whether there are `M` links or `2M`. Retaining the tail makes that
+/// cost `Θ(M × D)`, so it doubles with the links; not retaining it leaves the model's own `Θ(D)`
+/// footprint, which does not.
+///
+/// The tail has to be WIDE for the peak to read that, and this is the cell's one calibration.
+/// The model's `Θ(D)` share of the widening is the same at both chain lengths, so it dilutes the
+/// ratio: at `D = 128` the retained tail moves the peak by only 1.50× where the walk's own share
+/// would move it by 2×, and no bound separates that from an honest 1.0 with any margin. At
+/// `D = 2000` the tail dominates and the reading is 1.995× retained against 0.989× not — which
+/// the `3 : 2` bound below splits with a third of the way to spare on each side. The event count
+/// needs no such thing: it counts calls, and reads 1.974× against a drift of six.
+#[cfg(feature = "std")]
+#[test]
+fn an_omission_led_reentry_chain_pays_the_unrelated_tail_once() {
+  /// Unrelated coverable `G` fields on `Wide`. The control.
+  const NARROW: usize = 8;
+  /// The same `Wide`, wider. Nothing else about the document changes.
+  const WIDE: usize = 2_000;
+  /// Links in the chain. Doubled for the second reading. The source is `Θ(LINKS²)`.
+  const LINKS: usize = 200;
+
+  fn sdl(links: usize, width: usize) -> String {
+    let mut out = String::from("type Query { ok(w: Wide): Int }\ninput Wide {");
+    for index in 0..=links {
+      out.push_str(&std::format!(" c{index}: A{index} = {{}}"));
+    }
+    for index in 0..=width {
+      out.push_str(&std::format!(" g{index}: G = {{}}"));
+    }
+    out.push_str(" }\n");
+    for index in 0..=links {
+      out.push_str(&std::format!("input A{index} {{ w: Wide = {{"));
+      for supplied in 0..=index {
+        out.push_str(&std::format!("c{supplied}: null "));
+      }
+      out.push_str("} }\n");
+    }
+    out.push_str("input G { x: Int }\n");
+    out
+  }
+
+  /// Allocation events and peak live bytes across one `Schema::build`, parsed outside the window.
+  fn reading(links: usize, width: usize) -> (u64, usize) {
+    let source = sdl(links, width);
+    let document = parse_sdl(&source);
+    let mut ok = None;
+    let mut events = 0;
+    let peak = peak_bytes(|| {
+      events = allocations(|| ok = Some(Schema::build(&document).is_ok()));
+    });
+    assert_eq!(
+      ok,
+      Some(true),
+      "a {links}-link omission-led chain through a {width}-wide input object was refused"
+    );
+    (events, peak)
+  }
+
+  // The once-per-process built-in parse is not what any reading below is about.
+  let warm = Schema::build(&parse_sdl(MINIMAL)).expect("the minimal SDL is a schema");
+  std::hint::black_box(&warm);
+
+  let (narrow, narrow_peak) = reading(LINKS, NARROW);
+  let (wide, wide_peak) = reading(LINKS, WIDE);
+  let (narrow_twice, narrow_twice_peak) = reading(2 * LINKS, NARROW);
+  let (wide_twice, wide_twice_peak) = reading(2 * LINKS, WIDE);
+
+  // The instruments discriminate: the source is quadratic in the links, so doubling them has to
+  // move both readings. Without these, counters that never moved would satisfy everything below.
+  let per_link = narrow_twice - narrow;
+  assert!(
+    per_link >= LINKS as u64,
+    "doubling the links moved the event count by only {per_link} over {LINKS} added links, so the \
+     event instrument is not reading the walk"
+  );
+  assert!(
+    narrow_twice_peak > 2 * narrow_peak,
+    "doubling the links took the peak from {narrow_peak} to {narrow_twice_peak}, under twice — \
+     the source is quadratic in the links, so the byte instrument is not reading the document"
+  );
+
+  // Widening the object is `Θ(D)` of source and must be `O(D)` of walk, at every chain length.
+  let widening = wide - narrow;
+  let widening_twice = wide_twice - narrow_twice;
+  let drift = widening_twice.abs_diff(widening);
+  assert!(
+    drift <= 64,
+    "widening `Wide` from {NARROW} to {WIDE} unrelated `G` fields cost {widening} allocations at \
+     {LINKS} links and {widening_twice} at twice that, a difference of {drift}: the tail is \
+     retained once per nested visit, so `Θ(M² + D)` of SDL is `Θ(M × D + M²)` of walk"
+  );
+
+  let widening_peak = wide_peak - narrow_peak;
+  let widening_twice_peak = wide_twice_peak - narrow_twice_peak;
+  assert!(
+    2 * widening_twice_peak < 3 * widening_peak,
+    "widening `Wide` by {} unrelated fields took {widening_peak} bytes of peak at {LINKS} links \
+     and {widening_twice_peak} at twice that: the tail is retained once per nested visit, so \
+     `Θ(M² + D)` of SDL is `Θ(M × D + M²)` of live storage",
+    WIDE - NARROW
+  );
+}
