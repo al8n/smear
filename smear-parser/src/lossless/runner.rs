@@ -285,7 +285,8 @@ impl core::error::Error for MintError {}
 ///   tree and was not: a counter bounds a depth and the frames were the host's, so a walk on a
 ///   thread too small to hold the ceiling aborted before reaching the refusal. **None of the four
 ///   spends a native frame per level now**, so the refusal is reached on any stack. Three halves of
-///   the problem are still open, and none of them is this door's to close:
+///   the problem were listed here as still open; one of them has since been closed, and each is
+///   named below with which:
 ///
 ///   - **Construction.** The over-deep tree is built by `finish_partial`, from events already
 ///     recorded in the `Cst` this function is handed. There is nothing *here* to inspect and no way
@@ -312,16 +313,19 @@ impl core::error::Error for MintError {}
 ///     what makes the difference — the tree the failing call drops is one at or under it — and
 ///     that is upstream's to do, for the same reason construction is.
 ///   - **Projection.** What the four walks above *gate* is the dialect projection's own node
-///     dispatch, which is a native recursion with no counter of its own. It is bounded only by
-///     `MAX_GREEN_DEPTH` being small enough, and in an unoptimised build it is not: measured on a
-///     2 MiB thread, the projection descends 514 green levels and aborts at 516, which is exactly
-///     what the doors produce at the lexer's `HARD_MAX`. See
-///     `crate::lossless::project::MAX_GREEN_DEPTH` and the constant beside it.
+///     dispatch. It was a native recursion with no counter of its own, bounded only by
+///     `MAX_GREEN_DEPTH` being small enough — and in an unoptimised build it was not: on a 2 MiB
+///     thread it descended 514 green levels and aborted at 516, which is exactly what the doors
+///     produce at the lexer's `HARD_MAX`. **That half is closed.** The four cycles it recursed
+///     through are worklists now (al8n/smear#201), so the dispatch spends no native frame per
+///     level either and the ceiling it inherits from the walks above is a bound on heap rather
+///     than a wish about stack.
 ///
-///   So the honest statement of this entry is that **the walks spend no native stack, construction
-///   is bounded by whatever substrate revision is resolved, `rowan`'s own builder is bounded by
-///   nothing this crate can reach, and the projection behind the walks is bounded by a ceiling that
-///   does not clear it in a debug build**.
+///   So the honest statement of this entry is that **neither the walks nor the projection behind
+///   them spends native stack, construction is bounded by whatever substrate revision is resolved,
+///   and `rowan`'s own builder — and its destructor — are bounded by nothing this crate can
+///   reach**. Of the three halves listed here the first is upstream's, the second is `rowan`'s and
+///   the third is closed.
 ///
 ///   The first version of this list said *three* walks and did not mention either lifecycle half.
 ///   That is worth recording where it happened: a general claim written without enumerating what it

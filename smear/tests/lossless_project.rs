@@ -1415,9 +1415,11 @@ fn a_gap_beside_the_document_node_is_counted() {
 ///
 /// The projection doors inherit the ceiling without a counter of their own: every one of them opens
 /// with a verification, and `Verified::new` runs the counted form — so a `Verified` is proof of the
-/// tree's depth as well as of its bytes. What that ceiling now stands in front of is the
-/// projection's *own* recursion, which still spends a frame per level; `MAX_GREEN_DEPTH`'s header
-/// carries the window that leaves open.
+/// tree's depth as well as of its bytes. What that ceiling stands in front of is the projection's
+/// own node dispatch, and the four cycles it used to recurse through are worklists too
+/// (al8n/smear#201) — so what the inheritance now bounds is how many entries they hold, not
+/// whether a document the doors produce can be projected at all. `smear-parser`'s
+/// `deep_projection.rs` reads that flatness off a real projection.
 ///
 /// # What this pins, and what it cannot
 ///
