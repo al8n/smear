@@ -5397,26 +5397,137 @@ impl SchemaBuilder {
   /// order were refused. `input_object_default_cycle_verdict_is_declaration_order_independent` is
   /// the guard.
   ///
-  /// So a frame settles its object only when its work list **covers** the canonical exploration:
-  /// every declared field either asked with nothing supplied at least once — which is what makes
-  /// the walk descend into that field's *own* default — or inert, meaning asking would have
-  /// returned immediately because the field names no input object or carries no default. The
-  /// top-level start frame is canonical by construction, and so is a descent into `{}`, which is
-  /// what the chain guard above is made of; a supplied entry for a field whose default matters is
-  /// what stops being enough. `settled` is read at two places and both take this flag: the start
-  /// loop, and the descent, which is why `N` input objects defaulting to `{}` of one wide type cost
-  /// `O(N)` rather than a fresh `Θ(width)` work list each.
+  /// **So what settles is a FIELD, not an object.** A frame pushed to follow one field's own
+  /// default settles that field when it retires, and a frame reached through a caller's supplied
+  /// literal settles nothing, because the literal it read was not the field's own. Written that
+  /// way the rule is the three-colour walk over the *field* graph that
+  /// [`SchemaBuilder::validate_input_object_cycles`] runs over the type graph — `Unsettled`,
+  /// `Descending`, `Settled` — and the two questions this header has to answer are the two that
+  /// colouring already answers.
+  ///
+  /// *Does a settled field stay settled?* When a field settles, every field reachable from it is
+  /// already settled: each edge out of its default led to a field that was settled, or to one that
+  /// was unsettled and was then followed to the end, or to one that was `Descending` — and that
+  /// last is the cycle, which `break`s the walk so that nothing under it settles at all. A settled
+  /// field is therefore never `Descending` again, so skipping it can neither hide a cycle nor
+  /// change which cycle is found first: the entries it would have contributed explore a region
+  /// that is settled all the way down. The paragraph above is what makes this true one field at a
+  /// time — settling is written at exactly ONE place, the retire step of a frame carrying the
+  /// field whose own default it descended into, and `break` does not reach that step.
+  ///
+  /// *When is an OBJECT settled, then?* When every coverable field of it is — derived rather than
+  /// flagged, as the length of the run of its coverable fields that have not settled yet. There is
+  /// no second notion to disagree with the first: the start loop skips a start whose run is empty,
+  /// and a descent asks the fields the run still holds. That is why `N` input objects defaulting to
+  /// `{}` of one wide type cost `O(N)` rather than a fresh `Θ(width)` work list each — and it says
+  /// strictly more than the per-object flag could, because the fields may settle in different
+  /// frames.
+  ///
+  /// # What settling per OBJECT cost, on a document `Schema::build` accepts
+  ///
+  /// The flag sat on the object and was written only by a frame whose work list **covered** the
+  /// canonical exploration: every coverable field of that object asked with nothing supplied, in
+  /// that one frame. `M` sibling literals each supplying one of a `D`-wide object's fields make
+  /// **every** frame fall short of that, so the object never settled and each of the `M` descents
+  /// built and walked the `D` fields it did not supply:
+  ///
+  /// ```graphql
+  /// input Outer { w: [Wide] = [{f: {g0: null}} … ×M] }
+  /// input Wide  { f: Leaf }
+  /// input Leaf  { g0: G = {} … gD: G = {} }
+  /// ```
+  ///
+  /// `Θ(M + D)` of SDL, `Θ(M × D)` of walk, `finish` returns `Ok`, and no ceiling and no refusal
+  /// path is in front of either factor. Per field, the first descent settles `g1 … gD` and every
+  /// later one asks only `g0` — the field its sibling supplied, which is the one thing that
+  /// descent could still learn about. Medians of nine interleaved rounds, release, Apple M1 Max:
+  /// **313 ms → 28 ms** at `M = 64_000, D = 128`; **709 ms → 56 ms** at twice the siblings;
+  /// **635 ms → 27 ms** at twice the width — flat in `D`, which is the product being gone rather
+  /// than smaller. Allocation events, which are what the work lists are, read 8 832 830 → 256 837
+  /// on the first of those. The **peak** does not move, and could not: al8n/smear#198 had already
+  /// taken the live work list to `M + D` entries and only one level's list is live at a time, so
+  /// this is a repair to the walk and not to its footprint. al8n/smear#200.
+  ///
+  /// `a_wide_input_object_costs_its_width_once_however_many_siblings_descend_into_it` is the guard,
+  /// and it reads the interaction rather than either slope — widening the target must cost the same
+  /// at `M` siblings as at `2M` — because both slopes are honest on their own.
+  ///
+  /// # The same width, once per NESTED visit — and why "once" needed a second sentence
+  ///
+  /// Settling per field fixes what a *repeat* descent costs. It says nothing about what a descent
+  /// holds while it is still open, and a frame that appends its omitted fields at descent time
+  /// holds the width from the moment it is pushed — before any of those fields can have settled.
+  /// A **supplied** entry is processed first and can re-enter the same object, so the omissions
+  /// of every frame above are still unwalked when the next one is built:
+  ///
+  /// ```graphql
+  /// input Outer { w: Wide = {c0: {}} }
+  /// input Wide  { c0: A0 = null … cM: AM = null   g0: G = {} … gD: G = {} }
+  /// input Ai    { w: Wide = {c{i+1}: {}} }
+  /// ```
+  ///
+  /// A legitimate own-default chain of `M` distinct fields, every default shallow, every one of
+  /// them acyclic — and `M` nested visits to `Wide` each carrying `Θ(M + D)` entries that nothing
+  /// has settled. `Θ(M × (M + D))` of walk **and of live storage** out of `Θ(M + D)` of accepted
+  /// SDL, which ends in an allocator abort rather than a diagnostic. Compaction cannot reach it:
+  /// the entries are already copied into the ancestors' lists. Not a regression — `fcd7f5e` builds
+  /// the same lists, within 0.03% on both counts — and the sibling guard is blind to it, because
+  /// there the frame that carries the width has no supplied entry to re-enter through.
+  ///
+  /// **So a frame's live work is its supplied entries until its supplied branches have returned.**
+  /// The omissions come after, out of the frame's own run cursor. At `M = 4000, D = 128`: peak
+  /// **528.9 MB → 5.0 MB**, allocation events **618 233 → 58 112**; doubling the links takes the
+  /// peak 1.99× where it took it 3.94×, and widening `Wide` costs 501 events at `2M` against 502
+  /// at `M` — the same number, where it was 242 502 against 121 500. The sibling shape above is
+  /// unmoved: 256 830 events against 256 837, because the supply runs share one buffer rather than
+  /// allocating per frame. `a_reentrant_own_default_chain_pays_one_width_once_not_once_per_nested_visit`
+  /// is the guard, and it reads the width interaction off the EVENT count — which counts calls, so
+  /// the allocator's capacity ladder is not in it — and the slope in `M` off the peak.
+  ///
+  /// # The same width again, once per visit led by an OMISSION — and what closes the class
+  ///
+  /// Waiting behind a supplied branch was half of it. A frame waits behind its OMITTED branches
+  /// too, and the omissions were still *a list*, built in one go the moment the supplied entries
+  /// ran out. The first of them can re-enter the same object, and the rest of the list stays live
+  /// while the child builds another:
+  ///
+  /// ```graphql
+  /// input Wide { c0: A0 = {} … cM: AM = {}   g0: G = {} … gD: G = {} }
+  /// input Ai   { w: Wide = {c0: null … ci: null} }
+  /// ```
+  ///
+  /// `Wide` frame `i` is reached through `A{i-1}.w`'s own default, which supplies `c0 … c{i-1}`, so
+  /// it omits `c{i} … cM` and every `g`, and asks `c{i}` first. `M` open frames, each retaining a
+  /// `(M − i) + D` tail: `Θ(M × D + M²)` of walk and of live storage out of `Θ(M² + D)` of accepted
+  /// SDL — and `D` is free to be far larger than `M`, so this is not bounded by the source at any
+  /// exponent. Acyclic throughout: every `c` on the path is supplied one level down.
+  ///
+  /// **A lazier list would have fixed the peak and left the time.** A frame that resumes after its
+  /// descendants settled its whole tail still has to step over that tail to find that out — the
+  /// same `Θ(M × D)`, one reading across. So the list is gone entirely: an omission phase is a
+  /// cursor into the object's run, `next_unsettled_at` steps over what has settled in amortised
+  /// constant time, and the merge against the frame's retained supply span steps over what every
+  /// node wrote. At `M = 1000, D = 1000`: allocation events **1 532 286 → 26 771**, peak
+  /// **70.3 MB → 50.3 MB**, of which the 50 MB is the model and not the walk; widening `Wide` by
+  /// 1992 fields costs the peak 1.995× as much at `2M` links as at `M` with the tail retained and
+  /// **0.989×** without it. `an_omission_led_reentry_chain_pays_the_unrelated_tail_once` is the
+  /// guard.
+  ///
+  /// **Which is what closes the class.** The width of an object is walked by the frames that ask
+  /// its fields, once per field over the whole build, and copied by none.
   ///
   /// **How that rule is decided is not the rule.** Written out as "every declared field", it read
   /// the whole declaration once to clear its per-field marks and once again to answer —
   /// *whatever the descent was about to do*, the descent that pushes no work at all included. Its complement is the
   /// subset that decides it: `coverable` holds, per object, the fields that are not inert, so
   /// "every declared field was asked or is inert" is "every coverable field was asked", and an
-  /// object with none of them is canonical for nothing having been asked. That is what makes the
-  /// no-map descent `O(1)` — a value unwrapping to no map node runs the draft's "for each field in
-  /// `inputObject`" zero times, so it asks nothing, and it covers `target` exactly when `target`
-  /// has nothing to cover. The marks are stamped with the descent that wrote them rather than
-  /// cleared for it, so the other width-proportional pass goes too.
+  /// object with none of them has nothing that could be asked. That is what makes the no-map
+  /// descent `O(1)` — a value unwrapping to no map node runs the draft's "for each field in
+  /// `inputObject`" zero times, so it asks nothing, and a descent that asks nothing reads no
+  /// width. The marks are stamped with the descent that wrote them rather than cleared for it, so
+  /// the other width-proportional pass goes too. What al8n/smear#200 made of that run is the
+  /// sections above: it is immutable, and where a reader of it should look next — past everything
+  /// that has SETTLED — is [`next_unsettled_at`], not a rewrite of the run.
   ///
   /// # A frame's WORK is a second population, and narrowing it twice did not remove the product
   ///
@@ -5450,15 +5561,14 @@ impl SchemaBuilder {
   /// it belongs. The coalescing itself is gone: a node with no entries now contributes nothing to
   /// enumerate, so there is nothing left for a special case to skip.
   ///
-  /// **The settling rule's meaning is unchanged, and so is how it is decided.** It is still
-  /// "every coverable field of `target` was asked with nothing supplied at least once", and
-  /// asked-with-nothing-supplied is still exactly "some map node of this level omitted it". What
-  /// changed is which side of that is counted. Scanning the declaration per node stamped the
-  /// fields a node OMITTED; enumerating entries stamps the fields a node SUPPLIED, and a field is
-  /// asked when the nodes that supplied it are short of the nodes there are. No node can supply a
-  /// field twice — an entry repeated inside one node is one supply, which is what reading the
-  /// *first* occurrence meant — so `supplied < maps.len()` and "some node omitted it" are the
-  /// same statement, and `canonical` is that statement over `coverable`.
+  /// **What an ASK is did not change, and neither did how it is decided.** Asked-with-nothing-
+  /// supplied is still exactly "some map node of this level omitted it". What changed is which
+  /// side of that is counted. Scanning the declaration per node stamped the fields a node OMITTED;
+  /// enumerating entries stamps the fields a node SUPPLIED, and a field is asked when the nodes
+  /// that supplied it are short of the nodes there are. No node can supply a field twice — an
+  /// entry repeated inside one node is one supply, which is what reading the *first* occurrence
+  /// meant — so `supplied < maps.len()` and "some node omitted it" are the same statement, and a
+  /// descent pushes the ask for every field of `target`'s run that satisfies it.
   ///
   /// Resolving a written name through [`DeclaredNames`] resolves it to the FIRST declaration
   /// carrying it, which is what [`SchemaBuilder::check_const_value`] does with the same literal.
@@ -5498,27 +5608,106 @@ impl SchemaBuilder {
     /// One level of `InputObjectDefaultValueHasCycle`: an input object, and the work its
     /// `defaultValue` produced.
     struct Frame<'a> {
-      /// The field of the enclosing object whose *own* default this frame descended into, if that
-      /// is why it exists. Popped off the path when the frame retires.
-      pushed: Option<usize>,
-      /// `(field index in `object`, the value the caller supplied for it)` — the draft's "for
-      /// each field in inputObject", built from the two sides of that question separately rather
-      /// than by crossing the declaration with the map nodes.
+      /// The field of the enclosing object whose *own* default this frame descended into — its
+      /// dense id, and its position in that object's coverable run — if that is why the frame
+      /// exists. Grey while the frame is open, and **settled** when it retires: which is the
+      /// whole of the settling rule, and the only place a field becomes settled or leaves a run.
+      /// A frame reached through a caller's supplied literal has nothing here, so it settles
+      /// nothing.
+      pushed: Option<(usize, usize)>,
+      /// The entries the literal WROTE, `(field index in `object`, the value written)` — and
+      /// ONLY those. One per map entry naming a field that can descend, which the document
+      /// bounds because each was written once in the SDL.
       ///
-      /// One entry per map ENTRY naming a field that can descend, which the document bounds
-      /// because each was written once in the SDL; and one entry per coverable field that some
-      /// node left out, which is one per FIELD rather than one per (node, field), because
-      /// descending into a field's own default does not depend on which node omitted it. Nothing
-      /// here is a count of pairs. The header says what counting pairs cost.
+      /// The other half of the draft's "for each field in inputObject" — the fields no node
+      /// named — is not here and is not a list anywhere: `omitting` below hands them out one at
+      /// a time, straight off the object's run. The header says what a list of them cost, twice.
       ///
       /// Borrowed out of the model rather than owned; the header says why.
-      work: Vec<(usize, Option<&'a RawValue>)>,
+      work: Vec<(usize, &'a RawValue)>,
       cursor: usize,
-      /// The object whose fields `work` indexes, so a frame can name the field it blames.
+      /// The object whose fields this frame asks about, so a frame can name the field it blames.
       object: usize,
-      /// Whether `work` covers `InputObjectDefaultValueHasCycle(object, {})` — the question the
-      /// start loop and the descent both skip a settled object on the strength of. See the header.
-      canonical: bool,
+      /// Where in `supplied_here` this frame's run of fields that EVERY map node supplied lies,
+      /// ascending — so `skip` can merge against it — and `skip`, how far that merge has got.
+      ///
+      /// Taken at descent time, out of the entry loop, because that is the only time the supply
+      /// marks are this frame's: `supplied_in[id] >= since` reads "some node of this descent"
+      /// only until a NESTED descent into the same object stamps a later node id over it, and a
+      /// deferred read would then take the nested frame's supply for this one's and never ask a
+      /// field with nothing supplied — leaving its own default unexplored and a cycle through it
+      /// unfound. What is deferred is WHEN a field is asked, never the question of who supplied
+      /// what.
+      ///
+      /// Bounded by the entries the literal wrote, not by the declaration: a field reaches the
+      /// node count exactly once, at the node that completes it, so it is pushed there.
+      ///
+      /// A span rather than a `Vec` because these runs nest exactly as the frames do — a frame's
+      /// run is written before its children exist and dropped when it retires — so one shared
+      /// buffer holds all of them and a frame costs no allocation for having one. Which is not a
+      /// micro-economy: a `Vec` here is one allocation per DESCENT, and the shapes the header
+      /// describes are `M` descents.
+      supplied_from: usize,
+      supplied_len: usize,
+      skip: usize,
+      /// The next position in `object`'s coverable run this frame will consider — the whole of
+      /// what it holds for the fields it has yet to ask about, three words instead of a list.
+      ///
+      /// `Some` from the moment the frame is pushed, because the written entries are handed out
+      /// first regardless (`work` is read before this is). `None` means the frame asks no
+      /// omissions at all: its run is exhausted, or it read no map node and so asks nothing.
+      omitting: Option<usize>,
+    }
+
+    /// One question the draft's "for each field in inputObject" asks, and which of its two arms
+    /// it is — the distinction the whole settling rule turns on, so it is a type rather than an
+    /// `Option` whose `None` case a reader has to reconstruct.
+    #[derive(Clone, Copy)]
+    enum Ask<'a> {
+      /// The caller's literal named this field, so the walk descends into that literal and the
+      /// field's own default is never consulted. Nothing settles from this.
+      Supplied(usize, &'a RawValue),
+      /// No node of this level named it, so the walk descends into the field's OWN default —
+      /// and `.1` is where the field sits in its object's coverable run, which is what the
+      /// settling step needs to take it out of every later frame's way.
+      Omitted(usize, usize),
+    }
+
+    /// What the walk knows about one input field's own `defaultValue`, which is the granularity
+    /// the settling rule is stated at. See the header.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Settling {
+      /// Nothing yet, or a walk that stopped before it could say.
+      Unsettled,
+      /// A frame below is following this field's own default right now, so meeting it again is
+      /// the cycle.
+      Descending,
+      /// A frame followed this field's own default to the end and met nothing it had pushed.
+      Settled,
+    }
+
+    /// The first position of `coverable` at or after `position` whose field has not settled, in
+    /// amortised constant time — a disjoint-set forest over run POSITIONS, read with path
+    /// halving.
+    ///
+    /// Positions rather than fields because that is the question a frame asks: *where do I look
+    /// next*, in declaration order, having settled nothing myself. A per-field mark answers "is
+    /// this one settled" and leaves the walking to the caller, and the walking is the cost — a
+    /// frame resuming after its descendants settled a whole tail would step over that tail one
+    /// field at a time, once per frame, which is the product this replaces.
+    ///
+    /// The union is always `p → p + 1` and is performed once, where a field settles, so there is
+    /// no rank to keep and no way for the structure to disagree with `settling`: one site writes
+    /// both. `coverable` is one flat array over every object, so a find may run off the end of
+    /// its own object's run into the next one's — harmless, because every caller clamps at its
+    /// `coverable_base[object + 1]` and anything at or past that reads as "nothing left". The
+    /// last slot is the terminal sentinel that stops the last object.
+    fn next_unsettled_at(parent: &mut [usize], mut position: usize) -> usize {
+      while parent[position] != position {
+        parent[position] = parent[parent[position]];
+        position = parent[position];
+      }
+      position
     }
 
     let (model, errors, names) = self.split_indexed();
@@ -5534,7 +5723,7 @@ impl SchemaBuilder {
     // one flat list with `coverable_base` addressing it — the shape `field_base` above already
     // uses. A field naming no input object, or carrying no default, returns immediately whichever
     // way it is asked, so it is inert and covering it is nothing to cover; every other declared
-    // field is here, and `canonical` is exactly "every one of mine was asked".
+    // field is here, and an object is settled exactly when every one of these has settled.
     //
     // Derived once, in `Θ(input fields)`, so that a descent's two questions are answered over
     // this subset rather than over the whole declaration. What that replaces is the reason:
@@ -5553,6 +5742,8 @@ impl SchemaBuilder {
     // not by being kept out of a list built in advance.
     let mut coverable_base: Vec<usize> = vec![0; count + 1];
     let mut coverable: Vec<u32> = Vec::new();
+    // Built once and never rewritten — which is the difference between this and the two shapes
+    // the header describes: a frame reads the run, it does not own a copy of any part of it.
     for index in 0..count {
       for (at, field) in model.types[index].input_fields.iter().enumerate() {
         let base = field.ty.packed.base_id();
@@ -5567,11 +5758,16 @@ impl SchemaBuilder {
     }
 
     let mut implicated = vec![false; count];
-    // Objects a completed *canonical* exploration proved clean; the header says why only that one
-    // counts, and why what it proves is transitive.
-    let mut settled = vec![false; count];
-    let mut on_path = vec![false; total_fields];
-    // Which input field each map node SUPPLIED, addressed by the same dense id `on_path` uses.
+    // Per input field: the walk's white, grey and black. `Settled` is what a completed descent
+    // into that field's OWN default writes, and it is the only settled there is — an object is
+    // settled when none of its coverable fields is left, which is what `live` below counts.
+    let mut settling = vec![Settling::Unsettled; total_fields];
+    // Where a frame looks next, as parent pointers over `coverable` POSITIONS: see
+    // [`next_unsettled_at`]. `settling` says what is true of a field and this says where the
+    // fields that are still worth asking about are, so that neither a start nor a resumed frame
+    // walks over the ones that are not. One slot past the last position is the terminal sentinel.
+    let mut next_unsettled: Vec<usize> = (0..=coverable.len()).collect();
+    // Which input field each map node SUPPLIED, addressed by the same dense id `settling` uses.
     // `supplied_in` is the node that last wrote the field and `supplied_by` how many nodes of the
     // descent now running have, and the pair answers both questions one pass over the entries can
     // raise: an entry repeated inside one node is one supply, and a field every node wrote was
@@ -5588,43 +5784,120 @@ impl SchemaBuilder {
     let mut supplied_in: Vec<u64> = vec![0; total_fields];
     let mut supplied_by: Vec<usize> = vec![0; total_fields];
     let mut node: u64 = 0;
+    // Every open frame's run of fields that every node of its level supplied, end to end. The
+    // frames' runs nest, so one buffer serves them all and no frame allocates for its own; the
+    // whole thing is bounded by the entries the document wrote. `Frame::omitting` says what a run
+    // is for and why it cannot be recomputed later.
+    let mut supplied_here: Vec<u32> = Vec::new();
 
     for start in 0..count {
-      if model.types[start].kind != TypeKind::InputObject || implicated[start] || settled[start] {
+      if model.types[start].kind != TypeKind::InputObject || implicated[start] {
         continue;
       }
       // The draft's top-level call: `defaultValue` is an empty map, so every field is asked, and
-      // none of them is supplied a value. `canonical` is therefore true by construction and does
-      // not depend on the work list — which is why this frame carries only the entries that
-      // descend. Asked with nothing supplied descends into the field's own default, so the ones
-      // that do are exactly `coverable`, and the rest are the declaration's whole width popped and
-      // `continue`d past. The descent below reaches the same list from the other side: an empty
-      // map writes no entry, so every coverable field is one no node supplied.
+      // none of them is supplied a value. Asked with nothing supplied descends into the field's
+      // own default, so the ones that do are exactly the coverable fields still unsettled, and the
+      // rest — inert, or settled by an earlier descent that already followed that default to the
+      // end — are the declaration's whole width popped and `continue`d past. The descent below
+      // reaches the same list from the other side: an empty map writes no entry, so every
+      // coverable field is one no node supplied.
+      //
+      // "Every coverable field of this object has settled" is "the first position of its run
+      // that has not is past the end of its run", derived rather than flagged and answered in
+      // amortised constant time. It is the start loop's whole skip.
+      let base = coverable_base[start];
+      if next_unsettled_at(&mut next_unsettled, base) >= coverable_base[start + 1] {
+        continue;
+      }
       let mut stack = vec![Frame {
         pushed: None,
-        work: coverable[coverable_base[start]..coverable_base[start + 1]]
-          .iter()
-          .map(|&field| (field as usize, None))
-          .collect(),
+        // The empty-map call writes no entry, so every coverable field is one no node supplied
+        // and the frame's whole work is its omissions.
+        work: Vec::new(),
         cursor: 0,
         object: start,
-        canonical: true,
+        supplied_from: supplied_here.len(),
+        supplied_len: 0,
+        skip: supplied_here.len(),
+        omitting: Some(base),
       }];
 
       let mut found: Option<(usize, usize)> = None;
       while let Some(frame) = stack.last_mut() {
-        let Some(&(field_index, supplied)) = frame.work.get(frame.cursor) else {
-          if let Some(id) = frame.pushed {
-            on_path[id] = false;
-          }
-          if frame.canonical {
-            settled[frame.object] = true;
-          }
-          stack.pop();
-          continue;
-        };
-        frame.cursor += 1;
         let object = frame.object;
+        // The draft's "for each field in inputObject", in two arms and in that order: the
+        // entries the literal wrote, then the fields no node wrote. Nothing between the two is
+        // materialised — the second arm is answered from the object's run, ONE field per turn,
+        // so a frame that is waiting on a descendant holds three words and not a tail. The
+        // header says what a tail cost, both times it was one.
+        let ask = if let Some(&(field_index, value)) = frame.work.get(frame.cursor) {
+          frame.cursor += 1;
+          Ask::Supplied(field_index, value)
+        } else {
+          // The next field of `object`'s run this frame still has something to learn from:
+          // past the ones that have SETTLED, in one step whoever settled them, and past the
+          // ones EVERY node of this level supplied, by the merge against this frame's own span.
+          // Neither is a walk over the declaration, and neither leaves anything behind.
+          //
+          // Answering it here rather than at descent time cannot move a verdict. What this
+          // hands out differs from the list descent time would have built by exactly the fields
+          // that settled in between, and a settled field's whole reachable region is settled, so
+          // skipping it can neither hide a cycle nor reorder the one that is found. Declaration
+          // order is the run's own order, untouched.
+          let mut taken = None;
+          if let Some(mut position) = frame.omitting {
+            let end = coverable_base[object + 1];
+            let span_end = frame.supplied_from + frame.supplied_len;
+            loop {
+              position = next_unsettled_at(&mut next_unsettled, position);
+              if position >= end {
+                break;
+              }
+              let at = coverable[position];
+              while frame.skip < span_end && supplied_here[frame.skip] < at {
+                frame.skip += 1;
+              }
+              position += 1;
+              if frame.skip < span_end && supplied_here[frame.skip] == at {
+                frame.skip += 1;
+                continue;
+              }
+              taken = Some((at as usize, position - 1));
+              break;
+            }
+            frame.omitting = taken.map(|_| position);
+          }
+          match taken {
+            Some((field_index, position)) => Ask::Omitted(field_index, position),
+            None => {
+              // The rule, in one line. This frame descended into one field's own default and
+              // followed every path out of it to the end without meeting a field it had itself
+              // pushed, so that field's default is acyclic — whatever the caller above it
+              // supplied, because the literal this frame read was the field's own. The header
+              // says why that does not depend on the path, and why nothing below can put it
+              // back. Settling it and taking it out of its run are the same event, written
+              // here and nowhere else.
+              let pushed = frame.pushed;
+              let supplied_from = frame.supplied_from;
+              debug_assert_eq!(
+                supplied_here.len(),
+                supplied_from + frame.supplied_len,
+                "a frame's supplied run is the top of the buffer when its children have gone"
+              );
+              if let Some((id, position)) = pushed {
+                settling[id] = Settling::Settled;
+                let onward = next_unsettled_at(&mut next_unsettled, position + 1);
+                next_unsettled[position] = onward;
+              }
+              supplied_here.truncate(supplied_from);
+              stack.pop();
+              continue;
+            }
+          }
+        };
+        let field_index = match ask {
+          Ask::Supplied(index, _) | Ask::Omitted(index, _) => index,
+        };
 
         // `InputFieldDefaultValueHasCycle`. A field whose named type is not an input object can
         // hold no cycle, whatever its default says.
@@ -5638,12 +5911,12 @@ impl SchemaBuilder {
           continue;
         }
 
-        let descend_into = match supplied {
+        let descend_into = match ask {
           // The caller's literal named this field, so the field's own default is never consulted
           // and `visited` does not grow.
-          Some(value) => value,
+          Ask::Supplied(_, value) => value,
           // The field's own default, which is the descent `visited` grows for.
-          None => match field.default_value.as_ref() {
+          Ask::Omitted(..) => match field.default_value.as_ref() {
             Some(default) => default,
             None => continue,
           },
@@ -5653,51 +5926,49 @@ impl SchemaBuilder {
         let mut maps: Vec<&[RawObjectField]> = Vec::new();
         map_nodes(descend_into, &mut maps);
 
-        // A descent into `{}` *is* `InputObjectDefaultValueHasCycle(target, {})`, so a target some
-        // canonical frame already retired has nothing left to say and the work list is not built
-        // at all. Ahead of the cycle test on purpose, and the two cannot both apply: reaching this
-        // field while it is already on the path means the exploration below it comes back here, and
-        // an exploration that comes back to a field it pushed is one that `break`s rather than
-        // retires — so no canonical frame for `target` could have settled it.
-        //
-        // Without the skip, `N` input objects each defaulting to `{}` of one `N`-field input object
-        // build a fresh `Θ(N)` work list apiece: `O(N)` of source, `Θ(N²)` of walk, on a schema
-        // `Schema::build` **accepts**. 1.97 in the exponent over the top step of 1 k–16 k and
-        // **1.470 s** at 16 k, against 1.08 and 23 ms — and 1.10 carried out to 256 k, where a
-        // millisecond floor cannot be what is being read. al8n/smear#198.
-        if settled[target] && matches!(maps.as_slice(), [entries] if entries.is_empty()) {
-          continue;
-        }
-
-        let pushed = match supplied {
-          Some(_) => None,
-          None => {
+        let pushed = match ask {
+          Ask::Supplied(..) => None,
+          Ask::Omitted(_, position) => {
             let id = field_base[object] + field_index;
-            if on_path[id] {
-              found = Some((object, field_index));
-              break;
+            match settling[id] {
+              // Grey: the exploration below this field comes back to it.
+              Settling::Descending => {
+                found = Some((object, field_index));
+                break;
+              }
+              // Black: this field's own default was followed to the end already, and every field
+              // that default can reach was black before it turned black itself. There is nothing
+              // under it to find and no order in which finding it could differ, so it is not
+              // asked again — which is where the width goes.
+              //
+              // The backstop, not the mechanism: `next_unsettled` is what stops a frame from
+              // REACHING a settled field, and the two are written at one site, so this arm is
+              // how they would announce having come apart rather than a case the walk relies on.
+              Settling::Settled => continue,
+              Settling::Unsettled => {
+                settling[id] = Settling::Descending;
+                Some((id, position))
+              }
             }
-            on_path[id] = true;
-            Some(id)
           }
         };
 
-        // The header's condition, over the subset that can fail it. A field asked with nothing
-        // supplied is the one whose *own* default this frame descends into, which is what the
-        // empty-map call does to every field; an inert field is covered by being inert. So this
-        // frame's work is the canonical exploration of `target` exactly when every coverable
-        // field of `target` was asked — and only then may retiring it settle `target` for the
-        // starts and descents that follow. That is the rule 1260027 wrote, unchanged; what
-        // changed is that it is decided over `coverable` instead of by rescanning `declared`.
-        let coverable_here = &coverable[coverable_base[target]..coverable_base[target + 1]];
+        // The rule, over the subset that can still fail it. A field asked with nothing supplied is
+        // the one whose *own* default this frame descends into, which is what the empty-map call
+        // does to every field; an inert field is settled by being inert, and a field an earlier
+        // descent already followed to the end is settled by that. So a descent asks `target`'s
+        // coverable fields that are still unsettled and that some node of this level left out —
+        // and `target` itself is settled when that run empties, which is the only sense in which
+        // an object settles.
+        //
+        // What this loop builds is the SUPPLIED half and the one fact the omitted half needs. The
+        // omitted half itself is built when the supplied half has returned; the retire step says
+        // why, and `Frame::omitting` says why the fact has to be taken here.
         let mut work = Vec::new();
-        let canonical = if maps.is_empty() {
-          // The draft's "for each field in inputObject" runs once per map node, so no map is no
-          // work — and no work asks nothing, which covers `target` only when there is nothing of
-          // `target` to cover. Decided here in `O(1)` rather than by two passes over a
-          // declaration this frame is not going to read.
-          coverable_here.is_empty()
-        } else {
+        let supplied_from = supplied_here.len();
+        let mut asks = false;
+        if !maps.is_empty() {
+          asks = true;
           // **What the two loops below enumerate is every entry these map nodes WROTE, once each,
           // and every coverable field of `target`, once for the whole descent — and never a
           // declared field once per map node.** Neither loop is inside the other, so there is no
@@ -5739,50 +6010,49 @@ impl SchemaBuilder {
                 1
               };
               supplied_in[id] = node;
+              // Every node of this level has now written it, so no node omitted it and the
+              // omission phase must pass over it. Recorded HERE, at the node that completes the
+              // count, because the count is only this descent's until a nested one restamps it —
+              // and recorded once, because the count passes through `maps.len()` exactly once.
+              if supplied_by[id] == maps.len() {
+                supplied_here.push(index as u32);
+              }
               // The caller's literal named this field, so the walk descends into that literal and
               // the field's own default is never consulted.
-              work.push((index, Some(&entry.value)));
+              work.push((index, &entry.value));
             }
           }
-          // The condition stated above, read off the supply marks — and the descents it licenses,
-          // in the same pass. A coverable field short of a supply from every node was omitted by
-          // one of them, which is the ask that makes the walk descend into that field's OWN
-          // default; a field every node wrote was asked by none of them, and is what stops this
-          // frame from covering `InputObjectDefaultValueHasCycle(target, {})`.
-          let mut canonical = true;
-          for &at in coverable_here {
-            let index = at as usize;
-            let id = field_base[target] + index;
-            let supplied = if supplied_in[id] >= since {
-              supplied_by[id]
-            } else {
-              0
-            };
-            if supplied == maps.len() {
-              canonical = false;
-            } else {
-              work.push((index, None));
-            }
-          }
-          canonical
-        };
+          // Ascending, which the merge in the omission arm needs and the entry order does not
+          // give: a field enters the run at whichever node completed its count. The sort is over
+          // what the LITERAL wrote, never over the declaration.
+          supplied_here[supplied_from..].sort_unstable();
+        }
         stack.push(Frame {
           pushed,
           work,
           cursor: 0,
           object: target,
-          canonical,
+          supplied_from,
+          supplied_len: supplied_here.len() - supplied_from,
+          skip: supplied_from,
+          // A descent that reads no map node runs the draft's "for each field in inputObject"
+          // zero times, so it asks nothing at all — no entry, and no omission either.
+          omitting: asks.then(|| coverable_base[target]),
         });
       }
 
-      // The path is per-start, so a walk that stopped early has to put the bits back: `break`
-      // skips the retire step that clears them, and a stale `true` would make the *next* start
-      // report a cycle it never walked into.
+      // The path is per-start, so a walk that stopped early has to put the marks back — to
+      // `Unsettled`, not to `Settled`: `break` skips the retire step, and a frame it skipped
+      // followed no path to the end. A stale grey would make the *next* start report a cycle it
+      // never walked into, and a settled here would be the walk certifying the field it was in
+      // the middle of failing to certify.
       for frame in &stack {
-        if let Some(id) = frame.pushed {
-          on_path[id] = false;
+        if let Some((id, _)) = frame.pushed {
+          settling[id] = Settling::Unsettled;
         }
       }
+      // The runs of the frames that never reached their omission phase go with them.
+      supplied_here.clear();
 
       let Some((object, field_index)) = found else {
         debug_assert!(stack.is_empty(), "a completed walk retires every frame");
