@@ -43,6 +43,21 @@ impl Diagnostic {
   pub fn skipped_tokens(&self) -> Option<usize> {
     self.skipped_tokens
   }
+
+  /// A hard error covering `span`, with no recovery hole — the shape the **door's** budget report
+  /// takes when it is appended to a normalised log.
+  ///
+  /// **Private to this module**, and narrowed to that in round 8's fold: the one caller is
+  /// [`finish_parsed_root_with`] two items down, which is handed a *span* rather than a
+  /// `Diagnostic`. Nothing anywhere — in this crate or out of it — can construct a `Diagnostic`,
+  /// so no code path can put a diagnostic into a `Parse` that no parse produced.
+  const fn error_at(span: core::ops::Range<usize>) -> Self {
+    Self {
+      span,
+      severity: Severity::Error,
+      skipped_tokens: None,
+    }
+  }
 }
 
 /// The result of a lossless parse in `L`'s kind space.
@@ -61,6 +76,21 @@ pub struct Parse<L: rowan::Language> {
 }
 
 impl<L: rowan::Language> Parse<L> {
+  /// The one constructor, and it is **private to this module**.
+  ///
+  /// Both finishing doors go through it and nothing else can, which is what keeps "a `Parse` is
+  /// what some parse produced" a fact about two call sites rather than about a struct with private
+  /// fields. Narrowed from `pub(crate)` in round 8's fold, along with
+  /// [`Diagnostic::error_at`](Diagnostic::error_at): the dialect doors hand this module a span and
+  /// get a `Parse` back, so neither the value nor the type is theirs to assemble.
+  const fn from_parts(green: rowan::GreenNode, diagnostics: std::vec::Vec<Diagnostic>) -> Self {
+    Self {
+      green,
+      diagnostics,
+      language: core::marker::PhantomData,
+    }
+  }
+
   /// The raw `rowan` tree. Walk this for generic tooling — formatters, highlighters.
   pub fn syntax(&self) -> rowan::SyntaxNode<L> {
     rowan::SyntaxNode::new_root(self.green.clone())
@@ -192,7 +222,7 @@ impl core::error::Error for MintError {}
 ///   the only thing between a document and the stack.
 /// - The bracket **past** the budget therefore fails its lex, and a resource-limit trip *latches a
 ///   poison boundary*: the scanner refuses to rebuild a lexer past that offset. No token and no
-///   diagnostic can ever cover the tail, and a dialect's `document_entry` `skip_while` drain
+///   diagnostic can ever cover the tail, and the door's `skip_while` drain
 ///   cannot reach it either — that drain is the mechanism which otherwise guarantees coverage.
 /// - So `finish` reported `UncoveredGap` and `parse_document` panicked, at 501 open brackets, for
 ///   input an IDE produces by typing. That was smear issue #57.
@@ -374,11 +404,7 @@ where
   // refused has a stream to fix, not diagnostics to route.
   let green = green.map_err(|refusal| MintError { space, refusal })?;
 
-  Ok(Parse {
-    green,
-    diagnostics: emitter.collect_diagnostics(),
-    language: core::marker::PhantomData,
-  })
+  Ok(Parse::from_parts(green, emitter.collect_diagnostics()))
 }
 
 /// [`finish_root`] for a [`Cst`] one of *this crate's own* parsers built, where the refusal is
@@ -440,6 +466,82 @@ where
   })
 }
 
+/// [`finish_parsed_root`], with the **door's** verdict on the token budget applied to the log.
+///
+/// # Why a finished parse is normalised rather than trusted — smear issue #193, Codex round 7
+///
+/// Rounds 4 to 7 each closed one way for in-crate code to obtain the *capability* to report: the
+/// token, the emitter, the error container, the door itself. Round 7's finding is a different
+/// question and it does not yield to the same answer. The door hands the grammar an
+/// [`InputRef`](tokora::InputRef); `InputRef::emit_error` is public; the dialect's error container
+/// can construct its own budget variant. So a composed root can catch the terminal value a nested
+/// `drain_unless_stopped` handed it and **emit** it while recovering — two surviving reports — or
+/// emit one with no refusal at all and mark a complete parse as truncated. Fencing construction
+/// has no next fence here, because the grammar is writing the same channel the door writes.
+///
+/// What ends it is deciding rather than fencing. The budget variant belongs to the **door**: it is
+/// the only party that knows whether *this input's* durable tally refused, and it knows it after
+/// every root has run. So this function drops every budget diagnostic the log contains — whoever
+/// put it there — and appends the door's own if the door has one. The grammar's emissions become
+/// **inputs** to the decision rather than peers of it, and there is no further door to widen,
+/// because there is nothing left to reach: a root can still call `emit_error`, and what it emits
+/// on this channel is simply not what the output says.
+///
+/// **What is dropped is dropped by design.** A grammar-emitted budget refusal is not a diagnostic
+/// the grammar is entitled to make. A root that wants to end the document on one returns the stop
+/// value `drain_unless_stopped` handed it; that path is untouched and is how a refusal reaches a
+/// caller as an *outcome*. Only the *report* is the door's.
+///
+/// `retains` recognises the dialect's own variant because that is a dialect fact, and it decides at
+/// the **member** rather than at the payload — see
+/// [`collect_diagnostics_retaining`](DiagnosticSource::collect_diagnostics_retaining) for the
+/// mixed-container defect that granularity closes. What is here is the ordering: classify while the
+/// typed payload is still in hand, then append, so the door's report is last and is the only one of
+/// its kind.
+///
+/// **`append_error_at` is a span, not a `Diagnostic`.** Round 8's fold narrowed it: a caller says
+/// *there was a refusal, here*, and this module decides what that looks like in a `Parse`. Both
+/// constructors it needs are private to this file now, so there is no `Diagnostic` any other module
+/// can build and none it can put anywhere.
+///
+/// It is `pub(crate)` and cannot be less, because its one caller is a macro expansion that lands in
+/// a dialect module. What that costs is bounded by the fold above it: the dialect door finishes its
+/// own `Cst` and returns a [`Parse`], so no `Cst` of a shipped parse is ever in a caller's hands to
+/// finish a second time or to finish with a span the parse did not earn. An in-crate caller can
+/// still build its own `Cst` through the `test-support` drivers and finish it however it likes —
+/// and that is a lie about a parse it owns, which is the same answer the door's own
+/// `Nesting it is not a forgery` note gives.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) fn finish_parsed_root_with<'inp, L, Lx, Em>(
+  cst: Cst<'inp, Lx, Em>,
+  root: u16,
+  space: &'static str,
+  retains: impl Fn(&Em::Payload) -> bool,
+  append_error_at: Option<core::ops::Range<usize>>,
+) -> Parse<L>
+where
+  L: rowan::Language,
+  Lx: Lexer<'inp>,
+  Lx::Source: tokora::cst::CstText,
+  Lx::Offset: TryInto<u32>,
+  Em: DiagnosticSource,
+{
+  // `finish_partial`, NOT `finish`, and the refusal path drops the emitter — both for the reasons
+  // `finish_root` gives.
+  let (green, emitter) = cst.finish_partial(root);
+  let green = green.unwrap_or_else(|refusal| {
+    panic!(
+      "{}. No production in this crate emits a stream this door refuses",
+      MintError { space, refusal }
+    )
+  });
+
+  let mut diagnostics = emitter.collect_diagnostics_retaining(retains);
+  diagnostics.extend(append_error_at.map(Diagnostic::error_at));
+
+  Parse::from_parts(green, diagnostics)
+}
+
 /// The emitter half of a lossless context, reduced to the one thing `finish_root` asks of it.
 ///
 /// # Why a trait rather than naming `Verbose<Err, SimpleSpan, Brand>`
@@ -454,18 +556,93 @@ where
 /// One method, and it is the projection `Parse` needs. The blanket impl below covers `Verbose`
 /// for every error and brand, so no dialect writes an impl.
 pub trait DiagnosticSource {
+  /// The **typed** payload this emitter records, before the projection below throws it away.
+  ///
+  /// An associated type rather than a parameter on the trait, and that is the distinction the
+  /// note above draws: it names no dialect and pins no emitter shape — it says only that an
+  /// emitter has one payload type and that a caller who knows which dialect it is standing in may
+  /// ask about it. [`collect_diagnostics_retaining`](Self::collect_diagnostics_retaining) is the
+  /// one caller, and it exists because the **door** — not the grammar — decides what a finished
+  /// parse says about the token budget.
+  type Payload;
+
   /// Project every recorded diagnostic into the owned, source-independent form.
   fn collect_diagnostics(&self) -> std::vec::Vec<Diagnostic>;
+
+  /// The same projection, minus every diagnostic whose payload has nothing left to say once the
+  /// door's own variant is taken out of it.
+  ///
+  /// `retains` is the dialect's, because the variant it recognises is the dialect's: it answers
+  /// *does this payload hold any member that is not the door's*. What the substrate contributes is
+  /// that the question is asked **while the typed payload is still in hand** — after
+  /// [`collect_diagnostics`](Self::collect_diagnostics) there is nothing left to ask, since a
+  /// projected [`Diagnostic`] is a span, a severity and a skip count and a budget refusal is not
+  /// distinguishable from any other zero-width error by those three.
+  ///
+  /// # At the MEMBER, not the payload — smear issue #193, Codex round 8
+  ///
+  /// This took a `drop: impl Fn(&Payload) -> bool` for one round and threw the **whole payload**
+  /// away when it answered `true`. Both dialects' payloads are `Vec`-backed multi-error containers,
+  /// so one `emit_error` can carry `[TokenBudgetExhausted, FloatOverflow]` — and with no refusal to
+  /// replace it, the ordinary error vanished and `Parse::has_errors()` went `false` on a document
+  /// that had one. A document with a real error reported as clean is the consequence that matters;
+  /// the round that added the filter had already written that it "must remove only that variant",
+  /// and payload granularity is not that.
+  ///
+  /// The granularity is a fact about who owns what. **The container is the grammar's unit of
+  /// emission and the variant is the door's** — a root chooses what to put in one `Spanned`, and
+  /// only one member of it is the door's to take away. So a payload that is *nothing but* the
+  /// door's variant is dropped, and a payload with anything else in it is kept and projected
+  /// exactly as before.
+  ///
+  /// **An EMPTY payload is kept**, and that is round 9's own correction rather than a detail. Both
+  /// dialect containers implement `Default`, tokora records whatever payload it is handed, and
+  /// `any` over an empty `Vec` is `false` — so `Errors::default()` read as "nothing but the door's
+  /// variant" and the record vanished, taking `has_errors()` with it when no refusal replaced it.
+  /// An empty container holds no member of the door's, so there is nothing for the door to take
+  /// away and the classifier says keep. Every dialect closure spells `is_empty() || any(…)` for
+  /// that reason, and it applies to the **warning** channel exactly as to the error one: a payload
+  /// is a payload, and [`collect_diagnostics`](Self::collect_diagnostics) projects both.
+  ///
+  /// # Why a classifier and not a mutating prune
+  ///
+  /// Measured against tokora 0.10: [`Verbose`](tokora::emitter::Verbose) publishes payloads by
+  /// reference only — `diagnostics()`, `errors()`, `warnings()` and `skipped_regions()` all take
+  /// `&self`, and there is no owned, draining or `&mut` form. A prune that actually removed the
+  /// members would therefore have to clone each payload to have something to mutate, and the
+  /// mutation would then be **discarded**: the projection below keeps no payload at all, and
+  /// `severity` comes from the emitter's channel rather than from any member, so removing one
+  /// cannot change what a [`Diagnostic`] says. A clone whose result nothing reads is a classifier
+  /// with a cost, so this is the classifier.
+  fn collect_diagnostics_retaining(
+    &self,
+    retains: impl Fn(&Self::Payload) -> bool,
+  ) -> std::vec::Vec<Diagnostic>;
 }
 
 impl<Err, Brand: ?Sized> DiagnosticSource
   for tokora::emitter::Verbose<Err, tokora::SimpleSpan, Brand>
 {
+  type Payload = Err;
+
   fn collect_diagnostics(&self) -> std::vec::Vec<Diagnostic> {
+    self.collect_diagnostics_retaining(|_| true)
+  }
+
+  fn collect_diagnostics_retaining(
+    &self,
+    retains: impl Fn(&Self::Payload) -> bool,
+  ) -> std::vec::Vec<Diagnostic> {
     // `Verbose` exposes `diagnostics()` and nothing else — there is no `errors()` and no
     // `warnings()`. Each item carries `span()`, `labels()`, `kind()`, `severity()`, `payload()`.
+    //
+    // A RECOVERY HOLE HAS NO PAYLOAD and is therefore never dropped: `payload()` is `None` for
+    // `SkippedRegion`, and `is_none_or` keeps it. That is the right answer and not an accident of
+    // the combinator — a hole is the sink's own record of skipped tokens, not something a grammar
+    // could have forged into the channel this filter is about.
     self
       .diagnostics()
+      .filter(|d| d.payload().is_none_or(&retains))
       .map(|d| Diagnostic {
         span: d.span().start()..d.span().end(),
         severity: d.severity(),

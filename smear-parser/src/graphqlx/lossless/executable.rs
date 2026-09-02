@@ -370,16 +370,6 @@ lossless_production! {
     )
     .parse_input(inp)
   }
-
-  /// [`executable_document`], then a drain — the production [`super::parse_executable_document`]
-  /// applies.
-  ///
-  /// See `document.rs`'s module docs for why the drain is not optional — and
-  /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) for the one
-  /// outcome that must not read the tail.
-  fn executable_document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, executable_document::<Src, Ctx>)
-  }
 }
 
 lossless_drivers! {

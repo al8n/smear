@@ -30,7 +30,7 @@
 //! while the node is still open. Here that is the right answer rather than a tolerated one: a
 //! document *is* the file, leading and trailing trivia included.
 //!
-//! # Why `document_entry` exists beside `document`
+//! # Why the door drains beside `document`
 //!
 //! [`super::parse_document`] discards its parser's result, so an `Err` escaping the document
 //! production would leave the rest of the source uncommitted and `finish` would refuse it as an
@@ -194,7 +194,7 @@ lossless_production! {
   /// The exception is a **call**, not a predicate written out here — smear issue #178. See
   /// GraphQL's `document` and [`depth::root_turn`](crate::lossless::depth::root_turn).
   ///
-  /// `stop` carries that same per-entry verdict out to [`document_entry`]'s drain, which must not
+  /// `stop` carries that same per-entry verdict out to the door's drain, which must not
   /// re-derive it from a counter whose span is the whole root — smear PR #189, and GraphQL's
   /// `document` carries the mechanism.
   fn document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
@@ -251,24 +251,5 @@ lossless_production! {
       },
     )
     .parse_input(inp)
-  }
-
-  /// [`document`], then a drain — the production [`super::parse_document`] applies.
-  ///
-  /// See the module docs for why the drain is not optional — and
-  /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) for the one
-  /// outcome that must not read the tail, and for why it is handed [`document`] itself rather than
-  /// a classification of what [`document`] returned.
-  fn document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
-  }
-
-  /// [`type_system_document`], then a drain — the production
-  /// [`super::parse_type_system_document`] applies.
-  ///
-  /// See the module docs for why the drain is not optional; the SDL-only loop catches and
-  /// resynchronises exactly as the mixed one does, so an `Err` can still escape it.
-  fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
   }
 }
