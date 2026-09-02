@@ -36,10 +36,11 @@
 //!
 //! rowan's [`SyntaxNode`](rowan::SyntaxNode) is the other candidate, and what it buys over the
 //! green tree is a parent pointer and an absolute offset. A projection needs the second and gets
-//! the first from its own call frame: the parent a refusal names is the node whose walk reached
-//! the child. It pays for both with a heap allocation per element materialised — rowan boxes
-//! every node *and* token a cursor yields — which smear #120 measured at 2,447 allocations and
-//! 96 ns per source byte for a document the syntactic parser builds in 18.
+//! the first from whatever it descends on: the parent a refusal names is the node whose dispatch
+//! reached the child, which is a call frame where the walk still has one and a worklist entry
+//! where it does not. It pays for both with a heap allocation per element materialised — rowan
+//! boxes every node *and* token a cursor yields — which smear #120 measured at 2,447 allocations
+//! and 96 ns per source byte for a document the syntactic parser builds in 18.
 //!
 //! What the green tree does not carry is an absolute offset, so [`Node::children`] accumulates
 //! one: a child's start is the parent's start plus the lengths of its preceding siblings. That
@@ -70,7 +71,7 @@
 //! accumulator, effectively a chunked `memcmp` over the whole file. Per-token access after it is
 //! plain slicing.
 //!
-//! # No walk here spends a native frame per level
+//! # No walk here spends a native frame per level, and nothing behind them does either
 //!
 //! All four of them recursed, and each carried a counter that refused at [`MAX_GREEN_DEPTH`]. A
 //! counter cannot bound a native stack — the frames are the host's and the stack is the caller's —
@@ -79,6 +80,14 @@
 //! run on now: it adopts the tree's own child iterators rather than copying children out, keeps one
 //! entry per branching ancestor, and drops a source the moment its last child is taken. The counter
 //! survives, and its header says what it now answers for.
+//!
+//! **What these walks gate no longer recurses either**, which is the sentence that used to be
+//! missing. The dialect projection's node dispatch spent one native frame per grammar-nesting
+//! level, in the four cycles a value, a selection set and a type reference form, and at the top of
+//! the lexer's own ceiling that cost more stack than a document the doors produce could afford:
+//! 254 brackets of object value parsed clean and aborted the process. Those cycles are worklists
+//! now — see the dialect module's own header — so the deepest tree [`MAX_GREEN_DEPTH`] admits is
+//! projected on any stack the walks above run on. al8n/smear#201.
 
 use core::{fmt, iter::FusedIterator, marker::PhantomData, ops::Range};
 
@@ -104,15 +113,33 @@ use tokora::SimpleSpan;
 ///
 /// # So what does it bound, and why does it stay
 ///
-/// **The recursion behind these walks, which is the dialect projection's own.** A fail-fast door
-/// opens with [`verify_source`] over the whole green root and a [`reject_holes`] scan over the same
-/// tree, and only then dispatches on node kinds — and *that* dispatch is a native recursion, one
-/// frame per grammar-nesting level, with no counter of its own in either dialect. The two gate
-/// walks are what stand in front of it, and this is the depth they let past.
+/// **Three things, none of them a native stack.** It is a policy — the deepest tree a door will
+/// admit — and it is answered in one place so the doors and the helpers cannot disagree about
+/// which trees are projectable.
 ///
-/// A caller who calls the four walks directly gets a refusal at this depth for the same reason: the
-/// number is the door's admission ceiling, and answering it in one place is what keeps the doors and
-/// the helpers from disagreeing about which trees are projectable.
+/// - *These walks' own storage.* `Descent` holds one entry per branching ancestor and this is what
+///   caps how many there can be, so a caller-supplied tree cannot grow the worklist without bound.
+/// - *What a door hands the dialect behind it.* A fail-fast door opens with [`verify_source`] over
+///   the whole green root and a [`reject_holes`] scan over the same tree, and only then dispatches
+///   on node kinds; the compositional doors open with [`verify_source_at`] over their own subtree.
+///   Every one of those refuses past this number, so the depth the dispatch behind them ever sees
+///   is this one.
+/// - *The dialect projection's own worklists*, by that inheritance and not by a counter of their
+///   own. Their frames follow the tree's grammar nesting, which is at most its green depth, so the
+///   admission ceiling above is already their ceiling — see the paragraph below for what used to be
+///   here instead.
+///
+/// **It used to bound a native recursion, and that is what it could not do.** The dispatch behind
+/// these walks spent one frame per grammar-nesting level in both the value and the selection
+/// cycles, so at the top of the lexer's `HARD_MAX` a document the doors produce clean — 254
+/// brackets of object value, 516 green levels — aborted the process in `project_type_system_document`
+/// on a 2 MiB debug thread, at 4 080 bytes of frame per green level. No value of this constant
+/// closed that: cutting it under `WORST_DOOR_GREEN_TREE` refuses a parse this crate just produced,
+/// and it would take `MAX_DOOR_BRACKETS` below `HARD_MAX`, which the crate root refuses to
+/// compile. What closed it was the dispatch, which is a worklist now: measured on the same host and
+/// the same instrument, every bracket count `HARD_MAX` admits projects on a 256 KiB thread in both
+/// profiles, and the smallest stack the projection itself needs is the same at 255 brackets as at
+/// one. al8n/smear#201.
 ///
 /// # The population this is derived over, which is not the one it used to name
 ///
@@ -130,19 +157,23 @@ use tokora::SimpleSpan;
 /// brackets for an object-value chain and at 255 for a selection chain — which is itself the
 /// tell that a single fitted formula was the wrong instrument. al8n/smear#198.
 ///
-/// So the figure below is derived over the population that reaches it. `WORST_DOOR_GREEN_TREE` is
-/// what the doors produce and it is asserted; `WORST_PROJECTION_GREEN_TREE` is what the recursion
-/// this gate stands in front of can afford, and it is **not** asserted, for the reason recorded
-/// beside it.
+/// So the figure below is derived over the population that reaches it: `WORST_DOOR_GREEN_TREE` is
+/// what the doors produce, and it is asserted against this constant. There was a second figure
+/// beside it — what the recursion this gate stood in front of could afford — recorded and not
+/// asserted because the comparison was false. Nothing behind this gate recurses now, so that
+/// figure has no subject and one side of the relationship is all there is; see the assertions
+/// below.
 ///
 /// # Why any bound is needed here at all
 ///
 /// These helpers take a `&GreenNodeData`, and `rowan`'s builder is public, so the tree can come
 /// from anywhere — including `finish_root`, which finishes an event stream this crate did not
-/// emit. A projection over an unproved tree is a stack overflow rather than a refusal, and a crash
-/// is worse than every charge defect al8n/smear#198 has found. The gate walks are what refuse on
-/// the projection's behalf, which is what "independently bounded" has to mean when the caller
-/// supplies the tree and the walk that would die is not the one holding the counter.
+/// emit. A projection over an unproved tree used to be a stack overflow rather than a refusal, and
+/// a crash is worse than every charge defect al8n/smear#198 has found. It is now a worklist over an
+/// unproved tree instead, which is a heap the caller did not ask for rather than a dead process —
+/// a smaller hazard and still one worth refusing. The gate walks are what refuse on the
+/// projection's behalf, which is what "independently bounded" has to mean when the caller supplies
+/// the tree and the walk that would grow is not the one holding the counter.
 ///
 /// What this does **not** bound is the tree's *construction* or its *destruction*: `rowan` drops a
 /// green tree recursively, so a tree deep enough to overflow the projection was already deep enough
@@ -157,10 +188,17 @@ use tokora::SimpleSpan;
 /// | bound | from | value |
 /// |---|---|---|
 /// | lower: the tree the doors produce | `WORST_DOOR_GREEN_TREE` | **516** |
-/// | upper: none this module can state | see `WORST_PROJECTION_GREEN_TREE` | — |
+/// | upper: none — no walk this gate stands in front of has a boundary any more | — | — |
+///
+/// The upper row was a real number twice and is now genuinely empty, which is a different state
+/// from "not measured". It was these walks' own native boundary until they stopped having one; it
+/// was then the projection's, recorded but never asserted because the comparison it stood for was
+/// false; and the projection has no such boundary either now. So what is left is the lower bound
+/// and the tie-break.
 ///
 /// 1024 is the value the old interval `[516, 1505]` was taken at, and it is kept rather than raised
-/// because nothing here wants a wider one: raising it widens only what the projection is handed.
+/// because nothing here wants a wider one: raising it widens only what the projection is handed,
+/// and what the projection now spends on that width is heap rather than stack.
 ///
 /// **What it costs a caller is a bounded worklist rather than 750 KiB of stack.** The walks spend no
 /// native frame at all; what they spend instead is one entry per branching ancestor, the first
@@ -212,38 +250,6 @@ const WORST_DOOR_GREEN_TREE: usize = 516;
 /// shape nobody has written yet.
 const GREEN_LEVELS_PER_BRACKET: usize = 3;
 
-/// The deepest green tree a **dialect projection** was measured to descend before the native stack
-/// ends it.
-///
-/// Not this module's walks: they no longer have such a number, which is what
-/// [`MAX_GREEN_DEPTH`]'s header is about. This is the recursion those walks gate — the projection's
-/// own node dispatch, one native frame per grammar-nesting level, in both dialects and with no
-/// counter of its own.
-///
-/// Measured on `aarch64-apple-darwin`, **unoptimised**, on a 2 MiB thread — what
-/// `std::thread::spawn`, a tokio worker and the libtest harness each give — with the parse
-/// performed on another thread so only the projection's frames are on this one. One child process
-/// per bracket count, `project_type_system_document` over `scalar Foo @x(a: {a: … 1 … })`:
-/// 253 brackets and **514** levels returned, 254 brackets and **516** levels aborted with
-/// `SIGABRT`. That is 4 080 bytes of frame per green level, against a green *walk*'s 733.
-///
-/// # The window this opens, which is not this branch's to close
-///
-/// `WORST_DOOR_GREEN_TREE` is **516**, so at the top of `HARD_MAX` the doors produce exactly the
-/// tree the projection cannot descend: 254 and 255 brackets of object value parse clean and abort
-/// the process in `project_type_system_document`. No ceiling reachable from here closes it. Cutting
-/// [`MAX_GREEN_DEPTH`] under 516 makes a projection refuse a parse this crate just produced, which
-/// is the window al8n/smear#198 closed; and it would take `MAX_DOOR_BRACKETS` below `HARD_MAX`,
-/// which the crate root refuses to compile. The two repairs that do close it are a lower `HARD_MAX`
-/// and a projection that does not recurse, and both are a different change from this one.
-///
-/// **In an optimised build there is no window at all**, and that is the qualification the number
-/// above must be read with: release, same host, `project_type_system_document` returned at every
-/// bracket count `HARD_MAX` admits, on stacks down to 256 KiB, at 393 bytes of frame per green
-/// level. So what is recorded here is a debug-profile abort — which is the profile `cargo test`
-/// runs in, and the profile every other boundary in this file is measured in.
-const WORST_PROJECTION_GREEN_TREE: usize = 514;
-
 /// The deepest bracket ceiling a lossless door may clamp to and still produce a tree these walks
 /// will descend.
 ///
@@ -281,29 +287,34 @@ const _: () = assert!(
    MAX_GREEN_DEPTH, so a projection refuses a parse this crate just produced"
 );
 
-// THE THIRD ASSERTION IS GONE, AND IT IS NOT TIDYING. It read
+// THE THIRD ASSERTION IS GONE, AND ITS SUBJECT WITH IT — TWICE. It read
 //
 //   MAX_GREEN_DEPTH * 19 <= WORST_GREEN_WALK_BOUNDARY * 10
 //
 // over `WORST_GREEN_WALK_BOUNDARY = 2861`, the depth at which the worst of the four walks here ran
 // out of native stack on a 2 MiB debug thread. Those walks no longer run out of native stack at any
-// depth, so its subject does not exist and a passing assertion over it would say something true
-// about nothing.
+// depth, so its subject did not exist and a passing assertion over it would have said something
+// true about nothing.
 //
-// What it was *standing in for* is a real obligation and it does survive: the doors must not
-// produce a tree the walk behind this gate cannot descend. That walk is the projection's own
-// recursion, `WORST_PROJECTION_GREEN_TREE` is what it affords, and the comparison
+// `WORST_PROJECTION_GREEN_TREE = 514` took its place: the depth at which the walk BEHIND this gate
+// — the dialect projection's own node dispatch — ran out of native stack on the same thread. It was
+// recorded and deliberately not asserted, because the comparison it stood in for,
 //
 //   WORST_DOOR_GREEN_TREE <= WORST_PROJECTION_GREEN_TREE
 //
-// is FALSE today — 516 against 514 — which is why it is written here rather than asserted. The
-// assertion below is a tripwire on that record instead: it fires the day the gap closes, so the
-// paragraph above cannot outlive the defect it describes.
-const _: () = assert!(
-  WORST_PROJECTION_GREEN_TREE < WORST_DOOR_GREEN_TREE,
-  "the projection now descends every tree the doors produce, so WORST_PROJECTION_GREEN_TREE and \
-   the window its header records should be replaced by the assertion they stand in for"
-);
+// was false: 516 against 514, which is the window al8n/smear#201 reported. A tripwire assertion
+// beside it held the other direction, so the paragraph describing the window could not outlive it.
+//
+// The projection does not recurse any more, so THAT number has no subject either and both are
+// gone. What the pair was standing in for is a real obligation and it survives in the one
+// assertion above: the doors must not produce a tree the walks behind this gate refuse. Every walk
+// that refuses now does so at `MAX_GREEN_DEPTH` itself, on any stack — which is what makes
+// `WORST_DOOR_GREEN_TREE <= MAX_GREEN_DEPTH` the whole of it rather than half of it.
+//
+// What is NOT closed by this, and is not this module's, is `rowan`'s own recursive `Drop` of a
+// green tree: measured on the same instrument, a `Parse` at 192 brackets moved to a 128 KiB thread
+// aborts in its destructor with no projection called at all. See `crate::lossless::runner`'s
+// `finish_root`, which records construction and destruction separately for that reason.
 
 /// How a depth-bounded green walk stopped: on a divergence, or on the ceiling.
 ///
@@ -390,9 +401,9 @@ pub enum ProjectErrorKind<K> {
   /// The tree nests deeper than a projection will descend.
   ///
   /// Not reachable from a parsed document — [`MAX_GREEN_DEPTH`] carries the assertion that keeps
-  /// it unreachable, and the window where it briefly was not. It
-  /// exists because these helpers take an arbitrary `GreenNodeData`, and what runs behind them once
-  /// they pass is a projection whose own node dispatch recurses.
+  /// it unreachable, and the window where it briefly was not. It exists because these helpers take
+  /// an arbitrary `GreenNodeData`, so the tree can be one no parser built, and a projection over an
+  /// unproved tree would otherwise grow a worklist with nothing bounding it.
   TooDeep {
     /// The limit that was reached.
     limit: usize,
