@@ -1,0 +1,200 @@
+name: perf
+
+# ── THE MEASUREMENT LANE ────────────────────────────────────────────────────────────────────
+#
+# Two gates over one corpus: **peak allocation**, which is exact, and **wall clock**, which is
+# coarse. `ci/perf/run.sh` carries the design — both sides built and measured in one run, no
+# committed baseline — and `smear/benches/solo/perf/mod.rs` carries the workloads and why each
+# declares two sizes.
+#
+# ── WHY A LANE OF ITS OWN AND NOT A JOB IN `CI` ─────────────────────────────────────────────
+#
+# Three reasons, in the order they decide it.
+#
+#   1. **It answers a different question, and a different question deserves a readable verdict.**
+#      This is the argument `.github/workflows/macos.yml` and `.github/workflows/miri.yml` are
+#      already built on: a macOS formatting failure and a Miri UB report are different findings and
+#      should be readable apart. A performance delta is a third such finding — it is a
+#      NEGOTIABLE one, licensed by a `Perf-accept:` trailer, where a `CI` red is not.
+#   2. **It is advisory, and an advisory job inside `CI` is a lie in one direction or the other.**
+#      `continue-on-error` inside `CI` produces a green run over a red job — which reads as "CI
+#      passed" to everything that consumes a conclusion. Here the whole run is the advisory thing,
+#      so `gh pr checks` shows a `perf` line that a reader can act on or not.
+#   3. **It needs `fetch-depth: 0`**, because a merge-base cannot be computed from a shallow
+#      checkout, and no other job in this repository does.
+#
+# ── ADVISORY FIRST, AND WHAT WOULD PROMOTE IT ───────────────────────────────────────────────
+#
+# Both gates are `continue-on-error: true` today. The criterion for making either required is
+# stated here so that promoting it is a decision somebody makes rather than a thing that never
+# happens:
+#
+#   * **The allocation gate** is promoted when the `perf-floor` job below has run `--self` on this
+#     runner on **ten consecutive trunk pushes** and reported a difference of exactly zero on every
+#     workload each time. The local measurement that justifies the threshold is exactly zero over
+#     three invocations and one full self-comparison, so what the ten runs add is the runner and
+#     the toolchain drift, not the arithmetic. It is the gate this repository actually needs, and
+#     it should not stay advisory long.
+#   * **The wall-clock gate** is promoted only if `perf-floor`'s worst self-comparison over the
+#     same ten runs stays under **half** the configured threshold. If it does not, the honest
+#     response is to widen the threshold or to retire the gate — not to re-run until it is green.
+#     A gate whose failures are a coin flip trains people to ignore the one beside it.
+#
+# ── PYTHON >= 3.9 ───────────────────────────────────────────────────────────────────────────
+#
+# `ci/perf/compare.py` and `ci/perf/exe_path.py` use nothing newer, which is deliberate: every
+# Python gate in `ci/` except `ci/miri_scope.py` is 3.9-safe, so a local run on macOS's
+# `/usr/bin/python3` works. GitHub's `ubuntu-latest` ships far newer and no setup step is needed.
+
+# `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
+# `.github/workflows/ci.yml`, `macos.yml` and `miri.yml`; read the comment in `ci.yml` for why the
+# ignore list carries no blanket `**.md`. `ci/check_workflow_triggers.sh` enforces that the
+# `on.push.branches` lists stay identical across every workflow that has one, because that is the
+# part where a divergence is silent.
+on:
+  push:
+    # `main` is both the DEFAULT branch and the TRUNK. Any further entry is a live integration
+    # branch, which takes merges too and so needs a lane for the same reason: today that is
+    # `feat/proto`, temporary, dropped when the `proto` campaign lands on `main`. Kept identical to
+    # `ci.yml`'s list, whose comment carries the full reasoning and the order a retired entry has
+    # to be removed in.
+    #
+    # The push lane here is NOT a second copy of the pull-request gate — a merge-base comparison
+    # against the branch you are already on is a comparison with nothing. It runs `--self`, which
+    # is the calibration: the floor this runner produces for two builds of identical source. That
+    # is the number the thresholds are supposed to be derived from, and deriving it once and
+    # writing it down is how a threshold goes stale.
+    branches:
+      - main
+      - feat/proto
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - '**.txt'
+  pull_request:
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - '**.txt'
+  workflow_dispatch:
+  # NO `schedule`. A gate that compares a branch against its own merge-base has nothing to say
+  # about the passage of time: with no new commits there is no delta to measure, and `--self` on an
+  # unchanged tree re-proves what the previous push already proved. `ci.yml`'s cron is the lane
+  # that catches a new nightly or a yanked dependency; this one would spend two full builds a week
+  # to print the same zeros.
+
+concurrency:
+  # Identical in shape to `CI`'s and `Miri`'s; see the comment in `ci.yml` for why
+  # `${{ github.workflow }}` leads the group and why a push is keyed on the commit SHA.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}
+  cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+
+# Every `run:` here is bash — the same block the other three workflows carry, and `ci.yml`'s has
+# the full account. Nothing in this file runs on a Windows host today, and the default is stated
+# anyway so that adding such a job later cannot reintroduce the PowerShell parse failure #84 hit.
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # `-Dwarnings` is deliberately NOT set here, and it is the one place this file departs from
+  # `ci.yml`'s environment. The base side of every comparison compiles the MERGE-BASE's `src/`,
+  # which is code this branch has already moved past: a warning that a later commit fixed — a new
+  # rustc lint, a deprecation, an `unused` a refactor introduced — would fail the base build and
+  # red this gate for a defect that no longer exists. `ci.yml` is where a warning is an error;
+  # here it would only make the measurement unavailable.
+  #
+  # `-C debuginfo=0` is kept: it is what `ci.yml` builds under, it is identical on both sides, and
+  # debug info is build time and disk rather than anything either instrument reads.
+  RUSTFLAGS: -C debuginfo=0
+
+jobs:
+  # ── THE PULL-REQUEST GATE ─────────────────────────────────────────────────────────────────
+  #
+  # One build of each side serves both instruments, which is why they share a job rather than
+  # getting one each: the build is the expensive half and running it twice to separate two tables
+  # would double the lane's cost for a formatting preference.
+  perf:
+    name: perf
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # ADVISORY. See the promotion criteria in this file's header — both of them are conditions on
+    # `perf-floor`'s output, so they are checkable rather than a matter of opinion.
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        # A merge-base cannot be computed from a shallow clone, and `actions/checkout` is shallow
+        # by default. Without this the gate does not fail — it computes a merge-base of the wrong
+        # commit and reports a delta over a range nobody asked about.
+        fetch-depth: 0
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo registry and both sides' target directories
+      uses: actions/cache@v6
+      with:
+        # The two target directories are worth caching and the reason is specific to this gate:
+        # `ci/perf/run.sh` materialises each side with `git archive`, which writes fresh mtimes, so
+        # cargo re-fingerprints and rebuilds every WORKSPACE MEMBER on every run no matter what is
+        # cached. What it does not rebuild is the dependency graph — criterion, apollo-compiler,
+        # the three comparison parsers, rowan twice — whose sources come from the registry with
+        # stable mtimes. That is the large half and it is what this restores.
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ${{ runner.temp }}/smear-perf/target-head
+          ${{ runner.temp }}/smear-perf/target-base
+        key: ${{ runner.os }}-perf-${{ hashFiles('**/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-perf-
+    - name: ci/perf/run.sh ${{ github.base_ref }}
+      # `origin/` prefixed, because `actions/checkout` leaves the base branch as a REMOTE ref: a
+      # bare `feat/proto` does not resolve in the checkout and `git merge-base` would exit
+      # non-zero rather than answering, which reads as a broken gate.
+      run: ci/perf/run.sh "origin/${{ github.base_ref }}"
+
+  # ── THE CALIBRATION ───────────────────────────────────────────────────────────────────────
+  #
+  # `--self` builds the identical source twice, in two directories, into two target directories,
+  # and measures both. Whatever it reports IS this runner's floor, and every threshold in
+  # `ci/perf/run.sh` is a claim about that number. Running it on the trunk rather than writing the
+  # number down once is the whole point: a threshold derived on a developer's machine in August is
+  # not a threshold about a GitHub runner in December.
+  #
+  # It is also the reproducibility check for the allocation instrument, in its stronger form. The
+  # `perf` job above compares two READINGS of one binary; this one compares two independent BUILDS
+  # of identical source, which is what would catch an address- or layout-dependent allocation size
+  # that a repeated reading cannot see.
+  perf-floor:
+    name: perf-floor
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo registry and both sides' target directories
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ${{ runner.temp }}/smear-perf/target-head
+          ${{ runner.temp }}/smear-perf/target-base
+        key: ${{ runner.os }}-perf-${{ hashFiles('**/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-perf-
+    - name: ci/perf/run.sh --self
+      # More interleaved rounds than the pull-request gate, because this job's output is the
+      # THRESHOLD DERIVATION and not a verdict: the wider the sample, the less the number it
+      # publishes depends on which minute of the runner's life it ran in.
+      env:
+        PERF_ROUNDS: 6
+      run: ci/perf/run.sh --self
