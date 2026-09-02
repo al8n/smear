@@ -55,7 +55,8 @@
 //! Every function below takes a [`Node`](crate::lossless::project::Node) — a green node
 //! plus where it starts — and never a rowan cursor. See
 //! [the substrate](crate::lossless::project#what-a-projection-walks-the-green-tree-not-a-cursor)
-//! for why: a cursor's parent pointer is what the caller's own frame already is, and its offset
+//! for why: a cursor's parent pointer is what the dispatch already carries — a call frame in the
+//! bounded part of the grammar, a worklist entry in the four cycles below — and its offset
 //! is what [`Node::children`](crate::lossless::project::Node::children) accumulates, so
 //! the allocation per element it costs buys nothing here. The two whole-tree checks a door makes
 //! were already green; now the walk between them is too, and a fail-fast projection allocates for
@@ -75,6 +76,47 @@
 //! `(value, TextRange)`. Nothing re-descends a subtree an ancestor has already walked. A child
 //! the projection has no place for is the one exception: its bytes still belong to the parent's
 //! span, so [`node_extent`] reads them, and that is the only call site left for it.
+//!
+//! # No node dispatch below spends a native frame per level
+//!
+//! The grammar is bounded above a value: a document holds definitions, a definition holds fields,
+//! a field holds arguments, and none of those can contain another of itself. **Four cycles are
+//! not** — `value` ↔ `object_field`, `const_value` ↔ `const_object_field`, `selection_set` ↔
+//! `field`/`inline_fragment`, and `ty` ↔ `list_element`/`non_null_type` — and each of them used to
+//! spend one native frame per level of nesting, with no counter of its own.
+//!
+//! `MAX_GREEN_DEPTH` did not close that, and no value of it could: cutting it under what the doors
+//! produce refuses a parse this crate just made. So at the top of the lexer's `HARD_MAX` the doors
+//! produced exactly the tree the dispatch could not descend. Measured on `aarch64-apple-darwin`,
+//! unoptimised, on the 2 MiB thread `std::thread::spawn` and the libtest harness each give:
+//! `scalar Foo @x(a: {a: … 1 … })` at 253 brackets and 514 green levels projected, and at 254
+//! brackets and 516 levels **aborted the process** — 4 080 bytes of frame per green level, against
+//! a green walk's 733. 254 and 255 parse clean; 256 is refused by `HARD_MAX`. al8n/smear#201.
+//!
+//! Each cycle is a **worklist** now, and the three of them share one shape:
+//!
+//! - A frame is a container the walk has entered and not finished: the node, its fold so far, the
+//!   child iterator it has not drained, and the accumulator it is filling. A container costs one
+//!   frame however **wide** it is, because the frame adopts the tree's own iterator rather than
+//!   copying the children out — which is the same trade the substrate's `Descent` makes, and the
+//!   reason a breadth-first queue would have been the wrong structure here.
+//! - **The fold stays bottom-up**, which is what the `Extent` threaded through these functions
+//!   requires: a parent's span is the cover of its children's, so a parent cannot be finished
+//!   before them. A frame is therefore only ever completed by the value the level below hands
+//!   back, and the constituent that value belongs to — an `ObjectField` waiting on its value, a
+//!   `Field` waiting on its selection set — travels **on the frame** as an open slot rather than
+//!   in a call frame.
+//! - A frame is pushed only with a live descent already chosen below it, so the open slot is never
+//!   empty while the frame is on the stack. That is a state the type system then does not have to
+//!   rule out, and it is why the `open_*_chain` helpers exist: they run the entry dispatch down to
+//!   the first constituent that finishes without a frame.
+//!
+//! What that costs is one heap entry per nesting level in place of a native frame, and the
+//! entries are bounded by `MAX_GREEN_DEPTH` — inherited rather than re-counted, because every door
+//! into this module opens with a verification that refuses past it. Measured on the same host and
+//! the same instrument: every bracket count `HARD_MAX` admits now projects on a **256 KiB** thread
+//! in both profiles, and the smallest stack the projection itself needs is the same at 255
+//! brackets as at one.
 //!
 //! Two places the tree's geometry and the AST's differ, and both are span-relevant:
 //!
@@ -160,6 +202,14 @@ type Node<'g> = crate::lossless::project::Node<'g, GraphQLLang>;
 
 /// [`Node`]'s other half.
 type Token<'g> = crate::lossless::project::Token<'g, GraphQLLang>;
+
+/// A [`Node`]'s children, each carrying its own absolute start.
+///
+/// Named here because the three worklists below suspend one: a frame adopts the tree's own child
+/// iterator rather than copying the children out, so a container costs one entry however wide it
+/// is. That is the substrate's `Descent` trade, reached through a plain `Vec` because these frames
+/// carry a partly-built AST value and there is no allocation-free promise over them to keep.
+type Children<'g> = crate::lossless::project::Children<'g, GraphQLLang>;
 
 type Out<T> = Result<T, ProjectError>;
 
@@ -1776,35 +1826,217 @@ fn fragment_name<'src>(token: Token<'_>, source: &'src str) -> Out<FragmentName<
 // selections
 // ---------------------------------------------------------------------------------------------
 
+/// A selection whose own selection set is being built below.
+///
+/// Everything a `Field` or an `InlineFragment` needs *except* its selection set is bounded work —
+/// its alias, its name, its arguments, its directives — so it is all folded before the descent
+/// and travels here. A `FragmentSpread` never appears: it holds no selection set and is finished
+/// where it is read.
+enum OpenSelection<'g, 'src> {
+  Field {
+    /// The `Field` node, and the owner of the finished selection's span.
+    node: Node<'g>,
+    /// The field's fold, everything but its selection set.
+    extent: Extent,
+    alias: Option<Alias<&'src str>>,
+    name: Name<&'src str>,
+    arguments: Option<Arguments<&'src str>>,
+    directives: Option<Directives<&'src str>>,
+    /// The `SelectionSet` node this field is waiting on.
+    pending: Node<'g>,
+  },
+  InlineFragment {
+    /// The `InlineFragment` node, and the owner of the finished selection's span.
+    node: Node<'g>,
+    /// The fragment's fold, everything but its selection set.
+    extent: Extent,
+    type_condition: Option<TypeCondition<&'src str>>,
+    directives: Option<Directives<&'src str>>,
+    /// The `SelectionSet` node this fragment is waiting on.
+    pending: Node<'g>,
+  },
+}
+
+impl<'g> OpenSelection<'g, '_> {
+  /// The `SelectionSet` node this selection is waiting on.
+  const fn set(&self) -> Node<'g> {
+    match self {
+      Self::Field { pending, .. } | Self::InlineFragment { pending, .. } => *pending,
+    }
+  }
+}
+
+/// A `SelectionSet` suspended while the set of one of its selections is built below.
+///
+/// `{ a { a … } }` nests without bound at the lexer's own ceiling, so the walk that reads it is a
+/// loop over these rather than a native frame per level — see the module header's *No node
+/// dispatch below spends a native frame per level*.
+struct SelectionFrame<'g, 'src> {
+  /// The `SelectionSet` node.
+  node: Node<'g>,
+  /// The fold over the set's own tokens and the selections already finished.
+  extent: Extent,
+  /// The selections not yet read.
+  children: Children<'g>,
+  /// The selections already finished, in document order.
+  selections: Vec<Selection<&'src str>>,
+  /// The selection whose own set is being built below.
+  open: OpenSelection<'g, 'src>,
+}
+
+/// What a [`SelectionFrame`] did when the set below it finished.
+enum ResumedSet<'g, T> {
+  /// The next nested selection set that has to be built.
+  Descend(Node<'g>),
+  /// This frame is finished, and what it finished to.
+  Done(T, TextRange),
+}
+
+/// Read selections until one is waiting on a set of its own.
+///
+/// Everything that finishes where it is read — a fragment spread, a field with no set — is folded
+/// into `selections` here, so only a selection that actually nests ever occupies the worklist.
+/// `None` means the set is complete.
+fn next_selection<'g, 'src>(
+  set: Node<'g>,
+  children: &mut Children<'g>,
+  extent: &mut Extent,
+  selections: &mut Vec<Selection<&'src str>>,
+  source: &'src str,
+) -> Out<Option<OpenSelection<'g, 'src>>> {
+  for element in children.by_ref() {
+    match element {
+      NodeOrToken::Token(token) => extent.token(token),
+      NodeOrToken::Node(child) => match child.kind() {
+        K::Field => match open_field(child, source)? {
+          Ok(open) => return Ok(Some(open)),
+          Err(finished) => selections.push(Selection::Field(extent.keep(finished))),
+        },
+        K::FragmentSpread => {
+          selections.push(Selection::FragmentSpread(
+            extent.keep(fragment_spread(child, source)?),
+          ));
+        }
+        K::InlineFragment => return Ok(Some(open_inline_fragment(child, source)?)),
+        _ => return Err(unexpected_node(set, child)),
+      },
+    }
+  }
+  Ok(None)
+}
+
+/// Open selection sets from `node` down to the first one that nests no further, and answer that
+/// one.
+///
+/// Every set on the way is suspended on `frames` with the selection it must build first already
+/// chosen, so a frame is never on the stack without a live descent below it — which is what lets
+/// [`SelectionFrame::resume`] take a finished set rather than an optional one, and what keeps this
+/// walk free of a state the type system cannot rule out.
+///
+/// A frame is **pushed** rather than returned, because returning one means moving a few hundred
+/// bytes of partly-built AST through the caller's frame on a walk whose whole subject is frame
+/// size.
+fn open_selection_chain<'g, 'src>(
+  frames: &mut Vec<SelectionFrame<'g, 'src>>,
+  node: Node<'g>,
+  source: &'src str,
+) -> Out<(SelectionSet<&'src str>, TextRange)> {
+  let mut node = node;
+  loop {
+    let mut extent = Extent::default();
+    let mut children = node.children();
+    let mut selections = Vec::new();
+    match next_selection(node, &mut children, &mut extent, &mut selections, source)? {
+      Some(open) => {
+        let nested = open.set();
+        frames.push(SelectionFrame {
+          node,
+          extent,
+          children,
+          selections,
+          open,
+        });
+        node = nested;
+      }
+      None => {
+        let extent = extent.range(node, "a token")?;
+        return Ok((
+          SelectionSet::new(to_span(extent), selections.into()),
+          extent,
+        ));
+      }
+    }
+  }
+}
+
+impl<'g, 'src> SelectionFrame<'g, 'src> {
+  /// Fold the set the level below finished into the selection that was waiting on it, and read
+  /// on to the next selection that nests.
+  fn resume(
+    &mut self,
+    set: SelectionSet<&'src str>,
+    piece: TextRange,
+    source: &'src str,
+  ) -> Out<ResumedSet<'g, SelectionSet<&'src str>>> {
+    let Self {
+      node,
+      extent,
+      children,
+      selections,
+      open,
+    } = self;
+    let (selection, range) = close_selection(open, set, piece)?;
+    extent.cover(range);
+    selections.push(selection);
+    match next_selection(*node, children, extent, selections, source)? {
+      Some(next) => {
+        let nested = next.set();
+        *open = next;
+        Ok(ResumedSet::Descend(nested))
+      }
+      None => {
+        let range = extent.range(*node, "a token")?;
+        Ok(ResumedSet::Done(
+          SelectionSet::new(to_span(range), core::mem::take(selections).into()),
+          range,
+        ))
+      }
+    }
+  }
+}
+
+/// A selection set, with the nesting inside it read on a worklist rather than a stack.
 fn selection_set<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(SelectionSet<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut selections = Vec::new();
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => selections.push(match child.kind() {
-        K::Field => Selection::Field(extent.keep(field(child, source)?)),
-        K::FragmentSpread => {
-          Selection::FragmentSpread(extent.keep(fragment_spread(child, source)?))
-        }
-        K::InlineFragment => {
-          Selection::InlineFragment(extent.keep(inline_fragment(child, source)?))
-        }
-        _ => return Err(unexpected_node(node, child)),
-      }),
-    }
+  let mut frames: Vec<SelectionFrame<'_, 'src>> = Vec::new();
+  let mut built = open_selection_chain(&mut frames, node, source)?;
+  loop {
+    let Some(frame) = frames.last_mut() else {
+      return Ok(built);
+    };
+    let (set, piece) = built;
+    built = match frame.resume(set, piece, source)? {
+      ResumedSet::Descend(nested) => open_selection_chain(&mut frames, nested, source)?,
+      ResumedSet::Done(set, range) => {
+        frames.pop();
+        (set, range)
+      }
+    };
   }
-  let extent = extent.range(node, "a token")?;
-  Ok((
-    SelectionSet::new(to_span(extent), selections.into()),
-    extent,
-  ))
 }
 
-fn field<'src>(node: Node<'_>, source: &'src str) -> Out<(Field<&'src str>, TextRange)> {
+/// A field read as far as its selection set.
+///
+/// `Ok` is a field that nests and is now on the worklist; `Err` is one that does not and is
+/// finished — the `Result` is a two-way answer here rather than a refusal, and the refusals this
+/// makes are the `?`s above it.
+#[allow(clippy::type_complexity)]
+fn open_field<'g, 'src>(
+  node: Node<'g>,
+  source: &'src str,
+) -> Out<Result<OpenSelection<'g, 'src>, (Field<&'src str>, TextRange)>> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut alias_node = None;
@@ -1843,22 +2075,24 @@ fn field<'src>(node: Node<'_>, source: &'src str) -> Out<(Field<&'src str>, Text
   let name = name(source, names.at(0, node, "a field name")?)?;
   let arguments = extent.keep_opt(optional_arguments(arguments_node, source)?);
   let directives = extent.keep_opt(optional_directives(directives_node, source)?);
-  let selections = match selection_set_node {
-    Some(set) => Some(extent.keep(selection_set(set, source)?)),
-    None => None,
-  };
-  let extent = extent.range(node, "a token")?;
-  Ok((
-    Field::new(
-      to_span(extent),
+  match selection_set_node {
+    Some(set) => Ok(Ok(OpenSelection::Field {
+      node,
+      extent,
       alias,
       name,
       arguments,
       directives,
-      selections,
-    ),
-    extent,
-  ))
+      pending: set,
+    })),
+    None => {
+      let extent = extent.range(node, "a token")?;
+      Ok(Err((
+        Field::new(to_span(extent), alias, name, arguments, directives, None),
+        extent,
+      )))
+    }
+  }
 }
 
 fn fragment_spread<'src>(
@@ -1891,10 +2125,12 @@ fn fragment_spread<'src>(
   ))
 }
 
-fn inline_fragment<'src>(
-  node: Node<'_>,
+/// An inline fragment read as far as its selection set, which the grammar makes mandatory — so
+/// unlike a field this always nests.
+fn open_inline_fragment<'g, 'src>(
+  node: Node<'g>,
   source: &'src str,
-) -> Out<(InlineFragment<&'src str>, TextRange)> {
+) -> Out<OpenSelection<'g, 'src>> {
   let mut extent = Extent::default();
   let mut names = Names::default();
   let mut condition_node = None;
@@ -1933,12 +2169,68 @@ fn inline_fragment<'src>(
   };
   let directives = extent.keep_opt(optional_directives(directives_node, source)?);
   let set = selection_set_node.ok_or_else(|| missing(node, "a selection set"))?;
-  let selections = extent.keep(selection_set(set, source)?);
-  let extent = extent.range(node, "a token")?;
-  Ok((
-    InlineFragment::new(to_span(extent), type_condition, directives, selections),
+  Ok(OpenSelection::InlineFragment {
+    node,
     extent,
-  ))
+    type_condition,
+    directives,
+    pending: set,
+  })
+}
+
+/// Build the selection that was waiting on `set`, and answer its own extent.
+///
+/// `open` is left drained: the caller replaces it with the next waiting selection, or drops the
+/// frame that holds it.
+fn close_selection<'src>(
+  open: &mut OpenSelection<'_, 'src>,
+  set: SelectionSet<&'src str>,
+  piece: TextRange,
+) -> Out<(Selection<&'src str>, TextRange)> {
+  Ok(match open {
+    OpenSelection::Field {
+      node,
+      extent,
+      alias,
+      name,
+      arguments,
+      directives,
+      ..
+    } => {
+      extent.cover(piece);
+      let range = extent.range(*node, "a token")?;
+      (
+        Selection::Field(Field::new(
+          to_span(range),
+          alias.take(),
+          *name,
+          arguments.take(),
+          directives.take(),
+          Some(set),
+        )),
+        range,
+      )
+    }
+    OpenSelection::InlineFragment {
+      node,
+      extent,
+      type_condition,
+      directives,
+      ..
+    } => {
+      extent.cover(piece);
+      let range = extent.range(*node, "a token")?;
+      (
+        Selection::InlineFragment(InlineFragment::new(
+          to_span(range),
+          type_condition.take(),
+          directives.take(),
+          set,
+        )),
+        range,
+      )
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1950,6 +2242,8 @@ const TYPE_KINDS: [SyntaxKind; 3] = [K::NamedType, K::ListType, K::NonNullType];
 /// The type reference a node's walk collected, refused when there is none.
 ///
 /// `child` is the slot the caller's own dispatch filled; `node` is only ever the refusal's owner.
+/// It is also the **door** into the type walk: every caller outside this section reaches a type
+/// reference through here.
 fn require_type<'src>(
   node: Node<'_>,
   child: Option<Node<'_>>,
@@ -1959,29 +2253,28 @@ fn require_type<'src>(
   ty(child, source)
 }
 
-/// The `!` folds into the node it wraps, exactly as the syntactic parser folds it.
+/// A `ListType` whose element is being built below, and the `!` that folds into it.
 ///
-/// A `NonNullType` has no AST image of its own: `T!` is a `NamedType` with `required` set, and
-/// its span is the extent that includes the `!`.
-fn ty<'src>(node: Node<'_>, source: &'src str) -> Out<(Type<Name<&'src str>>, TextRange)> {
-  match node.kind() {
-    K::NamedType => {
-      let (name, extent) = inner_name(node, source)?;
-      Ok((
-        Type::Name(NamedType::new(to_span(extent), name, false)),
-        extent,
-      ))
-    }
-    K::ListType => {
-      let (element, extent) = list_element(node, source)?;
-      Ok((
-        ListType::new(to_span(extent), element, false).into(),
-        extent,
-      ))
-    }
-    K::NonNullType => non_null_type(node, source),
-    found => Err(unexpected(node, found, node.text_range())),
-  }
+/// The single-child half of this file's three worklists. `[[[Int]]]` nests without bound, so the
+/// walk that reads it is a loop over these rather than a native frame per bracket — see the
+/// module header's *No node dispatch below spends a native frame per level*.
+struct TypeFrame<'g> {
+  /// The `ListType` node, whose own tokens are the brackets [`Self::extent`] folds.
+  list: Node<'g>,
+  /// The fold over `list`'s tokens and its unread children.
+  extent: Extent,
+  /// The `NonNullType` that wraps `list`, when the AST list being built is `[T]!`.
+  ///
+  /// `[T]!` builds **one** AST list from two tree nodes and the span it carries is the outer
+  /// one's, so the wrapper's own fold has to survive the descent alongside the inner one's.
+  required: Option<Required<'g>>,
+}
+
+/// The `NonNullType` half of a `[T]!`: the node whose span the finished list carries, and the
+/// fold over its own tokens — the `!` among them.
+struct Required<'g> {
+  node: Node<'g>,
+  extent: Extent,
 }
 
 /// The element type a `ListType` node wraps, with the list node's own extent — brackets included.
@@ -1989,10 +2282,7 @@ fn ty<'src>(node: Node<'_>, source: &'src str) -> Out<(Type<Name<&'src str>>, Te
 /// Split out because the `!` folds: `[T]!` builds one AST list from **two** tree nodes, and the
 /// span it carries is the outer one's, so the inner node has to answer its element and its extent
 /// without also building a list of its own.
-fn list_element<'src>(
-  node: Node<'_>,
-  source: &'src str,
-) -> Out<(Type<Name<&'src str>>, TextRange)> {
+fn open_list_element<'g>(node: Node<'g>) -> Out<(Extent, Node<'g>)> {
   let mut extent = Extent::default();
   let mut wrapped = None;
   for element in node.children() {
@@ -2004,44 +2294,129 @@ fn list_element<'src>(
       },
     }
   }
-  let element = extent.keep(require_type(node, wrapped, source)?);
-  Ok((element, extent.range(node, "a token")?))
+  let wrapped = wrapped.ok_or_else(|| missing(node, "a type reference"))?;
+  Ok((extent, wrapped))
 }
 
-/// `T!` and `[T]!`, where the `!` is a token of this node and the span it produces is this node's.
-fn non_null_type<'src>(
-  node: Node<'_>,
+/// Open list types from `node` down to the first type reference that needs no frame, and answer
+/// that one.
+///
+/// The `!` folds into the node it wraps, exactly as the syntactic parser folds it: a `NonNullType`
+/// has no AST image of its own, `T!` is a `NamedType` with `required` set, and its span is the
+/// extent that includes the `!`.
+///
+/// Every list on the way is suspended on `frames` with its element already chosen, so a frame is
+/// never on the stack without a live descent below it — which is what lets [`close_type`] take a
+/// finished element rather than an optional one, and what keeps this walk free of a state the type
+/// system cannot rule out. A frame is **pushed** rather than returned, for the reason
+/// [`open_selection_chain`] gives.
+fn open_type_chain<'g, 'src>(
+  frames: &mut Vec<TypeFrame<'g>>,
+  node: Node<'g>,
   source: &'src str,
 ) -> Out<(Type<Name<&'src str>>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut wrapped = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if wrapped.is_none() && TYPE_KINDS.contains(&kind) => wrapped = Some(child),
-        _ => extent.unread(child),
-      },
+  let mut node = node;
+  loop {
+    match node.kind() {
+      K::NamedType => {
+        let (name, extent) = inner_name(node, source)?;
+        return Ok((
+          Type::Name(NamedType::new(to_span(extent), name, false)),
+          extent,
+        ));
+      }
+      K::ListType => {
+        let (extent, wrapped) = open_list_element(node)?;
+        frames.push(TypeFrame {
+          list: node,
+          extent,
+          required: None,
+        });
+        node = wrapped;
+      }
+      // `T!` and `[T]!`, where the `!` is a token of this node and the span it produces is this
+      // node's.
+      K::NonNullType => {
+        let mut extent = Extent::default();
+        let mut wrapped = None;
+        for element in node.children() {
+          match element {
+            NodeOrToken::Token(token) => extent.token(token),
+            NodeOrToken::Node(child) => match child.kind() {
+              kind if wrapped.is_none() && TYPE_KINDS.contains(&kind) => wrapped = Some(child),
+              _ => extent.unread(child),
+            },
+          }
+        }
+        let inner = wrapped.ok_or_else(|| missing(node, "a wrapped type"))?;
+        match inner.kind() {
+          K::NamedType => {
+            let name = extent.keep(inner_name(inner, source)?);
+            let extent = extent.range(node, "a token")?;
+            return Ok((
+              Type::Name(NamedType::new(to_span(extent), name, true)),
+              extent,
+            ));
+          }
+          K::ListType => {
+            let (inner_extent, wrapped) = open_list_element(inner)?;
+            frames.push(TypeFrame {
+              list: inner,
+              extent: inner_extent,
+              required: Some(Required { node, extent }),
+            });
+            node = wrapped;
+          }
+          // `T!!` has no production, so a nested `NonNullType` is not a shape the AST can hold.
+          found => return Err(unexpected(node, found, inner.text_range())),
+        }
+      }
+      found => return Err(unexpected(node, found, node.text_range())),
     }
   }
-  let inner = wrapped.ok_or_else(|| missing(node, "a wrapped type"))?;
-  match inner.kind() {
-    K::NamedType => {
-      let name = extent.keep(inner_name(inner, source)?);
-      let extent = extent.range(node, "a token")?;
-      Ok((
-        Type::Name(NamedType::new(to_span(extent), name, true)),
-        extent,
-      ))
+}
+
+/// Fold the element the level below finished into the list that wraps it.
+///
+/// A list type holds exactly one element, so a frame closed here is finished: unlike the value
+/// and selection worklists there is no next child to scan for.
+fn close_type<'src>(
+  frame: TypeFrame<'_>,
+  element: Type<Name<&'src str>>,
+  piece: TextRange,
+) -> Out<(Type<Name<&'src str>>, TextRange)> {
+  let TypeFrame {
+    list,
+    mut extent,
+    required,
+  } = frame;
+  extent.cover(piece);
+  let extent = extent.range(list, "a token")?;
+  match required {
+    None => Ok((
+      ListType::new(to_span(extent), element, false).into(),
+      extent,
+    )),
+    Some(Required {
+      node,
+      extent: mut outer,
+    }) => {
+      outer.cover(extent);
+      let outer = outer.range(node, "a token")?;
+      Ok((ListType::new(to_span(outer), element, true).into(), outer))
     }
-    K::ListType => {
-      let element = extent.keep(list_element(inner, source)?);
-      let extent = extent.range(node, "a token")?;
-      Ok((ListType::new(to_span(extent), element, true).into(), extent))
-    }
-    // `T!!` has no production, so a nested `NonNullType` is not a shape the AST can hold.
-    found => Err(unexpected(node, found, inner.text_range())),
   }
+}
+
+/// A type reference, with the list nesting inside it read on a worklist rather than a stack.
+fn ty<'src>(node: Node<'_>, source: &'src str) -> Out<(Type<Name<&'src str>>, TextRange)> {
+  let mut frames: Vec<TypeFrame<'_>> = Vec::new();
+  let mut built = open_type_chain(&mut frames, node, source)?;
+  while let Some(frame) = frames.pop() {
+    let (element, piece) = built;
+    built = close_type(frame, element, piece)?;
+  }
+  Ok(built)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2324,71 +2699,452 @@ fn boolean_literal<'src>(
   }
 }
 
-fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>, TextRange)> {
-  Ok(match node.kind() {
-    K::Variable => {
-      let (variable, extent) = variable_value(node, source)?;
-      (InputValue::Variable(variable), extent)
+/// The two value grammars this dialect projects, over one walk.
+///
+/// `value` and `const_value` were each other with `Const` spelled in: nine arms, seven of them
+/// character-for-character identical, differing in the constructors they name and in one refusal.
+/// Duplicating a `match` is cheap; **duplicating a worklist is not** — the arms are the easy half
+/// and the frame discipline is the half a second copy gets subtly wrong — so the machine below is
+/// written once and the difference is this trait.
+trait ValueGrammar<'src> {
+  /// The value this grammar builds.
+  type Value;
+  /// One field of an object value in this grammar.
+  type Field;
+
+  /// A `$name` in this position.
+  ///
+  /// The one arm the two grammars genuinely disagree about: [`ConstInputValue`] has no `Variable`
+  /// variant, so a constant position has nothing to construct and answers a refusal attributed to
+  /// `parent` — the position, not the variable, is what is wrong.
+  fn variable(parent: Node<'_>, node: Node<'_>, source: &'src str)
+  -> Out<(Self::Value, TextRange)>;
+
+  fn int(span: SimpleSpan, text: &'src str) -> Self::Value;
+  fn float(span: SimpleSpan, text: &'src str) -> Self::Value;
+  fn string(value: StringValue<&'src str>) -> Self::Value;
+  fn boolean(value: BooleanValue<&'src str>) -> Self::Value;
+  fn null(span: SimpleSpan, text: &'src str) -> Self::Value;
+  fn enumeration(span: SimpleSpan, text: &'src str) -> Self::Value;
+  fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value;
+  fn object(span: SimpleSpan, fields: Vec<Self::Field>) -> Self::Value;
+  fn field(span: SimpleSpan, name: Name<&'src str>, value: Self::Value) -> Self::Field;
+}
+
+/// A value position that admits a variable — an argument, a list element or an object field of a
+/// non-constant argument.
+struct Executable;
+
+impl<'src> ValueGrammar<'src> for Executable {
+  type Value = InputValue<&'src str>;
+  type Field = ObjectField<&'src str>;
+
+  fn variable(_: Node<'_>, node: Node<'_>, source: &'src str) -> Out<(Self::Value, TextRange)> {
+    let (variable, extent) = variable_value(node, source)?;
+    Ok((InputValue::Variable(variable), extent))
+  }
+
+  fn int(span: SimpleSpan, text: &'src str) -> Self::Value {
+    InputValue::Int(IntValue::new(span, text))
+  }
+
+  fn float(span: SimpleSpan, text: &'src str) -> Self::Value {
+    InputValue::Float(FloatValue::new(span, text))
+  }
+
+  fn string(value: StringValue<&'src str>) -> Self::Value {
+    InputValue::String(value)
+  }
+
+  fn boolean(value: BooleanValue<&'src str>) -> Self::Value {
+    InputValue::Boolean(value)
+  }
+
+  fn null(span: SimpleSpan, text: &'src str) -> Self::Value {
+    InputValue::Null(NullValue::new(span, text))
+  }
+
+  fn enumeration(span: SimpleSpan, text: &'src str) -> Self::Value {
+    InputValue::Enum(EnumValue::new(span, text))
+  }
+
+  fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
+    InputValue::List(List::new(span, values.into()))
+  }
+
+  fn object(span: SimpleSpan, fields: Vec<Self::Field>) -> Self::Value {
+    InputValue::Object(Object::new(span, fields.into()))
+  }
+
+  fn field(span: SimpleSpan, name: Name<&'src str>, value: Self::Value) -> Self::Field {
+    ObjectField::new(span, name, value)
+  }
+}
+
+/// A constant value position, where the AST's own type system forbids a variable.
+struct Constant;
+
+impl<'src> ValueGrammar<'src> for Constant {
+  type Value = ConstInputValue<&'src str>;
+  type Field = ConstObjectField<&'src str>;
+
+  fn variable(parent: Node<'_>, node: Node<'_>, _: &'src str) -> Out<(Self::Value, TextRange)> {
+    // The refusal is attributed to the position, not to the variable: a `Variable` node is
+    // perfectly legal, and what is wrong is the const context that is holding one.
+    Err(unexpected(parent, K::Variable, node.text_range()))
+  }
+
+  fn int(span: SimpleSpan, text: &'src str) -> Self::Value {
+    ConstInputValue::Int(IntValue::new(span, text))
+  }
+
+  fn float(span: SimpleSpan, text: &'src str) -> Self::Value {
+    ConstInputValue::Float(FloatValue::new(span, text))
+  }
+
+  fn string(value: StringValue<&'src str>) -> Self::Value {
+    ConstInputValue::String(value)
+  }
+
+  fn boolean(value: BooleanValue<&'src str>) -> Self::Value {
+    ConstInputValue::Boolean(value)
+  }
+
+  fn null(span: SimpleSpan, text: &'src str) -> Self::Value {
+    ConstInputValue::Null(NullValue::new(span, text))
+  }
+
+  fn enumeration(span: SimpleSpan, text: &'src str) -> Self::Value {
+    ConstInputValue::Enum(EnumValue::new(span, text))
+  }
+
+  fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
+    ConstInputValue::List(ConstList::new(span, values.into()))
+  }
+
+  fn object(span: SimpleSpan, fields: Vec<Self::Field>) -> Self::Value {
+    ConstInputValue::Object(ConstObject::new(span, fields.into()))
+  }
+
+  fn field(span: SimpleSpan, name: Name<&'src str>, value: Self::Value) -> Self::Field {
+    ConstObjectField::new(span, name, value)
+  }
+}
+
+/// An `ObjectField` whose name and own tokens are folded and whose value is being built below.
+///
+/// Everything a field needs but its value is bounded work, so it is all done where the field is
+/// read.
+#[derive(Clone, Copy)]
+struct OpenField<'g, 'src> {
+  /// The `ObjectField` node — the owner of the field's span, and the parent a refusal inside its
+  /// value names.
+  node: Node<'g>,
+  /// The field's fold, everything but its value.
+  extent: Extent,
+  name: Name<&'src str>,
+  /// The value node the descent below is building.
+  pending: Node<'g>,
+}
+
+/// A container value suspended while the value below it is built.
+///
+/// `{a: {a: … }}` nests without bound at the lexer's own ceiling, so the walk that reads it is a
+/// loop over these rather than a native frame per level — see the module header's *No node
+/// dispatch below spends a native frame per level*.
+struct ValueFrame<'g, 'src, G: ValueGrammar<'src>> {
+  /// The `ListValue` or `ObjectValue` node.
+  node: Node<'g>,
+  /// The fold over the container's own tokens and the children already finished.
+  extent: Extent,
+  /// The children not yet read.
+  children: Children<'g>,
+  /// What has been folded so far, and which container this is.
+  built: Built<'g, 'src, G>,
+}
+
+/// A container's accumulator.
+enum Built<'g, 'src, G: ValueGrammar<'src>> {
+  /// A `ListValue`'s elements, in document order.
+  List(Vec<G::Value>),
+  /// An `ObjectValue`'s finished fields, and the field whose value is being built below.
+  Object {
+    fields: Vec<G::Field>,
+    open: OpenField<'g, 'src>,
+  },
+}
+
+/// What a [`ValueFrame`] did when the value below it finished.
+enum ResumedValue<'g, T> {
+  /// The next value that has to be built, and the node whose dispatch reaches it.
+  Descend(Node<'g>, Node<'g>),
+  /// This frame is finished, and what it finished to.
+  Done(T, TextRange),
+}
+
+/// The next element of a list value, with the tokens passed on the way folded in.
+///
+/// No kind test: a `ListValue`'s node children are its elements whatever they are, and a kind the
+/// value grammar has no arm for is refused where it is entered rather than where it is read.
+fn next_element<'g>(children: &mut Children<'g>, extent: &mut Extent) -> Option<Node<'g>> {
+  for element in children.by_ref() {
+    match element {
+      NodeOrToken::Token(token) => extent.token(token),
+      NodeOrToken::Node(child) => return Some(child),
     }
-    K::IntValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Int], "an integer literal")?;
-      (InputValue::Int(IntValue::new(span, text)), extent)
+  }
+  None
+}
+
+/// The next field of an object value, with the tokens passed on the way folded in.
+///
+/// `None` means the object is complete.
+///
+/// **It does not ask whether the field's value is a container**, and the first draft of it did:
+/// deciding that meant entering the value, and entering an object value is what calls this — so
+/// the peek was one native frame per level of nesting, which is the whole defect back again on
+/// the other side of the worklist. A field whose value is a leaf costs nothing extra for being
+/// opened here: [`open_value_chain`] finishes a leaf without pushing a frame, and the field's own
+/// slot is on the frame this returns to, which already exists.
+fn next_field<'g, 'src>(
+  object: Node<'g>,
+  children: &mut Children<'g>,
+  extent: &mut Extent,
+  source: &'src str,
+) -> Out<Option<OpenField<'g, 'src>>> {
+  for element in children.by_ref() {
+    match element {
+      NodeOrToken::Token(token) => extent.token(token),
+      NodeOrToken::Node(child) => match child.kind() {
+        K::ObjectField => return open_object_field(child, source).map(Some),
+        _ => return Err(unexpected_node(object, child)),
+      },
     }
-    K::FloatValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Float], "a float literal")?;
-      (InputValue::Float(FloatValue::new(span, text)), extent)
-    }
-    K::StringValue => {
-      let (string, extent) = string_literal(node, source)?;
-      (InputValue::String(string), extent)
-    }
-    K::BooleanValue => {
-      let (boolean, extent) = boolean_literal(node, source)?;
-      (InputValue::Boolean(boolean), extent)
-    }
-    K::NullValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Name], "a `null` keyword")?;
-      (InputValue::Null(NullValue::new(span, text)), extent)
-    }
-    K::EnumValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Name], "an enum value")?;
-      (InputValue::Enum(EnumValue::new(span, text)), extent)
-    }
-    K::ListValue => {
-      let mut extent = Extent::default();
-      let mut values = Vec::new();
-      for element in node.children() {
-        match element {
-          NodeOrToken::Token(token) => extent.token(token),
-          NodeOrToken::Node(child) => values.push(extent.keep(value(child, source)?)),
+  }
+  Ok(None)
+}
+
+/// An `ObjectField` read as far as its value.
+fn open_object_field<'g, 'src>(node: Node<'g>, source: &'src str) -> Out<OpenField<'g, 'src>> {
+  let mut extent = Extent::default();
+  let mut names = Names::default();
+  let mut value_node = None;
+  for element in node.children() {
+    match element {
+      NodeOrToken::Token(token) => {
+        extent.token(token);
+        if token.kind() == K::Name {
+          names.push(token);
         }
       }
-      let extent = extent.range(node, "a token")?;
-      (
-        InputValue::List(List::new(to_span(extent), values.into())),
-        extent,
-      )
+      NodeOrToken::Node(child) => match child.kind() {
+        kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
+        _ => extent.unread(child),
+      },
     }
-    K::ObjectValue => {
-      let mut extent = Extent::default();
-      let mut fields = Vec::new();
-      for element in node.children() {
-        match element {
-          NodeOrToken::Token(token) => extent.token(token),
-          NodeOrToken::Node(child) => match child.kind() {
-            K::ObjectField => fields.push(extent.keep(object_field(child, source)?)),
-            _ => return Err(unexpected_node(node, child)),
-          },
-        }
-      }
-      let extent = extent.range(node, "a token")?;
-      (
-        InputValue::Object(Object::new(to_span(extent), fields.into())),
-        extent,
-      )
-    }
-    found => return Err(unexpected(node, found, node.text_range())),
+  }
+  let name = name(source, names.at(0, node, "a field name")?)?;
+  let pending = value_node.ok_or_else(|| missing(node, "a value"))?;
+  Ok(OpenField {
+    node,
+    extent,
+    name,
+    pending,
   })
+}
+
+/// Build the field that was waiting on `value`, and answer its own extent.
+fn close_field<'src, G: ValueGrammar<'src>>(
+  open: OpenField<'_, 'src>,
+  value: G::Value,
+  piece: TextRange,
+) -> Out<(G::Field, TextRange)> {
+  let OpenField {
+    node,
+    mut extent,
+    name,
+    ..
+  } = open;
+  extent.cover(piece);
+  let extent = extent.range(node, "a token")?;
+  Ok((G::field(to_span(extent), name, value), extent))
+}
+
+/// Open containers from `node` down to the first value that finishes without one, and answer that
+/// one.
+///
+/// Every container on the way is suspended on `frames` with the child it must build first already
+/// chosen, so a frame is never on the stack without a live descent below it — which is what lets
+/// [`ValueFrame::resume`] take a finished value rather than an optional one, and what keeps this
+/// walk free of a state the type system cannot rule out. A frame is **pushed** rather than
+/// returned, for the reason [`open_selection_chain`] gives.
+///
+/// `parent` is the node whose dispatch reached `node`. A green tree carries no parent pointer, and
+/// this is where the one a refusal names comes from — see
+/// [`Node`](crate::lossless::project::Node).
+fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
+  frames: &mut Vec<ValueFrame<'g, 'src, G>>,
+  parent: Node<'g>,
+  node: Node<'g>,
+  source: &'src str,
+) -> Out<(G::Value, TextRange)> {
+  let (mut parent, mut node) = (parent, node);
+  loop {
+    match node.kind() {
+      K::Variable => return G::variable(parent, node, source),
+      K::IntValue => {
+        let (text, span, extent) = leaf(node, source, &[K::Int], "an integer literal")?;
+        return Ok((G::int(span, text), extent));
+      }
+      K::FloatValue => {
+        let (text, span, extent) = leaf(node, source, &[K::Float], "a float literal")?;
+        return Ok((G::float(span, text), extent));
+      }
+      K::StringValue => {
+        let (string, extent) = string_literal(node, source)?;
+        return Ok((G::string(string), extent));
+      }
+      K::BooleanValue => {
+        let (boolean, extent) = boolean_literal(node, source)?;
+        return Ok((G::boolean(boolean), extent));
+      }
+      K::NullValue => {
+        let (text, span, extent) = leaf(node, source, &[K::Name], "a `null` keyword")?;
+        return Ok((G::null(span, text), extent));
+      }
+      K::EnumValue => {
+        let (text, span, extent) = leaf(node, source, &[K::Name], "an enum value")?;
+        return Ok((G::enumeration(span, text), extent));
+      }
+      K::ListValue => {
+        let mut extent = Extent::default();
+        let mut children = node.children();
+        match next_element(&mut children, &mut extent) {
+          Some(first) => {
+            frames.push(ValueFrame {
+              node,
+              extent,
+              children,
+              built: Built::List(Vec::new()),
+            });
+            parent = node;
+            node = first;
+          }
+          None => {
+            let extent = extent.range(node, "a token")?;
+            return Ok((G::list(to_span(extent), Vec::new()), extent));
+          }
+        }
+      }
+      K::ObjectValue => {
+        let mut extent = Extent::default();
+        let mut children = node.children();
+        match next_field(node, &mut children, &mut extent, source)? {
+          Some(open) => {
+            let (field, first) = (open.node, open.pending);
+            frames.push(ValueFrame {
+              node,
+              extent,
+              children,
+              built: Built::Object {
+                fields: Vec::new(),
+                open,
+              },
+            });
+            parent = field;
+            node = first;
+          }
+          None => {
+            let extent = extent.range(node, "a token")?;
+            return Ok((G::object(to_span(extent), Vec::new()), extent));
+          }
+        }
+      }
+      found => return Err(unexpected(node, found, node.text_range())),
+    }
+  }
+}
+
+impl<'g, 'src, G: ValueGrammar<'src>> ValueFrame<'g, 'src, G> {
+  /// Fold the value the level below finished into this frame, and read on to its next child that
+  /// needs one.
+  fn resume(
+    &mut self,
+    value: G::Value,
+    piece: TextRange,
+    source: &'src str,
+  ) -> Out<ResumedValue<'g, G::Value>> {
+    let Self {
+      node,
+      extent,
+      children,
+      built,
+    } = self;
+    match built {
+      Built::List(values) => {
+        extent.cover(piece);
+        values.push(value);
+        match next_element(children, extent) {
+          Some(next) => Ok(ResumedValue::Descend(*node, next)),
+          None => {
+            let range = extent.range(*node, "a token")?;
+            Ok(ResumedValue::Done(
+              G::list(to_span(range), core::mem::take(values)),
+              range,
+            ))
+          }
+        }
+      }
+      Built::Object { fields, open } => {
+        let (field, range) = close_field::<G>(*open, value, piece)?;
+        extent.cover(range);
+        fields.push(field);
+        match next_field(*node, children, extent, source)? {
+          Some(next) => {
+            let (parent, pending) = (next.node, next.pending);
+            *open = next;
+            Ok(ResumedValue::Descend(parent, pending))
+          }
+          None => {
+            let range = extent.range(*node, "a token")?;
+            Ok(ResumedValue::Done(
+              G::object(to_span(range), core::mem::take(fields)),
+              range,
+            ))
+          }
+        }
+      }
+    }
+  }
+}
+
+/// A value, with the list and object nesting inside it read on a worklist rather than a stack.
+fn value_tree<'src, G: ValueGrammar<'src>>(
+  parent: Node<'_>,
+  node: Node<'_>,
+  source: &'src str,
+) -> Out<(G::Value, TextRange)> {
+  let mut frames: Vec<ValueFrame<'_, 'src, G>> = Vec::new();
+  let mut built = open_value_chain::<G>(&mut frames, parent, node, source)?;
+  loop {
+    let Some(frame) = frames.last_mut() else {
+      return Ok(built);
+    };
+    let (value, piece) = built;
+    built = match frame.resume(value, piece, source)? {
+      ResumedValue::Descend(parent, node) => {
+        open_value_chain::<G>(&mut frames, parent, node, source)?
+      }
+      ResumedValue::Done(value, range) => {
+        frames.pop();
+        (value, range)
+      }
+    };
+  }
+}
+
+fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>, TextRange)> {
+  value_tree::<Executable>(node, node, source)
 }
 
 /// A constant value position, where the AST's own type system forbids a variable.
@@ -2404,69 +3160,7 @@ fn const_value<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(ConstInputValue<&'src str>, TextRange)> {
-  Ok(match node.kind() {
-    // The refusal is attributed to the position, not to the variable: a `Variable` node is
-    // perfectly legal, and what is wrong is the const context that is holding one.
-    K::Variable => return Err(unexpected(parent, K::Variable, node.text_range())),
-    K::IntValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Int], "an integer literal")?;
-      (ConstInputValue::Int(IntValue::new(span, text)), extent)
-    }
-    K::FloatValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Float], "a float literal")?;
-      (ConstInputValue::Float(FloatValue::new(span, text)), extent)
-    }
-    K::StringValue => {
-      let (string, extent) = string_literal(node, source)?;
-      (ConstInputValue::String(string), extent)
-    }
-    K::BooleanValue => {
-      let (boolean, extent) = boolean_literal(node, source)?;
-      (ConstInputValue::Boolean(boolean), extent)
-    }
-    K::NullValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Name], "a `null` keyword")?;
-      (ConstInputValue::Null(NullValue::new(span, text)), extent)
-    }
-    K::EnumValue => {
-      let (text, span, extent) = leaf(node, source, &[K::Name], "an enum value")?;
-      (ConstInputValue::Enum(EnumValue::new(span, text)), extent)
-    }
-    K::ListValue => {
-      let mut extent = Extent::default();
-      let mut values = Vec::new();
-      for element in node.children() {
-        match element {
-          NodeOrToken::Token(token) => extent.token(token),
-          NodeOrToken::Node(child) => values.push(extent.keep(const_value(node, child, source)?)),
-        }
-      }
-      let extent = extent.range(node, "a token")?;
-      (
-        ConstInputValue::List(ConstList::new(to_span(extent), values.into())),
-        extent,
-      )
-    }
-    K::ObjectValue => {
-      let mut extent = Extent::default();
-      let mut fields = Vec::new();
-      for element in node.children() {
-        match element {
-          NodeOrToken::Token(token) => extent.token(token),
-          NodeOrToken::Node(child) => match child.kind() {
-            K::ObjectField => fields.push(extent.keep(const_object_field(child, source)?)),
-            _ => return Err(unexpected_node(node, child)),
-          },
-        }
-      }
-      let extent = extent.range(node, "a token")?;
-      (
-        ConstInputValue::Object(ConstObject::new(to_span(extent), fields.into())),
-        extent,
-      )
-    }
-    found => return Err(unexpected(node, found, node.text_range())),
-  })
+  value_tree::<Constant>(parent, node, source)
 }
 
 fn variable_value<'src>(
@@ -2475,62 +3169,6 @@ fn variable_value<'src>(
 ) -> Out<(VariableValue<&'src str>, TextRange)> {
   let (name, extent) = inner_name(node, source)?;
   Ok((VariableValue::new(to_span(extent), name), extent))
-}
-
-fn object_field<'src>(
-  node: Node<'_>,
-  source: &'src str,
-) -> Out<(ObjectField<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut value_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = name(source, names.at(0, node, "a field name")?)?;
-  let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(value(value_node, source)?);
-  let extent = extent.range(node, "a token")?;
-  Ok((ObjectField::new(to_span(extent), name, value), extent))
-}
-
-fn const_object_field<'src>(
-  node: Node<'_>,
-  source: &'src str,
-) -> Out<(ConstObjectField<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut value_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = name(source, names.at(0, node, "a field name")?)?;
-  let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(const_value(node, value_node, source)?);
-  let extent = extent.range(node, "a token")?;
-  Ok((ConstObjectField::new(to_span(extent), name, value), extent))
 }
 
 fn optional_default_value<'src>(
