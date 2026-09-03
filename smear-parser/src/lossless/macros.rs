@@ -5,7 +5,7 @@
 //! Each of these would be a function, a trait or an `impl` if it could be. None of them can:
 //!
 //! - `lossless_production!` declares a **signature**, not a value — six where-predicates carrying
-//!   fourteen trait bounds, spelled over seven of the eight names a dialect owes it. A generic
+//!   fifteen trait bounds, spelled over seven of the eight names a dialect owes it. A generic
 //!   function cannot stand in for a signature its caller writes bodies against.
 //! - `lossless_drivers!` declares a module of `fn(&str) -> Parse` entry points whose closure
 //!   parameter types must be **spelled out**: a closure's parameter is not inferred through a
@@ -70,7 +70,7 @@
 ///
 /// # Why the bundle is one block, and why it is here rather than per dialect
 ///
-/// The bundle is **six where-predicates carrying fourteen trait bounds**, and not one of them is
+/// The bundle is **six where-predicates carrying fifteen trait bounds**, and not one of them is
 /// optional once a production both opens a node and goes through the atom set — which is every
 /// production in either suite. Written out per function it is ~150 lines of boilerplate across
 /// `value.rs` alone, and the failure mode of drifting copies is a compile error a hundred lines
@@ -112,14 +112,20 @@
 /// - **`Ctx::Emitter: CstEmitter<'inp, Lexer, Brand>`** — the structural gate on the whole `node`
 ///   family.
 /// - **`Error<'inp, Src, Ctx>: From<UnexpectedEot> + From<UnexpectedToken> + FromUnclosed +
-///   From<RecursionLimitReached> + FromNestingLimit + MaybeTerminal`** — six bounds. The first
+///   From<RecursionLimitReached> + FromNestingLimit + FromTokenBudget + MaybeTerminal`** — seven
+///   bounds. The first
 ///   three are the ordinary reports: `UnexpectedEot` for every peek, `UnexpectedToken` for every
 ///   declined `expect`, `FromUnclosed` for the unterminated-delimiter reports. The next two are
 ///   the parser-frame descent ([`crate::lossless::depth`]) —
 ///   [`InputRef::descend`](tokora::InputRef::descend) carries `From<RecursionLimitReached>` as its
 ///   own where-clause and it is the carrier a refusal *arrives* on, while `FromNestingLimit` is
-///   how that refusal's **diagnostic** reaches the dialect's container. The last, `MaybeTerminal`,
-///   is what the drains above a root read to tell a resource refusal from a syntax error. All six
+///   how that refusal's **diagnostic** reaches the dialect's container. `FromTokenBudget` is the
+///   same pairing at the other resource and it has only the second half: tokora refuses a
+///   durable [`TokenBudget`](tokora::input::TokenBudget) **silently**, with no carrier at all, so
+///   the diagnostic `drain_unless_stopped` mints through this trait is the only thing a refused
+///   document reports (smear issue #193). The last, `MaybeTerminal`,
+///   is what the drains above a root read to tell a resource refusal from a syntax error. All
+///   seven
 ///   ride the whole bundle rather than only the productions that need them, because the bundle is
 ///   one block and a per-production subset is the drift this macro exists to prevent.
 ///
@@ -203,6 +209,7 @@ macro_rules! lossless_production {
             ::tokora::error::RecursionLimitReached<usize, $crate::$dm::$dl::Brand>,
           >
           + $crate::lossless::depth::FromNestingLimit
+          + $crate::lossless::depth::FromTokenBudget
           + ::tokora::error::MaybeTerminal,
     $body
   )*};
@@ -365,67 +372,49 @@ macro_rules! lossless_drivers {
           //
           // `Lang` is `parse_lossless`'s SECOND parameter and is used only in bounds, so it is
           // turbofished alongside the lexer or inference settles it on `()`.
-          // The same state the shipped doors seed, and the same ceiling read off it. A driver
-          // that left the context defaulted would run at tokora's `PARSE_DEFAULT_DEPTH` instead
-          // of this dialect's, which is a different budget from the one every shipped entry
-          // point uses and therefore a driver that no longer drives what ships.
+          // The same state the shipped doors seed, and the same two ceilings read off it. A
+          // driver that left the context defaulted would run at tokora's `PARSE_DEFAULT_DEPTH`
+          // and an unlimited token budget instead of this dialect's, which is a different budget
+          // from the one every shipped entry point uses and therefore a driver that no longer
+          // drives what ships.
           let state = <$crate::$dm::$dl::LexerState as ::core::default::Default>::default();
-          let (cst, _out) = ::tokora::cst::parse_lossless_with_context::<
-            Lx<'inp>,
-            $crate::$dm::$dl::Brand,
-            _,
-            _,
-            _,
-            _,
-          >(
+          // ONE CALL, exactly as a shipped door does it — smear issue #193, Codex round 4. The
+          // context, the parse and the report are one function body in the substrate, so a driver
+          // has no context to mint, no reporting authority to hold, and no way to hold one twice.
+          //
+          // `Lang` is the SECOND parameter and is used only in bounds, so it is turbofished
+          // alongside the lexer or inference settles it on `()`.
+          //
+          // The root is handed in RAW. `root_turn` is what asks whether the one entry ended the
+          // document — a driver's ONE production is the whole attempt, and nothing below a root
+          // catches, so the baseline it takes immediately before that production is the correctly
+          // scoped one. The verdict travels to the drain in the slot rather than being re-derived
+          // there, which is the shape every shipped root has (smear PR #189). The drain itself,
+          // and the report behind it, are the door's.
+          //
+          // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the parameter
+          // that matches `L::Source`.
+          $crate::$dm::$dl::runner::parse_lossless_document(
               src,
               state,
-              $crate::lossless::depth::lossless_context(
-                ::core::default::Default::default(),
-                ::tokora::cache::DefaultCache::<Lx<'_>>::default(),
-                state.parse_ceiling(),
-              ),
-              $crate::$dm::$dl::runner::profile::<str>(),
-              |inp: &mut TestInput<'inp, '_>| {
-                // Minted before the call, not inside the argument list: `inp` is already borrowed
-                // mutably as the first argument, so a second `inp` method call in the second
-                // would be a second mutable borrow of the same value.
+              |inp: &mut TestInput<'inp, '_>,
+               stop: &mut $crate::lossless::depth::RootStop| {
+                use $crate::lossless::depth::{RootTurn, root_turn};
+
+                // Minted at the top of the ROOT now rather than at the top of the parse closure,
+                // because the parse closure is the door's. Same position either way: the door
+                // calls the root before anything reads the input.
                 $(let $mark = inp.cst_mark();)?
-                // Not a bare `skip_while`: a stop must not read the tail, and the input's trip
-                // witness is what sees a stop whose error value does not say so.
-                //
-                // `root_turn` is what asks — a driver's ONE production is the whole attempt, and
-                // nothing below a root catches, so the baseline it takes immediately before that
-                // production is the correctly scoped one. The verdict then travels to the drain in
-                // the slot rather than being re-derived there, which is the shape every shipped
-                // root now has (smear PR #189).
-                //
-                // A DRIVER IS A ROOT OF ONE ENTRY, and it is written as one: the drain runs it,
-                // mints the slot for it, and spends that slot against what it returns. The verdict
-                // never exists as a value this expansion could pair with anything else — see
-                // `drain_unless_stopped`'s `It runs the root` note.
-                //
-                // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
-                // parameter that matches `L::Source`.
-                $crate::lossless::depth::drain_unless_stopped(
-                  inp,
-                  |inp: &mut TestInput<'inp, '_>,
-                   stop: &mut $crate::lossless::depth::RootStop| {
-                    use $crate::lossless::depth::{RootTurn, root_turn};
-
-                    match root_turn(inp, stop, |inp: &mut TestInput<'inp, '_>| {
-                      super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?)
-                    }) {
-                      RootTurn::Parsed { parsed } => Ok(parsed),
-                      RootTurn::EndsTheDocument { error }
-                      | RootTurn::Recoverable { error } => Err(error),
-                    }
-                  },
-                )
+                match root_turn(inp, stop, |inp: &mut TestInput<'inp, '_>| {
+                  super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?)
+                }) {
+                  RootTurn::Parsed { parsed } => Ok(parsed),
+                  RootTurn::EndsTheDocument { error } | RootTurn::Recoverable { error } => {
+                    Err(error)
+                  }
+                }
               },
-            );
-
-          $crate::$dm::$dl::runner::finish_root(cst)
+            )
         }
       )*
     }
@@ -624,6 +613,37 @@ macro_rules! lossless_error_impls {
       }
     }
 
+    /// The **durable token-budget** refusal, landed in the dialect container — smear issue #193.
+    ///
+    /// Minted by `crate::lossless::depth::drain_unless_stopped` when the input's
+    /// [`TokenBudget`](::tokora::input::TokenBudget) refused an item during this root, and
+    /// reported at an empty span on the parse's committed end: tokora drops the refused item
+    /// where it stands and publishes no span for it, so the committed end is the only position
+    /// that describes anything real.
+    ///
+    /// **A dedicated variant, on the ruling the nesting refusal above already settled**, and here
+    /// the reader is more than the parser: this is the *only* thing a refused document reports.
+    /// tokora refuses silently, so without this conversion a parse that ran out of its ceiling
+    /// comes back as a `Parse` with a truncated tree, a gap-tiled tail and
+    /// [`has_errors`](crate::lossless::runner::Parse::has_errors) answering `false` — which a
+    /// consumer cannot tell from a document that parsed.
+    ///
+    /// The numbers are dropped for the reason the nesting refusal's are: the projection behind
+    /// [`Parse::diagnostics`](crate::lossless::runner::Parse::diagnostics) keeps the span and the
+    /// severity and drops the typed payload, so a consumer sees a positioned error either way.
+    /// The trait passes them so a container that *does* keep payloads is not forced to re-derive
+    /// them.
+    impl<S> $crate::lossless::depth::FromTokenBudget for $errors<S> {
+      #[inline]
+      fn token_budget_exhausted(
+        span: ::tokora::SimpleSpan,
+        _spent: usize,
+        _limit: usize,
+      ) -> Self {
+        $value::token_budget_exhausted(span).into()
+      }
+    }
+
     /// tokora's own descent trip, landed on the **same variant** smear's own refusal lands on —
     /// and it is now the path **every** lossless refusal takes.
     ///
@@ -755,3 +775,287 @@ pub(crate) use directive_location_predicate;
 pub(crate) use lossless_drivers;
 pub(crate) use lossless_error_impls;
 pub(crate) use lossless_production;
+
+/// Declares a dialect's **lossless door** — the one function that runs a lossless document parse,
+/// and the only place a durable token-budget refusal is reported.
+///
+/// # Why this is a macro and not a generic function — smear issue #193, Codex rounds 4 to 6
+///
+/// Three rounds found the same defect wearing three costumes, and each repair moved the choice one
+/// type to the left instead of removing it:
+///
+/// * **round 4, the token.** A `DocumentRoot` a `pub` factory minted — so an in-crate caller could
+///   mint a second one with throwaway arguments and report twice over one input;
+/// * **round 5, the emitter.** `E: Emitter + ValueKeyedEmitter` — a marker about checkpoint
+///   semantics, not about ownership, so a value-keyed collector over shared state could hand one
+///   handle to an outer parse and another to a nested one. Measured at **2** reports for one
+///   refusal;
+/// * **round 6, the error container.** `Errs` stayed caller-chosen, and `FromTokenBudget` for it is
+///   in-crate code: a container backed by a shared bag can clone the same handle out of
+///   `token_budget_exhausted` into both parses' stores.
+///
+/// The class is *an in-crate caller chooses a type through which state can be shared*, and no bound
+/// ends it — `Default`, a sealed trait and a purity comment are all things this crate can satisfy
+/// from inside. What ends it is the principle this macro exists to make true: **the report is made
+/// by code that chose every type it runs over.** The expansion fixes the lexer, the grammar brand,
+/// the error container, the cache and the profile to that dialect's own, reads both budgets off
+/// `limits` itself, and keeps its emission private to the module it lands in. The one thing a
+/// caller still supplies is the parser — and a parser can reach only
+/// [`drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped), which **stops and never
+/// emits**.
+///
+/// # One door per dialect, and coherence is what says so
+///
+/// The expansion carries a marker impl —
+/// `impl crate::lossless::depth::DoorOwner for <that dialect's brand>` — on a concrete type the
+/// dialect owns. A second invocation for the same dialect, anywhere in this crate, is a second impl
+/// of that trait for that type: **E0119**, at compile time, before any test runs. Without it this
+/// macro would be the round-4 forgery again one level up — an in-crate module could invoke it
+/// against the real dialect, get a private report function over the real `InputRef` type in its own
+/// module, and call it from a composed root inside the real parse.
+///
+/// The trait has no methods and nothing reads it. Its only job is to be uninhabitable twice.
+///
+/// # Why the substrate does not hold the door itself
+///
+/// Because it may not name a dialect: `smear/tests/lossless_isolation.rs` forbids both dialect
+/// crate roots and the lexer crate's own path anywhere under `smear-parser/src/lossless` — its
+/// `SUBSTRATE_FORBIDDEN` table is the list — and a door that fixes every type has to spell all
+/// three. Note that the gate matches on the LINE and not on whether it is code, so even this
+/// paragraph has to describe those paths rather than write them. So the substrate holds this
+/// **text**, which names
+/// no dialect, and each dialect's `runner.rs` holds the expansion. That is also what keeps the
+/// report site private: it is generated *into* the module that owns it, so neither the substrate
+/// nor the other dialect can reach it, and nothing had to be widened to `pub(crate)` to make the
+/// move.
+///
+/// # The residual, stated
+///
+/// The two dialect `runner.rs` modules, and only by editing them. Everything a forger would need —
+/// the emission, the context, the profile — is private to the module the invocation lands in, and
+/// the substrate below has no way to emit a budget refusal at all.
+macro_rules! lossless_door {
+  (
+    dialect = $dm:ident::$dl:ident;
+    errors  = $errors:ident;
+  ) => {
+    // ONE DOOR PER DIALECT, BY COHERENCE. See the macro's own note; a second invocation naming
+    // this dialect is `E0119` on this line.
+    impl $crate::lossless::depth::DoorOwner for $crate::$dm::$dl::Brand {}
+
+    // AND THE DOOR READS ITS OWN MARKER. Without this the trait has an impl and no user, which is
+    // `dead_code` on a `-Dwarnings` build; with it the assertion is also the true statement — the
+    // function below is the door this dialect's brand owns.
+    const _: () = {
+      const fn door_is_owned<T: $crate::lossless::depth::DoorOwner>() {}
+      door_is_owned::<$crate::$dm::$dl::Brand>();
+    };
+
+    /// **Builds** the durable token-budget refusal. It does not emit it, and after smear issue
+    /// #193's round 8 nothing in this crate does.
+    ///
+    /// Rounds 4 to 7 each fenced who could obtain the capability to *emit*. Codex round 7 showed
+    /// that fence has no last door: the grammar holds the same `InputRef` and `emit_error` is
+    /// public, so a root can emit this very variant — twice, or with nothing refused. So the door
+    /// stopped emitting. It builds the value here, hands it out of the parse, and
+    /// `crate::lossless::runner::finish_parsed_root_with` decides what the finished log says. The
+    /// grammar's emissions on this channel become inputs to that decision rather than peers of it.
+    fn token_budget_report<'inp>(
+      inp: &mut ::tokora::InputRef<
+        'inp,
+        '_,
+        $crate::$dm::$dl::Lexer<'inp, str>,
+        DoorCtx<'inp>,
+        $crate::$dm::$dl::Brand,
+      >,
+    ) -> ($errors<&'inp str>, ::core::ops::Range<usize>) {
+      // THE COMMITTED END. tokora drops the refused item where it stands and publishes no span
+      // for it, so this is the only position that describes anything real: the last byte the parse
+      // actually committed.
+      let end = ::tokora::InputRef::span(inp).end();
+      let span = ::tokora::SimpleSpan::new(end, end);
+      let spent = inp.token_budget().spent();
+      let limit = inp.token_budget().limitation();
+      (
+        <$errors<&'inp str> as $crate::lossless::depth::FromTokenBudget>::token_budget_exhausted(
+          span, spent, limit,
+        ),
+        end..end,
+      )
+    }
+
+    /// The context this door drives its parse under, spelled once.
+    ///
+    /// `parse_lossless_with_context` re-seats the caller's context around the `Sink` it mints from
+    /// the source, so what an `InputRef` inside the parse is parameterised by is the pair.
+    type DoorCtx<'inp> = (
+      ::tokora::cst::Sink<'inp, $crate::$dm::$dl::Lexer<'inp, str>, LosslessEmitter<'inp>>,
+      ::tokora::cache::DefaultCache<'inp, $crate::$dm::$dl::Lexer<'inp, str>>,
+    );
+
+    /// The **only** way to run a lossless document parse in this dialect, and the only place a
+    /// budget refusal is reported.
+    ///
+    /// Builds the context, runs tokora's lossless driver over `root`, drains what an escape left
+    /// behind, reports a refusal if the input's durable tally has one, and hands back the
+    /// [`LosslessCst`] the door materialises plus the driver's own `Result`.
+    ///
+    /// # Every type is this function's choice, and both budgets are read here
+    ///
+    /// The lexer, the grammar brand, the error container, the emitter, the cache and the profile
+    /// are all named above — a caller supplies the source, the limits and the parser, and none of
+    /// those can carry a diagnostic anywhere. `limits.parse_ceiling()` and
+    /// `limits.max_produce_events()` are read **here** rather than passed in, so no door can forget
+    /// one or vary it; that is what makes "every door installs the same ceiling" a fact about one
+    /// line instead of a check over six.
+    ///
+    /// # Nesting it is not a forgery
+    ///
+    /// A composed root inside `root` can call it, because it is `pub(crate)`. What that does is
+    /// start a **separate parse** — its own `Input`, its own `Sink`, its own emitter, its own tally
+    /// — whose report lands in that parse's own log. `smear-parser`'s
+    /// `a_nested_door_reports_into_its_own_parse_and_not_the_enclosing_one` measures both halves.
+    ///
+    /// # The drain is not optional
+    ///
+    /// [`Sink::finish`](tokora::cst::Sink::finish) refuses any source byte that no committed token
+    /// covers and no lexer-error diagnostic explains, and an `Err` escaping a document root leaves
+    /// the rest of the source uncommitted. Draining here is what turns that into a reportable parse
+    /// rather than a panic in materialisation — smear issue #57. It is
+    /// [`drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) rather than a bare
+    /// `skip_while` because a refusal must not read the tail.
+    ///
+    /// # The verdict never leaves this function — round 8
+    ///
+    /// The refusal is built, not emitted, and this function's own last statement is what decides
+    /// whether the finished parse says so — it finishes its own `Cst` and returns a [`Parse`].
+    /// Neither the `Cst`, the driver's `Result` nor the verdict is handed out, because each of the
+    /// three is a way for an in-crate caller to say something about a parse it did not run: finish
+    /// the tree without the verdict, or finish it with a forged one. Rounds 4 to 7
+    /// each fenced who could obtain the capability to report and each fence had a next door;
+    /// Codex round 7's case has none, because the grammar holds this door's own `InputRef` and
+    /// `emit_error` is public — a root can emit this variant twice, or once with nothing refused.
+    /// A decision taken over the finished log ends that: the grammar's emissions are **inputs** to
+    /// it rather than peers of it.
+    ///
+    /// # The driver's `Result` is dropped here
+    ///
+    /// A lossless door keeps the tree and the diagnostics and throws the parser's `Result` away —
+    /// which is the whole reason a refusal has to be *reported* rather than only returned. It used
+    /// to be dropped at each door's `finish_root` line; the fold moved that inside, so it is
+    /// dropped once. A cell that needs the stop VALUE runs the inner frame, which is where that
+    /// value is decided — `the_value_a_frame_hands_up_after_a_drain_refusal_is_terminal` is the
+    /// one that does.
+    pub(crate) fn parse_lossless_document<'inp, Root>(
+      src: &'inp str,
+      limits: $crate::$dm::$dl::LexerState,
+      root: Root,
+    ) -> Parse
+    where
+      Root: for<'closure> ::core::ops::FnOnce(
+          &mut ::tokora::InputRef<
+            'inp,
+            'closure,
+            $crate::$dm::$dl::Lexer<'inp, str>,
+            DoorCtx<'inp>,
+            $crate::$dm::$dl::Brand,
+          >,
+          &mut $crate::lossless::depth::RootStop,
+        ) -> ::core::result::Result<(), $errors<&'inp str>>,
+    {
+      // THE CONTEXT IS BUILT HERE, from tokora's own API and nothing of this crate's. There is no
+      // smear mint left to call: round 5 deleted `lossless_context` rather than widen it, and
+      // three chained tokora calls are what replaced it.
+      let context = ::tokora::input::InputContext::new(
+        <LosslessEmitter<'inp> as ::core::default::Default>::default(),
+        ::tokora::cache::DefaultCache::<$crate::$dm::$dl::Lexer<'inp, str>>::default(),
+      )
+      .with_recursion_limiter(
+        ::tokora::state::recursion_tracker::RecursionLimiter::with_limitation(
+          limits.parse_ceiling(),
+        ),
+      )
+      .with_token_budget(::tokora::input::TokenBudget::with_limitation(
+        limits.max_produce_events(),
+      ));
+
+      // `Option` + `take`: `ParseInput` is implemented for `FnMut` and a closure that moves a
+      // non-`Copy` capture out is only `FnOnce`. The root runs once per parse.
+      let mut root = ::core::option::Option::Some(root);
+      // THE DOOR'S VERDICT, carried out of the parse rather than written into it. See
+      // `token_budget_report`.
+      let mut door_report = ::core::option::Option::None;
+      let (cst, out) = ::tokora::cst::parse_lossless_with_context::<
+        $crate::$dm::$dl::Lexer<'inp, str>,
+        $crate::$dm::$dl::Brand,
+        _,
+        _,
+        _,
+        _,
+      >(
+        src,
+        limits,
+        context,
+        profile::<str>(),
+        |inp: &mut ::tokora::InputRef<
+          'inp,
+          '_,
+          $crate::$dm::$dl::Lexer<'inp, str>,
+          DoorCtx<'inp>,
+          $crate::$dm::$dl::Brand,
+        >| {
+          let out = $crate::lossless::depth::drain_unless_stopped(
+            inp,
+            root.take().expect("the root runs once per parse"),
+          );
+          // THE ONE VERDICT. Unconditional on what `out` is: a refusal is a refusal whether the
+          // frame below ended on it, on a descent trip, on a syntax error or on nothing at all,
+          // and the document is truncated in every one of those cases. Nothing is emitted — the
+          // value goes into `door_report`, and this function's own last statement is what decides.
+          if inp.token_budget().refused_an_item() {
+            door_report = ::core::option::Option::Some(token_budget_report(inp));
+          }
+          out
+        },
+      );
+      // `out` — the driver's `Result` — is dropped HERE, which is where every lossless door has
+      // always dropped it, and the `Cst` never leaves this function. That is round 8's fold: a
+      // door that handed back a `Cst` and a verdict handed an in-crate caller two ways to lie
+      // about a parse it did not run — finish it without the verdict, or finish it with a forged
+      // one. What leaves is a finished `Parse`, which is a value and not a capability.
+      let _ = out;
+
+      $crate::lossless::runner::finish_parsed_root_with(
+        cst,
+        K::Root.raw(),
+        <K as $crate::lossless::KindSpace>::NAME,
+        // THE DIALECT'S OWN VARIANT, recognised here because the substrate may not name it — and
+        // asked at the MEMBER, which is round 8's own precision defect closed. The container is
+        // the GRAMMAR's unit of emission and the variant is the DOOR's, so one `emit_error`
+        // carrying `[TokenBudgetExhausted, FloatOverflow]` keeps its `FloatOverflow`: what this
+        // answers is *is there anything here that is not mine*, and only a payload that is nothing
+        // but the door's variant is dropped. Asking `any(is the variant)` instead threw away the
+        // ordinary error with it and turned `has_errors()` false on a document that had one.
+        // `is_empty() ||` is round 9's finding and it is not a guard against nothing: both dialect
+        // containers implement `Default`, tokora records whatever payload it is handed, and
+        // `any` over an empty `Vec` is `false` — so a root emitting `Errors::default()` produced a
+        // record this classifier called "nothing but mine" and dropped. With no refusal to replace
+        // it the finished parse had no diagnostics at all and `has_errors()` was false. An empty
+        // container holds NO member of the door's, so there is nothing here for the door to take
+        // away, and the record stays exactly as it arrived.
+        |errs: &$errors<&'inp str>| {
+          errs.is_empty()
+            || errs
+              .iter()
+              .any(|e| !::core::matches!(e.data(), ErrorData::TokenBudgetExhausted))
+        },
+        // THE VERDICT, as a span. The substrate decides what it looks like in a `Parse`.
+        door_report.map(|(_, span)| span),
+      )
+    }
+  };
+}
+
+// AFTER the definition, because `macro_rules!` is textually scoped and a `use` above it does not
+// resolve. The five re-exports higher up sit below their own definitions for the same reason.
+pub(crate) use lossless_door;

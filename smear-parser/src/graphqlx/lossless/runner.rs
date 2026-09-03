@@ -4,14 +4,20 @@
 use smear_lexer::limits::LosslessLimits;
 use tokora::{
   Source,
-  cst::{Cst, CstProfile, KindValidator, parse_lossless_with_context},
+  cst::{Cst, CstProfile, KindValidator},
 };
-// `Sink` is named only by `LosslessSink`, which the drivers alone use.
-#[cfg(feature = "test-support")]
+// `Sink` is named by `LosslessSink`, which the drivers alone use, and by the `DoorCtx` the door
+// macro expands below — so it is no longer gated. Round 5 moved the parse out of these doors and
+// round 7 moved it back in as an expansion; the context it spells is the macro's, not this file's.
 use tokora::cst::Sink;
 
-use super::{GraphqlxLosslessLexer, GraphqlxLosslessSlice, GraphqlxLosslessToken};
-use crate::{graphqlx::kinds::SyntaxKind as K, lossless::KindSpace};
+use super::{
+  GraphqlxLosslessErrors, GraphqlxLosslessLexer, GraphqlxLosslessSlice, GraphqlxLosslessToken,
+};
+use crate::{
+  graphqlx::{error::ErrorData, kinds::SyntaxKind as K},
+  lossless::KindSpace,
+};
 
 /// The profile every GraphQLx lossless parse uses.
 ///
@@ -69,6 +75,16 @@ pub(crate) type LosslessSink<'inp> =
 pub(crate) type LosslessCst<'inp> =
   Cst<'inp, GraphqlxLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
 
+// THE DIALECT'S DOOR, generated here rather than written here — smear issue #193, round 7. The
+// macro text is dialect-generic and lives in the substrate; the expansion fixes every type to this
+// dialect's own and keeps its `report_token_budget` private to this module, which is what makes
+// the report unreachable from anywhere a second parse could call it. Invoking it twice for this
+// dialect is `E0119` on the `DoorOwner` impl it carries.
+crate::lossless::lossless_door! {
+  dialect = graphqlx::lossless;
+  errors  = GraphqlxLosslessErrors;
+}
+
 /// Materialize `cst` at the root kind and collect its diagnostics.
 ///
 /// Shared by the three document-root entry points — [`parse_document`],
@@ -107,7 +123,7 @@ pub type Parse = crate::lossless::runner::Parse<crate::graphqlx::kinds::GraphQLx
 
 /// Parse a `&str` as a GraphQLx document, losslessly.
 ///
-/// The production is `document.rs`'s `document_entry` — the mixed
+/// The production is `document.rs`'s `document` under the door's drain — the mixed
 /// root, which admits imports, executable definitions, type-system definitions and extensions in
 /// any order, followed by a drain. The **entry** and not `document` itself: this function discards
 /// its parser's result, so an `Err` escaping the document production would leave the rest of the
@@ -161,26 +177,12 @@ pub fn parse_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
   // `Src` needs its own turbofish for a second reason: `str` and `&str` both project
   // `Slice<'inp> = &'inp str`, so the lexer type alone leaves the production's source parameter
   // genuinely ambiguous. `str` is the one that matches `parse_document`'s `L::Source = str`.
-  let (cst, _out) = parse_lossless_with_context::<
-    GraphqlxLosslessLexer<'_, str>,
-    crate::graphqlx::GraphQLx,
-    _,
-    _,
-    _,
-    _,
-  >(
-    src,
-    limits,
-    crate::lossless::depth::lossless_context(
-      LosslessEmitter::default(),
-      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
-      limits.parse_ceiling(),
-    ),
-    profile::<str>(),
-    super::document::document_entry::<str, _>,
-  );
-
-  finish_root(cst)
+  // ONE CALL, AND IT IS THE WHOLE PARSE. `parse_lossless_document` is generated into this module
+  // by `lossless_door!`: it builds the context, installs both budgets off `limits` itself, runs the
+  // driver over this root, drains what an escape left behind and reports a budget refusal if there
+  // was one. Every type it runs over is its own choice — smear issue #193, Codex rounds 4 to 6 —
+  // and the production is the one thing this door still names.
+  parse_lossless_document(src, limits, super::document::document::<str, _>)
 }
 
 /// Parse a `&str` as a GraphQLx **type-system** (SDL-only) document, losslessly.
@@ -214,26 +216,12 @@ pub fn parse_type_system_document(src: &str) -> Parse {
 pub fn parse_type_system_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
   // The turbofishes and the `_entry` suffix are `parse_document`'s, for `parse_document`'s
   // reasons; see the comment there rather than a second copy of it here.
-  let (cst, _out) = parse_lossless_with_context::<
-    GraphqlxLosslessLexer<'_, str>,
-    crate::graphqlx::GraphQLx,
-    _,
-    _,
-    _,
-    _,
-  >(
-    src,
-    limits,
-    crate::lossless::depth::lossless_context(
-      LosslessEmitter::default(),
-      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
-      limits.parse_ceiling(),
-    ),
-    profile::<str>(),
-    super::document::type_system_document_entry::<str, _>,
-  );
-
-  finish_root(cst)
+  // ONE CALL, AND IT IS THE WHOLE PARSE. `parse_lossless_document` is generated into this module
+  // by `lossless_door!`: it builds the context, installs both budgets off `limits` itself, runs the
+  // driver over this root, drains what an escape left behind and reports a budget refusal if there
+  // was one. Every type it runs over is its own choice — smear issue #193, Codex rounds 4 to 6 —
+  // and the production is the one thing this door still names.
+  parse_lossless_document(src, limits, super::document::type_system_document::<str, _>)
 }
 
 /// Parse a `&str` as a GraphQLx **executable** document, losslessly.
@@ -258,26 +246,16 @@ pub fn parse_executable_document(src: &str) -> Parse {
 ///
 /// See [`parse_document_with_limits`] for when to reach for one.
 pub fn parse_executable_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
-  let (cst, _out) = parse_lossless_with_context::<
-    GraphqlxLosslessLexer<'_, str>,
-    crate::graphqlx::GraphQLx,
-    _,
-    _,
-    _,
-    _,
-  >(
+  // ONE CALL, AND IT IS THE WHOLE PARSE. `parse_lossless_document` is generated into this module
+  // by `lossless_door!`: it builds the context, installs both budgets off `limits` itself, runs the
+  // driver over this root, drains what an escape left behind and reports a budget refusal if there
+  // was one. Every type it runs over is its own choice — smear issue #193, Codex rounds 4 to 6 —
+  // and the production is the one thing this door still names.
+  parse_lossless_document(
     src,
     limits,
-    crate::lossless::depth::lossless_context(
-      LosslessEmitter::default(),
-      tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
-      limits.parse_ceiling(),
-    ),
-    profile::<str>(),
-    super::executable::executable_document_entry::<str, _>,
-  );
-
-  finish_root(cst)
+    super::executable::executable_document::<str, _>,
+  )
 }
 
 /// Test-only scaffolding for probing the sink's own kind-validator door.

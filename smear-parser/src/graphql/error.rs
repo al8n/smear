@@ -838,6 +838,27 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// rides and no published witness sees that.
   #[from(skip)]
   NestingLimitExceeded,
+  /// The input's **durable** token budget refused an item, so the parse stopped reading — smear
+  /// issue #193.
+  ///
+  /// [`NestingLimitExceeded`](Self::NestingLimitExceeded)'s twin at the other resource, and a
+  /// variant for a stronger reason than that one's. There the argument was that the *parser*
+  /// reads the discriminator back; here nothing else exists at all. tokora refuses the item at
+  /// its lexing chokepoint and states plainly that the refusal *cannot report itself* — there is
+  /// no diagnostic channel for it, so the item is dropped silently, the poison boundary is
+  /// latched, and a root loop's next peek answers `None`. Measured with the report planted away,
+  /// on a document chosen so that nothing else can speak — 400 definitions of `type Tn { f: Int }` — a document every root here takes in silence — under a durable ceiling of 100 — the
+  /// parse came back with **0** diagnostics and a tree covering the whole source, which is
+  /// exactly what a document that parsed looks like. (The measurement needs that document:
+  /// `[ type ] ` x2000, which the rest of this repair is measured on, reports its own grammar
+  /// errors and would have hidden the silence behind them.)
+  ///
+  /// So this is the whole report, and its [`MaybeTerminal`] arm is what keeps the drain above the
+  /// root off the tail. `crate::lossless::depth::drain_unless_stopped` mints it, once per
+  /// refusal, off the input's own
+  /// [`refused_an_item`](tokora::input::TokenBudgetTally::refused_an_item) bit.
+  #[from(skip)]
+  TokenBudgetExhausted,
   /// Some other error.
   Other(std::borrow::Cow<'static, str>),
 }
@@ -857,6 +878,12 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 ///   the value decides rather than the variant. That is step 1 of the trait's rule.
 /// * **`true`, always** — [`NestingLimitExceeded`](Self::NestingLimitExceeded). A frame budget is
 ///   never cleared by more input.
+/// * **`true`, always** — [`TokenBudgetExhausted`](Self::TokenBudgetExhausted). Neither is a
+///   durable token budget, and for a reason one scale stronger: the tally lives outside every
+///   rollback, no public mutator lowers it, and `is_exhausted` is re-derived from it on every
+///   entry. A `false` here would not merely resynchronise past a refusal — it would run the drain
+///   over a tail the input has already refused to lex, on the one carrier that reports nothing
+///   else.
 /// * **`true` when it holds a state refusal** — [`Lexer`](Self::Lexer). This is the arm the trait's
 ///   rule warns catches people, and smear is exactly the shape it warns about: the lossless keying
 ///   pins `StateError = LimitExceeded`, so `LexerErrorData::State` **is** a tripped
@@ -887,6 +914,7 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
         .iter()
         .any(|e| matches!(e.data(), LexerErrorData::State(_))),
       Self::NestingLimitExceeded => true,
+      Self::TokenBudgetExhausted => true,
       Self::UnexpectedEndOfVariableValue(e) => e.is_terminal(),
       Self::UnexpectedEndOfObjectFieldValue(e) => e.is_terminal(),
       Self::UnexpectedEndOfObjectExtension(e) => e.is_terminal(),
@@ -1163,6 +1191,21 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn nesting_limit_exceeded(span: Span) -> Self {
     Self::new(span, ErrorData::NestingLimitExceeded)
+  }
+
+  /// Creates a durable token-budget refusal.
+  ///
+  /// `span` is empty and sits at the parse's committed end: tokora drops the refused item where
+  /// it stands and publishes no span for it, so there is no lexeme to point at.
+  ///
+  /// The producer [`ErrorData::TokenBudgetExhausted`] is reached through — by
+  /// `lossless_error_impls!`'s
+  /// [`FromTokenBudget`](crate::lossless::depth::FromTokenBudget) impl, and by the variant
+  /// census, which may not name a variant directly. It is generic over every parameter of this
+  /// family, unlike that impl, which is pinned to the *lossless* keying.
+  #[inline]
+  pub const fn token_budget_exhausted(span: Span) -> Self {
+    Self::new(span, ErrorData::TokenBudgetExhausted)
   }
 
   /// Creates an integer-out-of-range error from a payload that has already justified its width.

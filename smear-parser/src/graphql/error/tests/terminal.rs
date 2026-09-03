@@ -56,6 +56,20 @@ fn the_terminal_arms_answer_for_every_variant() {
     "the constructor `descend` reaches the variant through must agree with the arm"
   );
 
+  assert!(
+    Data::TokenBudgetExhausted.is_terminal(),
+    "a durable token budget that has refused is never cleared by more input: the tally is \
+     monotone, outside every rollback, and has no public mutator"
+  );
+  assert!(
+    GraphqlError::<&str>::token_budget_exhausted(span)
+      .into_data()
+      .is_terminal(),
+    "the constructor `drain_unless_stopped` reaches the variant through must agree with the arm — \
+     and this arm carries more weight than the descent one, because tokora refuses the item \
+     silently and this value is the only report a refused document has"
+  );
+
   let tripped: LexerErrors<char, StateErr> = LexerErrors::bad_state(span, StateErr);
   assert!(
     Data::Lexer(tripped).is_terminal(),

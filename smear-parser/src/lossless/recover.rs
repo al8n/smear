@@ -562,9 +562,24 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// ```
 ///
 /// The module header carries the measurement — 99 963 produce-events under a ceiling of 12 000 —
-/// and `max_tokens`'s own docs carry it at the door a caller reads. Installing the durable cell
-/// there instead, tokora's `TokenBudget` through an `InputContext`, is smear issue #193; it is
-/// held behind PR #189's restructuring of that door plumbing rather than declined.
+/// and `max_tokens`'s own docs carry it at the door a caller reads.
+///
+/// **The durable cell is installed now, and it is a second knob rather than a re-pointing of that
+/// one** — smear issue #193. `LosslessLimits::max_produce_events` is tokora's `TokenBudget`,
+/// which every lossless door installs through `lossless::depth::lossless_context`, and it is
+/// checked in front of the lexer in a cell no rollback reaches. It does not replace this guard and
+/// does not weaken it: its default is `usize::MAX`, so **every parse that does not name it is
+/// bounded by this comparison and by nothing else**, which is what keeps this the shipped default
+/// path's only work bound.
+///
+/// Where a caller does name it, the two compose in the safe direction. The durable ceiling is
+/// absolute and this one is relative to what survived, so whichever is tighter on a given document
+/// is the one that stops it; neither can raise the other.
+///
+/// The two are also not two spellings of one quantity, which is why `max_tokens` was left where it
+/// is: measured on `[ type ] ` x2000, `with_max_tokens(12_000)` parses to the end at 99 963
+/// produce-events while `with_max_produce_events(12_000)` refuses after **four** committed
+/// lexemes, because the first recovery scan alone spends the budget.
 ///
 /// # Why this takes numbers instead of the handle
 ///

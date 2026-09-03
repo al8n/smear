@@ -662,6 +662,7 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
       "UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>)",
       "EndOfInput",
       "NestingLimitExceeded",
+      "TokenBudgetExhausted",
       "Other(std::borrow::Cow<'static, str>)",
     ],
     reason: "TWO changes, and they were reviewed separately. (1) `IntOverflow(S)` became \
@@ -676,8 +677,14 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
        It replaces `Other(\"nesting limit exceeded\")` because the PARSER now reads the \
        discriminator back (the dialect's `MaybeTerminal` arm, read at five document-root catch \
        sites), and a string comparison there is one rewording away from a permanent `false` with \
-       nothing failing. The other 21 lines above are the merge base's, unedited, and repeating \
-       them is the point — this entry approves two named changes, not the enum.",
+       nothing failing. (3) `TokenBudgetExhausted` is NEW, added by smear \
+       issue #193. Not source-breaking either, and a unit variant for the same reason: it \
+       carries no payload a match arm could bind. It exists because tokora refuses a durable \
+       `TokenBudget` **silently** — the refusal has no diagnostic channel — so this variant is \
+       the whole of what a refused document reports, and its `MaybeTerminal` arm is what keeps \
+       the drain above a root off a tail the input has already refused to lex. The other 21 \
+       lines above are the merge base's, unedited, and repeating \
+       them is the point — this entry approves three named changes, not the enum.",
   },
   Recorded {
     file: "src/graphql/error.rs",
@@ -878,6 +885,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // to a different width: 18 -> 16 and 156 -> 139 is that file leaving, and nothing else.
   // `fix/nesting-refusal-amplification` then added `ErrorData::NestingLimitExceeded`: 139 -> 140
   // is that one variant, the enum count unmoved, and the recorded row below carries why.
+  // `fix/durable-token-budget` then added `ErrorData::TokenBudgetExhausted`: 140 -> 141, the same
+  // shape one resource along, and the same recorded row carries it (smear issue #193).
   assert_eq!(
     found.len(),
     16,
@@ -888,8 +897,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   );
   let variants_read: usize = found.iter().map(|enum_| enum_.variants.len()).sum();
   assert_eq!(
-    variants_read, 140,
-    "the scan read {variants_read} variant(s) out of 16 enums, expected 140 — an enum gained or \
+    variants_read, 141,
+    "the scan read {variants_read} variant(s) out of 16 enums, expected 141 — an enum gained or \
      lost one, or `read_variants` stopped seeing them",
   );
 
