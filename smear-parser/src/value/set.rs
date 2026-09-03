@@ -17,7 +17,10 @@ pub struct Set<Value, Span = SimpleSpan, Container = Vec<Value>> {
 impl<Value, Span, Container> Set<Value, Span, Container> {
   /// Creates a set value from its span and values.
   #[inline]
-  pub const fn new(span: Span, values: Container) -> Self {
+  pub const fn new(span: Span, values: Container) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       values,

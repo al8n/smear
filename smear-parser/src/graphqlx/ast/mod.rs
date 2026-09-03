@@ -51,17 +51,23 @@ pub type DefaultVec<T> = Vec<T>;
 /// `match` as well. [`Nested`] is a `Vec` in every respect a consumer can observe and [`Nest`]
 /// answers as the pointer it wraps does; what each adds is the iterative release that keeps a
 /// value, a selection or a type nested through these carriers from aborting the process on the way
-/// out, however deep it is. That ranges over every recursive position the grammar forms, and not
-/// over a node a caller stored in `S` or in `Span` — see [`Nested`]'s own documentation, which
-/// states the difference. [`Nestable`], [`NestPtr`] and [`SoleNestPtr`] are all sealed, which fixes
-/// who may implement them and says nothing about what a payload may be.
+/// out, however deep it is. That ranges over every recursive position the grammar forms, and over
+/// a node a caller stored in `S` or in `Span` as well, because both are [`Leaf`] — see
+/// [`Nested`]'s own documentation, which states the scope. [`Nestable`], [`NestPtr`] and
+/// [`SoleNestPtr`] are all sealed, which fixes who may implement them and says nothing about what
+/// a payload may be; [`Leaf`] is the trait that does, for `S`, and it is deliberately **not**
+/// sealed. `Span` carries the same bound here, and this pair is why it needs one: it is the only
+/// one that leaves `Span` a parameter rather than pinning it to [`SimpleSpan`], so it is the only
+/// dialect in which a span can own a value tree.
 ///
-/// All eight are exported, and the list is not decorative: a consumer who builds this crate with
+/// All nine are exported, and the list is not decorative: a consumer who builds this crate with
 /// `graphqlx` and without `graphql` has this module as their only door onto them. The last three
 /// are in [`Nestable`]'s own signature — it hands its children to a [`Worklist`], its `Node` is
 /// bounded by [`NestNode`], and a node whose grammar has no object or map carrier fills those two
 /// lanes with [`Absent`].
-pub use crate::value::{Absent, Nest, NestNode, NestPtr, Nestable, Nested, SoleNestPtr, Worklist};
+pub use crate::value::{
+  Absent, Leaf, Nest, NestNode, NestPtr, Nestable, Nested, SoleNestPtr, Worklist,
+};
 
 /// A GraphQLx name.
 #[allow(type_alias_bounds)]
@@ -167,10 +173,12 @@ pub type DefaultInputValue<S, Span = SimpleSpan> =
 /// This dialect has **four** nesting variants rather than GraphQL's two, and a map entry nests
 /// through both halves, so it is the one where the defect had the most ways in.
 ///
-/// The repair covers every recursive position the *grammar* forms. It does not cover a node a
-/// caller stored in `S` or in `Span` — this pair is the only one that leaves `Span` a parameter,
-/// so it is also the one with the widest exposure. See [`Nested`]'s own documentation and
-/// `al8n/smear#176`.
+/// The repair covers every recursive position the *grammar* forms, and it covers a node a caller
+/// stored in a payload as well: both `S` and `Span` are [`Leaf`] (`al8n/smear#176`). `Span`
+/// mattered most here — this is the only pair that leaves it a parameter rather than pinning it to
+/// [`SimpleSpan`], every carrier holds one by value and every one of their constructors is public
+/// — so the bound sits on all eight of those constructors and on the four that seat a `Name`. See
+/// [`Nested`]'s own documentation.
 #[derive(
   Debug,
   Clone,
@@ -252,14 +260,18 @@ impl<S, Span> NestNode for InputValue<S, Span> {
 }
 
 impl<S, Span> Nestable for InputValue<S, Span> {
+  /// The value tree: rank 1. It holds no type node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Self;
 
   #[inline]
   fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // These arms hold no value of this enum, so they are released here. They do hold `S` and
-      // `Span`, and at a caller's arguments either can own a node this loop cannot reach
-      // (al8n/smear#176).
+      // `Span`, and both are `Leaf`: each has declared that its release reaches no node, which is
+      // the property this arm needs of everything it drops (al8n/smear#176). `Span` matters here
+      // and nowhere else — this is the only pair that leaves it a parameter.
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -352,14 +364,18 @@ impl<S, Span> NestNode for ConstInputValue<S, Span> {
 }
 
 impl<S, Span> Nestable for ConstInputValue<S, Span> {
+  /// The value tree: rank 1. It holds no type node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Self;
 
   #[inline]
   fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // These arms hold no value of this enum, so they are released here. They do hold `S` and
-      // `Span`, and at a caller's arguments either can own a node this loop cannot reach
-      // (al8n/smear#176).
+      // `Span`, and both are `Leaf`: each has declared that its release reaches no node, which is
+      // the property this arm needs of everything it drops (al8n/smear#176). `Span` matters here
+      // and nowhere else — this is the only pair that leaves it a parameter.
       Self::Boolean(_)
       | Self::String(_)
       | Self::Float(_)
@@ -450,6 +466,9 @@ impl<S, Span> NestNode for Type<S, Span> {
 }
 
 impl<S, Span> Nestable for Type<S, Span> {
+  /// The type tree: rank 1. It holds no value node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Self;
 
   #[inline]
@@ -492,6 +511,9 @@ impl<S, Span> Sealed for crate::ty::ListType<Type<S, Span>, Span> {}
 
 /// The pointee side of the walk: a list carrier is `(span, element, required)`.
 impl<S, Span> Nestable for crate::ty::ListType<Type<S, Span>, Span> {
+  /// The type tree: rank 1. It holds no value node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Type<S, Span>;
 
   #[inline]
@@ -504,6 +526,9 @@ impl<S, Span> Sealed for crate::ty::SetType<Type<S, Span>, Span> {}
 
 /// The pointee side of the walk: a set carrier is `(span, element, required)`.
 impl<S, Span> Nestable for crate::ty::SetType<Type<S, Span>, Span> {
+  /// The type tree: rank 1. It holds no value node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Type<S, Span>;
 
   #[inline]
@@ -517,6 +542,9 @@ impl<S, Span> Sealed for crate::ty::MapType<Type<S, Span>, Type<S, Span>, Span> 
 /// The pointee side of the walk: a map carrier is `(span, key, value, required)`, and both the key
 /// and the value are types.
 impl<S, Span> Nestable for crate::ty::MapType<Type<S, Span>, Type<S, Span>, Span> {
+  /// The type tree: rank 1. It holds no value node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Type<S, Span>;
 
   #[inline]

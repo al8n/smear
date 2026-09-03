@@ -9,6 +9,24 @@
 //! node they contain. The carriers expose constructors plus span and source
 //! accessors; parsers and external AST builders can construct them without
 //! allocating beyond their selected collection container.
+//!
+//! # `S` is a leaf, and the type says so
+//!
+//! The source representation is open — a borrowed slice, an owned buffer, an interned handle —
+//! and it is *not* unconstrained. Every door that carries an outside `S` into a value-tree
+//! position takes a `Leaf` bound: the four on `Name`, which is the only carrier in a tree position
+//! whose `S` a caller can supply. Implementing `Leaf` asserts that dropping the type runs no
+//! destructor able to reach a node of any tree this crate releases iteratively — value, type or
+//! selection — which is the property those releases need of a leaf
+//! and had no way to require.
+//!
+//! Without it, a caller could instantiate `S` with a type owning an input value and release a
+//! chain that descends one native frame per level, past `Nested` and into an abort
+//! (`al8n/smear#176`). The same bound sits on `Span` — every carrier here owns one by value, and
+//! GraphQLx leaves it a parameter — and on the materialised `I`, so all three payload parameters
+//! are leaves by obligation. `nesting.rs`'s `Leaf` carries the contract, the placement
+//! measurement and the residual; its module header derives the parameter list the bound ranges
+//! over.
 
 // Some scalar constructors remain crate-private to preserve their existing
 // parser-minted invariant. The copied collection carriers intentionally keep
@@ -31,7 +49,7 @@ pub use string::*;
 pub use variable::*;
 
 pub(crate) use nesting::Sealed;
-pub use nesting::{Absent, Nest, NestNode, NestPtr, Nestable, Nested, SoleNestPtr, Worklist};
+pub use nesting::{Absent, Leaf, Nest, NestNode, NestPtr, Nestable, Nested, SoleNestPtr, Worklist};
 
 mod boolean_value;
 mod default_input_value;

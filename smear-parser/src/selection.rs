@@ -26,7 +26,10 @@ pub struct Alias<Name, Span = SimpleSpan> {
 impl<Name, Span> Alias<Name, Span> {
   /// Creates a field alias.
   #[inline]
-  pub const fn new(span: Span, name: Name) -> Self {
+  pub const fn new(span: Span, name: Name) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self { span, name }
   }
 
@@ -92,7 +95,10 @@ pub struct TypeCondition<Name, Span = SimpleSpan> {
 impl<Name, Span> TypeCondition<Name, Span> {
   /// Creates a fragment type condition.
   #[inline]
-  pub const fn new(span: Span, name: Name) -> Self {
+  pub const fn new(span: Span, name: Name) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self { span, name }
   }
 
@@ -143,7 +149,10 @@ pub struct FragmentSpread<FragmentName, Directives, Span = SimpleSpan> {
 impl<FragmentName, Directives, Span> FragmentSpread<FragmentName, Directives, Span> {
   /// Creates a named fragment spread.
   #[inline]
-  pub const fn new(span: Span, name: FragmentName, directives: Option<Directives>) -> Self {
+  pub const fn new(span: Span, name: FragmentName, directives: Option<Directives>) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       name,
@@ -218,7 +227,10 @@ impl<TypeCondition, Directives, SelectionSet, Span>
     type_condition: Option<TypeCondition>,
     directives: Option<Directives>,
     selection_set: SelectionSet,
-  ) -> Self {
+  ) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       type_condition,
@@ -302,7 +314,10 @@ pub struct SelectionSet<Selection, Span = SimpleSpan, Container = Vec<Selection>
 impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
   /// Creates a selection set from its complete delimiter span and selections.
   #[inline]
-  pub const fn new(span: Span, selections: Container) -> Self {
+  pub const fn new(span: Span, selections: Container) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       selections,
@@ -378,7 +393,10 @@ impl<Alias, Name, Arguments, Directives, SelectionSet, Span>
     arguments: Option<Arguments>,
     directives: Option<Directives>,
     selection_set: Option<SelectionSet>,
-  ) -> Self {
+  ) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       alias,
@@ -480,6 +498,11 @@ mod tests {
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   struct CustomSpan(u8);
+
+  /// A span of the test's own, taking the obligation in the one line a consumer would write. Every
+  /// selection carrier owns its span by value and releases it where it finds it, so the span
+  /// answers the same question the value and type carriers' does (`al8n/smear#176`).
+  impl crate::value::Leaf for CustomSpan {}
 
   struct ArrayBacked<T, const N: usize>([T; N]);
 

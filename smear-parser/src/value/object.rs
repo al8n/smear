@@ -18,7 +18,11 @@ pub struct ObjectField<Name, Value, Span = SimpleSpan> {
 impl<Name, Value, Span> ObjectField<Name, Value, Span> {
   /// Creates an object field from its span, name, and value.
   #[inline]
-  pub const fn new(span: Span, name: Name, value: Value) -> Self {
+  pub const fn new(span: Span, name: Name, value: Value) -> Self
+  where
+    Name: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self { span, name, value }
   }
 
@@ -64,15 +68,18 @@ impl<Name, Value: crate::value::Nestable, Span> crate::value::Sealed
 impl<Name, Value: crate::value::Nestable, Span> crate::value::Nestable
   for ObjectField<Name, Value, Span>
 {
+  /// A field is a carrier, not a node: it takes the rank of the value it wraps.
+  const RANK: u8 = Value::RANK;
+
   type Node = Value::Node;
 
   #[inline]
   fn into_children(self, worklist: &mut crate::value::Worklist<Self::Node>) {
     // `Value` is the only `Nestable` slot, so it is the only one the walk can take, and a field
-    // forwards to it rather than costing the worklist an entry of its own. `Name` and `Span` carry
-    // no bound and are released here: at the crate's own arguments a name node and a span, at a
-    // caller's whatever the caller chose — including a node no loop can reach from here
-    // (al8n/smear#176).
+    // forwards to it rather than costing the worklist an entry of its own. `Name` and `Span` are
+    // released here rather than handed over, which is why `ObjectField::new` makes both a `Leaf`:
+    // whatever a caller chose for them has declared that its own release reaches no node, which is
+    // exactly what this arm needs of what it drops (al8n/smear#176).
     self.value.into_children(worklist);
   }
 }
@@ -97,7 +104,10 @@ pub struct Object<Name, Value, Span = SimpleSpan, Container = Vec<ObjectField<Na
 impl<Name, Value, Span, Container> Object<Name, Value, Span, Container> {
   /// Creates an object value from its span and fields.
   #[inline]
-  pub const fn new(span: Span, fields: Container) -> Self {
+  pub const fn new(span: Span, fields: Container) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       fields,

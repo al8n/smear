@@ -98,9 +98,18 @@ use crate::{
 /// so no tree is spelled in a body that serves several.
 pub(crate) trait Numbers<S> {
   /// The payload of an `IntValue` node.
-  type Int;
+  ///
+  /// `Leaf` for the same reason [`Value`](Self::Value) is `Nestable`, one position further in: a
+  /// number sits in a position the release treats as a leaf, so what goes there has to have said
+  /// that dropping it reaches no node of any of this crate's trees (`al8n/smear#176`). The bound
+  /// costs nothing outside
+  /// this crate — `Numbers` is `pub(crate)` and its two implementors are here — and it is what
+  /// lets every production below name the projection without repeating the obligation.
+  type Int: crate::value::Leaf;
   /// The payload of a `FloatValue` node.
-  type Float;
+  ///
+  /// `Leaf` for the reason [`Int`](Self::Int) records.
+  type Float: crate::value::Leaf;
   /// How a conversion can fail, carrying whatever the report needs.
   type Error;
   /// The input-value tree this marker assembles.
@@ -166,7 +175,7 @@ pub(crate) type ValueDefault<S, N> = crate::value::DefaultInputValue<<N as Numbe
 /// this marker compiles to what it compiled to before the parameter existed.
 pub(crate) enum SliceNumbers {}
 
-impl<S> Numbers<S> for SliceNumbers {
+impl<S: crate::value::Leaf> Numbers<S> for SliceNumbers {
   type Int = S;
   type Float = S;
   type Error = Infallible;
@@ -365,7 +374,7 @@ pub(crate) fn report_out_of_range<S>(
 /// ```
 #[cfg(feature = "materialized-numbers")]
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
-pub trait MaterializedInt: Sized + sealed::MaterializedInt {
+pub trait MaterializedInt: Sized + crate::value::Leaf + sealed::MaterializedInt {
   /// Which width this payload is, for the error a refusal raises.
   const WIDTH: IntWidth;
 }

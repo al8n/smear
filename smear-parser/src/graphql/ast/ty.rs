@@ -81,6 +81,9 @@ macro_rules! ty {
         }
 
         impl<Name> Nestable for $name<Name> {
+          /// The type tree: rank 1. It holds no value node and no selection.
+          const RANK: u8 = 1;
+
           type Node = Self;
 
           #[inline]
@@ -108,6 +111,9 @@ macro_rules! ty {
         /// The pointee side of the same walk: a list carrier is `(span, element, required)` and
         /// only the element holds a type.
         impl<Name> Nestable for ListType<$name<Name>> {
+          /// The type tree: rank 1. It holds no value node and no selection.
+          const RANK: u8 = 1;
+
           type Node = $name<Name>;
 
           #[inline]

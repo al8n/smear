@@ -61,7 +61,11 @@ impl<Name, Span> IntoComponents for NamedType<Name, Span> {
 impl<Name, Span> NamedType<Name, Span> {
   /// Creates a named type reference.
   #[inline]
-  pub const fn new(span: Span, name: Name, required: bool) -> Self {
+  pub const fn new(span: Span, name: Name, required: bool) -> Self
+  where
+    Name: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       name,
@@ -122,7 +126,10 @@ impl<Type, Span> IntoComponents for ListType<Type, Span> {
 impl<Type, Span> ListType<Type, Span> {
   /// Creates a list type reference.
   #[inline]
-  pub const fn new(span: Span, ty: Type, required: bool) -> Self {
+  pub const fn new(span: Span, ty: Type, required: bool) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self { span, ty, required }
   }
 
@@ -158,7 +165,10 @@ pub struct SetType<Type, Span = SimpleSpan> {
 impl<Type, Span> SetType<Type, Span> {
   /// Creates a set type reference.
   #[inline]
-  pub const fn new(span: Span, ty: Type, required: bool) -> Self {
+  pub const fn new(span: Span, ty: Type, required: bool) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self { span, ty, required }
   }
 
@@ -221,7 +231,10 @@ pub struct MapType<Key, Value, Span = SimpleSpan> {
 impl<Key, Value, Span> MapType<Key, Value, Span> {
   /// Creates a map type reference.
   #[inline]
-  pub const fn new(span: Span, key: Key, value: Value, required: bool) -> Self {
+  pub const fn new(span: Span, key: Key, value: Value, required: bool) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       key,
@@ -294,7 +307,10 @@ pub struct TypeGenerics<Type, Span = SimpleSpan, Container = Vec<Type>> {
 impl<Type, Span, Container> TypeGenerics<Type, Span, Container> {
   /// Creates a type-argument list from its enclosing span and parameters.
   #[inline]
-  pub const fn new(span: Span, params: Container) -> Self {
+  pub const fn new(span: Span, params: Container) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       params,
@@ -378,7 +394,10 @@ impl<Name, Type, Span, PathContainer, TypeContainer>
     path: Path<Name, Span, PathContainer>,
     generics: Option<TypeGenerics<Type, Span, TypeContainer>>,
     required: bool,
-  ) -> Self {
+  ) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       path,
