@@ -31,7 +31,7 @@
 //!   the point of failure as well as returning; before, a parse that failed outright recorded
 //!   no diagnostic at all and [`Parse::has_errors`](super::Parse::has_errors) read `false` —
 //!   which is the verdict the acceptance-parity gate compares against `syntactic/`.
-//! - **The remainder has to be committed.** `document_entry` drains whatever an escaping
+//! - **The remainder has to be committed.** The door's drain takes whatever an escaping
 //!   `Err` left behind, because `Sink::finish` refuses any source byte that no committed token
 //!   covers and no lexer-error diagnostic explains (`FinishError::UncoveredGap`). The old
 //!   `parse_document` bound the driver's result to `_out` and drained nothing, so the first
@@ -415,7 +415,7 @@ lossless_production! {
   ///
   /// # `stop` is the same verdict, on its way to the drain — smear PR #189
   ///
-  /// [`document_entry`] drains what this leaves uncommitted, and that drain must not run on a
+  /// The door drains what this leaves uncommitted, and that drain must not run on a
   /// refusal. It used to re-derive "did this root stop" from tokora's session counter, which
   /// answers for the whole root and therefore mistakes a *caught* early trip for a live one. The
   /// slot carries [`depth::root_turn`](crate::lossless::depth::root_turn)'s own per-entry verdict
@@ -471,36 +471,5 @@ lossless_production! {
       },
     )
     .parse_input(inp)
-  }
-
-  /// [`document`] plus the drain that makes materialization total.
-  ///
-  /// [`Sink::finish`](tokora::cst::Sink::finish) refuses any source byte that no committed token
-  /// covers and no lexer-error diagnostic explains, and an `Err` escaping [`document`] leaves
-  /// the rest of the source uncommitted. Draining here turns that into a reportable parse rather
-  /// than a panic in [`parse_document`](super::parse_document) — the defect Task 5 recorded and
-  /// could not reach, `document` having been a stub.
-  ///
-  /// The drain is [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped)
-  /// rather than a bare `skip_while`, because a refusal must not read the tail: see that
-  /// function's note for the diagnostic count that costs. It is handed [`document`] **itself**,
-  /// and that is not a style choice — the verdict is
-  /// [`depth::root_turn`](crate::lossless::depth::root_turn)'s, decided per entry, and any
-  /// re-derivation out here is a reading over the whole root, which is the wrong span for the
-  /// question (smear PR #189). The slot that carries it is minted, lent and spent inside that one
-  /// call, so this production has no step of the pairing it could get wrong.
-  fn document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, document::<Src, Ctx>)
-  }
-
-  /// [`type_system_document`] plus the drain, for the same reason [`document_entry`] carries one.
-  ///
-  /// The SDL-only loop catches and resynchronises exactly as the mixed one does, so an `Err` can
-  /// still escape it — through [`recover::resync_to_definition`] — and leave the tail
-  /// uncommitted. [`parse_type_system_document`](super::parse_type_system_document) discards the
-  /// parser's result, so without the drain that tail would be a `FinishError::UncoveredGap` panic
-  /// in materialization instead of a reportable parse.
-  fn type_system_document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, type_system_document::<Src, Ctx>)
   }
 }

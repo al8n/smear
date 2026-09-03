@@ -1041,6 +1041,22 @@ fn the_with_limits_doors_reach_the_same_guard() {
 /// parse completes rather than truncating — and read 99 963 produce-events against a configured
 /// 12 000.
 ///
+/// # This cell's subject did not move under smear issue #193, and that was the decision
+///
+/// #193 asked whether `max_tokens` should be re-pointed at tokora's durable input-layer
+/// `TokenBudget` or whether a second ceiling should appear beside it, and it named the hazard in
+/// the second: two knobs that both sound like ceilings. The answer is the second one anyway,
+/// because the two count different quantities — `max_tokens` counts lexemes a rewind kept,
+/// `max_produce_events` counts every item the lexer handed back including a re-lex — and on this
+/// very document they disagree by three orders of magnitude: 12 000 parses to the end under the
+/// first and is refused after **four** committed lexemes under the second, because the first
+/// recovery scan alone spends the budget.
+///
+/// So this pin stands unedited rather than being re-aimed or retired. What it measures —
+/// *`max_tokens` is not a work bound, and the scan allowance is what bounds one* — is still true,
+/// still the only bound an **unbudgeted** parse has, and still the default every consumer gets.
+/// `smear/tests/durable_token_budget.rs` is the gate on the knob that *is* a work bound.
+///
 /// # The assertion is two-sided, and each half pins a different thing
 ///
 /// The lower half, `FACTOR * max_tokens < spent`, is the finding: it reds if the durable count
@@ -1182,8 +1198,10 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
       assert_eq!(
         got.spent, unlimited.spent,
         "{dialect} {atom:?} x{reps}: configuring max_tokens changed the parse's durable work. \
-         That is the right end state and it is smear issue #193 — when it lands, this cell is the \
-         one to re-derive rather than the one to delete"
+         That knob is the rewindable one and it never bounded this number; the durable ceiling \
+         smear issue #193 added is `with_max_produce_events`, which is a second number rather \
+         than a re-pointing of this one — so this reading must not move. \
+         `smear/tests/durable_token_budget.rs` is the gate on the other knob"
       );
       assert!(
         FACTOR * items < got.spent,

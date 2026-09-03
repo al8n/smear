@@ -203,6 +203,13 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// #178).
   #[from(skip)]
   NestingLimitExceeded,
+  /// The input's durable token budget refused an item, so the parse stopped reading.
+  ///
+  /// GraphQL's twin carries the reasoning. In short: tokora refuses the item **silently** — the
+  /// refusal has no diagnostic channel at all — so without this variant a document that ran out
+  /// of `LosslessLimits::max_tokens` comes back indistinguishable from one that parsed.
+  #[from(skip)]
+  TokenBudgetExhausted,
   /// A dialect-specific message not represented by a dedicated variant.
   Other(std::borrow::Cow<'static, str>),
   /// Retains the source type in this generic family even when the current
@@ -215,7 +222,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 ///
 /// GraphQL's twin carries the reasoning, the rule each arm came from, and the one arm that is
 /// knowingly wrong. This dialect's variant set is narrower and every arm is the same ruling:
-/// [`UnexpectedEnd`] delegates, [`NestingLimitExceeded`](Self::NestingLimitExceeded) is always
+/// [`UnexpectedEnd`] delegates, [`NestingLimitExceeded`](Self::NestingLimitExceeded) and
+/// [`TokenBudgetExhausted`](Self::TokenBudgetExhausted) are always
 /// terminal, and [`Lexer`](Self::Lexer) is terminal when it holds a `State` refusal — the arm
 /// tokora's rule warns catches people, and the one a scanner trip lands on unmarked when the
 /// emitter rejects its diagnostic.
@@ -232,6 +240,9 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
         .iter()
         .any(|e| matches!(e.data(), LexerErrorData::State(_))),
       Self::NestingLimitExceeded => true,
+      // A budget the input has already refused against is never cleared by more input: the tally
+      // is monotone, no `Checkpoint` carries it and no public mutator lowers it.
+      Self::TokenBudgetExhausted => true,
       Self::UnexpectedEnd(e) => e.is_terminal(),
       Self::Unclosed(_) | Self::UnexpectedToken(_) | Self::Other(_) | Self::Source(_) => false,
     }
@@ -308,6 +319,19 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn nesting_limit_exceeded(span: Span) -> Self {
     Self::new(span, ErrorData::NestingLimitExceeded)
+  }
+
+  /// Creates a durable token-budget refusal.
+  ///
+  /// `span` is empty and sits at the parse's committed end: tokora drops the refused item where
+  /// it stands and publishes no span for it, so there is no lexeme to point at. This is the
+  /// producer [`ErrorData::TokenBudgetExhausted`] is reached through, generic over every
+  /// parameter of this family — unlike `lossless_error_impls!`'s
+  /// [`FromTokenBudget`](crate::lossless::depth::FromTokenBudget) impl, which is pinned to the
+  /// lossless keying.
+  #[inline]
+  pub const fn token_budget_exhausted(span: Span) -> Self {
+    Self::new(span, ErrorData::TokenBudgetExhausted)
   }
 
   /// Creates an unclosed-list error.

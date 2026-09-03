@@ -113,7 +113,7 @@
 fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   use crate::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
-    lossless::depth::{FromNestingLimit, RootStop, descend, drain_unless_stopped},
+    lossless::depth::{FromNestingLimit, FromTokenBudget, RootStop, descend, drain_unless_stopped},
   };
   use tokora::{
     Emitter, Lexer, ParserContext, SimpleSpan, Token,
@@ -145,6 +145,18 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   impl FromNestingLimit for Which {
     fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
       Which::Refusal
+    }
+  }
+
+  // NEVER CALLED, AND THAT IS PROVABLE HERE RATHER THAN HOPED. `drain_unless_stopped` mints a
+  // token-budget refusal only off the input's own `refused_an_item` bit, and these cells drive a
+  // `ParserContext` whose token budget is tokora's default — `TokenBudget::unlimited()`, whose
+  // gate excludes its own `usize::MAX` sentinel, so no item is ever refused. A variant for a value
+  // this cell cannot produce would widen a `MaybeTerminal` arm set whose subject is the descent
+  // axis.
+  impl FromTokenBudget for Which {
+    fn token_budget_exhausted(_span: SimpleSpan, _spent: usize, _limit: usize) -> Self {
+      unreachable!("this cell configures no token budget, so nothing can refuse an item")
     }
   }
 
@@ -346,7 +358,8 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
   use crate::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
     lossless::depth::{
-      FromNestingLimit, RootStop, RootTurn, descend, drain_unless_stopped, root_turn,
+      FromNestingLimit, FromTokenBudget, RootStop, RootTurn, descend, drain_unless_stopped,
+      root_turn,
     },
   };
   use tokora::{
@@ -382,6 +395,18 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
   impl FromNestingLimit for E {
     fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
       E::Refusal
+    }
+  }
+
+  // NEVER CALLED, AND THAT IS PROVABLE HERE RATHER THAN HOPED. `drain_unless_stopped` mints a
+  // token-budget refusal only off the input's own `refused_an_item` bit, and these cells drive a
+  // `ParserContext` whose token budget is tokora's default — `TokenBudget::unlimited()`, whose
+  // gate excludes its own `usize::MAX` sentinel, so no item is ever refused. A variant for a value
+  // this cell cannot produce would widen a `MaybeTerminal` arm set whose subject is the descent
+  // axis.
+  impl FromTokenBudget for E {
+    fn token_budget_exhausted(_span: SimpleSpan, _spent: usize, _limit: usize) -> Self {
+      unreachable!("this cell configures no token budget, so nothing can refuse an item")
     }
   }
 
@@ -565,7 +590,8 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
   use crate::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
     lossless::depth::{
-      FromNestingLimit, RootStop, RootTurn, descend, drain_unless_stopped, root_turn,
+      FromNestingLimit, FromTokenBudget, RootStop, RootTurn, descend, drain_unless_stopped,
+      root_turn,
     },
   };
   use tokora::{
@@ -605,6 +631,18 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
   impl FromNestingLimit for E {
     fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
       E::Refusal
+    }
+  }
+
+  // NEVER CALLED, AND THAT IS PROVABLE HERE RATHER THAN HOPED. `drain_unless_stopped` mints a
+  // token-budget refusal only off the input's own `refused_an_item` bit, and these cells drive a
+  // `ParserContext` whose token budget is tokora's default — `TokenBudget::unlimited()`, whose
+  // gate excludes its own `usize::MAX` sentinel, so no item is ever refused. A variant for a value
+  // this cell cannot produce would widen a `MaybeTerminal` arm set whose subject is the descent
+  // axis.
+  impl FromTokenBudget for E {
+    fn token_budget_exhausted(_span: SimpleSpan, _spent: usize, _limit: usize) -> Self {
+      unreachable!("this cell configures no token budget, so nothing can refuse an item")
     }
   }
 
@@ -813,7 +851,8 @@ fn a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it() {
   use crate::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
     lossless::depth::{
-      FromNestingLimit, RootStop, RootTurn, descend, drain_unless_stopped, root_turn,
+      FromNestingLimit, FromTokenBudget, RootStop, RootTurn, descend, drain_unless_stopped,
+      root_turn,
     },
   };
   use tokora::{
@@ -849,6 +888,18 @@ fn a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it() {
   impl FromNestingLimit for E {
     fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
       E::Refusal
+    }
+  }
+
+  // NEVER CALLED, AND THAT IS PROVABLE HERE RATHER THAN HOPED. `drain_unless_stopped` mints a
+  // token-budget refusal only off the input's own `refused_an_item` bit, and these cells drive a
+  // `ParserContext` whose token budget is tokora's default — `TokenBudget::unlimited()`, whose
+  // gate excludes its own `usize::MAX` sentinel, so no item is ever refused. A variant for a value
+  // this cell cannot produce would widen a `MaybeTerminal` arm set whose subject is the descent
+  // axis.
+  impl FromTokenBudget for E {
+    fn token_budget_exhausted(_span: SimpleSpan, _spent: usize, _limit: usize) -> Self {
+      unreachable!("this cell configures no token budget, so nothing can refuse an item")
     }
   }
 
@@ -1009,11 +1060,11 @@ fn a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone() {
 
   use crate::{
     graphql::{GraphQL, lossless::GraphqlLosslessLexer},
-    lossless::depth::{RootStop, drain_unless_stopped, drain_unless_terminal},
+    lossless::depth::{FromTokenBudget, RootStop, drain_unless_stopped, drain_unless_terminal},
   };
   use tokora::{
-    Emitter, InputRef, Lexer, ParserContext, Token, cache::DefaultCache, error::MaybeTerminal,
-    prelude::UnexpectedTokenOf, span::Spanned,
+    Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token, cache::DefaultCache,
+    error::MaybeTerminal, prelude::UnexpectedTokenOf, span::Spanned,
   };
 
   type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
@@ -1038,6 +1089,16 @@ fn a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone() {
   impl MaybeTerminal for E {
     fn is_terminal(&self) -> bool {
       matches!(self, E::Scanner)
+    }
+  }
+
+  // NEVER CALLED, AND THAT IS PROVABLE HERE RATHER THAN HOPED. `drain_unless_stopped` mints a
+  // token-budget refusal only off the input's own `refused_an_item` bit, and this cell drives a
+  // `ParserContext` whose token budget is tokora's default — `TokenBudget::unlimited()`, whose
+  // gate excludes its own `usize::MAX` sentinel, so no item is ever refused.
+  impl FromTokenBudget for E {
+    fn token_budget_exhausted(_span: SimpleSpan, _spent: usize, _limit: usize) -> Self {
+      unreachable!("this cell configures no token budget, so nothing can refuse an item")
     }
   }
 
@@ -1131,4 +1192,1274 @@ fn a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone() {
       );
     }
   }
+}
+
+/// A durable token-budget refusal is reported **once**, however many drains are stacked over the
+/// root that took it — smear issue #193, round 2.
+///
+/// # The defect this is the cell for
+///
+/// `drain_unless_stopped` polls
+/// [`TokenBudgetTally::refused_an_item`](tokora::input::TokenBudgetTally::refused_an_item) and
+/// differences it against a baseline taken before its root runs. That reading is
+/// **input-absolute and monotone** — it is a `bool` on a cell no rollback reaches and no mutator
+/// lowers — so *every* frame that took its baseline before the refusal sees the same `false ->
+/// true` transition. A boolean difference cannot say which frame's root produced it.
+///
+/// Two nested drains therefore both mint a diagnostic for one refusal: the inner reports and
+/// returns `Err`, and the outer, whose baseline predates the same refusal, reports again.
+/// Measured before the repair: **2** at every budget, against **1** through a single drain.
+///
+/// This is round 1's own claim inverted. That commit body said the baseline "makes a nested drain
+/// emit once", which is the sentence Codex round 1 falsified — and the reason it was wrong is worth
+/// keeping: the differencing discipline was copied from `root_turn`'s descent witness, where
+/// `trip_snapshot` returns a **counter** whose value is unique per trip. Copying the discipline
+/// without copying the *carrier* is what left an ownership signal that cannot distinguish owners.
+///
+/// # The repair, and why it is a generation rather than another baseline
+///
+/// [`RootStop`] gains the fact the boolean cannot carry: *this frame's root already reported the
+/// refusal*. The inner drain writes it before returning `Err`; nothing else writes it. But a slot
+/// is per frame and the outer frame holds its own, so the marker cannot travel in the slot alone —
+/// it travels the way tokora's own answer to this shape does, on the **input**, as the durable
+/// count of refusals smear has already reported. The outer frame subtracts what it reported
+/// itself, which is a number rather than a bit, and a number can tell two frames apart.
+///
+/// # The three cells
+///
+/// * **Nested.** The defect: 2 before, 1 after.
+/// * **The single-level control.** Already right at 1, so a repair that suppressed the report
+///   outright is visible here as a 0 rather than as an unchanged number.
+/// * **A budget nothing reaches.** The control that stays green under the defect, so the two
+///   above are about the refusal rather than about the shape.
+#[test]
+fn a_budget_refusal_is_reported_once_however_many_drains_are_stacked() {
+  use crate::{
+    graphql::{
+      GraphQL,
+      lossless::{GraphqlLosslessErrors, GraphqlLosslessLexer, runner::LosslessEmitter},
+    },
+    lossless::depth::{RootStop, drain_unless_stopped},
+  };
+  use smear_lexer::limits::LosslessLimits;
+  use tokora::{InputRef, cache::DefaultCache, cst::Sink};
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  /// THE DOOR'S OWN CONTEXT, and there is no other now. `parse_lossless_document` mints the
+  /// `Sink` from the source, pairs it with the cache, and builds the emitter itself — so a cell
+  /// that asks how many diagnostics a parse ends up with is parameterised by the pair and reads
+  /// the dialect's own error container.
+  type Ctx<'inp> = (
+    Sink<'inp, Lx<'inp>, LosslessEmitter<'inp>>,
+    DefaultCache<'inp, Lx<'inp>>,
+  );
+  type Errs<'inp> = GraphqlLosslessErrors<&'inp str>;
+
+  /// How many budget refusals **survived** in this parse's log.
+  ///
+  /// Read off the door's own `Cst` rather than a thread-local counter, and that is Codex round 5's
+  /// repair showing through: a counter shared between two parses is exactly the aliasing the door
+  /// no longer permits, so the cell cannot use one either. `finish_partial` hands the emitter back
+  /// whether or not the green tree is refused, and `Verbose`'s rewind drops rolled-back emissions
+  /// — so this log **is** "surviving diagnostics", which is the quantity every count below means.
+  fn budget_reports(parse: &crate::graphql::lossless::runner::Parse) -> usize {
+    // WHAT THE OUTPUT SAYS, and the door hands it over directly — smear issue #193, rounds 7 and
+    // 8. The door no longer emits: it builds its verdict, drops every budget diagnostic the
+    // grammar emitted, appends its own, and returns the finished `Parse`. Neither the `Cst` nor
+    // the verdict is in a caller's hands, so a cell about the COUNT has nothing to assemble and
+    // nothing it could assemble wrongly.
+    //
+    // A zero-width `Error` is the door's report's shape, and each cell carries the control that
+    // says so: the same parse with nothing refused has none.
+    parse
+      .diagnostics()
+      .iter()
+      .filter(|d| {
+        d.severity() == tokora::emitter::Severity::Error && d.span().start == d.span().end
+      })
+      .count()
+  }
+
+  /// The inner root: it drives the scanner to the end of the source, which is where the budget
+  /// refuses. It returns `Ok` — and that is the shipped shape rather than a contrivance, because
+  /// a refusal latches the poison boundary and every loop above it then reads an end of input.
+  fn inner<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// The outer root: it returns the nested drain's `Result` and touches its own slot not at all,
+  /// exactly as `a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it`'s does.
+  fn outer<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    drain_unless_stopped(inp, inner)
+  }
+
+  /// The inner root that reads **nothing**, so the refusal's first occurrence is inside that
+  /// frame's own tail drain rather than inside its root — smear issue #193, Codex round 2.
+  ///
+  /// The nesting question this adds is the one the post-drain poll makes reachable: the frame the
+  /// ceiling is met in is now the one whose *drain* met it, and one refusal still has to be one
+  /// diagnostic. Round 4 changed WHY it is: no frame here reports at all — each one stops, hands
+  /// up a terminal value and emits nothing — and the door, which `drive` runs because the six
+  /// shipped doors run it, emits once off the durable bit. The count is a property of the door
+  /// rather than of what any frame under it concluded, which is what Codex round 3 showed a
+  /// terminality reading could not deliver.
+  fn drains<'inp>(
+    _inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    Ok(())
+  }
+
+  /// [`drains`] under a second drain: two stacked frames whose refusal is taken in the inner
+  /// frame's drain.
+  fn outer_over_a_draining_inner<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    drain_unless_stopped(inp, drains)
+  }
+
+  /// A root that spends the budget **inside a speculative attempt and then declines it**.
+  ///
+  /// [`InputRef::attempt`](tokora::InputRef::attempt) rolls back on `None`: the cursor, the lexer
+  /// state and the poison boundary all go back to what the checkpoint saved, and the checkpoint
+  /// predates the refusal, so every positional witness reads clean afterwards. The refusal does
+  /// not: `TokenBudgetTally` is not a `Checkpoint` field. This is Codex round 1's second axis —
+  /// a rollback between the drain's baseline and its poll — and what it asserts is that the
+  /// baseline still means what it meant, because the cell it is a baseline of is outside the
+  /// rollback set.
+  fn speculating<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inp.attempt(
+      |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
+        let _ = inp.skip_while(|_| true);
+        // DECLINED. Everything the attempt did to the input is given back — except the charge.
+        None::<()>
+      },
+    );
+    Ok(())
+  }
+
+  /// One parse of `src` under a token budget of `ceiling`: what it ended as, and how many budget
+  /// refusals its own log kept.
+  fn drive<'inp, R>(src: &'inp str, ceiling: usize, root: R) -> usize
+  where
+    R: for<'c> FnOnce(
+      &mut InputRef<'inp, 'c, Lx<'inp>, Ctx<'inp>, GraphQL>,
+      &mut RootStop,
+    ) -> Result<(), Errs<'inp>>,
+  {
+    let limits = LosslessLimits::default();
+    let parse = crate::graphql::lossless::runner::parse_lossless_document(
+      src,
+      limits.with_max_produce_events(ceiling),
+      root,
+    );
+    budget_reports(&parse)
+  }
+
+  // Forty lexemes, so every ceiling below is reached well inside the source.
+  let src = "a b c d e f g h i j k l m n o p q r s t ".repeat(2);
+
+  for ceiling in [1usize, 4, 16] {
+    assert_eq!(
+      drive(&src, ceiling, outer),
+      1,
+      "ceiling={ceiling}: one refusal reported twice. `refused_an_item` is input-absolute and \
+       monotone, so both nested frames see the same `false -> true` transition and a boolean \
+       difference cannot attribute it to the frame whose root produced it — smear issue #193 \
+       round 2"
+    );
+    assert_eq!(
+      drive(&src, ceiling, inner),
+      1,
+      "ceiling={ceiling}: the single-level control. One drain over the same refusal was already \
+       right, so a repair that suppressed the report rather than de-duplicating it reads 0 here"
+    );
+  }
+
+  // THE REFUSAL PLACED IN THE INNER FRAME'S DRAIN rather than in its root — smear issue #193,
+  // Codex round 2. The inner frame reads nothing, so its own tail drain is what meets the ceiling.
+  // Still one diagnostic through two drains, and since round 4 that is the door's property rather
+  // than any frame's: every frame stops and none of them emits.
+  for ceiling in [1usize, 4, 16] {
+    assert_eq!(
+      drive(&src, ceiling, outer_over_a_draining_inner),
+      1,
+      "ceiling={ceiling}: a refusal first taken in the INNER frame's drain was reported {} times \
+       through two stacked drains. Every frame stops and only the door decides, so a count other \
+       than one is the door putting more than one report in the output for one refusal",
+      drive(&src, ceiling, outer_over_a_draining_inner)
+    );
+    assert_eq!(
+      drive(&src, ceiling, drains),
+      1,
+      "ceiling={ceiling}: the single-level control for the same placement. One drain over the \
+       same refusal must read 1, so a repair that suppressed the report rather than \
+       de-duplicating it reads 0 here"
+    );
+  }
+
+  // A ROLLBACK BETWEEN THE BASELINE AND THE POLL. The refusal happens inside a speculative
+  // attempt that is then declined, so the cursor, the lexer state and the poison boundary are all
+  // restored to a checkpoint that predates it. The charge is not, and the report must still be
+  // made exactly once.
+  for ceiling in [1usize, 4, 16] {
+    assert_eq!(
+      drive(&src, ceiling, speculating),
+      1,
+      "ceiling={ceiling}: a refusal taken inside a declined attempt went unreported. \
+       `TokenBudgetTally` is not a `Checkpoint` field, so the rollback restores the boundary and \
+       the cursor and cannot give the charge back — a parse that reads the difference as `no \
+       refusal happened` is reading a cell the rollback does not reach"
+    );
+  }
+
+  // The control that stays green under the defect: a ceiling nothing reaches reports nothing, so
+  // every count above is about the refusal and not about the shape of these roots.
+  assert_eq!(
+    drive(&src, 10_000, outer),
+    0,
+    "a budget no parse reaches must mint no diagnostic and must not end the document"
+  );
+  assert_eq!(drive(&src, 10_000, inner), 0, "the same, through one drain");
+  assert_eq!(
+    drive(&src, 10_000, speculating),
+    0,
+    "the same, through a declined attempt — which is what says the reading above is the refusal \
+     rather than the attempt"
+  );
+  assert_eq!(
+    drive(&src, 10_000, outer_over_a_draining_inner),
+    0,
+    "the same, through two drains whose reading is the drain's own"
+  );
+}
+
+/// A refusal whose **first occurrence is inside the tail drain** is this frame's to report, on
+/// both arms that drain — smear issue #193, Codex round 2.
+///
+/// # The defect
+///
+/// `drain_unless_stopped` polled the durable budget once, between the root's return and the arm
+/// below it. The `Parsed` and ordinary `Recoverable` arms then call [`drain_unless_terminal`],
+/// whose `skip_while(|_| true)` reads the same input against the same tally — and tokora answers
+/// `Ok` on the terminal `Scan::Tripped`, so a refusal the drain was the first to take left the
+/// frame carrying the root's own outcome and nothing naming the refusal. The door discards the
+/// parser's `Result` and `Cst::finish_partial` tiles the unread tail as a gap run, so a consumer
+/// gets a short tree, no refusal diagnostic, and no way to ask.
+///
+/// # Why the cell is here and not only at a shipped door
+///
+/// Five of the six shipped roots **resynchronise** on an ordinary failure, so their loop only
+/// exits at an end of input and there is no tail left for the drain to be the first reader of;
+/// GraphQL's executable root is the one that propagates both failure arms (smear issue #168), and
+/// `smear/tests/durable_token_budget.rs` carries that door's cell. A cell that only ran there
+/// would be a guard on one root's recovery choice rather than on the frame, and the frame is what
+/// the repair is in. These two roots reach the two draining arms directly:
+///
+/// * `Ok(())` without reading — the `Parsed` arm, over a tail the drain then lexes;
+/// * a non-terminal `Err` without reading — the ordinary `Recoverable` arm, same tail.
+///
+/// Both are the shapes a sixth root can be written in, and the `Parsed` one is **not** reachable
+/// at a shipped door today: a shipped root returns `Ok` only when its peek answered `None`, which
+/// over a non-empty tail means a latched poison boundary, and a latched boundary makes the tail
+/// unreachable to the drain. Measured at the doors: with `max_tokens(k)` tripping the lexer, the
+/// durable tally stops at `k` and no produce ceiling above `k` changes the parse.
+///
+/// # What the report displaces, measured rather than argued
+///
+/// On the `Recoverable` arm the frame returns the refusal instead of the root's syntax error.
+/// That is the same trade the first poll already makes and the reason is the same one it gives:
+/// the syntax error was reported at the point of failure, so what the displacement costs is a
+/// **value** and not a report.
+///
+/// The case worth measuring is the other one. [`drain_unless_terminal`]'s own note says a lexer
+/// error's `Err` out of `skip_while` **is** its delivery — the input layer advances the dedup
+/// watermark before calling, so dropping that `Err` drops the diagnostic. If a drain could both
+/// have that rejection to hand back *and* have refused an item, the report would displace a
+/// delivery rather than a value. The third axis below is that measurement: an emitter that
+/// rejects `emit_lexer_error`, a tail with one invalid lexeme, and every ceiling from before it
+/// to past it.
+#[test]
+fn a_refusal_first_taken_inside_the_drain_is_reported_on_both_draining_arms() {
+  use crate::{
+    graphql::{
+      GraphQL,
+      error::{Error as DialectError, ErrorData},
+      lossless::{GraphqlLosslessErrors, GraphqlLosslessLexer, runner::LosslessEmitter},
+    },
+    lossless::depth::RootStop,
+  };
+  use smear_lexer::limits::LosslessLimits;
+  use tokora::{InputRef, SimpleSpan, cache::DefaultCache, cst::Sink};
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = (
+    Sink<'inp, Lx<'inp>, LosslessEmitter<'inp>>,
+    DefaultCache<'inp, Lx<'inp>>,
+  );
+  type Errs<'inp> = GraphqlLosslessErrors<&'inp str>;
+
+  /// Budget refusals that survived in this parse's log.
+  fn budget_reports(parse: &crate::graphql::lossless::runner::Parse) -> usize {
+    // WHAT THE OUTPUT SAYS, and the door hands it over directly — smear issue #193, rounds 7 and
+    // 8. The door no longer emits: it builds its verdict, drops every budget diagnostic the
+    // grammar emitted, appends its own, and returns the finished `Parse`. Neither the `Cst` nor
+    // the verdict is in a caller's hands, so a cell about the COUNT has nothing to assemble and
+    // nothing it could assemble wrongly.
+    //
+    // A zero-width `Error` is the door's report's shape, and each cell carries the control that
+    // says so: the same parse with nothing refused has none.
+    parse
+      .diagnostics()
+      .iter()
+      .filter(|d| {
+        d.severity() == tokora::emitter::Severity::Error && d.span().start == d.span().end
+      })
+      .count()
+  }
+
+  /// The `Parsed` arm: the root says it parsed and reads nothing, so the whole source is the tail
+  /// and the drain behind it is the first — and only — reader of the budget.
+  fn parsed_with_tail<'inp>(
+    _inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    Ok(())
+  }
+
+  /// The ordinary `Recoverable` arm: a non-terminal failure over the same untouched tail.
+  ///
+  /// `FloatOverflow` is the cheapest dialect error whose `MaybeTerminal` arm is `false`
+  /// (`graphql/error.rs`'s wildcard-free `is_terminal` match), which is the only property this
+  /// root needs of it. The bespoke `E::Syntax` it replaces went with the emitter: the door owns
+  /// the emitter now, so the error type is the dialect's.
+  fn recoverable_with_tail<'inp>(
+    _inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    Err(Errs::from(DialectError::new(
+      SimpleSpan::new(0, 0),
+      ErrorData::FloatOverflow("x"),
+    )))
+  }
+
+  /// One parse of `src` under a token budget of `ceiling`.
+  fn drive<'inp, R>(src: &'inp str, ceiling: usize, root: R) -> usize
+  where
+    R: for<'c> FnOnce(
+      &mut InputRef<'inp, 'c, Lx<'inp>, Ctx<'inp>, GraphQL>,
+      &mut RootStop,
+    ) -> Result<(), Errs<'inp>>,
+  {
+    let limits = LosslessLimits::default();
+    let parse = crate::graphql::lossless::runner::parse_lossless_document(
+      src,
+      limits.with_max_produce_events(ceiling),
+      root,
+    );
+    budget_reports(&parse)
+  }
+
+  // Forty lexemes, so every ceiling below is met well inside the tail the drain reads.
+  let src = "a b c d e f g h i j k l m n o p q r s t ".repeat(2);
+
+  for ceiling in [1usize, 4, 16] {
+    assert_eq!(
+      drive(&src, ceiling, parsed_with_tail),
+      1,
+      "ceiling={ceiling}, the `Parsed` arm: the drain met the ceiling and the parse came back \
+       with nothing naming the refusal. `skip_while` answers `Ok` on the terminal \
+       `Scan::Tripped`, so the drain is a reader whose refusal only the door above it can report \
+       — smear issue #193, Codex round 2"
+    );
+    assert_eq!(
+      drive(&src, ceiling, recoverable_with_tail),
+      1,
+      "ceiling={ceiling}, the ordinary `Recoverable` arm: the drain met the ceiling and the parse \
+       came back on the root's own syntax error, truncated and unnamed. The refusal outranks the \
+       syntax error for the same reason the poll above the arm outranks it — the syntax error was \
+       reported at the point of failure, so what is displaced is a value"
+    );
+  }
+
+  // The control that stays green under the defect: a ceiling nothing reaches mints nothing and
+  // leaves each root's own outcome alone, so every reading above is about the refusal rather than
+  // about the shape of these two roots.
+  assert_eq!(
+    drive(&src, 10_000, parsed_with_tail),
+    0,
+    "a budget no parse reaches must mint no diagnostic and must not end the document"
+  );
+  assert_eq!(
+    drive(&src, 10_000, recoverable_with_tail),
+    0,
+    "the same, and the root's own NON-TERMINAL value must reach the caller as one: a `Stopped` \
+     here would be the frame ending a document on an ordinary failure"
+  );
+}
+
+/// What the frame hands **up** after a refusal first taken in its drain, and what a rejected lexer
+/// error does beside it — smear issue #193, rounds 2 and 5.
+///
+/// # Why this cell does not go through the door, and what that costs
+///
+/// It pins [`drain_unless_stopped`], not [`parse_lossless_document`]. Two things it needs the door
+/// cannot give it, and since Codex round 5 that is deliberate rather than incidental: an error type
+/// whose [`MaybeTerminal`](tokora::error::MaybeTerminal) arms this cell chooses, and an emitter
+/// that **rejects** `emit_lexer_error`. The door builds `Verbose` itself precisely so that no
+/// caller supplies either.
+///
+/// So it builds a `ParserContext` — tokora's own public door onto a context, which no smear
+/// mint is involved in — and runs the frame directly. That is not a forgery route and it does not
+/// weaken round 5: the frame it reaches **stops and never emits**, so nothing here can put a
+/// diagnostic anywhere. The count half of both arms lives in
+/// [`a_refusal_first_taken_inside_the_drain_is_reported_on_both_draining_arms`] and goes through
+/// the real door, because a count is the door's property.
+///
+/// # What it asserts
+///
+/// * both draining arms — `Ok` without reading, and a non-terminal `Err` without reading — hand up
+///   a **terminal** value once the drain has met the ceiling. That value is what every composition
+///   above the frame reads;
+/// * the displacement axis. [`drain_unless_terminal`]'s note says a lexer error's `Err` out of
+///   `skip_while` **is** its delivery, so a stop that replaced one would drop a diagnostic rather
+///   than a value. It cannot: the two are exclusive within one `skip_while`, because whichever
+///   comes first ends the scan. Measured over every ceiling from 0 to 24 — some return the
+///   refusal with the lexer error never offered, some return the rejection with nothing refused,
+///   and **none** does both.
+#[test]
+fn the_value_a_frame_hands_up_after_a_drain_refusal_is_terminal() {
+  use core::cell::Cell as StdCell;
+
+  use crate::{
+    graphql::{GraphQL, lossless::GraphqlLosslessLexer},
+    lossless::depth::{FromNestingLimit, FromTokenBudget, RootStop, drain_unless_stopped},
+  };
+  use tokora::{
+    Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token,
+    cache::DefaultCache,
+    error::{MaybeTerminal, RecursionLimitReached},
+    input::TokenBudget,
+    prelude::UnexpectedTokenOf,
+    span::Spanned,
+  };
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = ParserContext<'inp, Lx<'inp>, Recording, DefaultCache<'inp, Lx<'inp>>, GraphQL>;
+
+  thread_local! {
+    /// One per `emit_lexer_error` OFFERED, whether or not this emitter accepts it.
+    static LEXER_OFFERS: StdCell<usize> = const { StdCell::new(0) };
+    /// Whether `emit_lexer_error` rejects. The displacement axis turns it on.
+    static REJECT_LEXER_ERRORS: StdCell<bool> = const { StdCell::new(false) };
+  }
+
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  enum E {
+    /// What `FromTokenBudget` mints. Terminal, as every shipped container's arm is.
+    Budget,
+    /// An ordinary syntax error: **not** terminal, so the root that returns it takes the
+    /// `Recoverable` arm and the drain runs.
+    Syntax,
+    /// What a rejecting `emit_lexer_error` hands back — the displacement axis's subject.
+    LexerRejected,
+    /// The descent refusal, which this cell never reaches — no production here descends.
+    Refusal,
+  }
+
+  impl MaybeTerminal for E {
+    fn is_terminal(&self) -> bool {
+      matches!(self, E::Budget)
+    }
+  }
+
+  impl FromNestingLimit for E {
+    fn nesting_limit_exceeded(_span: SimpleSpan, _attempted: usize, _limit: usize) -> Self {
+      E::Refusal
+    }
+  }
+
+  impl FromTokenBudget for E {
+    fn token_budget_exhausted(_span: SimpleSpan, _spent: usize, _limit: usize) -> Self {
+      E::Budget
+    }
+  }
+
+  impl<Lang: ?Sized> From<RecursionLimitReached<usize, Lang>> for E {
+    fn from(_: RecursionLimitReached<usize, Lang>) -> Self {
+      E::Refusal
+    }
+  }
+
+  /// Counts the lexer errors offered, and rejects them when the displacement axis asks it to.
+  ///
+  /// It counts NO budget reports, and there are none to count: the frame this cell drives stops
+  /// and never emits. That is the round-5 split showing through — a cell about the value cannot
+  /// also be a cell about the log.
+  struct Recording;
+
+  impl<'inp, L: Lexer<'inp>> Emitter<'inp, L, GraphQL> for Recording {
+    type Error = E;
+
+    fn emit_lexer_error(
+      &mut self,
+      _err: Spanned<<L::Token as Token<'inp>>::Error, L::Span>,
+    ) -> Result<(), Self::Error> {
+      LEXER_OFFERS.with(|n| n.set(n.get() + 1));
+      if REJECT_LEXER_ERRORS.with(StdCell::get) {
+        return Err(E::LexerRejected);
+      }
+      Ok(())
+    }
+
+    fn emit_error(&mut self, _err: Spanned<Self::Error, L::Span>) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn emit_unexpected_token(
+      &mut self,
+      _err: UnexpectedTokenOf<'inp, L, GraphQL>,
+    ) -> Result<(), Self::Error> {
+      Ok(())
+    }
+
+    fn rewind(&mut self, _cursor: &tokora::input::Cursor<'inp, '_, L>, _checkpoint: u64) {}
+  }
+
+  /// The `Parsed` arm: the root says it parsed and reads nothing.
+  fn parsed_with_tail<'inp>(
+    _inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), E> {
+    Ok(())
+  }
+
+  /// The ordinary `Recoverable` arm: a non-terminal failure over the same untouched tail.
+  fn recoverable_with_tail<'inp>(
+    _inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), E> {
+    Err(E::Syntax)
+  }
+
+  /// The INNER FRAME alone, over a context this cell builds: what it handed up, and how many lexer
+  /// errors the tail offered.
+  fn frame<'inp, R>(src: &'inp str, ceiling: usize, root: R) -> (Result<(), E>, usize)
+  where
+    R:
+      FnOnce(&mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>, &mut RootStop) -> Result<(), E>,
+  {
+    LEXER_OFFERS.with(|n| n.set(0));
+    let mut root = Some(root);
+    let out = tokora::parse_with::<Lx<'inp>, str, _, (), Ctx<'inp>, GraphQL>(
+      |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| {
+        drain_unless_stopped(inp, root.take().expect("the production runs once"))
+      },
+      src,
+      ParserContext::of(Recording).with_token_budget(TokenBudget::with_limitation(ceiling)),
+    );
+    (out, LEXER_OFFERS.with(StdCell::get))
+  }
+
+  let src = "a b c d e f g h i j k l m n o p q r s t ".repeat(2);
+
+  for ceiling in [1usize, 4, 16] {
+    assert_eq!(
+      frame(&src, ceiling, parsed_with_tail),
+      (Err(E::Budget), 0),
+      "ceiling={ceiling}, the `Parsed` arm: the drain met the ceiling and the frame handed up the \
+       root's `Ok`. A frame that says the document is fine over a poisoned input is one every \
+       composition above it will carry on from"
+    );
+    assert_eq!(
+      frame(&src, ceiling, recoverable_with_tail),
+      (Err(E::Budget), 0),
+      "ceiling={ceiling}, the ordinary `Recoverable` arm: the drain met the ceiling and the frame \
+       handed up the root's own non-terminal syntax error. The stop outranks it, and what is \
+       displaced is a value that was already reported at the point of failure"
+    );
+  }
+
+  assert_eq!(
+    frame(&src, 10_000, parsed_with_tail),
+    (Ok(()), 0),
+    "a budget no parse reaches must not end the document"
+  );
+  assert_eq!(
+    frame(&src, 10_000, recoverable_with_tail),
+    (Err(E::Syntax), 0),
+    "the same, and the root's own value must reach the caller unchanged"
+  );
+
+  // ── THE DISPLACEMENT AXIS ────────────────────────────────────────────────────────────────
+  //
+  // An emitter that REJECTS `emit_lexer_error`, and a tail whose thirteenth item does not lex. The
+  // question is whether one drain can both hand back that rejection and have refused an item — if
+  // it can, the stop above it displaces a DELIVERY rather than a value.
+  REJECT_LEXER_ERRORS.with(|f| f.set(true));
+  let poisoned = "a b c d e f ~ g h i j k l m n o p q r s t ";
+  println!("\n== the drain's rejection against the drain's refusal ==");
+  println!("  {:>8} {:>16} {:>7}", "ceiling", "out", "lexer");
+  let mut rejections = 0usize;
+  let mut refusals = 0usize;
+  let mut both = 0usize;
+  for ceiling in 0..=24usize {
+    let (out, lexer) = frame(poisoned, ceiling, parsed_with_tail);
+    if out == Err(E::LexerRejected) {
+      rejections += 1;
+    }
+    if out == Err(E::Budget) {
+      refusals += 1;
+    }
+    if out == Err(E::LexerRejected) && lexer > 0 && out == Err(E::Budget) {
+      both += 1;
+    }
+    println!("  {ceiling:>8} {out:>16?} {lexer:>7}");
+  }
+  REJECT_LEXER_ERRORS.with(|f| f.set(false));
+
+  assert!(
+    rejections > 0 && refusals > 0,
+    "the displacement axis collapsed: {rejections} ceilings handed back the emitter's rejection \
+     and {refusals} handed back the refusal. Both populations have to be non-empty for the count \
+     of their intersection to mean anything"
+  );
+  assert_eq!(
+    both, 0,
+    "{both} ceilings had the drain both hand back a rejected lexer error AND stop on the budget. \
+     The two are exclusive within one `skip_while` — whichever comes first ends the scan — and \
+     this assertion is what says so. If it ever fails, the post-drain stop in \
+     `drain_unless_stopped` is displacing a diagnostic's only delivery and must keep it instead"
+  );
+  assert_eq!(
+    rejections + refusals,
+    25,
+    "every ceiling from 0 to 24 must land in exactly one of the two populations; {rejections} + \
+     {refusals} does not cover the sweep, which means a third outcome exists that this axis does \
+     not name"
+  );
+}
+
+/// The report has an **owner**, and terminality was never it — smear issue #193, Codex round 3.
+///
+/// # The defect
+///
+/// Rounds 2 and 3 de-duplicated the report by asking whether the value in hand is terminal:
+/// a frame handed a terminal `Err` concluded that some frame below it had already reported. That
+/// infers a fact about the **log** from a fact about the **value**, and the two come apart in both
+/// directions once a composed root wraps the inner frame:
+///
+/// * `InputRef::try_attempt` rolls back on `Err`. tokora's `restore_unchecked` restores the
+///   cursor, the span, the lexer state, **the emitter (rewound to its checkpoint)**,
+///   `emitted_error_end`, `front_reported_end`, **the poison boundary** and the regime — and
+///   `Checkpoint` has no token-budget field at all. So an inner frame that reported and returned
+///   terminal `Err` has its diagnostic **undone** while `refused_an_item` stays `true`; the outer
+///   frame reads the surviving terminal value, concludes the report was made, and the parse comes
+///   back truncated and silent;
+/// * an outer root that **catches** that terminal `Err` and returns an ordinary value keeps the
+///   emission and loses the terminality, so the outer frame reports a **second** time.
+///
+/// # The four cases, and what each is for
+///
+/// Each drives the same inner frame — a root that reads to the end, so the refusal lands inside
+/// the inner frame rather than in the composed root above it — through a different composition:
+///
+/// * **(a) direct.** The inner value propagates unchanged. The control: this is the shape rounds 2
+///   and 3 measured, and it was already right;
+/// * **(b) attempt, propagated.** The inner frame runs inside `try_attempt` whose closure hands
+///   the terminal `Err` back, so the attempt rolls the emission back. Codex's first direction;
+/// * **(c) attempt, committed.** The same, with the closure mapping the `Err` to `Ok` so the
+///   attempt commits. The control that separates *the rollback* from *the attempt*: if (b) and (c)
+///   read alike, the reading is about `try_attempt` rather than about what it restores;
+/// * **(d) caught and replaced.** No attempt at all: the composed root catches the inner terminal
+///   `Err` and returns an ordinary one. Codex's second direction.
+///
+/// The inner frame's own returned value is asserted terminal in all four — that is the stop's
+/// pin, and it is deliberately separate from the count, because the repair splits the two: the
+/// inner frame stops and the door reports.
+#[test]
+fn the_report_has_an_owner_and_terminality_is_not_it() {
+  use core::cell::Cell as StdCell;
+
+  use crate::{
+    graphql::{
+      GraphQL,
+      error::{Error as DialectError, ErrorData},
+      lossless::{GraphqlLosslessErrors, GraphqlLosslessLexer, runner::LosslessEmitter},
+    },
+    lossless::depth::{RootStop, drain_unless_stopped},
+  };
+  use smear_lexer::limits::LosslessLimits;
+  use tokora::{
+    InputRef, SimpleSpan, cache::DefaultCache, cst::Sink, error::MaybeTerminal, span::Spanned,
+  };
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = (
+    Sink<'inp, Lx<'inp>, LosslessEmitter<'inp>>,
+    DefaultCache<'inp, Lx<'inp>>,
+  );
+  type Errs<'inp> = GraphqlLosslessErrors<&'inp str>;
+
+  thread_local! {
+    /// Whether the inner frame's returned value answered `is_terminal`.
+    ///
+    /// A thread-local for a VALUE, which is not the shape Codex round 5 is about: what may not be
+    /// shared across parses is a diagnostic timeline, and this holds neither a diagnostic nor
+    /// anything a parse writes twice.
+    static INNER_WAS_TERMINAL: StdCell<Option<bool>> = const { StdCell::new(None) };
+  }
+
+  /// Budget refusals that **survived** in this parse's log.
+  ///
+  /// Read off the door's own `Cst`, and that is the round-5 repair showing through: the counter
+  /// this replaces was a thread-local shared between whatever parses ran, which is exactly the
+  /// aliasing the door no longer permits a caller to build. `Verbose`'s rewind drops rolled-back
+  /// emissions, so the log is "surviving diagnostics" — which is what case (b) needs it to be.
+  fn budget_reports(parse: &crate::graphql::lossless::runner::Parse) -> usize {
+    // WHAT THE OUTPUT SAYS, and the door hands it over directly — smear issue #193, rounds 7 and
+    // 8. The door no longer emits: it builds its verdict, drops every budget diagnostic the
+    // grammar emitted, appends its own, and returns the finished `Parse`. Neither the `Cst` nor
+    // the verdict is in a caller's hands, so a cell about the COUNT has nothing to assemble and
+    // nothing it could assemble wrongly.
+    //
+    // A zero-width `Error` is the door's report's shape, and each cell carries the control that
+    // says so: the same parse with nothing refused has none.
+    parse
+      .diagnostics()
+      .iter()
+      .filter(|d| {
+        d.severity() == tokora::emitter::Severity::Error && d.span().start == d.span().end
+      })
+      .count()
+  }
+
+  /// The inner root: reads to the end, so the refusal is taken inside the inner frame.
+  fn inner<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// Runs the inner frame and records whether what it handed back is terminal.
+  fn inner_frame<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+  ) -> Result<(), Errs<'inp>> {
+    let out = drain_unless_stopped(inp, inner);
+    INNER_WAS_TERMINAL.with(|c| {
+      c.set(Some(
+        out.as_ref().err().is_some_and(MaybeTerminal::is_terminal),
+      ))
+    });
+    out
+  }
+
+  /// (a) The inner value propagates unchanged.
+  fn direct<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inner_frame(inp)
+  }
+
+  /// (b) Inside `try_attempt`, propagating the terminal `Err` — so the attempt ROLLS BACK.
+  fn attempt_propagated<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inp.try_attempt(inner_frame)
+  }
+
+  /// (c) Inside `try_attempt`, mapping the terminal `Err` to `Ok` — so the attempt COMMITS.
+  fn attempt_committed<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inp.try_attempt(
+      |inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>| match inner_frame(inp) {
+        Ok(()) | Err(_) => Ok::<(), Errs<'inp>>(()),
+      },
+    )
+  }
+
+  /// (d) Caught and replaced by an ordinary value — no attempt, so nothing rolls back.
+  ///
+  /// `FloatOverflow` is the cheapest dialect error whose `MaybeTerminal` arm is `false`, which is
+  /// the only property this case needs of it.
+  fn caught_and_replaced<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    match inner_frame(inp) {
+      Ok(()) => Ok(()),
+      Err(_) => Err(Errs::from(DialectError::new(
+        SimpleSpan::new(0, 0),
+        ErrorData::FloatOverflow("x"),
+      ))),
+    }
+  }
+
+  /// (e) A composed root that **catches the nested stop and emits it** while recovering.
+  ///
+  /// Codex round 7's natural case, and it needs no forgery: the terminal value
+  /// `drain_unless_stopped` hands up IS the budget variant, `InputRef::emit_error` is public, and
+  /// a root that reports what it caught and carries on is ordinary-looking recovery code. Before
+  /// round 8 the door then observed the same durable refusal and reported again — **2** surviving
+  /// diagnostics for one refusal.
+  ///
+  /// It emits at `0..0` deliberately: the door's own report sits at the committed end, so the
+  /// assertion below can tell which one survived by its span alone.
+  fn catches_and_emits<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    match drain_unless_stopped(inp, inner) {
+      Ok(()) => Ok(()),
+      Err(caught) => {
+        let _ = inp.emit_error(Spanned::new(SimpleSpan::new(0, 0), caught));
+        Ok(())
+      }
+    }
+  }
+
+  /// (f) A root that **forges** the variant with nothing refused, beside one ordinary diagnostic.
+  ///
+  /// Before round 8 this marked a complete parse as truncated: one budget diagnostic in the output
+  /// of a parse whose budget never refused. The ordinary `FloatOverflow` beside it is what makes
+  /// "only that variant is dropped" checkable rather than asserted.
+  fn forges_without_refusal<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    let forged = SimpleSpan::new(0, 0);
+    let _ = inp.emit_error(Spanned::new(
+      forged,
+      Errs::from(DialectError::new(forged, ErrorData::TokenBudgetExhausted)),
+    ));
+    let ordinary = SimpleSpan::new(1, 2);
+    let _ = inp.emit_error(Spanned::new(
+      ordinary,
+      Errs::from(DialectError::new(ordinary, ErrorData::FloatOverflow("x"))),
+    ));
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// (g)/(h) One emission carrying **both** the door's variant and an ordinary error.
+  ///
+  /// Codex round 8, and it is a precision defect inside round 8's own repair rather than a new
+  /// class. Both dialects' payloads are `Vec`-backed multi-error containers, so a root can put
+  /// `[TokenBudgetExhausted, FloatOverflow]` into ONE `Spanned` — and a filter that decided at the
+  /// payload threw the `FloatOverflow` away with the budget member. (e) and (f) miss it because
+  /// they emit the two in separate calls.
+  ///
+  /// The container is emitted at the ORDINARY error's span, so the surviving diagnostic's span is
+  /// the reading that says which member kept it alive.
+  fn mixed_emission<'inp>(inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>) {
+    let ordinary = SimpleSpan::new(1, 2);
+    let mut mixed = Errs::from(DialectError::new(
+      SimpleSpan::new(0, 0),
+      ErrorData::TokenBudgetExhausted,
+    ));
+    mixed.extend(core::iter::once(DialectError::new(
+      ordinary,
+      ErrorData::FloatOverflow("x"),
+    )));
+    let _ = inp.emit_error(Spanned::new(ordinary, mixed));
+  }
+
+  /// (g) The mixed emission with **no** refusal, over a document the parse completes.
+  fn mixed_without_refusal<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    mixed_emission(inp);
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// (h) The same emission **with** a real refusal.
+  fn mixed_with_refusal<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    mixed_emission(inp);
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// (i)/(j) A root that emits an **empty** container — smear issue #193, Codex round 9.
+  ///
+  /// Both dialect `Errors` types implement `Default`, and tokora records whatever payload it is
+  /// handed. `any` over an empty `Vec` is `false`, so round 9's classifier read `Errors::default()`
+  /// as "nothing but the door's variant" and dropped the record; with no refusal to replace it the
+  /// finished parse had no diagnostics and `has_errors()` was false.
+  ///
+  /// **Which channels the finished `Parse` carries**, because the cell only means something if the
+  /// answer is written down: all three that `Verbose::diagnostics()` yields — errors, warnings and
+  /// recovery holes. The first two carry a payload and go through the classifier, so both are
+  /// covered here. A hole carries none and is never classified at all; the substrate's
+  /// `is_none_or` is what says so and it has said so since round 8.
+  fn emits_empty<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    let _ = inp.emit_error(Spanned::new(SimpleSpan::new(3, 4), Errs::default()));
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// (j) The same on the **warning** channel.
+  fn emits_empty_warning<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    let _ = inp.emit_warning(Spanned::new(SimpleSpan::new(5, 6), Errs::default()));
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// Every diagnostic the finished parse carries, as `(start, end, is_error)`, and what
+  /// `has_errors()` answers.
+  ///
+  /// The second reading is the one Codex round 8's finding is about: a dropped payload does not
+  /// only lose a diagnostic, it can turn a document that HAS an error into one that reports none.
+  fn output<'inp, R>(
+    src: &'inp str,
+    ceiling: usize,
+    root: R,
+  ) -> (std::vec::Vec<(usize, usize, bool)>, bool)
+  where
+    R: for<'c> FnOnce(
+      &mut InputRef<'inp, 'c, Lx<'inp>, Ctx<'inp>, GraphQL>,
+      &mut RootStop,
+    ) -> Result<(), Errs<'inp>>,
+  {
+    let limits = LosslessLimits::default();
+    let parse = crate::graphql::lossless::runner::parse_lossless_document(
+      src,
+      limits.with_max_produce_events(ceiling),
+      root,
+    );
+    let spans = parse
+      .diagnostics()
+      .iter()
+      .map(|d| {
+        (
+          d.span().start,
+          d.span().end,
+          d.severity() == tokora::emitter::Severity::Error,
+        )
+      })
+      .collect();
+    //  is a TRAIT in tokora and an inherent method here; the inherent one is what a
+    // consumer calls, so it is what this reads.
+    let has_errors = parse.has_errors();
+    (spans, has_errors)
+  }
+
+  /// One parse through the door, and what survived it.
+  fn drive<'inp, R>(src: &'inp str, ceiling: usize, root: R) -> (usize, Option<bool>)
+  where
+    R: for<'c> FnOnce(
+      &mut InputRef<'inp, 'c, Lx<'inp>, Ctx<'inp>, GraphQL>,
+      &mut RootStop,
+    ) -> Result<(), Errs<'inp>>,
+  {
+    INNER_WAS_TERMINAL.with(|c| c.set(None));
+    let limits = LosslessLimits::default();
+    let parse = crate::graphql::lossless::runner::parse_lossless_document(
+      src,
+      limits.with_max_produce_events(ceiling),
+      root,
+    );
+    (
+      budget_reports(&parse),
+      INNER_WAS_TERMINAL.with(StdCell::get),
+    )
+  }
+
+  let src = "a b c d e f g h i j k l m n o p q r s t ".repeat(2);
+
+  println!("\n== who owns the report ==");
+  println!("  {:<22} {:>8} {:>16}", "case", "budget", "inner-terminal");
+
+  //
+  // EVERY CASE RUNS BEFORE ANY IS JUDGED. Asserting inside the loop aborts at the first bad one
+  // and hides the other three, and the four are one reading: two of them are the two DIRECTIONS
+  // the inference fails in, and a run that shows only one of them cannot say that.
+  macro_rules! case {
+    ($label:literal, $root:expr) => {{
+      let (budget, inner_terminal) = drive(&src, 4, $root);
+      println!("  {:<22} {budget:>8} {inner_terminal:>16?}", $label);
+      ($label, budget, inner_terminal)
+    }};
+  }
+
+  let measured = [
+    case!("a direct", direct),
+    case!("b attempt/rollback", attempt_propagated),
+    case!("c attempt/commit", attempt_committed),
+    case!("d caught+replaced", caught_and_replaced),
+  ];
+
+  for (label, _budget, inner_terminal) in measured {
+    assert_eq!(
+      inner_terminal,
+      Some(true),
+      "{label}: the inner frame handed back a NON-terminal value over a refused input. The stop \
+       is what every composition above it reads, and a stop that is not terminal is a document \
+       that carries on"
+    );
+  }
+  // ── (e) CATCH AND EMIT, and (f) FORGE WITH NO REFUSAL — smear issue #193, Codex round 7 ──
+  //
+  // These two are not about who can obtain the capability; they are about the grammar writing the
+  // same channel the door writes. What answers them is that the door DECIDES at the end.
+  //
+  // BOTH RUN BEFORE EITHER IS JUDGED, for the reason the four above give: they are the two
+  // directions of one finding, and a run that aborts at the first shows only one of them.
+  let (e, _) = output(&src, 4, catches_and_emits);
+  let (f, _) = output(&src, 10_000, forges_without_refusal);
+  let (g, g_has_errors) = output(&src, 10_000, mixed_without_refusal);
+  let (h, _) = output(&src, 4, mixed_with_refusal);
+  let (i, i_has_errors) = output(&src, 10_000, emits_empty);
+  let (j, j_has_errors) = output(&src, 10_000, emits_empty_warning);
+  let e_budget: std::vec::Vec<_> = e.iter().filter(|(a, b, err)| a == b && *err).collect();
+  println!("  e catch+emit           {e:?}");
+  println!("  f forge, no refusal    {f:?}");
+  assert_eq!(
+    e_budget.len(),
+    1,
+    "(e) a root that caught the nested stop and emitted it left {} budget diagnostics in the \
+     output. Before round 8 this was 2 — the grammar's and the door's — and no fence on who may \
+     CONSTRUCT the report could have prevented it, because the root was handed the value by the \
+     frame below it: {e:?}",
+    e_budget.len()
+  );
+  assert!(
+    e_budget[0].0 > 0,
+    "(e) the surviving budget diagnostic is at {:?}, which is where the ROOT emitted its copy \
+     (0..0) rather than where the door's report sits (the committed end). The normalisation kept \
+     the grammar's and dropped the door's, which is the decision inverted",
+    (e_budget[0].0, e_budget[0].1)
+  );
+
+  assert_eq!(
+    f.iter().filter(|(a, b, err)| a == b && *err).count(),
+    0,
+    "(f) a parse whose budget never refused came back carrying a budget diagnostic. Before round 8 \
+     this was 1: a root can construct the dialect's own variant and emit it, marking a complete \
+     parse as truncated. The door's verdict is the only thing entitled to put one there: {f:?}"
+  );
+  assert_eq!(
+    f,
+    std::vec![(1, 2, true)],
+    "(f) the normalisation removed something other than the forged budget variant. The ordinary \
+     `FloatOverflow` at 1..2 the same root emitted must survive untouched — dropping ONLY that one \
+     variant is the claim, and a filter that took more would be a different and worse repair"
+  );
+
+  // ── (g) AND (h) THE MIXED CONTAINER — smear issue #193, Codex round 8 ──────────────────────
+  println!("  g mixed, no refusal    {g:?}  has_errors={g_has_errors}");
+  println!("  h mixed, with refusal  {h:?}");
+  assert_eq!(
+    g,
+    std::vec![(1, 2, true)],
+    "(g) one emission carrying [TokenBudgetExhausted, FloatOverflow] and NO refusal came back as \
+     {g:?}. Before round 9 it was empty: the filter decided at the payload, so the ordinary error \
+     went out with the budget member. The container is the grammar's unit of emission and only \
+     the variant is the door's"
+  );
+  assert!(
+    g_has_errors,
+    "(g) `has_errors()` is false on a document that emitted a `FloatOverflow`. That is the \
+     consequence that matters — not a diagnostic missing from a list, but a parse with a real \
+     error reporting itself clean"
+  );
+  assert_eq!(
+    h,
+    std::vec![(1, 2, true), (4, 4, true)],
+    "(h) the same emission WITH a refusal came back as {h:?} rather than the surviving \
+     `FloatOverflow` at its own span followed by the door's report at the refusal point. Before \
+     round 9 it was the door's alone: the ordinary error had been dropped and only the \
+     replacement remained, which reads as one error where there are two"
+  );
+
+  // ── (i) AND (j) THE EMPTY CONTAINER — smear issue #193, Codex round 9 ─────────────────────
+  println!("  i empty, error chan    {i:?}  has_errors={i_has_errors}");
+  println!("  j empty, warning chan  {j:?}  has_errors={j_has_errors}");
+  assert_eq!(
+    i,
+    std::vec![(3, 4, true)],
+    "(i) a root emitted `Errors::default()` with no refusal and the finished parse came back as \
+     {i:?}. Before round 10 it was empty: `any` over an empty container is `false`, so the \
+     classifier read it as nothing-but-the-door's-variant and dropped a record that holds no \
+     member of the door's at all"
+  );
+  assert!(
+    i_has_errors,
+    "(i) `has_errors()` is false on a parse that recorded an error diagnostic. An empty payload is \
+     still a record on the error channel, and dropping it is the same `has_errors()` consequence \
+     round 9 closed for the mixed container"
+  );
+  assert_eq!(
+    j,
+    std::vec![(5, 6, false)],
+    "(j) the same on the WARNING channel came back as {j:?}. The classifier runs over every \
+     payload `Verbose::diagnostics()` yields, and a warning carries one, so the empty case has to \
+     hold on both channels or it holds on neither"
+  );
+  assert!(
+    !j_has_errors,
+    "(j) `has_errors()` is true on a parse whose only record is a warning. It counts \
+     `Severity::Error` alone, and a warning surviving must not change that — this is the control \
+     that says (j) measured the warning channel and not the error one"
+  );
+
+  let counts = measured.map(|(_, budget, _)| budget);
+  assert_eq!(
+    counts,
+    [1, 1, 1, 1],
+    "budget diagnostics that SURVIVED, by case (a direct, b attempt/rollback, c attempt/commit, \
+     d caught+replaced): {counts:?}. Terminality is a fact about a VALUE and a report is an entry \
+     in a LOG. `try_attempt` restores the emitter and the poison boundary and leaves \
+     `refused_an_item` set, so a `0` in (b) is a rolled-back report a frame credited itself with; \
+     a `2` in (d) is a surviving report a frame could not see. smear issue #193, Codex round 3"
+  );
+}
+
+/// A nested door reports into **its own** parse, and not into the enclosing one — smear issue
+/// #193, Codex round 5.
+///
+/// # The defect
+///
+/// The door used to accept any caller emitter under `Emitter + ValueKeyedEmitter`. That marker
+/// constrains checkpoint semantics, not exclusive ownership: an in-crate caller could write a
+/// perfectly value-keyed collector over shared state, hand one handle to the outer door and
+/// capture another for a nested one, and the two parses — distinct `Input`s, distinct `Sink`s —
+/// would forward into **one diagnostic timeline**. Two indistinguishable budget reports in the
+/// enclosing result, which contradicts the door's own `Nesting this function is not a forgery`
+/// note in its own terms.
+///
+/// Measured on `1ec827c`, with a composed root calling the door again under a second `Counting`
+/// whose reports land in a thread-local: **2**. After the repair the door builds
+/// `Verbose::default()` itself, so a shared collector cannot be expressed at all — there is no
+/// parameter to pass one to and no type variable to instantiate — and this cell reads **1**.
+///
+/// # What it asserts
+///
+/// The outer parse's log holds exactly one budget report, and the inner parse's log holds its own
+/// one. Both halves matter: the first says the enclosing timeline is untouched, and the second
+/// says the nested parse still reported — so the reading is *separation*, not *suppression*.
+#[test]
+fn a_nested_door_reports_into_its_own_parse_and_not_the_enclosing_one() {
+  use core::cell::Cell as StdCell;
+
+  use crate::{
+    graphql::{
+      GraphQL,
+      lossless::{GraphqlLosslessErrors, GraphqlLosslessLexer, runner::LosslessEmitter},
+    },
+    lossless::depth::RootStop,
+  };
+  use smear_lexer::limits::LosslessLimits;
+  use tokora::{InputRef, cache::DefaultCache, cst::Sink};
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = (
+    Sink<'inp, Lx<'inp>, LosslessEmitter<'inp>>,
+    DefaultCache<'inp, Lx<'inp>>,
+  );
+  type Errs<'inp> = GraphqlLosslessErrors<&'inp str>;
+
+  thread_local! {
+    /// What the NESTED parse's own log held. A value carried out of the inner door, not a
+    /// diagnostic channel two parses write to — which is the distinction the whole cell is about.
+    static NESTED_REPORTS: StdCell<usize> = const { StdCell::new(0) };
+  }
+
+  fn budget_reports(parse: &crate::graphql::lossless::runner::Parse) -> usize {
+    // WHAT THE OUTPUT SAYS, and the door hands it over directly — smear issue #193, rounds 7 and
+    // 8. The door no longer emits: it builds its verdict, drops every budget diagnostic the
+    // grammar emitted, appends its own, and returns the finished `Parse`. Neither the `Cst` nor
+    // the verdict is in a caller's hands, so a cell about the COUNT has nothing to assemble and
+    // nothing it could assemble wrongly.
+    //
+    // A zero-width `Error` is the door's report's shape, and each cell carries the control that
+    // says so: the same parse with nothing refused has none.
+    parse
+      .diagnostics()
+      .iter()
+      .filter(|d| {
+        d.severity() == tokora::emitter::Severity::Error && d.span().start == d.span().end
+      })
+      .count()
+  }
+
+  /// Reads to the end, so the budget refuses inside whichever parse runs it.
+  fn reads_everything<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// The composed root: it calls the DOOR again, on its own source, from inside the outer parse.
+  fn nests_a_door<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    let limits = LosslessLimits::default();
+    let parse = crate::graphql::lossless::runner::parse_lossless_document(
+      "a b c d e f g h i j ",
+      limits.with_max_produce_events(2),
+      reads_everything,
+    );
+    NESTED_REPORTS.with(|n| n.set(budget_reports(&parse)));
+    // And then the outer parse's own root does its own reading, so the outer budget refuses too.
+    reads_everything(inp, stop)
+  }
+
+  NESTED_REPORTS.with(|n| n.set(0));
+  let src = "a b c d e f g h i j k l m n o p q r s t ".repeat(2);
+  let limits = LosslessLimits::default();
+  let parse = crate::graphql::lossless::runner::parse_lossless_document(
+    &src,
+    limits.with_max_produce_events(4),
+    nests_a_door,
+  );
+  let outer = budget_reports(&parse);
+  let nested = NESTED_REPORTS.with(StdCell::get);
+
+  println!("\n== a nested door's report goes to its own log ==");
+  println!("  outer log: {outer}   nested log: {nested}");
+
+  assert_eq!(
+    outer, 1,
+    "the enclosing parse's log holds {outer} budget reports. Two is Codex round 5's finding: a \
+     nested door forwarding into the same diagnostic timeline as the parse it runs inside. It \
+     cannot be expressed any more — the door builds its own `Verbose` — so anything but one here \
+     is the door emitting more than once for one refusal"
+  );
+  assert_eq!(
+    nested, 1,
+    "the NESTED parse's own log holds {nested} budget reports rather than one. This half is why \
+     the cell is about separation and not suppression: a nested parse that refused must still say \
+     so, in its own result"
+  );
 }

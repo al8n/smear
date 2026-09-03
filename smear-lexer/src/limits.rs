@@ -517,7 +517,8 @@ impl State for SyntacticLimits {
   }
 }
 
-/// The budget a **lossless** lex runs under: nesting depth and token count.
+/// The budget a **lossless** parse runs under: nesting depth, token count, and the durable
+/// produce-event ceiling.
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
 /// [`graphql::lossless::LosslessLexer`](crate::graphql::lossless::LosslessLexer) and its GraphQLx
@@ -530,20 +531,66 @@ impl State for SyntacticLimits {
 /// combined tracker, and it is settable so that a caller who wants the lex to stop early can say
 /// where.
 ///
-/// **It is not a total-work bound**, and an earlier revision of this paragraph said it was. The
-/// whole of this type is the lexer's rewindable state, so a recovery scan that finds nothing
-/// restores it and refunds every charge it made; what survives is the count of lexemes that
-/// survived. [`max_tokens`](Self::max_tokens) states what the ceiling therefore bounds, and names
-/// the number a caller sizing a defence has to use instead.
+/// **Neither of those two is a total-work bound**, and an earlier revision of this paragraph said
+/// the token one was. The `Limiter` half of this type is the lexer's rewindable state, so a
+/// recovery scan that finds nothing restores it and refunds every charge it made; what survives is
+/// the count of lexemes that survived. [`max_tokens`](Self::max_tokens) states what that ceiling
+/// therefore bounds.
+///
+/// # Two ceilings, and they count different things — smear issue #193
+///
+/// [`max_produce_events`](Self::max_produce_events) is the third number, and it is the one a
+/// **defence** is sized against. It is not a second spelling of the token ceiling and the pair is
+/// not a redundancy:
+///
+/// | | counts | lives in | a rollback | what it is for |
+/// |---|---|---|---|---|
+/// | [`max_tokens`](Self::max_tokens) | lexemes the scanner attempted, that a rewind kept | this type, i.e. `Lexer::State` | **refunds it** | *how much document do I want looked at* |
+/// | [`max_produce_events`](Self::max_produce_events) | every item the lexer handed back, **a re-lex included** | tokora's `Input` | cannot reach it | *how much work may this document buy* |
+///
+/// Measured, because the gap is the whole reason both exist: `[ type ] ` repeated 2 000 times is
+/// 12 000 lexical items, and it needs recovery at every one of them. Under
+/// `with_max_tokens(12_000)` it parses to the end, and the parse produces **99 963** items —
+/// 8.33× the ceiling, which is smear issue #168's scan allowance (`8n + 4096`) rather than
+/// anything the caller asked for. Under `with_max_produce_events(12_000)` the same document is
+/// **refused**, with four lexemes committed: the first recovery scan alone spends the budget. Both
+/// answers are correct for the question their knob asks, and neither answers the other's.
+///
+/// So a caller who wants a document ceiling sets the first, a caller defending against a hostile
+/// document sets the second, and a caller who wants both sets both. The durable one is checked in
+/// front of the lexer, so where both are configured it is the one that fires.
+///
+/// The durable half reaches a parse only through a **lossless door**, which is the one place an
+/// `InputContext` is built. A bare lexer driven through
+/// [`Lexer::with_state`](tokora::Lexer::with_state) has no `Input` and therefore no durable tally
+/// at all, so the number is inert there; `max_tokens` is the ceiling that surface honours, and
+/// `smear/tests/lossless_ceiling_doors.rs` is the gate on it.
 ///
 /// ```
 /// use smear_lexer::limits::{LosslessLimits, MAX_NESTING_DEPTH};
 ///
 /// assert_eq!(LosslessLimits::default().max_nesting_depth(), MAX_NESTING_DEPTH);
 /// assert_eq!(LosslessLimits::default().max_tokens(), usize::MAX);
+/// assert_eq!(LosslessLimits::default().max_produce_events(), usize::MAX);
+///
+/// // The two are independent, and setting one leaves the other alone.
+/// let limits = LosslessLimits::default().with_max_tokens(1_000);
+/// assert_eq!(limits.max_produce_events(), usize::MAX);
+/// let limits = limits.with_max_produce_events(8_000);
+/// assert_eq!(limits.max_tokens(), 1_000);
+/// assert_eq!(limits.max_produce_events(), 8_000);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LosslessLimits(Limiter);
+pub struct LosslessLimits {
+  /// The lexer's own two tallies: the rewindable token count and the bracket depth.
+  limiter: Limiter,
+  /// The **durable** produce-event ceiling a lossless parse door installs on the input.
+  ///
+  /// Configuration only: nothing here ever charges it. The cell it configures is tokora's
+  /// [`TokenBudgetTally`](tokora::input::TokenBudgetTally), which lives on the `Input` and which
+  /// this type cannot reach — see [`max_produce_events`](Self::max_produce_events).
+  produce_events: usize,
+}
 
 impl Default for LosslessLimits {
   #[inline(always)]
@@ -556,19 +603,22 @@ impl LosslessLimits {
   /// A budget at smear's own [`MAX_NESTING_DEPTH`], with no token ceiling.
   #[inline(always)]
   pub const fn new() -> Self {
-    Self(Limiter::with_trackers(
-      TokenLimiter::new(),
-      RecursionLimiter::with_limitation(MAX_NESTING_DEPTH),
-    ))
+    Self {
+      limiter: Limiter::with_trackers(
+        TokenLimiter::new(),
+        RecursionLimiter::with_limitation(MAX_NESTING_DEPTH),
+      ),
+      produce_events: usize::MAX,
+    }
   }
 
   /// A budget at `max` simultaneously open brackets, with no token ceiling.
   #[inline(always)]
   pub const fn with_max_nesting_depth(max: usize) -> Self {
-    Self(Limiter::with_trackers(
-      TokenLimiter::new(),
-      RecursionLimiter::with_limitation(max),
-    ))
+    Self {
+      limiter: Limiter::with_trackers(TokenLimiter::new(), RecursionLimiter::with_limitation(max)),
+      produce_events: usize::MAX,
+    }
   }
 
   /// A budget whose lexer-side tally never trips on either axis.
@@ -581,34 +631,110 @@ impl LosslessLimits {
   /// leaves the stack-safety wall standing.
   #[inline(always)]
   pub const fn unlimited() -> Self {
-    Self(Limiter::with_trackers(
-      TokenLimiter::new(),
-      RecursionLimiter::unlimited(),
-    ))
+    Self {
+      limiter: Limiter::with_trackers(TokenLimiter::new(), RecursionLimiter::unlimited()),
+      produce_events: usize::MAX,
+    }
   }
 
   /// The same budget with `max` as its token ceiling.
   ///
   /// See [`max_tokens`](Self::max_tokens) for what the number counts — lexemes attempted, tallied
-  /// in state a failed recovery scan gives back — and for the durable produce-event count that
-  /// follows from it, which is roughly eight times this one.
+  /// in state a failed recovery scan gives back — and
+  /// [`with_max_produce_events`](Self::with_max_produce_events) for the durable ceiling beside it,
+  /// which is the one a defence is sized against.
   #[inline(always)]
   pub const fn with_max_tokens(self, max: usize) -> Self {
-    Self(Limiter::with_trackers(
-      TokenLimiter::with_limitation(max),
-      *self.0.recursion(),
-    ))
+    Self {
+      limiter: Limiter::with_trackers(
+        TokenLimiter::with_limitation(max),
+        *self.limiter.recursion(),
+      ),
+      produce_events: self.produce_events,
+    }
   }
 
   /// The nesting ceiling this budget refuses past.
   #[inline(always)]
   pub const fn max_nesting_depth(&self) -> usize {
-    self.0.recursion().limitation()
+    self.limiter.recursion().limitation()
+  }
+
+  /// The same budget with `max` as its **durable** produce-event ceiling — smear issue #193.
+  ///
+  /// See [`max_produce_events`](Self::max_produce_events) for what the number counts and why it is
+  /// a different quantity from [`max_tokens`](Self::max_tokens) rather than a second spelling of
+  /// it, and the type's own header for the table and the measurement that separate them.
+  #[inline(always)]
+  pub const fn with_max_produce_events(self, max: usize) -> Self {
+    Self {
+      limiter: self.limiter,
+      produce_events: max,
+    }
+  }
+
+  /// The **durable** ceiling on items this parse's lexer may produce, and the one no rollback
+  /// refunds — smear issue #193.
+  ///
+  /// `usize::MAX` by default, which is tokora's own sentinel for *no ceiling*, so a caller who
+  /// never names this gets exactly the parse they got before it existed.
+  ///
+  /// # Where it is enforced, and why that is the whole of it
+  ///
+  /// Each lossless door installs it as tokora's
+  /// [`TokenBudget`](tokora::input::TokenBudget), through `lossless_context`. That budget is
+  /// charged by tokora's driver at its single lexing chokepoint, **in front of the lexer**, into a
+  /// cell that is not a [`Checkpoint`](tokora::input::Checkpoint) field, that the state re-key
+  /// behind `set_state`/`state_mut` does not reach, and that has no public mutator. So no rollback
+  /// can hand a charge back, and no grammar code can lower the count.
+  ///
+  /// [`max_tokens`](Self::max_tokens) cannot carry that guarantee and the reason is its
+  /// *location*, not the direction of its increment: its tally is a field of this type, this type
+  /// is [`Lexer::State`](tokora::Lexer::State), and lossless recovery's `sync_balanced` restores
+  /// the lexer state on its no-match exit. smear issue #183 moved the increment to the right place
+  /// inside the hook and could not move the hook.
+  ///
+  /// # What it counts, which is not the document
+  ///
+  /// Every item the lexer hands back — tokens, trivia and lexer errors alike, **and a re-lex
+  /// again**. A region a rollback made the cache unable to keep is lexed twice and charged twice,
+  /// so this is a bound on **work** and not a token census. tokora states the same thing from its
+  /// side: *calibrate against produce-events, not against a token census.*
+  ///
+  /// Measured, and the number is the reason the two knobs are two: `[ type ] ` repeated 2 000
+  /// times is 12 000 lexical items and needs recovery at each of them.
+  /// `with_max_produce_events(12_000)` **refuses** it after four committed lexemes, because the
+  /// first recovery scan alone spends the whole budget. The same document under
+  /// `with_max_tokens(12_000)` parses to the end and costs 99 963 produce-events. A caller sizing
+  /// this number against a document's lexeme count is sizing it against the wrong quantity; what
+  /// it is for is *how much scanning may an untrusted document buy*, and #168's scan allowance —
+  /// `8 * committed + 4096` — is the multiplier to size it with.
+  ///
+  /// # A refusal is terminal and it is one diagnostic
+  ///
+  /// tokora refuses the item **silently**: the refusal has no diagnostic channel, so the item is
+  /// dropped, the poison boundary is latched, and a root loop's next peek answers end of input.
+  /// smear mints the report — the dialect's `TokenBudgetExhausted`, at an empty span on the
+  /// parse's committed end — in `lossless::depth::drain_unless_stopped`, which is the one frame
+  /// every document root's entry production goes through. The tail is never read, so the refusal
+  /// costs one diagnostic rather than one per remaining lexeme, and the tree still covers every
+  /// byte with the unread tail tiled as a gap run.
+  ///
+  /// # It is inert on a bare lexer, deliberately
+  ///
+  /// A durable tally is a property of an `Input`, and
+  /// [`Lexer::with_state`](tokora::Lexer::with_state) builds none. A caller driving the lexer
+  /// directly is bounded by [`max_tokens`](Self::max_tokens) and by nothing here.
+  #[inline(always)]
+  pub const fn max_produce_events(&self) -> usize {
+    self.produce_events
   }
 
   /// The token ceiling this budget refuses past — counted in lexemes the scanner **attempted**,
   /// and counted in **rewindable** lexer state, so what it bounds is one scan attempt rather than
-  /// the parse. It is not a durable work budget. The number that is, is below.
+  /// the parse. It is not a durable work budget;
+  /// [`max_produce_events`](Self::max_produce_events) is the one that is, and the type's own
+  /// header carries the table that tells the two apart.
   ///
   /// # What it bounds: the lexemes that survive, plus the attempt in flight
   ///
@@ -642,7 +768,8 @@ impl LosslessLimits {
   /// and whose `committed` is this tally, so it is at most `max_tokens + 1`. **A
   /// `with_max_tokens(n)` budget therefore permits on the order of `8n + 4096` produce-events
   /// rather than `n`**, and that module's docs are where the two constants and their derivation
-  /// live.
+  /// live. A caller who wants that number bounded outright, rather than bounded by a multiple,
+  /// sets [`max_produce_events`](Self::max_produce_events) beside this one.
   ///
   /// Measured, because the multiplier is the whole of the difference: `[ type ] ` repeated 2 000
   /// times is 12 000 lexical items; `with_max_tokens(12_000)` **completes** — the tally is refunded
@@ -662,10 +789,23 @@ impl LosslessLimits {
   /// 3 000 / 6 000 / 12 000 / 24 000 / 48 000 items as the floor amortises. That is a campaign
   /// measurement, kept because re-deriving the bound wants it.
   ///
-  /// The durable cell is reachable — it is tokora's own `TokenBudget`, configured through an
-  /// `InputContext` — and no lossless door installs one. Doing so is smear issue #193 rather than
-  /// part of this repair: PR #189 is restructuring exactly that door plumbing, and the two changes
-  /// at once could not be reviewed against a stable base.
+  /// **The durable cell is now reachable, and it is a knob of its own** — smear issue #193.
+  /// [`max_produce_events`](Self::max_produce_events) is tokora's `TokenBudget`, installed by
+  /// every lossless door through `lossless_context`, and it is the number to size a defence
+  /// against. It is not a re-pointing of *this* one, and that choice was made on a measurement:
+  /// the two count different quantities, and on the very document above they disagree by three
+  /// orders of magnitude. `with_max_tokens(12_000)` parses `[ type ] ` x2000 to the end;
+  /// `with_max_produce_events(12_000)` refuses it after **four** committed lexemes, because the
+  /// first recovery scan alone spends the budget.
+  ///
+  /// Re-pointing this name at that cell was the alternative and it is worse in two ways that are
+  /// not matters of taste. It would silently change the knob's **unit** from lexemes to
+  /// produce-events, so an existing caller who sized it against a document would start getting
+  /// truncated trees on exactly the malformed input a lossless parser exists for — and it would
+  /// make one public name mean two different things at the two surfaces that honour it, because a
+  /// bare [`Lexer::with_state`](tokora::Lexer::with_state) has no `Input` and therefore no durable
+  /// tally, which `smear/tests/lossless_ceiling_doors.rs` pins. Two names for two quantities is
+  /// the smaller hazard, and the type's own header carries the table that tells them apart.
   ///
   /// # The unit changed, and the direction it changed in
   ///
@@ -688,7 +828,7 @@ impl LosslessLimits {
   /// unit should raise it by the number of bad lexemes it must tolerate.
   #[inline(always)]
   pub const fn max_tokens(&self) -> usize {
-    self.0.token().limitation()
+    self.limiter.token().limitation()
   }
 
   /// The recursion budget a lossless **parse** actually runs under: [`max_nesting_depth`] clamped
@@ -718,51 +858,93 @@ impl LosslessLimits {
   /// How many brackets are open right now.
   #[inline(always)]
   pub const fn depth(&self) -> usize {
-    self.0.recursion().depth()
+    self.limiter.recursion().depth()
   }
 
   /// The token half, for the handlers that step it.
   #[inline(always)]
   pub const fn token(&self) -> &TokenLimiter {
-    self.0.token()
+    self.limiter.token()
   }
 
   /// Counts one token.
   #[inline(always)]
   pub const fn increase_token(&mut self) {
-    self.0.increase_token();
+    self.limiter.increase_token();
   }
 
   /// Opens one level.
   #[inline(always)]
   pub const fn increase_recursion(&mut self) {
-    self.0.increase_recursion();
+    self.limiter.increase_recursion();
   }
 
   /// Closes one level.
   #[inline(always)]
   pub const fn decrease_recursion(&mut self) {
-    self.0.decrease_recursion();
+    self.limiter.decrease_recursion();
   }
 
   /// Whether both ceilings are still respected.
   #[inline(always)]
   pub fn check(&self) -> Result<(), LimitExceeded> {
-    self.0.check()
+    self.limiter.check()
   }
 }
 
+/// A [`Limiter`] widened into a lossless budget, with **no** durable ceiling.
+///
+/// [`max_produce_events`](LosslessLimits::max_produce_events) is seeded at `usize::MAX`, which is
+/// the documented default and tokora's own sentinel for *no ceiling* — so this is a total
+/// widening rather than a lossy one: a `Limiter` never held that number and this conversion
+/// invents nothing.
+///
+/// # Its partner is gone, and that is smear issue #193 round 2
+///
+/// `From<LosslessLimits> for Limiter` used to sit under this impl. It **dropped**
+/// `max_produce_events`, and together with the defaulting above that made
+/// `LosslessLimits::from(Limiter::from(configured))` a silent conversion of a configured work
+/// ceiling into no ceiling — the issue-193 amplification reintroduced, in one line, before any
+/// budget-aware door runs. A lossy `From` in one direction and a defaulting one in the other is
+/// *rebuild through a defaulting constructor*, which is the shape tokora's own #266/#300 had.
+///
+/// The removal is what makes the hazard unspellable rather than discouraged. The alternative —
+/// keeping it and documenting the loss — is a sentence, and this workspace's most repeated defect
+/// is a load-bearing claim that nothing compiles. `Limiter` is tokora's type and has exactly two
+/// tracker slots, so it genuinely cannot carry the field; the direction that cannot carry it is
+/// the direction that goes. Nothing in this workspace called either one.
+///
+/// This direction stays because it loses nothing and because a caller holding a bare `Limiter`
+/// still needs a way in. To go the other way, read the parts that exist —
+/// [`token`](LosslessLimits::token) and [`max_nesting_depth`](LosslessLimits::max_nesting_depth) —
+/// so that what a rebuilt `Limiter` drops is written at the call site rather than hidden in an
+/// `.into()`.
+///
+/// ```
+/// use smear_lexer::{limits::LosslessLimits, tokora::state::tracker::Limiter};
+///
+/// // The widening compiles, and it seeds the documented default.
+/// let widened = LosslessLimits::from(Limiter::default());
+/// assert_eq!(widened.max_produce_events(), usize::MAX);
+/// ```
+///
+/// ```compile_fail
+/// use smear_lexer::{limits::LosslessLimits, tokora::state::tracker::Limiter};
+///
+/// // The round trip does not compile: there is no `From<LosslessLimits> for Limiter` to erase
+/// // the ceiling with. THE CONTROL FOR THIS FENCE IS THE DOCTEST ABOVE — it uses the same two
+/// // paths and the same constructor, so this one fails on the missing impl rather than on a
+/// // spelling.
+/// let configured = LosslessLimits::default().with_max_produce_events(8_000);
+/// let round_tripped = LosslessLimits::from(Limiter::from(configured));
+/// ```
 impl From<Limiter> for LosslessLimits {
   #[inline(always)]
   fn from(limiter: Limiter) -> Self {
-    Self(limiter)
-  }
-}
-
-impl From<LosslessLimits> for Limiter {
-  #[inline(always)]
-  fn from(limits: LosslessLimits) -> Self {
-    limits.0
+    Self {
+      limiter,
+      produce_events: usize::MAX,
+    }
   }
 }
 

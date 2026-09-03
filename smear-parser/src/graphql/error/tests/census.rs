@@ -190,6 +190,10 @@ fn error_data_variant_census() {
     // bottom out in this constructor, which is what the sample rule is asking about.
     NestingLimitExceeded => GraphqlError::<&str>::nesting_limit_exceeded(span).into_data(),
 
+    // The durable token budget's refusal, through the same generic constructor and for the same
+    // reason: `lossless::depth`'s `FromTokenBudget` impl is pinned to the lossless keying.
+    TokenBudgetExhausted => GraphqlError::<&str>::token_budget_exhausted(span).into_data(),
+
     // Not a constructor: the only producers of `Other` are the six `From` conversions in
     // `error.rs`, and this is the cheapest of them to mint.
     Other => GraphqlErrors::<&str>::from(LexerErrors::<char, ()>::default())[0]

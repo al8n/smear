@@ -59,7 +59,7 @@
 //!
 //! This module may not name `smear-lexer` — the substrate is dialect-generic and
 //! `lossless_isolation.rs` enforces it — so the number crosses that line as a plain `usize`, once
-//! per parse, through [`lossless_context`]. Each dialect's `lossless/mod.rs` still has a
+//! per parse, through the door's own context step. Each dialect's `lossless/mod.rs` still has a
 //! `descend` wrapper so a production writes one call, but the wrapper carries no number any more.
 //!
 //! # There is one ceiling now, and it is the parse's own limiter
@@ -197,9 +197,10 @@
 //! judged entry window, and on the shipped error types the witness and the arm agree on every
 //! path.
 //!
-//! What stays public is [`lossless_context`] and [`FromNestingLimit`] — the ceiling, and the
-//! dialect conversion a refusal lands through. Neither reaches a drain and neither takes a level,
-//! so a consumer holding both cannot assemble a root, and the two gates below are what say so:
+//! What stays public is [`FromNestingLimit`] and [`FromTokenBudget`] — the two dialect
+//! conversions a refusal lands through. Neither reaches a drain, neither takes a level and neither
+//! builds a context, so a consumer holding both cannot assemble a root, and the three gates below
+//! are what say so:
 //!
 //! ```compile_fail
 //! // The readers' door is shut. This reddens by COMPILING if the verdict machinery is ever
@@ -212,6 +213,26 @@
 //! // stays red while *either* is private, so re-widening `descend` alone — the case that matters,
 //! // since it is the counter's only published mover — would pass it.
 //! use smear_parser::lossless::depth::descend;
+//! ```
+//!
+//! ```compile_fail
+//! // And the DRAIN'S OWN STOP VALUE — the last thing in this module that touches the budget.
+//! // `lossless_context` used to be the third gate here; round 7 deleted it rather than narrow it
+//! // again, and this took its place because it is what is left. Reddens by COMPILING.
+//! use smear_parser::lossless::depth::token_budget_stop;
+//! ```
+//!
+//! ```
+//! // THE POSITIVE CONTROL for the three gates above, and it is not decoration: a `compile_fail`
+//! // block passes for ANY compile error, a misspelled crate or a typo in the path included, so a
+//! // fence written that way proves nothing on its own. This imports from the SAME module by the
+//! // SAME path shape and compiles, which is what says the three above fail on the item's
+//! // visibility rather than on the route to it.
+//! //
+//! // Deliberately names only the two ungated items: this header is compiled in every feature
+//! // cell, and a control that reached for a dialect door would fail the cell that has no dialect.
+//! use smear_parser::lossless::depth::{FromNestingLimit, FromTokenBudget};
+//! fn _both_are_reachable<T: FromNestingLimit + FromTokenBudget>() {}
 //! ```
 //!
 //! # The residual is tokora's writer, and the retraction is what prices it — smear PR #189
@@ -230,10 +251,16 @@
 //! re-acquires this residual on the day it ships, and the entry above records that the type which
 //! would make it safe does not compile.
 
-// WHAT SURVIVES THE DIALECT-LESS CELL, AND NOTHING ELSE. `lossless_context` and
-// `FromNestingLimit` are the two items here that are not gated, and between them they name exactly
-// these three.
-use tokora::{SimpleSpan, input::InputContext, state::recursion_tracker::RecursionLimiter};
+// WHAT SURVIVES THE DIALECT-LESS CELL, AND NOTHING ELSE. `FromNestingLimit` and `FromTokenBudget`
+// are the two items here that are not gated, and between them they name exactly this one.
+//
+// `lossless_context` used to be a third. Round 4 made it private and moved its three types into
+// the gated block; round 7 DELETED it — each dialect's door builds its own `InputContext` from
+// tokora's API, so there is no mint in this crate to widen. The lesson the two rounds leave is the
+// same either way: a private item with no caller in the dialect-less cell is `dead_code`, and
+// imports it alone names are `unused_imports`, both denials under `-Dwarnings` on the one cell a
+// plain local build does not run.
+use tokora::SimpleSpan;
 
 // SAME CFG AS THE ITEMS THAT NAME THEM. Everything below `FromNestingLimit` in this file — the
 // verdict cluster and `descend` — is compiled only where a dialect is, so under
@@ -241,7 +268,7 @@ use tokora::{SimpleSpan, input::InputContext, state::recursion_tracker::Recursio
 // under `-Dwarnings`. Splitting the `use` is the repair, and it has a second half that is easy to
 // miss AND that has exactly one spelling, because two rustdoc lints close on it from opposite
 // sides. Every link to one of these names from an item that is NOT gated — the module header
-// above, `lossless_context`, `FromNestingLimit` — is a **bare link whose label is the full
+// above, `FromNestingLimit`, `FromTokenBudget` — is a **bare link whose label is the full
 // `tokora::` path**, and neither obvious alternative survives both feature cells:
 //
 //   - a bare short label resolves *through the import*, so in the cell that turns the import off
@@ -262,38 +289,6 @@ use tokora::{
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use crate::combinator::ErrorOf;
-
-/// The [`InputContext`] a lossless door drives its parse under: the caller's emitter and cache,
-/// and `ceiling` as **the** recursion budget.
-///
-/// # Why this is a function and not one line at each door
-///
-/// [`InputContext::new`] seeds
-/// [`RecursionLimiter::PARSE_DEFAULT_DEPTH`](tokora::state::recursion_tracker::RecursionLimiter::PARSE_DEFAULT_DEPTH),
-/// and that seed is a number smear does not choose and upstream has already moved it twice — 64
-/// at the version this workspace shipped against, then 16, then 32, neither move announced by a
-/// compile error. A door that builds its own context and forgets `with_recursion_limiter` is
-/// therefore not a door with no budget; it is a door running under **whatever tokora currently
-/// defaults to**, with the caller's ceiling silently discarded and nothing on any channel saying
-/// so. tokora's own `sink_context` carries the same warning about the same constructor.
-///
-/// So there is one place that turns a ceiling into a context, and every door goes through it. The
-/// argument is a plain `usize` because this module is the dialect-generic substrate and may not
-/// name `smear-lexer`; clamping the caller's request against the stack-safety maximum happens on
-/// the other side of that line, in `LosslessLimits::parse_ceiling`.
-///
-/// # This is the whole ceiling, and it was not before
-///
-/// `descend` used to take a `ceiling` argument and refuse at `min(ceiling, limitation())`,
-/// because a lossless parse could not install a limiter at all and tokora's default could sit
-/// below the caller's request. `cst::parse_lossless_with_context` is the hook that removes the
-/// second number: the budget installed here IS what
-/// [`InputRef::descend`](tokora::InputRef::descend) checks against, so a refusal is the
-/// substrate's own trip rather than smear arithmetic that happens to agree with it.
-#[inline]
-pub fn lossless_context<E, C>(inner: E, cache: C, ceiling: usize) -> InputContext<E, C> {
-  InputContext::new(inner, cache).with_recursion_limiter(RecursionLimiter::with_limitation(ceiling))
-}
 
 /// A dialect error container that can name a refused descent.
 ///
@@ -334,6 +329,60 @@ pub trait FromNestingLimit {
   /// is consistency residue rather than a promise the API cannot keep, and narrowing it would be a
   /// further public-API removal on no finding at all.
   fn nesting_limit_exceeded(span: SimpleSpan, attempted: usize, limit: usize) -> Self;
+}
+
+/// A dialect error container that can name a refused **durable token budget** — smear issue #193.
+///
+/// [`FromNestingLimit`]'s twin on the other resource axis, and one method for the same reason: the
+/// payload is two plain numbers and a span, and the substrate may not put a type into a dialect's
+/// error enum.
+///
+/// # The refusal has no channel of its own, which is why this trait exists
+///
+/// A [`TokenBudget`](tokora::input::TokenBudget) refusal latches tokora's poison boundary and
+/// counts a scanner trip, so it travels the pipeline a lexer-side resource trip already travels —
+/// and tokora states plainly that *the one thing the refusal cannot do is report itself*. There is
+/// no diagnostic channel for it: a report would have to be built as the emitter's own error type,
+/// which needs a `From` bound tokora deliberately does not add to every consume path, so the item
+/// that would have exhausted the budget is refused **silently**.
+///
+/// Left there, a refused document is a `Parse` with a truncated tree, a gap-tiled tail and
+/// [`has_errors`](crate::lossless::runner::Parse::has_errors) answering `false` — indistinguishable
+/// from a document that parsed. Measured on this tree with the report planted away, over 400
+/// definitions of `type Tn { f: Int }` — a document every root here takes in silence — under a
+/// durable ceiling of 100: **0** diagnostics, and a tree covering the whole source.
+///
+/// The document matters and picking the wrong one hides the finding. `[ type ] ` x2000 — the shape
+/// the rest of this repair is measured on — reports its own grammar errors, so the same plant
+/// moves it from 3 diagnostics to 2 and the silence is invisible. The reading above is taken on a
+/// document every root accepts, where the refusal is the only thing there is to say.
+///
+/// So smear mints the diagnostic, at the one frame that can see the refusal without being able to
+/// miss it — `drain_unless_stopped`, whose own note carries where the reading is taken and why a
+/// baseline is subtracted from it.
+///
+/// **The value this builds must answer [`tokora::error::MaybeTerminal::is_terminal`] with `true`.**
+/// A budget that has refused is never cleared by more input — the tally is monotone and outside
+/// every rollback — so `false` here would be the arm tokora's rule calls spent silently. The bound
+/// is not on this trait, for [`FromNestingLimit`]'s reason: a constructor cannot state a property
+/// of what it returns. It rides the `lossless_production!` bundle's `Error: MaybeTerminal` clause,
+/// and the arm censuses in `smear-parser/src/*/error/tests/terminal.rs` assert it at the value.
+pub trait FromTokenBudget {
+  /// The parse's lexer produced `spent` items under a durable ceiling of `limit`, and the next one
+  /// was refused.
+  ///
+  /// `span` is empty and sits at the parse's committed end. That is the only honest position
+  /// available: tokora drops the refused item where it stands and publishes no span for it, so
+  /// there is no lexeme to point at — the same reason [`FromNestingLimit`] reports at an empty
+  /// span, arrived at from the other direction.
+  ///
+  /// `spent` is [`TokenBudgetTally::spent`](tokora::input::TokenBudgetTally::spent) at the refusal
+  /// and `limit` is the configured ceiling. They are equal at every refusal this crate can reach,
+  /// because the gate is `spent >= limit` and the charge saturates one item at a time — both are
+  /// passed anyway so a consumer's container is not forced to re-derive one from the other, and so
+  /// that a future charging site that skips more than one item does not silently change what the
+  /// diagnostic says.
+  fn token_budget_exhausted(span: SimpleSpan, spent: usize, limit: usize) -> Self;
 }
 
 /// Drains whatever a document production left uncommitted — unless the **error value** says the
@@ -409,6 +458,16 @@ pub trait FromNestingLimit {
 /// for a *lexer* error that `Err` **is** the delivery — the input layer advances its dedup
 /// watermark before calling, so the diagnostic is offered exactly once and dropping the `Err`
 /// would drop it. That is the case [`descend`] is careful to distinguish from its own.
+///
+/// # The skip is charged to the durable budget, and the frame above polls afterwards
+///
+/// `skip_while` lexes, so every item it crosses is a produce-event charged to the input's
+/// [`TokenBudget`](tokora::input::TokenBudget) — the tally no [`Checkpoint`](tokora::input::Checkpoint)
+/// refunds. This drain can therefore be the **first** reader of the input to meet a caller's
+/// ceiling, and tokora answers `Ok` on that terminal `Scan::Tripped`, so nothing in the value
+/// handed back says a refusal happened. [`drain_unless_stopped`] polls the tally again after
+/// calling this, for that reason and no other; its `The durable budget is asked twice` note
+/// carries the measurement and what the report may and may not displace.
 ///
 /// # What pins the early return, and the round it spent unpinned
 ///
@@ -943,6 +1002,162 @@ where
 /// that remains here is a **residual** rather than the verdict: not *did this root trip*, which is
 /// the question with the wrong span, but *did a trip reach this frame that no turn of this root
 /// judged*, which is the question the slot's latch makes answerable at all.
+///
+/// # The durable token budget is asked here too, and it is the one stop no arm above can see
+///
+/// A [`TokenBudget`](tokora::input::TokenBudget) refusal reaches the roots as **nothing at all**,
+/// and that is the finding rather than an implementation detail. tokora refuses the item silently
+/// (see [`FromTokenBudget`]), latches the poison boundary, and takes `scan_with`'s
+/// `Scan::Tripped` exit — so a root loop's next `peek_kind` answers `Ok(None)`, the `while` exits,
+/// and the root returns **`Ok`**. Nothing fails, nothing is classified, and no
+/// [`RootTurn`] arm is ever reached: measured with the report planted away, over 400 definitions
+/// of `type Tn { f: Int }` — a document every root here takes in silence — under a durable ceiling
+/// of 100, the parse returned a `Parse` with **0** diagnostics whose tree covered the whole
+/// source. So the roots as smear PR #189 left them do not resynchronise past the refusal — the
+/// boundary makes the tail unreachable — but they do not stop *on* it either. They complete, over
+/// a document the parse never read.
+///
+/// Neither of the two terms [`root_turn`] reads covers it, and each misses for its own reason:
+///
+/// * the resource-trip counter behind
+///   [`tripped_during_attempt`](tokora::InputRef::tripped_during_attempt) counts **descent**
+///   refusals. A scanner stop moves the scanner counter, which is a different cell, and tokora's
+///   snapshot pair for it is withdrawn for cause (al8n/tokora#311);
+/// * [`MaybeTerminal`] is asked of an error **value**, and on this path there is no `Err` to ask.
+///
+/// tokora's own root-loop example carries a third term for exactly this —
+/// `e.is_terminal() || inp.tripped_during_attempt(trips) || inp.at_scanner_stop()` — and
+/// [`at_scanner_stop`](tokora::InputRef::at_scanner_stop) is the published reading. It is not what
+/// this frame asks, and the difference is deliberate: that predicate is the **disjunction** of the
+/// budget's refusal and the positional poison boundary, and the boundary's other writer is the
+/// lexer's own limit trip, which already ends the document *with* a diagnostic on the channel.
+/// Reading the disjunction here would mint a second diagnostic for every lexer trip. So this frame
+/// reads the durable half alone,
+/// [`TokenBudgetTally::refused_an_item`](tokora::input::TokenBudgetTally::refused_an_item) — the
+/// bit tokora describes as *the one question a host that caught an unwind and concluded can still
+/// ask*, written at the refusal, carried by no [`Checkpoint`](tokora::input::Checkpoint), dropped
+/// by no state re-key, and lowered by nothing.
+///
+/// **The reading is not differenced against anything, and it used to be.** Round 1 took a baseline
+/// before the root ran and asked *did a refusal happen inside this frame*, on the reasoning that a
+/// sibling root under an earlier refusal must not re-report. Both halves of that went: the frame
+/// no longer reports at all, so there is nothing here to re-do; and a frame running under a
+/// refusal that predates it **should** stop, because the input is poisoned and every reader below
+/// it is reading a document that ended. The absolute reading is the right one for a stop for
+/// exactly the reason it was the wrong one for a report.
+///
+/// # The report has an owner, and it is not the value — smear issue #193, rounds 2 to 4
+///
+/// This frame **stops** and never emits. The dialect's door, generated by
+/// [`lossless_door!`](crate::lossless::lossless_door), is
+/// what emits. Three rounds arrived at that split and each of the two before it got the same thing
+/// wrong, so the wrong versions are kept here: they are a sequence, not three unrelated slips.
+///
+/// **Round 1 differenced the bit.** `refused_an_item` is *input-absolute and monotone*, so every
+/// frame whose baseline predates the refusal sees the same `false -> true`. Two nested drains both
+/// minted a diagnostic for one refusal: measured at **2** against a single drain's **1**, at every
+/// ceiling. The discipline was copied from [`root_turn`]'s witness without the thing that made it
+/// work — `trip_snapshot` returns a **counter**, and a counter's value is unique to the trip that
+/// moved it, so a difference over it names an owner. *A monotone boolean can say that something
+/// happened inside you; it can never say it happened to you rather than to a frame inside you.*
+///
+/// **Rounds 2 and 3 asked whether the value in hand is terminal.** `FromTokenBudget` requires the
+/// refusal to be terminal, so a frame handed a terminal `Err` concluded that some frame below it
+/// had already reported. That reads a fact about the **log** off a fact about the **value**, and
+/// Codex round 3 pulled the two apart in both directions:
+///
+/// * [`try_attempt`](tokora::InputRef::try_attempt) rolls back on `Err`, and `restore_unchecked`
+///   restores the cursor, the span, the lexer state, **the emitter**, `emitted_error_end`,
+///   `front_reported_end`, **the poison boundary** and the regime —
+///   [`Checkpoint`](tokora::input::Checkpoint) has no token-budget field, so the diagnostic is
+///   undone while `refused_an_item` stays set. The outer frame reads a terminal value that no
+///   longer stands for a report and stays silent;
+/// * a composed root that **catches** that terminal `Err` and returns an ordinary one keeps the
+///   diagnostic and loses the term, so the outer frame reports a second time.
+///
+/// Measured at the frame over four compositions of one refusal — direct, inside a rolled-back
+/// `try_attempt`, inside a committed one, and caught-and-replaced — the surviving diagnostic counts
+/// were **1, 0, 2, 2** before the repair and are **1, 1, 1, 1** after it
+/// (`the_report_has_an_owner_and_terminality_is_not_it`).
+///
+/// # What the two frames each answer
+///
+/// * *Does this frame keep reading?* A question about the **value in hand**, and this frame's, at
+///   any nesting depth. Both polls below are pure stops: they build the refusal through
+///   [`token_budget_stop`] and emit nothing. Repeating the stop at every level costs one value per
+///   level and no diagnostic at all, which is why nothing here has to know whether it is the
+///   outermost;
+/// * *has this parse said the refusal out loud?* A question about the **log**, answered once, by
+///   the door's own closure body, after every composition the parse contains and off the one cell
+///   nothing restores. [`lossless_door!`](crate::lossless::lossless_door)'s note carries why that
+///   position is the only one where neither direction can bite, and why the emission is generated
+///   into the dialect's module rather than living here.
+///
+/// **Two things the stop deliberately is not.** It is not `out.is_ok()`: a root that fails
+/// *ordinarily* while the budget also refused has to stop too, and that spelling would let it
+/// carry on. And it is not a new `is_this_the_budget_refusal` predicate on [`FromTokenBudget`] —
+/// tokora's ruling that *"read the error" is exactly the design this cell exists to replace* is
+/// about the **stop**, and the stop is still
+/// [`refused_an_item`](tokora::input::TokenBudgetTally::refused_an_item), which no caller
+/// implements, which no rollback lowers and which has no public mutator.
+///
+/// # Both polls, and why the second one exists — smear issue #193, round 2 (Codex round 2)
+///
+/// The first is **before the arm below and ahead of the root's own outcome**, because it outranks
+/// both. A root that returns `Ok` there did not parse the document — it ran out of the budget
+/// partway and saw an end of input that was not one, which is the exact reading `Parsed`'s "takes
+/// it at its word" arm must not take. A root that returns `Err` has a syntax error already
+/// reported at the point of failure, and the value is discarded rather than the report —
+/// [`descend`]'s `The emitted `Err` is dropped` note is the same trade at the other resource.
+///
+/// The second is **after the arm**, because the arm is not the end of this frame's reading. Two of
+/// the three arms call [`drain_unless_terminal`], whose `skip_while(|_| true)` lexes the whole tail
+/// against the **same durable tally** — and tokora answers `Ok` on the terminal `Scan::Tripped`, so
+/// without it this frame would hand up a value saying the document is fine. Measured before it
+/// existed, at `parse_executable_document_with_limits` over `query Q type T { f: Int }` — the
+/// executable root takes `query Q`, wants a selection set, is handed `type` and reports an ordinary
+/// syntax error at `8..12`:
+///
+/// | `max_produce_events` | tree tokens of 16 | diagnostics | refusals named |
+/// |---|---|---|---|
+/// | 0 – 4 | 1 – 5 | 1 | 1 — the root itself met the ceiling |
+/// | **5 – 14** | 6 – 15 | 1 | **0** |
+/// | 15 – 20 | 16 | 1 | 0, and none owed |
+///
+/// **The two arms that read nothing return ahead of it** — `EndsTheDocument`, and `Recoverable`
+/// carrying an unjudged trip — because a frame that read nothing more has nothing more to stop on.
+///
+/// **What the second poll can displace, measured rather than argued.**
+/// [`drain_unless_terminal`]'s note says a lexer error's `Err` out of `skip_while` *is* its
+/// delivery, so a stop that replaced one would drop a diagnostic rather than a value. It cannot:
+/// the two are exclusive within one `skip_while`, because whichever comes first ends the scan.
+/// Measured over an emitter that rejects `emit_lexer_error`, a tail whose thirteenth item does not
+/// lex, and every ceiling from 0 to 24 — 13 ceilings returned the refusal with the lexer error
+/// never offered, 12 returned the rejection with nothing refused, and **0** did both. On the
+/// ordinary `Recoverable` arm the stop does displace the root's syntax error, and that is the first
+/// poll's trade unchanged.
+///
+/// **The two polls are independently pinned, and one plant each.** Deleting
+/// the door's emission reddens every cell that counts a diagnostic and leaves every
+/// terminality assertion green; deleting the post-drain poll here reddens exactly the two cells
+/// whose refusal is first taken in a drain — on the **value**, `Ok(())` where `Err(Budget)`
+/// belongs, with the diagnostic count still **1** — and leaves all seven door cells green. That
+/// asymmetry is the split working: the report does not depend on the stop.
+///
+/// # The residual, stated — for a budget refusal there is none
+///
+/// Rounds 2 and 3 each carried one here, and both were consequences of inferring the report from
+/// the value: a root ending on a *different* terminal failure while the budget also refused, and a
+/// drain handing back a terminal non-budget value in the same situation, each got one diagnostic
+/// naming the other resource and none naming the budget. The door does not read the value
+/// at all, so both documents now get **one diagnostic per resource** — the descent refusal
+/// [`descend`] already emitted, and the budget refusal beside it. Nothing about a budget refusal is
+/// left unnamed.
+///
+/// What a wrong `is_terminal` arm on the budget refusal still costs is the other direction, and
+/// that is unchanged: one extra diagnostic per nesting level, on a container that has already
+/// broken the contract [`FromTokenBudget`] states.
+///
 #[inline]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn drain_unless_stopped<'inp, 'closure, L, Ctx, Lang, T, Root>(
@@ -953,7 +1168,7 @@ where
   Lang: ?Sized,
   L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseContext<'inp, L, Lang>,
-  ErrorOf<'inp, L, Ctx, Lang>: MaybeTerminal,
+  ErrorOf<'inp, L, Ctx, Lang>: MaybeTerminal + FromTokenBudget,
   Root: FnOnce(
     &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
     &mut RootStop,
@@ -963,20 +1178,40 @@ where
   // residue: the trips that happen inside this root that no `root_turn` of this root judges. See
   // `The witness is read again above the root`.
   let since = inp.trip_snapshot();
+  // THE DURABLE BUDGET'S BASELINE. It answers ONE question — did a refusal happen inside this
+  // frame at all — and it cannot answer the other one, which is whether this frame is the one
+  // that owns the report. See `The durable token budget is asked here too`.
   // MINTED, LENT AND SPENT HERE, AND NOWHERE ELSE. The three lines below are the whole
   // transaction: the slot this frame created, the root this frame ran, and the pairing of the
   // one against the other. None of the three steps is reachable on its own — see this function's
   // `It runs the root` note for what each separately spellable step bought a caller.
   let mut stop = RootStop::new();
   let out = root(inp, &mut stop);
+  // BEFORE THE ARM, AND AHEAD OF THE ROOT'S OWN OUTCOME. A refusal is a stop whatever the root
+  // returned, and on the shipped path the root returns `Ok` — the loop's peek answered `None`
+  // over a poisoned input and nothing failed. `out` is dropped rather than propagated: on `Ok` it
+  // is `()`, and on `Err` the failure was already reported at the point of failure, so what the
+  // drop costs is a value and not a report.
+  //
+  // A PURE STOP: it builds the value and emits nothing. Nothing here asks whether some frame
+  // below already reported, because that question has no answer a value can carry — see
+  // `The report has an owner, and it is not the value`. Repeating the stop at every nesting level
+  // costs one value per level and no diagnostic at all.
+  if inp.token_budget().refused_an_item() {
+    return Err(token_budget_stop(inp));
+  }
   // READ BEFORE THE SLOT IS SPENT, because spending consumes it. The conjunction is the scoping:
   // a trip an entry of this root already judged is subtracted, and what is left is a trip that
   // reached this frame unjudged.
   let unjudged_trip = !stop.a_classified_entry_saw_a_trip() && inp.tripped_during_attempt(since);
-  match stop.ending(out) {
+  // BOUND, NOT RETURNED. The two arms below run a further reader of this frame's input, and the
+  // poll after them is what covers it — see `The durable budget is asked twice`. The two arms
+  // that read nothing return here, ahead of that poll, because a frame that read nothing more
+  // has nothing more to report.
+  let out = match stop.ending(out) {
     // The root said it stopped. Nothing reads the tail, which is what makes the refusal one
     // diagnostic — `drain_unless_terminal`'s own note carries the count.
-    RootTurn::EndsTheDocument { error } => Err(error),
+    RootTurn::EndsTheDocument { error } => return Err(error),
     // The trait is still asked, on both remaining arms, by `drain_unless_terminal`: a terminal
     // value reaching a drain by a path no `root_turn` classified — a scanner stop, which moves no
     // descent counter — is the population it is alone on.
@@ -985,9 +1220,68 @@ where
     // says, for the reason `root_turn` reads the witness beside the trait at all — smear PR #189,
     // round 4. `Parsed` is deliberately not here: a root that returns `Ok` has said it parsed,
     // and ending a document on that word would be the false-stop direction.
-    RootTurn::Recoverable { error } if unjudged_trip => Err(error),
+    RootTurn::Recoverable { error } if unjudged_trip => return Err(error),
     RootTurn::Recoverable { error } => drain_unless_terminal(inp, Err(error)),
+  };
+  // AFTER THE DRAIN, WHICH IS THE ONE FURTHER READER THIS FRAME RUNS. `skip_while` lexes the tail
+  // against the same durable tally and tokora answers `Ok` on the terminal `Scan::Tripped`, so a
+  // refusal whose first occurrence was in there would otherwise leave this frame handing up a
+  // value that says the document is fine. The same pure stop as above, for the same reason.
+  if inp.token_budget().refused_an_item() {
+    return Err(token_budget_stop(inp));
   }
+  out
+}
+
+/// The right to hold a dialect's lossless **door**, held by exactly one type per dialect.
+///
+/// No methods, no members, and nothing reads it. Its only job is to be unimplementable twice:
+/// [`lossless_door!`](crate::lossless::lossless_door)'s expansion carries
+/// `impl DoorOwner for <that dialect's brand>`, so a second invocation naming the same dialect —
+/// anywhere in this crate — is a second impl of one trait for one type and fails with **E0119**
+/// before any test runs.
+///
+/// That is the round-7 half of smear issue #193. The door itself is generated into each dialect's
+/// own module, which is what keeps its report site private; what a macro cannot make private is
+/// *how many times it is invoked*, and coherence is the only thing in the language that answers
+/// that. Without it, an in-crate module could invoke the macro against the real dialect, obtain a
+/// private report function over the real `InputRef` type in its own module, and call it from a
+/// composed root inside the real parse — Codex round 4's forgery, one level up.
+///
+/// `smear/tests/lossless_isolation.rs` counts the invocations as the standing half; this is the
+/// compile-time half, and the two fail in different ways on purpose.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) trait DoorOwner {}
+
+/// The value that **stops** a frame on a durable token-budget refusal — built, never emitted.
+///
+/// [`drain_unless_stopped`]'s two polls hand this up, and a frame above may hand up another one
+/// built the same way; a stop repeated at every nesting level costs a value per level and no
+/// diagnostic at all, which is the whole reason the stop and the report are two functions.
+/// The dialect's door owns the emission, and **this module cannot make one** — round 7 moved the
+/// only `emit_error` of a budget refusal out of the substrate entirely.
+///
+/// All three readings — the committed end, `spent` and `limitation` — are taken in one frame, so
+/// a stop and the report beside it cannot describe different refusals.
+#[inline]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+fn token_budget_stop<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> ErrorOf<'inp, L, Ctx, Lang>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseContext<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: FromTokenBudget,
+{
+  // THE COMMITTED END. tokora drops the refused item where it stands and publishes no span for
+  // it, so this is the only position that describes anything real: the last byte the parse
+  // actually committed. See `FromTokenBudget::token_budget_exhausted`.
+  let end = inp.span().end();
+  let span = SimpleSpan::new(end, end);
+  let spent = inp.token_budget().spent();
+  let limit = inp.token_budget().limitation();
+  ErrorOf::<'inp, L, Ctx, Lang>::token_budget_exhausted(span, spent, limit)
 }
 
 /// Enters one level of parser recursion, or reports and refuses.

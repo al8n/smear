@@ -102,8 +102,8 @@ fn the_terminal_arms_answer_for_every_variant() {
         );
         cells += 1;
       })+)+
-      // A census that selected nothing exits `ok`. 9 = 7 variants + the two second samples.
-      assert_eq!(cells, 9, "the cell set collapsed");
+      // A census that selected nothing exits `ok`. 10 = 8 variants + the two second samples.
+      assert_eq!(cells, 10, "the cell set collapsed");
     };
   }
 
@@ -126,6 +126,10 @@ fn the_terminal_arms_answer_for_every_variant() {
     // Always: a frame budget is never cleared by more input. Through the constructor
     // `lossless::depth::descend` reaches the variant by, so the two cannot disagree.
     NestingLimitExceeded => [(Err::nesting_limit_exceeded(span).into_data(), true)],
+
+    // Always, and one scale more firmly than the frame budget above: the tally is outside every
+    // rollback, no public mutator lowers it, and it is the only thing a refused document reports.
+    TokenBudgetExhausted => [(Err::token_budget_exhausted(span).into_data(), true)],
 
     // Delegated: the value decides, not the variant. A production that ran out of input is a
     // grammar rejection; the same variant is terminal when the scanner raised the flag on it.

@@ -298,7 +298,7 @@ lossless_production! {
   ///
   /// Not resynchronising is not the same as not needing the verdict. Both failure arms propagate
   /// here, so the `match` below decides nothing the bare `?` did not; what it decides is decided
-  /// for [`executable_document_entry`]'s drain, and travels there in `stop`. That drain used to
+  /// for the door's drain, and travels there in `stop`. That drain used to
   /// re-derive the same fact from tokora's session counter — the only reason a root that never
   /// called [`depth::root_turn`](crate::lossless::depth::root_turn) was protected at all, and the
   /// same re-derivation that mistakes a *caught* early trip for a live one. The call adds a
@@ -327,23 +327,6 @@ lossless_production! {
       },
     )
     .parse_input(inp)
-  }
-
-  /// [`executable_document`] plus the drain, for the reason `document.rs`'s `document_entry`
-  /// carries one.
-  ///
-  /// This loop does not resynchronise — both failure arms propagate — so an `Err` reaching
-  /// [`parse_executable_document`](super::parse_executable_document) is the ordinary case rather
-  /// than the exotic one, and the tail it left uncommitted would be a
-  /// `FinishError::UncoveredGap` panic in materialization without this drain.
-  ///
-  /// Which makes this the root where a nesting refusal reaches the drain most directly, and the
-  /// reason the drain is
-  /// [`depth::drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped): a refusal must
-  /// not read the tail, and a refusal the caller's `MaybeTerminal` arm answers `false` for is
-  /// still a refusal — which is the half the input's trip witness answers, carried here in `stop`.
-  fn executable_document_entry<'inp, Src, Ctx>(inp) {
-    depth::drain_unless_stopped(inp, executable_document::<Src, Ctx>)
   }
 }
 
