@@ -493,15 +493,33 @@ macro_rules! lossless_error_impls {
     ///
     /// Every peek needs it: `InputRef::peek_kind` carries
     /// `Error: From<UnexpectedEot<L::Offset, Lang>>` as a where-clause, so the trivia atom set
-    /// cannot be used without it. The container's own error has an `unexpected_end_of_input`
-    /// constructor and the offset is the whole payload, so the conversion is total.
+    /// cannot be used without it.
+    ///
+    /// # The offset is not the whole payload — smear issue #177
+    ///
+    /// It used to be, and that was the defect. `UnexpectedEnd::is_terminal` says whether this end
+    /// of input stands in for a **terminal scanner stop** — a resource-limit trip, or the poison
+    /// boundary it latches — and tokora raises it at the attempt/decline leaves and the delimited
+    /// close, which is every peek this macro's dialects make. Both arms carry the same offset, so
+    /// dropping the flag made the two indistinguishable and landed a real stop on a variant whose
+    /// `MaybeTerminal` arm answers `false`: `root_turn` then classified it `Recoverable` and the
+    /// document root resynchronised past a parse the scanner had already given up on.
+    ///
+    /// This is the door **both** dialects' lossless layers reach, so the routing is written once
+    /// here; each dialect's syntactic twin in its own `error.rs` routes the same way, and its
+    /// `terminal_end_of_input` constructor is what makes this line dialect-generic.
     impl<S, Lang: ?Sized, Set: ::core::clone::Clone + 'static>
       ::core::convert::From<::tokora::error::UnexpectedEot<usize, Lang, Set>> for $errors<S>
     {
       #[inline]
       fn from(err: ::tokora::error::UnexpectedEot<usize, Lang, Set>) -> Self {
         let off = err.offset();
-        $value::unexpected_end_of_input(::tokora::SimpleSpan::new(off, off)).into()
+        let span = ::tokora::SimpleSpan::new(off, off);
+        if err.is_terminal() {
+          $value::terminal_end_of_input(span).into()
+        } else {
+          $value::unexpected_end_of_input(span).into()
+        }
       }
     }
 

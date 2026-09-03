@@ -112,7 +112,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(
-    match inp.try_expect_map(|token| {
+    match inp.try_expect_map_or_stop(|token| {
       (keyword_of(token.data()) == Some(ContextualKeyword::Where)).then_some(())
     })? {
       Some((_, token)) => ParseAttempt::Accept(token.span()),

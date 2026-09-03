@@ -56,7 +56,7 @@ definition_parser!(
   Location,
   [contextual],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) => match keyword_of(&token)
         .and_then(|keyword| classify_location(keyword, span))
       {

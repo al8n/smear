@@ -638,8 +638,8 @@ impl<S> IntOverflow<S> {
 ///
 /// No consumer can be told at build time that this vocabulary grew: making a downstream match
 /// untotal is the whole of what `#[non_exhaustive]` does. The notice does not disappear, it moves
-/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 22 variants
-/// wildcard-free in **every** configuration, so a twenty-third is `E0004` there before it can
+/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 25 variants
+/// wildcard-free in **every** configuration, so a twenty-sixth is `E0004` there before it can
 /// reach anybody, and it must carry a public producer before that test is green again.
 ///
 /// What survives outside the crate is the half a wildcard cannot swallow, and `smear-smoke`'s
@@ -810,8 +810,48 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>),
   /// An unexpected end was found in a schema extension.
   UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
-  /// An end of input was found.
+  /// A **genuine** end of input was found: the production asked for more and the document had
+  /// ended.
+  ///
+  /// The recoverable half of a pair — [`TerminalEndOfInput`](Self::TerminalEndOfInput) is the
+  /// other — and the split is smear issue #177. Only the offset separates the two in tokora's
+  /// value; only this enum can carry the separation into a [`MaybeTerminal`] arm.
   EndOfInput,
+  /// An end of input that stands in for a **terminal scanner stop** — smear issue #177.
+  ///
+  /// A resource-limit trip, or the poison boundary it latches, surfaced at a committed leaf or a
+  /// delimited close as the end-of-input error that leaf would have raised anyway. tokora marks
+  /// it — [`UnexpectedEnd::is_terminal`](tokora::error::UnexpectedEnd::is_terminal) — and the mark
+  /// is the *only* thing that separates it from
+  /// [`EndOfInput`](Self::EndOfInput): same carrier, same offset, opposite verdict. No input
+  /// clears a tripped limit, so a root that resynchronises past this one re-reads a document the
+  /// scanner has already given up on.
+  ///
+  /// **A variant and not a `bool` field on [`EndOfInput`](Self::EndOfInput)**, and the two reasons
+  /// point in opposite directions.
+  ///
+  /// *A field is the source-breaking option.* `#[non_exhaustive]` protects this enum against
+  /// **additions**; it does nothing for a variant that changes shape. `EndOfInput(bool)` makes
+  /// every downstream pattern spelling `ErrorData::EndOfInput` an `E0532`, in every configuration.
+  /// This variant breaks nothing, for the reason
+  /// [`NestingLimitExceeded`](Self::NestingLimitExceeded) broke nothing: every out-of-crate
+  /// exhaustive match already carries the wildcard the attribute forces, and a unit variant binds
+  /// no payload.
+  ///
+  /// *And a field is the one the gates read least well.* Three things key on this enum, and a
+  /// payload flip is visible to exactly one of them. `error_data_variant_census`'s generated `tag`
+  /// matches `ErrorData::$variant { .. }`, which fits a tuple variant and cannot see inside it —
+  /// that census says as much about itself. This impl's arm would become `Self::EndOfInput(t) =>
+  /// *t`, which compiles once and then forces no decision ever again. Only
+  /// `smear-parser/tests/enum_attribute_parity.rs`'s payload axis would notice. A variant is
+  /// `E0004` in both wildcard-free matches **and** a named row in that table.
+  ///
+  /// Reached only through the two `From<UnexpectedEot>` conversions — the syntactic one in this
+  /// file and the one `lossless_error_impls!` generates — each of which routes on
+  /// `err.is_terminal()`. [`Error::terminal_end_of_input`] is the constructor they and the census
+  /// share.
+  #[from(skip)]
+  TerminalEndOfInput,
   /// The parse tried to descend one level past the nesting budget.
   ///
   /// **A variant rather than an [`Other`](Self::Other) message, and the reason is that something
@@ -884,26 +924,46 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 ///   entry. A `false` here would not merely resynchronise past a refusal — it would run the drain
 ///   over a tail the input has already refused to lex, on the one carrier that reports nothing
 ///   else.
+/// * **`true`, always** — [`TerminalEndOfInput`](Self::TerminalEndOfInput). It exists to carry
+///   tokora's own mark, so answering anything else would discard the flag one layer later than the
+///   conversion used to.
 /// * **`true` when it holds a state refusal** — [`Lexer`](Self::Lexer). This is the arm the trait's
 ///   rule warns catches people, and smear is exactly the shape it warns about: the lossless keying
 ///   pins `StateError = LimitExceeded`, so `LexerErrorData::State` **is** a tripped
 ///   `smear_lexer::limits` budget. It is also where a scanner trip lands when the emitter *rejects*
 ///   its diagnostic — tokora constructs no `UnexpectedEnd` on that path, so nothing marks it and
-///   the arm is the only thing that can answer.
+///   this arm is what answers. It answers only for the keying that can *hold* the batch, which is
+///   the lossless one; the syntactic container pins `StateError = ()` and cannot, so its
+///   `From<LexerErrors>` reads the same `State` variant and routes to
+///   [`TerminalEndOfInput`](Self::TerminalEndOfInput) instead — one refusal, two carriers, one
+///   answer.
 /// * **`false`** — everything else, and each is affirmatively recoverable rather than merely
 ///   unclassified: they are built from a construct the **grammar** rejected, not from a limit the
-///   **runtime** refused.
+///   **runtime** refused. [`EndOfInput`](Self::EndOfInput) is now one of them affirmatively: it is
+///   the end of input tokora did *not* mark.
 ///
-/// # The one arm that is knowingly wrong, and why it is not repaired here
+/// # The arm that was knowingly wrong, and what closed it — smear issue #177
 ///
-/// [`EndOfInput`](Self::EndOfInput) answers `false`, and it can hold a terminal stop.
-/// `From<UnexpectedEot>` lands *every* end of input on it — the genuine kind and the scanner-stop
-/// kind alike — discarding the flag before this trait can read it, so the variant cannot tell them
-/// apart and neither can this arm. Answering `true` would re-raise every ordinary end of input and
-/// take recovery with it; the actual repair is to stop discarding the flag, which means splitting
-/// the variant and is a change to the diagnostic surface rather than to this impl. Recorded rather
-/// than papered over: this is a `false` arm on a stop that can be real, bounded to the one carrier
-/// that erases its own marker.
+/// [`EndOfInput`](Self::EndOfInput) used to answer `false` while being able to hold a terminal
+/// stop. `From<UnexpectedEot>` landed *every* end of input on it — the genuine kind and the
+/// scanner-stop kind alike — discarding
+/// [`UnexpectedEnd::is_terminal`](tokora::error::UnexpectedEnd::is_terminal) before this trait
+/// could read it, so the variant could not tell them apart and neither could the arm. What was
+/// recorded here was that flipping the arm is the wrong repair — it would re-raise every ordinary
+/// end of input and take recovery with it — and that the right one is to stop discarding the flag.
+///
+/// That is [`TerminalEndOfInput`](Self::TerminalEndOfInput). Both conversions route on the flag,
+/// the two ends of input are two variants, and this impl reads the variant as it does everywhere
+/// else.
+///
+/// **Keeping a mark is not the same as making one, and Codex's round 1 on that branch found the
+/// two places smear owed the second.** A flag can only be kept where tokora set it, and tokora
+/// sets it at the leaves it owns. Where *smear* decides — the `From<LexerErrors>` conversion a
+/// rejecting emitter reaches, and every committed read written as `next()` or a raw `peek`, whose
+/// tokora contract folds a trip into `None` — the mark had to be made rather than kept. Both are
+/// repaired: the conversion inspects `LexerErrorData::State` and routes here, and the committed
+/// reads are `next_or_stop` and `peek_head_map`, which raise the marked value the routing above
+/// then keeps. No residual is recorded against this impl now.
 impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, StateError> {
   fn is_terminal(&self) -> bool {
     // Wildcard-free ON PURPOSE. A variant added without an arm is an `E0004` here, which is the
@@ -915,6 +975,7 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
         .any(|e| matches!(e.data(), LexerErrorData::State(_))),
       Self::NestingLimitExceeded => true,
       Self::TokenBudgetExhausted => true,
+      Self::TerminalEndOfInput => true,
       Self::UnexpectedEndOfVariableValue(e) => e.is_terminal(),
       Self::UnexpectedEndOfObjectFieldValue(e) => e.is_terminal(),
       Self::UnexpectedEndOfObjectExtension(e) => e.is_terminal(),
@@ -1172,10 +1233,26 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self::new(span, ErrorData::UnknownOperationType(value))
   }
 
-  /// Creates an unexpected end of input error.
+  /// Creates an unexpected end of input error — the **genuine** kind.
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
     Self::new(span, ErrorData::EndOfInput)
+  }
+
+  /// Creates the end-of-input error that stands in for a **terminal scanner stop** — smear issue
+  /// #177.
+  ///
+  /// [`unexpected_end_of_input`](Self::unexpected_end_of_input)'s twin at the same position and
+  /// with the opposite [`MaybeTerminal`] answer. The producer
+  /// [`ErrorData::TerminalEndOfInput`] is reached through, for the two `From<UnexpectedEot>`
+  /// conversions and for the variant census, which may not name a variant directly.
+  ///
+  /// `span` is the one the ordinary end of input would have carried: tokora builds the marked
+  /// value at the same offset as the plain one, because the stop *is* the leaf's end of input as
+  /// far as position goes — what differs is whether more input could ever change the answer.
+  #[inline]
+  pub const fn terminal_end_of_input(span: Span) -> Self {
+    Self::new(span, ErrorData::TerminalEndOfInput)
   }
 
   /// Creates a parser-frame nesting refusal.
@@ -1453,13 +1530,24 @@ impl<S, Lang: ?Sized> From<TooFew<Span, Lang>> for GraphqlErrors<S> {
 // members tokora's `FromTokenErrors` bundle names: the default `&'static str` set the
 // `_or_stop` family raises, and the `&'static [Kind]` classification table a committed
 // dispatch driver feeds straight into the diagnostic.
+//
+// IT ROUTES ON THE FLAG — smear issue #177. `is_terminal()` is the one bit tokora attaches at the
+// attempt/decline leaves and the delimited close, and the offset is identical either way, so this
+// `if` is the whole of what keeps a scanner stop distinguishable from an end of input. Reading
+// only `offset()` here is what made `MaybeTerminal`'s `EndOfInput` arm a `false` on a stop that
+// can be real; the arm is now a decision about which variant this line chose.
 impl<S, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<usize, Lang, Set>>
   for GraphqlErrors<S>
 {
   #[inline]
   fn from(err: UnexpectedEot<usize, Lang, Set>) -> Self {
     let off = err.offset();
-    GraphqlError::unexpected_end_of_input(Span::new(off, off)).into()
+    let span = Span::new(off, off);
+    if err.is_terminal() {
+      GraphqlError::terminal_end_of_input(span).into()
+    } else {
+      GraphqlError::unexpected_end_of_input(span).into()
+    }
   }
 }
 
@@ -1488,11 +1576,54 @@ where
   }
 }
 
+// THE BATCH IS INSPECTED, NOT ERASED — smear issue #177, Codex round 1.
+//
+// This is the conversion tokora reaches when an emitter **rejects** a lexer diagnostic: the scan
+// propagates the emitter's own error, built from the lexer error, and no `UnexpectedEnd` is
+// constructed anywhere on that path — so nothing is marked and there is nothing for the
+// end-of-input routing above to keep. Landing the whole batch on `Other`, whose `MaybeTerminal`
+// arm is unconditionally `false`, therefore made a rejecting host's `Errors::is_terminal()` answer
+// `false` on a tripped `smear_lexer::limits` budget.
+//
+// `LexerErrorData::State` is the scanner's own stop kind and the only one of the ten that is: the
+// other nine are built from a lexeme the **grammar** rejected — a malformed literal, an unknown
+// character, an unterminated `...`, invalid UTF-8 — and each is recoverable. `State` is the
+// tracker refusing, which no further input clears. It is the same variant the
+// [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state refusal
+// cannot drift apart.
+//
+// # Why `TerminalEndOfInput` and not a payload-carrying variant of its own
+//
+// A `State` refusal means the scanner has stopped and this is the end of what it will hand over.
+// That is the event `TerminalEndOfInput` already names, and a consumer reading `is_terminal()`
+// must not be able to tell *who built the value* — tokora at a committed leaf when the emitter
+// accepted the diagnostic, or smear here when it rejected — because the fact about the document is
+// the same.
+//
+// A variant carrying the batch is not available at this keying anyway, which is what made this
+// impl erase in the first place: it is generic over the batch's `Char` and `StateError` while the
+// container pins its own (`char`, `()`), so `ErrorData::Lexer` does not typecheck here. The
+// lossless conversion `lossless_error_impls!` generates is pinned to `LexerErrors<char,
+// LimitExceeded>` and therefore keeps the payload; that one already routed correctly and is
+// unchanged. A new variant here would have to erase the payload too — it would be
+// `TerminalEndOfInput` under another name, with a census row and a parity row bought for nothing.
+//
+// The span is the batch's first, on **both** arms. `Span::new(0, 0)` pointed every lexer error at
+// byte zero, which is a position the error is not at; a `State` error minted through
+// `From<StateError> for LexerErrors` genuinely carries `0..0`, and that is the value's own
+// statement rather than this conversion's.
 impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlErrors<S> {
   #[inline]
-  fn from(_err: LexerErrors<Char, StateError>) -> Self {
+  fn from(err: LexerErrors<Char, StateError>) -> Self {
+    let span = err.iter().next().map_or(Span::new(0, 0), |e| e.span());
+    if err
+      .iter()
+      .any(|e| matches!(e.data(), LexerErrorData::State(_)))
+    {
+      return GraphqlError::terminal_end_of_input(span).into();
+    }
     GraphqlError::new(
-      Span::new(0, 0),
+      span,
       ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
     )
     .into()

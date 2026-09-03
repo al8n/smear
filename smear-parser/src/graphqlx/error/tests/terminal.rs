@@ -102,8 +102,8 @@ fn the_terminal_arms_answer_for_every_variant() {
         );
         cells += 1;
       })+)+
-      // A census that selected nothing exits `ok`. 10 = 8 variants + the two second samples.
-      assert_eq!(cells, 10, "the cell set collapsed");
+      // A census that selected nothing exits `ok`. 11 = 9 variants + the two second samples.
+      assert_eq!(cells, 11, "the cell set collapsed");
     };
   }
 
@@ -130,6 +130,11 @@ fn the_terminal_arms_answer_for_every_variant() {
     // Always, and one scale more firmly than the frame budget above: the tally is outside every
     // rollback, no public mutator lowers it, and it is the only thing a refused document reports.
     TokenBudgetExhausted => [(Err::token_budget_exhausted(span).into_data(), true)],
+
+    // Always: an end of input that stands in for a scanner stop is a stop, and no input clears a
+    // tripped limit — smear issue #177. Through the constructor both `From<UnexpectedEot>` impls
+    // route to when tokora's mark is set, so the conversion and the arm cannot disagree.
+    TerminalEndOfInput => [(Err::terminal_end_of_input(span).into_data(), true)],
 
     // Delegated: the value decides, not the variant. A production that ran out of input is a
     // grammar rejection; the same variant is terminal when the scanner raised the flag on it.
@@ -233,4 +238,413 @@ fn the_container_fold_keeps_a_stop_that_is_not_alone() {
     !Errs::default().is_terminal(),
     "an empty container holds no stop"
   );
+}
+
+/// A **real parse** reaches the marked end of input, and the split is what keeps the mark.
+///
+/// GraphQL's twin — `graphql/error/tests/terminal.rs`'s cell of this name — carries why a census
+/// over values cannot make this claim and why the emitter has to accept. It is a **pair on
+/// purpose** for the reason this file's header gives: the two conversions are two hand-written
+/// impls of one ruling, and this dialect's routes to a different variant on the unmarked arm than
+/// GraphQL's does, so a plant on the sibling proves the sibling.
+///
+/// The unmarked arm is where the dialects differ and it is asserted below: GraphQLx has no
+/// `EndOfInput` variant, so a genuine end of input arrives as an
+/// [`UnexpectedToken`](ErrorData::UnexpectedToken) with no found token. Both arms of one `From`
+/// impl, one offset, opposite verdicts.
+#[test]
+fn a_scanner_stop_reaches_this_dialect_marked_and_the_split_keeps_the_mark() {
+  use tokora::{
+    InputRef, ParserContext, cache::DefaultCache, emitter::Verbose, error::UnexpectedEot,
+    input::TokenBudget,
+  };
+
+  use crate::graphqlx::{GraphQLx, error::GraphqlxErrors, syntactic::GraphqlxLexer};
+
+  type Lx<'inp> = GraphqlxLexer<'inp, str>;
+  type Em<'inp> = Verbose<GraphqlxErrors<&'inp str>, Span, GraphQLx>;
+  type Cx<'inp> = ParserContext<'inp, Lx<'inp>, Em<'inp>, DefaultCache<'inp, Lx<'inp>>, GraphQLx>;
+
+  /// Walks the document a token at a time, peeking before each one — the shape every trivia atom
+  /// in this dialect has, reduced to the two calls that matter.
+  fn walk<'inp>(src: &'inp str, budget: usize) -> Result<(), GraphqlxErrors<&'inp str>> {
+    tokora::parse_with::<Lx<'inp>, str, _, (), Cx<'inp>, GraphQLx>(
+      |inp: &mut InputRef<'inp, '_, Lx<'inp>, Cx<'inp>, GraphQLx>| {
+        while inp.peek_kind()?.is_some() {
+          inp.next()?;
+        }
+        Ok(())
+      },
+      src,
+      ParserContext::of(Verbose::default()).with_token_budget(TokenBudget::with_limitation(budget)),
+    )
+  }
+
+  let src = "query A { a { b { c } } } query B { d } query C { e }";
+
+  let mut cells = 0usize;
+  for budget in [1usize, 2, 3, 4, 8, 12, 20] {
+    let errors = walk(src, budget).expect_err("the budget refuses an item well inside the source");
+    let error = errors
+      .iter()
+      .next()
+      .expect("the conversion emits exactly one error");
+    assert!(
+      matches!(error.data(), ErrorData::TerminalEndOfInput),
+      "budget={budget}: a scanner stop reached the conversion and came back as {:?} — the mark was \
+       discarded, which is the whole of smear issue #177",
+      error.data(),
+    );
+    assert!(
+      errors.is_terminal(),
+      "budget={budget}: the value a document root reads to decide whether to resynchronise"
+    );
+    cells += 1;
+  }
+  assert_eq!(cells, 7, "the cell set collapsed");
+
+  assert!(
+    walk(src, 10_000).is_ok(),
+    "a budget no parse reaches must not end anything"
+  );
+
+  // THE UNMARKED ARM, and this dialect's own spelling of it: an `UnexpectedToken` with no found
+  // token, which is what `Error::unexpected_end_of_input`'s note keeps as the single spelling of a
+  // genuine end of input across both layers.
+  let ordinary: GraphqlxErrors<&str> = UnexpectedEot::<usize, GraphQLx>::eot_of(11).into();
+  let ordinary = ordinary
+    .iter()
+    .next()
+    .expect("the conversion emits exactly one error");
+  assert!(
+    matches!(ordinary.data(), ErrorData::UnexpectedToken(t) if t.found().is_none()),
+    "an unmarked end of input must still be the recoverable spelling: {:?}",
+    ordinary.data(),
+  );
+  assert!(
+    !ordinary.is_terminal(),
+    "and must still answer `false`, or every recovery in the crate ends at the first short read"
+  );
+}
+
+/// The two places **smear** has to make the mark, rather than keep one tokora made — smear issue
+/// #177, Codex round 1.
+///
+/// GraphQL's twin — `graphql/error/tests/terminal.rs`'s cell of this name — carries the reasoning:
+/// a committed read written as `next()` or a raw `peek` folds a resource trip into the same
+/// `Ok(None)` a genuine end of input produces, and a lexer error a rejecting emitter hands back
+/// reaches the caller through `From<LexerErrors>` rather than through any `UnexpectedEnd`.
+///
+/// **It is a pair for the reason this file's header gives, and this dialect had one extra place to
+/// repair.** GraphQLx declares its own `syntactic::peek_kind` free function, which *shadows*
+/// tokora's terminal-aware method of that name and was written over a raw `peek`; five call sites
+/// read a scanner stop through it as "no head here". GraphQL has no such wrapper and calls
+/// tokora's directly, so a plant on the sibling would have proved nothing about this.
+#[test]
+fn the_marks_smear_has_to_make_itself_reach_the_caller() {
+  use smear_lexer::limits::SyntacticLimits;
+  use tokora::{
+    FatalContext, Parse as _, Parser, ParserContext, cache::DefaultCache, emitter::Verbose,
+    input::TokenBudget,
+  };
+
+  use crate::graphqlx::{
+    GraphQLx,
+    ast::{InputValue, IntValue, Name as AstName, Selection},
+    error::GraphqlxErrors,
+    syntactic::{GraphqlxInput, GraphqlxLexer},
+  };
+
+  type Lx<'inp> = GraphqlxLexer<'inp, str>;
+  type Fx<'inp> = FatalContext<'inp, Lx<'inp>, GraphqlxErrors<&'inp str>, GraphQLx>;
+  type Vx<'inp> = ParserContext<
+    'inp,
+    Lx<'inp>,
+    Verbose<GraphqlxErrors<&'inp str>, Span, GraphQLx>,
+    DefaultCache<'inp, Lx<'inp>>,
+    GraphQLx,
+  >;
+
+  fn fatal<'inp, O>(
+    f: impl for<'c> FnMut(
+      &mut GraphqlxInput<'inp, 'c, str, Fx<'inp>>,
+    ) -> Result<O, GraphqlxErrors<&'inp str>>,
+    src: &'inp str,
+    state: SyntacticLimits,
+  ) -> Result<O, GraphqlxErrors<&'inp str>> {
+    Parser::with_parser::<'inp, Lx<'inp>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(f)
+      .parse_str_with_state(src, state)
+  }
+
+  fn budgeted<'inp, O>(
+    f: impl for<'c> FnMut(
+      &mut GraphqlxInput<'inp, 'c, str, Vx<'inp>>,
+    ) -> Result<O, GraphqlxErrors<&'inp str>>,
+    src: &'inp str,
+    budget: usize,
+  ) -> Result<O, GraphqlxErrors<&'inp str>> {
+    Parser::with_parser_and_context::<'inp, Lx<'inp>, O, Vx<'inp>, _, GraphQLx>(
+      f,
+      ParserContext::of(Verbose::default()).with_token_budget(TokenBudget::with_limitation(budget)),
+    )
+    .parse_str(src)
+  }
+
+  let mut cells = 0usize;
+  for (what, errors) in [
+    (
+      "IntValue::graphqlx",
+      budgeted(|inp| IntValue::<_>::graphqlx(inp).map(|_| ()), "123", 0)
+        .expect_err("a budget of zero refuses the first item"),
+    ),
+    (
+      "Name::graphqlx",
+      budgeted(|inp| AstName::<_>::graphqlx(inp).map(|_| ()), "Foo", 0)
+        .expect_err("a budget of zero refuses the first item"),
+    ),
+    // THE HEAD-PEEK CLASS ON ITS OWN, and finding a door for it was a measurement. Every door
+    // above reaches the budget through a `next`, and at a ceiling of zero the very first read
+    // answers — so reverting either head peek left all of them green. This one refuses *after* the
+    // spread has been consumed, which is where `syntactic::peek_kind` and `unexpected_here` are,
+    // and it is the shallowest public production that gets there.
+    (
+      "Selection::graphqlx (after the spread)",
+      budgeted(
+        |inp| Selection::<_>::graphqlx(inp).map(|_| ()),
+        "...a::b",
+        1,
+      )
+      .expect_err("a ceiling of one item refuses the second"),
+    ),
+  ] {
+    let data = errors
+      .iter()
+      .next()
+      .expect("the conversion emits exactly one error")
+      .data();
+    assert!(
+      matches!(data, ErrorData::TerminalEndOfInput),
+      "{what}: a refused item reached a public production as {data:?} — the read folded the trip \
+       into an absence before the end-of-input routing could see it"
+    );
+    assert!(errors.is_terminal(), "{what}");
+    cells += 1;
+  }
+
+  assert!(
+    budgeted(|inp| IntValue::<_>::graphqlx(inp).map(|_| ()), "123", 8).is_ok(),
+    "a budget no parse reaches must not refuse anything"
+  );
+
+  for src in ["{ a: 1 }", "[1]", "(1)"] {
+    let errors = fatal(
+      |inp| InputValue::<_>::graphqlx(inp).map(|_| ()),
+      src,
+      SyntacticLimits::with_max_nesting_depth(0),
+    )
+    .expect_err("a nesting ceiling of zero refuses the first bracket");
+    let error = errors
+      .iter()
+      .next()
+      .expect("the conversion emits exactly one error");
+    assert!(
+      matches!(error.data(), ErrorData::TerminalEndOfInput),
+      "{src:?}: a rejected `State` refusal reached the caller as {:?}",
+      error.data()
+    );
+    assert!(errors.is_terminal(), "{src:?}");
+    assert_eq!(
+      (error.span().start(), error.span().end()),
+      (0, 1),
+      "{src:?}: the batch's first span, not `0..0`"
+    );
+    cells += 1;
+  }
+
+  for (src, end) in [("\u{1}", 1usize), ("\"unterminated", 13)] {
+    let errors = fatal(
+      |inp| InputValue::<_>::graphqlx(inp).map(|_| ()),
+      src,
+      SyntacticLimits::default(),
+    )
+    .expect_err("neither source lexes");
+    let error = errors
+      .iter()
+      .next()
+      .expect("the conversion emits exactly one error");
+    assert!(
+      matches!(error.data(), ErrorData::Other(note) if note == "lexer error"),
+      "{src:?}: a malformed lexeme is a grammar rejection, not a scanner stop: {:?}",
+      error.data()
+    );
+    assert!(!errors.is_terminal(), "{src:?}");
+    assert_eq!(
+      (error.span().start(), error.span().end()),
+      (0, end),
+      "{src:?}: the batch's first span"
+    );
+    cells += 1;
+  }
+
+  assert_eq!(cells, 8, "the cell set collapsed");
+}
+
+/// Every optional probe in this dialect raises the stop instead of reporting the thing absent —
+/// smear issue #177, Codex round 2.
+///
+/// # What round 2 missed, and the shape of the miss
+///
+/// Round 2's census was derived over the two primitive **names** round 1 had mentioned, `next` and
+/// a raw `peek`. `try_expect_map` folds a stop into the same `Ok(None)` those do — tokora says so
+/// in the primitive's own doc (`input_ref/try_expect.rs:262`) — and this dialect reaches it from
+/// ten places, every one of them an optional or attempt probe. `NamedSpecifier::graphqlx` on
+/// `Foo as Bar` therefore **succeeded, as a bare `Foo`**, when the budget landed on `as`: a
+/// truncated AST with no error at all, which is worse than the wrong error.
+///
+/// # The sweep is the assertion, and it is derived rather than picked
+///
+/// A cell at one chosen ceiling proves one arithmetic coincidence. Each row below is driven at
+/// **every** ceiling from zero up to the one at which the production first succeeds: the source is
+/// chosen so the production consumes all of it, so every ceiling below that is a real refusal
+/// somewhere inside the parse, and *every one of them* must come back terminal. The first
+/// succeeding ceiling is discovered, not written down, so a row cannot go vacuous by the grammar
+/// shifting under it — and it is asserted to be at least two, which is what makes the sweep
+/// non-empty.
+#[test]
+fn every_optional_probe_raises_the_stop_instead_of_declining() {
+  use tokora::{
+    Parse as _, Parser, ParserContext, cache::DefaultCache, emitter::Verbose, input::TokenBudget,
+  };
+
+  use crate::graphqlx::{
+    GraphQLx,
+    ast::{
+      DescribedExecutableDefinition, DirectiveDefinition, InterfaceTypeDefinition, NamedSpecifier,
+      Selection, WildcardSpecifier,
+    },
+    error::GraphqlxErrors,
+    syntactic::{GraphqlxInput, GraphqlxLexer},
+  };
+
+  type Lx<'inp> = GraphqlxLexer<'inp, str>;
+  type Vx<'inp> = ParserContext<
+    'inp,
+    Lx<'inp>,
+    Verbose<GraphqlxErrors<&'inp str>, Span, GraphQLx>,
+    DefaultCache<'inp, Lx<'inp>>,
+    GraphQLx,
+  >;
+
+  fn budgeted<'inp, O>(
+    f: impl for<'c> FnMut(
+      &mut GraphqlxInput<'inp, 'c, str, Vx<'inp>>,
+    ) -> Result<O, GraphqlxErrors<&'inp str>>,
+    src: &'inp str,
+    budget: usize,
+  ) -> Result<O, GraphqlxErrors<&'inp str>> {
+    Parser::with_parser_and_context::<'inp, Lx<'inp>, O, Vx<'inp>, _, GraphQLx>(
+      f,
+      ParserContext::of(Verbose::default()).with_token_budget(TokenBudget::with_limitation(budget)),
+    )
+    .parse_str(src)
+  }
+
+  /// Drives one door over every ceiling up to the first that lets it through, and returns that
+  /// ceiling. Panics naming the ceiling if any refusal below it came back non-terminal.
+  macro_rules! sweep {
+    ($label:literal, $src:literal, $probe:literal, $call:expr) => {{
+      let mut first_ok = None;
+      for budget in 0..48usize {
+        match budgeted($call, $src, budget) {
+          Ok(_) => {
+            first_ok = Some(budget);
+            break;
+          }
+          Err(errors) => {
+            let data = errors
+              .iter()
+              .next()
+              .expect("the conversion emits exactly one error")
+              .data();
+            assert!(
+              matches!(data, ErrorData::TerminalEndOfInput),
+              "{} at ceiling {budget}: the refusal reached the caller as {data:?}. The probe this \
+               row is about is `{}`, whose blind form folds the stop into `Ok(None)` and lets the \
+               production report the thing absent",
+              $label,
+              $probe,
+            );
+            assert!(errors.is_terminal(), "{} at ceiling {budget}", $label);
+          }
+        }
+      }
+      let first_ok = first_ok
+        .unwrap_or_else(|| panic!("{}: no ceiling under 48 let the production through", $label));
+      assert!(
+        first_ok >= 2,
+        "{}: the sweep covered only {first_ok} ceiling(s) — the source no longer reaches the \
+         probe, so this row asserts nothing",
+        $label
+      );
+      first_ok
+    }};
+  }
+
+  // `optional_alias`, the probe Codex named, through both import specifiers.
+  sweep!(
+    "NamedSpecifier::graphqlx",
+    "Foo as Bar",
+    "optional_alias / try_expect_map",
+    |inp| NamedSpecifier::<_>::graphqlx(inp).map(|_| ())
+  );
+  sweep!(
+    "WildcardSpecifier::graphqlx",
+    "* as Bar",
+    "optional_alias / try_expect_map",
+    |inp| WildcardSpecifier::<_>::graphqlx(inp).map(|_| ())
+  );
+  // `try_on` — the inline-fragment type condition.
+  sweep!(
+    "Selection::graphqlx (inline fragment)",
+    "... on T { a }",
+    "try_on / try_expect_map",
+    |inp| Selection::<_>::graphqlx(inp).map(|_| ())
+  );
+  // `try_where_clause`, and the `description` probe in front of it.
+  sweep!(
+    "InterfaceTypeDefinition::graphqlx",
+    "interface I where T: U { a: Int }",
+    "try_where_clause / try_expect_map",
+    |inp| InterfaceTypeDefinition::<_>::graphqlx(inp).map(|_| ())
+  );
+  // `try_contextual_keyword`, through the one optional keyword that reaches it.
+  sweep!(
+    "DirectiveDefinition::graphqlx",
+    "directive @d repeatable on FIELD",
+    "try_contextual_keyword / try_expect_map",
+    |inp| DirectiveDefinition::<_>::graphqlx(inp).map(|_| ())
+  );
+  // `try_description`, the executable-side optional description.
+  sweep!(
+    "DescribedExecutableDefinition::graphqlx",
+    "\"d\" query Q { a }",
+    "try_description / try_expect_map",
+    |inp| DescribedExecutableDefinition::<_>::graphqlx(inp).map(|_| ())
+  );
+
+  // ── THE CONTROLS: every probe must still report a genuinely absent thing as absent ──
+  let no_alias = budgeted(
+    |inp| NamedSpecifier::<_>::graphqlx(inp).map(|s| s.alias().is_some()),
+    "Foo",
+    64,
+  )
+  .expect("a bare specifier parses");
+  assert!(!no_alias, "a specifier with no `as` must have no alias");
+  let with_alias = budgeted(
+    |inp| NamedSpecifier::<_>::graphqlx(inp).map(|s| s.alias().is_some()),
+    "Foo as Bar",
+    64,
+  )
+  .expect("an aliased specifier parses");
+  assert!(with_alias, "a specifier with an `as` must have its alias");
 }

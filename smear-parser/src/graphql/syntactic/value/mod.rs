@@ -292,7 +292,7 @@ macro_rules! value_eot_parser {
 }
 
 value_parser!(int_value, inp, IntValue<GraphqlSlice<'inp, Src>>, [], {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(spanned) => {
       let (span, token) = spanned.into_components();
       match token {
@@ -305,7 +305,7 @@ value_parser!(int_value, inp, IntValue<GraphqlSlice<'inp, Src>>, [], {
 });
 
 value_parser!(float_value, inp, FloatValue<GraphqlSlice<'inp, Src>>, [], {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(spanned) => {
       let (span, token) = spanned.into_components();
       match token {
@@ -323,7 +323,7 @@ value_parser!(
   StringValue<GraphqlSlice<'inp, Src>>,
   [],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
         match token {
@@ -345,7 +345,7 @@ value_parser!(
   BooleanValue<GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
         match token.downcast_ref() {
@@ -365,7 +365,7 @@ value_parser!(
   NullValue<GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
         match token.downcast_ref() {
@@ -387,7 +387,7 @@ value_parser!(
   EnumValue<GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
         match token.downcast_ref() {
@@ -422,17 +422,19 @@ value_try_parser!(
   ParseAttempt<IntValue<GraphqlSlice<'inp, Src>>>,
   [],
   {
-    inp.try_expect(|t| t.data().is_lit_int()).map(|opt| {
-      opt
-        .map(|spanned| {
-          let (span, token) = spanned.into_components();
-          match token {
-            GraphqlToken::<'inp, Src>::LitInt(value) => IntValue::new(span, value),
-            other => unreachable!("unexpected token in try_int_value: {:?}", other),
-          }
-        })
-        .into()
-    })
+    inp
+      .try_expect_or_stop(|t| t.data().is_lit_int())
+      .map(|opt| {
+        opt
+          .map(|spanned| {
+            let (span, token) = spanned.into_components();
+            match token {
+              GraphqlToken::<'inp, Src>::LitInt(value) => IntValue::new(span, value),
+              other => unreachable!("unexpected token in try_int_value: {:?}", other),
+            }
+          })
+          .into()
+      })
   }
 );
 
@@ -442,14 +444,16 @@ value_try_parser!(
   ParseAttempt<FloatValue<GraphqlSlice<'inp, Src>>>,
   [],
   {
-    inp.try_expect(|t| t.data().is_lit_float()).map(|opt| {
-      opt
-        .map(|Spanned { span, data: token }| match token {
-          GraphqlToken::<'inp, Src>::LitFloat(value) => FloatValue::new(span, value),
-          other => unreachable!("unexpected token in try_float_value: {:?}", other),
-        })
-        .into()
-    })
+    inp
+      .try_expect_or_stop(|t| t.data().is_lit_float())
+      .map(|opt| {
+        opt
+          .map(|Spanned { span, data: token }| match token {
+            GraphqlToken::<'inp, Src>::LitFloat(value) => FloatValue::new(span, value),
+            other => unreachable!("unexpected token in try_float_value: {:?}", other),
+          })
+          .into()
+      })
   }
 );
 
@@ -460,7 +464,7 @@ value_try_parser!(
   [],
   {
     inp
-      .try_expect(|t| {
+      .try_expect_or_stop(|t| {
         matches!(
           t.data(),
           GraphqlToken::<'inp, Src>::LitInlineStr(_) | GraphqlToken::<'inp, Src>::LitBlockStr(_)
@@ -485,7 +489,7 @@ value_eot_parser!(
   [contextual],
   {
     inp
-      .try_expect_map(|t| {
+      .try_expect_map_or_stop(|t| {
         let token = t.into_data();
         match token.downcast_ref() {
           Some(ContextualKeyword::True) => Some(true),
@@ -508,7 +512,7 @@ value_eot_parser!(
   [contextual],
   {
     inp
-      .try_expect(|t| t.into_data().downcast_ref() == Some(ContextualKeyword::Null))
+      .try_expect_or_stop(|t| t.into_data().downcast_ref() == Some(ContextualKeyword::Null))
       .map(|opt| {
         opt
           .map(|Spanned { span, data: token }| match token {
@@ -527,7 +531,7 @@ value_eot_parser!(
   [contextual],
   {
     inp
-      .try_expect(|t| {
+      .try_expect_or_stop(|t| {
         let token = t.into_data();
         !matches!(
           token.downcast_ref(),
@@ -702,14 +706,15 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let off = *inp.offset();
-  let rejected = {
-    let mut peeked = inp.peek::<U1>()?;
-    match peeked.pop_front() {
-      Some(token) if accepts(token.token()) => return Ok(()),
-      Some(token) => Some((*token.span(), token.token().kind())),
+  // `peek_head_map`, not a raw `peek` — smear issue #177. The `None` arm below keeps its rich
+  // `UnexpectedEnd` hint for a document that genuinely ended; a scanner stop no longer reaches it,
+  // because `peek_head_map` raises the marked end-of-input error before the absence is decided.
+  let rejected =
+    match inp.peek_head_map(|token| (accepts(token.data), *token.span, token.data.kind()))? {
+      Some((true, ..)) => return Ok(()),
+      Some((false, span, kind)) => Some((span, kind)),
       None => None,
-    }
-  };
+    };
 
   match rejected {
     Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, expected, span).into()),
@@ -1000,23 +1005,25 @@ numeric_value_parser!(value_with, inp, N::Value, [contextual, delimited], {
     ParseAttempt::Accept(value) => Ok(value),
     ParseAttempt::Decline => {
       let off = *inp.offset();
-      let list = {
-        let mut peeked = inp.peek::<U1>()?;
-        match peeked.pop_front() {
-          Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBracket) => true,
-          Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBrace) => false,
-          Some(head) => {
-            return Err(
-              DialectGraphqlError::unexpected_token(
-                head.token().kind(),
-                Expectation::InputValue,
-                *head.span(),
-              )
-              .into(),
-            );
-          }
-          None => return Err(UnexpectedEot::eot_of(off).into()),
+      // `peek_head_map`, not a raw `peek`: this arm synthesises a plain `UnexpectedEot` on
+      // absence, and a scanner stop reaching it that way is exactly the false negative tokora's
+      // terminal-aware primitives exist for — smear issue #177, Codex round 1.
+      let list = match inp.peek_head_map(|head| {
+        (
+          matches!(head.data, GraphqlToken::<'inp, Src>::LBracket),
+          matches!(head.data, GraphqlToken::<'inp, Src>::LBrace),
+          head.data.kind(),
+          *head.span,
+        )
+      })? {
+        Some((true, _, _, _)) => true,
+        Some((_, true, _, _)) => false,
+        Some((_, _, kind, span)) => {
+          return Err(
+            DialectGraphqlError::unexpected_token(kind, Expectation::InputValue, span).into(),
+          );
         }
+        None => return Err(UnexpectedEot::eot_of(off).into()),
       };
 
       if list {
@@ -1102,23 +1109,26 @@ numeric_value_parser!(
       ParseAttempt::Accept(value) => Ok(value),
       ParseAttempt::Decline => {
         let off = *inp.offset();
-        let list = {
-          let mut peeked = inp.peek::<U1>()?;
-          match peeked.pop_front() {
-            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBracket) => true,
-            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBrace) => false,
-            Some(head) => {
-              return Err(
-                DialectGraphqlError::unexpected_token(
-                  head.token().kind(),
-                  Expectation::ConstInputValue,
-                  *head.span(),
-                )
+        // `peek_head_map`, not a raw `peek`: this arm synthesises a plain `UnexpectedEot` on
+        // absence, and a scanner stop reaching it that way is exactly the false negative tokora's
+        // terminal-aware primitives exist for — smear issue #177, Codex round 1.
+        let list = match inp.peek_head_map(|head| {
+          (
+            matches!(head.data, GraphqlToken::<'inp, Src>::LBracket),
+            matches!(head.data, GraphqlToken::<'inp, Src>::LBrace),
+            head.data.kind(),
+            *head.span,
+          )
+        })? {
+          Some((true, _, _, _)) => true,
+          Some((_, true, _, _)) => false,
+          Some((_, _, kind, span)) => {
+            return Err(
+              DialectGraphqlError::unexpected_token(kind, Expectation::ConstInputValue, span)
                 .into(),
-              );
-            }
-            None => return Err(UnexpectedEot::eot_of(off).into()),
+            );
           }
+          None => return Err(UnexpectedEot::eot_of(off).into()),
         };
 
         if list {

@@ -109,23 +109,29 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
-  let mut peeked = inp.peek::<U1>()?;
-  Ok(peeked.pop_front().and_then(|token| match token.token() {
-    GraphqlxToken::<'inp, Src>::LBrace => Some(ExecutableDefinitionHead::Shorthand),
-    token => match keyword_of(token) {
-      Some(ContextualKeyword::Query) => {
-        Some(ExecutableDefinitionHead::Operation(OperationHead::Query))
-      }
-      Some(ContextualKeyword::Mutation) => {
-        Some(ExecutableDefinitionHead::Operation(OperationHead::Mutation))
-      }
-      Some(ContextualKeyword::Subscription) => Some(ExecutableDefinitionHead::Operation(
-        OperationHead::Subscription,
-      )),
-      Some(ContextualKeyword::Fragment) => Some(ExecutableDefinitionHead::Fragment),
-      _ => None,
-    },
-  }))
+  // `peek_head_map`, not a raw `peek`: this classifier's `None` is its word for "the document ended
+  // here", and a window the scanner truncated is byte-for-byte one a short document produces —
+  // smear issue #177, Codex round 1.
+  Ok(
+    inp
+      .peek_head_map(|token| match token.data {
+        GraphqlxToken::<'inp, Src>::LBrace => Some(ExecutableDefinitionHead::Shorthand),
+        token => match keyword_of(token) {
+          Some(ContextualKeyword::Query) => {
+            Some(ExecutableDefinitionHead::Operation(OperationHead::Query))
+          }
+          Some(ContextualKeyword::Mutation) => {
+            Some(ExecutableDefinitionHead::Operation(OperationHead::Mutation))
+          }
+          Some(ContextualKeyword::Subscription) => Some(ExecutableDefinitionHead::Operation(
+            OperationHead::Subscription,
+          )),
+          Some(ContextualKeyword::Fragment) => Some(ExecutableDefinitionHead::Fragment),
+          _ => None,
+        },
+      })?
+      .flatten(),
+  )
 }
 
 /// Classifies an import-aware executable-document entry without consuming it.
@@ -145,28 +151,34 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
-  let mut peeked = inp.peek::<U1>()?;
-  Ok(peeked.pop_front().and_then(|token| match token.token() {
-    GraphqlxToken::<'inp, Src>::LBrace => Some(ImportOrExecutableHead::Executable(
-      ExecutableDefinitionHead::Shorthand,
-    )),
-    token => match keyword_of(token) {
-      Some(ContextualKeyword::Import) => Some(ImportOrExecutableHead::Import),
-      Some(ContextualKeyword::Query) => Some(ImportOrExecutableHead::Executable(
-        ExecutableDefinitionHead::Operation(OperationHead::Query),
-      )),
-      Some(ContextualKeyword::Mutation) => Some(ImportOrExecutableHead::Executable(
-        ExecutableDefinitionHead::Operation(OperationHead::Mutation),
-      )),
-      Some(ContextualKeyword::Subscription) => Some(ImportOrExecutableHead::Executable(
-        ExecutableDefinitionHead::Operation(OperationHead::Subscription),
-      )),
-      Some(ContextualKeyword::Fragment) => Some(ImportOrExecutableHead::Executable(
-        ExecutableDefinitionHead::Fragment,
-      )),
-      _ => None,
-    },
-  }))
+  // `peek_head_map`, not a raw `peek`: this classifier's `None` is its word for "the document ended
+  // here", and a window the scanner truncated is byte-for-byte one a short document produces —
+  // smear issue #177, Codex round 1.
+  Ok(
+    inp
+      .peek_head_map(|token| match token.data {
+        GraphqlxToken::<'inp, Src>::LBrace => Some(ImportOrExecutableHead::Executable(
+          ExecutableDefinitionHead::Shorthand,
+        )),
+        token => match keyword_of(token) {
+          Some(ContextualKeyword::Import) => Some(ImportOrExecutableHead::Import),
+          Some(ContextualKeyword::Query) => Some(ImportOrExecutableHead::Executable(
+            ExecutableDefinitionHead::Operation(OperationHead::Query),
+          )),
+          Some(ContextualKeyword::Mutation) => Some(ImportOrExecutableHead::Executable(
+            ExecutableDefinitionHead::Operation(OperationHead::Mutation),
+          )),
+          Some(ContextualKeyword::Subscription) => Some(ImportOrExecutableHead::Executable(
+            ExecutableDefinitionHead::Operation(OperationHead::Subscription),
+          )),
+          Some(ContextualKeyword::Fragment) => Some(ImportOrExecutableHead::Executable(
+            ExecutableDefinitionHead::Fragment,
+          )),
+          _ => None,
+        },
+      })?
+      .flatten(),
+  )
 }
 
 /// Refuses the shorthand operation in a position a description has already committed to.
@@ -217,7 +229,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(Spanned {
       span,
       data: GraphqlxToken::<'inp, Src>::Identifier(source),
@@ -293,7 +305,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(
-    match inp.try_expect_map(|token| {
+    match inp.try_expect_map_or_stop(|token| {
       matches!(
         token.data(),
         GraphqlxToken::<'inp, Src>::LitInlineStr(_) | GraphqlxToken::<'inp, Src>::LitBlockStr(_)

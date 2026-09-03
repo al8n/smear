@@ -11,7 +11,7 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
   Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
   Token,
-  cache::{Peeked, PeekedTokenExt},
+  cache::Peeked,
   parser::Action,
   span::Spanned,
   utils::{DowncastRef, typenum::U1},
@@ -95,33 +95,40 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
-  let mut peeked = inp.peek::<U1>()?;
-  Ok(peeked.pop_front().and_then(|token| match token.token() {
-    GraphqlxToken::<'inp, Src>::LitInlineStr(_) | GraphqlxToken::<'inp, Src>::LitBlockStr(_) => {
-      Some(DocumentHead::Description)
-    }
-    GraphqlxToken::<'inp, Src>::LBrace => Some(DocumentHead::Executable(
-      ExecutableDefinitionHead::Shorthand,
-    )),
-    token => match keyword_of(token) {
-      Some(ContextualKeyword::Import) => Some(DocumentHead::Import),
-      Some(ContextualKeyword::Extend) => Some(DocumentHead::Extension),
-      Some(keyword) if is_type_system_keyword(keyword) => Some(DocumentHead::TypeSystem(keyword)),
-      Some(ContextualKeyword::Query) => Some(DocumentHead::Executable(
-        ExecutableDefinitionHead::Operation(OperationHead::Query),
-      )),
-      Some(ContextualKeyword::Mutation) => Some(DocumentHead::Executable(
-        ExecutableDefinitionHead::Operation(OperationHead::Mutation),
-      )),
-      Some(ContextualKeyword::Subscription) => Some(DocumentHead::Executable(
-        ExecutableDefinitionHead::Operation(OperationHead::Subscription),
-      )),
-      Some(ContextualKeyword::Fragment) => {
-        Some(DocumentHead::Executable(ExecutableDefinitionHead::Fragment))
-      }
-      _ => None,
-    },
-  }))
+  // `peek_head_map`, not a raw `peek`: this classifier's `None` is its word for "the document ended
+  // here", and a window the scanner truncated is byte-for-byte one a short document produces —
+  // smear issue #177, Codex round 1.
+  Ok(
+    inp
+      .peek_head_map(|token| match token.data {
+        GraphqlxToken::<'inp, Src>::LitInlineStr(_)
+        | GraphqlxToken::<'inp, Src>::LitBlockStr(_) => Some(DocumentHead::Description),
+        GraphqlxToken::<'inp, Src>::LBrace => Some(DocumentHead::Executable(
+          ExecutableDefinitionHead::Shorthand,
+        )),
+        token => match keyword_of(token) {
+          Some(ContextualKeyword::Import) => Some(DocumentHead::Import),
+          Some(ContextualKeyword::Extend) => Some(DocumentHead::Extension),
+          Some(keyword) if is_type_system_keyword(keyword) => {
+            Some(DocumentHead::TypeSystem(keyword))
+          }
+          Some(ContextualKeyword::Query) => Some(DocumentHead::Executable(
+            ExecutableDefinitionHead::Operation(OperationHead::Query),
+          )),
+          Some(ContextualKeyword::Mutation) => Some(DocumentHead::Executable(
+            ExecutableDefinitionHead::Operation(OperationHead::Mutation),
+          )),
+          Some(ContextualKeyword::Subscription) => Some(DocumentHead::Executable(
+            ExecutableDefinitionHead::Operation(OperationHead::Subscription),
+          )),
+          Some(ContextualKeyword::Fragment) => {
+            Some(DocumentHead::Executable(ExecutableDefinitionHead::Fragment))
+          }
+          _ => None,
+        },
+      })?
+      .flatten(),
+  )
 }
 
 /// Consumes a string literal after deterministic document-head dispatch.
@@ -137,7 +144,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(Spanned {
       span,
       data: GraphqlxToken::<'inp, Src>::LitInlineStr(value),
@@ -167,7 +174,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(Spanned {
       span,
       data: GraphqlxToken::<'inp, Src>::Identifier(_),
