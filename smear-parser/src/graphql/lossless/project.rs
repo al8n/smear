@@ -908,10 +908,11 @@ fn open_node(node: Node<'_>, source: &str) -> Out<()> {
 /// a hole the parser left beside the document node rather than inside it — see
 /// [`reject_holes`].
 fn scan_holes(node: Node<'_>) -> Out<()> {
-  // `Gap` is a **token** kind, so `reject_holes` — which tests node kinds — can never match it and
-  // the arm is dead as written. It stays because what it names is the refusal's scope rather than
-  // a live branch: were the parser ever to tile a gap as a node, dropping the arm is what would
-  // let it through, and nothing else records that a gap has no AST image.
+  // `Gap` is a **token** kind, and this arm used to be dead for exactly that reason: `reject_holes`
+  // tested node kinds only, so every gap tile in a scanned subtree was walked past and the
+  // projection folded it into an enclosing extent as an ordinary non-trivia token. The arm was kept
+  // as a statement of the refusal's scope; al8n/smear#58 made the substrate's scan token-aware, so
+  // the statement is now a live branch and this door refuses a gap where it sits.
   reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
 }
 

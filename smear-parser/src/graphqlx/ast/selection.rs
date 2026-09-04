@@ -42,7 +42,7 @@ pub type SelectionSet<S, Span = SimpleSpan, Container = Nested<Selection<S, Span
   crate::selection::SelectionSet<Selection<S, Span>, Span, Container>;
 
 /// A GraphQLx selection.
-#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]

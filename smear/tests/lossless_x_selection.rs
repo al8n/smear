@@ -621,13 +621,29 @@ fn a_fragment_definition_needs_neither_generic_list() {
 }
 
 #[test]
-fn a_fragment_may_be_named_on_because_graphqlx_does_not_reserve_it() {
+fn a_fragment_may_not_be_named_on_here_either() {
+  // GraphQL spends a production on `FragmentName: Name but not on`, and GraphQLx forbids the same
+  // spelling — which it did not until al8n/smear#58, when `executable_definition_name` was still a
+  // plain `take_name`. The report consumes nothing, so the name still reaches the tree and
+  // `text()` still round-trips; what changed is the verdict, which is what gate 1 compares.
   let parse = parse_fragment_definition("fragment on on X { f }");
   assert!(
-    !parse.has_errors(),
-    "GraphQL spends a production on `FragmentName: Name but not on`; GraphQLx's \
-     `executable_definition_name` is a plain `take_name`, so the exclusion does not exist here \
-     and gate 1 compares verdicts"
+    parse.has_errors(),
+    "the excluded spelling has to be reported, or gate 1 has this document as GraphQL-invalid and \
+     GraphQLx-valid again"
+  );
+  assert_eq!(
+    parse.syntax().text().to_string(),
+    "fragment on on X { f }",
+    "the report consumes nothing, so every byte is still in the tree"
+  );
+
+  // The control: the exclusion is exactly `on`, and a *type* named `on` stays legal.
+  let ok = parse_fragment_definition("fragment F on on { f }");
+  assert!(
+    !ok.has_errors(),
+    "a type condition named `on` carries no exclusion; if it did, the pin above would be measuring \
+     something wider than the rule"
   );
 }
 

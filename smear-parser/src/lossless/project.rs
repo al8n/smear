@@ -1301,7 +1301,7 @@ pub fn verify_source_at<K>(
   walk(green, source.as_bytes(), &mut offset, MAX_GREEN_DEPTH).map_err(Depth::into_error)
 }
 
-/// Refuse a subtree that carries a node the AST has no image for, in preorder.
+/// Refuse a subtree that carries an element the AST has no image for, in preorder.
 ///
 /// The recovery-hole scan. `is_hole` names the kinds — a dialect's error and gap tiles — and the
 /// refusal reports the first one document order reaches, its parent's kind, and its byte range,
@@ -1312,6 +1312,23 @@ pub fn verify_source_at<K>(
 /// left as a sibling of that node — the shape smear #57 produces — is never a child of anything
 /// the walk descends into. A hole anywhere in the scanned subtree is a region with no AST image,
 /// and a projection that silently omitted one would be losing data under a success type.
+///
+/// # It tested node kinds only, and a gap tile is a token
+///
+/// Both dialects pass `Error | Gap` here and both spell `Gap` as a **token** image — bytes no
+/// committed token covered are tiled, not wrapped. So the arm that named it could never match, and
+/// each dialect's own `scan_holes` carried a comment saying the arm was dead as written and kept
+/// for its scope. That reading was half right: the arm was dead, and what it was dead *about* was
+/// not a shape the parser has yet to produce but the one it produces today.
+///
+/// What that cost is a hole the preflight declared absent. A gap beside otherwise complete children
+/// is folded by the projection's own walk as an ordinary non-trivia token — into the enclosing
+/// node's extent, silently — so a fail-fast door could answer `Ok` and a recovering one could
+/// answer *complete* over source bytes with no AST image at all, which is exactly the data loss
+/// under a success type the paragraph above says this pass exists to refuse.
+///
+/// So the scan is token-aware, and `is_hole` is asked of every element rather than of every node.
+/// A token has no children, so nothing else about the walk changes. al8n/smear#58.
 pub fn reject_holes<L: Language>(
   node: Node<'_, L>,
   is_hole: impl Fn(L::Kind) -> bool + Copy,
@@ -1348,8 +1365,21 @@ pub fn reject_holes<L: Language>(
     visiting = loop {
       match descent.take() {
         Some((left, parent, NodeOrToken::Node(child))) => break Some((left, parent, child)),
-        // A token has no kind this scan can refuse and no children to descend into.
-        Some((_, _, NodeOrToken::Token(_))) => {}
+        // A token has no children to descend into, and until al8n/smear#58 that was read as
+        // having no kind this scan could refuse either. A gap tile is a token image in both
+        // dialects, so this is where every one of them was walked past.
+        Some((_, parent, NodeOrToken::Token(token))) => {
+          let kind = token.kind();
+          if is_hole(kind) {
+            return Err(ProjectError::new(
+              ProjectErrorKind::UnexpectedChild {
+                parent,
+                found: kind,
+              },
+              to_range(token.text_range()),
+            ));
+          }
+        }
         None => break None,
       }
     };

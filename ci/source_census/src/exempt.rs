@@ -401,6 +401,93 @@ pub const EXEMPTIONS: &[Exemption] = &[
              al8n/smear#121, and it is stale here the day that happens.",
   },
   Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "project",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "project_executable_document",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "project_executable_document_recovered",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "project_type_system_document",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "project_type_system_document_recovered",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "Document::to_ast",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "ExecutableDocument::to_ast",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "TypeSystemDocument::to_ast",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_PROJECTION,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "Verified::new",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "The GraphQLx twin of the entry above, narrowed for its reason and not for a reason \
+             of its own: `Verified` STORES this parameter and the `project*_verified` doors \
+             re-slice what is stored, so the AST's source type is this signature's. Recorded \
+             separately because a table that named one dialect's door and not the other's would \
+             shrink by half the day one of them widened.",
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::project",
+    entry: "verify_parse",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "The GraphQLx twin of the vanilla dialect's `verify_parse`, over this dialect's \
+             `Parse` and answering the same substrate `Unverified`. Nothing in its own signature \
+             forces the type; it is recorded because widening it alone would let a caller prove a \
+             pair over `&[u8]` and then be unable to build the `Verified` the proof exists for.",
+  },
+  Exemption {
     module: "smear::parser::lossless::project",
     entry: "verify_source_counted",
     param: "source",
@@ -517,6 +604,22 @@ pub const EXEMPTIONS: &[Exemption] = &[
              around it — `[Foo!]!`. It comes out of the schema's own name arena, so it is this \
              crate's `&str` and not the caller's buffer. Test 3 does not acquit it because \
              `PackedType` is a `u32` bitfield with no source type to hold.",
+  },
+  // ── The lexer's whole-slice re-cook door, whose input is one token and not a document ────────
+  Exemption {
+    module: "smear::lexer::graphqlx",
+    entry: "identifier",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: "One token's slice, re-cooked: the CST → AST projection hands in the bytes under a \
+             single `Name` token and asks whether the shipped scanner reads exactly one \
+             identifier over all of them — the same whole-slice question `LitInt::try_from` and \
+             `LitFloat::try_from` answer beside it, which the census does not see only because \
+             they are trait impls. It is text by construction — the answer borrows it back as the \
+             name's payload, the same `&str` in and out — and the document it came from is already \
+             verified and sliced by the caller. Test 4 does not acquit it because a free function \
+             over one slice has no source type to hold.",
   },
   // ── §7.1.7 `extensions`, whose keys are the service's and not the document's ─────────────────
   Exemption {
