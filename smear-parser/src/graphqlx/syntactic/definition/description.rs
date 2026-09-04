@@ -11,7 +11,7 @@ definition_parser!(
   Option<StringValue<GraphqlxSlice<'inp, Src>>>,
   [],
   {
-    Ok(match inp.try_expect_map(|token| {
+    Ok(match inp.try_expect_map_or_stop(|token| {
       matches!(
         token.data(),
         GraphqlxToken::<'inp, Src>::LitInlineStr(_) | GraphqlxToken::<'inp, Src>::LitBlockStr(_)

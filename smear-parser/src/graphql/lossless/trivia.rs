@@ -168,6 +168,7 @@ where
   GraphqlLosslessLexer<'inp, Src>:
     Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
+  GraphqlLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
 {
   crate::lossless::trivia::eat_if(inp, kind)
 }
@@ -184,6 +185,7 @@ where
   GraphqlLosslessLexer<'inp, Src>:
     Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
+  GraphqlLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
 {
   crate::lossless::trivia::try_eat(inp, kind)
 }

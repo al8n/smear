@@ -499,7 +499,11 @@ where
   }
 
   let mark = inp.cst_mark();
-  if inp.try_expect(|_| true)?.is_some() {
+  // `_or_stop`: this is the one-token fallback that makes progress the helper's contract, and its
+  // `None` is "there is nothing left to eat". `try_expect(|_| true)` never declines against a real
+  // token, so its only `Ok(None)` is absence — or a terminal stop folded into it, which would have
+  // this helper report progress over a scanner that had already given up. smear issue #177.
+  if inp.try_expect_or_stop(|_| true)?.is_some() {
     inp.cst_start_at(mark, error_kind);
     inp.cst_finish(error_kind);
   }
@@ -850,7 +854,11 @@ where
   }
 
   let mark = inp.cst_mark();
-  if inp.try_expect(|_| true)?.is_some() {
+  // `_or_stop`: this is the one-token fallback that makes progress the helper's contract, and its
+  // `None` is "there is nothing left to eat". `try_expect(|_| true)` never declines against a real
+  // token, so its only `Ok(None)` is absence — or a terminal stop folded into it, which would have
+  // this helper report progress over a scanner that had already given up. smear issue #177.
+  if inp.try_expect_or_stop(|_| true)?.is_some() {
     inp.cst_start_at(mark, error_kind);
     inp.cst_finish(error_kind);
   }

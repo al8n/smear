@@ -122,18 +122,23 @@ pub fn graphql_parser(
 ///
 /// # What is left, and the two halves it is in
 ///
-/// - **Complete.** All 22 variants are still named below, so a dependent can still reach every one
-///   of them by name and a path that stops resolving still fails here. The arm the attribute
-///   forces returns `None` instead of a tag, so a variant nobody listed is a *reported* failure
-///   rather than a quiet fall-through into some neighbour's answer.
-/// - **Reachable.** [`error_data_variant_samples`] builds one value per variant through a public
-///   constructor, from outside the crate, and the test pairs each against the tag it must produce.
-///   The old probe never had this half: it proved 22 names *resolve*, not that a dependent can
-///   *produce* what they name.
+/// - **Complete.** 23 of the enum's 25 variants are named below, so a dependent can reach each of
+///   those by name and a path that stops resolving still fails here. The arm the attribute forces
+///   returns `None` instead of a tag, so a variant nobody listed is a *reported* failure rather
+///   than a quiet fall-through into some neighbour's answer. The two that are not named are
+///   `NestingLimitExceeded` and `TokenBudgetExhausted`: both are minted by machinery inside
+///   `smear-parser` rather than by anything a dependent calls, and this list has never covered
+///   them. **The completeness claim is `smear-parser`'s `error_data_variant_census`**, which is
+///   wildcard-free over all 25; what lives out here is that the ones a dependent names still
+///   resolve and still have a public producer.
+/// - **Reachable.** [`error_data_variant_samples`] builds one value per name below through a
+///   public constructor, from outside the crate, and the test pairs each against the tag it must
+///   produce. The old probe never had this half: it proved the names *resolve*, not that a
+///   dependent can *produce* what they name.
 ///
 /// # The compile-time notice, and where it went
 ///
-/// It is gone from here and cannot be brought back from outside `smear-parser`. A twenty-third
+/// It is gone from here and cannot be brought back from outside `smear-parser`. A further
 /// variant now compiles against this function, lands on the wildcard, and is caught at run time by
 /// `tests::the_error_data_variant_set_is_complete_and_reachable_from_outside_the_crate` — a
 /// `#[cfg(test)]` unit test, so a code span and not a link — only once somebody adds a sample for
@@ -174,6 +179,7 @@ pub fn error_data_variant_tag(
     ErrorData::UnexpectedEndOfUnionExtension(_) => "UnexpectedEndOfUnionExtension",
     ErrorData::UnexpectedEndOfSchemaExtension(_) => "UnexpectedEndOfSchemaExtension",
     ErrorData::EndOfInput => "EndOfInput",
+    ErrorData::TerminalEndOfInput => "TerminalEndOfInput",
     ErrorData::Other(_) => "Other",
     // The arm `#[non_exhaustive]` requires, and it must stay a `return None`. A tag here would
     // answer for a variant nobody read, on this arm's authority, and leave the run green while
@@ -199,7 +205,7 @@ pub fn error_data_variant_tag(
 pub fn error_data_variant_samples() -> [(
   &'static str,
   smear::parser::graphql::error::GraphqlError<&'static str>,
-); 22] {
+); 23] {
   use smear::{
     lexer::{
       graphql::{error::LexerErrors, syntactic::SyntacticTokenKind},
@@ -298,6 +304,13 @@ pub fn error_data_variant_samples() -> [(
       GraphqlError::unexpected_end_of_schema_extension(span, SchemaExtensionHint::Schema),
     ),
     ("EndOfInput", GraphqlError::unexpected_end_of_input(span)),
+    // The end of input that stands in for a terminal scanner stop — smear issue #177. A second
+    // public constructor beside the first, so a dependent can name the stop apart from the end of
+    // input, which is the whole of what the split bought outside the crate.
+    (
+      "TerminalEndOfInput",
+      GraphqlError::terminal_end_of_input(span),
+    ),
     // Not a constructor: `Other`'s only producers are the `From` conversions in `smear-parser`'s
     // error glue, and this is the cheapest of them to mint from out here.
     (

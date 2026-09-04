@@ -14,7 +14,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(Spanned { span, data: token }) => match keyword_of(&token) {
       Some(ContextualKeyword::Query) => Ok(super::super::ast::OperationType::Query(span)),
       Some(ContextualKeyword::Mutation) => Ok(super::super::ast::OperationType::Mutation(span)),

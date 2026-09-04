@@ -112,7 +112,7 @@ definition_parser!(
   Location,
   [contextual],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
         match token

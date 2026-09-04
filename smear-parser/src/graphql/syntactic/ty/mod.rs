@@ -9,8 +9,8 @@
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
-  Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
-  cache::PeekedTokenExt, span::Spanned, try_parse_input::ParseAttempt, utils::typenum::U1,
+  Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput, span::Spanned,
+  try_parse_input::ParseAttempt,
 };
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};
@@ -79,30 +79,27 @@ where
       ParseAttempt::Accept(core) => Ok(core),
       ParseAttempt::Decline => {
         let offset = *inp.offset();
-        {
-          let mut peeked = inp.peek::<U1>()?;
-          match peeked.pop_front() {
-            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBracket) => {}
-            Some(head) => {
-              return Err(
-                DialectGraphqlError::unexpected_token(
-                  head.token().kind(),
-                  Expectation::Type,
-                  *head.span(),
-                )
-                .into(),
-              );
-            }
-            None => {
-              return Err(
-                DialectGraphqlError::maybe_unexpected_token(
-                  None,
-                  Expectation::Type,
-                  SimpleSpan::new(offset, offset),
-                )
-                .into(),
-              );
-            }
+        // `peek_head_map`, not a raw `peek`: a truncated window and a short document are the
+        // same bytes — smear issue #177.
+        match inp.peek_head_map(|head| {
+          let opens_list = matches!(head.data, GraphqlToken::<'inp, Src>::LBracket);
+          (opens_list, head.data.kind(), *head.span)
+        })? {
+          Some((true, ..)) => {}
+          Some((false, kind, span)) => {
+            return Err(
+              DialectGraphqlError::unexpected_token(kind, Expectation::Type, span).into(),
+            );
+          }
+          None => {
+            return Err(
+              DialectGraphqlError::maybe_unexpected_token(
+                None,
+                Expectation::Type,
+                SimpleSpan::new(offset, offset),
+              )
+              .into(),
+            );
           }
         }
         list_type_core(inp)

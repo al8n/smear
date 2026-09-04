@@ -84,14 +84,14 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
-  let rejected = {
-    let mut peeked = inp.peek::<U1>()?;
-    match peeked.pop_front() {
-      Some(token) if accepts(token.token()) => return Ok(()),
-      Some(token) => Some((*token.span(), token.token().kind())),
+  // `peek_head_map`, not a raw `peek` — see the sibling phase helper. The predicate runs inside the
+  // closure so the head is still read exactly once.
+  let rejected =
+    match inp.peek_head_map(|token| (accepts(token.data), *token.span, token.data.kind()))? {
+      Some((true, ..)) => return Ok(()),
+      Some((false, span, kind)) => Some((span, kind)),
       None => None,
-    }
-  };
+    };
 
   match rejected {
     Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, expected, span).into()),
@@ -145,31 +145,28 @@ where
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
-  let mut peeked = inp.peek::<U1>()?;
-  Ok(match peeked.pop_front() {
-    Some(token) => {
-      let span = *token.span();
-      let kind = token.token().kind();
-      let token = token.token();
-      let head = match token.downcast_ref() {
-        Some(ContextualKeyword::Query) => Some(ExecutableHead::Operation(OperationHead::Query)),
-        Some(ContextualKeyword::Mutation) => {
-          Some(ExecutableHead::Operation(OperationHead::Mutation))
-        }
-        Some(ContextualKeyword::Subscription) => {
-          Some(ExecutableHead::Operation(OperationHead::Subscription))
-        }
-        Some(ContextualKeyword::Fragment) => Some(ExecutableHead::Fragment),
-        _ if matches!(token, GraphqlToken::<'inp, Src>::LBrace) => Some(ExecutableHead::Shorthand),
-        _ => None,
-      };
-      match head {
-        Some(head) => ClassifiedExecutableHead::Accepted(head, span, kind),
-        None => ClassifiedExecutableHead::Rejected(Some((span, kind))),
+  // `peek_head_map`, not a raw `peek`: `Rejected(None)` is this classifier's word for "the
+  // document ended here", and a truncated window is the same bytes as one — smear issue #177.
+  let classified = inp.peek_head_map(|peeked| {
+    let span = *peeked.span;
+    let token = peeked.data;
+    let kind = token.kind();
+    let head = match token.downcast_ref() {
+      Some(ContextualKeyword::Query) => Some(ExecutableHead::Operation(OperationHead::Query)),
+      Some(ContextualKeyword::Mutation) => Some(ExecutableHead::Operation(OperationHead::Mutation)),
+      Some(ContextualKeyword::Subscription) => {
+        Some(ExecutableHead::Operation(OperationHead::Subscription))
       }
+      Some(ContextualKeyword::Fragment) => Some(ExecutableHead::Fragment),
+      _ if matches!(token, GraphqlToken::<'inp, Src>::LBrace) => Some(ExecutableHead::Shorthand),
+      _ => None,
+    };
+    match head {
+      Some(head) => ClassifiedExecutableHead::Accepted(head, span, kind),
+      None => ClassifiedExecutableHead::Rejected(Some((span, kind))),
     }
-    None => ClassifiedExecutableHead::Rejected(None),
-  })
+  })?;
+  Ok(classified.unwrap_or(ClassifiedExecutableHead::Rejected(None)))
 }
 
 /// Builds an operation type from a head already classified by executable
@@ -225,7 +222,7 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   guard_executable_phase(inp, Expectation::Name, |token| token.is_identifier())?;
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(spanned) => {
       let (span, token) = spanned.into_components();
       match token {
@@ -255,7 +252,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(spanned) => {
       let (span, token) = spanned.into_components();
       match token {
@@ -290,13 +287,12 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let has_name = {
-    let mut peeked = inp.peek::<U1>()?;
-    matches!(
-      peeked.pop_front(),
-      Some(token) if matches!(token.token(), GraphqlToken::<'inp, Src>::Identifier(_))
-    )
-  };
+  // `peek_head_map`, not a raw `peek`. The name here is genuinely optional, so `Ok(None)` is a
+  // legal answer for a document that ended — but not for one the scanner stopped reading, where
+  // "there is no name" is a grammar fact the input does not support. smear issue #177.
+  let has_name = inp
+    .peek_head_map(|token| matches!(token.data, GraphqlToken::<'inp, Src>::Identifier(_)))?
+    .unwrap_or(false);
   if has_name {
     let (span, source) = take_classified_identifier(inp, Expectation::Name)?;
     Ok(Some(Name::new(span, source)))
@@ -317,7 +313,7 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   guard_executable_phase(inp, Expectation::Dollar, |token| token.is_dollar())?;
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(spanned) => Ok(spanned.into_span()),
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
   }
@@ -335,7 +331,7 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   guard_executable_phase(inp, Expectation::Colon, |token| token.is_colon())?;
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(_) => Ok(()),
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
   }
@@ -356,7 +352,7 @@ where
   guard_executable_phase(inp, Expectation::Keyword("fragment"), |token| {
     token.downcast_ref() == Some(ContextualKeyword::Fragment)
   })?;
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(spanned) => Ok(Fragment::new(spanned.into_span())),
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
   }

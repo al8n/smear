@@ -21,7 +21,7 @@ where
         Some(ContextualKeyword::True | ContextualKeyword::False | ContextualKeyword::Null)
       )
   })?;
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(spanned) => {
       let (span, token) = spanned.into_components();
       match token {

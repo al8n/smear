@@ -15,7 +15,7 @@ use smear_lexer::{
 use tokora::{
   Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, ParseTokenChoice, SimpleSpan,
   Slice, Source, TryParseInput,
-  cache::{Peeked, PeekedTokenExt},
+  cache::Peeked,
   parser::Action,
   span::Spanned,
   try_parse_input::ParseAttempt,
@@ -80,12 +80,11 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
-  let rejected = {
-    let mut peeked = inp.peek::<U1>()?;
-    peeked
-      .pop_front()
-      .map(|token| (*token.span(), token.token().kind()))
-  };
+  // `peek_head_map`, not a raw `peek`: a window the scanner truncated is byte-for-byte a window a
+  // short document produces, and reading the first as the second reports a stop as an absent token
+  // — smear issue #177, Codex round 1. The terminal end-of-input error it raises instead carries
+  // tokora's mark into this dialect's `TerminalEndOfInput`.
+  let rejected = inp.peek_head_map(|token| (*token.span, token.data.kind()))?;
 
   match rejected {
     Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, expected, span).into()),
@@ -332,7 +331,7 @@ where
         unreachable!("fused spread arm received a non-spread token");
       }
 
-      let name = inp.try_expect_map(|token| {
+      let name = inp.try_expect_map_or_stop(|token| {
         let token = token.into_data();
         matches!(token, GraphqlToken::<'inp, Src>::Identifier(_)).then(|| {
           <GraphqlToken<'inp, Src> as DowncastRef<ContextualKeyword>>::downcast_ref(token)
@@ -359,16 +358,18 @@ where
           _ => unreachable!("identifier expectation consumed a non-identifier token"),
         },
         None => {
-          let untyped = {
-            let mut peeked = inp.peek::<U1>()?;
-            match peeked.pop_front() {
-              Some(token) => matches!(
-                token.token(),
+          // `peek_head_map`, not a raw `peek` — smear issue #177. `false` here routes to
+          // `expected_selection_phase`, which is itself a head read, so a stop would have been
+          // re-met there; raising it at the read that decides is what keeps the diagnostic the
+          // stop's rather than the phase's.
+          let untyped = inp
+            .peek_head_map(|token| {
+              matches!(
+                token.data,
                 GraphqlToken::<'inp, Src>::At | GraphqlToken::<'inp, Src>::LBrace
-              ),
-              None => false,
-            }
-          };
+              )
+            })?
+            .unwrap_or(false);
           if untyped {
             untyped_inline_fragment_after_spread(inp, span.start()).map(Selection::InlineFragment)
           } else {

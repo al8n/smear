@@ -69,14 +69,14 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
-  let rejected = {
-    let mut peeked = inp.peek::<U1>()?;
-    match peeked.pop_front() {
-      Some(token) if accepts(token.token()) => return Ok(()),
-      Some(token) => Some((*token.span(), token.token().kind())),
+  // `peek_head_map`, not a raw `peek` — see the sibling phase helper. The predicate runs inside the
+  // closure so the head is still read exactly once.
+  let rejected =
+    match inp.peek_head_map(|token| (accepts(token.data), *token.span, token.data.kind()))? {
+      Some((true, ..)) => return Ok(()),
+      Some((false, span, kind)) => Some((span, kind)),
       None => None,
-    }
-  };
+    };
 
   match rejected {
     Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, expected, span).into()),

@@ -661,6 +661,7 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
       "UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>)",
       "UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>)",
       "EndOfInput",
+      "TerminalEndOfInput",
       "NestingLimitExceeded",
       "TokenBudgetExhausted",
       "Other(std::borrow::Cow<'static, str>)",
@@ -682,9 +683,23 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
        carries no payload a match arm could bind. It exists because tokora refuses a durable \
        `TokenBudget` **silently** — the refusal has no diagnostic channel — so this variant is \
        the whole of what a refused document reports, and its `MaybeTerminal` arm is what keeps \
-       the drain above a root off a tail the input has already refused to lex. The other 21 \
+       the drain above a root off a tail the input has already refused to lex. (4) \
+       `TerminalEndOfInput` is NEW, added by smear issue #177. Not source-breaking either, and a \
+       unit variant for the same reason. It exists because tokora marks the end-of-input error it \
+       raises at a committed leaf when that end of input stands in for a terminal scanner stop \
+       (`UnexpectedEnd::is_terminal`), and both `From<UnexpectedEot>` conversions used to read \
+       only the offset — landing a real stop on `EndOfInput`, whose `MaybeTerminal` arm answers \
+       `false`, which is a document root resynchronising past a parse the scanner had already \
+       given up on. A VARIANT AND NOT A `bool` FIELD ON `EndOfInput`, on two counts. A field is \
+       the SOURCE-BREAKING option — `#[non_exhaustive]` covers additions, not a variant that \
+       changes shape, so `EndOfInput(bool)` is an `E0532` at every downstream \
+       `ErrorData::EndOfInput` pattern in every configuration. And a field is the one the gates \
+       read least well: `error_data_variant_census`'s `tag` matches `$variant { .. }`, which fits \
+       a tuple variant and cannot see inside it, and the `MaybeTerminal` arm would become \
+       `EndOfInput(t) => *t`, which compiles once and forces no decision again — THIS TABLE'S \
+       payload axis would be the only reader that noticed. The other 21 \
        lines above are the merge base's, unedited, and repeating \
-       them is the point — this entry approves three named changes, not the enum.",
+       them is the point — this entry approves four named changes, not the enum.",
   },
   Recorded {
     file: "src/graphql/error.rs",
@@ -887,6 +902,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // is that one variant, the enum count unmoved, and the recorded row below carries why.
   // `fix/durable-token-budget` then added `ErrorData::TokenBudgetExhausted`: 140 -> 141, the same
   // shape one resource along, and the same recorded row carries it (smear issue #193).
+  // `fix/terminal-end-of-input` then added `ErrorData::TerminalEndOfInput`: 141 -> 142, one unit
+  // variant again, and the same recorded row carries it (smear issue #177).
   assert_eq!(
     found.len(),
     16,
@@ -897,8 +914,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   );
   let variants_read: usize = found.iter().map(|enum_| enum_.variants.len()).sum();
   assert_eq!(
-    variants_read, 141,
-    "the scan read {variants_read} variant(s) out of 16 enums, expected 141 — an enum gained or \
+    variants_read, 142,
+    "the scan read {variants_read} variant(s) out of 16 enums, expected 142 — an enum gained or \
      lost one, or `read_variants` stopped seeing them",
   );
 

@@ -192,6 +192,26 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   UnexpectedToken(UnexpectedToken<T, Exp>),
   /// A production reached end of input unexpectedly.
   UnexpectedEnd(UnexpectedEnd<Exp>),
+  /// An end of input that stands in for a **terminal scanner stop** — smear issue #177.
+  ///
+  /// GraphQL's twin carries the reasoning and the shape: a resource-limit trip, or the poison
+  /// boundary it latches, surfaces at a committed leaf as the end-of-input error that leaf would
+  /// have raised anyway, and tokora's
+  /// [`is_terminal`](tokora::error::UnexpectedEnd::is_terminal) mark is the only thing separating
+  /// the two. The dialect difference is which spelling this sits beside: GraphQLx has no
+  /// `EndOfInput` variant, deliberately (see [`Error::unexpected_end_of_input`]), so a *genuine*
+  /// end of input arrives here as an [`UnexpectedToken`](Self::UnexpectedToken) with no found
+  /// token.
+  ///
+  /// **That deliberate absence is not an argument against this variant, and its own note says
+  /// why.** What it refuses is a second spelling of *one* event across two layers of one dialect —
+  /// a difference no consumer could act on and every consumer would have to handle. A scanner stop
+  /// is a different event: it answers the opposite question about whether the parse may continue,
+  /// both layers reach it through the same conversion, and its reader is the parser itself rather
+  /// than a consumer. One spelling per event is what that note asks for, and this is the second
+  /// event.
+  #[from(skip)]
+  TerminalEndOfInput,
   /// The parse tried to descend one level past the nesting budget.
   ///
   /// A variant rather than an [`Other`](Self::Other) message for the reason GraphQL's twin
@@ -220,18 +240,24 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 
 /// Which of these errors **end the parse** rather than being something to recover from.
 ///
-/// GraphQL's twin carries the reasoning, the rule each arm came from, and the one arm that is
-/// knowingly wrong. This dialect's variant set is narrower and every arm is the same ruling:
-/// [`UnexpectedEnd`] delegates, [`NestingLimitExceeded`](Self::NestingLimitExceeded) and
-/// [`TokenBudgetExhausted`](Self::TokenBudgetExhausted) are always
-/// terminal, and [`Lexer`](Self::Lexer) is terminal when it holds a `State` refusal — the arm
-/// tokora's rule warns catches people, and the one a scanner trip lands on unmarked when the
-/// emitter rejects its diagnostic.
+/// GraphQL's twin carries the reasoning and the rule each arm came from. This dialect's variant
+/// set is narrower and every arm is the same ruling: [`UnexpectedEnd`] delegates,
+/// [`NestingLimitExceeded`](Self::NestingLimitExceeded),
+/// [`TokenBudgetExhausted`](Self::TokenBudgetExhausted) and
+/// [`TerminalEndOfInput`](Self::TerminalEndOfInput) are always terminal, and
+/// [`Lexer`](Self::Lexer) is terminal when it holds a `State` refusal — the arm tokora's rule warns
+/// catches people, and the one a scanner trip lands on unmarked when the emitter rejects its
+/// diagnostic. That arm answers only for the keying that can hold the batch; the syntactic
+/// container pins `StateError = ()`, so its `From<LexerErrors>` reads the same `State` variant and
+/// routes to [`TerminalEndOfInput`](Self::TerminalEndOfInput) instead.
 ///
 /// GraphQLx has **no `EndOfInput` variant**, deliberately (see
-/// [`Error::unexpected_end_of_input`]), so the residual GraphQL records does not exist here in
-/// that shape: an end of input arrives as `UnexpectedToken` with no found token, which is
-/// affirmatively a grammar rejection.
+/// [`Error::unexpected_end_of_input`]): a genuine end of input arrives as `UnexpectedToken` with
+/// no found token, which is affirmatively a grammar rejection. The residual GraphQL used to record
+/// — an end of input that could be a stop, on a variant that could not say so — took a different
+/// shape here for that reason, and smear issue #177 closed both with the same split: the
+/// conversion routes on tokora's mark and the marked case is its own variant, which is the one
+/// added above.
 impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, StateError> {
   fn is_terminal(&self) -> bool {
     // Wildcard-free ON PURPOSE: a variant added without an arm is an `E0004` here.
@@ -243,6 +269,9 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       // A budget the input has already refused against is never cleared by more input: the tally
       // is monotone, no `Checkpoint` carries it and no public mutator lowers it.
       Self::TokenBudgetExhausted => true,
+      // Neither is a scanner stop, and this arm is what stops the conversion's routing from being
+      // discarded one layer later.
+      Self::TerminalEndOfInput => true,
       Self::UnexpectedEnd(e) => e.is_terminal(),
       Self::Unclosed(_) | Self::UnexpectedToken(_) | Self::Other(_) | Self::Source(_) => false,
     }
@@ -334,6 +363,25 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self::new(span, ErrorData::TokenBudgetExhausted)
   }
 
+  /// Creates the end-of-input error that stands in for a **terminal scanner stop** — smear issue
+  /// #177.
+  ///
+  /// The producer [`ErrorData::TerminalEndOfInput`] is reached through: the two
+  /// `From<UnexpectedEot>` conversions — this dialect's syntactic one and the one
+  /// `lossless_error_impls!` generates — and the variant census, which may not name a variant
+  /// directly. Generic over every parameter of this family, unlike
+  /// [`unexpected_end_of_input`](Self::unexpected_end_of_input), which names an [`Expectation`]
+  /// and therefore cannot be.
+  ///
+  /// `span` is empty and sits where the ordinary end of input would have been reported: tokora
+  /// builds the marked value at the same offset as the plain one, because the stop *is* the leaf's
+  /// end of input as far as position goes — what differs is whether more input could ever change
+  /// the answer.
+  #[inline]
+  pub const fn terminal_end_of_input(span: Span) -> Self {
+    Self::new(span, ErrorData::TerminalEndOfInput)
+  }
+
   /// Creates an unclosed-list error.
   #[inline]
   pub const fn unclosed_list(span: Span) -> Self {
@@ -396,6 +444,13 @@ impl<S, T, Char, StateError> Error<S, T, Char, Expectation, StateError> {
   /// GraphQL's error family has a dedicated expectation-free `ErrorData::EndOfInput` and this one
   /// deliberately does not gain a copy: adding a variant here would give GraphQLx two spellings
   /// where it currently has one, and only the *lossless* half would use the new one.
+  ///
+  /// **[`ErrorData::TerminalEndOfInput`] is not that copy** — smear issue #177. It spells a
+  /// different *event*: an end of input that stands in for a terminal scanner stop, which answers
+  /// the opposite question about whether the parse may continue. Both layers reach it, through the
+  /// same routing on tokora's own mark, so the count this paragraph protects is unchanged — one
+  /// spelling per event, in both layers. [`Error::terminal_end_of_input`] is its constructor and
+  /// `smear/tests/lossless_x_errors.rs` pins the two layers together on both events.
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
     Self::maybe_unexpected_token(None, Expectation::InputValue, span)
@@ -588,14 +643,23 @@ impl<S, Lang: ?Sized> From<TooFew<Span, Lang>> for GraphqlxErrors<S> {
 // members tokora's `FromTokenErrors` bundle names: the default `&'static str` set the
 // `_or_stop` family raises, and the `&'static [Kind]` classification table a committed
 // dispatch driver feeds straight into the diagnostic.
+//
+// IT ROUTES ON THE FLAG — smear issue #177, and GraphQL's twin carries the note. The offset is
+// identical on both arms, so this `if` is the whole of what keeps a scanner stop distinguishable
+// from an end of input; reading only `offset()` here landed both on a variant whose
+// `MaybeTerminal` arm answers `false`.
 impl<S, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<usize, Lang, Set>>
   for GraphqlxErrors<S>
 {
   #[inline]
   fn from(err: UnexpectedEot<usize, Lang, Set>) -> Self {
     let offset = err.offset();
-    GraphqlxError::maybe_unexpected_token(None, Expectation::InputValue, Span::new(offset, offset))
-      .into()
+    let span = Span::new(offset, offset);
+    if err.is_terminal() {
+      GraphqlxError::terminal_end_of_input(span).into()
+    } else {
+      GraphqlxError::maybe_unexpected_token(None, Expectation::InputValue, span).into()
+    }
   }
 }
 
@@ -624,11 +688,54 @@ where
   }
 }
 
+// THE BATCH IS INSPECTED, NOT ERASED — smear issue #177, Codex round 1.
+//
+// This is the conversion tokora reaches when an emitter **rejects** a lexer diagnostic: the scan
+// propagates the emitter's own error, built from the lexer error, and no `UnexpectedEnd` is
+// constructed anywhere on that path — so nothing is marked and there is nothing for the
+// end-of-input routing above to keep. Landing the whole batch on `Other`, whose `MaybeTerminal`
+// arm is unconditionally `false`, therefore made a rejecting host's `Errors::is_terminal()` answer
+// `false` on a tripped `smear_lexer::limits` budget.
+//
+// `LexerErrorData::State` is the scanner's own stop kind and the only one of the ten that is: the
+// other nine are built from a lexeme the **grammar** rejected — a malformed literal, an unknown
+// character, an unterminated `...`, invalid UTF-8 — and each is recoverable. `State` is the
+// tracker refusing, which no further input clears. It is the same variant the
+// [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state refusal
+// cannot drift apart.
+//
+// # Why `TerminalEndOfInput` and not a payload-carrying variant of its own
+//
+// A `State` refusal means the scanner has stopped and this is the end of what it will hand over.
+// That is the event `TerminalEndOfInput` already names, and a consumer reading `is_terminal()`
+// must not be able to tell *who built the value* — tokora at a committed leaf when the emitter
+// accepted the diagnostic, or smear here when it rejected — because the fact about the document is
+// the same.
+//
+// A variant carrying the batch is not available at this keying anyway, which is what made this
+// impl erase in the first place: it is generic over the batch's `Char` and `StateError` while the
+// container pins its own (`char`, `()`), so `ErrorData::Lexer` does not typecheck here. The
+// lossless conversion `lossless_error_impls!` generates is pinned to `LexerErrors<char,
+// LimitExceeded>` and therefore keeps the payload; that one already routed correctly and is
+// unchanged. A new variant here would have to erase the payload too — it would be
+// `TerminalEndOfInput` under another name, with a census row and a parity row bought for nothing.
+//
+// The span is the batch's first, on **both** arms. `Span::new(0, 0)` pointed every lexer error at
+// byte zero, which is a position the error is not at; a `State` error minted through
+// `From<StateError> for LexerErrors` genuinely carries `0..0`, and that is the value's own
+// statement rather than this conversion's.
 impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlxErrors<S> {
   #[inline]
-  fn from(_err: LexerErrors<Char, StateError>) -> Self {
+  fn from(err: LexerErrors<Char, StateError>) -> Self {
+    let span = err.iter().next().map_or(Span::new(0, 0), |e| e.span());
+    if err
+      .iter()
+      .any(|e| matches!(e.data(), LexerErrorData::State(_)))
+    {
+      return GraphqlxError::terminal_end_of_input(span).into();
+    }
     GraphqlxError::new(
-      Span::new(0, 0),
+      span,
       ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
     )
     .into()

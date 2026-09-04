@@ -35,16 +35,22 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 ///   `smear-lexer`'s `LosslessTokenKind::Boolean` (28 declared, 27 producible).
 ///
 /// **The exhaustive match and the sample set are gated differently, and that is the point.**
-/// `ErrorData` declares the same 23 variants in every configuration, so the `match` below is
-/// wildcard-free over all 23 everywhere and a new variant is `E0004` in a default build. What
+/// `ErrorData` declares the same 25 variants in every configuration, so the `match` below is
+/// wildcard-free over all 25 everywhere and a new variant is `E0004` in a default build. What
 /// `materialized-numbers` gates is the two *producers*, so only their two samples carry a
-/// `#[cfg]`: 23 samples with the feature, 21 without.
+/// `#[cfg]`: 25 samples with the feature, 23 without.
+///
+/// (The three numbers in the paragraph above read `23`/`23`/`21` until smear issue #177 counted
+/// them: they were written when the enum had 21 producible variants and were not moved by the two
+/// that `#169` and `#193` added. Nothing asserts them — the count that has teeth is the `match`,
+/// which the compiler derives — so a stale one is prose drift rather than a hole, but it is the
+/// kind that reads as a checked number.)
 ///
 /// Putting the `#[cfg]` on the match arm as well — the shape this test had first — would have
 /// made each build check only the enum it compiled, which sounds stricter and is weaker: it lets
 /// a variant be declared-and-unproducible in *every* configuration as long as no single
 /// configuration sees both halves. The all-features run is what rules that out, and it can only
-/// do so because it samples all 23.
+/// do so because it samples all 25.
 ///
 /// A census over the union of configurations — the shape `ci/source_census`'s D1–D4 necessarily
 /// has, since it reads the source as text with `syn` and strips only `#[cfg(test)]` — cannot tell
@@ -183,6 +189,12 @@ fn error_data_variant_census() {
       .into_data(),
 
     EndOfInput => GraphqlError::<&str>::unexpected_end_of_input(span).into_data(),
+
+    // The stop that arrives spelled as an end of input — smear issue #177. Through the generic
+    // constructor, for the reason the two refusals below use theirs: the producers that actually
+    // reach this variant are the two `From<UnexpectedEot>` impls, and the lossless one is pinned
+    // to the lossless keying while this census is written over the syntactic one.
+    TerminalEndOfInput => GraphqlError::<&str>::terminal_end_of_input(span).into_data(),
 
     // The **generic** constructor, not `lossless::depth`'s `FromNestingLimit` impl: that impl is
     // pinned to the lossless keying (`LosslessTokenKind`, `LimitExceeded`) and this census is

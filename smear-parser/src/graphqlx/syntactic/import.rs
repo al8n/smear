@@ -71,7 +71,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(Spanned { span, data: token }) if keyword_of(&token) == Some(keyword) => Ok(span),
     Some(Spanned { span, data: token }) => {
       Err(DialectGraphqlxError::unexpected_token(token.kind(), expected, span).into())
@@ -92,7 +92,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.try_expect_map(|token| {
+  match inp.try_expect_map_or_stop(|token| {
     (keyword_of(token.data()) == Some(ContextualKeyword::As)).then_some(())
   })? {
     Some(_) => super::path(inp).map(Some),

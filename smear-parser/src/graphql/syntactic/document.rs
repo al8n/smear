@@ -16,7 +16,7 @@ use smear_lexer::{
 use tokora::{
   Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
   TryParseInput,
-  cache::{Peeked, PeekedTokenExt},
+  cache::Peeked,
   parser::Action,
   span::{AsSpan, Spanned},
   try_parse_input::ParseAttempt,
@@ -96,12 +96,11 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
-  let rejected = {
-    let mut peeked = inp.peek::<U1>()?;
-    peeked
-      .pop_front()
-      .map(|token| (*token.span(), token.token().kind()))
-  };
+  // `peek_head_map`, not a raw `peek`: a window the scanner truncated is byte-for-byte a window a
+  // short document produces, and reading the first as the second reports a stop as an absent token
+  // — smear issue #177, Codex round 1. The terminal end-of-input error it raises instead carries
+  // tokora's mark into this dialect's `TerminalEndOfInput`.
+  let rejected = inp.peek_head_map(|token| (*token.span, token.data.kind()))?;
 
   match rejected {
     Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, expected, span).into()),

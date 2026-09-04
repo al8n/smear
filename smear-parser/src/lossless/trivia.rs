@@ -213,9 +213,14 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, SimpleSpan, Lang>>,
 {
   inp.skip_while(|t| t.is_trivia())?;
-  // There is no `expect_kind`. `try_expect` consumes-and-returns on a match and declines with
-  // `None` otherwise, so the "or error" half is this function's job.
-  match inp.try_expect(|t| kind_of(t.data) == kind)? {
+  // There is no `expect_kind`. `try_expect_or_stop` consumes-and-returns on a match and declines
+  // with `None` otherwise, so the "or error" half is this function's job.
+  //
+  // `_or_stop`, not the bare form: this is a committed leaf, and `try_expect`'s contract folds a
+  // terminal scanner stop into the same `Ok(None)` a mismatch produces
+  // (`tokora-0.10.0/src/input/input_ref/try_expect.rs:262`). The `None` arm below emits an
+  // expectation failure naming a token the scanner never got to look at — smear issue #177.
+  match inp.try_expect_or_stop(|t| kind_of(t.data) == kind)? {
     Some(_) => Ok(()),
     None => {
       // Emit first, then return the same diagnostic as the `Err`. Built twice rather than
@@ -240,11 +245,24 @@ where
   L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
   L::Token: FromLogos<'inp>,
   Ctx: tokora::ParseContext<'inp, L, Lang>,
+  // The bound the terminal-aware read needs, and every dialect container already satisfies it —
+  // `lossless_error_impls!` declares the conversion, and `InputRef::peek_kind` carries the same
+  // clause, so no caller of this atom can lack it.
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<usize, Lang>>,
 {
   inp.skip_while(|t| t.is_trivia())?;
-  // One `try_expect`, not a peek then an expect: a declining `try_expect` consumes nothing, so
-  // this is already the conditional consume. Peeking first would read the same token twice.
-  Ok(inp.try_expect(|t| kind_of(t.data) == kind)?.is_some())
+  // One `try_expect_or_stop`, not a peek then an expect: a declining `try_expect_or_stop`
+  // consumes nothing, so this is already the conditional consume. Peeking first would read the
+  // same token twice.
+  //
+  // `_or_stop` because `false` here is a decision, not a report: the caller takes the other branch
+  // and carries on. The bare form answers `false` for a terminal stop as well as for a mismatch —
+  // smear issue #177.
+  Ok(
+    inp
+      .try_expect_or_stop(|t| kind_of(t.data) == kind)?
+      .is_some(),
+  )
 }
 
 /// [`eat_if`]'s declining form: commit any leading trivia, then consume the next token only if
@@ -279,9 +297,12 @@ where
   L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
   L::Token: FromLogos<'inp>,
   Ctx: tokora::ParseContext<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<usize, Lang>>,
 {
   inp.skip_while(|t| t.is_trivia())?;
-  Ok(match inp.try_expect(|t| kind_of(t.data) == kind)? {
+  // `_or_stop`: a `Decline` is what `node_at` spends the caller's mark on, so it commits this
+  // parse to a different shape. The bare form declines on a terminal stop too — smear issue #177.
+  Ok(match inp.try_expect_or_stop(|t| kind_of(t.data) == kind)? {
     Some(_) => ParseAttempt::Accept(()),
     None => ParseAttempt::Decline,
   })

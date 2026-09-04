@@ -105,7 +105,9 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(
-    match inp.try_expect_map(|token| (keyword_of(token.data()) == Some(keyword)).then_some(()))? {
+    match inp
+      .try_expect_map_or_stop(|token| (keyword_of(token.data()) == Some(keyword)).then_some(()))?
+    {
       Some((_, token)) => ParseAttempt::Accept(token.span()),
       None => ParseAttempt::Decline,
     },
