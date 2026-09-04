@@ -71,7 +71,11 @@ impl<S, Span, Lang: ?Sized> core::ops::Deref for FloatValue<S, Span, Lang> {
 impl<S, Span, Lang: ?Sized> FloatValue<S, Span, Lang> {
   /// Creates a new float value.
   #[inline]
-  pub(crate) const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: Span, value: S) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       value,

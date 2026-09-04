@@ -128,8 +128,13 @@ pub type FloatValue<Span = SimpleSpan> = super::FloatValue<f64, Span>;
 /// every by-value `unwrap_*` and `try_unwrap_*` to `E0509`. Everything `derive_more` generated
 /// before is generated now.
 ///
-/// That repair covers every recursive position the *grammar* forms. It does not cover a node a
-/// caller stored in `S` — see [`Nested`]'s own documentation and `al8n/smear#176`.
+/// That repair covers every recursive position the *grammar* forms. It did not cover a node a
+/// caller stored in `S` — this is the enum `al8n/smear#176` was reported against — and
+/// [`Leaf`](super::Leaf) is what closed that: the bound on the four `Name` doors means the
+/// issue's `Source(Option<Box<InputValue<Source, i64>>>)` no longer reaches a constructor. `I` carries the same bound at
+/// `IntValue::new`, which is `pub(crate)` — so today it is visibility that holds that door shut
+/// and the bound is what makes publishing the constructor a change to one keyword rather than a
+/// re-run of this analysis. See [`Nested`]'s own documentation.
 #[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -164,15 +169,18 @@ impl<S, I> NestNode for InputValue<S, I> {
 }
 
 impl<S, I> Nestable for InputValue<S, I> {
+  /// The value tree: rank 1. It holds no type node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Self;
 
   #[inline]
   fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // These arms hold no `InputValue`, so they are released here rather than reaching the walk.
-      // What they do hold is `S` and `I` — at the crate's own arguments a source slice and an
-      // integer, at a caller's whatever the caller chose, including a node this loop cannot reach
-      // (al8n/smear#176; `I` has no public constructor to reach it through today).
+      // What they do hold is `S` and `I`. `S` is a `Leaf` and has declared its release reaches no
+      // node (al8n/smear#176); `I` carries it at `IntValue::new` too, though that constructor is
+      // `pub(crate)`, so nothing public can reach the arm to test it yet.
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -258,6 +266,9 @@ impl<S, I> NestNode for ConstInputValue<S, I> {
 }
 
 impl<S, I> Nestable for ConstInputValue<S, I> {
+  /// The value tree: rank 1. It holds no type node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Self;
 
   #[inline]

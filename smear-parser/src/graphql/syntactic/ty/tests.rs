@@ -131,7 +131,7 @@ fn type_graphql_does_not_require_equivalent() {
   ) -> Result<AstType<Name<TypeSlice>>, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = TypeSlice> + ?Sized,
-    TypeSlice: tokora::Slice<'inp> + Clone + 'inp,
+    TypeSlice: tokora::Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: crate::combinator::ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,

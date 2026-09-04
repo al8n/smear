@@ -97,7 +97,10 @@ impl<Name, Span> VariableValue<Name, Span> {
   /// constructor would let a caller past it. There is no analogous rule here — draft §2.1.9's
   /// name production is [`Name`]'s, and this node adds only the `$`.
   #[inline]
-  pub const fn new(span: Span, name: Name) -> Self {
+  pub const fn new(span: Span, name: Name) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self { span, name }
   }
 

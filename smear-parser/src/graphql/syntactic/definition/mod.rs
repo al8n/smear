@@ -74,7 +74,7 @@ macro_rules! definition_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -113,7 +113,7 @@ macro_rules! impl_definition_api {
       ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
-        $slice: Slice<'inp> + Clone + 'inp,
+        $slice: Slice<'inp> + Clone + 'inp + $crate::value::Leaf,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
@@ -155,7 +155,7 @@ macro_rules! impl_definition_try_api {
       ) -> Result<ParseAttempt<Self>, GraphqlError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
-        $slice: Slice<'inp> + Clone + 'inp,
+        $slice: Slice<'inp> + Clone + 'inp + $crate::value::Leaf,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,

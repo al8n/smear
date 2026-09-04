@@ -63,7 +63,11 @@ impl<S, Span, Lang: ?Sized> core::ops::Deref for EnumValue<S, Span, Lang> {
 impl<S, Span, Lang: ?Sized> EnumValue<S, Span, Lang> {
   /// Creates a new enum value.
   #[inline]
-  pub(crate) const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: Span, value: S) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self {
       source: value,
       span,

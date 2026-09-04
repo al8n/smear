@@ -162,7 +162,7 @@ macro_rules! materialized_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp + crate::value::Leaf,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -203,7 +203,7 @@ macro_rules! width_free_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp + crate::value::Leaf,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -230,7 +230,7 @@ fn materialize_int<'inp, Src, Ctx, I>(
 ) -> Result<IntValue<I>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>: Lexer<'inp>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -257,7 +257,7 @@ fn materialize_float<'inp, Src, Ctx>(
 ) -> Result<FloatValue<f64>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + AsRef<[u8]> + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>: Lexer<'inp>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
