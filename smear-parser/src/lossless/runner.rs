@@ -51,6 +51,12 @@ impl Diagnostic {
   /// [`finish_parsed_root_with`] two items down, which is handed a *span* rather than a
   /// `Diagnostic`. Nothing anywhere — in this crate or out of it — can construct a `Diagnostic`,
   /// so no code path can put a diagnostic into a `Parse` that no parse produced.
+  ///
+  /// **Gated with that caller**, which is what `mod.rs`'s note at the top of this directory says a
+  /// narrowed item has to be: a private item whose only user is behind a cfg is `dead_code` in
+  /// every cell that turns the cfg off, and `-Dwarnings` makes that a build failure. It cost the
+  /// trunk four red jobs to relearn.
+  #[cfg(any(feature = "graphql", feature = "graphqlx"))]
   const fn error_at(span: core::ops::Range<usize>) -> Self {
     Self {
       span,
@@ -441,6 +447,15 @@ where
 // dialect runners are the only callers, so without this the one configuration that builds the
 // substrate without a dialect reports dead code — which `-D warnings` turns into a failure of a
 // leg nothing else in this file exercises.
+//
+// A SECOND ATTRIBUTE ABOVE THE SANCTIONED ONE, and only one of each. This item's only callers are
+// the two dialects' `finish_root` wrappers, and those exist only under `test-support` — so its
+// live set is `test-support AND a dialect`. That conjunction cannot be written as one
+// `all(…)` here: gate 6 admits exactly one dialect-facing cfg spelling in this directory and a
+// compound one containing `graphql` is an offender. Stacked `#[cfg]`s are the same conjunction
+// with each line legal on its own — and they have to be stacked ONCE each, because rustc quietly
+// conjoins a repeated attribute while clippy's `duplicated_attributes` reds the job.
+#[cfg(feature = "test-support")]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn finish_parsed_root<'inp, L, Lx, Em>(
   cst: Cst<'inp, Lx, Em>,
