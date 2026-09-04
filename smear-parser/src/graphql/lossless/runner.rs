@@ -4,20 +4,27 @@
 use smear_lexer::limits::LosslessLimits;
 use tokora::{
   Source,
-  cst::{Cst, CstProfile, KindValidator},
+  cst::{CstProfile, KindValidator},
 };
-// `Sink` is named by `LosslessSink`, which the drivers alone use, and by the `DoorCtx` the door
-// macro expands below — so it is no longer gated. Round 5 moved the parse out of these doors and
-// round 7 moved it back in as an expansion; the context it spells is the macro's, not this file's.
-use tokora::cst::Sink;
+// ── THE `test-support` HALF OF THIS FILE'S IMPORTS ───────────────────────────────────────────
+//
+// Four names, and every one of them is reached only from the `test_support` drivers at the bottom:
+// `Sink` and `GraphqlLosslessLexer` through `LosslessSink`, `Cst` and `GraphqlLosslessLexer` again
+// through `LosslessCst`, and `KindSpace` through `finish_root`. Round 8 folded the shipped doors'
+// finishing step into the door macro's own body, which took the last non-driver caller off all
+// four, and the door's expansion spells its tokora paths absolutely — so with `test-support` off
+// they are `unused_imports`, which `-Dwarnings` makes a build failure. Four CI jobs on the trunk
+// are what found it, and gating them beside the items they serve is the same repair as those
+// items got.
+#[cfg(feature = "test-support")]
+use tokora::cst::{Cst, Sink};
 
-use super::{
-  GraphqlLosslessErrors, GraphqlLosslessLexer, GraphqlLosslessSlice, GraphqlLosslessToken,
-};
-use crate::{
-  graphql::{error::ErrorData, kinds::SyntaxKind as K},
-  lossless::KindSpace,
-};
+#[cfg(feature = "test-support")]
+use super::GraphqlLosslessLexer;
+use super::{GraphqlLosslessErrors, GraphqlLosslessSlice, GraphqlLosslessToken};
+use crate::graphql::{error::ErrorData, kinds::SyntaxKind as K};
+#[cfg(feature = "test-support")]
+use crate::lossless::KindSpace;
 
 /// The profile every GraphQL lossless parse uses.
 ///
@@ -72,6 +79,10 @@ pub(crate) type LosslessSink<'inp> =
   Sink<'inp, GraphqlLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
 
 /// The spent sink [`parse_lossless`] hands back — the one door to materialization.
+// WITH ITS ONE USER. `finish_root` below is the only thing that names this alias, and `finish_root`
+// is only reachable from the `test_support` drivers — the six shipped doors return the `Parse` the
+// door macro builds and never see a `Cst` at all.
+#[cfg(feature = "test-support")]
 pub(crate) type LosslessCst<'inp> =
   Cst<'inp, GraphqlLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
 
@@ -102,6 +113,10 @@ crate::lossless::lossless_door! {
 /// unreachable from here and that function carries the numbers that say why. A caller finishing a
 /// `Cst` it built itself goes through the public [`crate::lossless::runner::finish_root`] and gets
 /// the refusal as a value.
+// THE DRIVERS' FINISH, and theirs alone. Round 8 folded the shipped doors' finishing step into
+// the door macro's own body, which left this wrapper with exactly one caller family: the
+// `test_support` drivers below.
+#[cfg(feature = "test-support")]
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
   crate::lossless::runner::finish_parsed_root(cst, K::Root.raw(), <K as KindSpace>::NAME)
 }

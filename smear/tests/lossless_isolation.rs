@@ -104,7 +104,15 @@ fn relative(root: &Path, path: &Path, dir: &str) -> String {
   let tail = path
     .strip_prefix(root)
     .expect("every scanned path is under its root");
-  format!("{dir}/{}", tail.display())
+  // ONE SEPARATOR, EVERYWHERE, and it is normalised HERE because this is the one place a path in
+  // this file is built. `Path::display` uses the platform's separator, so on Windows every path
+  // below read `…/lossless\depth.rs` and every assertion spelled with `/` — a `contains("/graphql/")`
+  // among them — silently answered `false`. The Windows test job is what found it.
+  let tail: std::vec::Vec<_> = tail
+    .components()
+    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+    .collect();
+  format!("{dir}/{}", tail.join("/"))
 }
 
 /// Every line under `dir` that contains `pattern`, as `(file, line number, line)`.
@@ -497,9 +505,21 @@ fn the_substrate_names_no_dialect() {
 /// dialect-less build has it dead — and it is the LAST piece of this issue to arrive in the
 /// substrate. It can be here, unlike the door, because it names no dialect: the variant to drop
 /// arrives as a predicate and the report to append arrives as a value.
+///
+/// And **21** when the trunk went red on the merge of #213 — one more, not two, and the arithmetic
+/// is the entry. Four CI jobs failed `-Dwarnings` on `dead_code` in cells with a dialect off, over
+/// two items this directory had left ungated: `Diagnostic::error_at`, whose one caller is
+/// `finish_parsed_root_with`, and `finish_parsed_root`, whose only callers are the two dialects'
+/// `finish_root` wrappers. Only the first ADDS an occurrence of the string below.
+/// `finish_parsed_root` already carried the sanctioned gate and was counted in the 20; what it
+/// gained is a **second, stacked** `#[cfg(feature = "test-support")]`, which this constant does not
+/// count and should not — its live set is `test-support AND a dialect`, and an `all(…)` spelling
+/// containing `graphql` would be an offender for the cell above, so the conjunction is written as
+/// two attributes with each line legal on its own. Exactly one of each: rustc conjoins a repeated
+/// attribute silently, and clippy's `duplicated_attributes` does not.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 20;
+const SUBSTRATE_FEATURE_GATES: usize = 21;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {
