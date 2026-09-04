@@ -31,11 +31,14 @@
 //!   the point of failure as well as returning; before, a parse that failed outright recorded
 //!   no diagnostic at all and [`Parse::has_errors`](super::Parse::has_errors) read `false` —
 //!   which is the verdict the acceptance-parity gate compares against `syntactic/`.
-//! - **The remainder has to be committed.** The door's drain takes whatever an escaping
-//!   `Err` left behind, because `Sink::finish` refuses any source byte that no committed token
-//!   covers and no lexer-error diagnostic explains (`FinishError::UncoveredGap`). The old
-//!   `parse_document` bound the driver's result to `_out` and drained nothing, so the first
-//!   reachable `Err` would have been a panic in materialization rather than a reportable parse.
+//! - **The remainder has to be committed.** The door's drain lexes whatever an escaping `Err`
+//!   left behind and commits its tokens, unless a refusal ended the document. Materialization is
+//!   `Cst::finish_partial`, which would otherwise tile that tail as one `gap_kind` token carrying
+//!   the tail's original text: no committed token in it, and no lexer errors but those a
+//!   lookahead had already raised over it — a truncated, under-reported parse. (The strict
+//!   `Cst::finish` refuses such a tail as `FinishError::UncoveredGap` only where neither a token
+//!   nor a recorded lexer-error span covers it; that refusal was a panic in materialization
+//!   before the partial finish.)
 //!
 //! # A document ends with its trailing trivia inside it
 //!

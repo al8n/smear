@@ -86,9 +86,11 @@ use std::path::PathBuf;
 use smear::parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{
-    Parse, SyntaxNode, parse_document, parse_executable_document, parse_type_system_document,
+    Parse, SyntaxNode, parse_document, parse_document_from, parse_executable_document,
+    parse_executable_document_from, parse_type_system_document, parse_type_system_document_from,
   },
 };
+use smear::parser::lossless::Refused;
 
 /// The corpus entries whose bytes are kept by the sink's gap tiling rather than by the grammar.
 ///
@@ -538,4 +540,63 @@ fn the_round_trip_comparison_is_not_vacuous() {
   // disagree with the tokens, which is the pairing `every_byte_is_carried_by_a_token` holds over
   // the whole corpus. Repeated on one source so this test states the property it depends on.
   assert_eq!(tokens_text(&parse_document(A).syntax()), A);
+}
+
+/// The one input this law does not range over, and why it cannot reach the law at all.
+///
+/// # The law's boundary, stated where the law is
+///
+/// `tree.text() == source` is an equality between a `&str` and a `&str`, and al8n/smear#121 gave
+/// the doors a source that need not be either: bytes. Where those bytes are UTF-8 nothing changes
+/// — the whole corpus above is that case, and it reads the same through `parse_document_from` as
+/// through `parse_document`. Where they are **not**, there is no equality to state, because there
+/// is no tree: the fallible door answers `Err(Refused::NonUtf8Source { .. })` and produces no
+/// `Parse`.
+///
+/// That is the repair rather than the situation. For one round the refusal *was* a `Parse` with an
+/// empty root, and the hazard was this file's own audience: a formatter reprints `tree.text()`, an
+/// empty tree's text is `""`, and `has_errors()` could not separate it from a genuine parse of the
+/// empty document — so reprinting a file the parser could not read **emptied it**. There is now no
+/// value for that code path to be handed.
+#[test]
+fn a_refused_source_yields_no_parse_to_round_trip() {
+  // 19 bytes; byte 13 is not a UTF-8 lead.
+  const BAD: &[u8] = b"query Q { f }\xFF\xFEmore";
+
+  // No tree, and the two numbers instead. `Err` is the whole assertion: there is nothing whose
+  // text a formatter could reprint, at any of the three roots.
+  assert_eq!(
+    parse_document_from(BAD).err(),
+    Some(Refused::NonUtf8Source {
+      valid_up_to: 13,
+      source_len: 19
+    })
+  );
+  assert!(parse_type_system_document_from(BAD).is_err());
+  assert!(parse_executable_document_from(BAD).is_err());
+
+  // And the law still holds through the wide doors over bytes that ARE text, at all three roots —
+  // otherwise the exception above would be doing the work of a door that never round-trips.
+  for src in [
+    "type T { f: Int }",
+    "query Q { f }",
+    "\n  type T { f: Int }\n",
+  ] {
+    let parse = parse_document_from(src.as_bytes()).expect("valid UTF-8");
+    assert_eq!(parse.syntax().text(), src);
+  }
+  assert_eq!(
+    parse_type_system_document_from("type T { f: Int }".as_bytes())
+      .expect("valid UTF-8")
+      .syntax()
+      .text(),
+    "type T { f: Int }"
+  );
+  assert_eq!(
+    parse_executable_document_from("query Q { f }".as_bytes())
+      .expect("valid UTF-8")
+      .syntax()
+      .text(),
+    "query Q { f }"
+  );
 }

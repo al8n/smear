@@ -85,14 +85,17 @@ materialized-numbers = ["graphql"]
 # WHICH ONES, DERIVED FROM `Source::Slice` AND NOT FROM THE FEATURE LIST. What needs an impl is the
 # **slice** type a backing yields, not the backing:
 #
-# * `bstr` yields `&'a BStr`, and `impl<T: ?Sized> Leaf for &T` already covers every reference.
-#   It stays a pure forward, and that is the one entry this rule leaves alone.
+# * `bstr` yielded `&'a BStr`, which `impl<T: ?Sized> Leaf for &T` already covers, so `Leaf` left
+#   this entry alone. al8n/smear#121 did not: `lossless::source` views every shipped backing as
+#   text or bytes for the lossless doors, `BStr` is the one backing whose view cannot be written
+#   without naming the type, and the orphan rule puts that impl here or nowhere — the same
+#   argument the three below already carry, arriving one issue later.
 # * `bytes` yields `Bytes` — an owned, refcount-sliced type. It was already a direct dependency.
 # * `hipstr` yields `HipStr<'h>` / `HipByt<'h>`, and `smol-bytes` yields four owned types. Both
 #   become direct dependencies for the impls, which is the same reason `bytes` already was.
 smallvec = ["smear-lexer/smallvec"]
 bytes = ["dep:bytes", "smear-lexer/bytes", "tokora/bytes_1"]
-bstr = ["smear-lexer/bstr"]
+bstr = ["dep:bstr", "smear-lexer/bstr"]
 hipstr = ["dep:hipstr", "smear-lexer/hipstr", "tokora/hipstr_0_8"]
 smol-bytes = ["dep:smol-bytes", "smear-lexer/smol-bytes", "tokora/smol_bytes_0_1"]
 
@@ -128,6 +131,7 @@ tokora.workspace = true
 
 smear-lexer.workspace = true
 
+bstr = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 # Not a workspace entry: there is none for `hipstr`, and `smear` states the same requirement
 # inline for the same reason.

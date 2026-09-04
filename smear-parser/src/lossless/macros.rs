@@ -239,11 +239,14 @@ macro_rules! lossless_production {
 ///
 /// # The drain is not optional
 ///
-/// [`Sink::finish`](tokora::cst::Sink::finish) refuses any source byte that no committed token
-/// covers and no lexer-error diagnostic explains (`FinishError::UncoveredGap`), and a
-/// single-production driver stops at the end of its production by design. The drain also runs on
-/// the error path: a production that returns `Err` has committed a prefix and left the rest, and
-/// without the drain that would be a panic in the driver instead of a reportable parse.
+/// A single-production driver stops at the end of its production by design, and a production
+/// that returns `Err` has committed a prefix and left the rest. The driver runs through the
+/// dialect's `parse_lossless_document`, whose drain covers both. Without it the tail would reach
+/// `Cst::finish_partial` with no committed token and come back as one `gap_kind` token carrying
+/// its original text. Any lexer error a lookahead already raised over it stays recorded — tokora
+/// reports a lexer error when a peek lexes it, before any token settles — but nothing past that
+/// lookahead is lexed, so the rest of the tail's lexer errors would go unfound and the driver
+/// would under-report the production's tail.
 ///
 /// # A retro-wrapping production takes a mark, and the driver mints it
 ///
@@ -353,8 +356,10 @@ macro_rules! lossless_drivers {
 
       /// The context pair and the input each driver's closure receives.
       ///
-      /// The sink is held **by value**: `parse_lossless` mints it from the source itself and owns
-      /// it for the parse, so there is no `&mut Sink` for a driver to hand around.
+      /// The sink is held **by value**: the door's `parse_lossless_with_context`, called inside
+      /// `parse_lossless_document`, mints it from the source itself and owns it for the parse, so
+      /// there is no `&mut Sink` for a driver to hand around. It is the door's own `DoorCtx` type,
+      /// spelled through the dialect's `runner::LosslessSink`.
       type TestCtx<'inp> = (
         $crate::$dm::$dl::runner::LosslessSink<'inp>,
         ::tokora::cache::DefaultCache<'inp, Lx<'inp>>,
@@ -370,8 +375,6 @@ macro_rules! lossless_drivers {
           // The `'inp` is **named**, threaded from `src`, for the reason the trivia driver
           // records: elided, it varies independently of the error type and the closure `E0521`s.
           //
-          // `Lang` is `parse_lossless`'s SECOND parameter and is used only in bounds, so it is
-          // turbofished alongside the lexer or inference settles it on `()`.
           // The same state the shipped doors seed, and the same two ceilings read off it. A
           // driver that left the context defaulted would run at tokora's `PARSE_DEFAULT_DEPTH`
           // and an unlimited token budget instead of this dialect's, which is a different budget
@@ -381,9 +384,6 @@ macro_rules! lossless_drivers {
           // ONE CALL, exactly as a shipped door does it — smear issue #193, Codex round 4. The
           // context, the parse and the report are one function body in the substrate, so a driver
           // has no context to mint, no reporting authority to hold, and no way to hold one twice.
-          //
-          // `Lang` is the SECOND parameter and is used only in bounds, so it is turbofished
-          // alongside the lexer or inference settles it on `()`.
           //
           // The root is handed in RAW. `root_turn` is what asks whether the one entry ended the
           // document — a driver's ONE production is the whole attempt, and nothing below a root
@@ -472,6 +472,13 @@ macro_rules! lossless_error_impls {
     /// `LimitExceeded`, so `ErrorData::Lexer` accepts it unchanged. The span is the one thing that
     /// cannot be recovered — the lexer error type is a *batch* and the container's error carries a
     /// single span — so it is zeroed exactly as the syntactic impl zeroes it.
+    ///
+    /// # `char`, and only `char`
+    ///
+    /// A lossless door validates a byte view and scans the `&str`, so **the only scanner a door
+    /// ever runs has `Char = char`** and a `LexerErrors<u8, _>` cannot arrive here.
+    /// `lossless::source`'s header carries why the byte scanner is not an alternative: its lexeme
+    /// boundaries are not the `str` scanner's, and its diagnostics cannot be materialised at all.
     impl<S>
       ::core::convert::From<$lexer_errors<char, ::tokora::state::tracker::LimitExceeded>>
       for $errors<S>
@@ -854,8 +861,11 @@ pub(crate) use lossless_production;
 /// the substrate below has no way to emit a budget refusal at all.
 macro_rules! lossless_door {
   (
-    dialect = $dm:ident::$dl:ident;
-    errors  = $errors:ident;
+    dialect  = $dm:ident::$dl:ident;
+    errors   = $errors:ident;
+    document = $dmod:ident::$dfn:ident;
+    schema   = $smod:ident::$sfn:ident;
+    request  = $rmod:ident::$rfn:ident;
   ) => {
     // ONE DOOR PER DIALECT, BY COHERENCE. See the macro's own note; a second invocation naming
     // this dialect is `E0119` on this line.
@@ -915,8 +925,9 @@ macro_rules! lossless_door {
     /// budget refusal is reported.
     ///
     /// Builds the context, runs tokora's lossless driver over `root`, drains what an escape left
-    /// behind, reports a refusal if the input's durable tally has one, and hands back the
-    /// [`LosslessCst`] the door materialises plus the driver's own `Result`.
+    /// behind, reports a refusal if the input's durable tally has one, materialises the tree and
+    /// returns the [`Parse`]. The driver's own `Result` is dropped here; see
+    /// `The driver's Result is dropped here` below.
     ///
     /// # Every type is this function's choice, and both budgets are read here
     ///
@@ -927,6 +938,41 @@ macro_rules! lossless_door {
     /// one or vary it; that is what makes "every door installs the same ceiling" a fact about one
     /// line instead of a check over six.
     ///
+    /// # It takes `&str`, and the two door families reach it differently
+    ///
+    /// A lossless parse has exactly one scanner and its alphabet is `char`, so this function takes
+    /// text. `lossless_root!` generates two roots per document root and only one of them converts:
+    ///
+    /// - the **concrete** root takes `&str` and calls this directly. It does not call `as_text`,
+    ///   because its parameter type has already discharged the encoding requirement — and it does
+    ///   not discharge the length one, which is the precondition documented on the public `&str`
+    ///   doors.
+    /// - the **`_from`** root takes any [`LosslessSource`](crate::lossless::LosslessSource), calls
+    ///   [`as_text`](crate::lossless::LosslessView::as_text), and returns
+    ///   [`Refused`](crate::lossless::Refused) without reaching this function when either
+    ///   requirement fails. On `Ok` it hands the `&str` to the concrete root.
+    ///
+    /// So a byte backing reaches every production through the same lexer a `&str` caller does;
+    /// `crate::lossless::source`'s header carries why the byte scanner is not an alternative.
+    ///
+    /// # `NonUtf8Source` cannot reach this function, and `OffsetOverflow` can
+    ///
+    /// A `rowan` green tree stores text as `&str`, tokora states that as
+    /// [`CstText`](tokora::cst::CstText) on the sink's source, and `finish_partial` answers
+    /// `FinishError::NonUtf8Source` where it does not hold. `str`'s implementation is infallible,
+    /// so over this signature that arm is unreachable **by type** rather than by a check, which is
+    /// what keeps the materialisation panic below honest against *that* refusal while the doors
+    /// accept bytes.
+    ///
+    /// **The size refusal is the other half, and this signature does not close it.** `rowan`
+    /// addresses text with `u32`, so a source past
+    /// [`Refused::MAX_SOURCE_LEN`](crate::lossless::Refused::MAX_SOURCE_LEN) answers
+    /// `FinishError::OffsetOverflow` at materialisation, and `&str` says nothing about length. A
+    /// `_from` root classifies it one frame up and answers
+    /// [`Refused`](crate::lossless::Refused) before anything is scanned, for one validation pass
+    /// rather than a whole parse; a concrete `&str` door does not, and panics — the precondition
+    /// its own page documents.
+    ///
     /// # Nesting it is not a forgery
     ///
     /// A composed root inside `root` can call it, because it is `pub(crate)`. What that does is
@@ -936,10 +982,21 @@ macro_rules! lossless_door {
     ///
     /// # The drain is not optional
     ///
-    /// [`Sink::finish`](tokora::cst::Sink::finish) refuses any source byte that no committed token
-    /// covers and no lexer-error diagnostic explains, and an `Err` escaping a document root leaves
-    /// the rest of the source uncommitted. Draining here is what turns that into a reportable parse
-    /// rather than a panic in materialisation — smear issue #57. It is
+    /// An `Err` escaping a document root leaves the rest of the source with no committed token,
+    /// and this function materialises through `crate::lossless::runner::finish_parsed_root_with`,
+    /// whose `Cst::finish_partial` tiles every run no committed token covers as a `gap_kind` token
+    /// carrying that run's original text. Undrained, the tail would come back as one such token.
+    /// The tree would still cover every byte, and any lexer error a lookahead already raised over
+    /// the tail stays recorded — tokora reports a lexer error when a peek lexes it, before any
+    /// token settles — but nothing past that lookahead is lexed, so the rest of the tail's lexer
+    /// errors go unfound and its tokens are never charged to the budget: a truncated,
+    /// under-reported parse. The drain lexes the tail and commits its tokens, which reports those
+    /// errors and charges that budget — on every path but a terminal one, where it deliberately
+    /// reads nothing. (The strict [`Cst::finish`](tokora::cst::Cst::finish), which no door calls,
+    /// would refuse such a tail as `FinishError::UncoveredGap` only where neither a committed
+    /// token nor a recorded lexer-error span covers it; a tail every byte of which a diagnostic
+    /// covers is accepted. That refusal was smear issue #57's panic, before the doors moved to the
+    /// partial finish.) It is
     /// [`drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped) rather than a bare
     /// `skip_while` because a refusal must not read the tail.
     ///
@@ -959,11 +1016,10 @@ macro_rules! lossless_door {
     /// # The driver's `Result` is dropped here
     ///
     /// A lossless door keeps the tree and the diagnostics and throws the parser's `Result` away —
-    /// which is the whole reason a refusal has to be *reported* rather than only returned. It used
-    /// to be dropped at each door's `finish_root` line; the fold moved that inside, so it is
-    /// dropped once. A cell that needs the stop VALUE runs the inner frame, which is where that
-    /// value is decided — `the_value_a_frame_hands_up_after_a_drain_refusal_is_terminal` is the
-    /// one that does.
+    /// which is the whole reason a refusal has to be *reported* rather than only returned. It is
+    /// dropped once, here, for every door and driver. A cell that needs the stop VALUE runs the
+    /// inner frame, which is where that value is decided —
+    /// `the_value_a_frame_hands_up_after_a_drain_refusal_is_terminal` is the one that does.
     pub(crate) fn parse_lossless_document<'inp, Root>(
       src: &'inp str,
       limits: $crate::$dm::$dl::LexerState,
@@ -1071,9 +1127,101 @@ macro_rules! lossless_door {
         door_report.map(|(_, span)| span),
       )
     }
+
+    $crate::lossless::lossless_root! {
+      $dm::$dl;
+      /// The mixed root — [`parse_document_with_limits`] and
+      /// [`parse_document_from_with_limits`] are each one call into this pair.
+      fn document_root / document_root_from => $dmod::$dfn;
+      /// The SDL-only root, for [`parse_type_system_document_with_limits`] and its sibling.
+      fn type_system_document_root / type_system_document_root_from => $smod::$sfn;
+      /// The executable-only root, for [`parse_executable_document_with_limits`] and its sibling.
+      fn executable_document_root / executable_document_root_from => $rmod::$rfn;
+    }
   };
+}
+
+/// The root entry points a dialect's public doors are each one call into — **two per root**.
+///
+/// Six concrete doors stand on the `&str` half and six `_from` siblings on the fallible one, which
+/// asks the view for its text and calls the first, or answers the refusal.
+///
+/// # Only one of the two is a `Result`, and the asymmetry is narrower than it looks
+///
+/// A green tree requires two things of a source — valid UTF-8, and a length `rowan` can address
+/// with `u32` — and `&str` discharges the first by type and the second not at all. So the `&str`
+/// half is not *infallible*: it is the half whose one remaining precondition has nowhere to go,
+/// and an over-length `&str` panics at materialisation. The fallible half checks both and answers
+/// [`Refused`](crate::lossless::Refused), which is what makes a refusal *unrepresentable* as a
+/// `Parse` — there is no synthetic empty root anywhere in this crate.
+///
+/// # There is one production instantiation, not one per source type
+///
+/// `super::$pmod::$pfn::<str, _>`, in the `&str` half, and the fallible half calls it. A dialect's
+/// lossless scanner is a `logos` derive over `str` **or** over `[u8]`, and the two do not agree on
+/// where a lexeme ends: on unmatched input `logos` resumes at the next element of its source, a
+/// character for one and a byte for the other. Their diagnostics differ, and a byte scanner's
+/// lexer-error span can land inside a code point, which makes the sink refuse the stream outright
+/// — `crate::lossless::source`'s header carries both. So the byte alphabet is reachable from no
+/// door and the whole tower below runs on one scanner.
+///
+/// # Why the doors are not generic over the scanned type themselves
+///
+/// The source parameter stops at the fallible half, so the door's five where-predicates and
+/// `lossless_production!`'s own bundle are never instantiated at more than one source type: there
+/// is nothing to prove at a public entry point and nothing for twelve doors to respell.
+macro_rules! lossless_root {
+  (
+    $dm:ident::$dl:ident;
+    $(
+      $(#[$meta:meta])*
+      fn $name:ident / $from:ident => $pmod:ident::$pfn:ident;
+    )*
+  ) => {$(
+    $(#[$meta])*
+    ///
+    /// The production goes to the door RAW: the door is what drains what an escape left behind.
+    /// An `Err` escaping a document production leaves the rest of the source with no committed
+    /// token, and the door's `finish_partial` would otherwise tile it as one `gap_kind` token
+    /// carrying the tail's text, whose only lexer errors would be those a lookahead had already
+    /// raised.
+    pub(crate) fn $name(src: &str, limits: $crate::$dm::$dl::LexerState) -> Parse {
+      parse_lossless_document(src, limits, super::$pmod::$pfn::<str, _>)
+    }
+
+    $(#[$meta])*
+    ///
+    /// The fallible half: any source, and **both** questions a green tree asks of one — is it no
+    /// longer than a `u32` can address, and is it valid UTF-8 — settled once before anything is
+    /// scanned. A `str` view answers the second with the value it already is; a byte one pays one
+    /// validation pass, which the sink would have charged at `finish_partial` anyway. Neither is
+    /// spelled here: `LosslessView::as_text` decides both, which is what stops a door asking one
+    /// and forgetting the other.
+    ///
+    /// On `Ok` the text goes to the concrete root beside it, which builds the `Parse`. Settling
+    /// both questions here is what puts the materialisation panic `parse_lossless_document` reaches
+    /// through `finish_parsed_root_with` out of a caller's reach **through this door**, and says
+    /// nothing about the concrete `&str` door beside it, which never comes through here and where
+    /// an over-length source still reaches that panic. See [`Refused`](crate::lossless::Refused).
+    pub(crate) fn $from<Src>(
+      src: &Src,
+      limits: $crate::$dm::$dl::LexerState,
+    ) -> ::core::result::Result<Parse, $crate::lossless::Refused>
+    where
+      Src: $crate::lossless::LosslessSource + ?::core::marker::Sized,
+    {
+      // ONE CALL, AND IT DECIDES BOTH WAYS A SOURCE CAN BE REFUSED — not UTF-8, or longer than a
+      // green tree can address. Neither is spelled here on purpose: `LosslessView::as_text` is the
+      // fence that makes asking one and forgetting the other unexpressible, and its note says why.
+      match $crate::lossless::LosslessSource::lossless_view(src).as_text() {
+        ::core::result::Result::Ok(text) => ::core::result::Result::Ok($name(text, limits)),
+        ::core::result::Result::Err(refused) => ::core::result::Result::Err(refused),
+      }
+    }
+  )*};
 }
 
 // AFTER the definition, because `macro_rules!` is textually scoped and a `use` above it does not
 // resolve. The five re-exports higher up sit below their own definitions for the same reason.
 pub(crate) use lossless_door;
+pub(crate) use lossless_root;
