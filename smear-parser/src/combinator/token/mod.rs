@@ -142,7 +142,11 @@ where
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str>,
 {
-  match inp.next()? {
+  // `next_or_stop`, not `next`: this is a committed leaf whose `None` arm below synthesises a
+  // plain `UnexpectedEot`, and `next`'s contract folds a terminal scanner stop into that same
+  // `None` — smear issue #177. The atom is shared by both dialects, so the one line covers the
+  // `EnumValue` and `EnumValueDefinition` positions in each.
+  match inp.next_or_stop()? {
     Some(spanned) => {
       if spanned.data().is_identifier() {
         let text = inp.slice();

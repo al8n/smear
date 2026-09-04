@@ -135,7 +135,10 @@ where
   }
   let mut answer = Ok(None);
   inp.attempt(|inp| {
-    answer = match inp.try_expect(|_| true) {
+    // `_or_stop`, for the reason the paragraph above gives about the inner peek: folding a stop
+    // into `None` would let it pass for end of input, and this read is the step over the head that
+    // the second peek depends on. smear issue #177.
+    answer = match inp.try_expect_or_stop(|_| true) {
       // The head is consumed; the next peek crosses whatever trivia follows it and reports the
       // token after. Both are undone on the way out.
       Ok(Some(_)) => peek_kind::<Src, Ctx>(inp),
@@ -202,6 +205,7 @@ where
   GraphqlxLosslessLexer<'inp, Src>:
     Lexer<'inp, Token = GraphqlxLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
+  GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
 {
   crate::lossless::trivia::eat_if(inp, kind)
 }
@@ -218,6 +222,7 @@ where
   GraphqlxLosslessLexer<'inp, Src>:
     Lexer<'inp, Token = GraphqlxLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
+  GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
 {
   crate::lossless::trivia::try_eat(inp, kind)
 }

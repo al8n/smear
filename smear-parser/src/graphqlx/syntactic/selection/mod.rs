@@ -107,7 +107,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(
-    match inp.try_expect_map(|token| {
+    match inp.try_expect_map_or_stop(|token| {
       (keyword_of(token.data()) == Some(ContextualKeyword::On)).then_some(())
     })? {
       Some((_, token)) => ParseAttempt::Accept(token.span()),
@@ -441,7 +441,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.try_expect_map(|token| {
+  match inp.try_expect_map_or_stop(|token| {
     matches!(token.data(), GraphqlxToken::<'inp, Src>::Identifier(_))
       .then(|| keyword_of(token.data()) == Some(ContextualKeyword::On))
   })? {
@@ -460,7 +460,7 @@ where
     }
     Some(_) => unreachable!("identifier selection consumed a non-identifier token"),
     None => match super::peek_kind(inp)? {
-      Some(SyntacticTokenKind::PathSeparator) => match inp.next()? {
+      Some(SyntacticTokenKind::PathSeparator) => match inp.next_or_stop()? {
         Some(Spanned {
           span,
           data: GraphqlxToken::<'inp, Src>::PathSeparator,
@@ -546,7 +546,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.try_expect_map(|token| {
+  match inp.try_expect_map_or_stop(|token| {
     matches!(token.data(), GraphqlxToken::<'inp, Src>::Identifier(_))
       .then(|| keyword_of(token.data()) == Some(ContextualKeyword::On))
   })? {
@@ -561,7 +561,7 @@ where
       },
     )) => type_path_after_first(span.start(), Name::new(span, source), false, inp),
     Some(_) => unreachable!("fragment-path identifier probe consumed a non-identifier token"),
-    None => match inp.next()? {
+    None => match inp.next_or_stop()? {
       Some(Spanned {
         span,
         data: GraphqlxToken::<'inp, Src>::PathSeparator,

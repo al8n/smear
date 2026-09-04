@@ -16,10 +16,8 @@ use smear_lexer::graphql::{
   syntactic::{SyntacticLexer, SyntacticToken},
 };
 use tokora::{
-  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source,
-  cache::PeekedTokenExt,
-  try_parse_input::ParseAttempt,
-  utils::{DowncastRef, typenum::U1},
+  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, try_parse_input::ParseAttempt,
+  utils::DowncastRef,
 };
 
 use super::GraphQL;
@@ -128,31 +126,28 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
-  {
-    let mut peeked = inp.peek::<U1>()?;
-    match peeked.pop_front() {
-      Some(token) => {
-        let token_ref = token.token();
-        if matches!(token_ref.downcast_ref(), Some(ContextualKeyword::On))
-          || !matches!(token_ref, GraphqlToken::<'inp, Src>::Identifier(_))
-        {
-          let span = *token.span();
-          let kind = token_ref.kind();
-          return Err(
-            DialectGraphqlError::unexpected_token(kind, Expectation::FragmentName, span).into(),
-          );
-        }
-      }
-      None => {
-        return Err(
-          DialectGraphqlError::maybe_unexpected_token(
-            None,
-            Expectation::FragmentName,
-            SimpleSpan::new(offset, offset),
-          )
-          .into(),
-        );
-      }
+  // `peek_head_map`, not a raw `peek`: a truncated window and a short document are the same
+  // bytes, so a raw peek reports a scanner stop as an absent token — smear issue #177.
+  match inp.peek_head_map(|token| {
+    let rejected = matches!(token.data.downcast_ref(), Some(ContextualKeyword::On))
+      || !matches!(token.data, GraphqlToken::<'inp, Src>::Identifier(_));
+    (rejected, *token.span, token.data.kind())
+  })? {
+    Some((true, span, kind)) => {
+      return Err(
+        DialectGraphqlError::unexpected_token(kind, Expectation::FragmentName, span).into(),
+      );
+    }
+    Some((false, ..)) => {}
+    None => {
+      return Err(
+        DialectGraphqlError::maybe_unexpected_token(
+          None,
+          Expectation::FragmentName,
+          SimpleSpan::new(offset, offset),
+        )
+        .into(),
+      );
     }
   }
 
@@ -226,10 +221,26 @@ impl<S> ast::FragmentName<S> {
 mod tests;
 
 /// Peeks the next token without consuming it and reports whether it satisfies
-/// `pred`. It returns `false` at end of input.
+/// `pred`. It returns `false` at end of input, and **raises** on a terminal scanner stop.
 ///
 /// Selection and executable productions use this one-token dispatch primitive to
 /// choose a committed arm while leaving the token available to that arm.
+///
+/// # It was an always-declining `try_expect`, and tokora names that hack
+///
+/// The body ran `try_expect` with a predicate that recorded the answer and then always returned
+/// `false`, so the token stayed at the cache front. That reads the head without consuming it and
+/// it also answers `false` for a **terminal stop**, because `try_expect`'s contract folds a
+/// resource trip into the same `Ok(None)` a genuine end of input produces
+/// (`tokora-0.10.0/src/input/input_ref/try_expect.rs:262`). A caller then reads a halted scanner
+/// as "no `(` here" and commits to the arm for a construct that is absent — smear issue #177,
+/// Codex round 2, on `variables_definition`, which returned a successful **empty**
+/// `VariablesDefinition` over a refused input.
+///
+/// [`head_satisfies`](tokora::InputRef::head_satisfies) is the primitive for exactly this, and its
+/// own doc says so: *"Replaces the consumer-side always-decline `try_expect` hack, which answered
+/// `false` for both."* It is `peek_head_map` underneath, so `false` is still reserved for a real
+/// end of input and the token is still left where the committed arm will find it.
 fn peeks_where<'inp, Src, Ctx, F>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   pred: F,
@@ -242,10 +253,5 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   F: Fn(&GraphqlToken<'inp, Src>) -> bool,
 {
-  let mut found = false;
-  inp.try_expect(|spanned| {
-    found = pred(spanned.data);
-    false
-  })?;
-  Ok(found)
+  inp.head_satisfies(pred)
 }

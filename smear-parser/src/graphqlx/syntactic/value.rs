@@ -133,7 +133,7 @@ where
 }
 
 value_parser!(int_value, inp, IntValue<GraphqlxSlice<'inp, Src>>, [], {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(Spanned {
       span,
       data: GraphqlxToken::<'inp, Src>::LitInt(value),
@@ -151,7 +151,7 @@ value_parser!(
   FloatValue<GraphqlxSlice<'inp, Src>>,
   [],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned {
         span,
         data: GraphqlxToken::<'inp, Src>::LitFloat(value),
@@ -175,7 +175,7 @@ value_parser!(
   StringValue<GraphqlxSlice<'inp, Src>>,
   [],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned {
         span,
         data: GraphqlxToken::<'inp, Src>::LitInlineStr(value),
@@ -203,7 +203,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.next()? {
+  match inp.next_or_stop()? {
     Some(Spanned {
       span,
       data: GraphqlxToken::<'inp, Src>::LitInlineStr(value),
@@ -221,7 +221,7 @@ value_parser!(
   BooleanValue<GraphqlxSlice<'inp, Src>>,
   [contextual],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) => match keyword_of(&token) {
         Some(ContextualKeyword::True) => Ok(BooleanValue::new(span, true)),
         Some(ContextualKeyword::False) => Ok(BooleanValue::new(span, false)),
@@ -238,7 +238,7 @@ value_parser!(
   NullValue<GraphqlxSlice<'inp, Src>>,
   [contextual],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) => match keyword_of(&token) {
         Some(ContextualKeyword::Null) => match token {
           GraphqlxToken::<'inp, Src>::Identifier(value) => Ok(NullValue::new(span, value)),
@@ -1303,7 +1303,7 @@ value_parser!(
   Set<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Set) => {
         if super::peek_kind(inp)?.is_none() {
           return unexpected_here(inp, Expectation::LBrace);
@@ -1328,7 +1328,7 @@ value_parser!(
   ConstSet<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Set) => {
         if super::peek_kind(inp)?.is_none() {
           return unexpected_here(inp, Expectation::LBrace);
@@ -1353,7 +1353,7 @@ value_parser!(
   Map<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Map) => {
         if super::peek_kind(inp)?.is_none() {
           return unexpected_here(inp, Expectation::LBrace);
@@ -1378,7 +1378,7 @@ value_parser!(
   ConstMap<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    match inp.next()? {
+    match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Map) => {
         if super::peek_kind(inp)?.is_none() {
           return unexpected_here(inp, Expectation::LBrace);

@@ -7,8 +7,7 @@
 
 use std::vec::Vec;
 use tokora::{
-  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, cache::PeekedTokenExt,
-  try_parse_input::ParseAttempt, utils::typenum::U1,
+  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, try_parse_input::ParseAttempt,
 };
 
 use smear_lexer::graphqlx::{
@@ -199,8 +198,11 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
-  let mut peeked = inp.peek::<U1>()?;
-  Ok(peeked.pop_front().map(|token| token.token().kind()))
+  // THE DIALECT'S OWN `peek_kind`, and it shadows tokora's — which is terminal-aware. Written over
+  // a raw `peek` it was not, so five call sites read a scanner stop as `Ok(None)`: "no head here"
+  // on an input the scanner had already given up on. `peek_head_map` is tokora's terminal-aware
+  // width-1 primitive and is what `InputRef::peek_kind` is itself written over. smear issue #177.
+  inp.peek_head_map(|token| token.data.kind())
 }
 
 /// Produces a typed GraphQLx unexpected-token error at the current input head.
@@ -217,12 +219,11 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
-  let found = {
-    let mut peeked = inp.peek::<U1>()?;
-    peeked
-      .pop_front()
-      .map(|token| (*token.span(), token.token().kind()))
-  };
+  // `peek_head_map`, not a raw `peek`: a window the scanner truncated is byte-for-byte a window a
+  // short document produces, and reading the first as the second reports a stop as an absent token
+  // — smear issue #177, Codex round 1. The terminal end-of-input error it raises instead carries
+  // tokora's mark into this dialect's `TerminalEndOfInput`.
+  let found = inp.peek_head_map(|token| (*token.span, token.data.kind()))?;
   Err(match found {
     Some((span, kind)) => DialectGraphqlxError::unexpected_token(kind, expected, span).into(),
     None => {
