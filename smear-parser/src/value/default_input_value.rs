@@ -14,7 +14,10 @@ pub struct DefaultInputValue<Value, Span = SimpleSpan> {
 impl<Value, Span> DefaultInputValue<Value, Span> {
   /// Creates a default input value from its span and constant value.
   #[inline]
-  pub const fn new(span: Span, value: Value) -> Self {
+  pub const fn new(span: Span, value: Value) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self { span, value }
   }
 

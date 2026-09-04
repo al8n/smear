@@ -53,7 +53,7 @@ macro_rules! executable_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -77,7 +77,7 @@ fn guard_executable_phase<'inp, Src, Ctx>(
 ) -> Result<(), GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -139,7 +139,7 @@ fn classify_executable_head<'inp, Src, Ctx>(
 ) -> Result<ClassifiedExecutableHead, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -188,7 +188,7 @@ fn expected_classified_executable_head<'inp, Src, Ctx, T>(
 ) -> Result<T, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -215,7 +215,7 @@ fn take_name<'inp, Src, Ctx>(
 ) -> Result<Name<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -246,7 +246,7 @@ fn take_classified_identifier<'inp, Src, Ctx>(
 ) -> Result<(SimpleSpan, GraphqlSlice<'inp, Src>), GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -281,7 +281,7 @@ fn try_take_classified_name<'inp, Src, Ctx>(
 ) -> Result<Option<Name<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -306,7 +306,7 @@ fn take_dollar<'inp, Src, Ctx>(
 ) -> Result<SimpleSpan, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -324,7 +324,7 @@ fn take_colon<'inp, Src, Ctx>(
 ) -> Result<(), GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -342,7 +342,7 @@ fn take_fragment<'inp, Src, Ctx>(
 ) -> Result<Fragment, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -363,7 +363,7 @@ fn variable_definition_core<'inp, Src, Ctx>(
 ) -> Result<VariableDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -426,7 +426,7 @@ executable_parser!(
 fn is_variable_definition_head<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
 {
   matches!(
     token,
@@ -442,7 +442,7 @@ fn decide_variable_definition_head<'inp, Src, Ctx>(
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -513,7 +513,7 @@ pub(super) fn named_operation_after_classified_head<'inp, Src, Ctx>(
 ) -> Result<OperationDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -637,7 +637,7 @@ pub(super) fn fragment_definition_body<'inp, Src, Ctx>(
 ) -> Result<FragmentDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -768,7 +768,7 @@ fn decide_executable_definition_head<'inp, Src, Ctx>(
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -818,7 +818,7 @@ macro_rules! impl_executable_api {
       ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
-        $slice: Slice<'inp> + Clone + 'inp,
+        $slice: Slice<'inp> + Clone + 'inp + $crate::value::Leaf,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
@@ -923,7 +923,7 @@ impl OperationType {
   ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize> + ?Sized,
-    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,

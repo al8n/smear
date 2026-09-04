@@ -15,6 +15,11 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct CustomSpan(u8);
 
+/// A span of the test's own, taking the obligation in the one line a consumer would
+/// write. A `Span` sits in a leaf position on every value carrier, so it answers the
+/// same question the source representation does (`al8n/smear#176`).
+impl crate::value::Leaf for CustomSpan {}
+
 fn name(span: u8, source: &'static str) -> Name<&'static str, CustomSpan> {
   Name::new(CustomSpan(span), source)
 }

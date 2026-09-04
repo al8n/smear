@@ -63,8 +63,17 @@ impl<S, Span, Lang: ?Sized> core::ops::Deref for IntValue<S, Span, Lang> {
 
 impl<S, Span, Lang: ?Sized> IntValue<S, Span, Lang> {
   /// Creates a new int value.
+  ///
+  /// `S` here is the materialised tree's integer width `I` — the one payload parameter whose hole
+  /// is held shut by this constructor's visibility rather than by a bound. The
+  /// [`Leaf`](crate::value::Leaf) obligation is written anyway, so publishing this constructor is
+  /// a change to one keyword and not a re-run of `al8n/smear#176`'s analysis.
   #[inline]
-  pub(crate) const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: Span, value: S) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       value,

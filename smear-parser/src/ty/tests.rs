@@ -8,6 +8,11 @@ use super::ListType;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CustomSpan(u8);
 
+/// A span of the test's own, taking the obligation in the one line a consumer would write. Every
+/// type carrier owns its span by value and releases it where it finds it, so the span answers the
+/// same question the value carriers' does (`al8n/smear#176`).
+impl crate::value::Leaf for CustomSpan {}
+
 #[test]
 fn carriers_support_custom_spans() {
   let list = ListType::<_, CustomSpan>::new(CustomSpan(2), "Element", false);

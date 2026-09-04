@@ -110,7 +110,7 @@ pub(super) fn directive_after_keyword<'inp, Src, Ctx>(
 ) -> Result<DirectiveDefinition<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
@@ -194,7 +194,7 @@ impl DirectiveLocations {
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize> + ?Sized,
-    GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+    GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxToken<'inp, Src>:
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
@@ -214,7 +214,7 @@ impl Location {
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize> + ?Sized,
-    GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+    GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxToken<'inp, Src>:
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,

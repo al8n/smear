@@ -25,7 +25,7 @@ readme = "README.md"
 # explicitly with `default-features = false`, so this list governs a DIRECT dependent only.
 default = ["std", "graphql", "graphqlx", "smallvec"]
 
-std = ["smear-lexer/std", "tokora/std", "bytes?/default"]
+std = ["smear-lexer/std", "tokora/std", "bytes?/default", "hipstr?/default", "smol-bytes?/default"]
 
 # The two dialects, forwarded to the lexer because a parser for a dialect needs that dialect's
 # tokens. Every doc link to one is `#[cfg_attr]`-gated for the reason `smear-lexer` records.
@@ -68,14 +68,33 @@ graphqlx = ["smear-lexer/graphqlx"]
 # becomes a bug.
 materialized-numbers = ["graphql"]
 
-# The source backings. Nothing in `src/` outside a `#[cfg(feature = "bytes")]` test names one of
-# these types — the parser is generic over `Src` — so they exist here to forward the lexer's and,
-# for `bytes`, to give those tests the type to name.
+# The source backings. Three of the four are now direct optional dependencies rather than pure
+# forwards, and the reason is `value::Leaf` (al8n/smear#176).
+#
+# THE RULE DID NOT CHANGE; ITS CONDITION DID. These were forwards because "nothing in `src/`
+# outside a `#[cfg(feature = "bytes")]` test names one of these types — the parser is generic over
+# `Src`". Something does now: `S` carries a `Leaf` bound, `Leaf` is this crate's trait, and the
+# orphan rule means an impl for a foreign source type can be written **here or nowhere**. A
+# consumer parsing over `HipStr` cannot declare `HipStr` a leaf themselves, so a forward-only
+# feature would compile the lexer for a source this crate's productions then refuse.
+#
+# It is a refusal rather than a theory: measured on this branch before the impls landed,
+# `document::<HipStr<'static>, _>` failed with `the trait bound `HipStr<'static, hipstr::Arc>:
+# Leaf` is not satisfied`, which no downstream edit can answer.
+#
+# WHICH ONES, DERIVED FROM `Source::Slice` AND NOT FROM THE FEATURE LIST. What needs an impl is the
+# **slice** type a backing yields, not the backing:
+#
+# * `bstr` yields `&'a BStr`, and `impl<T: ?Sized> Leaf for &T` already covers every reference.
+#   It stays a pure forward, and that is the one entry this rule leaves alone.
+# * `bytes` yields `Bytes` — an owned, refcount-sliced type. It was already a direct dependency.
+# * `hipstr` yields `HipStr<'h>` / `HipByt<'h>`, and `smol-bytes` yields four owned types. Both
+#   become direct dependencies for the impls, which is the same reason `bytes` already was.
 smallvec = ["smear-lexer/smallvec"]
 bytes = ["dep:bytes", "smear-lexer/bytes", "tokora/bytes_1"]
 bstr = ["smear-lexer/bstr"]
-hipstr = ["smear-lexer/hipstr"]
-smol-bytes = ["smear-lexer/smol-bytes"]
+hipstr = ["dep:hipstr", "smear-lexer/hipstr", "tokora/hipstr_0_8"]
+smol-bytes = ["dep:smol-bytes", "smear-lexer/smol-bytes", "tokora/smol_bytes_0_1"]
 
 # The lossless CST tower. `std` because the runner needs it.
 #
@@ -110,6 +129,10 @@ tokora.workspace = true
 smear-lexer.workspace = true
 
 bytes = { workspace = true, optional = true }
+# Not a workspace entry: there is none for `hipstr`, and `smear` states the same requirement
+# inline for the same reason.
+hipstr = { version = "0.8", default-features = false, optional = true }
+smol-bytes = { workspace = true, optional = true }
 rowan = { version = "0.17", optional = true }
 
 [lints]

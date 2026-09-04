@@ -17,7 +17,10 @@ pub struct MapEntry<Key, Value, Span = SimpleSpan> {
 impl<Key, Value, Span> MapEntry<Key, Value, Span> {
   /// Creates a map entry from its complete span, key, and value.
   #[inline]
-  pub const fn new(span: Span, key: Key, value: Value) -> Self {
+  pub const fn new(span: Span, key: Key, value: Value) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self { span, key, value }
   }
 
@@ -67,6 +70,9 @@ where
   Key: crate::value::Nestable,
   Value: crate::value::Nestable<Node = Key::Node>,
 {
+  /// An entry is a carrier, not a node: it takes the rank of the halves it wraps, which share one.
+  const RANK: u8 = Key::RANK;
+
   type Node = Key::Node;
 
   #[inline]
@@ -74,8 +80,9 @@ where
     // Both halves are `Nestable`, so both forward to the same worklist. That an entry can forward
     // *twice* is one of the two things a sink buys over a returned answer — two halves that each
     // hand over a container have no single answer that does not pour one into the other — and
-    // `value/nesting.rs`'s header measures the other. `Span` carries no bound and is released
-    // here, on the same terms as `ObjectField`'s unbounded slots (al8n/smear#176).
+    // `value/nesting.rs`'s header measures the other. `Span` is released here rather than handed
+    // over, which is why `MapEntry::new` makes it a `Leaf` — on the same terms as `ObjectField`'s
+    // name and span slots (al8n/smear#176).
     self.key.into_children(worklist);
     self.value.into_children(worklist);
   }
@@ -101,7 +108,10 @@ pub struct Map<Key, Value, Span = SimpleSpan, Container = Vec<MapEntry<Key, Valu
 impl<Key, Value, Span, Container> Map<Key, Value, Span, Container> {
   /// Creates a map value from its span and entries.
   #[inline]
-  pub const fn new(span: Span, entries: Container) -> Self {
+  pub const fn new(span: Span, entries: Container) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       entries,

@@ -87,7 +87,7 @@ fn name<'inp, Src, Ctx>(
 ) -> Result<ast::Name<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -100,7 +100,7 @@ fn try_name<'inp, Src, Ctx>(
 ) -> Result<ParseAttempt<ast::Name<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -118,7 +118,7 @@ pub fn fragment_name<'inp, Src, Ctx>(
 ) -> Result<ast::FragmentName<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
@@ -168,7 +168,7 @@ impl<S> ast::Name<S> {
   ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
-    S: Slice<'inp> + Clone + 'inp,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -186,7 +186,7 @@ impl<S> ast::Name<S> {
   ) -> Result<ParseAttempt<Self>, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
-    S: Slice<'inp> + Clone + 'inp,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -206,7 +206,7 @@ impl<S> ast::FragmentName<S> {
   ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
-    S: Slice<'inp> + Clone + 'inp,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,

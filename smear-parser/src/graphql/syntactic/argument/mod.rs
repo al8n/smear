@@ -40,7 +40,7 @@ macro_rules! argument_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -62,7 +62,7 @@ fn guard_argument_phase<'inp, Src, Ctx>(
 ) -> Result<(), GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -163,7 +163,7 @@ fn decide_argument_head<'inp, Src, Ctx>(
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -181,7 +181,7 @@ fn decide_arguments_head<'inp, Src, Ctx>(
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -293,7 +293,7 @@ macro_rules! impl_argument_api {
       ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
-        $slice: Slice<'inp> + Clone + 'inp,
+        $slice: Slice<'inp> + Clone + 'inp + $crate::value::Leaf,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,

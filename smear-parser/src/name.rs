@@ -61,7 +61,11 @@ pub struct FragmentName<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Name<S,
 #[cfg(feature = "graphql")]
 impl<S, Span, Lang: ?Sized> FragmentName<S, Span, Lang> {
   #[inline]
-  pub(crate) const fn new(span: Span, source: S) -> Self {
+  pub(crate) const fn new(span: Span, source: S) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self(Name::new(span, source))
   }
 
@@ -156,8 +160,36 @@ impl<S, Span, Lang: ?Sized> Name<S, Span, Lang> {
   /// §2.1.9's. Nothing establishes that for a name assembled here, and a consumer that reads one
   /// as text — `graphql_proto`'s response keys, its variable lookups — has to answer that question
   /// itself rather than assume this constructor answered it.
+  ///
+  /// # Why the spelling has to be a leaf
+  ///
+  /// This is one of the four doors an outside `S` reaches a value-tree position through, and the
+  /// only carrier in such a position whose `S` a caller supplies — a name sits in an object
+  /// field's name slot on every value enum, and in the `Variable` arm on the three that have one.
+  /// So `S` takes the `Leaf` obligation here: dropping it must run no destructor able to reach a
+  /// value tree.
+  ///
+  /// `Span` takes it beside `S`, because this carrier owns one too — a `Name` is
+  /// `repr(transparent)` over an `Ident`, and the span is a field of the value being dropped. That
+  /// axis is reachable only in GraphQLx, the one dialect leaving `Span` a parameter rather than
+  /// pinning it to [`SimpleSpan`], and it is the wider of the two: the eight other doors it needs
+  /// are the shared value carriers' own constructors.
+  ///
+  /// Without it a caller could seat a type owning an input value in this slot and release a chain
+  /// that descends one native frame per level, past the container whose whole purpose is that it
+  /// does not — `al8n/smear#176`, measured at 20 000 released and 100 000 aborted. The other three
+  /// doors are the `From<Ident<S, Span, Lang>>`, `FromComponents` and `ErrorNode` impls below,
+  /// and they carry the same bound for the same reason.
+  ///
+  /// It is an obligation and not a fence: `impl Leaf for Mine {}` is one line, and a borrowed
+  /// slice, `String`, `Bytes` and every other shipped representation already satisfy it. See
+  /// `value::Leaf` for the contract and for what happens when the claim is false.
   #[inline]
-  pub const fn new(span: Span, source: S) -> Self {
+  pub const fn new(span: Span, source: S) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self(Ident::new(span, source))
   }
 
@@ -216,7 +248,9 @@ impl<S: ?Sized, Span, Lang: ?Sized> AsRef<Ident<S, Span, Lang>> for Name<S, Span
   }
 }
 
-impl<S, Span, Lang: ?Sized> From<Ident<S, Span, Lang>> for Name<S, Span, Lang> {
+impl<S: crate::value::Leaf, Span: crate::value::Leaf, Lang: ?Sized> From<Ident<S, Span, Lang>>
+  for Name<S, Span, Lang>
+{
   #[inline]
   fn from(ident: Ident<S, Span, Lang>) -> Self {
     Self(ident)
@@ -262,14 +296,17 @@ impl<S, Span, Lang: ?Sized> IntoComponents for Name<S, Span, Lang> {
   }
 }
 
-impl<S, Span, Lang: ?Sized> FromComponents for Name<S, Span, Lang> {
+impl<S: crate::value::Leaf, Span: crate::value::Leaf, Lang: ?Sized> FromComponents
+  for Name<S, Span, Lang>
+{
   #[inline]
   fn from_components(components: Self::Components) -> Self {
     Self(Ident::from_components(components))
   }
 }
 
-impl<S, Span, Lang: ?Sized> ErrorNode<Span> for Name<S, Span, Lang>
+impl<S: crate::value::Leaf, Span: crate::value::Leaf, Lang: ?Sized> ErrorNode<Span>
+  for Name<S, Span, Lang>
 where
   Ident<S, Span, Lang>: ErrorNode<Span>,
 {
@@ -303,6 +340,11 @@ mod tests {
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   struct CustomSpan(u8);
+
+  /// A span of the test's own, taking the obligation in the one line a consumer would
+  /// write. A `Span` sits in a leaf position on every value carrier, so it answers the
+  /// same question the source representation does (`al8n/smear#176`).
+  impl crate::value::Leaf for CustomSpan {}
 
   trait OtherLanguage {}
 

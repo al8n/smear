@@ -15,7 +15,7 @@ macro_rules! extension_tail {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -330,7 +330,7 @@ pub(super) fn type_extension_after_keyword<'inp, Src, Ctx>(
 ) -> Result<TypeExtension<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -363,7 +363,7 @@ pub(super) fn type_extension_after_extend<'inp, Src, Ctx>(
 ) -> Result<TypeExtension<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -414,7 +414,7 @@ pub(crate) fn type_system_extension_after_extend<'inp, Src, Ctx>(
 ) -> Result<TypeSystemExtension<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,

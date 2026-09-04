@@ -50,7 +50,7 @@ macro_rules! document_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
       GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
@@ -73,7 +73,7 @@ fn unexpected_consumed_head<'inp, Src, Ctx, T>(
 ) -> Result<T, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -89,7 +89,7 @@ fn expected_document_phase<'inp, Src, Ctx, T>(
 ) -> Result<T, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -124,7 +124,7 @@ fn refuse_described_shorthand<'inp, Src, Ctx>(
 ) -> Result<(), GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -146,7 +146,7 @@ fn definition_after_keyword<'inp, Src, Ctx>(
 ) -> Result<Definition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -202,7 +202,7 @@ fn shorthand_definition<'inp, Src, Ctx>(
 ) -> Result<Definition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
@@ -408,7 +408,7 @@ fn decide_definition_or_extension_head<'inp, Src, Ctx>(
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -456,7 +456,7 @@ macro_rules! impl_document_api {
       ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
-        $slice: Slice<'inp> + Clone + 'inp,
+        $slice: Slice<'inp> + Clone + 'inp + $crate::value::Leaf,
         GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,

@@ -91,7 +91,7 @@ pub fn name<'inp, Src, Ctx>(
 ) -> Result<ast::Name<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -105,7 +105,7 @@ pub fn try_name<'inp, Src, Ctx>(
 ) -> Result<ParseAttempt<ast::Name<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -123,7 +123,7 @@ pub fn path<'inp, Src, Ctx>(
 ) -> Result<ast::Path<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -144,7 +144,7 @@ pub fn try_path<'inp, Src, Ctx>(
 ) -> Result<ParseAttempt<ast::Path<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -166,7 +166,7 @@ pub(crate) fn path_after_first<'inp, Src, Ctx>(
 ) -> Result<ast::Path<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -212,7 +212,7 @@ pub(crate) fn unexpected_here<'inp, Src, Ctx, T>(
 ) -> Result<T, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -244,7 +244,7 @@ impl<S> ast::Name<S> {
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
-    S: Slice<'inp> + Clone + 'inp,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   {
@@ -257,7 +257,7 @@ impl<S> ast::Name<S> {
   ) -> Result<ParseAttempt<Self>, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
-    S: Slice<'inp> + Clone + 'inp,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   {
@@ -275,7 +275,7 @@ impl<S> ast::Path<S> {
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
-    S: Slice<'inp> + Clone + 'inp,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   {
@@ -291,7 +291,7 @@ impl<S> ast::Path<S> {
   ) -> Result<ParseAttempt<Self>, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
-    S: Slice<'inp> + Clone + 'inp,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   {

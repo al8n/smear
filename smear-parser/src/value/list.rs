@@ -18,7 +18,10 @@ pub struct List<Value, Span = SimpleSpan, Container = Vec<Value>> {
 impl<Value, Span, Container> List<Value, Span, Container> {
   /// Creates a list value from its span and elements.
   #[inline]
-  pub const fn new(span: Span, values: Container) -> Self {
+  pub const fn new(span: Span, values: Container) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       values,

@@ -50,7 +50,7 @@ pub(super) fn schema_after_keyword<'inp, Src, Ctx>(
 ) -> Result<SchemaDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,

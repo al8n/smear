@@ -66,7 +66,10 @@ impl<S: ?Sized, Span, Lang: ?Sized> core::ops::Deref for BooleanValue<S, Span, L
 impl<S: ?Sized, Span, Lang: ?Sized> BooleanValue<S, Span, Lang> {
   /// Creates a new boolean value.
   #[inline]
-  pub(crate) const fn new(span: Span, value: bool) -> Self {
+  pub(crate) const fn new(span: Span, value: bool) -> Self
+  where
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       value,

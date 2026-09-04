@@ -70,13 +70,39 @@ impl<S> Sealed for Selection<S> {}
 /// release is already the iterative one [`Nested`] installs on the value carriers. What they can
 /// still own is a node a caller stored in `S`, which no implementation of this trait can push —
 /// see [`Nested`]'s documentation and `al8n/smear#176`.
+// ── THE RANK EDGE, ASSERTED ─────────────────────────────────────────────────────────────────────
+//
+// A selection hands over only the nested selection sets. Everything else it destructures is
+// dropped **in place**: the alias and the name are leaves, and the arguments and directives are
+// not — they hold `InputValue` nodes.
+//
+// That is allowed, and the invariant on `Nestable::into_children` says why: a node of a
+// *lower-ranked* tree may be dropped here because its own release is iterative. Releasing an
+// argument list runs `Nested`'s `Drop`, which walks the value tree on its own worklist, so it
+// costs *this* release O(1) native frames however deep the values are — not one frame per level.
+// (What a caller's own payload destructor costs is the payload's own shape; `Leaf` does not bound
+// it and neither does this. See `Nestable::into_children`.)
+//
+// It is sound only while the edge points downwards, so the direction is checked rather than
+// trusted. One concrete instantiation is enough: `RANK` does not depend on the payload parameters.
+const _: () = assert!(
+  <super::InputValue<&'static str> as Nestable>::RANK < <Selection<&'static str> as Nestable>::RANK,
+  "a selection drops value nodes in place, so the value tree must rank below the selection tree",
+);
+
 impl<S> Nestable for Selection<S> {
+  /// The selection tree: rank 2. It drops value nodes (arguments, directives) and, in
+  /// GraphQLx, a type node (a type condition) in place — see the assertions above.
+  const RANK: u8 = 2;
+
   type Node = Self;
 
   #[inline]
   fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       Self::Field(field) => {
+        // span, alias, name, arguments, directives — dropped in place. The first three are
+        // leaves; the last two are rank-1 value nodes that release themselves iteratively.
         let (_, _, _, _, _, selection_set) = field.into_components();
         if let Some(selection_set) = selection_set {
           worklist.adopt(selection_set.into_selections().into_vec());
@@ -85,6 +111,8 @@ impl<S> Nestable for Selection<S> {
       // A spread names a fragment; the selections it stands for are the fragment definition's.
       Self::FragmentSpread(_) => {}
       Self::InlineFragment(fragment) => {
+        // span, type_condition, directives — dropped in place. The directives are rank-1 value
+        // nodes; the type condition is a rank-1 type node in GraphQLx and a bare name in GraphQL.
         let (_, _, _, selection_set) = fragment.into_components();
         worklist.adopt(selection_set.into_selections().into_vec());
       }

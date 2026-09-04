@@ -59,7 +59,11 @@ impl<S, Span, Lang: ?Sized> IntoComponents for StringValue<S, Span, Lang> {
 impl<S, Span, Lang: ?Sized> StringValue<S, Span, Lang> {
   /// Creates a new string value.
   #[inline]
-  pub(crate) const fn new(span: Span, lit: LitStr<S>) -> Self {
+  pub(crate) const fn new(span: Span, lit: LitStr<S>) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       lit,
@@ -157,7 +161,11 @@ where
 impl<S, Span, Lang: ?Sized> InlineStringValue<S, Span, Lang> {
   /// Creates a new inline string value.
   #[inline]
-  pub(crate) const fn new(span: Span, lit: LitInlineStr<S>) -> Self {
+  pub(crate) const fn new(span: Span, lit: LitInlineStr<S>) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       lit,
@@ -257,7 +265,11 @@ where
 impl<S, Span, Lang: ?Sized> BlockStringValue<S, Span, Lang> {
   /// Creates a new block string value.
   #[inline]
-  pub(crate) const fn new(span: Span, lit: LitBlockStr<S>) -> Self {
+  pub(crate) const fn new(span: Span, lit: LitBlockStr<S>) -> Self
+  where
+    S: crate::value::Leaf,
+    Span: crate::value::Leaf,
+  {
     Self {
       span,
       lit,

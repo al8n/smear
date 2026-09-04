@@ -62,8 +62,11 @@ pub type DefaultVec<T> = Vec<T>;
 /// respect a consumer can observe; what it adds is the iterative release that keeps a value nested
 /// through these carriers from aborting the process on the way out, however deep it is. That
 /// ranges over every recursive position the grammar forms, and not over a node a caller stored in
-/// `S` — see [`Nested`]'s own documentation, which states the difference. [`Nestable`] is sealed,
-/// which fixes who may implement it and says nothing about what a payload may be.
+/// `S` unless that `S` is a [`Leaf`] — see [`Nested`]'s own documentation, which states the
+/// difference. [`Nestable`] is sealed, which fixes who may implement it and says nothing about
+/// what a payload may be; [`Leaf`] is the trait that does, and it is deliberately **not** sealed.
+/// A consumer instantiating `S` with an owned representation of their own implements it, in one
+/// line, and takes the obligation it names.
 ///
 /// It is the default container of the selection aliases too, for the same reason and against the
 /// same defect: an inline fragment owns a nested selection set and a field owns an optional one.
@@ -72,4 +75,4 @@ pub type DefaultVec<T> = Vec<T>;
 /// [`Nestable`]'s own signature: the trait hands its children to a [`Worklist`], and its `Node` is
 /// bounded by [`NestNode`], whose two carrier lanes a node without them fills with [`Absent`]. A
 /// trait nobody outside this crate can implement is still one a consumer reads.
-pub use crate::value::{Absent, NestNode, Nestable, Nested, Worklist};
+pub use crate::value::{Absent, Leaf, NestNode, Nestable, Nested, Worklist};

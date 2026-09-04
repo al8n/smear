@@ -74,8 +74,11 @@ pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<
 /// `try_unwrap_*` to `E0509`. Everything `derive_more` generated before is generated now.
 ///
 /// [`Nestable`] below is how the release reaches this enum's children. It reaches every child the
-/// *grammar* can put in a recursive position; it does not reach a node a caller stored in `S`, for
-/// which see [`Nested`]'s own documentation and `al8n/smear#176`.
+/// *grammar* can put in a recursive position, and it never had to reach a node a caller stored in
+/// `S`: [`Leaf`](super::Leaf) is the bound the four `Name` doors carry, so an `S` that owns one of these cannot
+/// be seated in a tree at all (`al8n/smear#176`). `Span` carries the same bound, though this
+/// dialect pins it to `SimpleSpan` and so could never have exercised it; GraphQLx is where that
+/// axis is reachable. See [`Nested`]'s own documentation.
 ///
 /// **This tree carries the repair even though the issue that prompted it was raised against the
 /// materialised twin**, and the reason is that the defect is a property of the shape rather than of
@@ -116,15 +119,18 @@ impl<S> NestNode for InputValue<S> {
 }
 
 impl<S> Nestable for InputValue<S> {
+  /// The value tree: rank 1. It holds no type node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Self;
 
   #[inline]
   fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // These arms hold no `InputValue`, so they are released here rather than reaching the walk.
-      // What they do hold is `S` — at the crate's own `S` that is a source slice, and at a
-      // caller's it is whatever the caller chose, including a node this loop cannot reach
-      // (al8n/smear#176).
+      // What they do hold is `S`, and `S` is a `Leaf`: the crate's own is a source slice and a
+      // caller's is a type that has declared its release reaches no node, which is exactly the
+      // property this arm needs and did not used to have (al8n/smear#176).
       Self::Variable(_)
       | Self::Boolean(_)
       | Self::String(_)
@@ -213,6 +219,9 @@ impl<S> NestNode for ConstInputValue<S> {
 }
 
 impl<S> Nestable for ConstInputValue<S> {
+  /// The value tree: rank 1. It holds no type node and no selection.
+  const RANK: u8 = 1;
+
   type Node = Self;
 
   #[inline]
