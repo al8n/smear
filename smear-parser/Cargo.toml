@@ -1,0 +1,143 @@
+[package]
+name = "smear-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Zero-copy parsers for GraphQL and GraphQLx: atomic combinators over `smear-lexer`'s token streams, building an AST or a lossless rowan CST."
+keywords = ["graphql", "parser", "cst", "zero-copy", "no-std"]
+categories = ["parsing", "parser-implementations", "no-std"]
+
+# A real file, not a symlink: this crate has its own README. `smear/README.md` is a symlink
+# because that one IS the workspace-root landing page.
+readme = "README.md"
+
+# The tower above `smear-lexer`, and the crate `smear`'s `parser` feature used to gate. The gate
+# survives the split as the dependency edge itself: a consumer who wants tokens and nothing else
+# depends on `smear-lexer` directly and never resolves this package. Measured on a fresh
+# crate-only compile over warm deps before the split: lexer 3.4s, parser +12.7s at default
+# features and +19.6s with `rowan`.
+
+[features]
+# The subset of `smear`'s own default that reaches this layer. `smear` names every member feature
+# explicitly with `default-features = false`, so this list governs a DIRECT dependent only.
+default = ["std", "graphql", "graphqlx", "smallvec"]
+
+std = ["smear-lexer/std", "tokora/std", "bytes?/default", "hipstr?/default", "smol-bytes?/default"]
+
+# The two dialects, forwarded to the lexer because a parser for a dialect needs that dialect's
+# tokens. Every doc link to one is `#[cfg_attr]`-gated for the reason `smear-lexer` records.
+graphql = ["smear-lexer/graphql"]
+graphqlx = ["smear-lexer/graphqlx"]
+
+# The value materialisation axis: GraphQL value productions whose `Int` and `Float` leaves carry
+# a number instead of a source slice.
+#
+# ONE FEATURE, TWO WIDTHS, AND THAT IS A DECISION RATHER THAN AN OMISSION. It gates
+# `ast::materialized` + `syntactic::value::materialized`, whose `Int` leaf is the type parameter
+# `I`: `i32`, which is what draft §3.5.1 specifies `Int` to be, or `i64`, the grammar-permissive
+# reading of draft §2.9.1. A width is not a second axis of COMPILATION — it is a second
+# instantiation of one generic tree, so there is nothing per-width to gate even if someone wanted
+# to. What `--each-feature` proves is what was chosen: the single `materialized-numbers` cell
+# compiles the tree, and `every_value_tree_declares_the_same_variants` fails in that cell if it
+# drifts from the slice tree.
+#
+# It gated FOUR modules before `refactor/materialised-generic`, because each width had its own AST
+# module and its own production module. Those pairs were each other with one type substituted, and
+# the width is a parameter now — `MaterializedInt`, sealed, with the width as an associated const —
+# so there are two modules and one tree.
+#
+# NAMED FOR WHAT IT CONVERTS AND NOTHING MORE. Numbers are materialised; strings are not. A
+# string literal keeps its slice — unescaping is the consumer's, because doing it here would mean
+# an owned buffer per node, and the property this feature exists to preserve is that
+# materialisation allocates nothing beyond what the slice parser already allocates. A feature
+# called `materialized` would promise a tree that holds no slices, which is false of every text
+# leaf in it.
+#
+# It IMPLIES `graphql`, because everything it compiles lives inside that dialect's modules; a
+# `--each-feature` cell that turned it on alone would compile none of the code it names. `smear`'s
+# twin implies `smear/graphql` for the same reason, and the umbrella's feature fence asserts the
+# pair agrees.
+#
+# NO `graphqlx` TWIN YET, deliberately: that dialect's lexer admits hexadecimal, octal and binary
+# integer literals and hexadecimal floats, and what those materialise to — radix handling, `i64`
+# range for a 64-bit hex literal, whether a hex float is IEEE 754 double at all — is a decision
+# this feature's owner has not taken. Shipping a second dialect on an unstated rule is how a bound
+# becomes a bug.
+materialized-numbers = ["graphql"]
+
+# The source backings. Three of the four are now direct optional dependencies rather than pure
+# forwards, and the reason is `value::Leaf` (al8n/smear#176).
+#
+# THE RULE DID NOT CHANGE; ITS CONDITION DID. These were forwards because "nothing in `src/`
+# outside a `#[cfg(feature = "bytes")]` test names one of these types — the parser is generic over
+# `Src`". Something does now: `S` carries a `Leaf` bound, `Leaf` is this crate's trait, and the
+# orphan rule means an impl for a foreign source type can be written **here or nowhere**. A
+# consumer parsing over `HipStr` cannot declare `HipStr` a leaf themselves, so a forward-only
+# feature would compile the lexer for a source this crate's productions then refuse.
+#
+# It is a refusal rather than a theory: measured on this branch before the impls landed,
+# `document::<HipStr<'static>, _>` failed with `the trait bound `HipStr<'static, hipstr::Arc>:
+# Leaf` is not satisfied`, which no downstream edit can answer.
+#
+# WHICH ONES, DERIVED FROM `Source::Slice` AND NOT FROM THE FEATURE LIST. What needs an impl is the
+# **slice** type a backing yields, not the backing:
+#
+# * `bstr` yields `&'a BStr`, and `impl<T: ?Sized> Leaf for &T` already covers every reference.
+#   It stays a pure forward, and that is the one entry this rule leaves alone.
+# * `bytes` yields `Bytes` — an owned, refcount-sliced type. It was already a direct dependency.
+# * `hipstr` yields `HipStr<'h>` / `HipByt<'h>`, and `smol-bytes` yields four owned types. Both
+#   become direct dependencies for the impls, which is the same reason `bytes` already was.
+smallvec = ["smear-lexer/smallvec"]
+bytes = ["dep:bytes", "smear-lexer/bytes", "tokora/bytes_1"]
+bstr = ["smear-lexer/bstr"]
+hipstr = ["dep:hipstr", "smear-lexer/hipstr", "tokora/hipstr_0_8"]
+smol-bytes = ["dep:smol-bytes", "smear-lexer/smol-bytes", "tokora/smol_bytes_0_1"]
+
+# The lossless CST tower. `std` because the runner needs it.
+#
+# EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH, and will stay outside it until
+# `rowan` is fixed upstream — `rowan 0.17.0` executes undefined behaviour on the ordinary path,
+# under Stacked Borrows from building any green tree and under Tree Borrows from dropping any red
+# one. #77 has the evidence and `ci/miri_scope.py` fails the Miri matrix if this feature ever
+# resolves ON inside it.
+rowan = ["dep:rowan", "tokora/rowan", "std"]
+
+# Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
+# trivia-injection gate can prove its corpus reached every production instead of asserting success
+# over whichever handful of shapes it happens to exercise. Test-only: it changes no behaviour, and
+# without it the instrumentation is not compiled at all.
+lossless-coverage = ["rowan"]
+
+# Compiles the lossless suites' `test_support` scaffolding. Every item it exposes is reachable
+# only from an integration test, which is a separate crate and therefore sees `pub` and nothing
+# else — so `#[cfg(test)]` and `pub(crate)` are both out of reach and a feature is the only door.
+#
+# Deliberately does NOT imply `rowan`. All of it lives inside the `rowan`-gated lossless tower, so
+# with `rowan` off there is nothing for this feature to expose; implying it would drag the whole
+# tower into a default-feature test row, which today compiles the lossless suites to nothing on
+# purpose.
+test-support = []
+
+[dependencies]
+derive_more.workspace = true
+paste = "1"
+tokora.workspace = true
+
+smear-lexer.workspace = true
+
+bytes = { workspace = true, optional = true }
+# Not a workspace entry: there is none for `hipstr`, and `smear` states the same requirement
+# inline for the same reason.
+hipstr = { version = "0.8", default-features = false, optional = true }
+smol-bytes = { workspace = true, optional = true }
+rowan = { version = "0.17", optional = true }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

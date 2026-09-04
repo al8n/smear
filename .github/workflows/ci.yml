@@ -69,13 +69,19 @@ on:
     branches:
       - main
       - feat/proto
-    # `**.md` used to sit in these lists. It cannot: `README.md`,
-    # `smear/src/lexer/README.md` and `smear/src/parser/README.md` are
-    # `include_str!`-ed into the crate's rustdoc, so editing one is a compile-time
-    # change to the documentation, and a broken reference-style link in a README
-    # fails the `docs` job below. Ignoring them meant the one job that can catch such a
-    # break never ran for the one change class that causes it. Only the markdown no crate
-    # compiles is ignored, which is the root `docs/` notes tree.
+    # `**.md` used to sit in these lists. It cannot: three READMEs are `include_str!`-ed into a
+    # crate's rustdoc — the root `README.md` through `smear/README.md`, which is a symlink to it,
+    # plus `smear-lexer/README.md` and `smear-parser/README.md` — so editing one is a compile-time
+    # change to the documentation, and a broken reference-style link in it fails the `docs` job
+    # below. Ignoring them meant the one job that can catch such a break never ran for the one
+    # change class that causes it.
+    #
+    # `smear-schema`, `smear-compiler` and `graphql-proto` carry a README that is NOT included:
+    # their crate roots have hand-written `//!` headers, as the modules they came from did. Those
+    # three are crates.io landing pages only, and nothing compiles them — a stated bound, not a
+    # claim that the `docs` job covers them.
+    #
+    # Only the markdown no crate compiles is ignored, which is the root `docs/` notes tree.
     #
     # `docs/**.md` stays even though `.gitignore`'s root-anchored `/docs/` keeps a docs-only
     # commit out of reach of an ordinary `git add`. The two agree rather than duplicate, and
@@ -276,6 +282,71 @@ jobs:
     - name: source-census
       run: cargo run -p source-census -- --verbose
 
+  # al8n/smear#84's defect, as a gate: a member crate declaring a feature the crate named `smear`
+  # cannot reach. #84 found four of them, `rowan` — the gate on the entire lossless CST tower —
+  # among them, and the forwarding layer had dropped them in silence. The full-stack split rebuilds
+  # that layer over more manifests than it had then, so the gate lands with the first member out.
+  #
+  # THE SELFTEST FIRST, and for the reason `source-genericity` above states: the walk runs FROM the
+  # members, which are the superset, precisely because the defect's signature is absence and a
+  # check derived from the umbrella's own table is blind to it. `--selftest` plants three shapes of
+  # the defect and requires the verdict to fire on each; one plant proves the plant.
+  #
+  # Reads both sides out of `cargo metadata` and hardcodes no count. It needs no Rust toolchain
+  # beyond `cargo metadata`, so it is a separate job from the census above rather than a step in it
+  # — a gate that waits on a two-minute probe build is a gate people stop running locally.
+  #
+  # In no `needs:` chain, so it blocks nothing.
+  feature-reachability:
+    name: feature-reachability
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: feature_reachability --selftest
+      run: python3 ci/feature_reachability.py --selftest
+    - name: feature_reachability
+      run: python3 ci/feature_reachability.py --verbose
+
+  # The one property no job above can see, because every one of them builds THIS workspace.
+  #
+  # `smear` re-exports whole member crates, so a feature of `smear` gates what it advertises only
+  # where `smear/src/lib.rs` writes the `#[cfg]`. Where it forwards to a member feature, the `#[cfg]`
+  # lives inside the member — and cargo unifies a package's features across the whole graph, so a
+  # SECOND DEPENDENCY naming that member directly switches the capability on behind the consumer.
+  # This workspace has no second requester, so nothing here could reproduce it; `ci/downstream/` is
+  # a consumer outside the workspace, and its compile is the property.
+  #
+  # Measured before the repair: ten of ten forwarded pairs leaked. The repair is an equivalence
+  # `smear` asserts at compile time, and this job is what keeps it honest in both directions —
+  # a LEAK leg that compiles is the defect, and a CTL leg that compiles means the probe stopped
+  # naming the path and the positive beside it proves nothing.
+  #
+  # `--locked` against the fixture's committed lock, so the job is hermetic and a red reads "your
+  # feature is broken" rather than "upstream released something".
+  #
+  # In no `needs:` chain, so it blocks nothing.
+  downstream:
+    name: downstream
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-downstream-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-downstream-
+    - name: ci/downstream.sh
+      run: bash ci/downstream.sh
+
   # Check formatting
   rustfmt:
     name: rustfmt
@@ -314,46 +385,38 @@ jobs:
       run: rustup update stable --no-self-update && rustup default stable
     - name: Install cargo-hack
       run: cargo install cargo-hack
-    - name: Apply clippy lints
-      run: |
-        cargo hack clippy --each-feature
-        # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
-        # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
-        # build always contained the parser; a single-crate `--each-feature` never builds `parser`
-        # together with exactly one other feature. This restores those pairs deliberately, and the
-        # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
-        #
-        # `rowan`, `lossless-coverage`, `validator` and `introspection` are excluded because they
-        # already imply `parser`, so their pass-1 cells ARE pairs; `default`,
-        # `--no-default-features` and `--all-features` are excluded because those three runs would
-        # duplicate pass-1 exactly.
-        #
-        # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
-        # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
-        # and it does not need to be there — it already skips the `parser,parser` cell on its own.
-        # Nine cells, one per remaining feature, and a feature added to the manifest later joins
-        # them without anyone editing this file.
-        cargo hack clippy -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,default \
-          --exclude-no-default-features --exclude-all-features
+    # ONE STRING, SHARED WITH A LOCAL RUN. The invocation used to live here, and a local
+    # `cargo hack clippy --each-feature` typed by hand is a different question: this file sets
+    # `RUSTFLAGS: -Dwarnings` for every job, so a rustc lint is an error here and a warning there.
+    # That gap cleared this branch twice on the same construct, and the second time a stacked
+    # branch found it. `ci/hack.sh` carries the flags, both passes and the reasoning.
+    - name: ci/hack.sh
+      run: bash ci/hack.sh
 
   # ── WHAT CROSS-COMPILES, AND FOR WHOM ───────────────────────────────────────────────────────
   #
-  # Fifteen targets, one question: does the crate a consumer installs build for them. That is
-  # `smear` and only `smear` — it is the sole publishable member, which is a property of the
-  # manifests rather than an opinion, and the step below re-reads it out of `cargo metadata` so
-  # the list cannot go stale in silence. The other five are `publish = false`: two criterion
-  # harnesses — one of which also carries the `apollo-compiler` differential oracle — two
-  # tripwires, and the `source-genericity` gate's `syn` reader, none of which any target here
-  # will ever run.
+  # Fifteen targets, one question: does the crate a consumer installs build for them. Since the
+  # crate split that is all six of `smear`, `smear-lexer`, `smear-parser`, `smear-schema`,
+  # `smear-compiler` and `graphql-proto` — the publishable members, a property
+  # of the manifests rather than an opinion, and the step below re-reads it out of `cargo
+  # metadata` so the list cannot go stale in silence. The other three are `publish = false`: two
+  # tripwires and the `source-genericity` gate's `syn` reader, none of which any target here will
+  # ever run.
   #
   # This job said `cargo build --target ...` with no package selection until it was fixed, so it
-  # built every member, and one of them cannot be built for a 32-bit target at all:
-  # `smear-apollo-bench` pins `apollo-compiler =1.32.0`, whose lib carries
-  # `assert!(size_of::<Name>() == 24)`. At 32 bits that is false, it is a const assertion so it
-  # fires during compilation, and `cross (i686-linux-android)` failed on `main` with
-  # `evaluation of name::_ failed here`. Nothing a consumer of `smear` can reach was involved:
-  # the gate was red about a benchmark harness's oracle, on Android, and it blocked merges.
+  # built every member, and one of them could not be built for a 32-bit target at all: the
+  # `apollo-compiler =1.32.0` oracle, whose lib carries `assert!(size_of::<Name>() == 24)`. Under
+  # the 32-bit x86 ABI that is false, it is a const assertion so it fires during compilation, and
+  # `cross (i686-linux-android)` failed on `main` with `evaluation of name::_ failed here`.
+  # Nothing a consumer of `smear` can reach was involved: the gate was red about a benchmark
+  # harness's oracle, on Android, and it blocked merges.
+  #
+  # THAT ORACLE IS NOW A DEV-DEPENDENCY OF `smear` — the benches were consolidated into the crate
+  # they measure — and this job is unaffected for a reason worth stating rather than rediscovering:
+  # `cargo build` does not build dev-dependencies at all, only `cargo build --tests` does. The
+  # place where it WOULD have mattered is `cargo miri test --lib`, which does; see
+  # `smear/Cargo.toml`, where the entry sits under `cfg(target_pointer_width = "64")` so that the
+  # two 32-bit Miri cells never resolve it.
   #
   # `-p smear` NAMES THE PACKAGE, and that is the load-bearing half — the same rule `noatomic`
   # below, `publish-dry-run` and `byte-identity` are written around. A selection that goes quiet
@@ -420,20 +483,30 @@ jobs:
       # is exactly the kind that goes stale without a symptom: a second publishable member would
       # simply never be cross-compiled, under fifteen green ticks. Keyed on the same `publish`
       # field the `docs` job reads — cargo reports `[]` for `publish = false` and null otherwise.
-      - name: smear is still the only publishable member
+      # A FROZEN LITERAL on the left of the comparison and the SAME NAMES on the `-p` list below,
+      # deliberately: derived from metadata, the guard would silently start covering whatever the
+      # workspace happens to contain, and a member added and not cross-compiled is exactly the
+      # green-over-nothing this step exists to refuse. Updating both halves in one diff is the
+      # decision being recorded.
+      - name: the publishable members are the ones this matrix builds
         run: |
           PUBLISHABLE="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(",".join(sorted(p["name"] for p in json.load(sys.stdin)["packages"] if p.get("publish") != [])))')"
           echo "publishable members: $PUBLISHABLE"
-          if [ "$PUBLISHABLE" != "smear" ]; then
-            echo "::error::this matrix cross-compiles '-p smear', but the publishable members are now: $PUBLISHABLE"
+          if [ "$PUBLISHABLE" != "graphql-proto,smear,smear-compiler,smear-lexer,smear-parser,smear-schema" ]; then
+            echo "::error::this matrix cross-compiles '-p smear -p smear-lexer -p smear-parser -p smear-schema -p smear-compiler -p graphql-proto', but the publishable members are now: $PUBLISHABLE"
             echo "::error::add the new one to the build below, or mark it publish = false if it does not ship"
             exit 1
           fi
-      - name: cargo build -p smear --all-features --target ${{ matrix.target }}
+      # `-p smear-lexer` is named even though `-p smear --all-features` already builds it through
+      # the dependency edge: what a published crate has to survive is being built ON ITS OWN, and
+      # a member reached only as a dependency is built with whatever the umbrella's features
+      # resolve to rather than with its own.
+      - name: cargo build (every publishable member) --all-features --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build -p smear --all-features --target ${{ matrix.target }}
+          cargo build -p smear -p smear-lexer -p smear-parser -p smear-schema -p smear-compiler -p graphql-proto \
+            --all-features --target ${{ matrix.target }}
 
   # The validator's schema representation, on a core with no compare-and-swap.
   #
@@ -467,6 +540,40 @@ jobs:
             ${{ runner.os }}-noatomic-
       - name: Install Rust
         run: rustup update stable && rustup default stable
+      # The same tier claim from the crate's own side, and it is a CELL rather than a sentence.
+      # `smear-schema`'s default configuration is `core` + `alloc` with `tokora` as its only
+      # dependency; `build` and `introspection` are what raise it, and neither is in `default`.
+      # `cargo hack --each-feature` reaches this configuration too, but only as one row of a
+      # matrix — naming it here means a regression says which claim broke.
+      - name: cargo check -p smear-schema --no-default-features
+        run: cargo check -p smear-schema --no-default-features
+      # ASSERT THE GRAPH, not only that the code compiles. `cargo check` passing says nothing about
+      # what is in the dependency graph, and the claim `smear-schema`'s `build` feature exists to
+      # support is exactly a graph claim: a machine that READS a schema at execution time does not
+      # get the parser through that edge. The spec's own §6 makes this point about the `client`
+      # feature, which is unwritten; this is the same assertion in the form available today.
+      #
+      # `--edges normal` excludes the dev edge deliberately. `graphql-proto`'s unit tests build a
+      # schema from SDL and therefore DO ask for `smear-schema/build` — through a dev-dependency,
+      # which cargo unifies only into targets that need dev-dependencies. Measured on this tree:
+      # `--edges normal,features` shows `smear-schema` with no features; `--edges all,features`
+      # shows `smear-schema feature "build"`. If those two ever agree, the dev request has leaked.
+      - name: graphql-proto does not take smear-schema's builder through a normal edge
+        run: |
+          set -euo pipefail
+          NORMAL="$(cargo tree -p graphql-proto --no-default-features --edges normal,features \
+            | grep -c 'smear-schema feature "build"' || true)"
+          DEV="$(cargo tree -p graphql-proto --no-default-features --edges all,features \
+            | grep -c 'smear-schema feature "build"' || true)"
+          echo "smear-schema/build through normal edges: $NORMAL, through all edges: $DEV"
+          if [ "$NORMAL" != "0" ]; then
+            echo "::error::graphql-proto now pulls smear-schema's builder into a consumer's graph"
+            exit 1
+          fi
+          if [ "$DEV" = "0" ]; then
+            echo "::error::the dev-dependency that gives graphql-proto's tests a schema builder is gone, so the check above is comparing nothing"
+            exit 1
+          fi
       - name: cargo build -p smear-noatomic --target thumbv6m-none-eabi
         run: |
           rustup target add thumbv6m-none-eabi
@@ -524,8 +631,13 @@ jobs:
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
         #
-        # `rowan`, `lossless-coverage`, `validator` and `introspection` are excluded because they
-        # already imply `parser`, so their pass-1 cells ARE pairs; `default`,
+        # `smear-lexer` needs no pass of its own, and that is measured rather than assumed: not one
+        # of its features implies another — every entry in its `[features]` table is either empty
+        # or a forward to a dependency — so pass 1 already builds each of them in the only
+        # combination the old single-crate run gave them.
+        #
+        # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
+        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
         # `--no-default-features` and `--all-features` are excluded because those three runs would
         # duplicate pass-1 exactly.
         #
@@ -535,40 +647,37 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack build -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,default \
+          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
           --exclude-no-default-features --exclude-all-features
         # Pass 3 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
         #
         # Measured on this tree: `cargo test`'s default target selection is lib + bins + tests +
         # examples; a `[[bench]]` target is not in it, and neither `cargo build --workspace
         # --all-features` (the `msrv` job) nor `cargo hack build --each-feature` above builds
-        # one. So while the benches lived in `smear/benches/` they were compiled by no gate at
-        # all — `#73`'s family exactly, a target that exists and that nothing ever proves builds.
+        # one. A bench is a target that exists and that nothing else here ever proves builds —
+        # `#73`'s family exactly — so this pass is the only gate over all six.
         #
-        # That was survivable when the benches sat beside the fixtures they `include_str!`. It
-        # is not now: `smear-benches` reaches across a member boundary for all 29 of them
-        # (`../../smear/tests/fixtures/...`), so a fixture rename would break four bench targets
-        # and every other job would stay green. `--benches` names a target KIND on a package
-        # that has nothing else, so there is no filter here that can match zero targets and
-        # exit 0.
+        # The first line covers the four that measure `smear`'s DEFAULT feature set. `-p smear`
+        # names the package, which is the loud spelling: a target FILTER that matches nothing
+        # warns and exits 0, a named `-p` that cannot be built fails.
         #
-        # `smear-apollo-bench` is the SAME defect one member over, and it survived the fix that
-        # this comment describes: `-p smear-benches` names one package, and `benchmarks/`'s two
-        # criterion targets — `apollo_comparison` and `validator_comparison` — live in a
-        # different one. Nothing built them. `validator_comparison` in particular carries G5's
-        # acceptance criterion (issue #85), so the target that proves the validator's headline
-        # number was itself unproven. Naming the package is what makes the gate fire: a target
-        # FILTER that matches nothing warns and exits 0, a named `-p` that cannot be built fails.
+        # THE SECOND LINE IS NOT A SECOND HELPING OF THE FIRST. `apollo_comparison` and
+        # `validator_comparison` carry `required-features = ["rowan", "validator"]`, and an unmet
+        # `required-features` makes cargo SKIP the target in silence — no output, exit code 0.
+        # Measured: `cargo bench --no-run -p smear` builds four of the six and says nothing about
+        # the other two. A workspace-wide `cargo bench` does build all six, but only because
+        # `smear-smoke` names every one of `smear`'s features and cargo unifies across the
+        # selected packages — coverage by resolution, which is what #70 and #84 both were, and
+        # which would disappear the day that member narrowed. So the two are NAMED, `--bench` by
+        # `--bench`, with their features passed: a named target that cannot be built is a hard
+        # error, and a renamed one takes this step red on the commit that renamed it.
+        # `validator_comparison` in particular carries G5's acceptance criterion (issue #85).
         #
-        # Two invocations rather than `-p a -p b`, deliberately. Cargo unifies features across
-        # the packages selected by ONE command, and these two resolve `smear` differently
-        # (`smear-benches` does not ask for `validator`; `smear-apollo-bench` does, and adds
-        # `rowan`). A single command would build each bench against the union and could pass a
-        # target that does not compile against its own package's declared feature set.
-        #
-        # Build, not run: criterion sampling is minutes per target and this is a compile gate.
-        cargo build -p smear-benches --benches
-        cargo build -p smear-apollo-bench --benches
+        # `--no-run`, not a run: criterion sampling is minutes per target and this is a compile
+        # gate.
+        cargo bench --no-run -p smear
+        cargo bench --no-run -p smear --features rowan,validator \
+          --bench apollo_comparison --bench validator_comparison
 
   test:
     name: test
@@ -839,8 +948,8 @@ jobs:
     # Derived from `cargo metadata` over every workspace member rather than a list of
     # three crate names, so a crate added later is covered the day it is added. Keyed on
     # `publish`: cargo reports `[]` for `publish = false` and null otherwise, so
-    # `smear-apollo-bench` — a bench harness docs.rs will never build — is skipped
-    # without being named.
+    # `smear-smoke`, `smear-noatomic` and `source-census` — none of which docs.rs will
+    # ever build — are skipped without being named.
     - name: every publishable crate declares [package.metadata.docs.rs]
       run: |
         set -euo pipefail
@@ -962,8 +1071,17 @@ jobs:
         key: ${{ runner.os }}-publish-dry-run-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-publish-dry-run-
-    - name: cargo publish --dry-run -p smear
-      run: cargo publish --dry-run -p smear
+    # `--workspace`, NOT `-p smear`, and the difference is a hard failure rather than a
+    # preference. `smear` depends on `smear-lexer` by path plus version, and nothing named
+    # `smear-lexer` is on the registry yet, so `cargo publish --dry-run -p smear` exits 1 with
+    # `no matching package named smear-lexer found`. Measured on this tree. `--workspace`
+    # packages the members in dependency order and verifies each against the ones already
+    # packaged, which is also the order a real release has to go out in.
+    #
+    # `publish = false` members are skipped by cargo itself, so `smear-smoke`, `smear-noatomic`
+    # and `source-census` are not named here and do not need to be.
+    - name: cargo publish --dry-run --workspace
+      run: cargo publish --dry-run --workspace
     # The dry run passing is necessary and NOT sufficient, and the gap is specific.
     # `smear/README.md` is a symlink to the workspace-root `README.md`, which cargo resolves by
     # copying the TARGET into the package. A checkout that did not create the symlink — Windows
@@ -1032,9 +1150,10 @@ jobs:
 
   # ── THE BYTE-IDENTITY GATE ──────────────────────────────────────────────────────────────────
   #
-  # Recomputes the four corpus tree hashes (`benchmarks/tests/byte_identity.rs`) and fails if any
-  # has moved. Before this job the four values lived in a GitHub issue and a commit message, so a
-  # change that re-shaped every tree in the corpus went green through every gate in the repository.
+  # Recomputes the four corpus tree hashes (`smear/benches/comparative/apollo/byte_identity.rs`)
+  # and fails if any has moved. Before this job the four values lived in a GitHub issue and a
+  # commit message, so a change that re-shaped every tree in the corpus went green through every
+  # gate in the repository.
   #
   # WHY HERE, and not in `macos.yml` or `miri.yml`. Those two exist to hold legs that are
   # queue-bound or slow, so that `CI` can reach a conclusion — see their headers. This gate is
@@ -1074,14 +1193,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-byte-identity-
     - name: cargo test --release --test byte_identity -- --include-ignored
-      run: cargo test -p smear-apollo-bench --release --test byte_identity -- --include-ignored
+      run: cargo test -p smear --release --features rowan,validator --test byte_identity -- --include-ignored
 
   # ── THE VALIDATOR DIFFERENTIAL ORACLE ───────────────────────────────────────────────────────
   #
   # Runs smear's draft §5 validator against `apollo-compiler` 1.32.0 verdict by verdict
-  # (`benchmarks/tests/validator_oracle.rs`, issue #85 G2). The committed corpus runs in the
-  # ordinary `test` job too, because `cargo test --all-features` covers every workspace member —
-  # this job exists for the two things that one cannot do.
+  # (`smear/benches/comparative/apollo/validator_oracle.rs`, issue #85 G2). The committed corpus
+  # runs in the ordinary `test` job too, because `cargo test --all-features` covers every workspace
+  # member — this job exists for the two things that one cannot do.
   #
   # WHY A NAMED `--test` TARGET. Same reason as `byte-identity` above: a cargo target *filter* that
   # matches nothing warns and exits 0, so a renamed or deleted gate would leave a green tick over
@@ -1098,7 +1217,7 @@ jobs:
   #
   # WHY A PINNED SHA AND NOT `main`. A moving external corpus in a required gate is a gate that
   # eventually gets switched off. `fa2b5fe8` is the `apollo-compiler@1.32.0` tag — the same release
-  # `benchmarks/Cargo.toml` pins with `=`, so the corpus and the oracle move together or not at
+  # `smear/Cargo.toml` pins with `=`, so the corpus and the oracle move together or not at
   # all. Bumping one without the other is exactly the mistake the whitelist's re-verification test
   # exists to catch, and this pin makes it impossible to make by accident.
   #
@@ -1140,7 +1259,67 @@ jobs:
       # `--nocapture` because the report is the artifact: how many cases reached a comparison, what
       # each whitelist class and each open gap accounted for. A green tick alone would not say
       # whether the oracle checked five hundred documents or five.
-      run: cargo test -p smear-apollo-bench --test validator_oracle -- --nocapture
+      run: cargo test -p smear --features rowan,validator --test validator_oracle -- --nocapture
+
+  # smear's draft §6.4.4 null propagation against `graphql-js`'s own `nonnull-test.ts`, and its
+  # draft §6.2.2 serial mutation ordering against `mutations-test.ts`, case by case
+  # (`smear/tests/proto_nonnull_oracle.rs` and `smear/tests/proto_mutation_oracle.rs`).
+  #
+  # WHY A SEPARATE JOB, WHEN `test` ALREADY RUNS THIS TARGET. `cargo test --all-features` runs the
+  # seventeen ported cases wherever it runs, and it will keep passing with the transcription stale:
+  # a hand-ported corpus is only as good as its provenance, and provenance is the one thing a
+  # committed file cannot check about itself. `SMEAR_GRAPHQL_JS` is the door that makes it
+  # checkable — with it set, `upstream_has_not_drifted` re-reads every recorded line of the
+  # upstream file and fails if an anchor has moved, if the schema has changed, or if upstream has
+  # ADDED a case that is not ported. Without it that test prints a notice and returns.
+  #
+  # WHY NOT VENDORED, and why a tarball into `$RUNNER_TEMP`: both for the reasons the
+  # `validator-oracle` job above records. The pin is the `v16.11.0` tag's commit, and
+  # `UPSTREAM_COMMIT` in the test file carries the same SHA — bumping one without the other is
+  # what the drift gate exists to catch.
+  proto-oracle:
+    name: proto-oracle
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Fetch graphql-js at the pinned oracle release
+      run: |
+        mkdir -p "$RUNNER_TEMP/graphql-js"
+        curl -sSfL https://github.com/graphql/graphql-js/archive/c18e9f6aada9ae086ddf836e4d822cf1426f3868.tar.gz \
+          | tar -xz -C "$RUNNER_TEMP/graphql-js" --strip-components=1
+        # Fail here, loudly, rather than let a drift gate take its unset-variable branch and
+        # report a green run over a lane that fetched nothing. One `test -f` per ported upstream
+        # file, because a tarball that no longer carries one of them is exactly the case the
+        # unset-variable branch would swallow.
+        test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/nonnull-test.ts"
+        test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/mutations-test.ts"
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-proto-oracle-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-proto-oracle-
+    - name: cargo test --test proto_nonnull_oracle --test proto_mutation_oracle --test proto_execute
+      env:
+        SMEAR_GRAPHQL_JS: ${{ runner.temp }}/graphql-js
+      # `--nocapture` because the counts are the artifact: how many cases reached a comparison, how
+      # many error entries, paths and locations were compared, and how many anchors were verified
+      # against upstream. A green tick alone would not say whether the oracle compared 29 entries
+      # or none.
+      #
+      # Every target by name, not `-p smear --tests`: a cargo target *filter* warns and exits 0
+      # when it matches nothing, so a renamed file would silently empty this job. Which is also why
+      # a new oracle file has to be added here in the same change that adds it — a drift gate that
+      # never runs with `SMEAR_GRAPHQL_JS` set is a gate that cannot fire.
+      run: |
+        cargo test -p smear --features proto --test proto_nonnull_oracle \
+          --test proto_mutation_oracle --test proto_execute -- --nocapture
 
   # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
   # `macos-latest` cell, so on a run where those cells never got a runner this job was never
@@ -1198,8 +1377,25 @@ jobs:
         # outright ("--tests may not be used together with --doctests"). `--doctests` alone
         # already runs the default set (lib unit tests + `tests/*`) in addition to doc tests,
         # which is the full equivalent of the old lib+tests+doctests selection.
+        #
+        # `graphqlx` and `rowan` are named for the reason the `parser` paragraph gives, and NOT
+        # because the leg would otherwise resolve without them. `--workspace` selects
+        # `smear-smoke`, whose `smear` dependency names every declared feature, and cargo unifies
+        # that across the selected packages, so the unit graph is identical with these two names
+        # and without them. What changes is who decided. Until they were written, the resolve this
+        # job leans on was another member's dependency edge — the shape the paragraph above
+        # refuses for `parser`.
+        #
+        # It is this leg the decision rests on, because this is the repository's ONLY nightly
+        # `cargo test --doc`. A `compile_fail,EXXXX` fence has its ERROR CODE checked only by a
+        # nightly rustdoc; on stable a snippet that fails with some other code satisfies the fence
+        # and the run is green. So every coded fence in the workspace — 17 of the 18 today — is
+        # enforced here or nowhere. Two of the 18 need exactly what these names buy:
+        # `smear_parser::graphqlx`'s `OperationType` sits behind `#[cfg(feature = "graphqlx")]`,
+        # and the crate-root cross-dialect cast fence is a `cfg_attr(all(graphql, rowan), doc)`.
+        # Neither is compiled by `graphql,parser` alone.
         run: |
-          cargo llvm-cov --no-default-features --features graphql,parser \
+          cargo llvm-cov --no-default-features --features graphql,graphqlx,rowan,parser \
             --doctests --workspace \
             --cobertura --output-path cobertura.xml
       - name: Upload to codecov.io

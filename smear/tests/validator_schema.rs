@@ -9,7 +9,7 @@
 //! stops firing fails. The alternative — a builder exercised only on good input — is the defect
 //! class this suite exists to close, so the floor is checked rather than reviewed.
 //!
-//! Two kinds are excused, each with a written reason, in [`UNFIREABLE`].
+//! The kinds with no fixture are excused, each with a written reason, in [`UNFIREABLE`].
 
 // Every fixture and assertion below calls into `smear::validator`, which does not exist in the
 // crate's API surface with the feature off. Every other file in this directory gates itself to
@@ -24,15 +24,16 @@ use smear::{
   parser::graphql::{
     GraphQL,
     ast::{
-      Described, Name, ScalarTypeDefinition, TypeDefinition, TypeSystemDefinition,
+      ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList,
+      Described, Name, Nested, ScalarTypeDefinition, TypeDefinition, TypeSystemDefinition,
       TypeSystemDefinitionOrExtension, TypeSystemDocument,
     },
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, type_system_document},
   },
   validator::schema::{
-    DefaultKind, RootOperation, Schema, SchemaBuilder, SchemaErrorKind, SchemaErrors, TypeKind,
-    builtin,
+    DefaultKind, MAX_CONST_VALUE_DEPTH, RootOperation, Schema, SchemaBuilder, SchemaErrorKind,
+    SchemaErrors, TypeKind, builtin,
   },
 };
 
@@ -89,6 +90,29 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
     SchemaErrorKind::TooManyNames,
     "the name index addresses 2^30 symbols; a document that interns more would need gigabytes of \
      distinct identifiers, so the limit is unreachable in a test.",
+  ),
+  (
+    SchemaErrorKind::TooManyInternedBytes,
+    "the arena addresses its bytes with 32-bit offsets, so the ceiling is four gigabytes of \
+     interned spelling — reachable from a 92 KB hand-assembled AST, whose overlapping suffixes \
+     are quadratic, and not from anything a test should allocate. `smear-schema`'s \
+     `builder::tests` fires it through `Interner::intern_within`, which is the same mechanism \
+     with the two ceilings as parameters, and pins the accepting side beside it.",
+  ),
+  (
+    SchemaErrorKind::PossibleTypeTableTooLarge,
+    "the table addresses its words with a 32-bit offset, so the ceiling is four billion `u64` \
+     words — 34 GB — and below it the refusal is the host's allocator saying no. `smear-schema`'s \
+     `builder::tests` fires it through `possible_table`, which is the same mechanism with the \
+     ceiling as a parameter, and pins the accepting side beside it.",
+  ),
+  (
+    SchemaErrorKind::ConstantValueTooDeep,
+    "`MAX_CONST_VALUE_DEPTH` is 1024 open containers and it is derived to sit above what every \
+     smear door produces — the lossless door at `HARD_MAX` reaches 255 — so no SDL this harness \
+     can parse reaches it. `a_literal_at_the_ceiling_is_a_price_and_one_past_it_is_a_refusal` \
+     fires it through the other door, a hand-assembled AST, and pins the accepting side beside \
+     it.",
   ),
 ];
 
@@ -1040,6 +1064,89 @@ type Query @onObject(b: 1, b: 2) { ok: Int }";
   );
 }
 
+/// A duplicate reads the same on both sides of the width that changes how it is found.
+///
+/// The duplicate scan has two representations and the list's width alone chooses between them: a
+/// narrow list is scanned, a wide one resolves its repeats through a sorted index. That boundary
+/// is invisible from out here and has to stay that way — same kind, same count, same span, and
+/// the same *related* span, which is the FIRST occurrence and not the nearest earlier one.
+/// Nothing else in this suite reaches the wide representation: every other fixture is a handful
+/// of lines. al8n/smear#198.
+#[test]
+fn a_duplicate_reads_the_same_at_every_list_width() {
+  fn fixture(filler: usize) -> String {
+    let mut sdl = String::from("type Query {\n  dup: Int\n");
+    for i in 0..filler {
+      sdl.push_str(&format!("  f{i}: Int\n"));
+    }
+    sdl.push_str("  dup: Int\n}\n");
+    sdl
+  }
+
+  // 62 fillers is a list of 64 and 63 is a list of 65, which is the boundary itself.
+  for filler in [0, 1, 62, 63, 64, 500] {
+    let sdl = fixture(filler);
+    let errors = refused(&sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::DuplicateFieldName],
+      "filler {filler}"
+    );
+    assert_eq!(
+      errors.len(),
+      1,
+      "one diagnostic per repeat, filler {filler}"
+    );
+
+    let error = &errors.errors()[0];
+    let first = sdl.find("dup").expect("the first occurrence is written");
+    assert_eq!(
+      error.related(),
+      Some(SimpleSpan::const_new(first, first + 3)),
+      "the related span is the first occurrence, filler {filler}"
+    );
+    let second = sdl.rfind("dup").expect("the second occurrence is written");
+    let span = error.span();
+    assert_eq!(
+      (span.start(), span.end()),
+      (second, second + 3),
+      "the diagnostic is at the repeat, filler {filler}"
+    );
+  }
+}
+
+/// A wide list relates every repeat to the first occurrence and reports them in source order.
+///
+/// The index that finds them is built by sorting, and a sorted order is not the document's: an
+/// index that answered out of the sort would relate a repeat to whichever member of its group
+/// came first *there*, and would emit the groups by name. Both are checked here because both are
+/// invisible in a fixture narrow enough to be scanned.
+#[test]
+fn a_wide_list_relates_each_repeat_to_the_first_in_source_order() {
+  let mut sdl = String::from("type Query {\n  alpha: Int\n  beta: Int\n");
+  for i in 0..200 {
+    sdl.push_str(&format!("  f{i}: Int\n"));
+  }
+  sdl.push_str("  beta: Int\n  alpha: Int\n  alpha: Int\n}\n");
+
+  let errors = refused(&sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateFieldName]);
+  assert_eq!(errors.len(), 3, "one diagnostic per repeat, not per group");
+
+  let alpha = sdl.find("alpha").expect("`alpha` is written");
+  let beta = sdl.find("beta").expect("`beta` is written");
+  let related: Vec<_> = errors
+    .errors()
+    .iter()
+    .map(|error| error.related().map(|span| span.start()))
+    .collect();
+  assert_eq!(
+    related,
+    vec![Some(beta), Some(alpha), Some(alpha)],
+    "every repeat relates to the first occurrence, and the repeats arrive in source order"
+  );
+}
+
 /// A nested literal is blamed where it is written, not on the argument that contains it.
 #[test]
 fn a_nested_bad_literal_is_blamed_in_place() {
@@ -1056,6 +1163,186 @@ type Query @v(p: [{ x: 1 }, { x: \"no\" }]) { ok: Int }";
   assert_eq!(error.subject(), "p");
   let span = error.span();
   assert_eq!(&SDL[span.start()..span.end()], "\"no\"");
+}
+
+/// A literal deeper than any parse can carry is reduced, checked and released without recursing.
+///
+/// # What was wrong
+///
+/// `SchemaBuilder::const_value` descended a constant literal one native frame per level, on the
+/// argument that the AST came from a recursive-descent parser and would be dropped recursively
+/// anyway. Neither half holds. The route below is public — a scalar definition, a const directive,
+/// a const argument, a const list — so the literal is built with a loop and no parser sees it; and
+/// al8n/smear#199 gave the value tree an iterative release, so the drop that was supposed to give
+/// out first no longer does. `type_ref`, `check_const_value`, `map_nodes` and `RawValue`'s own
+/// release were the same shape, each one the next to give out as the one in front of it was
+/// repaired.
+///
+/// Measured at `8b73965`, `aarch64-apple-darwin`, unoptimised, one child process per depth with the
+/// document built on another thread: `Schema::build` over exactly this shape aborted at **1 545**
+/// levels on a 2 MiB thread — libtest's own — 389 on 512 KiB and 196 on 256 KiB.
+///
+/// # There is no red side here
+///
+/// A stack overflow is `SIGABRT`, which no `#[should_panic]` sees and which takes the harness with
+/// it, so what this pins is the green side: the build returns on a stack far too small to have held
+/// the recursion. The fixture picks its own stack for the reason `ast_release.rs` does — on
+/// libtest's 2 MiB the old boundary was 1 545 and a 20 000-level fixture would have proved the same
+/// thing more expensively, while a 512 KiB thread puts it fifty times past the boundary and costs
+/// nothing, since a walk that does not recurse needs no more stack at 20 000 levels than at one.
+/// `Schema::build` has a fixed floor of about 160 KiB of its own — it parses the built-in SDL — so
+/// the thread cannot be smaller than that whatever the literal does.
+#[test]
+fn a_hand_built_literal_deeper_than_any_parse_is_reduced_without_recursing() {
+  /// Fifty times the depth at which this aborted on [`STACK`] before the repair.
+  const DEPTH: usize = 20_000;
+  /// Above `Schema::build`'s own fixed floor and far below what the old recursion needed.
+  const STACK: usize = 512 * 1024;
+
+  std::thread::Builder::new()
+    .stack_size(STACK)
+    .spawn(|| {
+      let span = SimpleSpan::const_new(0, 0);
+      let empty = || ConstInputValue::List(ConstList::new(span, Nested::empty()));
+      let mut value = empty();
+      for _ in 0..DEPTH {
+        value = ConstInputValue::List(ConstList::new(span, Nested::new(vec![value])));
+      }
+
+      let directive = ConstDirective::new(
+        span,
+        Name::new(span, "x"),
+        Some(ConstArguments::new(
+          span,
+          vec![ConstArgument::new(span, Name::new(span, "a"), value)],
+        )),
+      );
+      let scalar = ScalarTypeDefinition::new(
+        span,
+        Name::new(span, "Foo"),
+        Some(ConstDirectives::new(span, vec![directive])),
+      );
+      let document = TypeSystemDocument::<&str>::new(
+        span,
+        vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+          span,
+          None,
+          TypeSystemDefinition::Type(TypeDefinition::Scalar(scalar)),
+        ))],
+      );
+
+      // The verdict is beside the point — `@x` is undefined, so this refuses — and the point is
+      // that it refuses at all instead of aborting, and that the `RawValue` it built is released on
+      // the way out without a frame per level either.
+      let refused = Schema::build(&document).expect_err("`@x` is not a defined directive");
+      assert!(
+        refused
+          .iter()
+          .any(|error| matches!(error.kind(), SchemaErrorKind::UndefinedDirective)),
+        "{refused}"
+      );
+      // And past `MAX_CONST_VALUE_DEPTH` the depth itself is reported, which is what makes the
+      // build's answer a refusal rather than a truncation nobody was told about.
+      assert!(
+        refused
+          .iter()
+          .any(|error| matches!(error.kind(), SchemaErrorKind::ConstantValueTooDeep)),
+        "{refused}"
+      );
+    })
+    .expect("a fixture thread")
+    .join()
+    .expect("the fixture thread returned");
+}
+
+/// Exactly at the ceiling a literal is built; one container past it the build refuses.
+///
+/// # Why a ceiling at all, once the walk is a loop
+///
+/// Making the reduction iterative moved its growth from the native stack to the heap, and that was
+/// the point — but `frames.push` and `Vec::with_capacity` are **infallible**, so a caller-built
+/// literal deep enough still ended the process instead of the build. Measured out of suite at
+/// `96881f2`, `aarch64-apple-darwin`, unoptimised, as peak live bytes across `Schema::build` with
+/// the document built before the instrument was armed: 138 to 224 bytes for every container of a
+/// list chain and 162 to 248 for an object one, with no ceiling anywhere in it.
+///
+/// `Schema::build` returns a `Result`, so the answer here is a refusal rather than a documented
+/// bound — the thing al8n/smear#199 could not do inside a `Drop`. With the ceiling in, the same
+/// measurement reads **140 007 bytes for a list chain of 1 025 containers, of 2 001, of 20 001 and
+/// of 200 001** — one number, not a slope — against a 67 940-byte build with no literal in it.
+///
+/// # Why both halves are here
+///
+/// A bound that only ever refuses is indistinguishable from a prohibition. The accepting half is
+/// what says the ceiling is a price: 1 024 containers — four times the 255 the lossless door at
+/// `HARD_MAX` produces — is reduced, coerced against a custom scalar, and built into a schema.
+///
+/// The schema half is parsed and the literal half is hand-assembled, in two documents through one
+/// [`SchemaBuilder`], because no SDL this harness can parse reaches the ceiling and hand-writing a
+/// query root and a directive definition would put four hundred lines of constructor between the
+/// reader and the property.
+#[test]
+fn a_literal_at_the_ceiling_is_a_price_and_one_past_it_is_a_refusal() {
+  const DECLARATIONS: &str = "type Query { ok: Int }
+     scalar Custom
+     directive @x(a: Custom) on SCALAR";
+
+  /// `scalar Foo @x(a: [[…[]…]])`, with exactly `containers` nested list literals.
+  fn document(containers: usize) -> TypeSystemDocument<&'static str> {
+    let span = SimpleSpan::const_new(0, 0);
+    let mut value = ConstInputValue::List(ConstList::new(span, Nested::empty()));
+    for _ in 1..containers {
+      value = ConstInputValue::List(ConstList::new(span, Nested::new(vec![value])));
+    }
+    let directive = ConstDirective::new(
+      span,
+      Name::new(span, "x"),
+      Some(ConstArguments::new(
+        span,
+        vec![ConstArgument::new(span, Name::new(span, "a"), value)],
+      )),
+    );
+    TypeSystemDocument::new(
+      span,
+      vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+        span,
+        None,
+        TypeSystemDefinition::Type(TypeDefinition::Scalar(ScalarTypeDefinition::new(
+          span,
+          Name::new(span, "Foo"),
+          Some(ConstDirectives::new(span, vec![directive])),
+        ))),
+      ))],
+    )
+  }
+
+  fn build(containers: usize) -> Result<Schema, SchemaErrors> {
+    let declarations = parse(DECLARATIONS);
+    let literal = document(containers);
+    let mut builder = SchemaBuilder::new();
+    builder.document(&declarations);
+    builder.document(&literal);
+    builder.finish()
+  }
+
+  // A custom scalar accepts every literal, so nothing but the depth is in question here.
+  build(MAX_CONST_VALUE_DEPTH).unwrap_or_else(|errors| {
+    panic!("a literal of exactly {MAX_CONST_VALUE_DEPTH} containers was refused:\n{errors}")
+  });
+
+  let refused = build(MAX_CONST_VALUE_DEPTH + 1).expect_err("one container past the ceiling");
+  assert_eq!(
+    refused.kinds(),
+    std::vec![SchemaErrorKind::ConstantValueTooDeep],
+    "one container past the ceiling produced {:?}, and the refusal is supposed to be the only \
+     thing wrong with this document",
+    refused.kinds()
+  );
+  assert_eq!(
+    refused.iter().next().expect("one error").subject(),
+    "a",
+    "the refusal names the argument the literal was written for"
+  );
 }
 
 /// The one kind no parsed document can reach, reached the only other way it can be.
@@ -1991,4 +2278,31 @@ fn a_deep_defaulted_input_chain_does_not_recurse() {
     1,
     "a cycle through twenty thousand objects is one diagnostic, not twenty thousand"
   );
+}
+
+/// Draft §3.10.1(4) is a property of the definitions, so reordering them cannot change the answer.
+///
+/// The settling that keeps `a_deep_defaulted_input_chain_does_not_recurse` linear used to be taken
+/// from *any* retired frame, including one reached through a caller's supplied literal — which
+/// explores a different question from the empty-map call and establishes nothing about it. With
+/// `Outer` read first, its `{ loop: null }` marked `Bad` clean, `Bad`'s own start was then skipped,
+/// and the build **accepted** a schema whose default cycle it refused when the same two definitions
+/// were read the other way round.
+#[test]
+fn input_object_default_cycle_verdict_is_declaration_order_independent() {
+  const QUERY: &str = "type Query { q(a: Outer, b: Bad): String }\n";
+  const BAD: &str = "input Bad { loop: Bad = {} }\n";
+  const OUTER: &str = "input Outer { b: Bad = { loop: null } }\n";
+
+  for sdl in [
+    format!("{QUERY}{OUTER}{BAD}"),
+    format!("{QUERY}{BAD}{OUTER}"),
+  ] {
+    let errors = refused(&sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::InputObjectDefaultValueCycle],
+      "{errors}"
+    );
+  }
 }

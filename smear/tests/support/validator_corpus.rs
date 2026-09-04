@@ -462,7 +462,12 @@ pub const FIXTURES: &[Fixture] = &[
   Fixture {
     rule: Rule::MergeWorkBudget,
     schema: None,
-    budget: Some(Budget::new(Budget::DEFAULT_MERGE_DEPTH, 24)),
+    // Calibrated, and it has to be re-calibrated whenever the merge engine's accounting moves.
+    // `{ dog { name } }` clears at 30 units and `{ dog { name nickname barkVolume } }` needs 56, so
+    // anything between separates the halves; 40 keeps a margin on each side. al8n/smear#196 gave
+    // the interner and the memo their own charges and left this at 24 — below the cost of the
+    // *valid* twin, which made the clean half of the corpus produce a finding.
+    budget: Some(Budget::new(Budget::DEFAULT_MERGE_DEPTH, 40)),
     invalid: "{ dog { name nickname barkVolume } }",
     fires: &[Rule::MergeWorkBudget],
     valid: "{ dog { name } }",
@@ -586,6 +591,45 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     SchemaErrorKind::ArgumentTypeNotInputType,
     "type Query { ok(a: Query): Int }",
     &[SchemaErrorKind::ArgumentTypeNotInputType],
+  ),
+  (
+    SchemaErrorKind::TooManyFieldArguments,
+    // Sixty-five, against a `MAX_FIELD_ARGUMENTS` of sixty-four. Written out rather than built,
+    // because this table is a `const` and because the number a fixture uses should be readable
+    // beside the number it is testing.
+    concat!(
+      "type Query { wide(",
+      "a0: Int a1: Int a2: Int a3: Int a4: Int a5: Int a6: Int a7: Int a8: Int a9: Int",
+      " a10: Int a11: Int a12: Int a13: Int a14: Int a15: Int a16: Int a17: Int a18: Int",
+      " a19: Int a20: Int a21: Int a22: Int a23: Int a24: Int a25: Int a26: Int a27: Int",
+      " a28: Int a29: Int a30: Int a31: Int a32: Int a33: Int a34: Int a35: Int a36: Int",
+      " a37: Int a38: Int a39: Int a40: Int a41: Int a42: Int a43: Int a44: Int a45: Int",
+      " a46: Int a47: Int a48: Int a49: Int a50: Int a51: Int a52: Int a53: Int a54: Int",
+      " a55: Int a56: Int a57: Int a58: Int a59: Int a60: Int a61: Int a62: Int a63: Int",
+      " a64: Int",
+      "): Int }",
+    ),
+    &[SchemaErrorKind::TooManyFieldArguments],
+  ),
+  (
+    SchemaErrorKind::TooManyDirectiveArguments,
+    // Sixty-five again, against a `MAX_DIRECTIVE_ARGUMENTS` of sixty-four, and written out for
+    // the two reasons the field fixture above is written out. The list is the same one: the two
+    // ceilings are separate numbers over the same shape, so a fixture that used a shorter list
+    // here would stop being a differential the day one of them moved.
+    concat!(
+      "type Query { ok: Int } directive @wide(",
+      "a0: Int a1: Int a2: Int a3: Int a4: Int a5: Int a6: Int a7: Int a8: Int a9: Int",
+      " a10: Int a11: Int a12: Int a13: Int a14: Int a15: Int a16: Int a17: Int a18: Int",
+      " a19: Int a20: Int a21: Int a22: Int a23: Int a24: Int a25: Int a26: Int a27: Int",
+      " a28: Int a29: Int a30: Int a31: Int a32: Int a33: Int a34: Int a35: Int a36: Int",
+      " a37: Int a38: Int a39: Int a40: Int a41: Int a42: Int a43: Int a44: Int a45: Int",
+      " a46: Int a47: Int a48: Int a49: Int a50: Int a51: Int a52: Int a53: Int a54: Int",
+      " a55: Int a56: Int a57: Int a58: Int a59: Int a60: Int a61: Int a62: Int a63: Int",
+      " a64: Int",
+      ") on FIELD",
+    ),
+    &[SchemaErrorKind::TooManyDirectiveArguments],
   ),
   (
     SchemaErrorKind::DeprecatedRequiredArgument,

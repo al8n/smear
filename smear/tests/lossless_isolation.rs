@@ -48,13 +48,18 @@ use std::{
   path::{Path, PathBuf},
 };
 
+// All three are relative to THIS package and reach into the sibling one, because the source this
+// gate scans became the `smear-parser` crate in the split while the gate stayed here. The paths
+// are the only thing that moved: the same three directories are read, and `rust_files` still
+// panics on a path that is not a directory, which is what stops a mistyped path from reporting
+// isolation over nothing.
 /// The dialect-generic substrate: the kind-space contract, the trivia atoms, the `Parse` surface,
 /// the coverage shims and the typed-wrapper macro.
-const SUBSTRATE: &str = "src/parser/lossless";
+const SUBSTRATE: &str = "../smear-parser/src/lossless";
 /// The GraphQL dialect's lossless layer.
-const GRAPHQL: &str = "src/parser/graphql/lossless";
+const GRAPHQL: &str = "../smear-parser/src/graphql/lossless";
 /// The GraphQLx dialect's lossless layer.
-const GRAPHQLX: &str = "src/parser/graphqlx/lossless";
+const GRAPHQLX: &str = "../smear-parser/src/graphqlx/lossless";
 
 /// Every `.rs` file under `dir`, recursively, as `(path relative to the crate root, contents)`.
 ///
@@ -99,7 +104,15 @@ fn relative(root: &Path, path: &Path, dir: &str) -> String {
   let tail = path
     .strip_prefix(root)
     .expect("every scanned path is under its root");
-  format!("{dir}/{}", tail.display())
+  // ONE SEPARATOR, EVERYWHERE, and it is normalised HERE because this is the one place a path in
+  // this file is built. `Path::display` uses the platform's separator, so on Windows every path
+  // below read `…/lossless\depth.rs` and every assertion spelled with `/` — a `contains("/graphql/")`
+  // among them — silently answered `false`. The Windows test job is what found it.
+  let tail: std::vec::Vec<_> = tail
+    .components()
+    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+    .collect();
+  format!("{dir}/{}", tail.join("/"))
 }
 
 /// Every line under `dir` that contains `pattern`, as `(file, line number, line)`.
@@ -145,11 +158,11 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 ///
 /// The third column is what turns each zero into evidence.
 const FORBIDDEN: &[(&str, &str, &str)] = &[
-  ("crate::parser::graphql::", GRAPHQLX, GRAPHQL),
+  ("crate::graphql::", GRAPHQLX, GRAPHQL),
   ("graphql::kinds", GRAPHQLX, GRAPHQL),
   ("graphql::lossless", GRAPHQLX, GRAPHQL),
   ("GraphQLLang", GRAPHQLX, GRAPHQL),
-  ("crate::parser::graphqlx::", GRAPHQL, GRAPHQLX),
+  ("crate::graphqlx::", GRAPHQL, GRAPHQLX),
   ("graphqlx::kinds", GRAPHQL, GRAPHQLX),
   ("graphqlx::lossless", GRAPHQL, GRAPHQLX),
   ("GraphQLxLang", GRAPHQL, GRAPHQLX),
@@ -192,18 +205,20 @@ fn the_two_lossless_layers_do_not_reference_each_other() {
 /// [`ast_node!`](smear::ast_node) — a `#[macro_export]`ed macro whose expansion names `$crate` and
 /// which every wrapper file therefore spells as `crate::ast_node` — and the lexer.
 ///
-/// `crate::lexer` is the entry the crate merge (#83) added, and it is a rename rather than a new
-/// permission: the dialect trees have always named their own lexer dialect, and they spelled it
-/// `smear_lexer::…` when that was a separate crate. An external crate name is invisible to a
-/// census that reads `crate::` roots, so the root was never pinned; now it is. What the merge
-/// does NOT do is let a dialect reach the *other* dialect's lexer through it —
-/// [`FORBIDDEN`]'s `graphql::kinds` / `graphql::lossless` spellings are substring patterns and
-/// match `crate::lexer::graphql::lossless::…` exactly as they matched `smear_lexer::graphql::…`.
+/// The lexer entry is `smear_lexer::<dialect>`, and the SPELLING is the load-bearing part. #83
+/// merged the crates and it became `crate::lexer`; the split makes it an external crate again and
+/// `crate::lexer` stops occurring. An external crate name is invisible to a census that reads
+/// `crate::` roots — so had this list simply dropped the entry, the lexer edge would have gone
+/// unpinned and this gate would have quietly stopped watching the one boundary it was extended to
+/// cover. [`crate_roots`] reads `smear_lexer::` as a root for exactly that reason. What neither
+/// spelling does is let a dialect reach the *other* dialect's lexer: [`FORBIDDEN`]'s
+/// `graphql::kinds` / `graphql::lossless` entries are substring patterns and match
+/// `smear_lexer::graphql::lossless::…` exactly as they matched `crate::lexer::graphql::…`.
 ///
-/// `crate::parser::type_system` is #58's entry, and it is on the GraphQL side only because that
-/// is the only dialect with a projection so far. The projection's **target** is the AST, and the
-/// AST's carriers are shared and dialect-free in exactly the way `crate::parser::lossless` is —
-/// this census is about a dialect reaching the *other dialect*, which a shared carrier is not.
+/// `crate::type_system` is #58's entry, and it is on the GraphQL side only because that is the
+/// only dialect with a projection so far. The projection's **target** is the AST, and the AST's
+/// carriers are shared and dialect-free in exactly the way `crate::lossless` is — this census is
+/// about a dialect reaching the *other dialect*, which a shared carrier is not.
 /// The narrow reason it is needed at all: three `Described<…>` aliases and six `…Data` extension
 /// enums have no spelling under `graphql::ast`, and a projection has to construct all nine. Every
 /// other AST type it builds is reached through the dialect's own `ast` module, which is why this
@@ -213,47 +228,48 @@ const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
     GRAPHQL,
     &[
       "crate::ast_node",
-      "crate::lexer",
-      "crate::parser::graphql",
-      "crate::parser::lossless",
-      "crate::parser::type_system",
+      "crate::graphql",
+      "crate::lossless",
+      "crate::type_system",
+      "smear_lexer::graphql",
+      "smear_lexer::limits",
     ],
   ),
   (
     GRAPHQLX,
     &[
       "crate::ast_node",
-      "crate::lexer",
-      "crate::parser::graphqlx",
-      "crate::parser::lossless",
+      "crate::graphqlx",
+      "crate::lossless",
+      "smear_lexer::graphqlx",
+      "smear_lexer::limits",
     ],
   ),
 ];
 
-/// Every `crate::<segment>` prefix that occurs under `dir`.
+/// Every `<root>::<segment>` prefix that occurs under `dir`, for each root this census reads.
+///
+/// TWO ROOTS, and the second is not decoration. The parser is its own crate again, so the lexer it
+/// stands on is an EXTERNAL crate and no `crate::` path names it. A census that read `crate::`
+/// alone would have gone from pinning the lexer edge to not seeing it, with every assertion still
+/// green — the same shape as the crate merge folding `smear_lexer::` into `crate::lexer` and the
+/// root going unpinned until #83 noticed. Reading both spellings is what makes this census survive
+/// the boundary moving in either direction.
+const ROOT_PREFIXES: &[&str] = &["crate::", "smear_lexer::"];
+
 fn crate_roots(dir: &str) -> BTreeSet<String> {
   let mut out = BTreeSet::new();
   for (_, text) in rust_files(dir) {
-    let mut rest = text.as_str();
-    while let Some(at) = rest.find("crate::") {
-      rest = &rest[at + "crate::".len()..];
-      // The parser is one module below the crate root since the crates merged, so `crate::parser::`
-      // is the prefix every in-tree path carries and the segment AFTER it is the root this census
-      // is about. The hop is stripped rather than assumed: `crate::ast_node` — the
-      // `#[macro_export]`ed macro — is still rooted at the crate itself, and folding both spellings
-      // to a single `crate::parser` would collapse the census to one entry and pin nothing.
-      let prefix = match rest.strip_prefix("parser::") {
-        Some(tail) => {
-          rest = tail;
-          "crate::parser::"
+    for prefix in ROOT_PREFIXES {
+      let mut rest = text.as_str();
+      while let Some(at) = rest.find(prefix) {
+        rest = &rest[at + prefix.len()..];
+        let end = rest
+          .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+          .unwrap_or(rest.len());
+        if end > 0 {
+          out.insert(format!("{prefix}{}", &rest[..end]));
         }
-        None => "crate::",
-      };
-      let end = rest
-        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .unwrap_or(rest.len());
-      if end > 0 {
-        out.insert(format!("{prefix}{}", &rest[..end]));
       }
     }
   }
@@ -294,13 +310,98 @@ fn a_dialects_lossless_tree_names_only_itself_the_substrate_and_the_shared_macro
 /// kind enum, keyword enum or error type. `crate::lexer` is on the list because the substrate is
 /// generic over the lexer: the moment it names the concrete lexer module it has picked a token
 /// space, and a token space is a dialect.
+///
+/// The lexer entry is spelled `smear_lexer::` again, which is what it was before #83 merged the
+/// crates and is what the split restores. That spelling is the ONLY thing this row can key on now:
+/// an external crate is invisible to a census reading `crate::` roots, which is the trap
+/// [`ALLOWED_CRATE_ROOTS`] records from the other direction.
 const SUBSTRATE_FORBIDDEN: &[(&str, &str)] = &[
-  ("crate::parser::graphql", GRAPHQL),
-  ("crate::parser::graphqlx", GRAPHQLX),
+  ("crate::graphql", GRAPHQL),
+  ("crate::graphqlx", GRAPHQLX),
   ("GraphQLLang", GRAPHQL),
   ("GraphQLxLang", GRAPHQLX),
-  ("crate::lexer", GRAPHQLX),
+  ("smear_lexer::", GRAPHQLX),
 ];
+
+/// Where the crate's `.rs` files live, for the census below.
+///
+/// Wider than [`SUBSTRATE`] on purpose: what it counts is an INVOCATION, and an invocation may be
+/// written anywhere in the crate. That is the whole hazard.
+const CRATE_SRC: &str = "../smear-parser/src";
+
+/// **One lossless door per dialect, and the count is the claim** — smear issue #193, round 7.
+///
+/// # What a second invocation would be
+///
+/// `lossless_door!` expands a dialect's whole parse door: the context, the driver call, the drain,
+/// and a **private `report_token_budget`** over that dialect's concrete `InputRef` type. Generated
+/// into the module that invokes it, that report is unreachable from anywhere else — which is the
+/// property four rounds of this issue were spent buying. It is also the property a second
+/// invocation would hand away: any in-crate module could invoke the macro naming the real dialect,
+/// get its own private report function over the real types, and call it from a composed root
+/// inside the real parse. That is Codex round 4's forgery with a macro in place of a token.
+///
+/// # Two instruments, failing differently on purpose
+///
+/// The compile-time half is coherence: the expansion carries
+/// `impl crate::lossless::depth::DoorOwner for <that dialect's brand>`, so a second invocation for
+/// the same dialect is **E0119** before any test runs. Measured by planting one and reading the
+/// error — the commit body records it.
+///
+/// This is the standing half, and it catches what coherence cannot: an invocation naming a dialect
+/// that does not exist yet, a third dialect arriving with two doors, or the marker impl being
+/// quietly dropped from the expansion. It counts, and the count is pinned rather than merely
+/// asserted non-zero — a gate that only said "at least one" would pass the very thing it is for.
+///
+/// # Its own discrimination
+///
+/// The `!` in the pattern is load-bearing and is checked: `lossless_door! {` is an invocation and
+/// `macro_rules! lossless_door {` is not, and the bare name matches strictly more lines than the
+/// narrow pattern does — which is what says the narrow one is narrowing rather than matching
+/// nothing. And each invocation is required to be in a `runner.rs` under a dialect's `lossless`
+/// directory, because "two invocations" in the wrong two files is not the claim.
+#[test]
+fn there_is_exactly_one_lossless_door_invocation_per_dialect() {
+  let invocations = references(CRATE_SRC, "lossless_door! {");
+
+  assert_eq!(
+    invocations.len(),
+    2,
+    "the crate holds {} `lossless_door!` invocations rather than one per dialect. Each one mints a \
+     private budget-report function over a dialect's real types in the module that writes it, so \
+     the number of invocations IS the number of places that can report — smear issue #193, round \
+     7:{}",
+    invocations.len(),
+    listed(invocations.iter().map(|(p, n, _)| format!("{p}:{n}")))
+  );
+
+  for (path, n, _) in &invocations {
+    assert!(
+      path.ends_with("lossless/runner.rs")
+        && (path.contains("/graphql/") || path.contains("/graphqlx/")),
+      "a `lossless_door!` invocation at {path}:{n} is not in a dialect's `lossless/runner.rs`. \
+       Two invocations in the wrong two files is not the claim: the door has to land in the module \
+       whose types it fixes, because that is what keeps its report private to it"
+    );
+  }
+
+  // THE DISCRIMINATION, two halves. The macro is defined exactly once and the definition is NOT
+  // one of the two above — `macro_rules! lossless_door {` has no `!` after the name, which is the
+  // character the pattern turns on.
+  assert_eq!(
+    references(SUBSTRATE, "macro_rules! lossless_door").len(),
+    1,
+    "the substrate does not define `lossless_door!` exactly once, so the count above is about a \
+     pattern rather than about the door"
+  );
+  // And the narrow pattern is narrower than the bare name — otherwise it could be matching every
+  // mention of the macro, doc comments and re-exports included, and two would be a coincidence.
+  assert!(
+    references(CRATE_SRC, "lossless_door").len() > invocations.len(),
+    "`lossless_door! {{` matched as many lines as the bare name, so the pattern is not \
+     discriminating an invocation from a mention and the count above means nothing"
+  );
+}
 
 #[test]
 fn the_substrate_names_no_dialect() {
@@ -324,13 +425,101 @@ fn the_substrate_names_no_dialect() {
 
 /// The one `#[cfg]` the substrate writes about dialects, and how many times.
 ///
-/// Two, both identical, and they are the substrate declining to compile its macros when **no**
-/// dialect is on rather than reaching for one — `any(…)` and not `graphql`. A gate that only
-/// forbade dialect *types* would let a `#[cfg(feature = "graphql")]` fork appear here, which is
-/// exactly how a generic layer starts having a favourite.
+/// Every one of them is identical and reads `any(…)` rather than `graphql`: the substrate declining
+/// to compile something when **no** dialect is on, never reaching for a particular one. A gate that
+/// only forbade dialect *types* would let a `#[cfg(feature = "graphql")]` fork appear here, which
+/// is exactly how a generic layer starts having a favourite. The count is pinned so that adding one
+/// is a decision rather than a drift.
+///
+/// Eighteen, in four families, and the last two are why this number moved:
+///
+/// - **two in `lossless/mod.rs`** — `mod macros` and its `pub(crate) use`. The substrate's macros
+///   have no invoker without a dialect assembly, and three uninvoked macros are three
+///   `unused_macros` denials.
+/// - **five in `lossless/recover.rs`**, all added for smear#168's scan allowance and all the same
+///   shape: `SCAN_ALLOWANCE_FACTOR`, `SCAN_ALLOWANCE_FLOOR`, `scan_allowance_exhausted`, and the
+///   two `pub(super)` recorders in its test-support telemetry. Their only callers are the four
+///   wrappers in the two dialects' own `recover.rs`, so with no dialect in the crate they are dead
+///   and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that — rustc counts a
+///   reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed it.
+/// - **ten in `lossless/depth.rs`**, nine from smear PR #189's round 5 and one from smear issue
+///   #193, and every one of them is the
+///   `recover.rs` shape rather than a new one. Seven are the retracted cluster —
+///   `drain_unless_terminal`, `RootTurn`, `RootStop`, its `impl`, `root_turn`,
+///   `drain_unless_stopped` and `descend` — which went `pub(crate)` when the public generic
+///   root-composition capability was withdrawn, and whose only callers are the two dialect
+///   assemblies and the driver macro. The remaining two are the `use` blocks those items need:
+///   **`unused_imports` fires before `dead_code` does**, so narrowing the items without gating
+///   `tokora::{InputRef, Lexer, ParseContext, error::…, input::Descent, span::Spanned}` and
+///   `crate::combinator::ErrorOf` alongside them reddens the dialect-less cell on the imports
+///   first and never reaches the lint this family is about. The tenth is #193's
+///   `report_token_budget`, a **private** helper whose one caller is `drain_unless_stopped` above
+///   it — so with no dialect in the crate the caller is gated away and the helper is dead. Same
+///   shape, one item along; `FromTokenBudget` beside it is `pub` and takes no gate, exactly as
+///   `FromNestingLimit` does not.
+///
+/// - **two more in `lossless/depth.rs`**, and the pair is what is LEFT of smear issue #193's four
+///   rounds rather than what they added. Round 3 split `report_token_budget` in two — the emission,
+///   and `token_budget_stop` for the value a frame hands up. Rounds 4 to 6 then moved the emission
+///   three times looking for a place a caller could not reach, and round 7 moved it out of this
+///   directory altogether: each dialect's door is generated into its own `runner.rs` by
+///   `lossless_door!`, and the substrate now has **no** way to emit a budget refusal. What remains
+///   gated here is `token_budget_stop`, private with `drain_unless_stopped` as its only caller, and
+///   the `DoorOwner` marker the door's coherence pin is an impl of. Both are the `recover.rs` shape
+///   above: with no dialect in the crate each is dead and `-D warnings` fails the leg that builds
+///   the substrate alone.
+///
+///   `lossless_context`, `parse_lossless_document`, `report_token_budget` and round 4's
+///   `DocumentRoot` were all entries here and are all gone. The count going DOWN is the thing to
+///   read: this constant has only ever moved up before.
+///
+/// - **one in `lossless/runner.rs`**, from al8n/smear#198: `finish_parsed_root`, the panicking
+///   companion the fallible `finish_root` gained when a safe public door stopped reporting a
+///   refusal it cannot prevent by panicking on it. It is the `recover.rs` shape a fourth time and
+///   not a new one — a `pub(crate)` item whose only callers are the two dialect runners, so the
+///   `rowan`-alone cell reports `dead_code` and `-D warnings` fails the one leg that builds the
+///   substrate without a dialect.
+///
+/// **Raising this number is the decision, not the bookkeeping.** Nine at once is a large move and
+/// it is one narrowing, not nine: the count went from 7 to 16 in a single PR because a whole
+/// cluster left the public API together. A future increment of one or two, unaccompanied by a
+/// family added above, is the drift this constant exists to catch — which is exactly what the
+/// seventeenth was when it arrived, and the eighteenth after it: each reddened this test rather
+/// than passing, the increment was
+/// read against the classification before the pin moved, and the family above is what records that
+/// the added gate is the sanctioned `any(…)` form in a known shape rather than a new fork. The
+/// nineteenth and twentieth arrived together and are one item split in two; this test reddened at
+/// `left: 20, right: 18` before the pin moved, which is the instrument working. The twenty-first
+/// was `lossless_context` going private one round later — a **narrowing** rather than a new item,
+/// which is the direction this constant exists to make visible, since a narrowing is exactly what
+/// arms `dead_code` on the dialect-less cell.
+///
+/// And then it went DOWN, from 21 to 19, which had not happened before: round 7 moved the door and
+/// its emission out of the substrate entirely and deleted the mint. A drop is as much a decision as
+/// a rise — it says an item left this directory, and the family entry above is where a reader
+/// finds out whether it went somewhere with a smaller reach or simply stopped being gated.
+///
+/// Back to 20 in round 8, and the one it gained is worth reading rather than counting:
+/// `lossless/runner.rs`'s `finish_parsed_root_with`, the normalising finish. It is gated for the
+/// `recover.rs` reason — `pub(crate)` with the two dialect doors as its only callers, so a
+/// dialect-less build has it dead — and it is the LAST piece of this issue to arrive in the
+/// substrate. It can be here, unlike the door, because it names no dialect: the variant to drop
+/// arrives as a predicate and the report to append arrives as a value.
+///
+/// And **21** when the trunk went red on the merge of #213 — one more, not two, and the arithmetic
+/// is the entry. Four CI jobs failed `-Dwarnings` on `dead_code` in cells with a dialect off, over
+/// two items this directory had left ungated: `Diagnostic::error_at`, whose one caller is
+/// `finish_parsed_root_with`, and `finish_parsed_root`, whose only callers are the two dialects'
+/// `finish_root` wrappers. Only the first ADDS an occurrence of the string below.
+/// `finish_parsed_root` already carried the sanctioned gate and was counted in the 20; what it
+/// gained is a **second, stacked** `#[cfg(feature = "test-support")]`, which this constant does not
+/// count and should not — its live set is `test-support AND a dialect`, and an `all(…)` spelling
+/// containing `graphql` would be an offender for the cell above, so the conjunction is written as
+/// two attributes with each line legal on its own. Exactly one of each: rustc conjoins a repeated
+/// attribute silently, and clippy's `duplicated_attributes` does not.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 2;
+const SUBSTRATE_FEATURE_GATES: usize = 21;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {
@@ -400,7 +589,8 @@ fn the_scanned_directories_are_real() {
   // untested, and an untested guard is the one that turns out to have been `if false`.
   let hook = std::panic::take_hook();
   std::panic::set_hook(Box::new(|_| {}));
-  let missing = std::panic::catch_unwind(|| rust_files("src/parser/lossless_that_does_not_exist"));
+  let missing =
+    std::panic::catch_unwind(|| rust_files("../smear-parser/src/lossless_that_does_not_exist"));
   std::panic::set_hook(hook);
   assert!(
     missing.is_err(),

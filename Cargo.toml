@@ -1,18 +1,35 @@
 [workspace]
 members = [
-  "benchmarks",
   "ci/source_census",
+  "graphql-proto",
   "smear",
-  "smear-benches",
+  "smear-lexer",
   "smear-noatomic",
+  "smear-parser",
+  "smear-compiler",
+  "smear-schema",
   "smear-smoke",
 ]
 
-# ── THREE OF THE SIX MEMBERS PULL `smear` PAST ITS DEFAULT FEATURE SET ───────────────────────
+# ── ONE MEMBER PULLS `smear` PAST ITS DEFAULT FEATURE SET ────────────────────────────────────
 #
-# `benchmarks` and `smear-smoke` both enable `smear/rowan`; `smear-smoke` also enables
-# `lossless-coverage` and `test-support`. Cargo unifies features across the SELECTED packages,
-# so a bare workspace-wide command resolves `smear` with every feature it declares turned on.
+# `smear-smoke` enables `smear/rowan`, `lossless-coverage` and `test-support`. Cargo unifies
+# features across the SELECTED packages, so a bare workspace-wide command resolves `smear` with
+# every feature it declares turned on.
+#
+# It used to be three of six. `benchmarks` (`smear-apollo-bench`) and `smear-benches` were the
+# other two, and they are gone: their six criterion targets are now `smear`'s own, under
+# `smear/benches/`, so a bare `cargo bench` reaches the whole suite and nothing crosses a member
+# boundary to read a fixture. What that costs is in `smear/Cargo.toml`'s dev-dependency header —
+# criterion and the comparison parsers are on this package's inner loop now — and it does not
+# change this arithmetic, because a package's own dev-dependencies are not another member's
+# feature request.
+#
+# THE SPLIT DID NOT CHANGE THIS ARITHMETIC, and it is worth saying why not: the five member crates
+# below `smear` are reached only THROUGH it, so `smear-smoke`'s request travels down the same edges
+# a dependent's does. What the split does change is that a bare workspace command now also selects
+# those five directly, each at its own default — which is a wider build, not a wider resolve of
+# `smear`.
 #
 # TWO members this arithmetic does not reach, both deliberately and for different reasons.
 #
@@ -42,6 +59,13 @@ members = [
 # pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted is not what
 # those scripts claim.
 
+# `ci/downstream/` is NOT a member and must never become one. It is a consumer fixture with a
+# dependency edge to `smear`, so a member entry would add its features to the workspace-wide resolve
+# and unify them into smear's own build — which is exactly the unification it exists to escape. It
+# carries its own `[workspace]` table; this says the same thing a second time, so a future `members`
+# glob cannot swallow it.
+exclude = ["ci/downstream"]
+
 resolver = "3"
 
 [workspace.package]
@@ -63,9 +87,9 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # they disagree on the major, cargo links both crates and the types stop matching. The failure is
 # not subtle and it is not a deprecation: `expected rowan::GreenNode, found rowan::GreenNode`.
 # `0.9` is therefore the floor, not a preference: published tokora 0.8.0 pins `rowan = "0.16"`,
-# and 0.9.0 is the first release carrying `rowan = "0.17"` to match the pins in `smear`,
-# `smear-smoke` and `benchmarks`. Because tokora is `0.x`, the minor IS the major — `^0.8.0`
-# cannot reach 0.9.0 — so this requirement had to be edited rather than moved by `cargo update`.
+# and 0.9.0 is the first release carrying `rowan = "0.17"` to match the pins in `smear` and
+# `smear-smoke`. Because tokora is `0.x`, the minor IS the major — `^0.8.0` cannot reach 0.9.0 —
+# so this requirement had to be edited rather than moved by `cargo update`.
 #
 # `combinators` is named explicitly and is NOT a rowan consequence. tokora 0.9.0 put each
 # combinator family behind its own feature and made the `combinators` umbrella a DEFAULT feature;
@@ -73,16 +97,46 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # entire 0.8 combinator surface (`parens`, `then`, `then_ignore`, `repeated_while`,
 # `Ident::parse`, `Keyword::parse_exact`, ...) — 166 errors when measured. Whether smear wants the
 # umbrella or a narrower set of families is a compile-time-footprint question left open.
-tokora = { version = "0.9", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
+#
+# WHAT MOVED, 0.9.1 -> 0.10.0 — already absorbed by this tree while it tracked tokora's `main`
+# ahead of either release, so the floor moving to `0.10` costs nothing further here. `rowan` did
+# not: both still pin `0.17`. `fix(recursion)!` (tokora#308) dropped `PARSE_DEFAULT_DEPTH` from 64
+# to 32, absorbed by the lossless doors' own `min(ceiling, HARD_MAX)`. `Lexer::read_frontier` and
+# `Token::SCAN_LOOKAHEAD` became required (tokora#282), answered `Unbounded` in all four lexers.
+# `fix(container)!` (tokora#283) changed `FullContainer`'s contract, which smear neither implements
+# nor asserts on. The rest of 0.9.1 -> 0.10.0 is tokora's own changelog, not a smear concern.
+tokora = { version = "0.10", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }
 
+graphql-proto = { path = "graphql-proto", version = "0.0.0", default-features = false }
 smear = { path = "smear", version = "0.0.0", default-features = false }
+smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
+smear-parser = { path = "smear-parser", version = "0.0.0", default-features = false }
+smear-compiler = { path = "smear-compiler", version = "0.0.0", default-features = false }
+smear-schema = { path = "smear-schema", version = "0.0.0", default-features = false }
 
 [workspace.lints.rust]
-rust_2018_idioms = "warn"
+# `priority = -1` because `unused_extern_crates` below is a MEMBER of this group, and cargo
+# refuses a group and one of its lints at the same priority — the group has to be resolved first
+# for the specific level to win.
+rust_2018_idioms = { level = "warn", priority = -1 }
 single_use_lifetimes = "warn"
+# ALREADY ON, AND THAT IS THE POINT. `unused_extern_crates` is part of `rust_2018_idioms` above, so
+# this repository had opted into the lint from the start — at `warn`. What decided whether it
+# stopped a build was the ENVIRONMENT: `.github/workflows/ci.yml` sets `RUSTFLAGS: -Dwarnings` for
+# every job, so it is an error in CI and a warning in any local run that does not export the same
+# variable. `cargo hack clippy --each-feature` run without it cleared a tree CI then reddened,
+# twice, on the same construct — the alloc-as-std alias, once in `smear` and once in
+# `smear-parser`.
+#
+# Denying it here is the repair for that gap: a lint level in the manifest travels with the code
+# and holds for `cargo clippy`, `cargo check` and `cargo hack` alike, with or without the
+# environment. `ci/hack.sh` closes the other half by making CI and a local run the same string.
+#
+# The alloc-as-std alias in each member carries an explicit `#[allow]` and states why.
+unused_extern_crates = "deny"
 unexpected_cfgs = { level = "warn", check-cfg = [
   # Testing / coverage helpers. These are set via `RUSTFLAGS='--cfg ...'`
   # in CI to force the dispatcher down a specific path so lower‑tier

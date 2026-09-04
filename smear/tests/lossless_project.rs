@@ -70,10 +70,10 @@ use smear::parser::{
     error::GraphqlErrors,
     kinds::{GraphQLLang, SyntaxKind as K},
     lossless::{
-      ProjectErrorKind, SyntaxNode, ast::Document as DocumentNode, parse_document,
-      parse_executable_document, parse_type_system_document, project, project_executable_document,
-      project_executable_document_recovered, project_type_system_document,
-      project_type_system_document_recovered,
+      ProjectErrorKind, Recovery, SyntaxNode, Unverified, ast::Document as DocumentNode,
+      parse_document, parse_executable_document, parse_type_system_document, project,
+      project_executable_document, project_executable_document_recovered,
+      project_type_system_document, project_type_system_document_recovered, verify_parse,
     },
     syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
@@ -320,7 +320,8 @@ fn the_executable_projection_equals_the_parse_over_the_shared_corpus() {
          same bytes"
       );
 
-      let (recovered, recovery) = project_executable_document_recovered(&parse, &source);
+      let (recovered, recovery) = project_executable_document_recovered(&parse, &source)
+        .expect("the pair is the same document");
       assert!(
         recovery.is_complete(),
         "{name} ({form}): the recovering door dropped {} element(s) of a clean parse",
@@ -411,7 +412,8 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
          same bytes"
       );
 
-      let (recovered, recovery) = project_type_system_document_recovered(&parse, &source);
+      let (recovered, recovery) = project_type_system_document_recovered(&parse, &source)
+        .expect("the pair is the same document");
       assert!(
         recovery.is_complete(),
         "{name} ({form}): the recovering door dropped {} element(s) of a clean parse",
@@ -1218,4 +1220,415 @@ fn the_invalid_half_is_a_census_rather_than_a_wall_of_refusals() {
     projected.contains(&"invalid_unterminated_brace.graphql"),
     "the unclosed-brace class is the pinned shape-faithful survivor; it now refuses: {projected:?}"
   );
+}
+
+/// A **direct** consumer of the recovering projector — no validator, no `smear-compiler` door —
+/// cannot obtain an AST it can mistake for the whole document.
+///
+/// The door check used to live at the door. `validate_executable_lossless` and
+/// `validate_schema_lossless` each called `verify_parse` themselves, which is airtight for a
+/// caller that goes through them and says nothing about the caller that does not: these two
+/// projections are `pub`, and projecting a pair is the whole reason they exist.
+///
+/// # Why `skipped` could not carry it
+///
+/// The first repair encoded the mismatch as "project nothing, count every top-level element as
+/// skipped". That is a true statement about a parse that *has* top-level elements. `skipped` is
+/// derived from the elements the container holds, so a parse holding none — empty, or trivia only
+/// — counts zero, and `Recovery::is_complete` is `skipped == 0`.
+///
+/// Each empty witness below is measured **twice**: once against its own text, where the answer is
+/// `Recovery::new(0, 0)` and complete, and once against a different source. Those two `Recovery`
+/// values were the same value. A count cannot carry a state, so the state left `Recovery`
+/// entirely and became the error half of a `Result`, which is the only difference the two cases
+/// have left.
+#[test]
+fn the_recovering_projector_refuses_a_pair_it_is_not_a_projection_of() {
+  // `(what, parse text, a source that is not it)`. The first of each pair is the extension — the
+  // shape a per-definition check cannot see, since every definition matches at its own range —
+  // and the second is the parse with nothing for a tally to count.
+  let executable = [
+    (
+      "an extended source",
+      "{ hero { name } }",
+      "{ hero { name } }\nquery More { hero { id } }",
+    ),
+    ("an empty parse", "", "{ hero { name } }"),
+  ];
+  for (what, text, source) in executable {
+    let parse = parse_executable_document(text);
+    let (ast, recovery) = project_executable_document_recovered(&parse, text)
+      .expect("a parse projects against its own text");
+    if text.is_empty() {
+      // The premise: this is the value the count-shaped encoding of a mismatch would also have
+      // produced, so nothing downstream could tell the two apart.
+      assert_eq!(ast.definitions().len(), 0);
+      assert_eq!(recovery, Recovery::new(0, 0));
+      assert!(recovery.is_complete(), "{what}: complete at zero skipped");
+    }
+
+    assert_eq!(
+      verify_parse(&parse, source),
+      Err(Unverified::SourceMismatch),
+      "{what}: the pair under test has to be a mismatched one, and mismatched for its BYTES — a \
+       shape refusal here would be a different test wearing this one's name"
+    );
+    let refused = project_executable_document_recovered(&parse, source)
+      .map(|(projected, recovery)| (projected.definitions().len(), recovery));
+    assert_eq!(
+      refused.map_err(|mismatch| mismatch.to_string()),
+      Err("the parse and the source are not the same document".to_owned()),
+      "{what}: a direct consumer was handed an AST for a source this parse does not describe"
+    );
+  }
+
+  let type_system = [
+    (
+      "an extended source",
+      "type T { f: Int }",
+      "type T { f: Int }\ntype U { g: Int }",
+    ),
+    ("a trivia-only parse", "# nothing\n", "type T { f: Int }"),
+  ];
+  for (what, text, source) in type_system {
+    let parse = parse_type_system_document(text);
+    let (ast, recovery) = project_type_system_document_recovered(&parse, text)
+      .expect("a parse projects against its own text");
+    if what == "a trivia-only parse" {
+      assert_eq!(ast.definitions().len(), 0);
+      assert_eq!(recovery, Recovery::new(0, 0));
+      assert!(recovery.is_complete(), "{what}: complete at zero skipped");
+    }
+
+    assert_eq!(
+      verify_parse(&parse, source),
+      Err(Unverified::SourceMismatch),
+      "{what}: the pair under test has to be a mismatched one, and mismatched for its BYTES — a \
+       shape refusal here would be a different test wearing this one's name"
+    );
+    let refused = project_type_system_document_recovered(&parse, source)
+      .map(|(projected, recovery)| (projected.definitions().len(), recovery));
+    assert_eq!(
+      refused.map_err(|mismatch| mismatch.to_string()),
+      Err("the parse and the source are not the same document".to_owned()),
+      "{what}: a direct consumer was handed an AST for a source this parse does not describe"
+    );
+  }
+}
+
+/// Rubble the parser leaves **beside** the document node is a top-level element, and counting only
+/// the document node's children reported it as nothing lost.
+///
+/// The same defect as the mismatch above, one level down, and found by sweeping for it: state
+/// derived from a population that can be empty while the thing it describes is not. `skipped` was
+/// counted over `ExecutableDocument`'s children, and a lexer gap tile does not always land there —
+/// `"%"` parses to `Root[ExecutableDocument@0..0, Gap@0..1]`, where that population is empty and
+/// the whole document sits outside it. Zero skipped, `is_complete()`, an empty AST over a source
+/// with nothing in it that has an AST image.
+///
+/// The walk now starts at the root and steps *through* the document node, so both populations are
+/// one population. The controls below are the two shapes that were already right: a gap *inside*
+/// the document node, which must still count once rather than twice, and a parse with no document
+/// node at all, whose children were already the root's.
+#[test]
+fn a_gap_beside_the_document_node_is_counted() {
+  // The premise, measured rather than asserted from the shape of the source: the document node is
+  // empty, so the population the walk used to iterate has nothing in it, and the root holds a
+  // non-trivia element the document node does not.
+  let parse = parse_executable_document("%");
+  let root = SyntaxNode::new_root(parse.green().clone());
+  let document = root
+    .children()
+    .find(|child| child.kind() == K::ExecutableDocument)
+    .expect("the parse has a document node");
+  assert_eq!(
+    document.children_with_tokens().count(),
+    0,
+    "the premise is a document node with an empty child population"
+  );
+  assert_eq!(
+    root
+      .children_with_tokens()
+      .filter(|element| element.kind() == K::Gap)
+      .count(),
+    1,
+    "the premise is one gap tile beside that document node"
+  );
+
+  for (what, src, projected, skipped) in [
+    ("a gap beside an empty document node", "%", 0, 1),
+    ("an unterminated string beside one", "\"unterminated", 0, 1),
+    // Controls. The first was already counted — inside the document node — and must not be counted
+    // twice now that the walk reaches both. The second has no document node, so the walk's
+    // fallback population was already the root's children and nothing about it changed.
+    ("a gap inside the document node", "{ a } %", 1, 1),
+    ("no document node at all", "{ a }\nquery Bad(", 1, 3),
+    // And the honest complete: trivia has no AST image at any position, so a document that is only
+    // trivia lost nothing. `projected() == 0` is what tells a consumer there is nothing here.
+    ("only trivia", "# nothing\n", 0, 0),
+    ("nothing at all", "", 0, 0),
+  ] {
+    let parse = parse_executable_document(src);
+    let (ast, recovery) = project_executable_document_recovered(&parse, src)
+      .expect("a parse projects against its own text");
+    assert_eq!(
+      (ast.definitions().len(), recovery),
+      (projected, Recovery::new(projected as u32, skipped)),
+      "{what}"
+    );
+    assert_eq!(
+      recovery.is_complete(),
+      skipped == 0,
+      "{what}: completeness is the tally's own answer"
+    );
+  }
+
+  // The SDL door is the same walk with a different root kind, so it is the same defect and the
+  // same repair; a gate that proved it of one root would be proving it of half the code.
+  let parse = parse_type_system_document("%");
+  let (ast, recovery) = project_type_system_document_recovered(&parse, "%")
+    .expect("a parse projects against its own text");
+  assert_eq!(ast.definitions().len(), 0);
+  assert_eq!(recovery, Recovery::new(0, 1));
+  assert!(!recovery.is_complete());
+}
+
+/// A tree deeper than any parser produces is **refused**, by every public helper that walks one.
+///
+/// # A crash, not a charge defect
+///
+/// These helpers take a `&GreenNodeData` and `rowan`'s builder is public, so the tree can come from
+/// anywhere — including `finish_root`, which finishes an event stream this crate did not emit. Four
+/// of them recursed with no counter: `verify_source_at`, `verify_source_counted`, `reject_holes`,
+/// and the mutually recursive `node_extent`/`extent_of` pair. al8n/smear#198's own audit of this
+/// named three and missed the fourth, which is what a general claim recorded without enumerating
+/// its members looks like when the artifact *is* the enumeration.
+///
+/// Each then carried its own counter and refused at `MAX_GREEN_DEPTH` — which is what this cell
+/// pins — and **the counter was not what made them safe**. A counter bounds a depth; the frames
+/// belonged to the host and the stack to whichever thread the caller walked on, so a walk on a
+/// thread too small to hold the ceiling aborted before reaching the refusal. Measured out of suite,
+/// one child process per depth, the tree built on one thread and the walk run on another: 726
+/// levels of `node_extent` and 927 of `reject_holes` on 512 KiB, 566 and 530 of the two
+/// verifications on 256 KiB. None of the four spends a native frame per level now, so the refusal
+/// below is reached on any stack.
+///
+/// The projection doors inherit the ceiling without a counter of their own: every one of them opens
+/// with a verification, and `Verified::new` runs the counted form — so a `Verified` is proof of the
+/// tree's depth as well as of its bytes. What that ceiling stands in front of is the projection's
+/// own node dispatch, and the four cycles it used to recurse through are worklists too
+/// (al8n/smear#201) — so what the inheritance now bounds is how many entries they hold, not
+/// whether a document the doors produce can be projected at all. `smear-parser`'s
+/// `deep_projection.rs` reads that flatness off a real projection.
+///
+/// # What this pins, and what it cannot
+///
+/// A tree one level past the ceiling, which is refused. **Not** a tree deep enough to actually
+/// overflow: `rowan` drops a green tree recursively, so building one here would crash this test in
+/// its own destructor before an assertion ran. That route is `rowan`'s and is reachable without
+/// this crate at all — which is why the ceiling is about *these walks* rather than about the tree's
+/// existence, and why `finish_root`'s audit records construction and destruction separately.
+#[test]
+fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
+  use smear::parser::lossless::project::{
+    MAX_GREEN_DEPTH, node_extent, reject_holes, verify_source, verify_source_counted,
+  };
+
+  // One level past what the walks will descend. Every level is a `SelectionSet`, a shape the
+  // grammar allows and the lexer's own nesting ceiling of twenty-four would never reach.
+  let over = MAX_GREEN_DEPTH + 8;
+  let mut tree = Tree::new();
+  tree.open(K::Root);
+  for _ in 0..over {
+    tree.open(K::SelectionSet);
+  }
+  for _ in 0..over {
+    tree.close();
+  }
+  tree.close();
+  let root = tree.finish();
+  let green = root.green();
+
+  // The tree holds no token, so its text is empty and the bytes agree — which is what makes depth
+  // the only thing left to refuse it for.
+  let refused =
+    verify_source::<K>(green, "").expect_err("`verify_source` descended a tree past the ceiling");
+  assert_eq!(
+    *refused.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{refused}"
+  );
+  let counted = verify_source_counted::<K>(green, "")
+    .map(|_| ())
+    .expect_err("`verify_source_counted` descended a tree past the ceiling");
+  assert_eq!(
+    *counted.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{counted}"
+  );
+
+  let node = smear::parser::lossless::project::Node::of(&root);
+  let holes = reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
+    .expect_err("`reject_holes` descended a tree past the ceiling");
+  assert_eq!(
+    *holes.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{holes}"
+  );
+
+  // The extent pair refuses too. It used to manufacture the node's own range instead, recorded as
+  // "a superset — imprecise rather than wrong": but these functions promise `None` when a run holds
+  // no non-trivia token, and this tree holds none at all, so `Some(..)` was a different answer to a
+  // different question rather than a wider one.
+  let extent = node_extent(node, |kind| matches!(kind, K::Space | K::Comment))
+    .expect_err("`node_extent` manufactured an extent for a tree past the ceiling");
+  assert_eq!(
+    *extent.kind(),
+    ProjectErrorKind::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    },
+    "{extent}"
+  );
+  // And the shallow twin still answers exactly: an all-trivia run is `None`, not a range.
+  let mut shallow = Tree::new();
+  shallow.open(K::Root);
+  shallow.token(K::Space, " ").token(K::Comment, "# c");
+  shallow.close();
+  let shallow = shallow.finish();
+  assert_eq!(
+    node_extent(
+      smear::parser::lossless::project::Node::of(&shallow),
+      |kind| matches!(kind, K::Space | K::Comment)
+    ),
+    Ok(None),
+    "an all-trivia run has no token extent"
+  );
+
+  // **The two refusals have different names all the way out.** A pair whose bytes agree exactly —
+  // this tree holds no token, so its text is `""` — used to be reported as a source mismatch purely
+  // because of its shape, which tells a caller to re-parse the one thing that is not wrong. The
+  // third collapse of this class on al8n/smear#198, after an arena refusal wearing the budget's
+  // `None` and a stale pair wearing the budget's refusal.
+  assert_ne!(
+    Unverified::SourceMismatch.to_string(),
+    Unverified::TooDeep {
+      limit: MAX_GREEN_DEPTH
+    }
+    .to_string(),
+    "the two reasons render as one sentence"
+  );
+
+  // The ceiling is not in the way of anything real: the deepest green tree in this repository's
+  // corpus is twelve levels. What the *doors* can produce is a different and much larger
+  // population — `HARD_MAX` brackets, not `MAX_NESTING_DEPTH`, reaching 516 levels — and reading
+  // the second off the first is what opened the window `MAX_GREEN_DEPTH`'s header now records.
+  // That obligation is a `const` assertion beside the constant; this cell is about the corpus.
+  let deepest = corpus("valid_")
+    .into_iter()
+    .map(|(_, src)| depth_of(parse_document(&src).green()))
+    .max()
+    .expect("the corpus is not empty");
+  println!("deepest corpus green tree: {deepest} levels, ceiling {MAX_GREEN_DEPTH}");
+  assert!(
+    deepest < 64,
+    "the corpus reaches {deepest} levels, so {MAX_GREEN_DEPTH} is no longer an order of magnitude \
+     of headroom"
+  );
+}
+
+/// The refusal is reached on a stack that cannot hold the ceiling in native frames.
+///
+/// # There is no red side in this file either
+///
+/// A stack overflow is `SIGABRT`, which takes the harness with it and which no `#[should_panic]`
+/// sees, so what this can pin is the green side: the four walks answer `TooDeep` on a thread far
+/// too small to have held 1 024 frames of any of them. A regression takes the whole file down
+/// loudly rather than passing quietly, which is the arrangement `ast_release.rs` uses for the same
+/// reason.
+///
+/// # Why the fixture picks its own stack, and which one
+///
+/// Because the boundary is a property of the stack and libtest's is not this file's to know. At
+/// `8b73965`, measured out of suite one child process per depth with the tree built on another
+/// thread, these walks reached **2 MiB** without dying — the ceiling refused first — so a fixture
+/// run on libtest's own thread would have passed before the repair and proved nothing. On 512 KiB
+/// `node_extent` aborted at 726 levels and `reject_holes` at 927; on the **128 KiB** this test
+/// spawns, all four die an order of magnitude below the ceiling. Sizing the stack is what makes the
+/// fixture decisive instead of a bet on the runner, and it costs nothing, since a walk that does
+/// not recurse needs no more of it at 1 032 levels than at one.
+#[test]
+fn the_ceiling_is_reached_on_a_stack_too_small_to_hold_it() {
+  use smear::parser::lossless::project::{
+    MAX_GREEN_DEPTH, Node, node_extent, reject_holes, verify_source, verify_source_counted,
+  };
+
+  /// An order of magnitude under every boundary the four walks were measured at on this stack.
+  const STACK: usize = 128 * 1024;
+
+  let over = MAX_GREEN_DEPTH + 8;
+  let mut tree = Tree::new();
+  tree.open(K::Root);
+  for _ in 0..over {
+    tree.open(K::SelectionSet);
+  }
+  for _ in 0..over {
+    tree.close();
+  }
+  tree.close();
+  let root = tree.finish();
+
+  // The tree is built here and walked there, which is the shape the defect needs: nothing ties a
+  // `Parse` to the thread that produced it, and only the walking thread's stack is at stake.
+  let green: rowan::GreenNode = root.green().to_owned();
+  std::thread::Builder::new()
+    .stack_size(STACK)
+    .spawn(move || {
+      let too_deep = ProjectErrorKind::TooDeep {
+        limit: MAX_GREEN_DEPTH,
+      };
+      let node = Node::<GraphQLLang>::new(&green, rowan::TextSize::new(0));
+      assert_eq!(
+        *verify_source::<K>(&green, "")
+          .expect_err("`verify_source` descended a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+      assert_eq!(
+        *verify_source_counted::<K>(&green, "")
+          .map(|_| ())
+          .expect_err("`verify_source_counted` descended a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+      assert_eq!(
+        *reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
+          .expect_err("`reject_holes` descended a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+      assert_eq!(
+        *node_extent(node, |kind| matches!(kind, K::Space | K::Comment))
+          .expect_err("`node_extent` manufactured an extent for a tree past the ceiling")
+          .kind(),
+        too_deep
+      );
+    })
+    .expect("a fixture thread")
+    .join()
+    .expect("the fixture thread returned");
+}
+
+/// The green tree's depth, for the margin assertion above.
+fn depth_of(node: &rowan::GreenNodeData) -> usize {
+  1 + node
+    .children()
+    .filter_map(|child| child.into_node().map(depth_of))
+    .max()
+    .unwrap_or(0)
 }

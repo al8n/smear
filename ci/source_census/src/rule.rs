@@ -333,14 +333,14 @@ pub fn text_hits(ty: &Type) -> Vec<TextHit> {
           }
         }
       }
-      Type::ImplTrait(i) => walk_bounds(i.bounds.iter(), out_param, konstant, out),
-      Type::TraitObject(t) => walk_bounds(t.bounds.iter(), out_param, konstant, out),
+      Type::ImplTrait(i) => walk_bounds(&i.bounds, out_param, konstant, out),
+      Type::TraitObject(t) => walk_bounds(&t.bounds, out_param, konstant, out),
       _ => {}
     }
   }
 
-  fn walk_bounds<'a>(
-    bounds: impl Iterator<Item = &'a TypeParamBound>,
+  fn walk_bounds(
+    bounds: &syn::punctuated::Punctuated<TypeParamBound, syn::Token![+]>,
     out_param: bool,
     konstant: bool,
     out: &mut Vec<TextHit>,
@@ -516,13 +516,16 @@ fn walk_children(ty: &Type, f: &mut impl FnMut(&Type)) {
     Type::Slice(s) => f(&s.elem),
     Type::Array(a) => f(&a.elem),
     Type::Tuple(t) => t.elems.iter().for_each(f),
-    Type::ImplTrait(i) => bound_types(i.bounds.iter(), f),
-    Type::TraitObject(t) => bound_types(t.bounds.iter(), f),
+    Type::ImplTrait(i) => bound_types(&i.bounds, f),
+    Type::TraitObject(t) => bound_types(&t.bounds, f),
     _ => {}
   }
 }
 
-fn bound_types<'a>(bounds: impl Iterator<Item = &'a TypeParamBound>, f: &mut impl FnMut(&Type)) {
+fn bound_types(
+  bounds: &syn::punctuated::Punctuated<TypeParamBound, syn::Token![+]>,
+  f: &mut impl FnMut(&Type),
+) {
   for bound in bounds {
     let TypeParamBound::Trait(t) = bound else {
       continue;

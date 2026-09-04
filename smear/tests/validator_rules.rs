@@ -119,11 +119,19 @@ fn diagnose_full<'a>(
   let mut collected = Vec::new();
   let mut sink = Collect::new(&mut collected);
   let result = validate_executable_with(schema, &document, &mut scratch, budget, rules, &mut sink);
-  assert_eq!(
-    result.is_err(),
-    !collected.is_empty(),
-    "the verdict and the diagnostics disagree\n---\n{source}"
-  );
+  // `Err` with an empty sink is one deliberate state and not a disagreement: a `Budget` refused the
+  // document with its own rule outside `rules`, so there was nothing to emit and the refusal itself
+  // is the report. Anything else must match. al8n/smear#196.
+  match result {
+    Ok(()) => assert!(
+      collected.is_empty(),
+      "an `Ok` verdict carried diagnostics\n---\n{source}"
+    ),
+    Err(invalid) => assert!(
+      !collected.is_empty() || invalid.budget_tripped(),
+      "the verdict is `Err` with an empty sink and no budget refusal\n---\n{source}"
+    ),
+  }
   collected
 }
 
@@ -155,9 +163,21 @@ fn sorted(rules: &[Rule]) -> Vec<Rule> {
 
 /// Rules with no fixture, each excused in writing.
 ///
-/// The list is empty and is expected to stay that way. It exists so that an excuse has to be
-/// written down rather than implied by a rule quietly missing from the table.
-const UNFIREABLE: &[(Rule, &str)] = &[];
+/// It exists so that an excuse has to be written down rather than implied by a rule quietly
+/// missing from the table. One entry, and the entry names what would delete it.
+const UNFIREABLE: &[(Rule, &str)] = &[(
+  Rule::ValidationWorkBudget,
+  "fireable, and deliberately not fixtured here. Every reader of this table runs each fixture \
+   through BOTH doors and compares them diagnostic for diagnostic, and this is the one rule the \
+   two doors cannot agree on at the boundary: the lossless door charges its projection before it \
+   projects, so at a budget low enough to make the syntactic door refuse mid-walk, the lossless \
+   door has already refused at the whole document\'s span. That is not a drift between two \
+   implementations of a rule — it is one door doing strictly more work and being charged for it — \
+   and a fixture whose two halves disagree by construction would be a differential asserting the \
+   opposite of what it exists to assert. `validator_work.rs` fires the rule through each door \
+   separately and pins both: the refusal, the wall clock, the rule-filtered-out verdict, and the \
+   `Recovery` a refused projection reports.",
+)];
 
 #[test]
 fn liveness_floor() {
@@ -985,7 +1005,8 @@ fn nested_selection_document_ending_in(
       None,
       None,
       None,
-    ))],
+    ))]
+    .into(),
   );
   for _ in 0..depth {
     set = SelectionSet::new(
@@ -997,7 +1018,8 @@ fn nested_selection_document_ending_in(
         None,
         None,
         Some(set),
-      ))],
+      ))]
+      .into(),
     );
   }
   document(SelectionSet::new(
@@ -1009,18 +1031,19 @@ fn nested_selection_document_ending_in(
       None,
       None,
       Some(set),
-    ))],
+    ))]
+    .into(),
   ))
 }
 
 fn nested_value_document(depth: usize) -> ExecutableDocument<&'static str> {
   let span = SimpleSpan::const_new(0, 0);
   // `Recursive` has no required fields, so the innermost literal is the empty object.
-  let mut value = InputValue::Object(Object::new(span, vec![]));
+  let mut value = InputValue::Object(Object::new(span, vec![].into()));
   for _ in 0..depth {
     value = InputValue::Object(Object::new(
       span,
-      vec![ObjectField::new(span, Name::new(span, "rec"), value)],
+      vec![ObjectField::new(span, Name::new(span, "rec"), value)].into(),
     ));
   }
   document(SelectionSet::new(
@@ -1035,7 +1058,8 @@ fn nested_value_document(depth: usize) -> ExecutableDocument<&'static str> {
       )),
       None,
       None,
-    ))],
+    ))]
+    .into(),
   ))
 }
 

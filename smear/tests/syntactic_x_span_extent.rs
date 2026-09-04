@@ -2,6 +2,14 @@
 
 //! The syntactic span-extent gate for GraphQLx — the twin of `syntactic_span_extent.rs`.
 //!
+//! The two corpus sweeps carry `#[cfg_attr(miri, ignore)]`, as that file's do and for that file's
+//! reason, plus one of its own: this gate's valid sweep is the LARGER of the pair — 90 corpus
+//! entries against its 56, over a dialect with three times as many span-carrying productions. No
+//! Miri cell has ever reached this file at all, because cargo runs test binaries in name order
+//! and its twin sits immediately before it, unfinished. Read that file's header for the
+//! measurement and the argument. The four witnesses here are not ignored, `cargo test` runs all
+//! six in full, and `ci/miri_scope.py` cross-checks the ignored count.
+//!
 //! `parser` is in the header for the reason that file's header gives: the gate reads
 //! `smear::parser::graphqlx`, and until #136 no build existed in which a header could omit it and
 //! be caught.
@@ -373,6 +381,11 @@ fn the_checker_can_answer_no() {
 
 /// The gate proper: every span in every padded parse is the extent of its own tokens, and every
 /// node type reached was reached somewhere the two span rules disagree.
+#[cfg_attr(
+  miri,
+  ignore = "810 parses of the valid_ corpus, the larger half of the pair; see the header of \
+            `syntactic_span_extent.rs` for the measurement that excluded both"
+)]
 #[test]
 fn trivia_injection_leaves_every_span_on_its_own_tokens() {
   let entries = valid_corpus();
@@ -525,6 +538,11 @@ fn trivia_injection_leaves_every_span_on_its_own_tokens() {
 ///
 /// The GraphQL twin carries the reasoning. What differs here is only the size of the corpus and
 /// how far a recovering context gets through it, both of which the counters below pin.
+#[cfg_attr(
+  miri,
+  ignore = "the invalid_ corpus sweep; minutes under Miri for span arithmetic no `unsafe` is \
+            reachable from. See the header of `syntactic_span_extent.rs`"
+)]
 #[test]
 fn recovered_spans_are_token_extents_over_the_invalid_corpus() {
   let entries = invalid_corpus();

@@ -7,9 +7,12 @@
 //!
 //! * the `SyntacticLexer`s are smear's own hand-written scanners, so the kit
 //!   checks that smear honours the contract tokora's input machinery relies on;
-//! * the `LosslessLexer`s are aliases for `tokora::lexer::LogosLexer`, so those
-//!   runs exercise tokora's own Logos adapter, including gap-free tiling via
-//!   `.lossless()`.
+//! * the `LosslessLexer`s are smear newtypes that delegate every `Lexer` item
+//!   to `tokora::lexer::LogosLexer`, so those runs exercise tokora's own Logos
+//!   adapter *and* the delegation over it, including gap-free tiling via
+//!   `.lossless()`. They were bare aliases for `LogosLexer` until the newtype
+//!   took away the three accessors that handed out the raw `logos::Lexer`; the
+//!   kit is what says the delegation still answers as the adapter does.
 
 #![cfg(all(feature = "std", any(feature = "graphql", feature = "graphqlx")))]
 
@@ -57,8 +60,28 @@ const INVALID: &[&str] = &[
   "\u{0000}\u{0001}",
 ];
 
+/// Sources whose *complete* parse is one long item but whose truncations are shorter accepted
+/// ones — the only shape that can falsify a `Token::SCAN_LOOKAHEAD` / `Lexer::read_frontier`
+/// claim, and the shape neither list above has.
+///
+/// `run_partial` audits a corpus, not a vocabulary: with `Unbounded` on every lexer here nothing
+/// is committed while a stream is open, so these cells pass and are meant to. What they are for
+/// is the *next* edit — narrowing either answer to `WithinSpan`/`SpanEnd` reds `-.5` at split
+/// `k = 2` in all four lexers, because `-` is an accepting rule of its own, `-.` is accepted by
+/// nothing, and `-.5` is one float, so the prefix commits an item at `0..1` the complete parse
+/// does not have. Without these cells that narrowing is green: the 33 sources above contain no
+/// gap between an accepting prefix and the longer rule that swallows it.
+const FRONTIER: &[&str] = &[
+  "-.5", "-.", "-.5e3", ".5", "0.", "-0.5", "1.0", "1e10", "1.5e-3", "0x1F", "0x1.8p3", "0b10",
+];
+
 fn corpus() -> Vec<&'static str> {
-  VALID.iter().chain(INVALID.iter()).copied().collect()
+  VALID
+    .iter()
+    .chain(INVALID.iter())
+    .chain(FRONTIER.iter())
+    .copied()
+    .collect()
 }
 
 #[cfg(feature = "graphql")]

@@ -48,7 +48,8 @@ be driven by a `tokio` server, a `compio` one, a wasm module or an editor withou
 privileged — which is what lets the runtime adapters and the ergonomic macro layer be thin crates
 *above* the core instead of assumptions baked *into* it.
 
-None of that is here yet. The table below is the specification coverage as it stands, and the
+The first phase of that is here, behind the non-default `proto` feature: query execution, and
+nothing above it. The table below is the specification coverage as it stands, and the
 [roadmap](#roadmap) is the list of what is still missing, unchecked.
 
 ### What is implemented, and what is not
@@ -62,8 +63,8 @@ absent, it is absent — not partial.
 | §3 Type System | Validated inside `Schema::build`: 67 distinct refusals, each with a schema in the test suite that makes it fire |
 | §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. There is no introspection **execution** |
 | §5 Validation | All 30 executable-document rules |
-| §6 Execution | **Not implemented.** Smear parses and validates a request; running it is the caller's |
-| §7 Response | **Not implemented.** `smear::diagnostic` does carry §7.1.2 response paths, so an executor built on top of smear can attach them |
+| §6 Execution | **All three operations, behind the non-default `proto` feature.** `smear::proto`'s Sans-I/O executor does collect, coerce arguments, complete, resolve abstract types and propagate nulls. §6.2.2's serial mutation is structural rather than a contract — the top-level fields are withheld from `poll_resolve` rather than queued — and §6.2.3's subscription is a third value of the same at-most-one operation-kind phase, not a second type: `start` runs §6.2.3.1 and hands the driver the one source field to resolve into an event stream, each event it pushes back is one whole execution, and §6.2.3.2's one-result-per-event ordering is owned by the intake. What is still absent is the transport: the crate owns no stream, no clock and no timers, so the connection state machine and backpressure a long-lived operation needs live in a driver |
+| §7 Response | **The tree, not the document.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. All three of §7.1's result kinds are modelled — §7.1.1's execution result, §7.1.3's request error result as a distinct type with no `data` accessor at all, and §7.1.2's response stream as the state of a running subscription rather than a container, because a crate that owns no stream cannot hold one. The response map's third entry is there too — the driver attaches a §7.1.7 *Extensions* map, a container that cannot hold a non-map, cannot grow past `max_extension_entries` or `max_extension_key_bytes`, and cannot be attached outside the one phase a response could carry it in; the executor hands the values back unread, at both of §7.1.7's sites. One `extensions` site is deliberately absent: the per-*error* one of §7.1.6's error result format, because it would decide part of the diagnostic contract. Nothing writes `data`, `errors` and `extensions` out, because serialising a driver's leaf is the driver's |
 
 Both counts are enumerable rather than asserted. `Rule::ALL` holds 31 entries — the 29 §5 rules that
 need a runtime check, plus two non-specification resource budgets; §5.1.1 needs no entry because the
@@ -122,11 +123,12 @@ The syntactic doors are generic over the source type: `&str`, `&[u8]`, `bytes::B
 parallel schema compilation and batched query processing straightforward.
 
 **This is not yet true of the whole crate.** The lossless doors and the introspection door take
-`&str`, because rowan stores token text as `&str` and an introspection response is parsed from one.
-A consumer holding `bytes::Bytes` can use the syntactic doors and not those. The narrowings are not
+`&str`, because rowan stores token text as `&str` and an introspection response is parsed from one;
+so does the one method of `proto`'s value trait that hands a driver the name of a variable. A
+consumer holding `bytes::Bytes` can use the syntactic doors and not those. The narrowings are not
 folklore: `cargo run -p source-census -- --verbose` walks the public surface and prints every one of
-them with a written reason — at this commit, 24 narrowed parameters out of 663, of which 22 are
-tracked against issues [#121] and [#103] as things to widen rather than accepted shapes.
+them with a written reason — at this commit, 25 narrowed parameters out of 687, of which 23 are
+tracked against issues [#121], [#103] and [#139] as things to widen rather than accepted shapes.
 
 ### A diagnostic contract, not a `Display` string
 
@@ -166,6 +168,7 @@ smear = { version = "0.0.0", features = ["validator"] }
 ### Parsing
 
 ```rust
+# #[cfg(all(feature = "parser", feature = "graphql"))] {
 use smear::{
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
@@ -187,6 +190,7 @@ let document = Parser::with_parser::<
 .expect("the query parses");
 
 assert_eq!(document.definitions().len(), 1);
+# }
 ```
 
 ### Validating
@@ -246,19 +250,29 @@ assert_eq!(diagnostic.subject_source(), Some(&"title"));
 
 ## Architecture
 
-Four layers. The lower two are generic over the source type and the dialect; the upper two are
-standard GraphQL only.
+Five layers, one crate each, and `smear` is an umbrella that re-exports all of them. The lower two
+are generic over the source type and the dialect; the upper three are standard GraphQL only.
 
-| Layer | Module | What it is |
-|---|---|---|
-| Lexer | `smear::lexer` | Source text to zero-copy tokens, in a syntactic or a lossless stream. The irreducible base — it has no feature of its own because the parser cannot exist without it |
-| Parser | `smear::parser` | Combinators that build an AST from the syntactic stream, and the rowan CST tower from the lossless one, plus the generic node definitions a new dialect reuses |
-| Validator | `smear::validator` | The built-once `Schema`, draft §3 inside its build, and the draft §5 rules over a parsed request |
-| Diagnostic | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice |
+| Layer | Crate | Reached as | What it is |
+|---|---|---|---|
+| Lexer | `smear-lexer` | `smear::lexer` | Source text to zero-copy tokens, in a syntactic or a lossless stream. The irreducible base — it has no feature of its own because everything above it is built on its token streams |
+| Parser | `smear-parser` | `smear::parser` | Combinators that build an AST from the syntactic stream, and the rowan CST tower from the lossless one, plus the generic node definitions a new dialect reuses |
+| Schema | `smear-schema` | `smear::validator::schema` | The built-once `Schema` and, behind its `build` feature, draft §3 inside the builder. A consumer that only *reads* a schema takes it with `default-features = false` and gets no front end |
+| Validator | `smear-compiler` | `smear::validator` | The draft §5 rules over a parsed request, the rule vocabulary and the diagnostic rendering |
+| Execution | `graphql-proto` | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Queries today, behind the non-default `proto` feature |
+| Diagnostic | (in `smear-schema`) | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. It ships with the schema because that is the lowest crate whose errors implement it |
+
+**Depend on `smear` and enable features, or depend on a member directly** — the two are the same
+code and the same paths. `smear::lexer::X` and `smear_lexer::X` are one item. A member is worth
+naming directly when you want exactly one layer: a syntax highlighter wants `smear-lexer` and never
+resolves the parser tower; a driver that reads a schema at execution time wants `smear-schema` with
+`default-features = false` and never resolves the front end. Every feature a member declares is
+forwarded by `smear` under the same name, which `ci/feature_reachability.py` checks by enumerating
+the members rather than by reading the umbrella's own table.
 
 ## Feature Flags
 
-Fourteen features. The lexer is not one of them: it is the irreducible base, the parser cannot exist
+Fifteen features. The lexer is not one of them: it is the irreducible base, the parser cannot exist
 without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
@@ -266,10 +280,12 @@ without it, and a gate that can only ever be on is not a gate.
 | `std` | Standard library support; off is `no_std`, and `alloc` is required either way | ✓ |
 | `graphql` | Standard GraphQL, in every layer | ✓ |
 | `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
-| `parser` | `smear::parser` — the combinators and the ASTs. Off, the crate is the lexer alone | ✓ |
+| `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
-| `validator` | `smear::validator` — the built-once `Schema`, draft §3 inside its build, and the draft §5 rules. Implies `parser` and `graphql`. Adds no dependency | |
-| `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator` and `std`, and is the one validator feature that costs a dependency (`serde`, `serde_json`) | |
+| `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
+| `proto` | `smear::proto` — draft §6 query execution as a Sans-I/O state machine. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
+| `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator` and `std`. Adds no third-party dependency | |
+| `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry a number instead of a source slice. One tree, generic over the integer: `Int` is `i32` — the width draft §3.5.1 specifies — or `i64`, the reading that takes §2.9.1's unbounded grammar at its word and accepts literals the specification does not; a refusal names which. `Float` is `f64` at both, because draft §3.5.2 says `Float` **is** IEEE 754 double precision. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, leaves the slice AST and the slice parser untouched, and keeps the slice parser available for the literals neither width can hold | |
 | `rowan` | The lossless CST tower, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
 | `bytes` | Support the `bytes::Bytes` source type | |
 | `bstr` | Support the `bstr::BStr` source type | |
@@ -279,11 +295,13 @@ without it, and a gate that can only ever be on is not a gate.
 | `test-support` | The lossless suites' `test_support` scaffolding | |
 
 A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns the
-parser off:
+parser off, or names the member and skips the umbrella entirely. The two resolve the same code:
 
 ```toml
 [dependencies]
 smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
+# or
+smear-lexer = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
 ```
 
 ### `no_std`
@@ -291,31 +309,43 @@ smear = { version = "0.0.0", default-features = false, features = ["std", "graph
 With `std` off the crate is `no_std` and requires `alloc`. CI cross-compiles `smear` with
 `--all-features` for fourteen targets including five WebAssembly ones, and builds the validator's
 schema representation for `thumbv6m-none-eabi` — a core with no compare-and-swap — through the
-`smear-noatomic` member, which `#[path]`-includes smear's own files so the proof cannot drift from
-the source.
+`smear-noatomic` member, which `#[path]`-includes `smear-schema`'s own files so the proof cannot
+drift from the source.
 
 Two limits on that claim, because they are the difference between "compiles" and "works". `smear`
 itself does **not** build for `thumbv6m-none-eabi`: its AST offers an `Arc`-backed list spelling that
 needs native atomics, which is why the no-atomic proof is about the schema representation rather than
-the crate. And per [#124], the `not(std)` arm is compile-checked but **executed** by nothing — the
-crate's dev-dependency on itself does not pass `default-features = false`, so every test build
-resolves `std` back on. Treat `no_std` as a supported build, not as a tested runtime.
+the crate. And per [#124], the `not(std)` arm is compile-checked but **executed** by nothing: the one
+row that runs the suite is `cargo test --all-features`, which has `std` on. Until [#136] a test build
+could not even *compile* it — the crate's dev-dependency on itself omitted
+`default-features = false`, so a `--no-default-features` selection resolved `std` back on, and every
+narrowed row was really the default build wearing a narrower name. Treat `no_std` as a supported
+build, not as a tested runtime.
 
 ## Benchmarks
 
-Two packages carry the benchmark suites. Every target sets `harness = false` and runs under criterion,
-so a run must name its target:
+All six live in `smear/benches`, as `smear`'s own `[[bench]]` targets, so `cargo bench` is the whole
+suite. They are grouped by how many implementations are inside the timed region:
+
+* `benches/solo/` — `lex_baseline` and `graphqlx`, where both sides are smear. The number is
+  comparable only to an earlier run on the same machine.
+* `benches/comparative/` — `executables` and `type_system` against four other Rust GraphQL parsers,
+  and `benches/comparative/apollo/`'s `apollo_comparison` and `validator_comparison` against
+  `apollo-parser` and `apollo-compiler`. The number is a ratio.
+
+Every target sets `harness = false` and runs under criterion, so a run must name its target. The two
+apollo ones additionally need the features they measure:
 
 ```sh
-cargo bench --package smear-benches      --bench executables          -- --quick
-cargo bench --package smear-benches      --bench type_system          -- --quick
-cargo bench --package smear-apollo-bench --bench validator_comparison -- --quick
-cargo bench --package smear-apollo-bench --bench apollo_comparison    -- --quick
+cargo bench -p smear --bench executables -- --quick
+cargo bench -p smear --bench type_system -- --quick
+cargo bench -p smear --features rowan,validator --bench apollo_comparison    -- --quick
+cargo bench -p smear --features rowan,validator --bench validator_comparison -- --quick
 ```
 
-`smear-benches` measures parsing against four other Rust GraphQL parsers, and `smear-apollo-bench`
-measures the lossless CST tower and draft §5 validation against `apollo-parser` and
-`apollo-compiler`.
+Those two carry `required-features`, and an unmet `required-features` makes cargo *skip* a target in
+silence. `cargo bench -p smear` therefore builds four of the six and exits 0; the CI step that closes
+that names both targets explicitly.
 
 **No tables here.** The ones this file used to carry were measured on an unrecorded commit, date and
 machine, and had drifted far enough to understate the crate — so they were removed rather than
@@ -336,21 +366,30 @@ load average is not a usable signal for that — it reads around 3.3 at 80% idle
 Smear is **not** a GraphQL server *yet*: there is no execution engine and no response serialisation.
 Today it is the front end one would be built on; the [roadmap](#roadmap) is the rest.
 
-Migration note: `smear-lexer` and `smear-parser` were merged into this crate in [#83]. Neither had
-ever been published, so nothing on crates.io moved; path and git dependents rename `smear_lexer::X`
-to `smear::lexer::X` and `smear_parser::X` to `smear::parser::X`, and select features per the table
-above.
+Migration note: `smear-lexer` and `smear-parser` were merged into this crate in [#83] and are
+separate crates again, joined by `smear-schema`, `smear-compiler` and `graphql-proto`. **Nothing a
+consumer writes changed in either direction**: `smear` re-exports every member under the module
+name it had, so `smear::lexer::X`, `smear::parser::X`, `smear::validator::X`, `smear::proto::X` and
+`smear::diagnostic::X` all still resolve, and every feature is forwarded under the same name. What
+the split adds is the option of depending on one layer directly — see [Architecture](#architecture).
 
 ## Roadmap
 
 Every box below is unchecked, and unchecked means absent — not partial, not planned-and-half-landed.
-The list is what stands between the current front end and a complete implementation.
+The first two carry an inline exception, because execution's first phase has landed and a box that
+stayed silent about it would be the reading this sentence exists to forbid. The list is what stands
+between the current front end and a complete implementation.
 
-- [ ] **§6 Execution** — the Sans-I/O engine described in the Overview. Query execution first, then
-  mutations, then subscription execution, then the connection state machine, backpressure and
-  timers that a long-lived operation needs.
-- [ ] **§7 Response** — assembling and serialising the result. Only the error half exists today, as
-  the §7.1.2 response paths already carried by `smear::diagnostic`.
+- [ ] **§6 Execution** — the Sans-I/O engine described in the Overview. All three of §6.2's
+  operations execute behind the non-default `proto` feature — query, serial mutation, and
+  subscription as a phase of the same machine. What has not landed is everything a *transport*
+  needs: the connection state machine, backpressure, and the timers a long-lived operation wants.
+  That is why the box is unchecked.
+- [ ] **§7 Response** — assembling and serialising the result. Execution hands back a response tree,
+  and its field errors carry §7.1.2's `path` and `locations` the same way `smear::diagnostic` does;
+  all three of §7.1's result kinds are modelled, and both of §7.1.7's *Extensions* sites are
+  carried. The per-*error* `extensions` of §7.1.6 is not, and nothing writes `data`, `errors` and
+  `extensions` out as a document.
 - [ ] **Introspection execution** — a schema can be *built* from an introspection response, and an
   introspection query is *validated* like any other document, because the meta-schema is injected
   into every schema. Nothing here **answers** `__schema` or `__type`.
@@ -358,7 +397,9 @@ The list is what stands between the current front end and a complete implementat
   one, or a wasm host. Thin is the point: each one is a driver, and the core stays runtime-free.
 - [ ] **Macro layer** — deriving schema types and resolver wiring from Rust types, so the ergonomic
   surface sits *above* the core instead of being the only way in.
-- [ ] **`graphql-transport-ws`** — the subscription transport, once execution can produce a stream.
+- [ ] **`graphql-transport-ws`** — the subscription transport. Execution now produces the stream
+  §7.1.2 describes, one execution result per source event, so what is left is the wire protocol and
+  the connection lifecycle around it.
 - [ ] **Diagnostic rendering** — smear ships the contract and deliberately no renderer, so nothing
   here turns an error into a rendered snippet. A companion crate for that is being built
   separately.
@@ -393,3 +434,5 @@ shall be dual licensed as above, without any additional terms or conditions.
 [#103]: https://github.com/al8n/smear/issues/103
 [#121]: https://github.com/al8n/smear/issues/121
 [#124]: https://github.com/al8n/smear/issues/124
+[#136]: https://github.com/al8n/smear/issues/136
+[#139]: https://github.com/al8n/smear/issues/139

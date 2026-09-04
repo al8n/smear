@@ -12,7 +12,7 @@
 //!
 //! The `unclosed` list is a **macro argument**, so each dialect states its own pairs. GraphQLx
 //! states a fourth — `<>` — because its lexer depth-counts `<` and `>` alongside the other three
-//! (`smear/src/lexer/graphqlx/syntactic/mod.rs:807-814`). That fourth entry is the single line in
+//! (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`). That fourth entry is the single line in
 //! this task that a reviewer cannot check by symmetry with GraphQL, and it is the line that
 //! decides whether an unterminated generic list reports `Unclosed::Angle` or the catch-all's
 //! `Other("unclosed delimiter")`.
@@ -29,7 +29,9 @@ use smear::parser::{
 use tokora::{
   SimpleSpan,
   emitter::FromUnclosed,
-  error::{UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEot},
+  error::{
+    MaybeTerminal, UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEot,
+  },
 };
 
 type Errs = GraphqlxLosslessErrors<&'static str>;
@@ -138,8 +140,51 @@ fn an_undeclared_pair_reaches_the_catch_all_and_still_produces_an_error() {
 /// not. Rather than give GraphQLx a second spelling that only the lossless half would use, the new
 /// constructor produces exactly what this dialect's syntactic `UnexpectedEot` conversion already
 /// produced. This test is what pins the two together.
+///
+/// # Both events, since smear issue #177
+///
+/// `UnexpectedEot` carries two: a genuine end of input, and one standing in for a **terminal
+/// scanner stop**, told apart by [`UnexpectedEnd::is_terminal`](tokora::error::UnexpectedEnd) and
+/// by nothing else — the offset is the same on both. Each layer routes on the flag in its own
+/// hand-written impl, so "the two layers agree" is now two claims and the second one is the one a
+/// dialect can lose silently: a `MaybeTerminal` answer that differs between layers is a document
+/// root that resynchronises in one of them and stops in the other, on the same input.
 #[test]
 fn the_two_layers_agree_on_what_end_of_input_reports() {
+  // ── the marked event, first, because it is the one the flag decides ──
+  //
+  // A macro rather than a loop: the two layers are two *keyings* of one error family — different
+  // token kind, different `StateError` — so no array can hold both.
+  macro_rules! is_the_stop {
+    ($layer:literal, $errors:expr) => {{
+      let error = $errors
+        .iter()
+        .next()
+        .unwrap_or_else(|| panic!("the {} conversion produced no error", $layer));
+      assert!(
+        matches!(error.data(), ErrorData::TerminalEndOfInput),
+        "the {} layer discarded the terminal mark: {:?}",
+        $layer,
+        error.data()
+      );
+      assert!(
+        MaybeTerminal::is_terminal(error),
+        "the {} layer built the variant and then answered `false` for it",
+        $layer
+      );
+      assert_eq!(error.span().start(), 11, "{}", $layer);
+      assert_eq!(error.span().end(), 11, "{}", $layer);
+    }};
+  }
+
+  let stop = UnexpectedEot::<usize, GraphQLx>::eot_of(11).into_terminal();
+  let lossless_stop: GraphqlxLosslessErrors<&str> = stop.clone().into();
+  let syntactic_stop: GraphqlxErrors<&str> = stop.into();
+  is_the_stop!("lossless", lossless_stop);
+  is_the_stop!("syntactic", syntactic_stop);
+
+  // ── and the genuine one, whose spelling this dialect deliberately shares with a declined
+  // `expect`: an `UnexpectedToken` with no found token ──
   let eot = UnexpectedEot::<usize, GraphQLx>::eot_of(11);
 
   let lossless: GraphqlxLosslessErrors<&str> = eot.clone().into();
@@ -182,6 +227,11 @@ fn the_two_layers_agree_on_what_end_of_input_reports() {
   assert_eq!(lossless.span().start(), 11);
   assert_eq!(lossless.span().end(), 11);
   assert_eq!(syntactic.span().start(), 11);
+
+  // The control the marked half needs: an unmarked value must stay recoverable in BOTH layers, or
+  // the routing above was a blanket rewrite rather than a split.
+  assert!(!MaybeTerminal::is_terminal(&lossless));
+  assert!(!MaybeTerminal::is_terminal(&syntactic));
 }
 
 /// A declined `expect` reports the kind it found and the expectation the dialect spells for it.
@@ -253,5 +303,102 @@ fn a_lexer_error_lands_as_error_data_lexer_not_as_a_note() {
     matches!(first.data(), ErrorData::Lexer(_)),
     "a lexer error was flattened instead of kept: {:?}",
     first.data()
+  );
+}
+
+/// A path the scanner stopped inside is not committed as a complete `Path` node.
+///
+/// # This is the one shipped-tree change smear issue #177 makes, and it is here so it is a
+/// decision rather than an accident
+///
+/// Round 1 measured the lossless `Parse` byte-identical before and after the terminal split, over
+/// 2 239 door/dialect/document/ceiling configurations. Round 4 moved the substrate's own blind
+/// reads onto their terminal-aware twins and re-ran that diff: **twelve of the 2 240 rows moved,
+/// all of them this one shape**, and reverting a single site — `lossless::trivia::eat_if` — makes
+/// the output byte-identical again, which is how the cause was attributed rather than read off the
+/// code.
+///
+/// `ty.rs`'s `path_tail` is `while eat_if(PathSeparator) { expect(Identifier) }`. `eat_if`'s
+/// `false` used to mean "no `::` follows" for a genuine end of input **and** for a scanner stop, so
+/// a type position truncated mid-path closed its `Path` node and the tree said the path was
+/// complete. `A` where the source is `A::B` and the scanner never reached `::` is exactly the
+/// structural form of the AST defect Codex found in `NamedSpecifier` — `Foo as Bar` succeeding as a
+/// bare `Foo`.
+///
+/// **The node did not merely wrap one name — it swallowed the tail.** Measured at ceiling 10 with
+/// the site planted back: `Path@12..61`, holding `Name@12..15 "Int"` and then `Gap@15..61`, the
+/// whole 46 refused bytes of the other two definitions. A path node over a gap is a claim about
+/// input nothing read.
+///
+/// What did **not** move, on every one of the twelve rows: the diagnostic count, its span, its
+/// severity, `has_errors`, and the tree's extent. The committed tokens are the same tokens, and the
+/// `Gap` covers the same bytes; it is no longer inside a node that says they are part of a path.
+#[test]
+fn a_path_the_scanner_stopped_inside_is_not_committed_as_a_whole_path() {
+  use smear::{
+    lexer::limits::LosslessLimits, parser::graphqlx::lossless::parse_document_with_limits,
+  };
+
+  // Three type positions, so the ceiling can land inside one of them.
+  const SRC: &str = "type T { a: Int }\ntype U { b: [Int!]! }\ntype V { c: String }\n";
+
+  // The six ceilings the sweep found, and the two roots that reach them.
+  let mut checked = 0usize;
+  for ceiling in [10usize, 11, 24, 26, 40, 41] {
+    let parse = parse_document_with_limits(SRC, LosslessLimits::default().with_max_tokens(ceiling));
+
+    // The property is positional, not a count: a document refused at ceiling 24 has already
+    // committed a whole first definition whose `Int` legitimately IS a `Path`. What must not exist
+    // is a `Path` that runs right up to where the scanner stopped — a path closed at the gap is one
+    // the parse never saw the end of.
+    let gap_start = parse
+      .syntax()
+      .descendants_with_tokens()
+      .find(|c| format!("{:?}", c.kind()) == "Gap")
+      .map(|c| c.text_range().start())
+      .unwrap_or_else(|| panic!("ceiling {ceiling}: a refused parse tiles its tail with a gap"));
+    let truncated: Vec<String> = parse
+      .syntax()
+      .descendants()
+      .filter(|n| format!("{:?}", n.kind()) == "Path" && n.text_range().end() > gap_start)
+      .map(|n| format!("{:?}@{:?}", n.kind(), n.text_range()))
+      .collect();
+    assert!(
+      truncated.is_empty(),
+      "ceiling {ceiling}: a `Path` node reaches past the point the scanner stopped at \
+       ({gap_start:?}) — it is a node claiming a path over bytes nothing read: {truncated:?}"
+    );
+
+    // The half that must NOT have moved. A repair that ended the parse earlier, or reported twice,
+    // would satisfy the assertion above and fail here.
+    assert_eq!(
+      parse.diagnostics().len(),
+      1,
+      "ceiling {ceiling}: the refusal is one diagnostic, as it was before the split"
+    );
+    assert!(parse.has_errors(), "ceiling {ceiling}");
+    assert_eq!(
+      parse.syntax().text_range().end(),
+      u32::try_from(SRC.len())
+        .expect("the fixture is small")
+        .into(),
+      "ceiling {ceiling}: a lossless tree covers every byte, refused or not"
+    );
+    checked += 1;
+  }
+  assert_eq!(checked, 6, "the ceiling set collapsed");
+
+  // THE CONTROL: unrefused, the same document still builds its `Path` nodes.
+  let whole = parse_document_with_limits(SRC, LosslessLimits::default());
+  assert!(!whole.has_errors(), "the fixture parses");
+  assert_eq!(
+    whole
+      .syntax()
+      .descendants()
+      .filter(|n| format!("{:?}", n.kind()) == "Path")
+      .count(),
+    3,
+    "an unrefused document must still commit one `Path` per type position — otherwise the \
+     assertions above are about a node this dialect stopped building at all"
   );
 }

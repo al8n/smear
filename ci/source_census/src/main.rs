@@ -21,7 +21,12 @@
 //! cargo run -p source-census -- --no-probe     # skip D2's `cargo check`; fails, loudly, on purpose
 //! ```
 //!
-//! Six modules carry the design and each states its own reasoning:
+//! The [`roots`] census is smear PR #189's, and it is here for the third time for the same three
+//! reasons: it needs the source parsed rather than grepped, a declared table whose every row is an
+//! argument, and a selftest that makes the verdict fire. Its subject is one sentence in
+//! `smear-parser/src/lossless/depth.rs` that three consecutive sweeps wrote wrong.
+//!
+//! Seven modules carry the design and each states its own reasoning:
 //!
 //! * [`surface`] — which entries a consumer can reach, derived from the code rather than listed.
 //! * [`rule`] — what counts as a parameter carrying source text, which is the whole judgement.
@@ -29,6 +34,7 @@
 //! * [`diagnose`] — the diagnostic contract's four checks and what each of them derives.
 //! * [`diagnose::probe`] — why D2 hands the trait question to `rustc` instead of answering it.
 //! * [`diagnose::exempt`] — the types recorded as outside the contract, and their arguments.
+//! * [`roots`] — who calls the two functions that mint and spend a document root's verdict.
 //!
 //! # What makes this gate non-vacuous
 //!
@@ -41,10 +47,15 @@
 //!   tables go stale in the same instant and the run goes red, rather than reporting a clean crate.
 //! * A run that reads zero public entries, zero parameters, zero error types, zero accessor
 //!   matches or zero inventories fails outright, and so does a D2 probe with nothing in it.
+//! * [`roots`] fails on a source file it cannot parse, on a tree with fewer files than it was
+//!   written against, and on an occurrence of a watched name it cannot classify — a caller set is
+//!   a claim about absence, and absence is only evidence once the instrument has been shown to
+//!   find things.
 
 mod census;
 mod diagnose;
 mod exempt;
+mod roots;
 mod rule;
 mod selftest;
 mod surface;
@@ -60,12 +71,36 @@ use std::{
 use census::{Report, Verdict};
 use rule::Cost;
 
-const DEFAULT_ROOT: &str = "smear/src/lib.rs";
-const DEFAULT_CRATE: &str = "smear";
+/// Every crate root the default run reads, each mounted at the path a consumer of the umbrella
+/// writes for it.
+///
+/// One row per workspace member that carries public API, and the mount name is the umbrella's
+/// spelling rather than the member's own crate name — `smear::lexer`, not `smear_lexer`. The
+/// census's question is "what can a dependent reach", a dependent reaches all of this through
+/// `smear`, and both exemption tables and D2's generated probe are written in that vocabulary.
+///
+/// NOT DERIVED, because the mount name cannot be: `smear-lexer` is published by the umbrella as
+/// `lexer`, and only the umbrella's `lib.rs` knows that. What IS derived is the table's
+/// COMPLETENESS — `ci/feature_reachability.py` reads this const out of this file and fails when a
+/// publishable workspace member is missing from it, so a member added and not mounted here is a
+/// red gate rather than a surface the census quietly stops reading. Miri losing the lexer, and
+/// this census going blind, were both that defect; the check exists so neither recurs by growth.
+const DEFAULT_ROOTS: &[(&str, &str)] = &[
+  ("smear/src/lib.rs", "smear"),
+  ("smear-lexer/src/lib.rs", "smear::lexer"),
+  ("smear-parser/src/lib.rs", "smear::parser"),
+  ("smear-schema/src/lib.rs", "smear::validator::schema"),
+  ("smear-compiler/src/lib.rs", "smear::validator"),
+  ("graphql-proto/src/lib.rs", "smear::proto"),
+];
 
 fn main() -> ExitCode {
-  let mut root = PathBuf::from(DEFAULT_ROOT);
-  let mut crate_name = DEFAULT_CRATE.to_string();
+  // Roots and names are collected as parallel lists so both flags stay repeatable and pair by
+  // position. Passing either one replaces the default table wholesale rather than adding to it:
+  // `--crate-root` exists so this tool can be pointed at a crate that is not this workspace's,
+  // and a default that leaked into such a run would read files that are not there.
+  let mut roots: Vec<PathBuf> = Vec::new();
+  let mut crate_names: Vec<String> = Vec::new();
   let mut verbose = false;
   let mut run_selftest = false;
   let mut probe = true;
@@ -79,11 +114,11 @@ fn main() -> ExitCode {
       "--verbose" => verbose = true,
       "--no-probe" => probe = false,
       "--crate-root" => match args.next() {
-        Some(value) => root = PathBuf::from(value),
+        Some(value) => roots.push(PathBuf::from(value)),
         None => return fail("--crate-root needs a path to a crate's lib.rs"),
       },
       "--crate-name" => match args.next() {
-        Some(value) => crate_name = value,
+        Some(value) => crate_names.push(value),
         None => return fail("--crate-name needs a name"),
       },
       "--probe-dir" => match args.next() {
@@ -96,9 +131,13 @@ fn main() -> ExitCode {
       },
       "--help" | "-h" => {
         println!(
-          "source-census [--crate-root {DEFAULT_ROOT}] [--crate-name {DEFAULT_CRATE}] \
+          "source-census [--crate-root LIB_RS --crate-name NAME]... \
            [--verbose] [--selftest] [--no-probe] [--probe-dir DIR] [--jobs N]"
         );
+        println!("default roots:");
+        for (root, name) in DEFAULT_ROOTS {
+          println!("  {root} as {name}");
+        }
         return ExitCode::SUCCESS;
       }
       other => return fail(&format!("unknown argument {other:?}")),
@@ -109,33 +148,55 @@ fn main() -> ExitCode {
     return selftests();
   }
 
-  // A gate that only works from one directory is a gate someone runs from the wrong one and
-  // reads the error as noise. The default path is tried against the working directory first and
-  // then against this crate's own location, which is fixed relative to the repository.
-  if !root.is_file() && root == Path::new(DEFAULT_ROOT) {
-    let beside = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-      .join("..")
-      .join("..")
-      .join(DEFAULT_ROOT);
-    if beside.is_file() {
-      root = beside;
+  let defaulted = roots.is_empty() && crate_names.is_empty();
+  if defaulted {
+    for (root, name) in DEFAULT_ROOTS {
+      roots.push(PathBuf::from(root));
+      crate_names.push((*name).to_string());
     }
   }
-  if !root.is_file() {
+  if roots.len() != crate_names.len() {
     return fail(&format!(
-      "no such crate root: {} — run this from the repository root, or pass --crate-root",
-      root.display()
+      "{} --crate-root and {} --crate-name: they pair by position, so there must be one of each",
+      roots.len(),
+      crate_names.len()
     ));
   }
 
-  let surface = match surface::load(&root, &crate_name) {
+  // A gate that only works from one directory is a gate someone runs from the wrong one and
+  // reads the error as noise. The default paths are tried against the working directory first and
+  // then against this crate's own location, which is fixed relative to the repository.
+  for root in &mut roots {
+    if !root.is_file() && defaulted {
+      let beside = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(&*root);
+      if beside.is_file() {
+        *root = beside;
+      }
+    }
+    if !root.is_file() {
+      return fail(&format!(
+        "no such crate root: {} — run this from the repository root, or pass --crate-root",
+        root.display()
+      ));
+    }
+  }
+
+  let mounted: Vec<(PathBuf, String)> = roots.iter().cloned().zip(crate_names).collect();
+  let surface = match surface::load_many(&mounted) {
     Ok(surface) => surface,
     Err(message) => return fail(&message),
   };
+  // D2 writes a probe crate with a path dependency on ONE package and generates `use smear::…`
+  // paths into it, so the package it points at has to be the umbrella — the first root, which is
+  // the only one every mounted path resolves through.
+  let root = roots[0].clone();
 
   let mut report = census::detect(&surface);
   census::reconcile(&mut report);
-  render(&report, &root, verbose);
+  render(&report, &mounted, verbose);
   let source_ok = verdict(&report);
 
   let contract = diagnose::detect(&surface);
@@ -157,7 +218,28 @@ fn main() -> ExitCode {
   diagnose::render(&contract, outcome.as_ref(), verbose);
   let contract_ok = diagnose::verdict(&contract, outcome.as_ref());
 
-  if source_ok && contract_ok && probe_ok {
+  // Reads a directory rather than a mounted crate root, because its subject is `pub(crate)` and
+  // therefore invisible to `surface`. It is skipped when `--crate-root` points this tool at some
+  // other workspace, where `smear-parser/src` is not there to read.
+  let roots_ok = if defaulted {
+    match roots::repository_root() {
+      Ok(repository) => {
+        let report = roots::detect(&repository);
+        roots::render(&report, verbose);
+        roots::verdict(&report)
+      }
+      Err(message) => {
+        error(&format!(
+          "the caller census could not be run at all: {message}"
+        ));
+        false
+      }
+    }
+  } else {
+    true
+  };
+
+  if source_ok && contract_ok && probe_ok && roots_ok {
     ExitCode::SUCCESS
   } else {
     ExitCode::FAILURE
@@ -181,6 +263,16 @@ fn selftests() -> ExitCode {
     Ok(cases) => println!("diagnostic-census selftest OK: {cases} cases"),
     Err(problems) => {
       error("the diagnostic-contract selftest did not behave as `diagnose`'s header claims");
+      for problem in problems {
+        println!("  - {problem}");
+      }
+      ok = false;
+    }
+  }
+  match roots::selftest() {
+    Ok(cases) => println!("caller-census selftest OK: {cases} cases"),
+    Err(problems) => {
+      error("the caller census did not read the shapes `roots`'s header claims it reads");
       for problem in problems {
         println!("  - {problem}");
       }
@@ -233,10 +325,15 @@ fn manifest_dir(root: &Path) -> Result<PathBuf, String> {
 const RULE: &str =
   "────────────────────────────────────────────────────────────────────────────────────────────";
 
-fn render(report: &Report, root: &Path, verbose: bool) {
+fn render(report: &Report, mounted: &[(PathBuf, String)], verbose: bool) {
   println!();
   println!("── Source genericity census ─{}", &RULE[..RULE.len() - 84]);
-  println!("crate root: {}", root.display());
+  // Every mounted root, not only the first: a run that quietly read one member fewer than it
+  // meant to would otherwise look exactly like a run that read them all.
+  println!("crate roots ({}):", mounted.len());
+  for (root, name) in mounted {
+    println!("  {} as {name}", root.display());
+  }
   println!(
     "read: {} files, {} publicly reachable modules, {} public entries, {} parameters",
     report.files_read,

@@ -35,6 +35,7 @@ smear = { path = "../smear", default-features = false, features = [
   "parser",
   "validator",
   "introspection",
+  "proto",
   "smallvec",
   "bytes",
   "bstr",
@@ -43,6 +44,7 @@ smear = { path = "../smear", default-features = false, features = [
   "rowan",
   "lossless-coverage",
   "test-support",
+  "materialized-numbers",
 ] }
 
 # The source-backing crates, named directly so each probe can construct a source of that type.
@@ -62,6 +64,12 @@ rowan = "0.17"
 
 [dev-dependencies]
 toml = "0.8"
+# The reader census parses `smear-parser`'s materialised module as TEXT — no dependency edge, the
+# way `ci/source_census` reads this workspace's sources — so that "every public production is
+# classified" is asked of the module's own item list instead of a list kept by hand here. `full`
+# is what `syn::parse_file` needs; the productions are `macro_rules!` invocations, so the item
+# list is the only place their names exist before expansion.
+syn = { version = "2", features = ["full", "parsing"] }
 
 [lints]
 workspace = true

@@ -29,6 +29,21 @@
 //! and `Executor::handle_field_error`'s `message` — are absent from this table on purpose. They
 //! are classified by the rule, structurally, and needing an exemption for them would have meant
 //! the rule was wrong. See `rule`'s header.
+//!
+//! `Values::variable`'s `name` is the same module's third `&str` and it *is* recorded, which is
+//! the rule working rather than the rule wavering: test 3 acquits the other two on their receiver,
+//! `Executor<'a, S, V>`, and `Values` is the **driver's** trait with no source type anywhere in
+//! it, so nothing in that signature says the document is already in hand. The three together are
+//! the clearest calibration the table has — same module, same concrete type, opposite verdicts,
+//! each for a reason read off the signature.
+//!
+//! It is also the table's one worked example of a conviction being **answered** rather than
+//! carried. It sat here as `Tracked` against al8n/smear#139 with a reason that ended "Recorded,
+//! not accepted"; #139 read the signature, found that the parameter is not the document's type at
+//! all but the *request's* key space, and decided not to widen it. So the entry is `Structural`
+//! now and names no issue. What the rule caught was real — the two readers of that key space had
+//! drifted apart, and one of them substituted a name — and none of it was the parameter's type.
+//! A conviction the table records is a question, and this is what an answer looks like.
 
 /// The shortest reason the census will accept. Long enough that "rowan" or "#121" alone does not
 /// clear it, short enough that a genuine one-line reason does.
@@ -63,6 +78,14 @@ pub struct Exemption {
   pub issue: Option<u32>,
   pub reason: &'static str,
 }
+
+const EXTENSION_KEY: &str = "A draft §7.1.7 `extensions` key, which is not source text: it is a \
+     string the *service* mints at response time to label its own protocol extension, and §7.1.7 \
+     puts the entry's contents under no restriction at all, lexical ones included. Nothing about \
+     it comes out of the document, so there is no source representation for it to be generic \
+     over — a driver holding its document as `&[u8]` still writes `\"tracing\"` here. Test 3 does \
+     not acquit it because `Extensions<V>` is parameterised by the driver's *value* type and has \
+     no source type to hold.";
 
 /// The three lossless roots of each dialect, `fn(&str) -> Parse`.
 const LOSSLESS_ROOT: &str = "The materialization door: it builds a rowan green tree, and rowan's \
@@ -158,6 +181,14 @@ pub const EXEMPTIONS: &[Exemption] = &[
   },
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
+    entry: "parse_document_with_limits",
+    param: "src",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_ROOT,
+  },
+  Exemption {
+    module: "smear::parser::graphql::lossless::runner",
     entry: "parse_executable_document",
     param: "src",
     kind: Kind::Tracked,
@@ -166,7 +197,23 @@ pub const EXEMPTIONS: &[Exemption] = &[
   },
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
+    entry: "parse_executable_document_with_limits",
+    param: "src",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_ROOT,
+  },
+  Exemption {
+    module: "smear::parser::graphql::lossless::runner",
     entry: "parse_type_system_document",
+    param: "src",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_ROOT,
+  },
+  Exemption {
+    module: "smear::parser::graphql::lossless::runner",
+    entry: "parse_type_system_document_with_limits",
     param: "src",
     kind: Kind::Tracked,
     issue: Some(121),
@@ -182,6 +229,14 @@ pub const EXEMPTIONS: &[Exemption] = &[
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
+    entry: "parse_document_with_limits",
+    param: "src",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_ROOT,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_executable_document",
     param: "src",
     kind: Kind::Tracked,
@@ -190,7 +245,23 @@ pub const EXEMPTIONS: &[Exemption] = &[
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
+    entry: "parse_executable_document_with_limits",
+    param: "src",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_ROOT,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_type_system_document",
+    param: "src",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: LOSSLESS_ROOT,
+  },
+  Exemption {
+    module: "smear::parser::graphqlx::lossless::runner",
+    entry: "parse_type_system_document_with_limits",
     param: "src",
     kind: Kind::Tracked,
     issue: Some(121),
@@ -261,6 +332,48 @@ pub const EXEMPTIONS: &[Exemption] = &[
     reason: LOSSLESS_PROJECTION,
   },
   Exemption {
+    module: "smear::parser::graphql::lossless::project",
+    entry: "Verified::new",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "The proof half of the same door the eight `project*` entries above are the walk half \
+             of, and this parameter is the one they narrow: `Verified` STORES it, and `project` \
+             re-slices what is stored to build a `Document<&'src str>`. So the AST's source type \
+             is this signature's, exactly as `LOSSLESS_PROJECTION` says, and widening it means \
+             widening the projection's output — which is al8n/smear#121's question and not a \
+             change to one parameter. The verification underneath it needs no UTF-8; the door \
+             does, because of what it hands back.",
+  },
+  Exemption {
+    module: "smear::parser::graphql::lossless::project",
+    entry: "verify_parse",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "The check a caller runs to find out whether `Verified::new` will succeed, over the \
+             same pair and the same comparison and answering the same `Unverified`, and it \
+             borrows nothing back — so unlike the entry above, nothing in its own signature \
+             forces the type. It is recorded rather than widened because widening it alone would \
+             let a caller prove a pair over `&[u8]` and then be unable to build the `Verified` \
+             the proof exists for. It widens when the door it predicts widens, on \
+             al8n/smear#121, and it is stale here the day that happens.",
+  },
+  Exemption {
+    module: "smear::parser::lossless::project",
+    entry: "verify_source_counted",
+    param: "source",
+    kind: Kind::Tracked,
+    issue: Some(121),
+    reason: "`verify_source` with the element count the same walk already establishes, added by \
+             al8n/smear#198 so a consumer can price a projection by what it will visit instead of \
+             by `source.len()`, which does not bound it. Its comparison is byte-wise like its two \
+             siblings', so the `&str` is not forced here either — and widening this one alone \
+             would buy a caller nothing, because the count exists to price `project`, which takes \
+             `&'src str`. Four shapes of one door check, recorded together, and widened together \
+             when al8n/smear#121 settles where the projection's source type binds.",
+  },
+  Exemption {
     module: "smear::parser::lossless::project",
     entry: "verify_slice",
     param: "source",
@@ -279,10 +392,15 @@ pub const EXEMPTIONS: &[Exemption] = &[
     kind: Kind::Tracked,
     issue: Some(121),
     reason: "The whole-tree form of `verify_slice`, and the one every projection door above \
-             actually calls since al8n/smear#127 hoisted the check out of the per-token path. It \
-             compares `source` against the green tree's own token text, which rowan stores as \
-             `&str`, so it narrows for `verify_slice`'s reason at the door rather than at a \
-             token — and it reaches al8n/smear#121's conclusion by the same route.",
+             actually calls since al8n/smear#127 hoisted the check out of the per-token path. \
+             **Not** for `verify_slice`'s reason, which this entry used to claim: that one \
+             compares two `&str`s and hands a `&'src str` back, while this walks the GREEN tree \
+             and compares `token.text().as_bytes()` against `source.as_bytes()`, so nothing in \
+             its body needs UTF-8 at all. What the `&str` carries is the door's promise — that a \
+             caller who has run this may slice `source` by any range in the tree and land on a \
+             character boundary — which is what the projections downstream do to build an AST \
+             borrowing it. So al8n/smear#121's question here is where the projection's source \
+             type binds, not where rowan's does.",
   },
   Exemption {
     module: "smear::parser::lossless::project",
@@ -291,17 +409,51 @@ pub const EXEMPTIONS: &[Exemption] = &[
     kind: Kind::Tracked,
     issue: Some(121),
     reason: "`verify_source` for a subtree, which the compositional `to_ast` doors and the \
-             recovering door's per-definition check call. Recorded separately because widening \
-             one and not the other would leave half the projection's doors narrow under a table \
-             that had stopped naming them.",
+             recovering door's per-definition check call. Its walk is `verify_source`'s and \
+             compares bytes for the same reason, so it narrows for the same one: the promise the \
+             door makes about slicing, not the comparison it performs. Recorded separately \
+             because widening one and not the other would leave half the projection's doors \
+             narrow under a table that had stopped naming them.",
+  },
+  // ── §6 execution, the driver's value trait — al8n/smear#139, DECIDED ─────────────────────────
+  Exemption {
+    module: "smear::proto::values",
+    entry: "Values::variable",
+    param: "name",
+    kind: Kind::Structural,
+    // No issue, and that is the record: al8n/smear#139 asked whether this parameter should widen,
+    // and the answer was no. A `Tracked` entry naming a closed issue is the stale exemption this
+    // table exists to refuse — debt with a home that nobody lives in any more.
+    issue: None,
+    reason: "Not a narrowing of the document's type: the two ends of this call are two different \
+             key spaces, and only one of them is the document. Draft §6.1's `CoerceVariableValues` \
+             runs over the *request's* `variableValues`, whose keys arrive as text and are the \
+             driver's own `&str`, while a variable's spelling is a slice of an `S: AsRef<[u8]>`. \
+             Widening this parameter would not delete the conversion — it would move it inside \
+             every driver, once per implementation, where `from_utf8(..).unwrap_or(\"\")` could be \
+             written again and no gate in this repository would see it. #139 decided the opposite \
+             direction: the conversion is ONE IMPLEMENTATION — `proto::variable_key`, which is \
+             `pub` for this reason — and it refuses rather than substitutes. A spelling that is \
+             not a draft §2.1.9 `Name` names no variable the request could have supplied, so \
+             draft §6.4.1 step 5.d and draft §6.3's `VariableMissing` are the answer and the \
+             driver is not asked. One implementation and NOT one call site, which is the claim an \
+             earlier draft of this entry overstated: draft §6.4.1 step 5.j leaves a literal's \
+             contents to the driver, so a variable nested in a list or an input object reaches it \
+             inside `ArgumentSource::Literal` and the driver resolves that one — with this \
+             function, which is what the variant's own documentation now says. \
+             `graphql-proto/tests/unreadable_name.rs` pins the executor's two readers taking that \
+             same branch, pins the nested case reaching the driver unread, and pins the control \
+             where a readable spelling reaches the driver unchanged from both. STRUCTURAL rather \
+             than TRACKED because there is nothing left to remove; if the driver's key space ever \
+             stops being text, this is the entry that decision is about.",
   },
   // ── Not narrowings: the rule's default-convict misfiring ─────────────────────────────────────
   //
-  // Two, out of the two dozen narrowed parameters this table records over a public surface of
+  // A small minority of the narrowed parameters this table records, over a public surface of
   // several hundred entries. The proportion is the evidence for the rule rather than a note about
-  // it: a rule needing an exemption for every second entry would be the wrong rule. The exact
-  // counts are deliberately not written here — the run prints both on its own summary line, and a
-  // pair copied into a comment goes stale on the next public item anyone adds, as this one had.
+  // it: a rule needing an exemption for every second entry would be the wrong rule. The counts are
+  // deliberately not written here — the run prints them on its own summary line, and a number
+  // copied into a comment goes stale on the next public item anyone adds, as this one twice had.
   Exemption {
     module: "smear::validator::schema::repr::location",
     entry: "DirectiveLocation::from_name",
@@ -325,7 +477,107 @@ pub const EXEMPTIONS: &[Exemption] = &[
              crate's `&str` and not the caller's buffer. Test 3 does not acquit it because \
              `PackedType` is a `u32` bitfield with no source type to hold.",
   },
+  // ── §7.1.7 `extensions`, whose keys are the service's and not the document's ─────────────────
+  Exemption {
+    module: "smear::proto::extensions",
+    entry: "Extensions::insert",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: EXTENSION_KEY,
+  },
+  Exemption {
+    module: "smear::proto::extensions",
+    entry: "Extensions::get",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: EXTENSION_KEY,
+  },
+  Exemption {
+    module: "smear::proto::extensions",
+    entry: "Extensions::remove",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: EXTENSION_KEY,
+  },
+  // ── The draft §7.2.1 writer — three of its `&str`s are output, two are genuinely narrow ──────
+  //
+  // Worth reading as a group, because the rule gets all five right in the direction this table's
+  // header calls evidence FOR it: `smear::json` writes JSON, and JSON is UTF-8 by definition, so
+  // most of its `&str`s are bytes on the way OUT rather than a caller's document on the way in.
+  // The two that really are a document are recorded as debt with an issue.
+  Exemption {
+    module: "smear::json",
+    entry: "Json::string",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: JSON_OUTPUT,
+  },
+  Exemption {
+    module: "smear::json",
+    entry: "Object::key",
+    param: "key",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: JSON_OUTPUT,
+  },
+  Exemption {
+    module: "smear::json",
+    entry: "Json::graphql_string",
+    param: "literal",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: "A GraphQL string literal's SOURCE spelling, delimiters included, so the rule is right \
+             that this one is a document where `Json::string` beside it is not. What the narrowing \
+             costs today is exact and small: the two `WriteJson` implementations require \
+             `S: AsRef<str>`, so a materialised value tree parsed over a `[u8]` backing — which \
+             `smear-parser`'s own suite drives — has no writer. Widening is not a signature change \
+             alone, which is why it is recorded rather than done: the byte lexer does not validate \
+             UTF-8 INSIDE a string literal — `LitInlineStr<&[u8]>` reaches `LitInlineStr<&str>` \
+             through a `TryFrom` whose error is `Utf8Error` — so an `AsRef<[u8]>` door needs a \
+             fifth `Error` variant for a literal that is not UTF-8, and that variant is a public \
+             API decision about a case draft §2.1 says a conforming document cannot contain. #122 \
+             owns the widening, and this parameter is the whole of what it has to widen here.",
+  },
+  Exemption {
+    module: "smear::json::response",
+    entry: "write_response",
+    param: "document",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: WRITER_DOCUMENT,
+  },
+  Exemption {
+    module: "smear::json::response",
+    entry: "write_response_with",
+    param: "document",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: WRITER_DOCUMENT,
+  },
 ];
+
+/// The writer's output-side `&str`s: not a caller's document in either direction.
+const JSON_OUTPUT: &str = "Bytes on the way OUT, not a document on the way in. This parameter is content the writer quotes \
+   and escapes into a JSON string, and RFC 8259 §8.1 makes a JSON document exchanged between \
+   systems UTF-8 — so the narrow type is the format's and not this crate's. The sink is a \
+   `core::fmt::Write`, which accepts `&str` and nothing else, so a byte-slice door would have to \
+   validate UTF-8 and refuse, adding a failure mode to a call that today cannot fail for a reason \
+   of its own. Test 3 does not acquit it because `Json<W>`'s parameter is the SINK and carries no \
+   source type, which is right: there is no document here for it to have carried.";
+
+/// Why the two response doors take the executed document as `&str`.
+const WRITER_DOCUMENT: &str = "The source text the operation was parsed from, read for exactly one thing: turning the byte \
+   span `graphql-proto` records on a field error into draft §7.1.2's `line` and `column`. It is \
+   genuinely a document and the rule is right to convict it. Widening it belongs to #122 and is \
+   not free the way the schema doors are: the column is counted in CHARACTERS, so an \
+   `AsRef<[u8]>` door either decodes UTF-8 as it walks — and must then decide what a malformed \
+   sequence counts as, inside a function whose whole job is to name a position — or silently \
+   changes the unit to bytes and reports a different column for the same token. Recorded rather \
+   than guessed. One parameter on two doors that share a body.";
 
 /// Refuses a table that would let a narrowing through without an argument.
 pub fn validate() -> Vec<String> {

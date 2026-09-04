@@ -5,6 +5,12 @@
 
 **target/
 **Cargo.lock
+# ...except the downstream fixture's, and the exception is load-bearing. `ci/downstream.sh` passes
+# `--locked` to every leg so the gate is hermetic: it answers "does smear's feature gate what it
+# advertises", which has nothing to do with which patch of a dependency is current, and an unpinned
+# resolve would make a red read "upstream released something". `--locked` with no committed lock is
+# a hard cargo error, so ignoring this file would leave the gate unable to run at all.
+!ci/downstream/Cargo.lock
 
 **wip
 
