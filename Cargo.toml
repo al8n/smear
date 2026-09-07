@@ -73,7 +73,7 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # entire 0.8 combinator surface (`parens`, `then`, `then_ignore`, `repeated_while`,
 # `Ident::parse`, `Keyword::parse_exact`, ...) — 166 errors when measured. Whether smear wants the
 # umbrella or a narrower set of families is a compile-time-footprint question left open.
-tokora = { version = "0.9", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
+tokora = { version = "0.10", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }
