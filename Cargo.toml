@@ -98,14 +98,15 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # `Ident::parse`, `Keyword::parse_exact`, ...) — 166 errors when measured. Whether smear wants the
 # umbrella or a narrower set of families is a compile-time-footprint question left open.
 #
-# WHAT MOVED, 0.9.1 -> 0.10.0 — already absorbed by this tree while it tracked tokora's `main`
-# ahead of either release, so the floor moving to `0.10` costs nothing further here. `rowan` did
-# not: both still pin `0.17`. `fix(recursion)!` (tokora#308) dropped `PARSE_DEFAULT_DEPTH` from 64
-# to 32, absorbed by the lossless doors' own `min(ceiling, HARD_MAX)`. `Lexer::read_frontier` and
-# `Token::SCAN_LOOKAHEAD` became required (tokora#282), answered `Unbounded` in all four lexers.
-# `fix(container)!` (tokora#283) changed `FullContainer`'s contract, which smear neither implements
-# nor asserts on. The rest of 0.9.1 -> 0.10.0 is tokora's own changelog, not a smear concern.
-tokora = { version = "0.10", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
+# WHAT MOVED, 0.10.0 -> 0.11.0 — tokora renamed the items below; smear names none of them, so
+# the floor moving to `0.11` costs nothing here. The arraydeque backing swapped from
+# `generic-arraydeque` to `hybrid-arraydeque`, and tokora retired its own
+# `#![recursion_limit = "256"]`. The renames are `tokora::utils::{GenericArrayDeque -> ArrayDeque,
+# generic_arraydeque -> arraydeque}`, `ArrayLength -> ArraySize`, and `ConstGenericArrayDeque ->
+# ArrayDequeN`. What smear actually reaches — `tokora::utils::typenum::U1`, `DowncastRef`,
+# `IntoComponents`, `IntoEquivalent`, the display traits — is unchanged. The rest of 0.10.0 ->
+# 0.11.0 is tokora's own changelog, not a smear concern.
+tokora = { version = "0.11", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }

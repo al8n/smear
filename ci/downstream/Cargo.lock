@@ -68,32 +68,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
-name = "generic-array"
-version = "1.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab4e5aa225bc56696909483320f0ff9b600f1a971b52e07a17d70f3d9b43254b"
-dependencies = [
- "rustversion",
- "typenum",
-]
-
-[[package]]
-name = "generic-arraydeque"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f91bd39331dc15d4bb8a5a5be318683bfe95f1395630b07fe4750c5eac52a80"
-dependencies = [
- "generic-array",
- "rustversion",
-]
-
-[[package]]
 name = "graphql-proto"
 version = "0.0.0"
 dependencies = [
  "smear-parser",
  "smear-schema",
  "tokora",
+]
+
+[[package]]
+name = "hybrid-array"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
+dependencies = [
+ "typenum",
+]
+
+[[package]]
+name = "hybrid-arraydeque"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa0155a1101853c4f84473b6bc9052d73ac7da7fe5951c5e24fd74c22260798a"
+dependencies = [
+ "hybrid-array",
+ "rustversion",
 ]
 
 [[package]]
@@ -336,14 +335,14 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokora"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e15661b0c0741fe660c1d6cd03d7d2405d7bd770311bc5908952a621810be96"
+checksum = "571b784ba76c3cd2d74263a6d6c2e49b1e0a59d21d1a43c46fc2bc11ef4ef925"
 dependencies = [
  "ascii",
  "deranged",
  "derive_more",
- "generic-arraydeque",
+ "hybrid-arraydeque",
  "logos",
  "mayber",
  "paste",
