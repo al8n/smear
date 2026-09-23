@@ -128,6 +128,12 @@ impl<L: rowan::Language> Parse<L> {
   /// [`Severity::Warning`], and neither is a rejection — a parse that recovered still accepted
   /// the document. Counting diagnostics instead of errors would make every recovered parse read
   /// as a failure.
+  ///
+  /// **Every `Parse` is the parse of some text.** A source a green tree cannot be built from never
+  /// becomes one: a `_from` sibling answers [`Refused`](super::Refused) instead, and a concrete
+  /// `&str` door over an over-length source panics rather than producing a `Parse` — neither
+  /// yields a value for this to have to qualify. So there is no state here to report, and no
+  /// empty-but-not-empty tree for a consumer to tell apart from a genuine parse of `""`.
   pub fn has_errors(&self) -> bool {
     self
       .diagnostics
@@ -140,29 +146,49 @@ impl<L: rowan::Language> Parse<L> {
 ///
 /// # Why this forwards the substrate's refusal instead of re-spelling it
 ///
-/// The two mistakes a caller can make at this door have different remedies — a malformed event
-/// stream is a bug in the sink that emitted it, and a tree too deep for `rowan` to *release* is a
-/// shape that has to get shallower — so a caller has to be able to tell them apart. The type that
-/// tells them apart is [`FinishError`](tokora::cst::FinishError), and it is upstream's.
+/// A refusal here has one of several causes with different remedies, so a caller has to be able to
+/// tell them apart. Against tokora 0.11.0 they fall into four classes:
+///
+/// - **The event stream** broke a law the substrate enforces — for example a finish that closes
+///   no open node (`OrphanFinish`) or names a different kind than the node it closes
+///   (`MismatchedFinish`), a double demote (`StaleDemote`), a token span past the end of the
+///   source (`SpanOutOfBounds`), or structure over a nonempty source with no committed token
+///   (`StructureWithoutTokens`). That is a bug in whatever emitted the stream. Two of these are
+///   **release-only** here: a debug build of tokora panics at emission on the orphan finish (in
+///   `cst_finish`) and on the second demote (in `cst_demote`), so only a release build reaches
+///   materialisation and gets `OrphanFinish` or `StaleDemote` back.
+/// - **Depth**: the tree would nest deeper than `rowan` can *release* (`FinishError::TooDeep`).
+///   The shape has to get shallower; nothing in it is malformed.
+/// - **The source** the sink was built over cannot be stored: it is not UTF-8
+///   (`FinishError::NonUtf8Source`), or it is longer than
+///   [`Refused::MAX_SOURCE_LEN`](super::Refused::MAX_SOURCE_LEN)
+///   (`FinishError::OffsetOverflow { index: 0 }`). The remedy is a different buffer.
+/// - **The root kind** passed as `root` is the reserved tombstone
+///   (`FinishError::ReservedRootKind`) or a kind the profile's validator does not admit
+///   (`FinishError::InvalidDialectKind { index: 0, .. }`). That is a wrong argument, not a wrong
+///   stream.
+///
+/// Other variants exist only as upstream backstops, not as refusals a public `Cst` can earn here:
+/// `StaleStartAt`, a `StaleDemote` naming a slot at or above itself, `ReservedKind`, and
+/// `InvalidDialectKind` at a non-zero index are each preceded by an every-build `assert!` at the
+/// emission site, which panics first, and only tokora's crate-private `push_raw_event_for_tests`
+/// hook bypasses those asserts.
+///
+/// That list is a reading of one release, not a contract: the type that classifies is
+/// [`FinishError`](tokora::cst::FinishError), it is upstream's, and it is `#[non_exhaustive]`.
 ///
 /// A smear-side enum mirroring it was considered, and it is worse for a reason that is not taste.
-/// `FinishError` is `#[non_exhaustive]`, this workspace tracks tokora's `main` **by branch** and
-/// commits no lock, so what the crate compiles against moves between builds of the same commit —
-/// the manifest says so outright. The depth refusal is the example rather than a hypothetical: it
-/// is absent from the revision this workspace resolved when the door was made fallible and
-/// present one commit later. A mirror could not carry the one variant that matters without
-/// pinning the dependency, and a mirror that omitted it would be a smear type asserting a variant
-/// set it does not own and cannot keep current.
+/// The requirement is `tokora = "0.11"` and the workspace commits no lock, so a build compiles
+/// against whichever `0.11` release it resolves, and a later one may add a variant. A mirror would
+/// be a smear type asserting a variant set it does not own and cannot keep current.
 ///
 /// So the coupling is real, and it is chosen rather than inherited: [`MintError::refusal`] hands
 /// back upstream's own enum and a caller classifies with exactly the precision the tokora it
-/// compiled against has. Against a revision that has no depth refusal there is nothing to
-/// classify, because every refusal really is a malformed stream — a fact about that revision, not
-/// a limitation of this type.
+/// compiled against has.
 ///
-/// What the wrapper adds over returning `FinishError` bare is [`MintError::space`], the kind space
-/// whose sink emitted the stream. That is what the panic this replaced carried, and it is the only
-/// thing a runner shared by every dialect can say about *whose* stream it was.
+/// What the wrapper adds over returning `FinishError` bare is [`MintError::space`], the kind-space
+/// name the caller passed. It is the only thing a runner shared by every dialect can say about
+/// *whose* stream it was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MintError {
   space: &'static str,
@@ -170,7 +196,8 @@ pub struct MintError {
 }
 
 impl MintError {
-  /// The kind space whose sink emitted the refused stream.
+  /// The kind-space name passed to [`finish_root`] as `space` — the dialect the caller says
+  /// emitted the refused stream.
   #[inline]
   pub const fn space(&self) -> &'static str {
     self.space
@@ -200,10 +227,13 @@ impl core::error::Error for MintError {}
 
 /// Materialize `cst` at `root` and collect its diagnostics.
 ///
-/// Shared by every dialect's `parse_document` and by its per-production drivers, so the
-/// fallible-materialization contract and the diagnostic projection are stated once. The
-/// materialization door names the root kind — it is NOT profile data — and hands back the inner
-/// emitter, which is where the diagnostics live.
+/// The public materialiser for a [`Cst`] its caller built, and the fallible contract for one:
+/// every refusal comes back as a [`MintError`]. Inside this crate its one caller is
+/// `finish_parsed_root`, which the dialects' `test-support` `finish_root` wrappers reach. The
+/// shipped doors and the per-production drivers do not come through here: both run the dialect's
+/// generated `parse_lossless_document`, which materialises through `finish_parsed_root_with` and
+/// returns a bare [`Parse`]. The materialization door names the root kind — it is NOT profile
+/// data — and hands back the inner emitter, which is where the diagnostics live.
 ///
 /// `space` is a `&'static str` argument rather than a [`KindSpace::NAME`](super::KindSpace::NAME)
 /// lookup so this function needs no `KindSpace` bound at all; the caller already has the name.
@@ -216,7 +246,8 @@ impl core::error::Error for MintError {}
 /// a source byte covered by neither a committed token nor a recorded lexer-error diagnostic
 /// (`UncoveredGap`); `finish_partial` closes the one and tiles the other as a `gap_kind` run.
 /// **Both of those are reachable from ordinary input**, so under `finish` they were a panic on a
-/// public entry point:
+/// public entry point. `finish_parsed_root_with`, where the shipped doors materialise, calls
+/// `finish_partial` for the same reason. The history, for context:
 ///
 /// - When #57 was filed the nesting budget was the **lexer's** alone: every `{`, `[` and `(`
 ///   stepped the budget carried in the Logos `Extras`, nothing in this crate descended through
@@ -288,8 +319,8 @@ impl core::error::Error for MintError {}
 ///
 /// Nothing else is relaxed. Balance underflow, close identity, retro-wrap integrity, kind
 /// hygiene, span discipline and the token-channel wall are enforced identically through both
-/// doors, so the [`MintError`] below still reports a genuine sink bug — and it names the
-/// [`FinishError`](tokora::cst::FinishError) it refused, because a message that dropped it made
+/// doors, so a stream-class [`MintError`] below still reports a genuine sink bug — and it names
+/// the [`FinishError`](tokora::cst::FinishError) it refused, because a message that dropped it made
 /// #57 diagnosable only by patching this line.
 ///
 /// The widening costs nothing for input that already worked: gap **placement** differs between
@@ -330,18 +361,16 @@ impl core::error::Error for MintError {}
 ///     access, and `finish_partial` consumes it by value — so the check belongs upstream, in the
 ///     builder that sees the events as they arrive.
 ///
-///     **Upstream now makes it, and this door forwards the refusal as a value.** tokora gates the
+///     **Upstream makes it, and this door forwards the refusal as a value.** tokora gates the
 ///     one replay-walk door that pushes a builder node and answers a typed refusal, which arrives
-///     here as [`MintError`] rather than as a panic. What this function no longer does is assert
-///     that a refusal means a malformed stream: a depth refusal is a well-formed tree nobody could
-///     dispose of, which is a different mistake with a different remedy, and the caller is the one
-///     who can tell them apart.
+///     here as [`MintError`]. This function does not assert that a refusal means a malformed
+///     stream: a depth refusal is a well-formed tree nobody could dispose of, which is a different
+///     mistake with a different remedy, and the caller is the one who can tell them apart.
 ///
-///     **The forwarding is only as good as the revision it is compiled against.** This workspace
-///     names tokora by branch and commits no lock, so a build of this very commit may resolve a
-///     revision whose `finish_partial` has no depth ceiling at all; against that one the hazard
-///     below stands exactly as it did, because there is no refusal to forward. That is the
-///     residual, and it is the dependency edge's rather than this door's.
+///     **The forwarding is only as good as the release it is compiled against.** The requirement
+///     is `tokora = "0.11"` and no lock is committed, so the ceiling is whatever the resolved
+///     `0.11` release enforces; 0.11.0 refuses past `MAX_TREE_DEPTH` (1024) with
+///     `FinishError::TooDeep`. That is the dependency edge's residual rather than this door's.
 ///   - **Destruction.** `rowan` drops a green tree recursively, so a tree deep enough to overflow
 ///     is a crash in its own destructor. That is reachable through `rowan`'s public builder without
 ///     this crate being involved at all, and no guard placed after materialisation can help: the
@@ -380,11 +409,11 @@ impl core::error::Error for MintError {}
 ///
 /// # Errors
 ///
-/// [`MintError`] when the substrate refuses to materialise the recorded stream, which its own
-/// [`FinishError`](tokora::cst::FinishError) classifies. It replaced a `panic!` on this line: a
-/// safe public function that aborts its caller's process cannot be the way a caller learns its
-/// own event stream was rejected, and the message it panicked with asserted a malformed stream,
-/// which is exactly what a depth refusal is not.
+/// [`MintError`] when the substrate refuses to materialise the recorded stream — for the stream,
+/// depth, source or root-kind reasons [`MintError`]'s own page lists — which its own
+/// [`FinishError`](tokora::cst::FinishError) classifies. This function does not panic on a
+/// refusal: a safe public function that aborted its caller's process could not be the way a caller
+/// learns its own event stream, buffer or root kind was rejected.
 pub fn finish_root<'inp, L, Lx, Em>(
   cst: Cst<'inp, Lx, Em>,
   root: u16,
@@ -413,30 +442,37 @@ where
   Ok(Parse::from_parts(green, emitter.collect_diagnostics()))
 }
 
-/// [`finish_root`] for a [`Cst`] one of *this crate's own* parsers built, where the refusal is
-/// unreachable and the dialect doors keep their infallible signatures.
+/// [`finish_root`] with the refusal turned into a panic, for a [`Cst`] this crate built itself.
+///
+/// **The `test_support` probes' path, and nothing else's.** Its only callers are the two dialects'
+/// `test-support` `finish_root` wrappers, and theirs are the `test_support` probes. A shipped door
+/// and a per-production driver materialise through [`finish_parsed_root_with`] instead, and that
+/// function's `# Panics` section is where the refusals a caller's own buffer can still reach are
+/// named.
 ///
 /// # Panics
 ///
-/// If the substrate refuses the stream, which no *production* in this crate can make it do. The
-/// depth refusal in particular cannot fire here, and the reason is three numbers rather than a
-/// wish:
+/// If the substrate refuses the stream, which no *production* in this crate can make it do — the
+/// probes are not productions, and one of them does so on purpose (below). The depth refusal in
+/// particular cannot come from a production, and the reason is three numbers rather than a wish:
 ///
 /// - Every lossless door installs `min(requested, HARD_MAX)` as the parse's recursion budget, so
 ///   no parse this crate performs holds more than the lexer's `HARD_MAX` brackets open.
-/// - A selection chain at that maximum materialises **515** green levels. The tree costs two
-///   levels per open bracket plus three, measured on this crate's own `parse_document_with_limits`
-///   over `1..=256`, and the 24-bracket row of that same measurement is the **51** that
-///   `crate::lossless::project::MAX_GREEN_DEPTH`'s header already records — so the figure is
-///   checkable against a number that was recorded before this function existed.
-/// - tokora's tree ceiling, where the resolved revision has one, is above 515; where it has none
-///   there is nothing to trip.
+/// - The deepest tree a shipped production materialises at that maximum is **516** green levels:
+///   an object-value chain, `WORST_DOOR_GREEN_TREE` in `crate::lossless::project`, whose table
+///   records every shape measured on this crate's own `parse_document_with_limits` at a
+///   `HARD_MAX` ceiling. A selection chain reaches 515; the object-value chain costs slightly more
+///   per bracket and is the worst case.
+/// - tokora's tree ceiling, `MAX_TREE_DEPTH`, is 1024 in 0.11.0 — above 516.
 ///
-/// So the claim is that 515 clears the substrate's ceiling, not that a refusal "cannot happen".
-/// Should a substrate ceiling ever drop under 515, or a door stop clamping to `HARD_MAX`, this
-/// panics with the ceiling in the message.
+/// So the claim is that 516 clears the substrate's ceiling, not that a refusal "cannot happen".
+/// tokora refuses an open when its frame stack already holds the ceiling's worth of frames, so
+/// should a substrate ceiling ever drop below 516, or a door stop clamping to `HARD_MAX`, a
+/// shipped production's stream could be refused, and it would panic at
+/// [`finish_parsed_root_with`], where productions materialise, with the substrate's `TooDeep`
+/// message — which names the ceiling — in the panic.
 ///
-/// The other refusals are reachable, deliberately: a dialect's `test_support` probe severs the
+/// Other refusals are reachable here, deliberately: a dialect's `test_support` probe severs the
 /// token channel to prove the `space` argument is threaded rather than assumed. That is why the
 /// message below reports the refusal it got rather than naming a cause.
 ///
@@ -483,6 +519,25 @@ where
 
 /// [`finish_parsed_root`], with the **door's** verdict on the token budget applied to the log.
 ///
+/// # Panics, and this is the one every shipped parse goes through
+///
+/// Every public door materialises here, and so does every `lossless_drivers!` driver — the dialect
+/// `finish_root` wrappers are the `test_support` probes' path, not this one — so the refusal this
+/// function unwraps is the refusal a caller can actually meet.
+///
+/// Its message asserts that no *production* in this crate emits a stream the substrate refuses,
+/// and that is true. It is not the same as "this cannot fire". `rowan` addresses text with `u32`,
+/// so tokora's replay converts the source length with `u32::try_from` before it walks anything and
+/// answers `FinishError::OffsetOverflow { index: 0 }` past
+/// [`Refused::MAX_SOURCE_LEN`](super::Refused::MAX_SOURCE_LEN). No production is involved: it is a
+/// property of the buffer the caller handed in.
+///
+/// A `_from` sibling classifies that before it scans and answers
+/// [`Refused::SourceTooLong`](super::Refused::SourceTooLong). A concrete `&str` door cannot — it
+/// returns a bare `Parse` and has nowhere to put a refusal — so an over-length `&str` reaches this
+/// line and panics — the precondition each dialect's `parse_document` page documents for every
+/// concrete door.
+///
 /// # Why a finished parse is normalised rather than trusted — smear issue #193, Codex round 7
 ///
 /// Rounds 4 to 7 each closed one way for in-crate code to obtain the *capability* to report: the
@@ -523,7 +578,8 @@ where
 /// a dialect module. What that costs is bounded by the fold above it: the dialect door finishes its
 /// own `Cst` and returns a [`Parse`], so no `Cst` of a shipped parse is ever in a caller's hands to
 /// finish a second time or to finish with a span the parse did not earn. An in-crate caller can
-/// still build its own `Cst` through the `test-support` drivers and finish it however it likes —
+/// still build its own `Cst` the way the `test_support` probes do, through tokora's
+/// `parse_lossless`, and finish it however it likes —
 /// and that is a lie about a parse it owns, which is the same answer the door's own
 /// `Nesting it is not a forgery` note gives.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
@@ -557,7 +613,9 @@ where
   Parse::from_parts(green, diagnostics)
 }
 
-/// The emitter half of a lossless context, reduced to the one thing `finish_root` asks of it.
+/// The emitter half of a lossless context, reduced to what the two finishing functions ask of it:
+/// [`finish_root`] the projection, `finish_parsed_root_with` the projection with the door's
+/// variant classified out.
 ///
 /// # Why a trait rather than naming `Verbose<Err, SimpleSpan, Brand>`
 ///
@@ -568,8 +626,9 @@ where
 /// way: it pins the emitter's shape, so a dialect that ever needed a different recording emitter
 /// could not use the shared runner at all.
 ///
-/// One method, and it is the projection `Parse` needs. The blanket impl below covers `Verbose`
-/// for every error and brand, so no dialect writes an impl.
+/// Two methods, and both are the projection `Parse` needs — one of them filtered by a classifier
+/// the caller supplies. The blanket impl below covers `Verbose` for every error and brand, so no
+/// dialect writes an impl.
 pub trait DiagnosticSource {
   /// The **typed** payload this emitter records, before the projection below throws it away.
   ///

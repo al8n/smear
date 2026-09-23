@@ -115,20 +115,40 @@ asserted — `smear/tests/validator_allocation.rs` counts with a global allocato
 `the_gate_counts` test proves the counter moves, so a green reading means "nothing allocated" rather
 than "nothing was looking".
 
-### A source type you choose — on the syntactic half
+### A source type you choose — on both halves of the parser
 
 The syntactic doors are generic over the source type: `&str`, `&[u8]`, `bytes::Bytes`,
 `bstr::BStr`, `hipstr::{HipStr, HipByt}`, `smol_bytes::SmolBytes`, or your own. Pick a
 `Send + Sync + 'static` one and the AST becomes `Send + Sync + 'static` with it, which is what makes
 parallel schema compilation and batched query processing straightforward.
 
-**This is not yet true of the whole crate.** The lossless doors and the introspection door take
-`&str`, because rowan stores token text as `&str` and an introspection response is parsed from one;
-so does the one method of `proto`'s value trait that hands a driver the name of a variable. A
-consumer holding `bytes::Bytes` can use the syntactic doors and not those. The narrowings are not
-folklore: `cargo run -p source-census -- --verbose` walks the public surface and prints every one of
-them with a written reason — at this commit, 25 narrowed parameters out of 687, of which 23 are
-tracked against issues [#121], [#103] and [#139] as things to widen rather than accepted shapes.
+**The lossless parse doors reach the same set, through a sibling each** ([#121]). Every
+`parse_*` door keeps its `&str` signature and its `-> Parse`, and beside it is a
+`parse_*_from<Src: LosslessSource + ?Sized>(src: &Src) -> Result<Parse, Refused>`: a source is
+borrowed as text or as bytes without a copy, a byte view is validated once, and one scanner runs
+over the text either way. So `parse_document_from(&bytes)` works on `bytes::Bytes` directly,
+without validating UTF-8 first, and answers byte-identically to `parse_document` over the same
+bytes — same tree, same diagnostics, same verdict.
+
+Two things differ between the pair and each says the same thing twice. The **parameter**, because a
+generic one cannot be inferred where a `&str` could be coerced: `String` is both `AsRef<str>` and
+`AsRef<[u8]>`, so a single generic door turns `parse_document(s.as_ref())` into an inference error
+at every call site that ever wrote it. And the **return type**, because a rowan green tree stores
+text as `&str` — so a `&str` source has already met the only requirement there is and cannot be
+refused, while bytes can. A source that is not UTF-8 yields `Err(Refused::NonUtf8Source {
+valid_up_to, source_len })` and no `Parse` at all: no empty tree to reprint, and nothing for a
+consumer that pairs a parse with a source to be handed.
+
+**This is not yet true of the whole crate.** The lossless **projection**, the two lossless
+validator doors in front of it and the introspection door take `&str`; so does the one method of
+`proto`'s value trait that hands a driver the name of a variable. The projection's reason is stated
+in `smear-compiler/src/lossless.rs`'s header, and it is about what those doors hand *back*: a
+projection returns an AST borrowing the caller's buffer, so the parameter is the AST's source type.
+The narrowings are not folklore either way: `cargo run -p source-census -- --verbose` walks the
+public surface and prints every one with a written reason — at this commit, 42 narrowed parameters
+out of 804, of which 22 are tracked against issues [#121], [#103] and [#139] as things to widen
+rather than accepted shapes, and 13 are structural. Twelve of the thirteen are the lossless parse
+doors above, recorded as narrow because they are, beside the `_from` siblings that are not.
 
 ### A diagnostic contract, not a `Display` string
 

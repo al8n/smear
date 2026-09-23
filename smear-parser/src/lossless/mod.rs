@@ -77,12 +77,16 @@ pub mod recover;
 
 pub mod runner;
 
+pub mod source;
+
 pub mod trivia;
+
+pub use source::{LosslessSource, LosslessView, Refused};
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) use macros::{
   description_head_predicate, directive_location_predicate, lossless_door, lossless_drivers,
-  lossless_error_impls, lossless_production,
+  lossless_error_impls, lossless_production, lossless_root,
 };
 
 /// What a dialect's syntax-kind space must provide for the shared runner, coverage counter and

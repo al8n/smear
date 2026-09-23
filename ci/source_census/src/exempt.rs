@@ -23,6 +23,14 @@
 //!    `validate_schema_lossless` stops taking `&str`, this table stops matching and the census
 //!    goes red until the line is deleted.
 //!
+//!    **It has fired, and the twelve rows it took out came back as a different kind.**
+//!    al8n/smear#121 widened the twelve public lossless parse doors to a source-generic bound;
+//!    their `Tracked` entries matched nothing the same afternoon, the run went red, and the rows
+//!    came out. Then an external review measured what a generic parameter costs a call site that
+//!    writes `as_ref()`, the doors went back to `&str` **beside** a wide `_from` sibling, and the
+//!    twelve rows returned as `Structural` — the narrowing is real, and it is now a shape rather
+//!    than a debt. What the clause bought both times is that nobody had to remember.
+//!
 //! # What is exempt today, and what is not
 //!
 //! The two `&str` parameters that are *not* narrowings at all — `Executor::start`'s `operation`
@@ -87,27 +95,47 @@ const EXTENSION_KEY: &str = "A draft §7.1.7 `extensions` key, which is not sour
      not acquit it because `Extensions<V>` is parameterised by the driver's *value* type and has \
      no source type to hold.";
 
-/// The three lossless roots of each dialect, `fn(&str) -> Parse`.
-const LOSSLESS_ROOT: &str = "The materialization door: it builds a rowan green tree, and rowan's \
-   `GreenNodeBuilder::token` takes `&str`, so UTF-8 binds SOMEWHERE on this path. Whether it \
-   binds at the public door or deeper is exactly al8n/smear#121's third question — the substrate \
-   runner one layer down is already generic (`Lx::Source: tokora::cst::CstText` at \
-   `parser/lossless/runner.rs`), so the abstraction exists and it is this entry that spells the \
-   concrete type. Recorded, not accepted.";
+/// The twelve concrete lossless parse doors, `fn(&str) -> Parse`.
+const LOSSLESS_DOOR: &str = "Concrete BY DESIGN, and beside a wide sibling that is not. \
+   al8n/smear#121 made all twelve of these generic over the source and Codex measured what that \
+   costs at a call site that names no type: `String` implements `AsRef<str>` AND `AsRef<[u8]>`, \
+   both targets are a `LosslessSource`, so `parse_document(s.as_ref())` — which compiled against \
+   this signature — is E0283 against a generic one, in every consumer that ever wrote it. A \
+   generic parameter cannot be inferred where `&str` could be coerced, and the same argument \
+   reaches `&String`, `&Box<str>`, `&Cow<str>` and every other deref. So the capability the issue \
+   asked for is `<this door>_from`, one per door, taking any `smear::parser::lossless::\
+   LosslessSource` — `&[u8]`, `bytes::Bytes`, `bstr::BStr`, `HipStr`, `HipByt`, the smol-bytes \
+   forms — and answering byte-identically over the same bytes. This parameter stays `&str` so \
+   that every existing call still compiles, which is the one thing widening it in place cannot \
+   do. The two signatures also differ in their RETURN type, and that is the same fact stated \
+   twice: a green tree stores text as `&str`, so this door's source has already met the only \
+   requirement there is and it answers a `Parse`, while the sibling takes bytes and answers \
+   `Result<Parse, Refused>`. The narrowing is real and the capability is not narrowed; both \
+   halves are the record.";
 
 /// The projections from a rowan tree back to a borrowing AST.
 const LOSSLESS_PROJECTION: &str = "A projection re-slices the caller's own buffer by the tree's byte offsets and hands back an \
    AST borrowing it, so the AST's source type is whatever this parameter is — which is why the \
    `&'src str` here forces `Document<&'src str>` on every consumer of the lossless half while \
-   the syntactic half is generic. Nothing in the signature needs UTF-8 except rowan's own \
-   `SyntaxToken::text()` comparison, which is al8n/smear#121's question about where the \
-   constraint really binds.";
+   the syntactic half is generic. al8n/smear#121 answered where the constraint binds, and it is \
+   NOT here: it binds at materialisation, as tokora's `CstText`, and the parse doors above are \
+   generic over the source now. What holds this parameter is the OUTPUT — widening it means \
+   deciding what a projection hands back over bytes, which is a change to the projection's own \
+   contract rather than to a parameter, and the walk underneath it already compares bytes.";
 
 /// Everything the census finds on `main` and does not fail on, each with its argument.
 ///
 /// The three sites al8n/smear#122 names as the calibration answer are the first three groups. They
 /// are recorded rather than fixed because #121 and #103 own them, and because a census whose known
 /// answer is invisible in its own output cannot be checked against that answer.
+///
+/// One of those groups has since been answered rather than carried, and the shape of the answer is
+/// worth reading off the table. al8n/smear#121 gave the parse doors a wide sibling each and left
+/// the projections and the two validator doors in front of them narrow, because what pins those is
+/// the type of what they hand **back** rather than the type of what they take. So the parse-door
+/// group is `Structural` beside a door with no narrowing at all, and the projection group is still
+/// `Tracked`; they are the same issue answering two different questions, and each reason below
+/// says which.
 pub const EXEMPTIONS: &[Exemption] = &[
   // ── §5 lossless, the validator doors — al8n/smear#121 ────────────────────────────────────────
   Exemption {
@@ -118,9 +146,12 @@ pub const EXEMPTIONS: &[Exemption] = &[
     issue: Some(121),
     reason: "The lossless twin of `validate_executable<S, K> where S: AsRef<[u8]> + Clone, \
              K: Sink<S>`, narrowed to `&'src str` at both the source parameter and the sink's \
-             source type. A consumer holding `bytes::Bytes` can use the syntactic door and not \
-             this one. #121 is settling whether the rowan boundary genuinely binds at the door or \
-             deeper; until it does, this is a recorded narrowing and not an accepted shape.",
+             source type. #121 settled the boundary question: it binds at materialisation, not at \
+             a door, and every lossless PARSE door is source-generic now. What holds this one is \
+             its output — the projection hands back a `Document<&'src str>` borrowing this buffer, \
+             so the parameter is the AST's source type and widening it is a change to the \
+             projection's contract. Stated, with the mechanism, in `smear-compiler/src/lossless.rs`'s \
+             header; recorded here because the narrowing is real and is not an oversight.",
   },
   Exemption {
     module: "smear::validator::lossless",
@@ -129,9 +160,9 @@ pub const EXEMPTIONS: &[Exemption] = &[
     kind: Kind::Tracked,
     issue: Some(121),
     reason: "`validate_executable_lossless`'s `rules` sibling, and narrowed identically — the \
-             same `&'src str` source and the same `Sink<&'src str>`. Recorded separately because \
-             widening one door and not the other would leave the asymmetry in place under a \
-             shrinking table.",
+             same `&'src str` source and the same `Sink<&'src str>`, for the reason that entry \
+             now carries. Recorded separately because widening one door and not the other would \
+             leave the asymmetry in place under a shrinking table.",
   },
   Exemption {
     module: "smear::validator::lossless",
@@ -141,8 +172,10 @@ pub const EXEMPTIONS: &[Exemption] = &[
     issue: Some(121),
     reason: "The §3 door `Schema::build<S>(&TypeSystemDocument<S>) where S: AsRef<[u8]>` is \
              generic; this lossless door in front of it is not. Nothing in its signature carries \
-             a source type — `&Parse` is a rowan tree — so the `&str` is the document itself, \
-             tracked on #121.",
+             a source type — `&Parse` is a rowan tree — so the `&str` is the document itself. \
+             Held by the same thing as its §5 sibling: the projection it runs first hands back a \
+             `TypeSystemDocument<&'src str>`, so this parameter is that AST's source type. #121's \
+             answer and the mechanism are in `smear-compiler/src/lossless.rs`'s header.",
   },
   // ── §4 introspection — al8n/smear#103 ────────────────────────────────────────────────────────
   Exemption {
@@ -166,106 +199,114 @@ pub const EXEMPTIONS: &[Exemption] = &[
              narrowed at the same parameter for the same reason. Widening one without the other \
              would leave the door a caller reaches for directly still narrow.",
   },
-  // ── §5 lossless, the parser doors — al8n/smear#121 ───────────────────────────────────────────
+  // ── §5 lossless, the parser doors — al8n/smear#121, ANSWERED and RECORDED ───────────────────
   //
-  // NOT in #121's table, which enumerates the two validator doors. They are the same family: the
-  // census found them by the same rule and they narrow the same property, so they are recorded
-  // under the issue that owns the question rather than left out of it.
+  // Twelve entries, one per public parse door per dialect, and they are not the twelve that stood
+  // here before: those were `Kind::Tracked` against #121 as debt to be widened, and these are
+  // `Kind::Structural` because the widening happened and produced a PAIR. Each door keeps `&str`
+  // so that every call that ever compiled still does — `as_ref()` included, which a generic
+  // parameter cannot infer — and each has a `_from` sibling with no narrowing at all. The rule
+  // convicts this parameter correctly; what the reason records is that the convict has a twin who
+  // is not narrow, which is a shape no `Tracked` entry can express.
+  //
+  // The `_from` siblings are absent from this table on purpose, and that is the census working:
+  // their parameter is `&Src`, which mentions no concrete text type, so the rule acquits them at
+  // step 1 and an entry for them would match nothing.
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
     entry: "parse_document",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
     entry: "parse_document_with_limits",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
     entry: "parse_executable_document",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
     entry: "parse_executable_document_with_limits",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
     entry: "parse_type_system_document",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphql::lossless::runner",
     entry: "parse_type_system_document_with_limits",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_document",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_document_with_limits",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_executable_document",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_executable_document_with_limits",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_type_system_document",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphqlx::lossless::runner",
     entry: "parse_type_system_document_with_limits",
     param: "src",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: LOSSLESS_ROOT,
+    kind: Kind::Structural,
+    issue: None,
+    reason: LOSSLESS_DOOR,
   },
   Exemption {
     module: "smear::parser::graphql::lossless::project",

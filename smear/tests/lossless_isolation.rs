@@ -517,6 +517,17 @@ fn the_substrate_names_no_dialect() {
 /// containing `graphql` would be an offender for the cell above, so the conjunction is written as
 /// two attributes with each line legal on its own. Exactly one of each: rustc conjoins a repeated
 /// attribute silently, and clippy's `duplicated_attributes` does not.
+///
+/// **And back to 21 after al8n/smear#121, which is the interesting entry in this list.** That
+/// issue added two — `refused_non_utf8_source`, a `Parse` a door answered when the source was
+/// bytes `rowan` cannot store, and `Parse::from_refusal`, the private constructor it went through
+/// — and then deleted both. An external review found that the value they built was
+/// **success-shaped**: `syntax()` and `green()` are unconditional, so a formatter reprinting an
+/// errorful tree wrote an empty file, and the tree-only verification helpers certified it against
+/// `""`. The repair made the refusal unrepresentable — the fallible doors answer
+/// `Result<Parse, Refused>` — so the two items have no reason to exist and the count returns to
+/// where it was. A number that goes up and comes back down is worth a line, because the next
+/// reader would otherwise look for the two gates it names.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
 const SUBSTRATE_FEATURE_GATES: usize = 21;

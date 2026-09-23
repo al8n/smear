@@ -305,12 +305,18 @@ pub mod trivia;
 pub mod ty;
 pub mod value;
 
-// The three document roots this suite parses, all at the same module level and all
-// `fn(&str) -> Parse`: the mixed one (`parse_document`), the SDL-only one and the executable-only
-// one. A consumer picks a root here, once, rather than parsing the mixed form and filtering the
-// tree.
+// The three document roots this suite parses, all at the same module level: the mixed one
+// (`parse_document`), the SDL-only one and the executable-only one. A consumer picks a root here,
+// once, rather than parsing the mixed form and filtering the tree.
+//
+// TWO FAMILIES PER ROOT, and the shapes differ. The `parse_*` doors are `fn(&str) -> Parse`; the
+// `parse_*_from` siblings beside them take any `crate::lossless::LosslessSource` and answer
+// `Result<Parse, Refused>`, because a source that is not `&str` can fail the two requirements a
+// green tree has of one — valid UTF-8, and a length it can address.
 pub use runner::{
-  Parse, parse_document, parse_document_with_limits, parse_executable_document,
-  parse_executable_document_with_limits, parse_type_system_document,
-  parse_type_system_document_with_limits, profile,
+  Parse, parse_document, parse_document_from, parse_document_from_with_limits,
+  parse_document_with_limits, parse_executable_document, parse_executable_document_from,
+  parse_executable_document_from_with_limits, parse_executable_document_with_limits,
+  parse_type_system_document, parse_type_system_document_from,
+  parse_type_system_document_from_with_limits, parse_type_system_document_with_limits, profile,
 };

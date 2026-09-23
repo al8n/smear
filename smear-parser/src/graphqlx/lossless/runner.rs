@@ -8,14 +8,15 @@ use tokora::{
 };
 // ── THE `test-support` HALF OF THIS FILE'S IMPORTS ───────────────────────────────────────────
 //
-// Four names, and every one of them is reached only from the `test_support` drivers at the bottom:
-// `Sink` and `GraphqlxLosslessLexer` through `LosslessSink`, `Cst` and `GraphqlxLosslessLexer` again
-// through `LosslessCst`, and `KindSpace` through `finish_root`. Round 8 folded the shipped doors'
-// finishing step into the door macro's own body, which took the last non-driver caller off all
-// four, and the door's expansion spells its tokora paths absolutely — so with `test-support` off
-// they are `unused_imports`, which `-Dwarnings` makes a build failure. Four CI jobs on the trunk
-// are what found it, and gating them beside the items they serve is the same repair as those
-// items got.
+// Four names, and every one of them is reached only under `test-support`: `Sink` and
+// `GraphqlxLosslessLexer` through `LosslessSink`, which the `test_support` probes at the bottom
+// and the `lossless_drivers!` drivers name; `Cst` and `GraphqlxLosslessLexer` again through
+// `LosslessCst`, and `KindSpace` through `finish_root`, which only the probes reach. Round 8
+// folded the shipped doors' finishing step into the door macro's own body, which took the last
+// shipped user off all four, and the door's expansion spells its tokora paths absolutely — so
+// with `test-support` off they are `unused_imports`, which `-Dwarnings` makes a build failure.
+// Four CI jobs on the trunk are what found it, and gating them beside the items they serve is the
+// same repair as those items got.
 #[cfg(feature = "test-support")]
 use tokora::cst::{Cst, Sink};
 
@@ -25,6 +26,7 @@ use super::{GraphqlxLosslessErrors, GraphqlxLosslessSlice, GraphqlxLosslessToken
 use crate::graphqlx::{error::ErrorData, kinds::SyntaxKind as K};
 #[cfg(feature = "test-support")]
 use crate::lossless::KindSpace;
+use crate::lossless::{LosslessSource, Refused};
 
 /// The profile every GraphQLx lossless parse uses.
 ///
@@ -54,7 +56,7 @@ where
   )
 }
 
-/// The recording emitter every lossless driver pins.
+/// The recording emitter every lossless parse pins — the door's, the drivers' and the probes'.
 ///
 /// `Verbose<Error, S = SimpleSpan, Lang = ()>` — the **third** parameter is the grammar brand,
 /// and `Emitter<'inp, L, Lang>` is implemented only where it matches. A bare
@@ -66,22 +68,26 @@ pub(crate) type LosslessEmitter<'inp> = tokora::emitter::Verbose<
   crate::graphqlx::GraphQLx,
 >;
 
-/// The `Sink` every lossless driver records into.
+/// The `Sink` type every lossless parse records into, under the name its `test-support` users
+/// spell.
 ///
-/// Named only as the emitter half of a driver's **context pair** — `Sink::new` is tokora-private,
-/// so the one way to mint one is [`parse_lossless`], which takes the source once and uses that
-/// same argument for the sink and the input.
+/// Named as the emitter half of a **context pair** by exactly two users: the `lossless_drivers!`
+/// drivers' `TestCtx` and the `test_support` probes' `TestCtx` below. `Sink::new` is
+/// tokora-private, so the one way to mint one is a tokora driver that takes the source once and
+/// uses that same argument for the sink and the input — `parse_lossless` for the probes, and
+/// `parse_lossless_with_context` inside `parse_lossless_document` for the drivers.
 ///
-/// Which is why it is gated with the drivers: the shipped [`parse_document`] path names
-/// [`LosslessCst`] and never this, so with `test-support` off it has no reference at all.
+/// Which is why it is gated with those two: the door macro spells the same type out in its own
+/// `DoorCtx`, so the shipped doors name neither this alias nor [`LosslessCst`], and with
+/// `test-support` off it has no reference at all.
 #[cfg(feature = "test-support")]
 pub(crate) type LosslessSink<'inp> =
   Sink<'inp, GraphqlxLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
 
-/// The spent sink [`parse_lossless`] hands back — the one door to materialization.
+/// The spent sink tokora's `parse_lossless` hands back to a `test_support` probe.
 // WITH ITS ONE USER. `finish_root` below is the only thing that names this alias, and `finish_root`
-// is only reachable from the `test_support` drivers — the six shipped doors return the `Parse` the
-// door macro builds and never see a `Cst` at all.
+// is only reachable from the `test_support` probes — the shipped doors and the `lossless_drivers!`
+// drivers hand back what the door macro builds and never see a `Cst` at all.
 #[cfg(feature = "test-support")]
 pub(crate) type LosslessCst<'inp> =
   Cst<'inp, GraphqlxLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
@@ -92,28 +98,29 @@ pub(crate) type LosslessCst<'inp> =
 // the report unreachable from anywhere a second parse could call it. Invoking it twice for this
 // dialect is `E0119` on the `DoorOwner` impl it carries.
 crate::lossless::lossless_door! {
-  dialect = graphqlx::lossless;
-  errors  = GraphqlxLosslessErrors;
+  dialect  = graphqlx::lossless;
+  errors   = GraphqlxLosslessErrors;
+  document = document::document;
+  schema   = document::type_system_document;
+  request  = executable::executable_document;
 }
 
-/// Materialize `cst` at the root kind and collect its diagnostics.
+/// Materialize a probe's `cst` at the root kind and collect its diagnostics.
 ///
-/// Shared by the three document-root entry points — [`parse_document`],
-/// [`parse_type_system_document`] and [`parse_executable_document`] — and by the per-production
-/// drivers under `test_support`, so the root kind is named once. Note that the root kind is the
-/// *tree's* root (`K::Root`) rather than the production's, which is why one wrapper covers three
-/// different document roots. Everything below that — the fallible-materialization contract and
-/// the diagnostic projection — is [`crate::lossless::runner::finish_root`]'s; this wrapper's
-/// whole content is *which* root kind and *which* dialect the refusal names.
+/// **The `test_support` probes' finish, and theirs alone.** The shipped doors and the
+/// `lossless_drivers!` drivers do not come through here: they materialise inside the door macro's
+/// own body, through
+/// [`crate::lossless::runner::finish_parsed_root_with`], which is where what a finished parse says
+/// about a refusal is decided. This wrapper exists so the probes name the root kind once — the
+/// *tree's* root (`K::Root`) rather than any production's. Below it is
+/// `crate::lossless::runner::finish_parsed_root`, which calls
+/// [`crate::lossless::runner::finish_root`] — the partial-materialization door
+/// (`Cst::finish_partial`, smear issue #57) and the diagnostic projection — and turns its refusal
+/// into a panic, so this wrapper returns a bare [`Parse`].
 ///
-/// The refusal itself is `crate::lossless::runner::finish_parsed_root`'s: these doors build the
-/// `Cst` they finish, under their own clamped recursion budget, so the substrate's refusal is
-/// unreachable from here and that function carries the numbers that say why. A caller finishing a
-/// `Cst` it built itself goes through the public [`crate::lossless::runner::finish_root`] and gets
-/// the refusal as a value.
-// THE DRIVERS' FINISH, and theirs alone. Round 8 folded the shipped doors' finishing step into
-// the door macro's own body, which left this wrapper with exactly one caller family: the
-// `test_support` drivers below.
+/// A caller finishing a `Cst` it built itself goes through the public
+/// [`crate::lossless::runner::finish_root`] and gets the refusal as a value.
+// GATED ON HAVING A CALLER: the `test_support` probes below are the only ones.
 #[cfg(feature = "test-support")]
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
   crate::lossless::runner::finish_parsed_root(cst, K::Root.raw(), <K as KindSpace>::NAME)
@@ -136,14 +143,18 @@ pub use crate::lossless::runner::Diagnostic;
 /// be handed to a GraphQL typed wrapper. The two spaces do not even agree on what raw `0` means.
 pub type Parse = crate::lossless::runner::Parse<crate::graphqlx::kinds::GraphQLxLang>;
 
-/// Parse a `&str` as a GraphQLx document, losslessly.
+/// Parse a source as a GraphQLx document, losslessly.
 ///
 /// The production is `document.rs`'s `document` under the door's drain — the mixed
 /// root, which admits imports, executable definitions, type-system definitions and extensions in
-/// any order, followed by a drain. The **entry** and not `document` itself: this function discards
-/// its parser's result, so an `Err` escaping the document production would leave the rest of the
-/// source uncommitted and `finish` would refuse it as a `FinishError::UncoveredGap`. The drain
-/// turns the one failure mode `parse_document` cannot report into a reportable parse.
+/// any order, followed by a drain. The door discards the production's result, so an `Err` escaping
+/// it leaves the rest of the source with no committed token. Materialisation is
+/// `Cst::finish_partial`, which would tile that tail as one `gap_kind` token carrying its original
+/// text: the tree would still cover every byte, and any lexer error a lookahead already raised over
+/// the tail stays recorded, but nothing past that lookahead is lexed, so the parse would
+/// under-report. The drain lexes the tail and commits its tokens — unless a refusal ended the
+/// document, when it deliberately reads nothing — so the tail's remaining lexer errors are
+/// reported and its tokens are charged to the budget.
 ///
 /// A consumer that will only accept one half of the language has a root of its own rather than a
 /// filter to write afterwards — see [`parse_type_system_document`] and
@@ -157,6 +168,25 @@ pub type Parse = crate::lossless::runner::Parse<crate::graphqlx::kinds::GraphQLx
 /// the next one is reported. That default is derived against a 2 MiB stack, which is what
 /// `std::thread::spawn`, a tokio worker and the libtest harness each give a thread. A caller on a
 /// different stack, or with deeper documents, uses [`parse_document_with_limits`].
+///
+/// # Holding something that is not a `&str`
+///
+/// [`parse_document_from`] is this door over any [`LosslessSource`] — `&[u8]`, `bytes::Bytes`,
+/// `bstr::BStr`, `HipStr`, `HipByt`, the smol-bytes forms — and answers byte-identically to this
+/// one over the same bytes. It is a sibling rather than this signature because a generic parameter
+/// cannot be inferred where a `&str` could be coerced; that door's own note says why.
+///
+/// It is fallible and this one is not, because a green tree requires two things of a source —
+/// valid UTF-8, and a length it can address — and `&str` proves only the first. **This signature
+/// therefore still has a precondition**: see below.
+///
+/// # One precondition, and the sibling is the way around it
+///
+/// A source longer than [`Refused::MAX_SOURCE_LEN`](crate::lossless::Refused::MAX_SOURCE_LEN)
+/// panics at materialisation — `rowan` addresses text with `u32` — and this signature returns a
+/// [`Parse`], so it has nowhere to report that. It applies to every concrete `&str` door; a caller
+/// that cannot bound its input uses [`parse_document_from`], which classifies the length before it
+/// scans and answers `Err`.
 pub fn parse_document(src: &str) -> Parse {
   parse_document_with_limits(src, LosslessLimits::default())
 }
@@ -178,29 +208,107 @@ pub fn parse_document(src: &str) -> Parse {
 /// smear cannot see the stack its caller is on. The **lexer's** own tally still reads the
 /// unclamped number; see [`HARD_MAX`](smear_lexer::limits::HARD_MAX) for why only one of the two
 /// has a native-stack cost behind it.
+///
+/// # One precondition, and the sibling is the way around it
+///
+/// A source longer than [`Refused::MAX_SOURCE_LEN`](crate::lossless::Refused::MAX_SOURCE_LEN)
+/// panics at materialisation — `rowan` addresses text with `u32` — and this signature returns a
+/// [`Parse`], so it has nowhere to report that. It applies to every concrete `&str` door; a caller
+/// that cannot bound its input uses [`parse_document_from`], which classifies the length before it
+/// scans and answers `Err`.
 pub fn parse_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
-  // `parse_lossless` is the only door that mints a `Sink`: it takes the source ONCE and uses
-  // that one argument for both the sink and the input, so the buffer the tree's text comes from
-  // and the buffer the parse reads cannot be two different buffers. Argument order is
-  // (source, lexer state, inner emitter, profile, cache, parser).
-  //
-  // `Lang` needs the turbofish. The driver's signature uses it only in bounds — nothing in the
-  // argument list carries it, and `Ctx: ParseContext<'inp, L, Lang>` holds for every `Lang` —
-  // so inference silently settles on `()`, which then fails to match this production's branded
-  // `InputRef`. The lexer is spelled alongside it because `Lang` is the SECOND parameter.
-  //
-  // `Src` needs its own turbofish for a second reason: `str` and `&str` both project
-  // `Slice<'inp> = &'inp str`, so the lexer type alone leaves the production's source parameter
-  // genuinely ambiguous. `str` is the one that matches `parse_document`'s `L::Source = str`.
-  // ONE CALL, AND IT IS THE WHOLE PARSE. `parse_lossless_document` is generated into this module
-  // by `lossless_door!`: it builds the context, installs both budgets off `limits` itself, runs the
-  // driver over this root, drains what an escape left behind and reports a budget refusal if there
-  // was one. Every type it runs over is its own choice — smear issue #193, Codex rounds 4 to 6 —
-  // and the production is the one thing this door still names.
-  parse_lossless_document(src, limits, super::document::document::<str, _>)
+  // The `&str` half of the root pair. `str` discharges the UTF-8 requirement by type and not the
+  // length one, which is why this signature is not a `Result` and why an over-length source still
+  // panics at materialisation — the precondition documented above.
+  document_root(src, limits)
 }
 
-/// Parse a `&str` as a GraphQLx **type-system** (SDL-only) document, losslessly.
+/// [`parse_document`] over any source [`LosslessSource`] admits.
+///
+/// `&str`, `&[u8]`, and every backing this crate ships an integration for: `bytes::Bytes`,
+/// `bstr::BStr`, `HipStr`, `HipByt` and the smol-bytes forms, plus `String`, `Vec<u8>`, a `Cow`, a
+/// `Box`, an `Rc`, an `Arc` and a reference to any of them.
+///
+/// # Why this is a sibling and not the door itself
+///
+/// Because a generic parameter cannot be inferred where `&str` could be coerced. `String`
+/// implements `AsRef<str>` **and** `AsRef<[u8]>`, and both targets are a [`LosslessSource`], so
+/// `parse_document(s.as_ref())` — which compiles against the `&str` door — is `E0283` against a
+/// generic one. So the concrete door keeps its signature and its callers, and the wide capability
+/// sits beside it: nothing to choose unless you hold something that is not a `&str`.
+///
+/// # The parse is the same parse whichever you hand over
+///
+/// A source is borrowed as text or as bytes, a byte view is validated once, and one scanner runs
+/// over the text either way — so this and [`parse_document`] return byte-identical trees,
+/// diagnostics and verdicts over the same bytes, non-ASCII outside strings and comments included.
+/// [`LosslessSource`] carries why there is only one scanner.
+///
+/// A green tree requires **two** things of a source and this door asks both once, before anything
+/// is scanned: valid UTF-8, and no longer than [`Refused::MAX_SOURCE_LEN`] because `rowan`
+/// addresses text with `u32`. They are independent — a 5 GiB `&str` is good text and still cannot
+/// be materialised. Either failure is `Err(`[`Refused`]`)` naming which, with the numbers, and no
+/// [`Parse`] for a consumer to reprint or to pair with a source.
+///
+/// # Both halves, compiled
+///
+/// The same bytes through this door and through [`parse_document`] are the same parse. `Parse` is
+/// not `PartialEq` — it holds a green tree — so the comparison is over everything it publishes.
+///
+/// ```
+/// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
+/// use smear_parser::graphqlx::lossless::{parse_document, parse_document_from};
+///
+/// let src = "type T { f: Int } query Q { f }";
+///
+/// let narrow = parse_document(src);
+/// let wide = parse_document_from(src.as_bytes())
+///   .expect("valid UTF-8, and short enough for a green tree to address");
+///
+/// assert_eq!(wide.green(), narrow.green());
+/// assert_eq!(wide.diagnostics(), narrow.diagnostics());
+/// assert_eq!(wide.has_errors(), narrow.has_errors());
+/// # }
+/// ```
+///
+/// And bytes that are not UTF-8 are an `Err` carrying both numbers — no `Parse`, so there is no
+/// tree to reprint and nothing to hand a door that pairs a parse with a source.
+///
+/// ```
+/// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
+/// use smear_parser::{graphqlx::lossless::parse_document_from, lossless::Refused};
+///
+/// // Nineteen bytes; byte 13 is not a UTF-8 lead.
+/// let bad: &[u8] = b"query Q { f }\xFF\xFEmore";
+///
+/// match parse_document_from(bad) {
+///   Ok(_) => panic!("a source that is not UTF-8 must not produce a parse"),
+///   Err(Refused::NonUtf8Source { valid_up_to, source_len }) => {
+///     assert_eq!(valid_up_to, 13);
+///     assert_eq!(source_len, 19);
+///   }
+///   Err(other) => panic!("unexpected refusal: {other}"),
+/// }
+/// # }
+/// ```
+pub fn parse_document_from<Src: LosslessSource + ?Sized>(src: &Src) -> Result<Parse, Refused> {
+  parse_document_from_with_limits(src, LosslessLimits::default())
+}
+
+/// [`parse_document_from`] under a caller-chosen resource budget.
+///
+/// See [`parse_document_with_limits`] for when to reach for one.
+pub fn parse_document_from_with_limits<Src: LosslessSource + ?Sized>(
+  src: &Src,
+  limits: LosslessLimits,
+) -> Result<Parse, Refused> {
+  // ONE CALL, AND IT IS THE WHOLE PARSE — and the only place in this root's four doors where a
+  // source can be refused. The fallible half of the root pair takes the source's text, validating
+  // it once if the source is bytes, and hands it to the `&str` half.
+  document_root_from(src, limits)
+}
+
+/// Parse a source as a GraphQLx **type-system** (SDL-only) document, losslessly.
 ///
 /// [`parse_document`]'s root without the executable half:
 /// `ImportOrTypeSystemDefinitionOrExtension+`, the tree
@@ -229,17 +337,36 @@ pub fn parse_type_system_document(src: &str) -> Parse {
 ///
 /// See [`parse_document_with_limits`] for when to reach for one.
 pub fn parse_type_system_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
-  // The turbofishes and the `_entry` suffix are `parse_document`'s, for `parse_document`'s
-  // reasons; see the comment there rather than a second copy of it here.
-  // ONE CALL, AND IT IS THE WHOLE PARSE. `parse_lossless_document` is generated into this module
-  // by `lossless_door!`: it builds the context, installs both budgets off `limits` itself, runs the
-  // driver over this root, drains what an escape left behind and reports a budget refusal if there
-  // was one. Every type it runs over is its own choice — smear issue #193, Codex rounds 4 to 6 —
-  // and the production is the one thing this door still names.
-  parse_lossless_document(src, limits, super::document::type_system_document::<str, _>)
+  // The `&str` half of the root pair. `str` discharges the UTF-8 requirement by type and not the
+  // length one, which is why this signature is not a `Result` and why an over-length source still
+  // panics at materialisation — the precondition documented above.
+  type_system_document_root(src, limits)
 }
 
-/// Parse a `&str` as a GraphQLx **executable** document, losslessly.
+/// [`parse_type_system_document`] over any source [`LosslessSource`] admits.
+///
+/// See [`parse_document_from`] for why the wide form is a sibling rather than the door itself, and
+/// what it accepts.
+pub fn parse_type_system_document_from<Src: LosslessSource + ?Sized>(
+  src: &Src,
+) -> Result<Parse, Refused> {
+  parse_type_system_document_from_with_limits(src, LosslessLimits::default())
+}
+
+/// [`parse_type_system_document_from`] under a caller-chosen resource budget.
+///
+/// See [`parse_document_with_limits`] for when to reach for one.
+pub fn parse_type_system_document_from_with_limits<Src: LosslessSource + ?Sized>(
+  src: &Src,
+  limits: LosslessLimits,
+) -> Result<Parse, Refused> {
+  // ONE CALL, AND IT IS THE WHOLE PARSE — and the only place in this root's four doors where a
+  // source can be refused. The fallible half of the root pair takes the source's text, validating
+  // it once if the source is bytes, and hands it to the `&str` half.
+  type_system_document_root_from(src, limits)
+}
+
+/// Parse a source as a GraphQLx **executable** document, losslessly.
 ///
 /// [`parse_type_system_document`]'s mirror: `ImportOrExecutableDefinition+`, the tree
 /// [`ast::ExecutableDocument`](super::ast::ExecutableDocument) wraps. Imports stay in here too;
@@ -261,16 +388,33 @@ pub fn parse_executable_document(src: &str) -> Parse {
 ///
 /// See [`parse_document_with_limits`] for when to reach for one.
 pub fn parse_executable_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
-  // ONE CALL, AND IT IS THE WHOLE PARSE. `parse_lossless_document` is generated into this module
-  // by `lossless_door!`: it builds the context, installs both budgets off `limits` itself, runs the
-  // driver over this root, drains what an escape left behind and reports a budget refusal if there
-  // was one. Every type it runs over is its own choice — smear issue #193, Codex rounds 4 to 6 —
-  // and the production is the one thing this door still names.
-  parse_lossless_document(
-    src,
-    limits,
-    super::executable::executable_document::<str, _>,
-  )
+  // The `&str` half of the root pair. `str` discharges the UTF-8 requirement by type and not the
+  // length one, which is why this signature is not a `Result` and why an over-length source still
+  // panics at materialisation — the precondition documented above.
+  executable_document_root(src, limits)
+}
+
+/// [`parse_executable_document`] over any source [`LosslessSource`] admits.
+///
+/// See [`parse_document_from`] for why the wide form is a sibling rather than the door itself, and
+/// what it accepts.
+pub fn parse_executable_document_from<Src: LosslessSource + ?Sized>(
+  src: &Src,
+) -> Result<Parse, Refused> {
+  parse_executable_document_from_with_limits(src, LosslessLimits::default())
+}
+
+/// [`parse_executable_document_from`] under a caller-chosen resource budget.
+///
+/// See [`parse_document_with_limits`] for when to reach for one.
+pub fn parse_executable_document_from_with_limits<Src: LosslessSource + ?Sized>(
+  src: &Src,
+  limits: LosslessLimits,
+) -> Result<Parse, Refused> {
+  // ONE CALL, AND IT IS THE WHOLE PARSE — and the only place in this root's four doors where a
+  // source can be refused. The fallible half of the root pair takes the source's text, validating
+  // it once if the source is bytes, and hands it to the `&str` half.
+  executable_document_root_from(src, limits)
 }
 
 /// Test-only scaffolding for probing the sink's own kind-validator door.
@@ -363,7 +507,9 @@ pub mod test_support {
   /// from.
   ///
   /// The orphan-finish shape is *not* the substitute either: `cst_finish` with nothing open
-  /// panics at the emit door, so it never reaches materialization at all.
+  /// panics at the emit door in a debug build — tokora checks it with a `debug_assert!` — and
+  /// reaches materialization, as `FinishError::OrphanFinish`, only in a release build, so a probe
+  /// built on it would test a different thing in each profile.
   ///
   /// # Panics
   ///

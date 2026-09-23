@@ -81,6 +81,90 @@
 //! wherever a projection ran — which is both arms of the build, and neither arm of a refusal taken
 //! before it — and `tests/validator_lossless_schema.rs` pins both artifacts.
 //!
+//! # Why these four doors take `&str` while the parse doors do not — al8n/smear#121
+//!
+//! Every public lossless **parse** door has a `_from` sibling taking anything the parser's
+//! `LosslessSource` admits — `&str`, `&[u8]` and every backing this crate ships — and answering
+//! `Result<Parse, Refused>`, so a source a green tree cannot hold comes back from **a sibling** as
+//! `Err` with no `Parse` at all: no tree, no diagnostic and no panic. Two things make a source
+//! unholdable and the sibling checks both — it is not valid UTF-8, or it is longer than `rowan`'s
+//! `u32` text sizes can address. Through a concrete `&str` door an over-length source still
+//! panics, which is pre-existing and documented there. The doors here have no such sibling, and
+//! that is a decision.
+//!
+//! **Four doors, and they are not held by the same thing.**
+//!
+//! - `validate_executable_lossless<'src, K>(…, source: &'src str, …, sink: &mut K)
+//!   where K: Sink<&'src str>` — **two bindings, one lifetime.** `source` is `&'src str` because
+//!   `Verified::new` stores it and the projection re-slices it into an
+//!   `ExecutableDocument<&'src str>`: the AST borrows the caller's buffer, so this parameter *is*
+//!   the AST's source type. `K: Sink<&'src str>` because the diagnostics that reach the sink carry
+//!   those same slices, so the sink's source type is the AST's. Widening one without the other is
+//!   not expressible, and widening both changes what every consumer of the lossless half receives.
+//! - `validate_executable_lossless_with` — the same signature with a `RuleSet`, and the same two
+//!   reasons unchanged.
+//! - `validate_executable_lossless_verified_with<'src, K>(…, pair: Verified<'_, 'src>, …)` —
+//!   **there is no `source` parameter here at all.** `'src` arrives through the pair, whose
+//!   `source()` is the `&'src str` the first bullet's reason binds, so the type is not this
+//!   signature's to widen: it is `Verified`'s, and `Verified`'s is the projection's. The
+//!   `K: Sink<&'src str>` half is unchanged, for the first bullet's reason.
+//! - `validate_schema_lossless(parse: &Parse, source: &str) -> Result<(Schema, Recovery), …>` —
+//!   **no `K`, no sink, and no borrow in the output at all.** The `Schema` it returns is owned, so
+//!   "the AST borrows the buffer" is false here. What pins it is one step earlier: the door runs
+//!   `project_type_system_document_recovered`, which is `&str`-keyed and hands back a
+//!   `TypeSystemDocument<&'src str>`. `Schema::build` would take a byte-keyed document; the
+//!   projection in front of it would not.
+//!
+//! **A `_from` sibling for the schema door is additive, and deliberately not in this change.** It
+//! would need a state on `LosslessSchemaErrors` for a source that is not UTF-8. That enum is
+//! `#[non_exhaustive]`, so adding one breaks nobody — but the obvious name is taken: its `Refused`
+//! variant already means *the projected document is not a schema*, carrying `SchemaErrors` from
+//! `Schema::build`, which is a different event with a different remedy. Naming a second refusal
+//! well is a public-API decision.
+//!
+//! **Nothing in any of the four needs UTF-8.** The pair's verification walks the green tree
+//! comparing `token.text().as_bytes()` against `source.as_bytes()`; the projection re-slices
+//! `source` by byte ranges the tree already holds, and every one of those is a token boundary, so
+//! the slicing is not what pins the type either. Where the `rowan` constraint genuinely binds is
+//! materialisation, one layer below — tokora's `CstText`, in the parse door — and it is
+//! *refusable* there rather than binding here.
+//!
+//! `ci/source_census`'s table records **three** of the four against #121 rather than closing it,
+//! so the narrowing stays visible in a run's own output for as long as it stands. The one it does
+//! not record is `_verified_with`: the census convicts concrete text *parameters*, that door has
+//! none, and an entry for it would match nothing and fail the table's own stale-exemption check.
+//!
+//! **What it costs a byte-backed caller, exactly.** The parse spares them the *pre*-validation:
+//! `parse_*_from` takes the bytes as they are. Every door above then wants a `&str` — three of
+//! them as a parameter and `_verified_with` through the `Verified` a caller builds — so a
+//! byte-backed caller performs a fresh `core::str::from_utf8` before validating, and **handles**
+//! its error rather than unwrapping it, unless they are holding the exact buffer the parse ran
+//! over and it has not changed since.
+//!
+//! That proviso is load-bearing. A `Parse` is deliberately **lifetime-free** — that is what lets a
+//! consumer cache one per file — so it borrows nothing and pins nothing. `parse_*_from` borrows
+//! its source for the call and returns a value that outlives the borrow. What the caller still
+//! owns can then change: a `Vec<u8>` is pushed to or truncated, in safe code and with nothing to
+//! stop it; the variable that held a `bytes::Bytes` is reassigned to a different one; a `String`'s
+//! bytes are rewritten through `as_mut_vec`, which is `unsafe` and therefore the caller's own
+//! contract rather than this crate's, but is still a supported way for the buffer to stop being
+//! text. So the conversion can genuinely fail on a buffer whose parse reported nothing.
+//! **A successful parse is a fact about bytes that were read, never about the bytes a variable
+//! holds now.**
+//!
+//! What would make the stronger claim true is a type, not a sentence: a source-bound proof —
+//! something the parse hands back that *borrows* the buffer, so the borrow checker refuses the
+//! mutation rather than a paragraph asking the caller not to make it. This crate does not have one
+//! and this note is not proposing it; the gap is structural, and prose is not a guarantee.
+//!
+//! The residual, then, is one validation pass and a branch on its result — linear in the buffer
+//! rather than a copy of it, and an `Err` a caller must have an answer for. It runs over whatever
+//! that variable holds at the moment the conversion runs, not over the buffer the parse walked.
+//!
+//! **And a source the parser would not read never becomes a `Parse` at all**, because
+//! `parse_*_from` answers `Result<Parse, Refused>` and a concrete `&str` door is never reached
+//! with one. So the two wildcard arms below cover `Unverified::SourceMismatch` and nothing else.
+//!
 //! [`project_executable_document`]: smear_parser::graphql::lossless::project_executable_document
 //! [`project_executable_document_recovered`]: smear_parser::graphql::lossless::project_executable_document_recovered
 //! [`Schema::build`]: super::Schema::build
