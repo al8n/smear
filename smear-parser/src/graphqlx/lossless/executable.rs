@@ -28,11 +28,15 @@
 //! - **A `where` clause before an already-mandatory selection set** (divergence 19). See
 //!   this module's private `constrained_selection_set`.
 //!
-//! And one GraphQL rule that is **absent** here: `FragmentName: Name but not "on"`. GraphQL spends
-//! a production on the exclusion and this suite's GraphQL twin enforces it; GraphQLx's
-//! `executable_definition_name` is a plain `take_name` (`graphqlx/syntactic/generic/mod.rs:377`),
-//! so `fragment on on T { f }` is accepted here. Gate 1 compares verdicts input by input, so
-//! carrying GraphQL's rule across would be a manufactured disagreement.
+//! And one GraphQL rule this suite was **missing**: `FragmentName: Name but not "on"`. GraphQL
+//! spends a production on the exclusion and this suite's GraphQL twin enforces it; GraphQLx's
+//! `executable_definition_name` was a plain `take_name`, so `fragment on on T { f }` was accepted
+//! here and gate 1 recorded the disagreement as a dialect difference. It is not one — GraphQLx
+//! forbids the spelling too — and al8n/smear#58 gave the exclusion a home in
+//! [`generic::executable_definition_name`](super::generic), which is this dialect's fragment-name
+//! production: a fragment is the only executable definition whose name is an
+//! `ExecutableDefinitionName`, so the rule sits one level lower here than in the twin, where the
+//! name is a bare token of the definition.
 //!
 //! # An operation's name is a `DefinitionName`, not a bare name
 //!

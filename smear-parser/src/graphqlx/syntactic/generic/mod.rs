@@ -368,14 +368,63 @@ generic_parser!(
   }
 );
 
+/// `FragmentName : Name but not on`, checked without consuming the token.
+///
+/// The rejection is non-consuming so a surrounding production keeps the token for recovery or
+/// dispatch, which is the vanilla dialect's `fragment_name` rule spelled for this grammar's
+/// shape — see [`executable_definition_name`] for why the exclusion lives one level lower here.
+fn refuse_fragment_name_on<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<(), GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  // `peek_head_map`, not a raw `peek`: a truncated window and a short document are the same bytes,
+  // so a raw peek reports a scanner stop as an absent token — smear issue #177.
+  let found = inp.peek_head_map(|token| {
+    (
+      keyword_of(token.data) == Some(ContextualKeyword::On),
+      *token.span,
+      token.data.kind(),
+    )
+  })?;
+  match found {
+    Some((true, span, kind)) => {
+      Err(DialectGraphqlxError::unexpected_token(kind, Expectation::FragmentName, span).into())
+    }
+    _ => Ok(()),
+  }
+}
+
 generic_parser!(
   /// Parses a GraphQLx executable definition name with optional generic names.
+  ///
+  /// # `Name` but not `on`, and why the exclusion is here
+  ///
+  /// This node **is** the fragment-name production: a fragment definition is the only executable
+  /// definition whose name is an [`ExecutableDefinitionName`] — an operation's is a
+  /// `DefinitionName` — and this is its only caller. So the draft's `FragmentName : Name but not
+  /// on` has one home in this dialect, and it is a narrower one than the vanilla dialect's: there
+  /// the name is a bare token of the definition and the exclusion has to sit in
+  /// `fragment_definition` itself.
+  ///
+  /// **The rule arrived later than the dialect.** GraphQLx accepted `fragment on on T { f }` in
+  /// both suites until al8n/smear#58, which is a parser defect rather than a dialect difference —
+  /// found while deriving the projection's rule set from the grammar, because a projection's rules
+  /// are the grammar's and the grammar was missing one.
   pub executable_definition_name,
   inp,
   ExecutableDefinitionName<GraphqlxSlice<'inp, Src>>,
-  token_bounds = [];
+  token_bounds = [+ DowncastRef<ContextualKeyword>];
   {
     let node_start = extent_start(inp)?;
+    refuse_fragment_name_on(inp)?;
     let name = take_name(inp)?;
     let generics = try_executable_definition_type_generics(inp)?;
     Ok(ExecutableDefinitionName::new(
@@ -625,7 +674,7 @@ impl_generic_api!(
   S,
   ExecutableDefinitionName<S>,
   executable_definition_name;
-  token_bounds = [];
+  token_bounds = [+ DowncastRef<ContextualKeyword>];
 );
 impl_generic_api!(
   /// Parses a GraphQLx path followed by optional recursive type arguments.

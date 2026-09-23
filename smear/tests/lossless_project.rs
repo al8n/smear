@@ -961,6 +961,66 @@ fn a_fragment_named_on_refuses() {
   );
 }
 
+/// A gap tile is a **token**, and the substrate's hole scan tested node kinds only.
+///
+/// Added by al8n/smear#58's GraphQLx round, and it is this dialect's witness for a substrate fix
+/// rather than a change to anything in `graphql/lossless/project.rs`. `reject_holes` discarded
+/// every token, so `scan_holes` declared a tree free of holes while it held one — both dialects
+/// pass `Error | Gap` to that walker and both spell `Gap` as a token image, and this file's
+/// `scan_holes` carried a comment saying the arm was dead as written. It was, and what it was dead
+/// about was not a shape the parser has yet to produce but the one it produces today: the walk then
+/// folded the gap's bytes into the enclosing node's extent as an ordinary non-trivia token and the
+/// door answered `Ok`.
+///
+/// The walker is asked of every element now, so the refusal names the gap's parent and its exact
+/// range. `smear/tests/lossless_x_project.rs` carries the same witness over the other dialect.
+#[test]
+fn a_gap_token_is_a_hole_the_scan_sees() {
+  for (what, src, parent, at) in [
+    (
+      "beside a complete definition",
+      "type T { f: Int } %",
+      K::Document,
+      18..19,
+    ),
+    (
+      "inside a fields block",
+      "type T { % f: Int }",
+      K::FieldsDefinition,
+      9..10,
+    ),
+  ] {
+    let parse = parse_document(src);
+    assert_eq!(
+      parse
+        .syntax()
+        .descendants_with_tokens()
+        .filter(|element| element.kind() == K::Gap)
+        .count(),
+      1,
+      "{what}: the premise is one gap tile; if the lexer stopped tiling here this pin moved"
+    );
+    assert!(
+      !parse.syntax().descendants().any(|n| n.kind() == K::Error),
+      "{what}: an Error node would refuse this tree for the other reason and the gap would go \
+       unmeasured"
+    );
+
+    let refusal = project(&parse, src)
+      .map(|_| ())
+      .expect_err("a gap is a region with no AST image");
+    assert_eq!(
+      refusal.kind(),
+      &ProjectErrorKind::UnexpectedChild {
+        parent,
+        found: K::Gap,
+      },
+      "{what}"
+    );
+    assert_eq!(refusal.span(), &at, "{what}: the gap's own range");
+  }
+}
+
 #[test]
 fn a_mismatched_source_refuses() {
   let src = "type T { f: Int }";

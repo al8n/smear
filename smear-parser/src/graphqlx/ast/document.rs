@@ -29,7 +29,7 @@ pub type DefinitionOrExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   >;
 
 /// A top-level GraphQLx type-system entry, including imports.
-#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
@@ -73,7 +73,7 @@ impl<S, Span, Ty> IntoSpan<Span> for ImportOrTypeSystemDefinitionOrExtension<S, 
 }
 
 /// A top-level GraphQLx executable entry, including imports.
-#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
@@ -113,7 +113,7 @@ impl<S, Span, Ty> IntoSpan<Span> for ImportOrExecutableDefinition<S, Span, Ty> {
 }
 
 /// A complete top-level GraphQLx entry, including imports and extensions.
-#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
