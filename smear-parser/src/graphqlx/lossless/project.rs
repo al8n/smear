@@ -395,9 +395,8 @@
 //! [`Gap`](SyntaxKind::Gap)) is the one element with no image and the doors refuse it before any
 //! walk, so a walk never meets one.
 //!
-//! Deleting the descent also retired the `TooDeep` the fold used to carry: nothing below covers a
-//! subtree it has not walked, so no extent is unknowable. The refusal is still reachable — the
-//! doors' own verification produces it — and
+//! The fold carries no `TooDeep` of its own: nothing below covers a subtree it has not walked, so
+//! no extent is unknowable. The refusal comes from the doors' own verification, and
 //! `a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended` pins it there.
 //!
 //! ## A walk is its production transcribed
@@ -565,10 +564,8 @@
 //!
 //! The grammar is bounded above a value, and **three cycles are not**: `value` ↔
 //! `object_field`/`map_entry`, `selection_set` ↔ `field`/`inline_fragment`, and `ty` ↔ a list's,
-//! a set's and a map's element and a path's generic arguments. Each is a **worklist**, for the
-//! reason and with the measurement `graphql/lossless/project.rs`'s header records: at the top of
-//! the lexer's `HARD_MAX` the doors produce exactly the tree a recursive dispatch cannot descend,
-//! and no value of `MAX_GREEN_DEPTH` closes that. al8n/smear#201.
+//! a set's and a map's element and a path's generic arguments. Each is a **worklist**, as in
+//! `graphql/lossless/project.rs`. al8n/smear#201.
 //!
 //! Three cycles rather than GraphQL's four, and it is not a smaller surface: the const and
 //! non-const value walks are one machine parameterised by a trait here as they are there, and what
@@ -621,8 +618,11 @@ use crate::{
     syntactic::definition::classify_location,
   },
   lossless::project::{
-    Recovery, Unverified, reject_holes, to_range, to_span, verify_source, verify_source_at,
-    verify_source_counted,
+    Recovery, Unverified, reject_foreign_kinds_and_holes, to_range, to_span, verify_root_kind,
+    verify_source, verify_source_at, verify_source_counted,
+    walk::{
+      Extent, Leading, Optional, Trivia, described_extents, missing, unexpected, unexpected_token,
+    },
   },
 };
 
@@ -668,25 +668,12 @@ type Node<'g> = crate::lossless::project::Node<'g, GraphQLxLang>;
 /// [`Node`]'s other half.
 type Token<'g> = crate::lossless::project::Token<'g, GraphQLxLang>;
 
-/// A [`Node`]'s children, each carrying its own absolute start.
-///
-/// Named here because the three worklists below suspend one: a frame adopts the tree's own child
-/// iterator rather than copying the children out, so a container costs one entry however wide it
-/// is.
-type Children<'g> = crate::lossless::project::Children<'g, GraphQLxLang>;
-
-/// One child of a node: the cursor's unit.
-type Element<'g> = crate::lossless::project::Element<'g, GraphQLxLang>;
+/// A node's child sequence, read in its production's order — the substrate's cursor over this
+/// dialect's kind space. See the substrate's `walk` module for the atoms and why they are shared;
+/// [`Atoms`] is this dialect's half.
+type Cursor<'g> = crate::lossless::project::walk::Cursor<'g, GraphQLxLang>;
 
 type Out<T> = Result<T, ProjectError>;
-
-/// A constituent whose node the tree opens even where the AST records nothing for it.
-///
-/// `( )` is a written-down empty argument list and `( )` after an operation name is a written-down
-/// empty variables list: the tree gives each a node and the syntactic parser answers `None` for
-/// both while still covering the parentheses. So the value and the extent travel separately, and
-/// [`Extent::keep_optional`] is where a parent puts them back together.
-type Optional<T> = (Option<T>, Option<TextRange>);
 
 /// A described definition's three answers, folded from the node's single walk.
 ///
@@ -708,6 +695,7 @@ type Definition<'src, T> = (Option<StringValue<&'src str>>, T, TextRange);
 fn unverified(error: &ProjectError) -> Unverified {
   match error.kind() {
     ProjectErrorKind::TooDeep { limit } => Unverified::TooDeep { limit: *limit },
+    ProjectErrorKind::WrongRoot { raw } => Unverified::WrongRoot { raw: *raw },
     _ => Unverified::SourceMismatch,
   }
 }
@@ -785,13 +773,16 @@ pub fn project_executable_document<'src>(
 /// ones that do not.
 ///
 /// [`project_executable_document`] is fail-fast: one hole anywhere and the whole document is
-/// refused. That is the right answer for a caller that wants the AST or nothing, and the wrong one
-/// for an editor — a lossless CST exists precisely so it can represent a document somebody is
-/// still typing.
+/// refused.
 ///
 /// This door walks the top level instead, projects each entry **independently**, and keeps the
-/// ones that succeeded. What it could see is the [`Recovery`], and that value is the contract:
-/// read it before reading anything off the AST.
+/// ones that succeeded. What it could see is the [`Recovery`].
+///
+/// Every container of the root's kind is stepped through, not only the first: a caller-minted root
+/// holding two valid containers projects the entries of both and reports complete, where
+/// [`project_executable_document`], which asserts exactly one container, refuses the second. Each
+/// container is a legitimate document image and this door's contract is per entry — see
+/// [`Recovery`].
 ///
 /// ```
 /// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
@@ -887,9 +878,7 @@ pub fn project_type_system_document<'src>(
 /// ones that do not.
 ///
 /// [`project_executable_document_recovered`]'s mirror at the SDL root, walking the same top level
-/// with the same accounting. What differs is only what a dropped definition costs: a type this
-/// document defines is what every reference to it elsewhere resolves against, so a [`Recovery`]
-/// with [`is_complete`](Recovery::is_complete) false says rather more here.
+/// with the same accounting.
 ///
 /// ```
 /// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
@@ -952,17 +941,9 @@ impl super::ast::TypeSystemDocument {
 
 /// A parse and the source it was produced from, **verified once**.
 ///
-/// # Why this is a type
-///
-/// Two properties a lossless door is asked for, which cannot both hold when the door is handed an
-/// unverified pair: a **source mismatch outranks a budget refusal**, because a stale pair is not a
-/// resource problem; and the **ceiling is absolute**, because no input-linear work may run outside
-/// the ledger. Deciding the first requires *finishing* the comparison; honouring the second
-/// requires being able to stop before finishing it.
-///
-/// Moving the verification out of the bounded call is the only shape that satisfies both. A
-/// `Verified` is checked by whoever constructs it, once, and every door that takes one has nothing
-/// left to verify. al8n/smear#198.
+/// [`Verified::new`] is the only constructor: it runs the whole-root byte comparison and the root
+/// check once. [`project_executable_document_verified`] and its twin take one and run no
+/// verification, so they have no error half. al8n/smear#198.
 #[derive(Clone, Copy)]
 pub struct Verified<'p, 'src> {
   parse: &'p Parse,
@@ -982,24 +963,36 @@ impl core::fmt::Debug for Verified<'_, '_> {
 }
 
 impl<'p, 'src> Verified<'p, 'src> {
-  /// Verifies that `source` is the whole text `parse` was produced from.
+  /// Verifies that `source` is the whole text `parse` was produced from, and that the parse's root
+  /// is this dialect's document root.
   ///
-  /// `O(tokens)` over the borrowed green root — see [`verify_parse`], which is the same comparison
-  /// and answers the same [`Unverified`].
+  /// The second half exists because `finish_root` is public and generic, so a `Parse` can be
+  /// minted over a root that is not this dialect's `Root` — outside the kind space, or an in-space
+  /// kind such as `Name` — and its bytes verify. The refusal is [`Unverified::WrongRoot`]. Kinds
+  /// below the root are checked by each entry's own scan, so a recovering door counts an entry
+  /// holding one as skipped. al8n/smear#218.
+  ///
+  /// `O(green elements + source bytes)` over the borrowed green root: [`verify_source_counted`]
+  /// visits every node and token and compares every token's bytes. See [`verify_parse`], which is
+  /// the same comparison and answers the same [`Unverified`].
   ///
   /// # Allocation
   ///
-  /// **It allocates nothing through sixteen branching ancestors, and not at every shape.** The
-  /// comparison keeps one entry per ancestor of the node in hand that still has an unvisited child,
-  /// the first sixteen of them in a fixed array in its own frame; a seventeenth spills to the heap
-  /// through an infallible `push`, at 24 bytes an entry and bounded by
-  /// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH). Sixteen is not a depth — a
-  /// chain of single-child nodes holds one entry however long it is — but it is not far off,
-  /// either: an ordinary nested selection set has one branching ancestor per level.
+  /// **It allocates nothing through sixteen branching ancestors.** The comparison keeps one entry
+  /// per ancestor of the node in hand that still has an unvisited child, the first sixteen of them
+  /// in a fixed array in its own frame; a seventeenth spills to the heap through an infallible
+  /// `push`, bounded by [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH). A chain of
+  /// single-child nodes holds one entry however long it is.
   pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, Unverified> {
     // Counted by the same walk that verifies, so the proof and the price are established together
     // and cost one pass between them. See [`Verified::projection_cost`].
-    match verify_source_counted::<SyntaxKind>(parse.green(), source) {
+    //
+    // And the root's raw kind, which the byte walk never reads: a `Verified` proves the recovering
+    // walk's first question — whether a root child is the container — can be asked of this root
+    // without answering for a tree outside this dialect's space.
+    match verify_source_counted::<SyntaxKind>(parse.green(), source)
+      .and_then(|elements| verify_root_kind::<SyntaxKind>(parse.green()).map(|()| elements))
+    {
       Ok(elements) => Ok(Self {
         parse,
         source,
@@ -1011,14 +1004,12 @@ impl<'p, 'src> Verified<'p, 'src> {
 
   /// What projecting this pair costs, in **elements** — one per green node and one per token.
   ///
-  /// # A proof that does not bound what its consumer charges for is not a proof
-  ///
-  /// `Verified` proves the *bytes* agree. A door that then prices the projection from
-  /// `source.len()` is assuming bytes bound structure, and they do not:
+  /// `Verified` proves the *bytes* agree, and bytes do not bound structure:
   /// [`finish_root`](crate::lossless::runner::finish_root) is public, so a caller can mint a
   /// `Parse` from its own CST event stream, and a balanced pair of **zero-width** nodes adds
-  /// structure without adding a byte. Saturating at [`u32::MAX`], so a tree too large to price
-  /// refuses rather than wrapping into a budget it fits. al8n/smear#198.
+  /// structure without adding a byte. This count is taken by the same walk that verified the pair.
+  /// It saturates at [`u32::MAX`]: no finite validation budget covers that cost, and a disabled
+  /// ledger or a projection that takes no budget proceeds. al8n/smear#198.
   #[inline]
   pub const fn projection_cost(&self) -> u32 {
     self.elements
@@ -1037,45 +1028,48 @@ impl<'p, 'src> Verified<'p, 'src> {
   }
 }
 
-/// That `parse` and `source` describe the same bytes, over the **whole root** — or the reason the
-/// pair is refused.
+/// That `parse` and `source` describe the same bytes, over the **whole root**, and that the root is
+/// this dialect's document root — or the reason the pair is refused.
 ///
-/// The recovering projection's precondition, and the one thing it cannot establish definition by
-/// definition. Each entry it projects is verified against `source` at that entry's own range,
-/// which refuses a pair whose bytes differ — and says nothing at all about a `source` that
-/// *begins* with the parse's text and then adds to it. There every entry matches, nothing is
-/// skipped, the [`Recovery`] reports complete, and whatever the caller appended is silently absent
-/// from the AST.
+/// The recovering doors' precondition: their entries compare no bytes, so this whole-root
+/// comparison is the only one they make. It compares lengths first, so a `source` that *begins*
+/// with the parse's text and then adds to it is refused before a byte is walked.
 ///
-/// [`verify_source`] over the parse's **green** root, which is the same comparison the fail-fast
-/// doors make. It is `O(tokens)` and it reads no `Parse` state beyond a borrow; it allocates
-/// nothing through sixteen branching ancestors, on the terms [`Verified::new`] states.
+/// [`verify_source`] over the parse's **green** root — the comparison the fail-fast doors open
+/// with — then [`verify_root_kind`]. It is `O(green elements + source bytes)`: every node and token
+/// is visited and every token's bytes are compared. It reads no `Parse` state beyond a borrow, and
+/// it allocates nothing through sixteen branching ancestors, on the terms [`Verified::new`] states.
 ///
 /// # Why this is not a `bool`
 ///
-/// [`verify_source`] refuses for two reasons and only one of them is *these are not the same
-/// document*: a tree deeper than
-/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) is refused for its **shape**,
-/// whatever its bytes say. The two refusals have opposite remedies — a stale pair is re-parsed, and
-/// re-parsing a tree too deep to descend produces the same tree — so a boolean would send a caller
-/// to the one action that cannot work. al8n/smear#198.
+/// It refuses for three reasons, and [`Unverified`] names which: the bytes differ
+/// ([`Unverified::SourceMismatch`]), the tree is deeper than
+/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) whatever its bytes say
+/// ([`Unverified::TooDeep`]), or the root is not this dialect's ([`Unverified::WrongRoot`]).
+/// [`Verified::new`] refuses at the same ceiling. al8n/smear#198.
 pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
-  verify_source::<SyntaxKind>(parse.green(), source).map_err(|refusal| unverified(&refusal))
+  verify_source::<SyntaxKind>(parse.green(), source)
+    .and_then(|()| verify_root_kind::<SyntaxKind>(parse.green()))
+    .map_err(|refusal| unverified(&refusal))
 }
 
 /// The recovering top-level walk, shared by both single-half roots.
 ///
-/// One implementation rather than one per root, because what it computes is [`Recovery`], and
-/// `Recovery`'s documented meaning has to be one statement about both doors rather than two that
-/// happen to agree today. `entry_of` is a `fn` pointer rather than a generic parameter so this
-/// monomorphises once per root.
+/// One implementation rather than one per root, because what it computes is [`Recovery`] and both
+/// doors report it. `entry_of` is a `fn` pointer.
 ///
 /// # Every element of the root, not every element of the document node
 ///
 /// The walk starts at the **root** and steps *through* the document node rather than starting
 /// inside it. The two are not the same population: the parser can leave a gap tile beside the
-/// document node instead of within it, and iterating the document node's children then reports a
-/// complete [`Recovery`] over a document whose every byte had no AST image.
+/// document node instead of within it.
+///
+/// **Every** container of `root_kind` under the root is stepped through, not only the first. The
+/// dialect's own doors build one; a caller-minted root can hold two, and this walk projects the
+/// entries of both and reports complete. That is deliberate: each container is a legitimate
+/// document image, and this walk's contract is per entry — [`Recovery`] counts what had an AST
+/// image and what did not, and a second container's entries have one. Whether the root is exactly
+/// one document is the fail-fast doors' question, and [`sole_document`] answers it there.
 fn recovered_top_level<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
@@ -1083,9 +1077,11 @@ fn recovered_top_level<'src, T>(
   source: &'src str,
 ) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
   // Established once, over the whole root, before a single element is projected, and **returned**
-  // rather than folded into the tally. See [`verify_parse`] for why a per-entry check cannot see a
-  // prefix, and [`Unverified`] for why the answer is not a [`Recovery`].
-  if let Err(refusal) = verify_source::<SyntaxKind>(parse.green(), source) {
+  // rather than folded into the tally. The entries below compare no bytes, so this is the only
+  // byte comparison this walk makes.
+  if let Err(refusal) = verify_source::<SyntaxKind>(parse.green(), source)
+    .and_then(|()| verify_root_kind::<SyntaxKind>(parse.green()))
+  {
     return Err(unverified(&refusal));
   }
   Ok(recovered_top_level_verified(
@@ -1095,8 +1091,8 @@ fn recovered_top_level<'src, T>(
 
 /// [`recovered_top_level`] for a pair whose verification is already established.
 ///
-/// Infallible, because the only thing the fallible form can answer with is the check a
-/// [`Verified`] already carries. Splitting it is what lets a **bounded** caller exist at all.
+/// Infallible: it runs no verification. Its callers are [`recovered_top_level`], after its own, and
+/// the `_verified` doors, whose [`Verified`] carries one.
 fn recovered_top_level_verified<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
@@ -1115,7 +1111,14 @@ fn recovered_top_level_verified<'src, T>(
   let mut take = |element: NodeOrToken<Node<'_>, Token<'_>>| match element {
     // Rubble the parser could not attach to an entry. Counted per token rather than per run: a
     // bound on what was lost, which is what `Recovery::skipped` promises.
-    NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
+    //
+    // Read raw: this pass runs before any scan, so a token outside the kind space is counted as
+    // rubble rather than asked a kind `kind_from_raw` would panic on.
+    NodeOrToken::Token(token)
+      if !SyntaxKind::from_raw(token.green().kind().0).is_some_and(is_trivia) =>
+    {
+      skipped = skipped.saturating_add(1)
+    }
     NodeOrToken::Token(_) => {}
     NodeOrToken::Node(child) => match entry_of(child, source) {
       Ok((entry, piece)) => {
@@ -1129,7 +1132,9 @@ fn recovered_top_level_verified<'src, T>(
     match element {
       // The document node is stepped *through*: its children are the entries. Everything else
       // under the root is a top-level element in its own right.
-      NodeOrToken::Node(child) if child.kind() == root_kind => child.children().for_each(&mut take),
+      NodeOrToken::Node(child) if child.green().kind() == raw_of(root_kind) => {
+        child.children().for_each(&mut take)
+      }
       other => take(other),
     }
   }
@@ -1149,18 +1154,15 @@ fn recovered_top_level_verified<'src, T>(
 
 /// The one document container a fail-fast door reads, with the rest of the root's shape refused.
 ///
-/// **Finding the container is not enough.** A parse's root holds exactly one of them plus trivia,
-/// and a door that merely *selects* the first child of the wanted kind says nothing about what else
-/// is there. `finish_root` is public, so a caller can mint a `Parse` whose root holds a valid
-/// document **and** a second container, or another node, or a bare token — and the door's own
-/// whole-source verification passes over all of it, because that check compares bytes and every one
-/// of those bytes is in the tree. The projection would then answer an AST that omits a region of
-/// the source it had just declared verified, which is the data loss under a success type the hole
-/// scan beside it exists to refuse.
+/// **Finding the container is not enough.** `finish_root` is public, so a caller can mint a `Parse`
+/// whose root holds a valid document **and** a second container, or another node, or a bare token,
+/// and the door's whole-source verification passes over all of it: that check compares bytes, not
+/// shape.
 ///
 /// So the shape is asserted rather than searched: one container of `kind`, trivia, and nothing
 /// else. A duplicate container is an unexpected sibling like any other — the second one is a region
-/// with no image in the AST the first one produces. al8n/smear#58.
+/// with no image in the AST the first one produces. The recovering doors do not share this
+/// assertion — see [`recovered_top_level`] for why. al8n/smear#58.
 fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> Out<Node<'g>> {
   // `Trivia* Container Trivia*`, transcribed like every walk below.
   let mut cursor = Cursor::new(root);
@@ -1171,21 +1173,14 @@ fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> 
 
 /// One top-level entry, with the holes in **its own** subtree refused.
 ///
-/// The scan is scoped rather than global on purpose: a hole is charged to the entry that holds it
-/// and to no other. Without it a hole would instead be *skipped* by whichever `child_node` lookup
-/// walked past it, which is the data loss under a success type both doors exist to refuse.
+/// The scan is scoped to the entry, so a hole is charged to the entry that holds it and to no
+/// other.
 ///
-/// # It verified the pair again, and there was nothing left to verify
+/// # It compares no bytes
 ///
-/// This used to open with [`open_node`], on the argument that the recovering door has no error
-/// channel of its own so an entry whose bytes are not the caller's has to fail *as that entry*.
-/// The argument was about a door that does not exist: **both** recovering paths establish the pair
-/// over the whole root before the first entry is reached — [`recovered_top_level`] with
-/// [`verify_source`] and [`project_executable_document_verified`] through the [`Verified`] it is
-/// handed — so by the time this runs the bytes have already been compared, and comparing the
-/// entry's own again is a second pass over the same bytes that can only answer what the first one
-/// did. What it cost is `O(source)` per entry rather than `O(source)` per document.
-/// al8n/smear#58.
+/// **Both** recovering paths establish the pair over the whole root before the first entry is
+/// reached — [`recovered_top_level`] with [`verify_source`], and
+/// [`project_executable_document_verified`] through the [`Verified`] it is handed. al8n/smear#58.
 fn recoverable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
@@ -1194,8 +1189,8 @@ fn recoverable_entry<'src>(
   executable_entry(node, source)
 }
 
-/// [`recoverable_entry`]'s twin at the SDL root, scoped for the same reason and post-verified for
-/// the same one.
+/// [`recoverable_entry`]'s twin at the SDL root, scoped for the same reason and comparing no bytes
+/// for the same one.
 fn recoverable_type_system_entry<'src>(
   node: Node<'_>,
   source: &'src str,
@@ -1214,19 +1209,21 @@ fn recoverable_type_system_entry<'src>(
 /// Open a fail-fast door: the `(tree, source)` pair verified whole, then every recovery hole
 /// refused.
 ///
-/// Both checks read the **green** tree, so together they cost two passes over the file's bytes and
-/// not a single cursor allocation. The pair is checked first because nothing else the door could
-/// report means anything if the tree is not this text's.
+/// Both walks read the **green** tree: the byte comparison visits every node and token and compares
+/// every token's bytes, and the hole scan visits every node and token. The pair is checked first,
+/// so every range the door reports afterwards is a range of `source`.
 fn open(root: Node<'_>, source: &str) -> Out<()> {
   verify_source(root.green(), source)?;
+  // The root's identity before anything reads its children: a parse rooted anywhere but this
+  // dialect's `Root` was not finished by a dialect door. al8n/smear#218.
+  verify_root_kind::<SyntaxKind>(root.green())?;
   scan_holes(root)
 }
 
 /// [`open`]'s subtree form: `node`'s own text is checked where `node` sits.
 ///
-/// The compositional doors' check, and the recovering door's per-entry one. No hole scan —
-/// [`Document::to_ast`](super::ast::Document::to_ast) and its twins deliberately do not make one,
-/// and the recovering door makes its own so it can charge the hole to an entry.
+/// The compositional doors' check. The hole scan beside it is theirs to make, scoped to the same
+/// node — see [`Document::to_ast`](super::ast::Document::to_ast).
 fn open_node(node: Node<'_>, source: &str) -> Out<()> {
   verify_source_at(node.green(), source, usize::from(node.start()))
 }
@@ -1240,7 +1237,10 @@ fn scan_holes(node: Node<'_>) -> Out<()> {
   // is asked of every element rather than of every node: a scan that tested nodes only walked past
   // every gap tile, and the projection then folded the bytes it covers into an enclosing extent as
   // an ordinary non-trivia token — a hole the preflight had declared absent.
-  reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
+  // The kind check rides on the same pass: this scan is the first code in every door to ask an
+  // element its kind, so it is where a raw kind outside this space is refused rather than handed
+  // to `kind_from_raw`, which can only panic. al8n/smear#218.
+  reject_foreign_kinds_and_holes(node, |kind| matches!(kind, K::Error | K::Gap))
 }
 
 /// A parse's green root, as the walk's first node.
@@ -1249,39 +1249,19 @@ fn parse_root(parse: &Parse) -> Node<'_> {
 }
 
 /// The first direct child of `parent` whose kind is `kind`.
+///
+/// Compared **raw**, because its one caller runs before the per-entry scan that checks kinds: a
+/// sibling outside the kind space is simply not the one wanted.
 fn child_node(parent: Node<'_>, kind: SyntaxKind) -> Option<Node<'_>> {
   parent.children().find_map(|child| match child {
-    NodeOrToken::Node(child) if child.kind() == kind => Some(child),
+    NodeOrToken::Node(child) if child.green().kind() == raw_of(kind) => Some(child),
     _ => None,
   })
 }
 
-fn missing(parent: Node<'_>, wanted: &'static str) -> ProjectError {
-  ProjectError::new(
-    ProjectErrorKind::MissingChild {
-      parent: parent.kind(),
-      wanted,
-    },
-    to_range(parent.text_range()),
-  )
-}
-
-fn unexpected(parent: Node<'_>, found: SyntaxKind, at: TextRange) -> ProjectError {
-  ProjectError::new(
-    ProjectErrorKind::UnexpectedChild {
-      parent: parent.kind(),
-      found,
-    },
-    to_range(at),
-  )
-}
-
-fn unexpected_node(parent: Node<'_>, found: Node<'_>) -> ProjectError {
-  unexpected(parent, found.kind(), found.text_range())
-}
-
-fn unexpected_token(parent: Node<'_>, found: Token<'_>) -> ProjectError {
-  unexpected(parent, found.kind(), found.text_range())
+/// `kind` as the green tree stores it.
+fn raw_of(kind: SyntaxKind) -> rowan::SyntaxKind {
+  <GraphQLxLang as rowan::Language>::kind_to_raw(kind)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1301,243 +1281,43 @@ const fn is_string_image(kind: SyntaxKind) -> bool {
   matches!(kind, K::InlineString | K::BlockString)
 }
 
-/// A node's token extent, folded as its children are consumed.
-///
-/// One of these lives in every [`Cursor`]: a token atom covers the token it consumed and
-/// [`keep`](Cursor::keep) covers the extent a projected child hands back, so what is left at the
-/// end is the node's span. `None` — no non-trivia token anywhere under the node — is a finding
-/// rather than a fallback to the node's own range, which is why [`range`](Self::range) is
-/// fallible.
-#[derive(Debug, Clone, Copy, Default)]
-struct Extent {
-  /// The cover of every non-trivia token folded in so far.
-  range: Option<TextRange>,
-}
-
-impl Extent {
-  /// Widen to include `piece`.
-  ///
-  /// `cover` rather than `start..piece.end()`: a fold that assumed document order would produce an
-  /// inverted range the moment it was handed a stream that was not in it, and an inverted span is
-  /// exactly the class `tests/support/span_extent.rs` exists to catch.
+impl Trivia for GraphQLxLang {
   #[inline]
-  fn cover(&mut self, piece: TextRange) {
-    self.range = Some(match self.range {
-      Some(seen) => seen.cover(piece),
-      None => piece,
-    });
-  }
-
-  /// Widen to include a projected child's extent, and keep the child.
-  ///
-  /// The bottom-up fold, spelled once: a child function answers its AST value beside the extent it
-  /// folded, and the parent covers the second while binding the first.
-  #[inline]
-  fn keep<T>(&mut self, projected: (T, TextRange)) -> T {
-    let (value, piece) = projected;
-    self.cover(piece);
-    value
-  }
-
-  /// [`keep`](Self::keep) for a constituent the grammar makes optional.
-  #[inline]
-  fn keep_opt<T>(&mut self, projected: Option<(T, TextRange)>) -> Option<T> {
-    projected.map(|projected| self.keep(projected))
-  }
-
-  /// [`keep`](Self::keep) for a constituent whose node the tree opens even where the AST records
-  /// nothing for it — see [`Optional`].
-  #[inline]
-  fn keep_optional<T>(&mut self, projected: Optional<T>) -> Option<T> {
-    let (value, piece) = projected;
-    if let Some(piece) = piece {
-      self.cover(piece);
-    }
-    value
-  }
-
-  #[inline]
-  const fn get(self) -> Option<TextRange> {
-    self.range
-  }
-
-  #[inline]
-  fn range(self, node: Node<'_>, wanted: &'static str) -> Out<TextRange> {
-    self.range.ok_or_else(|| missing(node, wanted))
+  fn is_trivia(kind: SyntaxKind) -> bool {
+    is_trivia(kind)
   }
 }
 
-/// The outer and inner extents of a described node, from the one fold.
+/// This dialect's half of the cursor: the atoms that need its lexer or its keyword table.
 ///
-/// `inner` is everything the node's fold covered *except* its description; `described` is the
-/// description's own extent when the node carries one. The wrapper's span is their cover and the
-/// definition's is `inner`, which is where the hoist shows up as a number — and note the three node
-/// types that give both the same span instead, listed in the module header.
-fn described_extents(
-  node: Node<'_>,
-  inner: Extent,
-  described: Option<TextRange>,
-) -> Out<(TextRange, TextRange)> {
-  let inner = inner.range(
-    node,
-    match described {
-      Some(_) => "a constituent other than its description",
-      None => "a token",
-    },
-  )?;
-  let outer = match described {
-    Some(described) => inner.cover(described),
-    None => inner,
-  };
-  Ok((outer, inner))
+/// The substrate's cursor owns every atom that takes a kind as a parameter; what is left here is
+/// what reading a `Name` means in this dialect — a keyword by its spelling, a name through
+/// [`identifier`], a spelling a caller classifies — and where a description sits. A trait rather
+/// than free functions so every walk below reads as the one sequence of calls it was before the
+/// hoist, and a trait rather than inherent methods because the cursor is the substrate's type.
+///
+/// **There is no `token(K::Name)`**, and that is the point: ten vocabularies at al8n/smear#58's
+/// fourth round HEAD folded keyword names by kind alone and unbounded in count, so
+/// `ScalarTypeDefinition { Name("scalar") DefinitionName(S) Name("junk") }` projected `scalar S`
+/// with `junk` covered.
+trait Atoms<'g> {
+  fn keyword(&mut self, keyword: ContextualKeyword, wanted: &'static str) -> Out<Token<'g>>;
+  fn opt_keyword(&mut self, keyword: ContextualKeyword) -> Option<Token<'g>>;
+  fn name_token<'src>(&mut self, source: &'src str, wanted: &'static str) -> Out<Name<&'src str>>;
+  fn name_except<'src>(
+    &mut self,
+    source: &'src str,
+    reserved: &[ContextualKeyword],
+    rule: &'static str,
+    wanted: &'static str,
+  ) -> Out<Name<&'src str>>;
+  fn opt_name<'src>(&mut self, source: &'src str) -> Out<Option<Name<&'src str>>>;
+  fn spelling(&mut self, wanted: &'static str) -> Out<Token<'g>>;
+  fn opt_spelling(&mut self) -> Option<Token<'g>>;
+  fn opt_description(&mut self) -> Option<Token<'g>>;
 }
 
-/// A node's child sequence, read in the order its production writes it.
-///
-/// # Why a cursor and not a slot dispatch
-///
-/// Through al8n/smear#58's fourth round every walk below was a `match child.kind()` filling slots
-/// behind `is_none()` guards, with a token vocabulary beside it. That form can express a shape's
-/// *set* of children and cannot express their **sequence** or **multiplicity** — and the same
-/// kinds in a different order or count are a different sentence wherever a production has a
-/// committing prefix (`as`, `:`, `=`, `implements`, `where`, `on`) or a separator (`&`, `|`, `=>`,
-/// `::`). `import { A as } from "m"` and `type T where A:B & { }` are the two the fifth round
-/// found: an `as` with no target and a `&` with no member, each covered by the extent and present
-/// in no AST field. Each earlier round had found the previous such gap, because a vocabulary is an
-/// *approximation* of the production it stands in for and the two differ somewhere.
-///
-/// So a walk is its production **transcribed**: a sequence of atoms over this cursor, in the
-/// grammar's order, ending in [`end`](Self::end). *Represented* stops being a property a reviewer
-/// checks against a table and becomes *consumed by an atom*; sequence, multiplicity, vocabulary,
-/// one-of exclusivity, committing prefixes and separators are consequences of the transcription
-/// rather than rules laid over it. It is the same shape `graphqlx/lossless/*.rs` already has over
-/// the token stream, and **every** walk in this file is one — the three worklists included, whose
-/// frames suspend a cursor rather than a raw child iterator.
-///
-/// # What an atom does
-///
-/// Trivia is skipped, everywhere. A **token** atom covers what it consumed, because a token's
-/// bytes are the node's own. A **node** atom does not: a child's contribution is its *token*
-/// extent, which only the child's own walk knows, so the caller folds it back with
-/// [`keep`](Self::keep) when it projects the child — or, for the three worklist cycles, when the
-/// descent returns. A node handed back and neither projected nor descended into is the one thing
-/// this form cannot make impossible; `tests/lossless_x_mutation.rs` is what finds it.
-///
-/// **A `Name` is never consumed by kind alone.** It reaches an atom as a keyword
-/// ([`keyword`](Self::keyword)), as a name re-cooked through the lexer's own identifier door
-/// ([`name_token`](Self::name_token)), or as a spelling its caller classifies
-/// ([`spelling`](Self::spelling)) — never as "some `Name`, any number of them".
-///
-/// Refusals are positioned: [`MissingChild`](ProjectErrorKind::MissingChild) when the children run
-/// out, [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) at the element actually in hand.
-struct Cursor<'g> {
-  node: Node<'g>,
-  children: Children<'g>,
-  peeked: Option<Element<'g>>,
-  extent: Extent,
-}
-
-/// Whether a separated list may open with its separator — `on | FIELD | QUERY` may, `A & B` may
-/// not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Leading {
-  Allowed,
-  Forbidden,
-}
-
-impl<'g> Cursor<'g> {
-  #[inline]
-  fn new(node: Node<'g>) -> Self {
-    Self {
-      node,
-      children: node.children(),
-      peeked: None,
-      extent: Extent::default(),
-    }
-  }
-
-  /// The next non-trivia element, without consuming it.
-  #[inline]
-  fn peek(&mut self) -> Option<Element<'g>> {
-    if self.peeked.is_none() {
-      for element in self.children.by_ref() {
-        match element {
-          NodeOrToken::Token(token) if is_trivia(token.kind()) => {}
-          other => {
-            self.peeked = Some(other);
-            break;
-          }
-        }
-      }
-    }
-    self.peeked
-  }
-
-  #[inline]
-  fn bump(&mut self) {
-    self.peeked = None;
-  }
-
-  #[inline]
-  fn missing(&self, wanted: &'static str) -> ProjectError {
-    missing(self.node, wanted)
-  }
-
-  #[inline]
-  fn unexpected(&self, element: Element<'g>) -> ProjectError {
-    match element {
-      NodeOrToken::Node(child) => unexpected_node(self.node, child),
-      NodeOrToken::Token(token) => unexpected_token(self.node, token),
-    }
-  }
-
-  /// The refusal for a required constituent that is not next: **what is in hand decides it**.
-  ///
-  /// [`MissingChild`](ProjectErrorKind::MissingChild) when the children ran out, or when the next
-  /// element is the enclosing `closer` — a present-but-empty `{ }` is row one of the container
-  /// table, and its answer is that the member is missing. Anything else is a present element the
-  /// production has no place for, refused as
-  /// [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) **at that element**: a refusal that
-  /// named the parent while the obstruction sat in plain view would point a caller at the wrong
-  /// bytes, which is Codex round five's third finding.
-  fn absent(&mut self, closer: Option<SyntaxKind>, wanted: &'static str) -> ProjectError {
-    match self.peek() {
-      None => self.missing(wanted),
-      Some(NodeOrToken::Token(token)) if Some(token.kind()) == closer => self.missing(wanted),
-      Some(element) => self.unexpected(element),
-    }
-  }
-
-  /// The next element must be a token of `kind`.
-  fn token(&mut self, kind: SyntaxKind, wanted: &'static str) -> Out<Token<'g>> {
-    self.token_of(&[kind], wanted)
-  }
-
-  /// The next element must be a token whose kind is one of `kinds` — a literal leaf's one token.
-  fn token_of(&mut self, kinds: &[SyntaxKind], wanted: &'static str) -> Out<Token<'g>> {
-    match self.peek() {
-      Some(NodeOrToken::Token(token)) if kinds.contains(&token.kind()) => {
-        self.bump();
-        self.extent.cover(token.text_range());
-        Ok(token)
-      }
-      Some(element) => Err(self.unexpected(element)),
-      None => Err(self.missing(wanted)),
-    }
-  }
-
-  /// A token of `kind` if one is next.
-  fn opt_token(&mut self, kind: SyntaxKind) -> Option<Token<'g>> {
-    match self.peek() {
-      Some(NodeOrToken::Token(token)) if token.kind() == kind => {
-        self.bump();
-        self.extent.cover(token.text_range());
-        Some(token)
-      }
-      _ => None,
-    }
-  }
-
+impl<'g> Atoms<'g> for Cursor<'g> {
   /// A `Name` token spelling `keyword`, through the lexer's own table.
   ///
   /// **There is no `token(K::Name)`**, and that is the point: ten vocabularies at the fourth
@@ -1577,7 +1357,9 @@ impl<'g> Cursor<'g> {
   /// The one door every name position goes through: the slice is handed to [`identifier`] — the
   /// shipped scanner, which must read the whole slice as exactly one identifier — so a `Name`
   /// label over bytes the lexer would not produce a name from is
-  /// [`MalformedToken`](ProjectErrorKind::MalformedToken) here and nowhere else. See [`name`].
+  /// [`MalformedToken`](ProjectErrorKind::MalformedToken) here, at a name position. The other way a
+  /// `Name` reaches that refusal is a spelling position whose classifier does not know the word —
+  /// an operation keyword, a directive location — which a parse can reach. See [`name`].
   fn name_token<'src>(&mut self, source: &'src str, wanted: &'static str) -> Out<Name<&'src str>> {
     self.name_except(source, &[], "", wanted)
   }
@@ -1652,137 +1434,6 @@ impl<'g> Cursor<'g> {
     }
   }
 
-  /// The next element must be a node of `kind`. **Not covered** — see the type's header.
-  fn node(&mut self, kind: SyntaxKind, wanted: &'static str) -> Out<Node<'g>> {
-    self.one_of(&[kind], wanted)
-  }
-
-  /// A node of `kind` if one is next.
-  fn opt_node(&mut self, kind: SyntaxKind) -> Option<Node<'g>> {
-    self.opt_one_of(&[kind])
-  }
-
-  /// A node whose kind is one of `kinds` — a slot the production fills from a set.
-  fn one_of(&mut self, kinds: &[SyntaxKind], wanted: &'static str) -> Out<Node<'g>> {
-    match self.peek() {
-      Some(NodeOrToken::Node(child)) if kinds.contains(&child.kind()) => {
-        self.bump();
-        Ok(child)
-      }
-      Some(element) => Err(self.unexpected(element)),
-      None => Err(self.missing(wanted)),
-    }
-  }
-
-  /// [`one_of`](Self::one_of) where the production makes the slot optional.
-  fn opt_one_of(&mut self, kinds: &[SyntaxKind]) -> Option<Node<'g>> {
-    match self.peek() {
-      Some(NodeOrToken::Node(child)) if kinds.contains(&child.kind()) => {
-        self.bump();
-        Some(child)
-      }
-      _ => None,
-    }
-  }
-
-  /// Every node of one of `kinds`, greedily — an undelimited `*` repetition.
-  fn many(&mut self, kinds: &[SyntaxKind]) -> Vec<Node<'g>> {
-    let mut taken = Vec::new();
-    while let Some(child) = self.opt_one_of(kinds) {
-      taken.push(child);
-    }
-    taken
-  }
-
-  /// `X+` — [`many`](Self::many) with the first member required, refused through
-  /// [`absent`](Self::absent) so a present-but-empty container is `MissingChild` and a present
-  /// stranger is `UnexpectedChild` at the stranger.
-  ///
-  /// `closer` is the delimiter that ends the run inside its container, and `None` for an
-  /// undelimited run.
-  fn many1(
-    &mut self,
-    kinds: &[SyntaxKind],
-    closer: Option<SyntaxKind>,
-    wanted: &'static str,
-  ) -> Out<Vec<Node<'g>>> {
-    let taken = self.many(kinds);
-    if taken.is_empty() {
-      return Err(self.absent(closer, wanted));
-    }
-    Ok(taken)
-  }
-
-  /// `sep? item (sep item)*` — one separator between adjacent items, the leading one only where
-  /// `leading` allows it. Answers the items and whether a leading separator was written.
-  ///
-  /// `item` probes for one item **without consuming anything else**: `Ok(None)` means the next
-  /// element is not an item. An item is required after the opening position and after every
-  /// separator the list consumes, and where one is not there the refusal is decided by what *is*
-  /// ([`absent`](Self::absent)): `MissingChild` when the node's children ran out, and
-  /// `UnexpectedChild` at the element in hand otherwise — a leading separator where none is
-  /// allowed, a doubled separator, a node of the wrong kind. Codex round five found the earlier
-  /// form answering `MissingChild` for all of them, which names the parent while the obstruction
-  /// sits in plain view.
-  fn separated<T>(
-    &mut self,
-    mut item: impl FnMut(&mut Self) -> Out<Option<T>>,
-    separator: SyntaxKind,
-    leading: Leading,
-    wanted: &'static str,
-  ) -> Out<(Vec<T>, bool)> {
-    let led = leading == Leading::Allowed && self.opt_token(separator).is_some();
-    let mut taken = Vec::new();
-    match item(self)? {
-      Some(first) => taken.push(first),
-      None => return Err(self.absent(None, wanted)),
-    }
-    while self.opt_token(separator).is_some() {
-      match item(self)? {
-        Some(next) => taken.push(next),
-        None => return Err(self.absent(None, wanted)),
-      }
-    }
-    Ok((taken, led))
-  }
-
-  /// [`separated`](Self::separated) over **nodes** of one of `kinds`.
-  fn separated_nodes(
-    &mut self,
-    kinds: &[SyntaxKind],
-    separator: SyntaxKind,
-    leading: Leading,
-    wanted: &'static str,
-  ) -> Out<Vec<Node<'g>>> {
-    self
-      .separated(
-        |cursor| Ok(cursor.opt_one_of(kinds)),
-        separator,
-        leading,
-        wanted,
-      )
-      .map(|(taken, _)| taken)
-  }
-
-  /// Fold a projected child's extent in, and keep its value.
-  #[inline]
-  fn keep<T>(&mut self, projected: (T, TextRange)) -> T {
-    self.extent.keep(projected)
-  }
-
-  /// [`keep`](Self::keep) for a constituent the grammar makes optional.
-  #[inline]
-  fn keep_opt<T>(&mut self, projected: Option<(T, TextRange)>) -> Option<T> {
-    self.extent.keep_opt(projected)
-  }
-
-  /// [`keep`](Self::keep) for a constituent whose node the tree opens even where the AST records
-  /// nothing for it — see [`Optional`].
-  #[inline]
-  fn keep_optional<T>(&mut self, projected: Optional<T>) -> Option<T> {
-    self.extent.keep_optional(projected)
-  }
-
   /// The description a definition may open with, **held back rather than folded**.
   ///
   /// This kind space has no `Description` node — one token is not a region — so the hoist is a
@@ -1797,27 +1448,6 @@ impl<'g> Cursor<'g> {
       }
       _ => None,
     }
-  }
-
-  /// **The totality obligation.** Nothing may be left over.
-  fn end(&mut self) -> Out<()> {
-    match self.peek() {
-      Some(element) => Err(self.unexpected(element)),
-      None => Ok(()),
-    }
-  }
-
-  /// The node's token extent, after [`end`](Self::end).
-  #[inline]
-  fn range(&self, wanted: &'static str) -> Out<TextRange> {
-    self.extent.range(self.node, wanted)
-  }
-
-  /// Finish: nothing left over, and the extent the fold arrived at.
-  #[inline]
-  fn finish(&mut self, wanted: &'static str) -> Out<TextRange> {
-    self.end()?;
-    self.range(wanted)
   }
 }
 
@@ -1861,8 +1491,8 @@ fn keyword_of(token: Token<'_>) -> Option<ContextualKeyword> {
 ///
 /// [`LitStr`]'s `TryFrom<&str>` is the string lexer, so the `Plain`/`Complex` discriminant and the
 /// `required_capacity` a consumer allocates against are the lexer's answers rather than a second
-/// implementation of the escape rules. A refusal here means the two disagree about bytes the
-/// lossless lexer already accepted, which is a lexer finding, not a projection one.
+/// implementation of the escape rules. A refusal here means the token's text is not a string
+/// literal to that lexer — a caller-minted label, since a parse's string tokens come from it.
 fn string_lit<'src>(token: Token<'_>, source: &'src str) -> Out<LitStr<&'src str>> {
   let slice = slice(source, token)?;
   LitStr::try_from(slice).map_err(|_| {
@@ -1913,9 +1543,9 @@ fn inline_string_value<'src>(
 /// `smear-lexer` grew the door on al8n/smear#58 and it **is** the scanner: `LitInt::try_from`
 /// requires the slice to scan to exactly one whole integer literal and answers the scanner's own
 /// error otherwise. So the exception is retired and the projection re-implements no number
-/// grammar. A refusal here means the lossless lexer accepted bytes the scanner will not read back,
-/// which is the internal-inconsistency class [`MalformedToken`](ProjectErrorKind::MalformedToken)
-/// names.
+/// grammar. A refusal here means the tree labelled `Int` a slice the scanner will not read back as
+/// one — [`MalformedToken`](ProjectErrorKind::MalformedToken), reachable from a caller-minted tree
+/// and never from a parse, whose number tokens come from that scanner.
 fn int_lit(text: &str, span: SimpleSpan) -> Out<LitInt<&str>> {
   LitInt::try_from(text).map_err(|_| {
     ProjectError::new(

@@ -58,7 +58,7 @@
 //! rules coincide. Interior trivia is the only material on which that bug can red.
 
 use std::{
-  collections::BTreeSet,
+  collections::{BTreeMap, BTreeSet},
   path::{Path, PathBuf},
 };
 
@@ -70,10 +70,13 @@ use smear::parser::{
     error::GraphqlErrors,
     kinds::{GraphQLLang, SyntaxKind as K},
     lossless::{
-      ProjectErrorKind, Recovery, SyntaxNode, Unverified, ast::Document as DocumentNode,
-      parse_document, parse_executable_document, parse_type_system_document, project,
-      project_executable_document, project_executable_document_recovered,
-      project_type_system_document, project_type_system_document_recovered, verify_parse,
+      ProjectErrorKind, Recovery, SyntaxNode, Unverified, Verified, ast::Document as DocumentNode,
+      ast::ExecutableDocument as ExecutableDocumentNode,
+      ast::TypeSystemDocument as TypeSystemDocumentNode, parse_document, parse_executable_document,
+      parse_type_system_document, project, project_executable_document,
+      project_executable_document_recovered, project_executable_document_verified,
+      project_type_system_document, project_type_system_document_recovered,
+      project_type_system_document_verified, verify_parse,
     },
     syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
@@ -535,41 +538,82 @@ impl Tree {
     self
   }
 
+  /// `NamedType > Name`.
+  fn named_type(&mut self, name: &str) -> &mut Self {
+    self.open(K::NamedType).token(K::Name, name).close()
+  }
+
+  /// `FieldDefinition` for `name: Type`.
+  fn field(&mut self, name: &str, ty: &str) -> &mut Self {
+    self.open(K::FieldDefinition);
+    self.token(K::Name, name).token(K::Colon, ":");
+    self.named_type(ty);
+    self.close()
+  }
+
+  /// `FieldsDefinition` holding one field.
+  fn fields(&mut self, name: &str, ty: &str) -> &mut Self {
+    self.open(K::FieldsDefinition);
+    self.token(K::LBrace, "{");
+    self.field(name, ty);
+    self.token(K::RBrace, "}");
+    self.close()
+  }
+
+  /// `Directives > Directive > [@ d Arguments > Argument > <value>]`, over one argument whose value
+  /// node the caller opens. The smallest shape that puts a value in a document.
+  fn one_argument(&mut self, name: &str, value: impl FnOnce(&mut Self)) -> &mut Self {
+    self.open(K::Directives);
+    self.open(K::Directive);
+    self.token(K::At, "@").token(K::Name, "d");
+    self.open(K::Arguments);
+    self.token(K::LParen, "(");
+    self.open(K::Argument);
+    self.token(K::Name, name).token(K::Colon, ":");
+    value(self);
+    self.close();
+    self.token(K::RParen, ")");
+    self.close();
+    self.close();
+    self.close()
+  }
+
   fn finish(self) -> SyntaxNode {
     SyntaxNode::new_root(self.builder.finish())
   }
 }
 
-/// Two definitions' worth of text, in **one** definition node.
+/// One selection moved **out** of the set that holds it in the text.
 ///
-/// The text is `type T{f:Int} type U{g:Int}`, which the parser splits into two definitions. This
-/// tree says there is one, and the projection has to believe the tree. A tree walk answers one
-/// definition named `T`; anything that re-derived the structure from the bytes answers two.
-fn two_definitions_in_one_node() -> (SyntaxNode, &'static str) {
-  let text = "type T{f:Int} type U{g:Int}";
+/// The text is `{a{b c}`, which the parser reads as one field `a` selecting `b` and `c`, with the
+/// outer set's `}` missing. This tree groups it differently: `a`'s set holds only `b` — its `}` is
+/// the lenient one now — and `c` is a second top-level selection, whose set the one `}` closes.
+/// Every token is consumed by the production of the node that holds it, so the tree is
+/// well-shaped, and the projection has to believe it: a walk answers two top-level selections, and
+/// anything that re-derived the structure from the bytes answers one.
+///
+/// **Why this shape and not the one it replaces.** Until al8n/smear#218 this was one
+/// `ObjectTypeDefinition` holding a second definition's `type U{g:Int}`, which projected because
+/// the slot walk folded any token and dropped a second `FieldsDefinition` behind its `is_none()`
+/// guard — the witness was the hatch the issue closed. A stray `type` is refused where it stands
+/// now, so the control diverges from the text through a grouping the productions *do* spell, and
+/// the lenient closer is one. GraphQLx's control made the same move in al8n/smear#58's sixth round.
+fn two_selections_for_one() -> (SyntaxNode, &'static str) {
+  let text = "{a{b c}";
   let mut tree = Tree::new();
   tree.open(K::Document);
-  tree.open(K::ObjectTypeDefinition);
-  tree.token(K::Name, "type").token(K::Space, " ");
-  tree.token(K::Name, "T");
-  tree.open(K::FieldsDefinition);
+  tree.open(K::OperationDefinition);
+  tree.open(K::SelectionSet);
   tree.token(K::LBrace, "{");
-  tree.open(K::FieldDefinition);
-  tree.token(K::Name, "f").token(K::Colon, ":");
-  tree.open(K::NamedType).token(K::Name, "Int").close();
-  tree.close();
-  tree.token(K::RBrace, "}");
-  tree.close();
+  tree.open(K::Field);
+  tree.token(K::Name, "a");
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field).token(K::Name, "b").close();
   tree.token(K::Space, " ");
-  // The second definition's tokens, swallowed by the first node.
-  tree.token(K::Name, "type").token(K::Space, " ");
-  tree.token(K::Name, "U");
-  tree.open(K::FieldsDefinition);
-  tree.token(K::LBrace, "{");
-  tree.open(K::FieldDefinition);
-  tree.token(K::Name, "g").token(K::Colon, ":");
-  tree.open(K::NamedType).token(K::Name, "Int").close();
   tree.close();
+  tree.close();
+  tree.open(K::Field).token(K::Name, "c").close();
   tree.token(K::RBrace, "}");
   tree.close();
   tree.close();
@@ -607,7 +651,7 @@ fn description_as_sibling() -> (SyntaxNode, &'static str) {
 
 #[test]
 fn a_projection_that_re_parsed_the_source_would_fail_this() {
-  let (node, text) = two_definitions_in_one_node();
+  let (node, text) = two_selections_for_one();
   assert_eq!(
     node.text().to_string(),
     text,
@@ -629,15 +673,35 @@ fn a_projection_that_re_parsed_the_source_would_fail_this() {
 
   // Pinned both ways, so "differs" cannot be satisfied tomorrow by an arbitrary wrong answer.
   assert_eq!(
-    from_structure.definitions().len(),
-    1,
-    "the tree says one definition"
+    top_level_selections(&from_structure),
+    2,
+    "the tree says two top-level selections"
   );
   assert_eq!(
-    from_text.definitions().len(),
-    2,
-    "the bytes say two; if the parser stopped splitting them this control has nothing to contrast"
+    top_level_selections(&from_text),
+    1,
+    "the bytes say one; if the parser stopped nesting `c` under `a` this control has nothing to \
+     contrast"
   );
+}
+
+/// How many selections the document's one shorthand operation holds at its top level, read off the
+/// value itself.
+fn top_level_selections(document: &Document<&str>) -> usize {
+  let definition = document.definitions()[0]
+    .try_unwrap_definition_ref()
+    .expect("a definition");
+  let operation = definition
+    .node()
+    .try_unwrap_executable_ref()
+    .expect("an executable definition")
+    .try_unwrap_operation_ref()
+    .expect("an operation");
+  operation
+    .try_unwrap_shorthand_ref()
+    .expect("the shorthand")
+    .selections()
+    .len()
 }
 
 #[test]
@@ -654,10 +718,15 @@ fn a_structure_the_bytes_do_not_imply_is_refused_rather_than_re_derived() {
     .expect_err("a description loose under the document is rubble, not a definition")
     .kind()
     .clone();
+  // The parent is the document, because that is where the node sits. The slot walk this file had
+  // until al8n/smear#218 handed every child node of the document to the definition dispatch, whose
+  // unknown-kind arm named the *child* as its own parent — `{ Description, Description }` — which
+  // pointed at the right bytes and said nothing true about the shape. The transcribed document
+  // walk reads `Definition+` and `end` refuses the stranger under the node that holds it.
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
-      parent: K::Description,
+      parent: K::Document,
       found: K::Description,
     },
     "the walk names the loose node where it sits"
@@ -1124,22 +1193,21 @@ fn a_token_that_will_not_cook_refuses() {
   // Same reason as above: the lossless lexer never emits a `String` token it cannot re-lex, so
   // this class is reachable only by handing the projection a tree that claims one. Its value is
   // that the refusal exists rather than a panic or a silently truncated literal.
-  let text = "type T{f:Int}\"oops";
+  //
+  // The description is where a definition's production puts one — **first**. Until
+  // al8n/smear#218 this tree hung it after the fields block, and the slot walk read a
+  // `Description` wherever it sat; the transcription refuses a description anywhere but in front
+  // (`UnexpectedChild`), which would be a different refusal wearing this cell's name.
+  let text = "\"oops type T{f:Int}";
   let mut tree = Tree::new();
   tree.open(K::Document);
   tree.open(K::ObjectTypeDefinition);
-  tree.token(K::Name, "type").token(K::Space, " ");
-  tree.token(K::Name, "T");
-  tree.open(K::FieldsDefinition);
-  tree.token(K::LBrace, "{");
-  tree.open(K::FieldDefinition);
-  tree.token(K::Name, "f").token(K::Colon, ":");
-  tree.open(K::NamedType).token(K::Name, "Int").close();
-  tree.close();
-  tree.token(K::RBrace, "}");
-  tree.close();
   // An unterminated literal, claimed as a description.
   tree.open(K::Description).token(K::String, "\"oops").close();
+  tree.token(K::Space, " ");
+  tree.token(K::Name, "type").token(K::Space, " ");
+  tree.token(K::Name, "T");
+  tree.fields("f", "Int");
   tree.close();
   tree.close();
   let node = tree.finish();
@@ -1204,12 +1272,15 @@ fn every_refusal_kind_has_a_witness() {
     );
   }
 
-  // The two synthetic classes are pinned in their own tests above; asserting them here as well
-  // would duplicate the construction without adding a check. What this count owns is the claim
-  // that five variants exist and five are witnessed somewhere in this file.
-  const KIND_COUNT: usize = 5;
+  // Five classes are pinned in their own cells rather than here: `MissingChild`, `MalformedToken`,
+  // `TooDeep` (`a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended`),
+  // `InvalidRawKind` (`a_raw_kind_outside_the_space_refuses_rather_than_panicking`), and
+  // `WrongRoot` (`a_parse_minted_over_a_wrong_root_is_refused_not_reported_complete`). This count
+  // used to read five and omit `TooDeep`, which had a cell all along; it owns the claim that eight
+  // variants exist and eight are witnessed somewhere in this file.
+  const KIND_COUNT: usize = 8;
   assert_eq!(
-    witnesses.len() + 2,
+    witnesses.len() + 5,
     KIND_COUNT,
     "ProjectErrorKind has a variant with no witness in this file; add one and raise the count"
   );
@@ -1691,4 +1762,2822 @@ fn depth_of(node: &rowan::GreenNodeData) -> usize {
     .filter_map(|child| child.into_node().map(depth_of))
     .max()
     .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------------------------
+// al8n/smear#217 and #218: the GraphQLx projection's form, site for site
+// ---------------------------------------------------------------------------------------------
+
+/// The refusal a caller-minted tree draws, by kind.
+///
+/// The pairs below are built rather than parsed, which is the only way to put a shape in front of
+/// the projection that no production makes — and [`Verified`] exists precisely so one can be.
+fn refuse_tree(node: SyntaxNode, text: &str) -> ProjectErrorKind {
+  DocumentNode::cast_node(node)
+    .expect("the synthetic root is a Document")
+    .to_ast(text)
+    .map(|_| ())
+    .expect_err("the projection was expected to refuse this tree")
+    .kind()
+    .clone()
+}
+
+/// The fail-fast answer for `src` under the mixed root, spelled for a table.
+fn refusal_of(src: &str) -> String {
+  match project(&parse_document(src), src) {
+    Ok(_) => "Ok".to_string(),
+    Err(error) => answer(error.kind()),
+  }
+}
+
+/// `scalar S@d(n:<literal>)`, with the literal claimed as `kind` under a `node` value node.
+fn scalar_with_literal(node: K, token: K, literal: &str) -> (SyntaxNode, String) {
+  let text = std::format!("scalar S@d(n:{literal})");
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ScalarTypeDefinition);
+  tree.token(K::Name, "scalar").token(K::Space, " ");
+  tree.token(K::Name, "S");
+  tree.one_argument("n", |tree| {
+    tree.open(node).token(token, literal).close();
+  });
+  tree.close();
+  tree.close();
+  (tree.finish(), text)
+}
+
+/// **al8n/smear#217.** A written-down empty argument list is `None`, with its span still covered.
+///
+/// # Before
+///
+/// `optional_arguments` answered `Some(Arguments { arguments: [] })` whenever the node existed, and
+/// the lossless production opens one for a written-down `()` — so `project(&parse, src) !=
+/// document(src)` over `query Q { f() }` and `type T @d() { f: Int }`, both of which both parsers
+/// accept. The corpus held no `()`, which is why the differential sweep never saw it.
+///
+/// # After
+///
+/// Row two of the container table: `None`, and the field's or directive's span still reaches over
+/// the parentheses — the value the syntactic parser builds, measured here against it rather than
+/// asserted.
+#[test]
+fn a_written_down_empty_argument_list_is_none_with_a_span() {
+  let src = "query Q { f() }";
+  let parse = parse_document(src);
+  assert!(!parse.has_errors());
+  assert!(
+    parse
+      .syntax()
+      .descendants()
+      .any(|node| node.kind() == K::Arguments),
+    "the tree opens an Arguments node for the written-down `()`"
+  );
+  let expected = oracle(src).expect("parses");
+  let projected = project(&parse, src).expect("projects");
+  assert_eq!(projected, expected);
+
+  let described = projected.definitions()[0]
+    .try_unwrap_definition_ref()
+    .expect("a definition");
+  let operation = described
+    .node()
+    .try_unwrap_executable_ref()
+    .expect("an executable definition")
+    .try_unwrap_operation_ref()
+    .expect("an operation")
+    .try_unwrap_named_ref()
+    .expect("a named operation");
+  let field = operation.selection_set().selections()[0]
+    .try_unwrap_field_ref()
+    .expect("a field");
+  assert!(
+    field.arguments().is_none(),
+    "the syntactic parser answers `None` for `()`, and so does the projection"
+  );
+  assert_eq!(
+    (field.span().start(), field.span().end()),
+    (10, 13),
+    "and the field's span still covers the parentheses"
+  );
+
+  // Both flavours, all three positions, and the three empty containers that are values rather than
+  // optional constituents — none of them is in the corpus.
+  for what in [
+    "type T @d() { f: Int }",
+    "query Q { f @d() }",
+    "query Q @d() { f }",
+    "type T { f(a: Int = []): Int }",
+    "type T @d(a: {}) { f: Int }",
+    "{ f(a: [], b: {}) }",
+  ] {
+    let parse = parse_document(what);
+    assert!(!parse.has_errors(), "{what}: the lossless parse rejects it");
+    let expected = oracle(what).unwrap_or_else(|e| panic!("{what}: the parser rejects it: {e:?}"));
+    assert_eq!(
+      project(&parse, what).unwrap_or_else(|e| panic!("{what}: the projection refused: {e}")),
+      expected,
+      "{what}: a written-down empty list projects to a different value from the parser's"
+    );
+  }
+}
+
+/// **al8n/smear#218, finding 1.** A present-but-empty `+` container refuses.
+///
+/// # Before
+///
+/// Seven shapes — each parsing losslessly with a diagnostic, the syntactic parser rejecting, the
+/// tree carrying no `Error` child — projected `Ok` to an AST value the syntactic parser can never
+/// produce: a `SelectionSet` with no selections, a `FieldsDefinition` with no fields.
+///
+/// # After
+///
+/// Row one of the container table: `MissingChild { parent, wanted }`.
+#[test]
+fn a_present_but_empty_required_container_refuses() {
+  for (src, parent, wanted) in [
+    ("query Q { }", K::SelectionSet, "a selection"),
+    ("type T { }", K::FieldsDefinition, "a field definition"),
+    (
+      "type T { f(): Int }",
+      K::ArgumentsDefinition,
+      "an argument definition",
+    ),
+    (
+      "input I { }",
+      K::InputFieldsDefinition,
+      "an input field definition",
+    ),
+    (
+      "enum E { }",
+      K::EnumValuesDefinition,
+      "an enum value definition",
+    ),
+    (
+      "schema { }",
+      K::RootOperationTypeDefinitions,
+      "a root operation type",
+    ),
+    (
+      "query Q() { f }",
+      K::VariablesDefinition,
+      "a variable definition",
+    ),
+    (
+      "extend type T { }",
+      K::FieldsDefinition,
+      "a field definition",
+    ),
+  ] {
+    let parse = parse_document(src);
+    // The premise, measured rather than asserted from the shape of the source: gate 1 is intact —
+    // the lossless parser reports and the syntactic parser rejects — and the tree is
+    // shape-complete, which is exactly why the hole scan cannot see this class.
+    assert!(parse.has_errors(), "{src}: the lossless parser accepts it");
+    assert!(
+      oracle(src).is_err(),
+      "{src}: the syntactic parser accepts it"
+    );
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{src}: the tree carries a hole, so this proves nothing about the cardinality rule"
+    );
+    assert!(
+      parse
+        .syntax()
+        .descendants()
+        .any(|node| node.kind() == parent),
+      "{src}: the tree does not even hold a {parent:?}"
+    );
+    assert_eq!(
+      refuse(src),
+      ProjectErrorKind::MissingChild { parent, wanted },
+      "{src}"
+    );
+  }
+}
+
+/// `query Q{f}` with the field carrying a `Directives` node and whatever `inside` writes into it.
+fn field_with_directives(
+  inside: impl FnOnce(&mut Tree),
+  text: &'static str,
+) -> (SyntaxNode, &'static str) {
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::OperationDefinition);
+  tree.open(K::OperationType).token(K::Name, "query").close();
+  tree.token(K::Space, " ").token(K::Name, "Q");
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field);
+  tree.token(K::Name, "f");
+  tree.open(K::Directives);
+  inside(&mut tree);
+  tree.close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  (tree.finish(), text)
+}
+
+/// **al8n/smear#218's worse form of finding 1.** A directive run with no directive refuses.
+///
+/// `optional_directives` ended `Ok(Some(Directives::new(..)))` unconditionally, so a run holding a
+/// stray `@` and no `Directive` projected to `Some(Directives { directives: [] })` — an empty
+/// carrier the parser produces for no input. `Directive+` is row one of the container table.
+#[test]
+fn a_present_directive_run_with_no_directive_refuses() {
+  let (node, text) = field_with_directives(|_| {}, "query Q{f}");
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::MissingChild {
+      parent: K::Directives,
+      wanted: "a directive",
+    },
+    "a present run with no directive is the refusal, not an empty carrier"
+  );
+
+  // The const twin, through an SDL definition's own run.
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ScalarTypeDefinition);
+  tree.token(K::Name, "scalar").token(K::Space, " ");
+  tree.token(K::Name, "S");
+  tree.open(K::Directives).close();
+  tree.close();
+  tree.close();
+  assert_eq!(
+    refuse_tree(tree.finish(), "scalar S"),
+    ProjectErrorKind::MissingChild {
+      parent: K::Directives,
+      wanted: "a directive",
+    },
+    "both flavours, or the fix is half a fix"
+  );
+
+  // The witness as it was reported: a run holding a stray `@` and no directive. The token refusal
+  // fires first — a `Directives` node spells no tokens of its own.
+  let (node, text) = field_with_directives(
+    |tree| {
+      tree.token(K::At, "@");
+    },
+    "query Q{f@}",
+  );
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::Directives,
+      found: K::At,
+    },
+    "the stray `@` is refused where it stands"
+  );
+}
+
+/// **al8n/smear#218, finding 2.** The three typed `to_ast` doors scan their own subtree for holes.
+///
+/// # Before
+///
+/// They ran `open_node` and no hole scan, on the claim that the walk would reach any hole inside
+/// the subtree — and the walk's permissive arms routed an unknown child into the unread extent, so
+/// a recovered subtree with an `Error` child after its valid halves projected `Ok`.
+///
+/// # After
+///
+/// `open_node` then a subtree-scoped, token-aware `scan_holes` in all three. The hole below sits
+/// after a list type's element, where the old `open_list_element` had a wildcard arm.
+#[test]
+fn a_typed_door_scans_its_own_subtree_for_holes() {
+  let text = "type T{f:[Int junk]}";
+  let build = |tree: &mut Tree| {
+    tree.open(K::ObjectTypeDefinition);
+    tree.token(K::Name, "type").token(K::Space, " ");
+    tree.token(K::Name, "T");
+    tree.open(K::FieldsDefinition);
+    tree.token(K::LBrace, "{");
+    tree.open(K::FieldDefinition);
+    tree.token(K::Name, "f").token(K::Colon, ":");
+    tree.open(K::ListType);
+    tree.token(K::LBracket, "[");
+    tree.named_type("Int");
+    tree.token(K::Space, " ");
+    tree.open(K::Error).token(K::Name, "junk").close();
+    tree.token(K::RBracket, "]");
+    tree.close();
+    tree.close();
+    tree.token(K::RBrace, "}");
+    tree.close();
+    tree.close();
+  };
+  let hole = ProjectErrorKind::UnexpectedChild {
+    parent: K::ListType,
+    found: K::Error,
+  };
+
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  build(&mut tree);
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(refuse_tree(node, text), hole, "the mixed door");
+
+  let mut tree = Tree::new();
+  tree.open(K::TypeSystemDocument);
+  build(&mut tree);
+  tree.close();
+  let node = TypeSystemDocumentNode::cast_node(tree.finish()).expect("a TypeSystemDocument root");
+  assert_eq!(
+    node.to_ast(text).map(|_| ()).expect_err("refuses").kind(),
+    &hole,
+    "the type-system door"
+  );
+
+  let text = "{f(a:[1 junk])}";
+  let mut tree = Tree::new();
+  tree.open(K::ExecutableDocument);
+  tree.open(K::OperationDefinition);
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field);
+  tree.token(K::Name, "f");
+  tree.open(K::Arguments);
+  tree.token(K::LParen, "(");
+  tree.open(K::Argument);
+  tree.token(K::Name, "a").token(K::Colon, ":");
+  tree.open(K::ListValue);
+  tree.token(K::LBracket, "[");
+  tree.open(K::IntValue).token(K::Int, "1").close();
+  tree.token(K::Space, " ");
+  tree.open(K::Error).token(K::Name, "junk").close();
+  tree.token(K::RBracket, "]");
+  tree.close();
+  tree.close();
+  tree.token(K::RParen, ")");
+  tree.close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = ExecutableDocumentNode::cast_node(tree.finish()).expect("an ExecutableDocument root");
+  assert_eq!(
+    node.to_ast(text).map(|_| ()).expect_err("refuses").kind(),
+    &ProjectErrorKind::UnexpectedChild {
+      parent: K::ListValue,
+      found: K::Error,
+    },
+    "the executable door"
+  );
+}
+
+/// **al8n/smear#218, finding 3.** The root's shape is asserted rather than searched.
+///
+/// # Before
+///
+/// Each fail-fast door selected the first child of the wanted kind, and answered
+/// `MissingChild { Root }` when there was none. A root holding a valid document **and** a sibling
+/// would verify byte for byte and project to an AST omitting the sibling.
+///
+/// # After
+///
+/// `sole_document` requires one container of the wanted kind plus trivia, and refuses anything
+/// else with `UnexpectedChild { parent: Root, found }`.
+///
+/// # What this cell can reach, measured rather than assumed
+///
+/// #218 recorded that over the whole corpus the parser's root holds exactly one container and no
+/// tokens, so that the check is preventive. **At this dialect's executable root that is not so**,
+/// and the cell measures both halves: the executable root's production abandons the document node
+/// when a definition fails — `executable_document` returns the turn's error rather than resyncing —
+/// so the lost-node class leaves rubble *beside* no container at all. Over the corpus every such
+/// root also carries a hole, which the preflight refuses first; but a hole-free one exists, and the
+/// door's answer for it moved from `MissingChild { Root }` to `UnexpectedChild { Root, found }` at
+/// the first stranger. Both refuse. A root holding a container **and** a sibling, the shape the
+/// check exists for, is reached by no parse this cell has found: it stays preventive against a
+/// caller of `finish_root`, and removing it reds nothing here.
+#[test]
+fn the_root_shape_is_asserted_rather_than_searched() {
+  let mut one_container = 0usize;
+  let mut rubble_with_a_hole = 0usize;
+  for (name, src) in corpus("valid_") {
+    for (what, root, kind) in [
+      ("mixed", parse_document(&src).syntax(), K::Document),
+      (
+        "executable",
+        parse_executable_document(&src).syntax(),
+        K::ExecutableDocument,
+      ),
+      (
+        "type system",
+        parse_type_system_document(&src).syntax(),
+        K::TypeSystemDocument,
+      ),
+    ] {
+      let children: Vec<K> = root.children_with_tokens().map(|e| e.kind()).collect();
+      if children == vec![kind] {
+        one_container += 1;
+        continue;
+      }
+      assert!(
+        root
+          .descendants_with_tokens()
+          .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+        "{name} ({what}): a hole-free root holding {children:?}"
+      );
+      assert!(
+        !children.contains(&kind),
+        "{name} ({what}): a container **and** a sibling, the shape `sole_document` was written for"
+      );
+      rubble_with_a_hole += 1;
+    }
+  }
+  println!("ROOTS one_container={one_container} rubble_with_a_hole={rubble_with_a_hole}");
+  assert_eq!(
+    (one_container, rubble_with_a_hole),
+    (ROOTS_WITH_ONE_CONTAINER, ROOTS_OF_RUBBLE),
+    "the corpus's root shapes moved"
+  );
+
+  // The hole-free root with no container, and the answer it now gets.
+  let src = "query Q($a: Int";
+  let parse = parse_executable_document(src);
+  let root = parse.syntax();
+  assert!(
+    !root
+      .descendants_with_tokens()
+      .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+    "the premise is a hole-free root"
+  );
+  assert!(
+    !root
+      .children()
+      .any(|child| child.kind() == K::ExecutableDocument),
+    "and no container under it"
+  );
+  assert_eq!(
+    project_executable_document(&parse, src)
+      .map(|_| ())
+      .expect_err("rubble is not a document")
+      .kind(),
+    &ProjectErrorKind::UnexpectedChild {
+      parent: K::Root,
+      found: K::OperationType,
+    }
+  );
+
+  // The positive half of the check itself, at all three doors.
+  let sdl = "  # a comment\n  type T { f: Int }  \n";
+  assert_eq!(
+    project(&parse_document(sdl), sdl).expect("projects"),
+    oracle(sdl).expect("parses")
+  );
+  let executable = "  query Q { f }  ";
+  assert!(project_executable_document(&parse_executable_document(executable), executable).is_ok());
+  assert!(project_type_system_document(&parse_type_system_document(sdl), sdl).is_ok());
+}
+
+/// `(entry, root)` pairs over the valid corpus whose root is exactly one container.
+const ROOTS_WITH_ONE_CONTAINER: usize = 165;
+
+/// The rest: every one of them carries a hole and holds no container.
+const ROOTS_OF_RUBBLE: usize = 3;
+
+/// **al8n/smear#218, finding 4.** A type condition whose type precedes its `on` refuses rather
+/// than panicking.
+///
+/// # Before
+///
+/// `TypeCondition::new(SimpleSpan::new(on.start, name.end), …)`, with the `on` found by counting
+/// `Name` tokens and the type found by kind — so a caller-built tree with the type first made the
+/// span's constructor panic, in `fragment_definition` and in `open_inline_fragment` both. A safe
+/// public door that answers `ProjectError` for every other malformed tree aborted for this one.
+///
+/// # After
+///
+/// Both walks consume the `on` before the type in their own sequence, so the order is the cursor's
+/// and the misplaced `on` is refused where it stands.
+#[test]
+fn a_type_condition_whose_type_precedes_its_on_refuses_rather_than_panicking() {
+  let text = "fragment F T on{f}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::FragmentDefinition);
+  tree.token(K::Name, "fragment").token(K::Space, " ");
+  tree.token(K::Name, "F").token(K::Space, " ");
+  tree.named_type("T");
+  tree.token(K::Space, " ").token(K::Name, "on");
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field).token(K::Name, "f").close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  // `to_ast` is a safe public entry point: the answer has to be a value, and an unwinding panic
+  // here would take the harness with it rather than being caught by this assertion.
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::FragmentDefinition,
+      found: K::Name,
+    },
+    "the fragment definition's site"
+  );
+
+  let text = "{... T on{f}}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::OperationDefinition);
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::InlineFragment);
+  tree.token(K::Spread, "...").token(K::Space, " ");
+  tree.named_type("T");
+  tree.token(K::Space, " ").token(K::Name, "on");
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field).token(K::Name, "f").close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::InlineFragment,
+      found: K::NamedType,
+    },
+    "the inline fragment's site: with no `on` in front of it the type is not in the sequence"
+  );
+}
+
+/// **al8n/smear#218, finding 5.** The recovering doors verify the pair once, at the door.
+///
+/// # Before
+///
+/// Both recovering paths establish the pair over the whole root, and each entry callback then
+/// called `open_node` and re-compared the entry's own bytes — `O(source)` per entry over bytes a
+/// single pass had already compared.
+///
+/// # After
+///
+/// The entry callbacks do the subtree hole scan and the projection. Nothing observable changed,
+/// which is the claim: a mismatched pair is refused **before** any entry is projected, and the
+/// verified door and the fallible one still agree entry for entry.
+#[test]
+fn the_recovering_door_verifies_the_pair_once_at_the_door() {
+  let executable = "{ hero { name } }\nquery Q { hero { id } }";
+  let parse = parse_executable_document(executable);
+  assert!(!parse.has_errors());
+  assert_eq!(
+    project_executable_document_recovered(&parse, "{ hero { name } }")
+      .map(|(ast, _)| ast.definitions().len())
+      .map_err(|e| e.to_string()),
+    Err("the parse and the source are not the same document".to_owned()),
+    "a mismatched pair has to be refused at the door, not counted as skipped entries"
+  );
+  let (fallible, fallible_recovery) =
+    project_executable_document_recovered(&parse, executable).expect("the pair matches");
+  let pair = Verified::new(&parse, executable).expect("the pair matches");
+  let (verified, verified_recovery) = project_executable_document_verified(pair);
+  assert_eq!(fallible, verified);
+  assert_eq!(fallible_recovery, verified_recovery);
+  assert_eq!(fallible_recovery.projected(), 2);
+  assert!(fallible_recovery.is_complete());
+
+  let sdl = "type T { f: Int }\ntype U { g: Int }";
+  let parse = parse_type_system_document(sdl);
+  let (fallible, _) = project_type_system_document_recovered(&parse, sdl).expect("matches");
+  let pair = Verified::new(&parse, sdl).expect("matches");
+  let (verified, recovery) = project_type_system_document_verified(pair);
+  assert_eq!(fallible, verified);
+  assert_eq!(recovery.projected(), 2);
+}
+
+/// **al8n/smear#218's round-four addendum.** A described shorthand refuses, and its recovery is not
+/// complete.
+///
+/// `"d" { f }` is reported by the lossless `definition` and the operation is built *around* the
+/// description. The walk this replaces returned `OperationDefinition::Shorthand` with the
+/// description preserved — a value the syntactic parser refuses — and the recovering executable
+/// door counted the entry projected with `skipped == 0`.
+#[test]
+fn a_described_shorthand_refuses_and_its_recovery_is_not_complete() {
+  let src = "\"d\" { f }";
+  let parse = parse_document(src);
+  assert!(parse.has_errors(), "the parser reports the description");
+  assert!(oracle(src).is_err(), "and the syntactic parser refuses it");
+  assert_eq!(
+    refuse(src),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::OperationDefinition,
+      found: K::Description,
+    }
+  );
+  let parse = parse_executable_document(src);
+  let (document, recovery) =
+    project_executable_document_recovered(&parse, src).expect("the pair verifies");
+  assert_eq!(document.definitions().len(), 0);
+  assert_eq!(recovery, Recovery::new(0, 1));
+  assert!(!recovery.is_complete());
+
+  // The control: a described *named* operation is this dialect's, and it projects.
+  let named = "\"d\" query Q { f }";
+  assert_eq!(
+    project(&parse_document(named), named).expect("projects"),
+    oracle(named).expect("parses")
+  );
+}
+
+/// A description in front of an `extend` sits **inside** the extension node in this dialect — the
+/// node opens at a mark taken before the description — and every extension's walk refuses it as
+/// the first element its sequence has no place for. The walk this replaces covered it with the
+/// unread extent and projected the extension.
+#[test]
+fn a_described_extension_refuses() {
+  for (src, parent) in [
+    ("\"d\" extend scalar S @k", K::ScalarTypeExtension),
+    ("\"d\" extend type T @k", K::ObjectTypeExtension),
+    ("\"d\" extend schema @k", K::SchemaExtension),
+  ] {
+    let parse = parse_document(src);
+    assert!(parse.has_errors(), "{src}");
+    assert!(oracle(src).is_err(), "{src}");
+    assert_eq!(
+      refuse(src),
+      ProjectErrorKind::UnexpectedChild {
+        parent,
+        found: K::Description,
+      },
+      "{src}"
+    );
+    let (_, recovery) =
+      project_type_system_document_recovered(&parse_type_system_document(src), src)
+        .expect("the pair verifies");
+    assert!(!recovery.is_complete(), "{src}");
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// the hatches, each refused where it stands
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn a_fragment_name_split_into_two_tokens_refuses() {
+  // The `on` bypass, and the class behind it. The slot walk collected every direct `Name` into
+  // three slots and read the fragment's name out of the second, so `Name("o")` + `Name("n")`
+  // spelled `on` in the source while the rule inspected `o`. A fragment's sequence holds one name;
+  // the second is refused where it sits.
+  let text = "fragment on on T{f}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::FragmentDefinition);
+  tree.token(K::Name, "fragment").token(K::Space, " ");
+  tree.token(K::Name, "o").token(K::Name, "n");
+  tree
+    .token(K::Space, " ")
+    .token(K::Name, "on")
+    .token(K::Space, " ");
+  tree.named_type("T");
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field).token(K::Name, "f").close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(
+    node.text().to_string(),
+    text,
+    "the split has to spell `on` in the source, or it witnesses nothing"
+  );
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::FragmentDefinition,
+      found: K::Name,
+    },
+    "the second name is refused where it sits"
+  );
+}
+
+#[test]
+fn a_fourth_name_token_refuses() {
+  // `Names` dropped a fourth `Name` rather than storing it, with its bytes covered: "no production
+  // reads one". A directive definition's sequence reads `directive`, its name, `repeatable` and
+  // `on`; a fifth is a tree no production builds.
+  let text = "directive @d repeatable on x FIELD";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::DirectiveDefinition);
+  tree.token(K::Name, "directive").token(K::Space, " ");
+  tree.token(K::At, "@").token(K::Name, "d");
+  tree.token(K::Space, " ").token(K::Name, "repeatable");
+  tree.token(K::Space, " ").token(K::Name, "on");
+  tree.token(K::Space, " ").token(K::Name, "x");
+  tree.token(K::Space, " ");
+  tree
+    .open(K::DirectiveLocations)
+    .token(K::Name, "FIELD")
+    .close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::DirectiveDefinition,
+      found: K::Name,
+    }
+  );
+
+  // And the shape `Names` was sized for: an extension's third name is its target, so a fourth used
+  // to vanish inside the extension's span.
+  let text = "extend type T U @k";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ObjectTypeExtension);
+  tree.token(K::Name, "extend").token(K::Space, " ");
+  tree.token(K::Name, "type").token(K::Space, " ");
+  tree.token(K::Name, "T").token(K::Space, " ");
+  tree.token(K::Name, "U").token(K::Space, " ");
+  tree.open(K::Directives);
+  tree
+    .open(K::Directive)
+    .token(K::At, "@")
+    .token(K::Name, "k")
+    .close();
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::ObjectTypeExtension,
+      found: K::Name,
+    }
+  );
+}
+
+#[test]
+fn a_duplicate_of_an_expected_once_child_refuses() {
+  // Sixty-seven arms dispatched behind an `if x_node.is_none()` guard, and every one of them fell
+  // through to a wildcard that covered the duplicate and dropped it. The second one is simply not in
+  // the sequence now.
+  for (what, text, build, found) in [
+    (
+      "a second fields block",
+      "type T{f:Int}{g:Int}",
+      (|tree: &mut Tree| {
+        tree.open(K::ObjectTypeDefinition);
+        tree.token(K::Name, "type").token(K::Space, " ");
+        tree.token(K::Name, "T");
+        tree.fields("f", "Int");
+        tree.fields("g", "Int");
+        tree.close();
+      }) as fn(&mut Tree),
+      K::FieldsDefinition,
+    ),
+    (
+      "a second directive run",
+      "scalar S@a@b",
+      |tree: &mut Tree| {
+        tree.open(K::ScalarTypeDefinition);
+        tree.token(K::Name, "scalar").token(K::Space, " ");
+        tree.token(K::Name, "S");
+        for name in ["a", "b"] {
+          tree.open(K::Directives);
+          tree
+            .open(K::Directive)
+            .token(K::At, "@")
+            .token(K::Name, name)
+            .close();
+          tree.close();
+        }
+        tree.close();
+      },
+      K::Directives,
+    ),
+    (
+      "a second type reference",
+      "type T{f:A B}",
+      |tree: &mut Tree| {
+        tree.open(K::ObjectTypeDefinition);
+        tree.token(K::Name, "type").token(K::Space, " ");
+        tree.token(K::Name, "T");
+        tree.open(K::FieldsDefinition);
+        tree.token(K::LBrace, "{");
+        tree.open(K::FieldDefinition);
+        tree.token(K::Name, "f").token(K::Colon, ":");
+        tree.named_type("A");
+        tree.token(K::Space, " ");
+        tree.named_type("B");
+        tree.close();
+        tree.token(K::RBrace, "}");
+        tree.close();
+        tree.close();
+      },
+      K::NamedType,
+    ),
+  ] {
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    build(&mut tree);
+    tree.close();
+    let node = tree.finish();
+    assert_eq!(node.text().to_string(), text, "{what}");
+    let kind = refuse_tree(node, text);
+    assert!(
+      matches!(kind, ProjectErrorKind::UnexpectedChild { found: f, .. } if f == found),
+      "{what}: {kind:?}"
+    );
+  }
+}
+
+#[test]
+fn a_stray_token_a_shape_does_not_spell_refuses() {
+  // `extent.token(token)` folded any non-trivia token of any kind into the span. A scalar definition
+  // spells `scalar`, a name and directives; a `:` under it is a byte the walk would have covered and
+  // never represented.
+  let text = "scalar S:";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ScalarTypeDefinition);
+  tree.token(K::Name, "scalar").token(K::Space, " ");
+  tree.token(K::Name, "S").token(K::Colon, ":");
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::ScalarTypeDefinition,
+      found: K::Colon,
+    }
+  );
+}
+
+#[test]
+fn a_keyword_slot_is_read_by_spelling() {
+  // The directive definition read "the `Name` at index 2 is `repeatable` or `on`" and never read
+  // the `on` at all, so `directive @d foo FIELD` answered what `directive @d on FIELD` answers, with
+  // `foo`'s bytes in the span and nowhere else. Every keyword is an atom at its own position now.
+  for text in [
+    "directive @d foo FIELD",
+    "directive @d repeatable foo FIELD",
+  ] {
+    let parse = parse_document(text);
+    assert!(parse.has_errors(), "{text}: the parser reports it");
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    tree.open(K::DirectiveDefinition);
+    tree.token(K::Name, "directive").token(K::Space, " ");
+    tree.token(K::At, "@").token(K::Name, "d");
+    for word in text["directive @d ".len()..].split(' ') {
+      if word == "FIELD" {
+        tree
+          .open(K::DirectiveLocations)
+          .token(K::Name, "FIELD")
+          .close();
+      } else {
+        tree
+          .token(K::Space, " ")
+          .token(K::Name, word)
+          .token(K::Space, " ");
+      }
+    }
+    tree.close();
+    tree.close();
+    let node = tree.finish();
+    let built = node.text().to_string();
+    assert_eq!(
+      refuse_tree(node, &built),
+      ProjectErrorKind::UnexpectedChild {
+        parent: K::DirectiveDefinition,
+        found: K::Name,
+      },
+      "{text}"
+    );
+  }
+
+  // A root operation type and an operation's keyword are read for their spelling too.
+  assert_eq!(
+    refusal_of("schema { foo: Q }"),
+    "MalformedToken Name",
+    "the root keyword is classified, not assumed"
+  );
+}
+
+/// The smallest definition of `kind` whose sequence is complete, with `foreign` appended.
+fn definition_with_foreign(kind: K, head: &[&str], foreign: K) -> (SyntaxNode, String) {
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(kind);
+  for (i, word) in head.iter().enumerate() {
+    if i > 0 {
+      tree.token(K::Space, " ");
+    }
+    tree.token(K::Name, word);
+  }
+  match foreign {
+    K::FieldsDefinition => {
+      tree.fields("f", "Int");
+    }
+    K::EnumValuesDefinition => {
+      tree.open(K::EnumValuesDefinition);
+      tree.token(K::LBrace, "{");
+      tree.open(K::EnumValueDefinition);
+      tree.open(K::EnumValue).token(K::Name, "A").close();
+      tree.close();
+      tree.token(K::RBrace, "}");
+      tree.close();
+    }
+    K::UnionMemberTypes => {
+      tree.open(K::UnionMemberTypes);
+      tree.token(K::Equal, "=");
+      tree.named_type("A");
+      tree.close();
+    }
+    _ => unreachable!("a foreign kind this helper does not build"),
+  }
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  let text = node.text().to_string();
+  (node, text)
+}
+
+#[test]
+fn every_definition_kind_refuses_a_foreign_child() {
+  // Each definition's walk used to send every child it had no slot for to the unread extent — a
+  // caller-built `ScalarTypeDefinition` holding a whole `FieldsDefinition` projected `Ok` with the
+  // block dropped inside its span. A foreign child is not in the sequence now, and `end` refuses it.
+  for (kind, head, foreign) in [
+    (
+      K::ScalarTypeDefinition,
+      &["scalar", "S"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::UnionTypeDefinition,
+      &["union", "U"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::EnumTypeDefinition,
+      &["enum", "E"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::InputObjectTypeDefinition,
+      &["input", "I"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::ObjectTypeDefinition,
+      &["type", "T"][..],
+      K::EnumValuesDefinition,
+    ),
+    (
+      K::InterfaceTypeDefinition,
+      &["interface", "I"][..],
+      K::UnionMemberTypes,
+    ),
+  ] {
+    let (node, text) = definition_with_foreign(kind, head, foreign);
+    assert_eq!(
+      refuse_tree(node, &text),
+      ProjectErrorKind::UnexpectedChild {
+        parent: kind,
+        found: foreign,
+      },
+      "{kind:?} holding a {foreign:?}"
+    );
+  }
+}
+
+#[test]
+fn every_extension_kind_refuses_a_foreign_tail() {
+  // `extension_parts` accepted the union of all six extension tails regardless of the node's kind,
+  // and the kind-specific constructors ignored the tails they could not hold. The tail is each
+  // kind's own sequence now.
+  for (kind, head, foreign) in [
+    (
+      K::ScalarTypeExtension,
+      &["extend", "scalar", "S"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::UnionTypeExtension,
+      &["extend", "union", "U"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::EnumTypeExtension,
+      &["extend", "enum", "E"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::InputObjectTypeExtension,
+      &["extend", "input", "I"][..],
+      K::FieldsDefinition,
+    ),
+    (
+      K::ObjectTypeExtension,
+      &["extend", "type", "T"][..],
+      K::EnumValuesDefinition,
+    ),
+    (
+      K::InterfaceTypeExtension,
+      &["extend", "interface", "I"][..],
+      K::UnionMemberTypes,
+    ),
+  ] {
+    let (node, text) = definition_with_foreign(kind, head, foreign);
+    assert_eq!(
+      refuse_tree(node, &text),
+      ProjectErrorKind::UnexpectedChild {
+        parent: kind,
+        found: foreign,
+      },
+      "{kind:?} holding a {foreign:?}"
+    );
+  }
+  // And each kind's own tail still projects, so the refusals above are about foreignness.
+  for src in [
+    "extend scalar S @k",
+    "extend type T implements I @k { f: Int }",
+    "extend interface I { f: Int }",
+    "extend union U @k = A | B",
+    "extend enum E { A }",
+    "extend input I @k { f: Int }",
+    "extend schema @k { query: Q }",
+  ] {
+    let parse = parse_document(src);
+    assert!(!parse.has_errors(), "{src}");
+    assert_eq!(
+      project(&parse, src).expect(src),
+      oracle(src).expect(src),
+      "{src}"
+    );
+  }
+}
+
+/// A separated walk's node inside the smallest document that reaches it, with `inside` writing the
+/// node's own children after its opener.
+fn separated_in(parent: K, inside: impl FnOnce(&mut Tree)) -> (SyntaxNode, String) {
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  match parent {
+    K::ImplementsInterfaces => {
+      tree.open(K::ObjectTypeDefinition);
+      tree.token(K::Name, "type").token(K::Space, " ");
+      tree.token(K::Name, "T").token(K::Space, " ");
+      tree.open(K::ImplementsInterfaces);
+      tree.token(K::Name, "implements").token(K::Space, " ");
+      inside(&mut tree);
+      tree.close();
+      tree.fields("f", "Int");
+      tree.close();
+    }
+    K::UnionMemberTypes => {
+      tree.open(K::UnionTypeDefinition);
+      tree.token(K::Name, "union").token(K::Space, " ");
+      tree.token(K::Name, "U").token(K::Space, " ");
+      tree.open(K::UnionMemberTypes);
+      tree.token(K::Equal, "=");
+      inside(&mut tree);
+      tree.close();
+      tree.close();
+    }
+    K::DirectiveLocations => {
+      tree.open(K::DirectiveDefinition);
+      tree.token(K::Name, "directive").token(K::Space, " ");
+      tree
+        .token(K::At, "@")
+        .token(K::Name, "d")
+        .token(K::Space, " ");
+      tree.token(K::Name, "on").token(K::Space, " ");
+      tree.open(K::DirectiveLocations);
+      inside(&mut tree);
+      tree.close();
+      tree.close();
+    }
+    _ => unreachable!("not a separated walk"),
+  }
+  tree.close();
+  let node = tree.finish();
+  let text = node.text().to_string();
+  (node, text)
+}
+
+#[test]
+fn the_separated_atoms_refuse_at_the_obstruction() {
+  // `sep? item (sep item)*`, transcribed once in the substrate and used by all three of this
+  // dialect's separated walks. A dangling separator with nothing after it is `MissingChild` over the
+  // node; a doubled one, or a leading one where none is allowed, is `UnexpectedChild` at the
+  // separator — the obstruction in plain view.
+  let member: fn(&mut Tree, &str) = |tree, name| {
+    tree.named_type(name);
+  };
+  let separator: [(K, &str); 3] = [
+    (K::ImplementsInterfaces, "&"),
+    (K::UnionMemberTypes, "|"),
+    (K::DirectiveLocations, "|"),
+  ];
+  for (parent, sep) in separator {
+    let kind = if sep == "&" { K::Ampersand } else { K::Pipe };
+    let item = |tree: &mut Tree, name: &str| {
+      if parent == K::DirectiveLocations {
+        tree.token(K::Name, name);
+      } else {
+        member(tree, name);
+      }
+    };
+    let first = if parent == K::DirectiveLocations {
+      "FIELD"
+    } else {
+      "A"
+    };
+    // A trailing separator.
+    let (node, text) = separated_in(parent, |tree| {
+      item(tree, first);
+      tree.token(kind, sep);
+    });
+    let refused = refuse_tree(node, &text);
+    assert!(
+      matches!(refused, ProjectErrorKind::MissingChild { parent: p, .. } if p == parent),
+      "{parent:?} `{text}`: {refused:?}"
+    );
+    // A doubled separator.
+    let (node, text) = separated_in(parent, |tree| {
+      item(tree, first);
+      tree.token(kind, sep).token(kind, sep);
+      item(tree, first);
+    });
+    assert_eq!(
+      refuse_tree(node, &text),
+      ProjectErrorKind::UnexpectedChild {
+        parent,
+        found: kind,
+      },
+      "{parent:?} `{text}`"
+    );
+    // Nothing at all after the opener.
+    let (node, text) = separated_in(parent, |_| {});
+    let refused = refuse_tree(node, &text);
+    assert!(
+      matches!(refused, ProjectErrorKind::MissingChild { parent: p, .. } if p == parent),
+      "{parent:?} `{text}`: {refused:?}"
+    );
+  }
+}
+
+#[test]
+fn a_one_of_slot_group_refuses_its_second_member() {
+  // A slot filled from a kind set — a field's type, an object field's value — is one atom, and the
+  // next atom in the sequence refuses a second member rather than a guard dropping it.
+  let text = "{f(a:{b:1 2})}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::OperationDefinition);
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field);
+  tree.token(K::Name, "f");
+  tree.open(K::Arguments);
+  tree.token(K::LParen, "(");
+  tree.open(K::Argument);
+  tree.token(K::Name, "a").token(K::Colon, ":");
+  tree.open(K::ObjectValue);
+  tree.token(K::LBrace, "{");
+  tree.open(K::ObjectField);
+  tree.token(K::Name, "b").token(K::Colon, ":");
+  tree.open(K::IntValue).token(K::Int, "1").close();
+  tree.token(K::Space, " ");
+  tree.open(K::IntValue).token(K::Int, "2").close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.token(K::RParen, ")");
+  tree.close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::ObjectField,
+      found: K::IntValue,
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// leaves: the lexer's own doors
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn a_name_token_spelled_as_a_number_refuses() {
+  // `Name` → `slice`, no door: a caller-built `Name` token spelled `1` projected to `Name("1")`, a
+  // value no source produces. `smear_lexer::graphql::identifier` — the shipped scanner,
+  // whole-slice — is what says so now.
+  let text = "scalar 1";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ScalarTypeDefinition);
+  tree.token(K::Name, "scalar").token(K::Space, " ");
+  tree.token(K::Name, "1");
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::MalformedToken { kind: K::Name }
+  );
+
+  // A keyword passes: this dialect's keywords are contextual, so the door reads `query` as an
+  // identifier and the classifier tells them apart afterwards.
+  let src = "scalar query";
+  assert_eq!(
+    project(&parse_document(src), src).expect("a keyword-spelled name projects"),
+    oracle(src).expect("and the parser agrees")
+  );
+}
+
+#[test]
+fn a_numeric_spelling_the_scanner_will_not_read_back_refuses() {
+  // `Int`/`Float` → the raw slice, no door at all. This dialect's AST stores the text rather than a
+  // classified literal, so there was no radix to get wrong — but `IntValue("abc")` was producible.
+  // `int_literal` and `float_literal` are the scanner over the whole slice.
+  for (what, node, token, literal) in [
+    ("letters claimed as an integer", K::IntValue, K::Int, "abc"),
+    ("a float claimed as an integer", K::IntValue, K::Int, "1.5"),
+    (
+      "an integer claimed as a float",
+      K::FloatValue,
+      K::Float,
+      "1",
+    ),
+    ("a leading zero", K::IntValue, K::Int, "01"),
+    ("two literals in one token", K::IntValue, K::Int, "1 2"),
+  ] {
+    let (tree, text) = scalar_with_literal(node, token, literal);
+    assert_eq!(tree.text().to_string(), text, "{what}");
+    assert_eq!(
+      refuse_tree(tree, &text),
+      ProjectErrorKind::MalformedToken { kind: token },
+      "{what}"
+    );
+  }
+  // And what the scanner does read passes, the slice unchanged.
+  for literal in ["-0", "12", "1.5e3", "-2E-1"] {
+    let src = std::format!("scalar S @d(n: {literal})");
+    assert_eq!(
+      project(&parse_document(&src), &src).expect(&src),
+      oracle(&src).expect(&src),
+      "{src}"
+    );
+  }
+}
+
+#[test]
+fn a_null_value_over_another_identifier_refuses() {
+  // `NullValue` → no spelling check: whatever identifier the tree held became `null`. Its sibling
+  // `BooleanValue` always compared.
+  let (node, text) = scalar_with_literal(K::NullValue, K::Name, "X");
+  assert_eq!(
+    refuse_tree(node, &text),
+    ProjectErrorKind::MalformedToken { kind: K::Name }
+  );
+  let (node, text) = scalar_with_literal(K::BooleanValue, K::Name, "X");
+  assert_eq!(
+    refuse_tree(node, &text),
+    ProjectErrorKind::MalformedToken { kind: K::Name }
+  );
+}
+
+#[test]
+fn a_string_leaf_without_its_quotes_refuses() {
+  let (node, text) = scalar_with_literal(K::StringValue, K::String, "abc");
+  assert_eq!(
+    refuse_tree(node, &text),
+    ProjectErrorKind::MalformedToken { kind: K::String }
+  );
+}
+
+#[test]
+fn a_leaf_with_two_literal_tokens_refuses() {
+  // A leaf that read the first token of its kind and folded the rest answered `1` for `12` with a
+  // span across both bytes.
+  let text = "scalar S@d(n:12)";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ScalarTypeDefinition);
+  tree.token(K::Name, "scalar").token(K::Space, " ");
+  tree.token(K::Name, "S");
+  tree.one_argument("n", |tree| {
+    tree.open(K::IntValue);
+    tree.token(K::Int, "1").token(K::Int, "2");
+    tree.close();
+  });
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::UnexpectedChild {
+      parent: K::IntValue,
+      found: K::Int,
+    }
+  );
+  assert_eq!(
+    project(&parse_document(text), text).expect("projects"),
+    oracle(text).expect("parses"),
+    "the control: one `Int` token is the shape the parser gives the same bytes"
+  );
+}
+
+#[test]
+fn a_tree_that_splits_a_token_projects_the_tree_it_was_handed() {
+  // **A decision, not a defect** — see the module header's *what a tree the parser did not build
+  // is promised*. Over `[-12]` a caller can build two adjacent `IntValue` tokens; each slice is one
+  // whole integer to the lexer's door, the byte verification passes because the concatenation is
+  // the source, and the projection answers the AST of the sentence the *tree* spells.
+  let text = "scalar S@d(n:[-12])";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::ScalarTypeDefinition);
+  tree.token(K::Name, "scalar").token(K::Space, " ");
+  tree.token(K::Name, "S");
+  tree.one_argument("n", |tree| {
+    tree.open(K::ListValue);
+    tree.token(K::LBracket, "[");
+    tree.open(K::IntValue).token(K::Int, "-1").close();
+    tree.open(K::IntValue).token(K::Int, "2").close();
+    tree.token(K::RBracket, "]");
+    tree.close();
+  });
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  let projected = DocumentNode::cast_node(node)
+    .expect("a Document root")
+    .to_ast(text)
+    .expect("a tree the parser would not build is still a tree, and this one is well-shaped");
+  let debug = std::format!("{projected:?}");
+  assert_eq!(debug.matches("IntValue").count(), 2, "the tree says two");
+  let parsed = project(&parse_document(text), text).expect("the real parse projects");
+  assert_eq!(
+    std::format!("{parsed:?}").matches("IntValue").count(),
+    1,
+    "the shipped lexer reads one integer `-12`"
+  );
+  assert!(
+    debug.contains("start: 14, end: 16") && debug.contains("start: 16, end: 17"),
+    "the two literals carry the tree's own ranges: {debug}"
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// the rule positions, derived from the syntactic parser's refusals
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn an_enum_value_named_true_refuses() {
+  let src = read_entry(
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/corpus/invalid_enum_reserved_spelling.graphql"),
+  )
+  .1;
+  assert_eq!(
+    refuse(&src),
+    ProjectErrorKind::SemanticRule {
+      rule: "an enum value may not be `true`, `false` or `null`",
+    }
+  );
+}
+
+/// `{f(a:<value>)}` with the value node `value` writes — the executable value grammar.
+fn executable_value(value: impl FnOnce(&mut Tree), text: &str) -> (SyntaxNode, String) {
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::OperationDefinition);
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::Field);
+  tree.token(K::Name, "f");
+  tree.open(K::Arguments);
+  tree.token(K::LParen, "(");
+  tree.open(K::Argument);
+  tree.token(K::Name, "a").token(K::Colon, ":");
+  value(&mut tree);
+  tree.close();
+  tree.token(K::RParen, ")");
+  tree.close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  (node, text.to_string())
+}
+
+#[test]
+fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
+  // The module header derives four positions from the syntactic parser's refusals. Two of them the
+  // lossless parser reports and still builds, so a parse reaches them — `a_fragment_named_on_refuses`
+  // and `an_enum_value_named_true_refuses` — and two it never builds at all: the spread dispatch
+  // reads `... on` as an inline fragment's head, and the value dispatch reads `true`, `false` and
+  // `null` as a boolean and a null. Those two are invisible to the mutation law, so they are pinned
+  // here, over trees built by hand.
+  let rule_enum = ProjectErrorKind::SemanticRule {
+    rule: "an enum value may not be `true`, `false` or `null`",
+  };
+  for spelling in ["true", "false", "null"] {
+    let (node, text) = executable_value(
+      |tree| {
+        tree.open(K::EnumValue).token(K::Name, spelling).close();
+      },
+      &std::format!("{{f(a:{spelling})}}"),
+    );
+    assert_eq!(
+      refuse_tree(node, &text),
+      rule_enum,
+      "a value-position `{spelling}`"
+    );
+  }
+
+  let text = "{...on}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::OperationDefinition);
+  tree.open(K::SelectionSet);
+  tree.token(K::LBrace, "{");
+  tree.open(K::FragmentSpread);
+  tree.token(K::Spread, "...").token(K::Name, "on");
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(
+    refuse_tree(node, text),
+    ProjectErrorKind::SemanticRule {
+      rule: "a fragment spread may not target `on`",
+    }
+  );
+
+  // The two a parse reaches, from a hand-built tree too, so all four read the same way here.
+  let text = "enum E{null}";
+  let mut tree = Tree::new();
+  tree.open(K::Document);
+  tree.open(K::EnumTypeDefinition);
+  tree
+    .token(K::Name, "enum")
+    .token(K::Space, " ")
+    .token(K::Name, "E");
+  tree.open(K::EnumValuesDefinition);
+  tree.token(K::LBrace, "{");
+  tree.open(K::EnumValueDefinition);
+  tree.open(K::EnumValue).token(K::Name, "null").close();
+  tree.close();
+  tree.token(K::RBrace, "}");
+  tree.close();
+  tree.close();
+  tree.close();
+  let node = tree.finish();
+  assert_eq!(node.text().to_string(), text);
+  assert_eq!(refuse_tree(node, text), rule_enum);
+  assert_eq!(
+    refuse("fragment on on T { f }"),
+    ProjectErrorKind::SemanticRule {
+      rule: "a fragment may not be named `on`",
+    }
+  );
+}
+
+#[test]
+fn a_contextual_keyword_is_a_name_at_every_name_position() {
+  // This dialect's keywords are contextual: the lexer reads `on`, `query` and `type` as identifiers,
+  // and the syntactic parser accepts each of them wherever the grammar says *name* — except at the
+  // four positions the header derives. Each of these is accepted and projects to the parse.
+  for src in [
+    "type on { on: on }",
+    "type query implements on & type @on(on: on) { on(on: on = on): on }",
+    "interface on { on: [on!]! }",
+    "union on = on | query",
+    "enum on { on query type }",
+    "input on { on: on = { on: on } }",
+    "scalar on @on",
+    "directive @on(on: on) repeatable on FIELD",
+    "schema { query: on }",
+    "extend type on @on",
+    "query query($on: on = on) @on(on: $on) { on: on(on: on) ...query ... on on { on } }",
+    "fragment query on on { on }",
+  ] {
+    let parse = parse_document(src);
+    assert!(!parse.has_errors(), "{src}");
+    assert_eq!(
+      project(&parse, src).expect(src),
+      oracle(src).expect(src),
+      "{src}"
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// what the parser reports and still builds
+// ---------------------------------------------------------------------------------------------
+
+/// Which root a probe goes through.
+#[derive(Clone, Copy, Debug)]
+enum Root {
+  Mixed,
+  Executable,
+  TypeSystem,
+}
+
+/// What a report-and-build site leaves out of the node it builds.
+#[derive(Clone, Copy, Debug)]
+enum Absent {
+  /// One token, with **no AST image**, is missing from a node of this kind — the leniency
+  /// criterion's candidate. The probe's tree is the witness if it holds such a node.
+  Token(K, &'static str),
+  /// What is missing is a constituent the AST holds — a member, a name, a tail. Never lenient.
+  Imaged,
+  /// Nothing is missing: the site reports something *present* — a description, a spelling a rule
+  /// or a classifier refuses, a variable in a constant position.
+  Not,
+}
+
+/// One non-hole recovery site of the GraphQL lossless productions: the file, the family (`report`
+/// for a `recover::report_unexpected::<…>` call, `unclosed` for a `recover::unclosed_*::<…>` one), a
+/// probe that reaches it with a hole-free tree, the root, what the projection answers, and what
+/// the site leaves out.
+type Site = (
+  &'static str,
+  &'static str,
+  &'static str,
+  Root,
+  &'static str,
+  Absent,
+);
+
+/// Every report-and-build site, one probe each — the module header's table, executable.
+const SITES: &[Site] = &[
+  (
+    "document.rs",
+    "report",
+    "extend scalar S",
+    Root::Mixed,
+    "MissingChild ScalarTypeExtension",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "extend type T",
+    Root::Mixed,
+    "MissingChild ObjectTypeExtension",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "extend union U",
+    Root::Mixed,
+    "MissingChild UnionTypeExtension",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "extend enum E",
+    Root::Mixed,
+    "MissingChild EnumTypeExtension",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "extend input I",
+    Root::Mixed,
+    "MissingChild InputObjectTypeExtension",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "extend schema",
+    Root::Mixed,
+    "MissingChild SchemaExtension",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "extend",
+    Root::Mixed,
+    "UnexpectedChild Document Name",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "\"d\" { f }",
+    Root::Mixed,
+    "UnexpectedChild OperationDefinition Description",
+    Absent::Not,
+  ),
+  (
+    "document.rs",
+    "report",
+    "\"d\" extend scalar S @k",
+    Root::Mixed,
+    "UnexpectedChild ScalarTypeExtension Description",
+    Absent::Not,
+  ),
+  (
+    "document.rs",
+    "report",
+    "\"d\" extend scalar S @k",
+    Root::TypeSystem,
+    "UnexpectedChild ScalarTypeExtension Description",
+    Absent::Not,
+  ),
+  (
+    "document.rs",
+    "report",
+    "",
+    Root::Mixed,
+    "MissingChild Document",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "",
+    Root::TypeSystem,
+    "MissingChild TypeSystemDocument",
+    Absent::Imaged,
+  ),
+  (
+    "executable.rs",
+    "report",
+    "query Q() { f }",
+    Root::Executable,
+    "MissingChild VariablesDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "executable.rs",
+    "unclosed",
+    "query Q($a: Int",
+    Root::Executable,
+    "UnexpectedChild Root OperationType",
+    Absent::Token(K::VariablesDefinition, ")"),
+  ),
+  (
+    "executable.rs",
+    "report",
+    "fragment on on T { f }",
+    Root::Executable,
+    "SemanticRule",
+    Absent::Not,
+  ),
+  (
+    "executable.rs",
+    "report",
+    "\"d\" { f }",
+    Root::Executable,
+    "UnexpectedChild OperationDefinition Description",
+    Absent::Not,
+  ),
+  (
+    "executable.rs",
+    "report",
+    "",
+    Root::Executable,
+    "MissingChild ExecutableDocument",
+    Absent::Imaged,
+  ),
+  (
+    "selection.rs",
+    "report",
+    "fragment F T { f }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::FragmentDefinition, "on"),
+  ),
+  (
+    "selection.rs",
+    "report",
+    "fragment F on { f }",
+    Root::Mixed,
+    "UnexpectedChild FragmentDefinition SelectionSet",
+    Absent::Imaged,
+  ),
+  (
+    "selection.rs",
+    "report",
+    "{ ... }",
+    Root::Mixed,
+    "UnexpectedChild SelectionSet Spread",
+    Absent::Imaged,
+  ),
+  (
+    "selection.rs",
+    "report",
+    "{ }",
+    Root::Mixed,
+    "MissingChild SelectionSet",
+    Absent::Imaged,
+  ),
+  (
+    "selection.rs",
+    "unclosed",
+    "{ f",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::SelectionSet, "}"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "type T { f(): Int }",
+    Root::Mixed,
+    "MissingChild ArgumentsDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "unclosed",
+    "type T { f(a: Int",
+    Root::Mixed,
+    "UnexpectedChild Document Name",
+    Absent::Token(K::ArgumentsDefinition, ")"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "type T { }",
+    Root::Mixed,
+    "MissingChild FieldsDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "unclosed",
+    "type T { f: Int",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::FieldsDefinition, "}"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "input I { }",
+    Root::Mixed,
+    "MissingChild InputFieldsDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "unclosed",
+    "input I { f: Int",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::InputFieldsDefinition, "}"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "type T implements { f: Int }",
+    Root::Mixed,
+    "MissingChild ImplementsInterfaces",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "type T implements A & { f: Int }",
+    Root::Mixed,
+    "MissingChild ImplementsInterfaces",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "union U =",
+    Root::Mixed,
+    "MissingChild UnionMemberTypes",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "union U = A |",
+    Root::Mixed,
+    "MissingChild UnionMemberTypes",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "directive @d on FOO",
+    Root::Mixed,
+    "MalformedToken Name",
+    Absent::Not,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "directive @d on |",
+    Root::Mixed,
+    "MissingChild DirectiveLocations",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "directive @d on FIELD |",
+    Root::Mixed,
+    "MissingChild DirectiveLocations",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "enum E { true }",
+    Root::Mixed,
+    "SemanticRule",
+    Absent::Not,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "enum E { }",
+    Root::Mixed,
+    "MissingChild EnumValuesDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "unclosed",
+    "enum E { A",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::EnumValuesDefinition, "}"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "schema { foo: Q }",
+    Root::Mixed,
+    "MalformedToken Name",
+    Absent::Not,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "schema { }",
+    Root::Mixed,
+    "MissingChild RootOperationTypeDefinitions",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "unclosed",
+    "schema { query: Q",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::RootOperationTypeDefinitions, "}"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "directive @d FIELD",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::DirectiveDefinition, "on"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "directive @d on",
+    Root::Mixed,
+    "MissingChild DirectiveDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "report",
+    "schema @k",
+    Root::Mixed,
+    "MissingChild SchemaDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "directive.rs",
+    "unclosed",
+    "{ f(a: 1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::Arguments, ")"),
+  ),
+  (
+    "ty.rs",
+    "unclosed",
+    "type T { f: [Int",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListType, "]"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "{ f(a: [1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "{ f(a: {b: 1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ObjectValue, "}"),
+  ),
+  (
+    "value.rs",
+    "report",
+    "type T { f(a: Int = $v): Int }",
+    Root::Mixed,
+    "UnexpectedChild DefaultValue Variable",
+    Absent::Not,
+  ),
+];
+
+/// Whether the parse of `text` under `root` holds a node of `kind` without the token `token` —
+/// the hole-free witness the leniency criterion asks for. A keyword row is read by **position**,
+/// as the mutation law reads it: both keyword rows' nodes open with the definition's keyword and
+/// its name, and the `on` is a third `Name`.
+fn witnessed(text: &str, root: Root, kind: K, token: &str) -> bool {
+  let parse = match root {
+    Root::Mixed => parse_document(text),
+    Root::Executable => parse_executable_document(text),
+    Root::TypeSystem => parse_type_system_document(text),
+  };
+  let tree = parse.syntax();
+  !tree
+    .descendants_with_tokens()
+    .any(|element| matches!(element.kind(), K::Error | K::Gap))
+    && tree.descendants().any(|node| {
+      node.kind() == kind && {
+        let tokens: Vec<_> = node
+          .children_with_tokens()
+          .filter_map(|element| element.into_token())
+          .collect();
+        if token == "on" {
+          !tokens
+            .iter()
+            .filter(|child| child.kind() == K::Name)
+            .skip(2)
+            .any(|child| child.text() == token)
+        } else {
+          !tokens.iter().any(|child| child.text() == token)
+        }
+      }
+    })
+}
+
+/// The module header's missing-token table, as `(parent kind, token)` rows read off the source.
+fn header_lenient_rows() -> Vec<(String, String)> {
+  let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("../smear-parser/src/graphql/lossless/project.rs");
+  let source = std::fs::read_to_string(path).expect("the projection's source");
+  let mut rows = Vec::new();
+  let mut inside = false;
+  for line in source.lines() {
+    if line.starts_with("//! | parent | absent token |") {
+      inside = true;
+      continue;
+    }
+    if !inside || line.starts_with("//! |---") {
+      continue;
+    }
+    if !line.starts_with("//! | ") {
+      break;
+    }
+    let cells: Vec<&str> = line.split(" | ").collect();
+    let kind = cells[1]
+      .split("SyntaxKind::")
+      .nth(1)
+      .and_then(|rest| rest.split(')').next())
+      .expect("a kind link");
+    let token = cells[2].split('`').nth(1).expect("a spelled token");
+    rows.push((kind.to_string(), token.to_string()));
+  }
+  rows.sort();
+  rows
+}
+
+/// A refusal's kind, spelled compactly enough to sit in a table cell.
+fn answer(kind: &ProjectErrorKind) -> String {
+  match kind {
+    ProjectErrorKind::MissingChild { parent, .. } => std::format!("MissingChild {parent:?}"),
+    ProjectErrorKind::UnexpectedChild { parent, found } => {
+      std::format!("UnexpectedChild {parent:?} {found:?}")
+    }
+    ProjectErrorKind::MalformedToken { kind } => std::format!("MalformedToken {kind:?}"),
+    ProjectErrorKind::SemanticRule { .. } => "SemanticRule".to_string(),
+    other => std::format!("{other:?}"),
+  }
+}
+
+/// What the fail-fast door of `root` answers for `text` — `hole` when the tree carries one — and
+/// whether the parse reported anything.
+fn site_answer(text: &str, root: Root) -> (bool, String) {
+  let parse = match root {
+    Root::Mixed => parse_document(text),
+    Root::Executable => parse_executable_document(text),
+    Root::TypeSystem => parse_type_system_document(text),
+  };
+  let hole = parse
+    .syntax()
+    .descendants_with_tokens()
+    .any(|element| matches!(element.kind(), K::Error | K::Gap));
+  if hole {
+    return (parse.has_errors(), "hole".to_string());
+  }
+  let projected = match root {
+    Root::Mixed => project(&parse, text).map(|_| ()),
+    Root::Executable => project_executable_document(&parse, text).map(|_| ()),
+    Root::TypeSystem => project_type_system_document(&parse, text).map(|_| ()),
+  };
+  (
+    parse.has_errors(),
+    match projected {
+      Ok(()) => "Ok".to_string(),
+      Err(error) => answer(error.kind()),
+    },
+  )
+}
+
+/// The two call families [`SITES`] maps, as the census reads them out of the source.
+const FAMILIES: [(&str, &[&str]); 2] = [
+  ("report", &["recover::report_unexpected::<"]),
+  (
+    "unclosed",
+    &[
+      "recover::unclosed_list::<",
+      "recover::unclosed_object::<",
+      "recover::unclosed_parens::<",
+    ],
+  ),
+];
+
+/// How many of [`SITES`]' probes project.
+const PROJECTING_SITES: usize = 11;
+
+/// Image-less tokens a site can leave out whose probe is **not** a witness.
+const UNWITNESSED: &[(&str, &str)] = &[];
+
+#[test]
+fn every_report_and_build_site_has_a_measured_answer() {
+  // The census, per file and family: `grep -c 'recover::report_unexpected::<'` and the three
+  // `recover::unclosed_*::<` spellings over the code lines of `graphql/lossless/*.rs`.
+  let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../smear-parser/src/graphql/lossless");
+  let mut in_source: BTreeMap<(String, &str), usize> = BTreeMap::new();
+  for entry in std::fs::read_dir(&dir).expect("the lossless sources are readable") {
+    let path = entry.expect("an entry").path();
+    if path.extension().is_none_or(|ext| ext != "rs") {
+      continue;
+    }
+    let file = path
+      .file_name()
+      .expect("a name")
+      .to_string_lossy()
+      .to_string();
+    let text = std::fs::read_to_string(&path).expect("a readable source");
+    let code: Vec<&str> = text
+      .lines()
+      .filter(|line| !line.trim_start().starts_with("//"))
+      .collect();
+    for (family, spellings) in FAMILIES {
+      let count: usize = spellings
+        .iter()
+        .map(|spelling| {
+          code
+            .iter()
+            .map(|line| line.matches(spelling).count())
+            .sum::<usize>()
+        })
+        .sum();
+      if count > 0 {
+        in_source.insert((file.clone(), family), count);
+      }
+    }
+  }
+  let mut in_table: BTreeMap<(String, &str), usize> = BTreeMap::new();
+  for (file, family, ..) in SITES {
+    *in_table.entry(((*file).to_string(), *family)).or_default() += 1;
+  }
+  assert_eq!(
+    in_table, in_source,
+    "a recovery site was added or removed without its row here, or a row names no site"
+  );
+  let total = |family: &str| -> usize {
+    in_source
+      .iter()
+      .filter(|((_, f), _)| *f == family)
+      .map(|(_, n)| n)
+      .sum()
+  };
+  assert_eq!(
+    (total("report"), total("unclosed")),
+    (38, 11),
+    "the two families' populations"
+  );
+
+  // Each probe: the parser reported, the tree is hole-free, and the projection answers what the
+  // table says. Every mismatch is collected before the assertion, so a moved answer names all of
+  // its siblings at once.
+  let mut lenient = 0;
+  let mut moved = Vec::new();
+  for (file, family, text, root, expected, _) in SITES {
+    let (errors, got) = site_answer(text, *root);
+    if !errors {
+      moved.push(std::format!(
+        "{file} {family} {text:?}: the probe reported nothing"
+      ));
+    }
+    if got != *expected {
+      moved.push(std::format!(
+        "{file} {family} {text:?} under {root:?}: expected {expected}, got {got}"
+      ));
+    }
+    lenient += usize::from(got == "Ok");
+  }
+  assert!(moved.is_empty(), "{moved:#?}");
+  assert_eq!(
+    lenient, PROJECTING_SITES,
+    "the sites whose probe projects moved; each is a lenient row a site can leave well-formed"
+  );
+
+  // The derivation. A position is lenient iff the token the site leaves out has no AST image and
+  // the site's probe is a hole-free witness of a node without it; the set this enumerates is the
+  // header's missing-token table, row for row.
+  let mut derived: Vec<(String, String)> = Vec::new();
+  let mut unwitnessed: Vec<(String, String)> = Vec::new();
+  for (_, _, text, root, _, absent) in SITES {
+    if let Absent::Token(kind, token) = absent {
+      let row = (std::format!("{kind:?}"), token.to_string());
+      if witnessed(text, *root, *kind, token) {
+        derived.push(row);
+      } else {
+        unwitnessed.push(row);
+      }
+    }
+  }
+  derived.sort();
+  unwitnessed.sort();
+  println!("DERIVED {derived:?}\nUNWITNESSED {unwitnessed:?}");
+  assert_eq!(
+    derived,
+    header_lenient_rows(),
+    "the header's lenient table is the report-and-build census's derivation"
+  );
+  let unwitnessed: Vec<(&str, &str)> = unwitnessed
+    .iter()
+    .map(|(kind, token)| (kind.as_str(), token.as_str()))
+    .collect();
+  assert_eq!(unwitnessed, UNWITNESSED);
+}
+
+/// `image` with every span end past `end` pulled back to `end` — the one place a closed text's
+/// spans differ from the unclosed tree's, when the closers are a suffix written with no trivia.
+fn clamp_spans(image: &str, end: usize) -> String {
+  const OPEN: &str = "SimpleSpan { start: ";
+  const MID: &str = ", end: ";
+  let mut out = String::with_capacity(image.len());
+  let mut rest = image;
+  while let Some(at) = rest.find(OPEN) {
+    out.push_str(&rest[..at + OPEN.len()]);
+    rest = &rest[at + OPEN.len()..];
+    for (i, sep) in [MID, ""].into_iter().enumerate() {
+      let digits = rest.find(|c: char| !c.is_ascii_digit()).expect("a number");
+      let n: usize = rest[..digits].parse().expect("a number");
+      out.push_str(&n.min(end).to_string());
+      rest = &rest[digits..];
+      if i == 0 {
+        assert!(rest.starts_with(sep));
+        out.push_str(sep);
+        rest = &rest[sep.len()..];
+      }
+    }
+  }
+  out.push_str(rest);
+  out
+}
+
+#[test]
+fn every_unclosed_closer_projects_what_the_closed_text_parses_to() {
+  // Each `unclosed_*` site builds its node hole-free without the closer, and the closer has no AST
+  // image. The projection of the unclosed text is the parse of the text closed, every span that
+  // ended on a restored closer ending on the last token instead.
+  for (open, closers) in [
+    ("{ f(a: 1", ")}"),
+    ("{ f(a: [1", "])}"),
+    ("{ f(a: {b: 1", "})}"),
+    ("{ f(a: {b: [1", "]})}"),
+    ("scalar S @k(a: [1", "])"),
+    ("type T { f: [Int", "]}"),
+    ("type T { f: [[Int!]", "]}"),
+    ("type T { f: Int", "}"),
+    ("input I { f: Int", "}"),
+    ("enum E { A", "}"),
+    ("schema { query: Q", "}"),
+    ("{ f", "}"),
+  ] {
+    let parse = parse_document(open);
+    assert!(parse.has_errors(), "{open}");
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{open}: hole-free"
+    );
+    let closed = std::format!("{open}{closers}");
+    let projected = project(&parse, open).expect(open);
+    let expected = oracle(&closed).expect(&closed);
+    assert_eq!(
+      std::format!("{projected:?}"),
+      clamp_spans(&std::format!("{expected:?}"), open.len()),
+      "{open}"
+    );
+  }
+
+  // The two whose closed text the parser still refuses: a list whose definition is lost at end of
+  // input, left as an orphan beside its rubble. Lenient by the criterion, and it changes no
+  // answer.
+  for src in ["query Q($a: Int", "type T { f(a: Int"] {
+    assert!(oracle(src).is_err(), "{src}");
+    assert!(
+      !parse_document(src)
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{src}: hole-free"
+    );
+    assert!(
+      project(&parse_document(src), src).is_err(),
+      "{src}: the refusal is the rubble's, not the list's"
+    );
+  }
+}
+
+#[test]
+fn a_type_condition_without_its_on_projects_what_the_text_with_it_parses_to() {
+  // `(FragmentDefinition, on)`: the keyword has no AST image — the condition stores only its type's
+  // name — and the lossless production reports a missing one and still builds the definition,
+  // hole-free, around the type. The two texts are padded so every token but the keyword sits at the
+  // same offset: the one span that differs is the condition's own, which starts at its first token
+  // — the type in the tree, the `on` in the text.
+  let src = "fragment F    T { f }";
+  let restored = "fragment F on T { f }";
+  let parse = parse_document(src);
+  assert!(
+    parse.has_errors(),
+    "the production reports the missing `on`"
+  );
+  assert!(
+    !parse
+      .syntax()
+      .descendants_with_tokens()
+      .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+    "and builds the definition whole"
+  );
+  assert!(oracle(src).is_err(), "the syntactic parser rejects it");
+
+  let projected = project(&parse, src).expect("a missing `on` is lenient");
+  let expected = oracle(restored).expect("the text with the keyword parses");
+  const IN_TEXT: &str = "SimpleSpan { start: 11, end: 15 }";
+  const IN_TREE: &str = "SimpleSpan { start: 14, end: 15 }";
+  let image = std::format!("{expected:?}");
+  assert_eq!(
+    image.matches(IN_TEXT).count(),
+    1,
+    "the condition's span is the one span `on` opens"
+  );
+  assert_eq!(
+    std::format!("{projected:?}"),
+    image.replacen(IN_TEXT, IN_TREE, 1),
+    "the projection answers the restored text's value, the condition starting at its type"
+  );
+  let (document, recovery) =
+    project_executable_document_recovered(&parse_executable_document(src), src)
+      .expect("the pair verifies");
+  assert_eq!(document.definitions().len(), 1);
+  assert!(recovery.is_complete());
+}
+
+#[test]
+fn a_directive_definition_without_its_on_projects_what_the_text_with_it_parses_to() {
+  // `(DirectiveDefinition, on)`: no image, and the production reports a missing one and still
+  // builds the definition, hole-free, around its locations. No span starts or ends on the `on`, so
+  // the two values are equal outright.
+  let src = "directive @d    FIELD | QUERY";
+  let restored = "directive @d on FIELD | QUERY";
+  let parse = parse_document(src);
+  assert!(
+    parse.has_errors(),
+    "the production reports the missing `on`"
+  );
+  assert!(
+    !parse
+      .syntax()
+      .descendants_with_tokens()
+      .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+    "and builds the definition whole"
+  );
+  assert!(oracle(src).is_err(), "the syntactic parser rejects it");
+  assert_eq!(
+    project(&parse, src).expect("a missing `on` is lenient"),
+    oracle(restored).expect("the text with the keyword parses"),
+  );
+}
+
+#[test]
+fn every_walk_is_a_transcription() {
+  // al8n/smear#218's addenda counted the hatches in this file at `c885c07`: 48 bare
+  // `extent.token(` folds, 34 `extent.unread(` wildcards behind 67 `is_none() =>` guards, and a
+  // `Names` collector read at 22 sites. The census is read off the projection's own source so it
+  // cannot drift from what the module header says. Comment lines are skipped — the header's table
+  // of retired hatches names every one.
+  let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("../smear-parser/src/graphql/lossless/project.rs");
+  let source = std::fs::read_to_string(path).expect("the projection's source is readable");
+  let code: Vec<&str> = source
+    .lines()
+    .filter(|line| !line.trim_start().starts_with("//"))
+    .collect();
+  let count =
+    |needle: &str| -> usize { code.iter().map(|line| line.matches(needle).count()).sum() };
+  let word = |word: &str| -> usize {
+    code
+      .iter()
+      .map(|line| {
+        line
+          .split(|c: char| !c.is_alphanumeric() && c != '_')
+          .filter(|piece| *piece == word)
+          .count()
+      })
+      .sum()
+  };
+  assert_eq!(count("extent.token("), 0, "a token folded by a vocabulary");
+  assert_eq!(count("unread("), 0, "a child covered and not read");
+  assert_eq!(word("Names"), 0, "a fixed-width name collector");
+  assert_eq!(count("is_none() =>"), 0, "a slot guard");
+  assert_eq!(
+    code
+      .iter()
+      .filter(|line| line.contains("_ =>") && (line.contains("extent") || line.contains("cover")))
+      .count(),
+    0,
+    "a wildcard arm that covers what it drops"
+  );
+  // The one loop over a child iterator left is the recovering door's pass over the root, which
+  // counts what it skips rather than projecting a production; the cursor's trivia skip is the
+  // substrate's.
+  assert_eq!(
+    count("for element in"),
+    1,
+    "a child loop outside the cursor"
+  );
+  assert_eq!(count("Cursor::new("), CURSORS, "the walks, one cursor each");
+}
+
+/// The walks, one cursor each — every production this file transcribes.
+const CURSORS: usize = 56;
+
+/// **Codex round 1 on al8n/smear#217/#218.** A raw kind outside this dialect's space refuses at
+/// every typed door rather than panicking.
+///
+/// A caller mints a tree with rowan's public builder: a legal root kind, so the cast to the typed
+/// wrapper succeeds, and one element whose raw kind no `SyntaxKind` names. `kind_from_raw` has no
+/// fallible form and panics on it, and the hole scan the typed doors gained was the first code to
+/// ask. The substrate's `reject_foreign_kinds_and_holes` now reads every kind raw first.
+///
+/// **No `catch_unwind` here**, deliberately: the cell calls the door in-process, so a panic is the
+/// test failing, which is the regression it exists to catch. The fail-fast and recovering doors
+/// take a `Parse`, which has no public constructor that skips the kind validator; they run the
+/// same scan, and the cell cannot mint their input.
+#[test]
+fn a_raw_kind_outside_the_space_refuses_rather_than_panicking() {
+  const FOREIGN: u16 = 60_000;
+  let foreign = rowan::SyntaxKind(FOREIGN);
+  let refusal = ProjectErrorKind::InvalidRawKind { raw: FOREIGN };
+  for root in [K::Document, K::ExecutableDocument, K::TypeSystemDocument] {
+    // A foreign token, and a foreign node holding a legal one.
+    for as_node in [false, true] {
+      let mut builder = GreenNodeBuilder::new();
+      builder.start_node(GraphQLLang::kind_to_raw(root));
+      if as_node {
+        builder.start_node(foreign);
+        builder.token(GraphQLLang::kind_to_raw(K::Name), "x");
+        builder.finish_node();
+      } else {
+        builder.token(foreign, "x");
+      }
+      builder.finish_node();
+      let node = SyntaxNode::new_root(builder.finish());
+      let error = match root {
+        K::Document => DocumentNode::cast_node(node)
+          .expect("a legal root")
+          .to_ast("x")
+          .map(|_| ())
+          .expect_err("refuses"),
+        K::ExecutableDocument => ExecutableDocumentNode::cast_node(node)
+          .expect("a legal root")
+          .to_ast("x")
+          .map(|_| ())
+          .expect_err("refuses"),
+        _ => TypeSystemDocumentNode::cast_node(node)
+          .expect("a legal root")
+          .to_ast("x")
+          .map(|_| ())
+          .expect_err("refuses"),
+      };
+      assert_eq!(error.kind(), &refusal, "{root:?}, as a node: {as_node}");
+      assert_eq!(error.span(), &(0..1), "{root:?}, as a node: {as_node}");
+    }
+  }
+}
+
+/// A `Parse` minted through the public, generic `finish_root` from a `Cst` whose profile admits every
+/// raw kind, over the root kind `root` — the one public route to this dialect's `Parse` that skips
+/// its door. The
+/// closure consumes nothing, so a non-empty source is tiled as one gap token under the root.
+fn foreign_root_parse<'a>(src: &'a str, root: u16) -> smear::parser::graphql::lossless::Parse {
+  use smear::parser::{
+    graphql::lossless::{Brand, GraphqlLosslessErrors, Lexer, LexerState},
+    lossless::runner::finish_root,
+  };
+  use tokora::{
+    InputRef, SimpleSpan,
+    cache::DefaultCache,
+    cst::{CstProfile, KindValidator, Sink, parse_lossless},
+    emitter::Verbose,
+  };
+
+  type Lx<'a> = Lexer<'a, str>;
+  type Em<'a> = Verbose<GraphqlLosslessErrors<&'a str>, SimpleSpan, Brand>;
+  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
+
+  fn unmapped<T>(_: &T) -> u16 {
+    0
+  }
+
+  let profile = CstProfile::new(
+    unmapped as fn(&_) -> u16,
+    KindValidator::accept_all(),
+    GraphQLLang::kind_to_raw(K::Error).0,
+    GraphQLLang::kind_to_raw(K::Gap).0,
+  );
+  let (cst, _) = parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
+    src,
+    LexerState::default(),
+    Em::new(),
+    profile,
+    DefaultCache::<'a, Lx<'a>>::default(),
+    |_: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| Ok(()),
+  );
+  finish_root::<GraphQLLang, Lx<'a>, Em<'a>>(cst, root, "a permissive profile")
+    .expect("the permissive profile admits the root")
+}
+
+/// **Codex rounds 2 and 4 on al8n/smear#217/#218.** A `Parse` whose root is not this dialect's
+/// document root is refused by every projection door — never projected, never reported complete.
+///
+/// The public generic `finish_root` takes the root kind as an argument and checks it only against
+/// the caller's profile, so it can mint this dialect's `Parse` rooted at raw 60000 (outside the
+/// space) or at `Name` (inside it, and not a document). The byte comparison reads green data only,
+/// and over an empty source the recovering doors answered `Recovery::new(0, 0)` — complete, over a
+/// tree no door finished. Round 2 closed the out-of-space root and passed `Name`; the check is the
+/// root's identity now, and both answer `WrongRoot`.
+///
+/// **The typed door is reached through a cast, and the cast refuses first**: `cast_node` compares
+/// the raw kind with the wrapper's own, so neither root casts to a `Document`, an
+/// `ExecutableDocument` or a `TypeSystemDocument`, and `to_ast` cannot be called on it. The cast
+/// used to ask `SyntaxNode::kind`, which panicked on the out-of-space root. In-process, no
+/// `catch_unwind`.
+#[test]
+fn a_parse_minted_over_a_wrong_root_is_refused_not_reported_complete() {
+  use smear::parser::graphql::lossless::{
+    Verified, ast::ExecutableDocument as ExecutableDocumentNode,
+    ast::TypeSystemDocument as TypeSystemDocumentNode,
+  };
+
+  for root in [GraphQLLang::kind_to_raw(K::Name).0, 60_000] {
+    let unverified = Unverified::WrongRoot { raw: root };
+    let refusal = ProjectErrorKind::WrongRoot { raw: root };
+    for src in ["", "{ f }"] {
+      let parse = foreign_root_parse(src, root);
+      assert_eq!(parse.green().kind().0, root, "{root} {src:?}: the premise");
+      assert_eq!(
+        project_executable_document_recovered(&parse, src).map(|(_, recovery)| recovery),
+        Err(unverified),
+        "{root} {src:?}: the executable recovering door"
+      );
+      assert_eq!(
+        project_type_system_document_recovered(&parse, src).map(|(_, recovery)| recovery),
+        Err(unverified),
+        "{root} {src:?}: the type-system recovering door"
+      );
+      assert_eq!(
+        Verified::new(&parse, src).map(|_| ()),
+        Err(unverified),
+        "{root} {src:?}: `Verified::new`"
+      );
+      assert_eq!(
+        verify_parse(&parse, src),
+        Err(unverified),
+        "{root} {src:?}: `verify_parse`"
+      );
+      for (what, refused) in [
+        ("project", project(&parse, src).map(|_| ()).err()),
+        (
+          "project_executable_document",
+          project_executable_document(&parse, src).map(|_| ()).err(),
+        ),
+        (
+          "project_type_system_document",
+          project_type_system_document(&parse, src).map(|_| ()).err(),
+        ),
+      ] {
+        assert_eq!(
+          refused.map(|error| error.kind().clone()),
+          Some(refusal.clone()),
+          "{root} {src:?}: {what}"
+        );
+      }
+      // The typed door: the cast answers `None` for all three wrappers, without panicking.
+      let node = parse.syntax();
+      assert!(
+        DocumentNode::cast_node(node.clone()).is_none(),
+        "{root} {src:?}"
+      );
+      assert!(
+        ExecutableDocumentNode::cast_node(node.clone()).is_none(),
+        "{root} {src:?}"
+      );
+      assert!(
+        TypeSystemDocumentNode::cast_node(node).is_none(),
+        "{root} {src:?}"
+      );
+    }
+  }
+}
+
+/// **Codex round 6 on al8n/smear#217/#218.** `MalformedToken` is reachable from a parse, at a
+/// position that reads a spelling.
+///
+/// `FOO` and `foo` lex as identifiers; what they are not is a directive location and a root
+/// operation type. The lossless productions report both and still build the node — the
+/// report-and-build table's two `MalformedToken { Name }` rows — so the variant's doc and Display
+/// describe a token that cannot be read in the role its position gives it, and make no claim that
+/// only a caller-minted tree reaches it.
+#[test]
+fn a_spelling_a_position_does_not_classify_is_malformed_in_a_parse() {
+  for (src, at) in [
+    ("directive @d on FOO", 16..19),
+    ("schema { foo: Q }", 9..12),
+  ] {
+    let parse = parse_document(src);
+    assert!(parse.has_errors(), "{src}: the parser reports it");
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{src}: and builds the node whole"
+    );
+    let refusal = project(&parse, src)
+      .map(|_| ())
+      .expect_err("the word is not one the position classifies");
+    assert_eq!(
+      refusal.kind(),
+      &ProjectErrorKind::MalformedToken { kind: K::Name },
+      "{src}"
+    );
+    assert_eq!(refusal.span(), &at, "{src}: the token's own range");
+    assert_eq!(
+      refusal.to_string(),
+      std::format!(
+        "{}..{}: the Name token's text cannot be read in the role this position gives it",
+        at.start,
+        at.end
+      ),
+      "{src}"
+    );
+  }
+}
+
+/// One step of a tree's shape, replayed through the sink by [`twin_container_parse`].
+enum Replay {
+  Open(u16),
+  Token,
+  Close(u16),
+}
+
+/// A `Parse` minted through `finish_root` whose root holds **two** document containers of `kind`,
+/// each the tree this dialect's own door builds for `one`, over the source `one` written twice.
+///
+/// The shape is read off a real parse of `one` and replayed through the dialect's own profile, so
+/// every node and token kind is one the door itself emits; only the root's arity is the caller's.
+/// `one` ends in punctuation, so its second copy lexes to the same tokens as its first and every
+/// token the replay takes — trivia included — is the one the shape names.
+fn twin_container_parse(one: &str, kind: K) -> (String, smear::parser::graphql::lossless::Parse) {
+  use smear::parser::{
+    graphql::lossless::{Brand, GraphqlLosslessErrors, Lexer, LexerState, profile},
+    lossless::runner::finish_root,
+  };
+  use tokora::{InputRef, SimpleSpan, cache::DefaultCache, cst::Sink, emitter::Verbose};
+
+  type Lx<'a> = Lexer<'a, str>;
+  type Em<'a> = Verbose<GraphqlLosslessErrors<&'a str>, SimpleSpan, Brand>;
+  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
+
+  let raw = |kind: K| GraphQLLang::kind_to_raw(kind).0;
+  let single = match kind {
+    K::ExecutableDocument => parse_executable_document(one),
+    _ => parse_type_system_document(one),
+  };
+  assert!(!single.has_errors(), "{one:?} parses clean");
+  let root = single.syntax();
+  let container = root
+    .children()
+    .find(|child| child.kind() == kind)
+    .expect("the door builds its container");
+  assert_eq!(
+    root.children_with_tokens().count(),
+    1,
+    "{one:?}: nothing beside the container"
+  );
+  let mut shape = Vec::new();
+  for event in container.preorder_with_tokens() {
+    match event {
+      rowan::WalkEvent::Enter(rowan::NodeOrToken::Node(node)) => {
+        shape.push(Replay::Open(raw(node.kind())))
+      }
+      rowan::WalkEvent::Leave(rowan::NodeOrToken::Node(node)) => {
+        shape.push(Replay::Close(raw(node.kind())))
+      }
+      rowan::WalkEvent::Enter(rowan::NodeOrToken::Token(_)) => shape.push(Replay::Token),
+      rowan::WalkEvent::Leave(rowan::NodeOrToken::Token(_)) => {}
+    }
+  }
+
+  let src = format!("{one}{one}");
+  let parse = mint(&src, &shape);
+  return (src, parse);
+
+  fn mint<'a>(src: &'a str, shape: &[Replay]) -> smear::parser::graphql::lossless::Parse {
+    let (cst, _) =
+      tokora::cst::parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
+        src,
+        LexerState::default(),
+        Em::new(),
+        profile::<str>(),
+        DefaultCache::<'a, Lx<'a>>::default(),
+        |inp: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| {
+          for _ in 0..2 {
+            for step in shape {
+              match step {
+                Replay::Open(kind) => {
+                  let _ = inp.cst_start(*kind);
+                }
+                Replay::Token => {
+                  let _ = inp.next();
+                }
+                Replay::Close(kind) => inp.cst_finish(*kind),
+              }
+            }
+          }
+          Ok(())
+        },
+      );
+    finish_root::<GraphQLLang, Lx<'a>, Em<'a>>(
+      cst,
+      GraphQLLang::kind_to_raw(K::Root).0,
+      "the dialect's profile",
+    )
+    .expect("the dialect's profile admits its own root")
+  }
+}
+
+/// A root holding two valid document containers: the recovering doors project both, the fail-fast
+/// doors refuse the second.
+///
+/// The two answers are different contracts, and this cell pins both. A recovering door steps
+/// through **every** container of its kind under the root, and each container is a legitimate
+/// document image: its definitions are projected one by one, so the [`Recovery`] is complete with
+/// both halves' definitions counted. A fail-fast door asserts the root holds **exactly one**
+/// container, so the second is `UnexpectedChild { parent: Root, .. }` at the second container's
+/// range. A complete [`Recovery`] therefore says nothing was lost, not that the fail-fast door
+/// would have answered.
+#[test]
+fn a_root_with_two_containers_is_recovered_whole_and_refused_fail_fast() {
+  for (one, kind) in [
+    ("{a}", K::ExecutableDocument),
+    ("enum E{A}", K::TypeSystemDocument),
+  ] {
+    let (src, parse) = twin_container_parse(one, kind);
+    let root = parse.syntax();
+    assert_eq!(
+      root.text().to_string(),
+      src,
+      "{kind:?}: the minted tree spells its source"
+    );
+    assert_eq!(
+      root
+        .children_with_tokens()
+        .map(|e| e.kind())
+        .collect::<Vec<_>>(),
+      vec![kind, kind],
+      "{kind:?}: the root holds two containers and nothing else"
+    );
+    let second = one.len()..src.len();
+    let wanted = Recovery::new(2, 0);
+
+    let (fail_fast, recovered, verified) = match kind {
+      K::ExecutableDocument => (
+        project_executable_document(&parse, &src).map(|_| ()),
+        project_executable_document_recovered(&parse, &src)
+          .map(|(ast, r)| (ast.definitions().len(), r)),
+        {
+          let (ast, r) = project_executable_document_verified(
+            Verified::new(&parse, &src).expect("the pair verifies"),
+          );
+          (ast.definitions().len(), r)
+        },
+      ),
+      _ => (
+        project_type_system_document(&parse, &src).map(|_| ()),
+        project_type_system_document_recovered(&parse, &src)
+          .map(|(ast, r)| (ast.definitions().len(), r)),
+        {
+          let (ast, r) = project_type_system_document_verified(
+            Verified::new(&parse, &src).expect("the pair verifies"),
+          );
+          (ast.definitions().len(), r)
+        },
+      ),
+    };
+    assert_eq!(recovered, Ok((2, wanted)), "{kind:?}: recovered");
+    assert!(wanted.is_complete());
+    assert_eq!(verified, (2, wanted), "{kind:?}: verified");
+    let refusal = fail_fast.expect_err("the fail-fast door asserts one container");
+    assert_eq!(
+      refusal.kind(),
+      &ProjectErrorKind::UnexpectedChild {
+        parent: K::Root,
+        found: kind,
+      },
+      "{kind:?}: fail-fast"
+    );
+    assert_eq!(refusal.span(), &second, "{kind:?}: at the second container");
+  }
 }
