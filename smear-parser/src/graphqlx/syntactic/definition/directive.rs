@@ -3,8 +3,14 @@
 use super::*;
 use crate::combinator::{pipe, try_pipe};
 
+/// The location table, shared with the CST → AST projection.
+///
+/// `pub(crate)` since #58, exactly as the vanilla dialect's twin is and for its reason: the
+/// projection reads a directive location off a tree token's text and must classify it the way this
+/// production does, and a second copy of the table would be a spelling the two could disagree
+/// about.
 #[inline]
-fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {
+pub(crate) fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {
   Some(match keyword {
     ContextualKeyword::QueryLocation => ExecutableDirectiveLocation::query(span).into(),
     ContextualKeyword::MutationLocation => ExecutableDirectiveLocation::mutation(span).into(),

@@ -16,12 +16,13 @@
 //! - **All fifty-six `valid_*` entries are accepted.** The superset holds over the whole positive
 //!   half, so `GRAPHQL_ENTRIES_GRAPHQLX_REJECTS` — the list the plan expected to fill — is empty
 //!   and does not exist.
-//! - **Exactly one `invalid_*` entry is *accepted*,** which is the opposite direction and the one
-//!   the plan did not anticipate. `fragment on on T { f }` is a GraphQL error and valid GraphQLx:
-//!   GraphQL spends a whole production on `FragmentName: Name but not "on"` and GraphQLx's
-//!   `executable_definition_name` is a plain `take_name`. It is therefore in this corpus under
-//!   `valid_`, and the rename is pinned in [`GRAPHQL_ENTRIES_GRAPHQLX_ACCEPTS`] so a future
-//!   grammar change reds instead of the corpus drifting.
+//! - **No `invalid_*` entry is accepted either, and that is news.** One was until al8n/smear#58:
+//!   `fragment on on T { f }` is a GraphQL error and was valid GraphQLx, because GraphQL spends a
+//!   whole production on `FragmentName: Name but not "on"` and GraphQLx's
+//!   `executable_definition_name` was a plain `take_name`. That was a **missing rule** rather than
+//!   a dialect difference — GraphQLx forbids the spelling exactly as GraphQL does — so the
+//!   exclusion now has a home in both suites and the entry is filed under its own GraphQL stem.
+//!   [`GRAPHQL_ENTRIES_GRAPHQLX_ACCEPTS`] is empty and stays, for the reason its own header gives.
 //!
 //! [`the_inherited_half_is_exactly_the_graphql_corpus`] holds the copy itself: every GraphQL entry
 //! is here, under its own stem or under the one pinned rename, and nothing is here twice.
@@ -227,18 +228,20 @@ fn every_corpus_entry_declares_its_expected_verdict() {
   }
 }
 
-/// The GraphQL corpus entry GraphQLx **accepts**, and the name it is filed under here.
+/// The GraphQL corpus entries GraphQLx **accepts**, and the names they are filed under here.
 ///
-/// One entry, measured rather than assumed — see this file's module docs. The pin is a rename
-/// rather than an exclusion, because excluding it would drop the coverage the fixture carries and
-/// leave the divergence untested; filed as `valid_`, the divergence is a fact this gate holds
-/// every run.
-const GRAPHQL_ENTRIES_GRAPHQLX_ACCEPTS: &[(&str, &str, &str)] = &[(
-  "invalid_fragment_named_on.graphql",
-  "valid_fragment_named_on.graphqlx",
-  "GraphQL's `FragmentName: Name but not \"on\"` has no GraphQLx counterpart: \
-   `executable_definition_name` is a plain `take_name`",
-)];
+/// **Empty, and it was not.** `invalid_fragment_named_on.graphql` was pinned as renamed to
+/// `valid_fragment_named_on.graphqlx`, because GraphQLx's `executable_definition_name` was a plain
+/// `take_name` and accepted the one spelling GraphQL's `FragmentName` production exists to refuse.
+/// al8n/smear#58 read that as what it was — a rule the grammar was missing rather than a rule the
+/// dialect does not have — and gave the exclusion a home in both of this dialect's suites, so the
+/// entry is back under its own stem and the two corpora agree input by input.
+///
+/// The list stays at zero rather than being deleted. What it holds is the *shape* of a real
+/// possibility — a document one dialect accepts and the other does not — and the two-sided check
+/// below is what turns a future entry into a pin instead of a silent rename. A table deleted the
+/// day it emptied is a table nobody re-reads when the next one arrives.
+const GRAPHQL_ENTRIES_GRAPHQLX_ACCEPTS: &[(&str, &str, &str)] = &[];
 
 /// Every GraphQL corpus entry is here exactly once, under its own stem or under a pinned rename.
 ///

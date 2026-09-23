@@ -182,6 +182,8 @@ pub type DefaultInputValue<S, Span = SimpleSpan> =
 #[derive(
   Debug,
   Clone,
+  PartialEq,
+  Eq,
   derive_more::From,
   derive_more::IsVariant,
   derive_more::TryUnwrap,
@@ -294,7 +296,9 @@ impl<S, Span> Nestable for InputValue<S, Span> {
 /// A GraphQLx constant input value, which cannot contain a variable.
 ///
 /// Like [`InputValue`], it declares no `Drop`; the release is [`Nested`]'s.
-#[derive(Debug, Clone, derive_more::IsVariant, derive_more::TryUnwrap, derive_more::Unwrap)]
+#[derive(
+  Debug, Clone, PartialEq, Eq, derive_more::IsVariant, derive_more::TryUnwrap, derive_more::Unwrap,
+)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S, Span = SimpleSpan> {
@@ -428,15 +432,23 @@ pub type DefinitionTypePath<
 /// [`Nestable`] below is the walk, and it matches without a wildcard arm so a fifth is a compile
 /// error here rather than a silent return to recursing.
 ///
-/// `Drop` is one of three generated impls that descend one frame per level on this enum — there is
-/// no derived `PartialEq` here, unlike the vanilla dialect's — and the derived `Debug` and `Clone`
-/// still do. This removes the only one of the three that fires without a call being made. What
-/// standing a [`Nest`] in an arm costs the other two was measured on `graphql::ast::Type`, whose
-/// arm has the same shape; `value/nesting.rs`'s header has the table, and the short version is
-/// nothing in a release build and a stated charge in a debug one.
+/// `Drop` is one of **four** generated impls that descend one frame per level on this enum, and
+/// the derived `Debug`, `Clone` and `PartialEq` still do. This removes the only one of the four
+/// that fires without a call being made. What standing a [`Nest`] in an arm costs the others was
+/// measured on `graphql::ast::Type`, whose arm has the same shape; `value/nesting.rs`'s header has
+/// the table, and the short version is nothing in a release build and a stated charge in a debug
+/// one.
+///
+/// The count was three, and `PartialEq` is what made it four (al8n/smear#58). The CST → AST
+/// projection's differential gate is *the projected value equals the parsed one*, which is not a
+/// well-typed sentence without it, and the vanilla dialect's twin has carried the derive since
+/// that gate's first half. A comparison is a call, so the arithmetic above is unchanged: what
+/// fires unbidden is still only the release, and that is still the one this enum does not declare.
 #[derive(
   Debug,
   Clone,
+  PartialEq,
+  Eq,
   derive_more::From,
   derive_more::IsVariant,
   derive_more::TryUnwrap,

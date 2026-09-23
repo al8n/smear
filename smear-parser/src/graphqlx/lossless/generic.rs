@@ -237,11 +237,28 @@ lossless_production! {
   /// The generics this node may hold are the name's **own**, and they are not the implementation
   /// generics a fragment declares before it — see [`super::executable::fragment_definition`] for
   /// the two-list shape divergence 13 names.
+  /// `Name ExecutableDefinitionTypeGenerics?` — **and the name is not `on`**.
+  ///
+  /// The draft's `FragmentName : Name but not on`, on the lossless side. This node is the
+  /// fragment-name production — a fragment is the only executable definition whose name is one of
+  /// these, and this is its only caller — so the exclusion has one home here where the vanilla
+  /// dialect has to put it in `fragment_definition`, its name being a bare token of the definition.
+  ///
+  /// The report **consumes nothing**: the `expect` below is what makes the progress the document
+  /// loop needs, so the name reaches the tree either way and `text()` still round-trips. That is
+  /// the vanilla dialect's arrangement exactly, and it is what keeps gate 1 honest — a document
+  /// the syntactic parser rejects now reports here too.
+  ///
+  /// GraphQLx accepted `fragment on on T { f }` in both suites until al8n/smear#58; see the
+  /// syntactic twin's header for why the rule arrived with the projection.
   fn executable_definition_name<'inp, Src, Ctx>(inp) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::ExecutableDefinitionName.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::On) {
+          recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
+        }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
           executable_definition_type_generics::<Src, Ctx>(inp)?;

@@ -115,6 +115,14 @@ pub enum Expectation {
   /// fragment …` — so the shorthand `OperationDefinition : SelectionSet` cannot
   /// follow one.
   OperationTypeOrFragment,
+  /// A fragment name — a `Name` that is not `on`.
+  ///
+  /// The vanilla dialect's own [`Expectation`] has carried this since its `fragment_name`
+  /// production did; this dialect's exclusion arrived later, on al8n/smear#58, because the
+  /// projection's rule set is derived from the grammar and the grammar did not have the rule.
+  ///
+  /// [`Expectation`]: crate::graphql::error::Expectation
+  FragmentName,
   /// A keyword with the given spelling.
   Keyword(&'static str),
 }

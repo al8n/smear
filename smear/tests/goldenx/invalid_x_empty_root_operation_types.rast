@@ -1,0 +1,10 @@
+Root@0..11
+  Document@0..11
+    SchemaDefinition@0..10
+      Name@0..6 "schema"
+      Space@6..7 " "
+      RootOperationTypesDefinition@7..10
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        RBrace@9..10 "}"
+    Newline@10..11 "\n"

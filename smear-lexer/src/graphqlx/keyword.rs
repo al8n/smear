@@ -157,9 +157,15 @@ impl ContextualKeyword {
   }
 }
 
-/// Classifies a spelling with one exact byte match.
+/// The spelling table, in the one direction a reader of *text* needs it.
+///
+/// Not private since #58, and for the reason the vanilla dialect's twin records: the CST-to-AST
+/// projection reads a keyword off a tree token's text and must classify it exactly as the lexer
+/// did, and a second copy of this table in `smear-parser` would be a spelling the two layers could
+/// disagree about. This dialect's projection lands one round after that one, so the visibility
+/// follows one round later; the door itself is the same door.
 #[inline]
-fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
+pub fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
   match source {
     b"type" => Some(ContextualKeyword::Type),
     b"interface" => Some(ContextualKeyword::Interface),

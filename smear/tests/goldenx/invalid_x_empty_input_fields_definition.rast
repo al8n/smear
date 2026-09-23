@@ -1,0 +1,13 @@
+Root@0..12
+  Document@0..12
+    InputObjectTypeDefinition@0..11
+      Name@0..5 "input"
+      Space@5..6 " "
+      DefinitionName@6..8
+        Name@6..7 "I"
+        Space@7..8 " "
+      InputFieldsDefinition@8..11
+        LBrace@8..9 "{"
+        Space@9..10 " "
+        RBrace@10..11 "}"
+    Newline@11..12 "\n"

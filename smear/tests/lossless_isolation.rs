@@ -215,14 +215,19 @@ fn the_two_lossless_layers_do_not_reference_each_other() {
 /// `graphql::kinds` / `graphql::lossless` entries are substring patterns and match
 /// `smear_lexer::graphql::lossless::…` exactly as they matched `crate::lexer::graphql::…`.
 ///
-/// `crate::type_system` is #58's entry, and it is on the GraphQL side only because that is the
-/// only dialect with a projection so far. The projection's **target** is the AST, and the AST's
-/// carriers are shared and dialect-free in exactly the way `crate::lossless` is — this census is
-/// about a dialect reaching the *other dialect*, which a shared carrier is not.
-/// The narrow reason it is needed at all: three `Described<…>` aliases and six `…Data` extension
-/// enums have no spelling under `graphql::ast`, and a projection has to construct all nine. Every
-/// other AST type it builds is reached through the dialect's own `ast` module, which is why this
-/// is one root and not eight.
+/// `crate::type_system` and `crate::generic` are #58's entries, one per projection. The
+/// projection's **target** is the AST, and the AST's carriers are shared and dialect-free in
+/// exactly the way `crate::lossless` is — this census is about a dialect reaching the *other
+/// dialect*, which a shared carrier is not.
+/// The narrow reason they are needed at all: some carriers a projection constructs have no
+/// spelling under the dialect's own `ast` module. On the GraphQL side that is three `Described<…>`
+/// aliases and six `…Data` extension enums, all under `crate::type_system`. GraphQLx adds five
+/// described cores and the same six enums, and one more root: `crate::generic::Constrained` is the
+/// carrier its six `where` sites hold their clause with, and it has no `graphqlx::ast` name of its
+/// own, and `crate::ty` holds the three carriers this dialect's `Type` stands behind a `Nest` —
+/// the enum names its pointees inline rather than aliasing them, so the projection has to as well.
+/// Every other AST type either projection builds is reached through its dialect's `ast` module,
+/// which is why this is three roots and not twenty.
 const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
   (
     GRAPHQL,
@@ -239,8 +244,11 @@ const ALLOWED_CRATE_ROOTS: &[(&str, &[&str])] = &[
     GRAPHQLX,
     &[
       "crate::ast_node",
+      "crate::generic",
       "crate::graphqlx",
       "crate::lossless",
+      "crate::ty",
+      "crate::type_system",
       "smear_lexer::graphqlx",
       "smear_lexer::limits",
     ],
