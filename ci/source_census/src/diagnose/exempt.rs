@@ -548,6 +548,24 @@ pub const EXEMPTIONS: &[Exemption] = &[
              gets decided rather than guessed. Recorded, not accepted.",
   },
   Exemption {
+    path: "smear::parser::lossless::Refused",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: "Why a source is not a document at all — the `Err` of the twelve `parse_*_from` \
+             siblings al8n/smear#121 added. Same family and same phase E as the entries around \
+             it, and for the ordinary structural reason first: `Diagnose` is `smear-schema`'s and \
+             `smear-parser` does not depend on it, so this crate could not answer the contract \
+             here even if the code were decided. \
+             What separates it from `MintError` and `Unverified` beside it is worth recording, \
+             because it means this row is waiting on strictly less: those two are exempt partly \
+             because `Diagnose::primary` returns a `Location` and neither has an honest one, and \
+             `NonUtf8Source` DOES — `valid_up_to` is the offset of the sequence that failed, and \
+             `source_len` bounds it. So the only open question here is which `Code` a refusal \
+             that precedes every rule should carry, which is exactly phase E's. Recorded, not \
+             accepted.",
+  },
+  Exemption {
     path: "smear::parser::lossless::runner::Diagnostic",
     kind: Kind::Tracked,
     element: None,

@@ -32,10 +32,13 @@
 //!
 //! # Why the door drains beside `document`
 //!
-//! [`super::parse_document`] discards its parser's result, so an `Err` escaping the document
-//! production would leave the rest of the source uncommitted and `finish` would refuse it as an
-//! `UncoveredGap`. The entry drains whatever an escape left behind, which turns the one failure
-//! mode `parse_document` cannot report into a reportable parse.
+//! The door behind [`super::parse_document`] discards its production's result, so an `Err`
+//! escaping the document production leaves the rest of the source with no committed token.
+//! Materialization is `Cst::finish_partial`, which would tile that tail as one `gap_kind` token
+//! carrying the tail's original text: no committed token in it, and no lexer errors but those a
+//! lookahead had already raised over it — a truncated, under-reported parse. The door drains
+//! whatever an escape left behind — lexing it and committing its tokens, unless a refusal ended
+//! the document — which is what reports the tail instead.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, cst::event::EventMark};
