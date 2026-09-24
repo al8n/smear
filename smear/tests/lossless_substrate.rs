@@ -401,3 +401,110 @@ fn each_declared_delimiter_pair_reaches_its_own_report() {
   // The span survives every arm — the diagnostic points at the opener, not at the end of input.
   assert_eq!(bracket.span().start(), 3);
 }
+
+/// **Codex round 2 on al8n/smear#217/#218.** The substrate's public walks refuse a raw kind outside
+/// the space rather than panicking.
+///
+/// `Node::new` takes an unchecked `GreenNodeData`, and `reject_holes`, `node_extent` and
+/// `extent_of` each asked `Node::kind`/`Token::kind` — `rowan::Language::kind_from_raw`, which
+/// panics — before they had checked anything. Each now reads every kind raw first and answers
+/// `InvalidRawKind` at the element's range. In-process and with no `catch_unwind`: a panic here is
+/// the test failing.
+#[test]
+fn the_substrate_walks_refuse_a_raw_kind_outside_the_space() {
+  use rowan::{GreenNodeBuilder, Language, NodeOrToken, SyntaxKind as Raw, TextSize};
+  use smear::parser::lossless::project::{
+    Node, ProjectErrorKind, extent_of, node_extent, reject_holes, verify_root_kind,
+  };
+
+  const FOREIGN: u16 = 60_000;
+  let refusal = ProjectErrorKind::<K>::InvalidRawKind { raw: FOREIGN };
+  let legal = |kind: K| GraphQLLang::kind_to_raw(kind);
+
+  // A foreign token beside a legal one, and a foreign node holding a legal token.
+  for as_node in [false, true] {
+    let mut builder = GreenNodeBuilder::new();
+    builder.start_node(legal(K::Document));
+    builder.token(legal(K::Name), "a");
+    if as_node {
+      builder.start_node(Raw(FOREIGN));
+      builder.token(legal(K::Name), "x");
+      builder.finish_node();
+    } else {
+      builder.token(Raw(FOREIGN), "x");
+    }
+    builder.finish_node();
+    let green = builder.finish();
+    let node = Node::<GraphQLLang>::new(&green, TextSize::new(0));
+
+    let holes = reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
+      .expect_err("`reject_holes` answered for a foreign kind");
+    assert_eq!(
+      (holes.kind(), holes.span()),
+      (&refusal, &(1..2)),
+      "{as_node}"
+    );
+
+    let extent = node_extent(node, |kind| matches!(kind, K::Space))
+      .expect_err("`node_extent` answered for a foreign kind");
+    assert_eq!(
+      (extent.kind(), extent.span()),
+      (&refusal, &(1..2)),
+      "{as_node}"
+    );
+
+    // `extent_of` over the node's own children, the form a filtered stream takes.
+    let run = extent_of(node.children(), |kind| matches!(kind, K::Space))
+      .expect_err("`extent_of` answered for a foreign kind");
+    assert_eq!((run.kind(), run.span()), (&refusal, &(1..2)), "{as_node}");
+
+    // And the `Debug` of the foreign element prints the raw value rather than panicking.
+    let foreign = node.children().nth(1).expect("the foreign element");
+    let image = match foreign {
+      NodeOrToken::Node(child) => std::format!("{child:?}"),
+      NodeOrToken::Token(token) => std::format!("{token:?}"),
+    };
+    assert_eq!(image, "raw(60000)@1..2", "{as_node}");
+  }
+
+  // The root's identity, which every projection door asks about first: out of the space, and in
+  // it but not `Root`, answer alike. Codex round 4: the first form of this check tested
+  // membership, and a `Name` root passed it.
+  for root in [Raw(FOREIGN), legal(K::Name), legal(K::Document)] {
+    let mut builder = GreenNodeBuilder::new();
+    builder.start_node(root);
+    builder.finish_node();
+    assert_eq!(
+      verify_root_kind::<K>(&builder.finish()).map_err(|error| error.kind().clone()),
+      Err(ProjectErrorKind::WrongRoot { raw: root.0 }),
+      "{root:?}"
+    );
+  }
+  let mut builder = GreenNodeBuilder::new();
+  builder.start_node(Raw(FOREIGN));
+  builder.finish_node();
+  let green = builder.finish();
+  let node = Node::<GraphQLLang>::new(&green, TextSize::new(0));
+  assert_eq!(
+    reject_holes(node, |kind| matches!(kind, K::Error)).map_err(|error| error.kind().clone()),
+    Err(refusal)
+  );
+
+  // The controls: a legal tree answers exactly as before.
+  let mut builder = GreenNodeBuilder::new();
+  builder.start_node(legal(K::Document));
+  builder.token(legal(K::Name), "a");
+  builder.finish_node();
+  let green = builder.finish();
+  let node = Node::<GraphQLLang>::new(&green, TextSize::new(0));
+  let mut builder = GreenNodeBuilder::new();
+  builder.start_node(legal(K::Root));
+  builder.finish_node();
+  assert!(verify_root_kind::<K>(&builder.finish()).is_ok());
+  assert!(reject_holes(node, |kind| matches!(kind, K::Error)).is_ok());
+  assert_eq!(
+    node_extent(node, |kind| matches!(kind, K::Space))
+      .map(|r| r.map(|r| (u32::from(r.start()), u32::from(r.end())))),
+    Ok(Some((0, 1)))
+  );
+}

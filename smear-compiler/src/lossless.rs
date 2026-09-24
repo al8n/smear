@@ -59,9 +59,8 @@
 //!   kind, which is the second validator this design exists to refuse.
 //! - **Refuse the document, as the fail-fast projection does.** It is the outcome that makes the
 //!   lossless leg pointless, and it is what the door is here to replace.
-//! - **Report it, and say so.** A caller with [`Recovery::is_complete`] false knows the verdict
-//!   is partial and can render accordingly; a caller with it true is holding exactly what the
-//!   syntactic door would have said. That is this door's choice, and
+//! - **Report it, and say so.** [`Recovery::is_complete`] false says at least one top-level
+//!   element had no AST image. That is this door's choice, and
 //!   `tests/validator_lossless.rs` pins the artifact rather than leaving it to be discovered.
 //!
 //! # What a skipped definition does to a *schema*
@@ -163,7 +162,9 @@
 //!
 //! **And a source the parser would not read never becomes a `Parse` at all**, because
 //! `parse_*_from` answers `Result<Parse, Refused>` and a concrete `&str` door is never reached
-//! with one. So the two wildcard arms below cover `Unverified::SourceMismatch` and nothing else.
+//! with one. The two refusal matches below name `Unverified::TooDeep`, `Unverified::WrongRoot` and
+//! `Unverified::SourceMismatch` in arms of their own, and their wildcard covers only what a later
+//! `#[non_exhaustive]` variant might add.
 //!
 //! [`project_executable_document`]: smear_parser::graphql::lossless::project_executable_document
 //! [`project_executable_document_recovered`]: smear_parser::graphql::lossless::project_executable_document_recovered
@@ -188,16 +189,12 @@ use super::{
 
 /// The verdict of a failed lossless validation.
 ///
-/// [`Invalid`] plus the [`Recovery`] the successful arm carries, so the two facts a caller needs
-/// — *what was wrong* and *how much of the document was looked at* — arrive together whenever the
-/// second one exists. It does not when the projection never ran; see
-/// [`LosslessInvalid::recovery`], which says so without enumerating the reasons.
+/// [`Invalid`] plus the [`Recovery`] the successful arm carries, when the projection ran; see
+/// [`LosslessInvalid::recovery`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LosslessInvalid {
   invalid: Invalid,
-  /// `None` when the projection never ran, whatever the reason — a *different thing* from a
-  /// projection that ran and dropped nothing, and the only representation that cannot be confused
-  /// with one. [`LosslessInvalid::recovery`] says why the distinction is not enumerated here.
+  /// `None` exactly when the projection never ran.
   recovery: Option<Recovery>,
 }
 
@@ -210,30 +207,11 @@ impl LosslessInvalid {
 
   /// Returns how much of the parse had an AST image, when the projection ran.
   ///
-  /// [`Recovery::is_complete`] false means at least one of these diagnostics may be an artifact
-  /// of a definition that was dropped rather than of one the author wrote — see
-  /// [`validate_executable_lossless`].
-  ///
   /// # `None` means the projection never ran
   ///
-  /// That is the whole of it, and deliberately: the reason is
-  /// [`Invalid::refusal`](super::Invalid::refusal)'s to give, and [`Refusal`](super::Refusal) is
-  /// the one place the reasons are enumerated. There is no [`Recovery`] to report because nothing
-  /// examined anything, and a caller that unwraps this gets an `Option`'s answer rather than a
-  /// number.
-  ///
-  /// This used to name **one** path — the budget that could not pay for the projection — and a
-  /// second arrived with `Refusal::SourceMismatch` without the sentence noticing. It is the same
-  /// failure the accessors on [`Invalid`] had one round earlier, over a different set with an
-  /// overlapping membership, so it gets the same repair rather than a second enumeration to keep
-  /// in step. al8n/smear#198.
-  ///
-  /// It took three rounds to arrive at the absence. The count was `1`, disclosed in prose as a
-  /// floor; then `1` with a `projection_ran()` flag beside it saying which way to read it. Both
-  /// still *constructed* the number, so both still let it be compared, printed and believed — and
-  /// for an empty or trivia-only parse the real skipped count is **zero**, so `1` was not even the
-  /// floor it claimed. A value that must not be read is a value that must not exist; that is the
-  /// same repair as `Ledger::Off`, one type over. al8n/smear#198.
+  /// `Some` exactly when the projection ran, whatever the rules then found; `None` when the call
+  /// stopped before projecting — the pair was refused, or the budget could not pay for the
+  /// projection; [`Invalid::refusal`](super::Invalid::refusal) is then `Some` and names which.
   #[inline]
   pub const fn recovery(&self) -> Option<Recovery> {
     self.recovery
@@ -250,9 +228,8 @@ impl From<LosslessInvalid> for Invalid {
 impl core::fmt::Display for LosslessInvalid {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     core::fmt::Display::fmt(&self.invalid, f)?;
-    // Branching on the state, not on a count synthesised to keep this arm total. The `1` this used
-    // to be handed rendered as the exact text "1 skipped by recovery" for a projection that had not
-    // looked at anything.
+    // Branching on the state, not on a count synthesised to keep this arm total: a synthesised `1`
+    // would render as "1 skipped by recovery" for a projection that had not looked at anything.
     match self.recovery {
       None => f.write_str(" (nothing was projected)"),
       Some(recovery) if !recovery.is_complete() => {
@@ -274,8 +251,19 @@ impl core::error::Error for LosslessInvalid {}
 /// bytes. `scratch`, `budget` and `sink` are the syntactic door's, unchanged and reusable across
 /// both.
 ///
-/// Returns `Ok(recovery)` when no rule fired and `Err` when at least one did; either way the
-/// [`Recovery`] says how much of the parse had an AST image.
+/// Returns `Ok(recovery)` only when the pair verified, the projection ran, and the rules emitted
+/// nothing and no budget tripped. Everything else is `Err`, and three accessors each report one
+/// independent fact about it:
+///
+/// - [`LosslessInvalid::recovery`] is `Some` when the projection ran and `None` when the call
+///   stopped before projecting.
+/// - [`Invalid::refusal`](super::Invalid::refusal) is [`Refusal::Budget`] when a budget tripped —
+///   before the projection or during the rules alike — [`Refusal::SourceMismatch`],
+///   [`Refusal::TooDeep`] or [`Refusal::WrongRoot`] for a refused pair, and `None` otherwise.
+/// - [`Invalid::stopped`](super::Invalid::stopped) is `true` when the sink returned `Break` on a
+///   diagnostic.
+///
+/// The [`Recovery`] says how much of the parse had an AST image.
 ///
 /// # One validator, not two
 ///
@@ -293,18 +281,8 @@ impl core::error::Error for LosslessInvalid {}
 /// refuse one. Each top-level definition is projected on its own; the ones with an AST image are
 /// validated and the ones without are skipped and counted.
 ///
-/// **Read the [`Recovery`] before you believe the verdict.** With
-/// [`is_complete`](Recovery::is_complete) true, this is exactly what the syntactic door would
-/// have said. With it false, two things follow, and neither is correctable here:
-///
-/// - a clean verdict is weaker than it looks — nothing examined what was skipped, and a parse
-///   with nothing projectable in it validates as `Ok` with an empty sink; and
-/// - a finding may be an **artifact** of the skip. Draft §5 has rules that read the document as a
-///   whole — 5.5.2.1 (a spread names a defined fragment), 5.5.1.4 (a fragment is used) — and none
-///   of them can tell a fragment that was never written from one that was dropped. Suppressing
-///   them would fork the rule set by input kind, which is the second validator this design
-///   refuses; refusing the document is the outcome this door exists to replace. So it reports,
-///   and says so here.
+/// With [`is_complete`](Recovery::is_complete) false, nothing examined what was skipped: a parse
+/// with nothing projectable in it validates as `Ok` with an empty sink.
 ///
 /// A projection refusal never reaches the `sink`: it is not a draft §5 finding and does not
 /// become one. The parse's own diagnostics already describe the syntax that broke.
@@ -380,99 +358,59 @@ where
 /// not merely filtered. With [`RuleSet::ALL`] this is exactly [`validate_executable_lossless`].
 ///
 /// The projection is not part of the rule set and runs whatever `rules` says — it is what
-/// produces the document the rules read, so an empty [`RuleSet`] still costs it. What that buys
-/// is a caller who wants only the [`Recovery`]: `RuleSet::empty()` answers "how much of this
-/// parse has an AST image" and nothing else.
+/// produces the document the rules read, so an empty [`RuleSet`] still costs it.
 ///
 /// # What the ledger bounds here, and what it does not
 ///
 /// [`Budget::validation_work`](super::Budget::validation_work) bounds **the projection and the
-/// validation**. It does not bound the pair's *verification*, and on this entry point that
-/// verification runs first: `parse` and `source` are two arguments and nothing pairs them, so
-/// before anything can be projected they have to be shown to describe one document, and showing it
-/// is `O(tokens)`.
-///
-/// A caller who needs the **whole call** bounded constructs a
-/// [`Verified`](smear_parser::graphql::lossless::Verified) itself and uses
-/// [`validate_executable_lossless_verified_with`], where the ledger opens on the first instruction
-/// and the pair's verification was paid for once, by whoever built it. That is not an optimisation:
-/// a door handed an unverified pair cannot both decide that a mismatch outranks a budget refusal —
-/// which needs the comparison *finished* — and refuse before reading its input — which needs it
-/// *stoppable*. The two properties are separated by the type rather than traded off inside one
-/// function. al8n/smear#198.
+/// validation**. It does not bound the pair's *verification*: on this entry point
+/// [`Verified::new`] runs first, outside the ledger, and costs `O(green elements + source bytes)`
+/// — it visits every node and token of the green tree and compares every token's bytes, and a
+/// `Parse` minted through [`finish_root`](smear_parser::lossless::runner::finish_root) can hold any
+/// number of zero-width nodes, so neither the token count nor the source length bounds it.
+/// [`validate_executable_lossless_verified_with`] takes a [`Verified`] and runs no verification
+/// before its ledger opens. al8n/smear#198.
 ///
 /// # What the prepayment prices
 ///
 /// One payment, before the projection, of two terms that do not bound each other:
 ///
-/// - `units(source.len())`, for the bytes — the projector re-verifies each definition against the
-///   source at that definition's own range; and
+/// - `units(source.len())`, for the **bytes** — the projector re-reads every token whose text
+///   reaches the AST (names, numbers, strings, the spellings a position classifies) through the
+///   lexer's own doors; and
 /// - the pair's own
 ///   [`projection_cost`](smear_parser::graphql::lossless::Verified::projection_cost), for the
 ///   **elements** — one per green node and one per token, counted by the walk that verified the
 ///   pair.
 ///
-/// The second term exists because bytes do not bound structure. This section used to say the
-/// projection "builds at most one AST node per CST token and a token is at least one byte", and a
-/// zero-width node is a counter-example the parser itself produces —
-/// [`finish_root`](smear_parser::lossless::runner::finish_root) is public, so a caller can mint a
-/// `Parse` full of them. An empty source over such a tree verified, paid one unit, and had every
-/// node visited.
+/// The second term exists because bytes do not bound structure: a zero-width node adds structure
+/// without adding a byte.
 ///
-/// Incremental charging would still be better and is still not available:
-/// `project_executable_document_verified` lives in `smear-parser`, and threading a validation
-/// ledger into it would put a compiler concept in the parser. What makes a prepayment sound rather
-/// than merely convenient is that it is an upper bound the caller already holds — and it is one
-/// *because* the pair carries its own element count, rather than because a proxy was assumed to
-/// bound it.
-///
-/// **This is the one place the two doors do not answer identically, and it is not a drift.** The
-/// module header's promise — the same rules, the same order, the same spans — is about the *rules*,
-/// and it holds: they are the same call. What differs is the resource, because this door does
-/// strictly more work than the syntactic one and is charged for it, so with
-/// [`Budget::validation_work`](super::Budget::validation_work) set low enough to refuse a document
-/// at all, this door refuses earlier — at the whole input's span, before a rule ran — where the
-/// syntactic door would have refused mid-walk at a node. At any budget that does not refuse, the
-/// two are diagnostic-for-diagnostic identical, which is what `tests/validator_lossless.rs`
-/// compares.
+/// **This is the one place the two doors do not answer identically.** The rules are the same call;
+/// the resource is not, because this door charges the prepayment before any rule runs. With
+/// [`Budget::validation_work`](super::Budget::validation_work) below the prepayment this door
+/// refuses at the whole input's span before a rule ran, where the syntactic door charges node by
+/// node. `tests/validator_lossless.rs` compares the two doors' diagnostics.
 ///
 /// # A mismatched pair is an error, not a weakened answer
 ///
-/// `parse` and `source` are two arguments and nothing pairs them, so a caller can hand over a parse
-/// of different bytes. When they do, this returns `Err` with
+/// When `parse` and `source` do not describe one document this returns `Err` with
 /// [`LosslessInvalid::recovery`] `None` and
-/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) **false** — the one verdict that
-/// means "these inputs do not describe a document", distinct from the budget refusal below, which
-/// sets that flag.
+/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) **false**. The same holds for a pair
+/// too deep to descend and a parse whose root is not this dialect's document root;
+/// [`Invalid::refusal`](super::Invalid::refusal) names which: [`Refusal::SourceMismatch`],
+/// [`Refusal::TooDeep`] or [`Refusal::WrongRoot`].
 ///
-/// The alternative was an incomplete [`Recovery`], and it is worse here for two reasons. It needs a
-/// `skipped` count, and counting what was not projected is exactly the walk this declined to make —
-/// the same wall al8n/smear#198's eighth round hit, where inventing the number was worse than not
-/// having one. And it would be `Ok`: a caller who does not read the recovery sees a clean verdict,
-/// which is the failure this check exists to remove, one indirection later. This crate has already
-/// ruled on "nothing was examined" once, for the budget refusal, and ruled `Err`.
+/// The pair is checked before the ledger opens, so a mismatch answers
+/// [`Refusal::SourceMismatch`](super::Refusal::SourceMismatch) at every budget including zero.
 ///
-/// It also **outranks** the budget: the pair is checked before the ledger opens, so a mismatch
-/// answers [`Refusal::SourceMismatch`](super::Refusal::SourceMismatch) at every budget including
-/// zero. A stale pair is not a resource problem, and `Refusal::Budget` names a remedy — raise the
-/// limit, retry — that cannot help with one. That ordering is what the verified entry point exists
-/// to make free: there, the check has already happened.
+/// # When the budget cannot pay for the projection
 ///
-/// An earlier version of this contract said rejecting outright "would be a new way to fail for
-/// callers who are not doing anything wrong". That reasoning did not survive its own case — the
-/// projector's per-definition check cannot see a `source` that merely *extends* the parse's text,
-/// so the alternative was a complete-looking [`Recovery`] over a document nobody validated.
-///
-/// # What a refusal here looks like
-///
-/// The same thing every other refusal looks like: `Err`, with
-/// [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set, and
-/// [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget) in the sink when the rule set
-/// contains it. [`LosslessInvalid::recovery`] is **`None`**: nothing was projected, so there is no
-/// [`Recovery`] to report and no synthetic count for a caller to compare against. Counting the
-/// elements exactly is the walk the refusal declined to make, and doing it here from the green
-/// root's children would put a second copy of `recovered_top_level`'s idea of where the top level
-/// is into this crate, where it could drift.
+/// `Err`, with [`Invalid::budget_tripped`](super::Invalid::budget_tripped) set,
+/// [`Rule::ValidationWorkBudget`](super::Rule::ValidationWorkBudget) in the sink at the whole
+/// input's span when the rule set contains it, and [`LosslessInvalid::recovery`] **`None`**:
+/// nothing was projected. A budget that trips later, during the rules, also sets
+/// `budget_tripped`, and there the projection ran and `recovery` is `Some`.
 pub fn validate_executable_lossless_with<'src, K>(
   schema: &Schema,
   parse: &Parse,
@@ -485,27 +423,14 @@ pub fn validate_executable_lossless_with<'src, K>(
 where
   K: Sink<&'src str>,
 {
-  // Verifies, then delegates. The verification is `O(tokens)` and it runs **before the ledger is
-  // opened**, which is the price of taking an unverified pair: a caller who needs the ceiling to be
-  // absolute constructs a [`Verified`] itself and calls
-  // [`validate_executable_lossless_verified_with`], where nothing input-linear precedes the charge.
-  //
-  // Two properties are asked of this door and they cannot both hold here:
-  //
-  // - a **mismatch outranks a budget refusal**, because a stale pair is not a resource problem and
-  //   the remedy that answer names — raise the limit, retry — cannot work; and
-  // - the **ceiling is absolute**, because no input-linear work may run outside the ledger.
-  //
-  // Deciding the first needs the comparison *finished*; honouring the second needs it *stoppable*.
-  // That is a property of the arguments rather than of the ordering, so no rearrangement of this
-  // function satisfies both — which is why [`Verified`] exists rather than the check simply having
-  // been moved again. This signature chooses the first, and says so. al8n/smear#198.
+  // Verifies, then delegates. The verification is `O(green elements + source bytes)` and it runs
+  // **before the ledger is opened**. al8n/smear#198.
   let pair = Verified::new(parse, source).map_err(|refusal| LosslessInvalid {
-    // The two reasons a pair can be refused have different remedies — re-parse the source, or stop
-    // handing this door a tree nothing will descend — so they arrive under different names. The
-    // third time on al8n/smear#198 that a channel carrying one name met two abandonments.
+    // Three reasons, three `Refusal`s.
     invalid: match refusal {
       Unverified::TooDeep { .. } => Invalid::too_deep(),
+      Unverified::WrongRoot { raw } => Invalid::wrong_root(raw),
+      Unverified::SourceMismatch => Invalid::unexamined(),
       _ => Invalid::unexamined(),
     },
     recovery: None,
@@ -515,13 +440,8 @@ where
 
 /// [`validate_executable_lossless_with`] for a pair that already carries its verification.
 ///
-/// **The bounded door.** Nothing input-linear runs before the ledger opens: the pair's own
-/// verification was paid for by whoever constructed the [`Verified`], and the prepayment below
-/// prices the one thing left, the projection. A caller validating the same pair repeatedly — a
-/// cached parse, a watch loop — verifies once and is bounded on every call after it.
-///
-/// The projection is infallible here for the same reason this door has no mismatch state: a
-/// [`Verified`] is the proof that the fallible form's error half exists to report.
+/// It runs no verification: the first thing it does is price the projection and open the ledger.
+/// The projection is infallible here because it runs no verification either.
 pub fn validate_executable_lossless_verified_with<'src, K>(
   schema: &Schema,
   pair: Verified<'_, 'src>,
@@ -534,22 +454,10 @@ where
   K: Sink<&'src str>,
 {
   let source = pair.source();
-  // **Two dimensions, and neither bounds the other.** Bytes: the projector re-verifies each
-  // definition against the source at its own range, which reads them. Elements: it visits a node to
-  // dispatch on its kind and a token to read its text. A megabyte string literal is one token, and
-  // a balanced pair of zero-width nodes is two elements and no bytes — so the charge is the sum
-  // rather than either one.
-  //
-  // The element count is [`Verified`]'s, established by the same walk that established the pair's
-  // proof. This door charged `units(source.len())` alone until al8n/smear#198's twenty-third round,
-  // which is the assumption that bytes bound structure — and
-  // [`finish_root`](smear_parser::lossless::runner::finish_root) is public, so a caller can mint a
-  // `Parse` where they do not. An empty source over a tree of a million empty nodes verified, paid
-  // one unit, and had every node visited. A proof that does not bound what its consumer charges for
-  // is not a proof of the thing being relied on.
-  //
-  // The pair's two halves are the same length by construction, so there is no maximum to take: the
-  // twentieth round's "priced over both inputs" question does not exist for a verified pair.
+  // **Two dimensions, and neither bounds the other.** Bytes: the projector re-reads every token
+  // whose text reaches the AST through the lexer's own doors, which reads them. Elements: it visits
+  // a node to dispatch on its kind and a token to read its text. The element count is
+  // [`Verified`]'s, established by the same walk that verified the pair.
   let cost = units(source.len()).saturating_add(pair.projection_cost());
   let Some(left) = Ledger::open(budget).take(cost) else {
     let (emitted, stopped) = refuse_projection(source, budget, rules, sink);
@@ -575,10 +483,9 @@ where
 /// the rule is filtered out, which is the case the verdict has to survive: switching a bound's rule
 /// off switches off its *diagnostic*, never the refusal.
 ///
-/// The sink's answer is **returned rather than discarded**. A [`First`](super::First) sink breaks
-/// on the diagnostic it keeps, and dropping that made a verdict which had told a sink to stop
-/// report [`Invalid::stopped`](super::Invalid::stopped) as false — the same "gave up, said
-/// finished" shape one axis over.
+/// The sink's answer is **returned rather than discarded**, and becomes
+/// [`Invalid::stopped`](super::Invalid::stopped): `true` when the sink returned `Break` on the
+/// budget diagnostic.
 fn refuse_projection<'src, K>(
   source: &'src str,
   budget: &Budget,
@@ -606,26 +513,36 @@ where
 
 /// The verdict of a failed lossless schema build.
 ///
-/// [`SchemaErrors`] plus the [`Recovery`] the successful arm carries — [`LosslessInvalid`]'s twin,
-/// so the two facts a caller needs, *what was wrong* and *how much of the document was looked at*,
-/// arrive together whichever way the result went.
+/// [`SchemaErrors`] plus the [`Recovery`] the successful arm carries — [`LosslessInvalid`]'s twin.
+/// [`LosslessSchemaErrors::Refused`] carries both, and is the one variant made after the
+/// projection ran. The three made before it — [`SourceMismatch`](Self::SourceMismatch),
+/// [`TooDeep`](Self::TooDeep) and [`WrongRoot`](Self::WrongRoot) — carry neither; for them
+/// [`LosslessSchemaErrors::refusal`] names the reason and [`LosslessSchemaErrors::recovery`]
+/// answers `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LosslessSchemaErrors {
   /// The `parse` and the `source` do not describe one document, so nothing was projected and
   /// [`Schema::build`](super::Schema::build) was never asked.
   ///
-  /// A separate state rather than an empty error list beside a flag: the §3 refusals a caller would
-  /// otherwise read here — "no `Query` root", and so on — would be true of the empty document this
-  /// door declined to build from, and false of anything the caller wrote.
   SourceMismatch,
-  /// The `parse` nests deeper than a projection will descend, so nothing was projected and
+  /// The supplied tree is deeper than `smear_parser::lossless::project::MAX_GREEN_DEPTH`, so
+  /// nothing was projected and [`Schema::build`](super::Schema::build) was never asked.
+  ///
+  /// A refusal of the tree, not of its bytes, which may agree with the source exactly. A parse of
+  /// the same source through the dialect's own door is never this deep, so the tree was built
+  /// outside that door. al8n/smear#198.
+  TooDeep,
+  /// The `parse`'s root is not the dialect's document root, so nothing was projected and
   /// [`Schema::build`](super::Schema::build) was never asked.
   ///
-  /// Distinct from [`LosslessSchemaErrors::SourceMismatch`] because the remedies are: the bytes may
-  /// agree exactly here, and telling a caller to re-parse them names the one thing that is not
-  /// wrong. al8n/smear#198.
-  TooDeep,
+  /// No parse this crate's doors produce has one: the pair was minted through the public, generic
+  /// `finish_root`, whose root kind is the caller's argument. The bytes may agree exactly.
+  /// al8n/smear#218.
+  WrongRoot {
+    /// The root's raw kind, as the green tree stores it.
+    raw: u16,
+  },
   /// The projected document is not a schema, exactly as
   /// [`Schema::build`](super::Schema::build) reports it.
   Refused {
@@ -639,7 +556,8 @@ pub enum LosslessSchemaErrors {
 impl LosslessSchemaErrors {
   /// Returns why the build refused, exactly as [`Schema::build`](super::Schema::build) reports it.
   ///
-  /// `None` when the build was never asked — see [`LosslessSchemaErrors::SourceMismatch`].
+  /// `None` when the build was never asked — [`LosslessSchemaErrors::SourceMismatch`],
+  /// [`LosslessSchemaErrors::TooDeep`] and [`LosslessSchemaErrors::WrongRoot`].
   #[inline]
   pub const fn errors(&self) -> Option<&SchemaErrors> {
     match self {
@@ -650,23 +568,22 @@ impl LosslessSchemaErrors {
 
   /// Returns why this door refused, when the reason was not the schema itself.
   ///
-  /// [`Invalid::refusal`](super::Invalid::refusal)'s twin for the SDL side, and the same reason for
-  /// existing: a caller should read one value to learn *which* refusal this is, not infer it from
-  /// which accessors happen to answer.
+  /// [`Invalid::refusal`](super::Invalid::refusal)'s twin for the SDL side: `Some` for the three
+  /// variants made before the projection, `None` for [`LosslessSchemaErrors::Refused`].
   #[inline]
   pub const fn refusal(&self) -> Option<Refusal> {
     match self {
       Self::SourceMismatch => Some(Refusal::SourceMismatch),
       Self::TooDeep => Some(Refusal::TooDeep),
+      Self::WrongRoot { raw } => Some(Refusal::WrongRoot { raw: *raw }),
       _ => None,
     }
   }
 
   /// Returns how much of the parse had an AST image.
   ///
-  /// [`Recovery::is_complete`] false means at least one of these refusals may be an artifact of a
-  /// definition that was dropped rather than of one the author wrote — see
-  /// [`validate_schema_lossless`].
+  /// `Some` exactly for [`LosslessSchemaErrors::Refused`], the one variant made after the
+  /// projection ran.
   #[inline]
   pub const fn recovery(&self) -> Option<Recovery> {
     match self {
@@ -711,6 +628,11 @@ impl core::fmt::Display for LosslessSchemaErrors {
       Self::TooDeep => {
         f.write_str("the parse nests deeper than a projection will descend, so nothing was built")
       }
+      Self::WrongRoot { raw } => write!(
+        f,
+        "the parse's root has raw kind {raw}, which is not this dialect's document root, so the \
+         parse was minted outside its door and nothing was built"
+      ),
       Self::Refused { errors, recovery } => {
         core::fmt::Display::fmt(errors, f)?;
         if !recovery.is_complete() {
@@ -732,8 +654,15 @@ impl core::error::Error for LosslessSchemaErrors {}
 /// returned and `source` is the text it was parsed from — the pair is **verified, not trusted**,
 /// so a mismatched one is refused by the projection rather than built against unrelated bytes.
 ///
-/// Returns `Ok((schema, recovery))` when the SDL is a schema and `Err` when it is not; either way
-/// the [`Recovery`] says how much of the parse had an AST image.
+/// Returns `Ok((schema, recovery))` when the projection ran and the projected document is a schema.
+/// The build is not gated on [`Recovery::is_complete`]: `Ok` may carry an incomplete [`Recovery`]
+/// when the definitions that were projected form a valid schema on their own. `Err` covers either
+/// a build refusal — [`LosslessSchemaErrors::Refused`], where the projection ran and the
+/// [`Recovery`] rides along — or a refusal made before the projection could run —
+/// [`LosslessSchemaErrors::SourceMismatch`],
+/// [`LosslessSchemaErrors::TooDeep`] and [`LosslessSchemaErrors::WrongRoot`], which carry none.
+/// [`LosslessSchemaErrors::refusal`] is `Some` for those three and `None` for `Refused`;
+/// [`LosslessSchemaErrors::recovery`] is `Some` for `Refused` and `None` for those three.
 ///
 /// # One §3 pass, not two
 ///
@@ -751,26 +680,16 @@ impl core::error::Error for LosslessSchemaErrors {}
 /// refuse one. Each top-level definition is projected on its own; the ones with an AST image are
 /// built and the ones without are skipped and counted.
 ///
-/// **Read the [`Recovery`] before you believe the verdict**, and here more carefully than at the
-/// executable door. With [`is_complete`](Recovery::is_complete) true this is exactly what
-/// [`Schema::build`](super::Schema::build) would have said. With it false, draft §3 is a
-/// whole-document pass over a document that is missing a piece, so:
-///
-/// - a refusal may be an **artifact** of the skip. Every reference to a dropped type is an
-///   [`UndefinedType`](super::SchemaErrorKind::UndefinedType), and a dropped `Query` is a
-///   [`MissingQueryRootOperationType`](super::SchemaErrorKind::MissingQueryRootOperationType) for
-///   the whole document; and
-/// - an `Ok` is a schema built from **less SDL than the author wrote**. It is a real, internally
-///   consistent schema, and it is not the one on screen — validating an operation against it can
-///   blame a field the missing half defines.
+/// With [`is_complete`](Recovery::is_complete) false the builder was handed only the definitions
+/// that had an AST image.
 ///
 /// A projection refusal never reaches the returned [`SchemaErrors`]: it is not a draft §3 finding
 /// and does not become one. The parse's own diagnostics already describe the syntax that broke.
 ///
 /// # Several documents
 ///
-/// [`SchemaBuilder`](super::SchemaBuilder) is still the door for a schema that spans more than one
-/// file, and it is reachable from here:
+/// For a schema that spans more than one file, [`SchemaBuilder`](super::SchemaBuilder) takes
+/// several documents, and
 /// [`project_type_system_document_recovered`](smear_parser::graphql::lossless::project_type_system_document_recovered)
 /// is public and answers the `(document, recovery)` pair this function feeds the one-document
 /// case with.
@@ -806,21 +725,13 @@ pub fn validate_schema_lossless(
   parse: &Parse,
   source: &str,
 ) -> Result<(Schema, Recovery), LosslessSchemaErrors> {
-  // The same whole-root verification the executable door gets, from the same shared projector.
-  //
-  // This door was cleared in al8n/smear#198's third-round sweep — "out of scope by API shape: it
-  // takes no `Budget`". That was right about the *ledger* question and had nothing to say about
-  // this one, and nothing re-read the clearance when the question changed. Without it, a `source`
-  // that is the parse's text plus trailing SDL projected every stale definition, reported a
-  // complete recovery, and let `Schema::build` answer `Ok` for the prefix while the appended
-  // definitions were silently absent.
-  //
-  // Neither door spells the check itself any more: the twelfth round asked for it "in the shared
-  // recovering-projection API" precisely so a door cannot be written without it, and the
-  // fourteenth showed a caller that has no door at all.
+  // The same whole-root verification the executable door gets, made inside the shared recovering
+  // projection rather than spelled here.
   let (document, recovery) =
     project_type_system_document_recovered(parse, source).map_err(|refusal| match refusal {
       Unverified::TooDeep { .. } => LosslessSchemaErrors::TooDeep,
+      Unverified::WrongRoot { raw } => LosslessSchemaErrors::WrongRoot { raw },
+      Unverified::SourceMismatch => LosslessSchemaErrors::SourceMismatch,
       _ => LosslessSchemaErrors::SourceMismatch,
     })?;
   match Schema::build(&document) {

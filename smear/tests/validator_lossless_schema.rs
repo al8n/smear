@@ -1123,3 +1123,93 @@ fn a_mixed_parse_is_not_an_sdl_parse() {
       > 0
   );
 }
+
+/// A `Parse` minted through the public, generic `finish_root` from a `Cst` whose profile admits every
+/// raw kind, over root raw kind `root` — the one public route to this dialect's `Parse` that skips
+/// its kind validator. The closure consumes nothing, so a non-empty source is tiled as one gap
+/// token under the root. The same construction as `lossless_project.rs`'s minted-root cell.
+fn foreign_root_parse<'a>(src: &'a str, root: u16) -> smear::parser::graphql::lossless::Parse {
+  use rowan::Language;
+  use smear::{
+    lexer::tokora::{
+      InputRef, SimpleSpan,
+      cache::DefaultCache,
+      cst::{CstProfile, KindValidator, Sink, parse_lossless},
+      emitter::Verbose,
+    },
+    parser::{
+      graphql::{
+        kinds::{GraphQLLang, SyntaxKind as K},
+        lossless::{Brand, GraphqlLosslessErrors, Lexer, LexerState},
+      },
+      lossless::runner::finish_root,
+    },
+  };
+
+  type Lx<'a> = Lexer<'a, str>;
+  type Em<'a> = Verbose<GraphqlLosslessErrors<&'a str>, SimpleSpan, Brand>;
+  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
+
+  fn unmapped<T>(_: &T) -> u16 {
+    0
+  }
+
+  let profile = CstProfile::new(
+    unmapped as fn(&_) -> u16,
+    KindValidator::accept_all(),
+    GraphQLLang::kind_to_raw(K::Error).0,
+    GraphQLLang::kind_to_raw(K::Gap).0,
+  );
+  let (cst, _) = parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
+    src,
+    LexerState::default(),
+    Em::new(),
+    profile,
+    DefaultCache::<'a, Lx<'a>>::default(),
+    |_: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| Ok(()),
+  );
+  finish_root::<GraphQLLang, Lx<'a>, Em<'a>>(cst, root, "a permissive profile")
+    .expect("the permissive profile admits the root")
+}
+
+/// A `Parse` whose root is not the dialect's document root builds nothing and says so, under its
+/// own name.
+///
+/// The recovering projector refuses it as `Unverified::WrongRoot` (al8n/smear#218, Codex rounds 2
+/// and 4), and this door keeps the reason — `LosslessSchemaErrors::WrongRoot` with the raw value —
+/// rather than reporting a mismatch (Codex round 3). Two roots: raw 60000, outside the kind space,
+/// and `Name`, inside it and not a document. Before, an empty such parse projected as a complete
+/// `Recovery::new(0, 0)` and `Schema::build` was asked about nothing.
+#[test]
+fn a_parse_over_a_wrong_root_builds_nothing_and_says_so() {
+  use rowan::Language;
+  use smear::parser::graphql::kinds::{GraphQLLang, SyntaxKind as K};
+
+  for root in [GraphQLLang::kind_to_raw(K::Name).0, 60_000] {
+    for source in ["", "type Query { ok: Int }"] {
+      let parse = foreign_root_parse(source, root);
+      let refused = validate_schema_lossless(&parse, source)
+        .err()
+        .unwrap_or_else(|| panic!("{root} {source:?}: a wrong root built a schema"));
+      assert_eq!(
+        refused,
+        smear::validator::LosslessSchemaErrors::WrongRoot { raw: root },
+        "{root} {source:?}"
+      );
+      assert_eq!(
+        refused.refusal(),
+        Some(Refusal::WrongRoot { raw: root }),
+        "{root} {source:?}"
+      );
+      assert_eq!(
+        refused.to_string(),
+        std::format!(
+          "the parse's root has raw kind {root}, which is not this dialect's document root, so \
+           the parse was minted outside its door and nothing was built"
+        )
+      );
+      assert_eq!(refused.errors(), None);
+      assert_eq!(refused.recovery(), None);
+    }
+  }
+}

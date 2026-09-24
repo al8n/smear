@@ -495,9 +495,9 @@ use values::ValueLocation;
 /// The verdict of a failed validation.
 ///
 /// Returned when the document was refused: because at least one diagnostic was emitted, or because
-/// validation was **abandoned** before the document had been examined. What the diagnostics *were*
-/// is the sink's business — this is the count, whether the sink asked to stop, and
-/// [`Invalid::refusal`], which is where the reasons for abandoning are named.
+/// a budget or a lossless door's pair check refused it. What the diagnostics *were* is the sink's
+/// business — this is the count, whether the sink returned `Break` ([`Invalid::stopped`]), and
+/// [`Invalid::refusal`], which names a budget or pair refusal.
 ///
 /// This paragraph does not list them, and neither does any accessor below. [`Refusal`] is the one
 /// place they are enumerated, for the reason its own documentation gives.
@@ -508,30 +508,19 @@ pub struct Invalid {
   refusal: Option<Refusal>,
 }
 
-/// Why a validation abandoned a document, when one did.
+/// Why a validation was refused other than by its findings: a budget, or a lossless door's pair.
 ///
 /// # Why this is a type and not a combination of flags
 ///
 /// An [`Invalid`] with [`Invalid::emitted`] zero is a verdict that examined less than the whole
-/// document, and there is more than one way to reach it. The contract used to say there was exactly
-/// one, and named it — and then a second arrived and the sentence did not notice. Asking a caller
-/// to tell two refusals apart by reading three booleans in the right combination is the shape this
-/// crate has already replaced three times: an `Option` carrying two kinds of abandonment, a
-/// [`u32::MAX`] carrying "off", and a zero-and-one [`Recovery`](super::Recovery) carrying "never
-/// ran". Each became a type, and each stopped needing prose to be read correctly.
+/// document, and there is more than one way to reach it; this type names which.
 ///
-/// It is `#[non_exhaustive]` for the reason the flags were not: a fourth way to refuse should cost
-/// a `match` arm at the call sites that care, not a sweep of every published sentence.
+/// It is `#[non_exhaustive]` so that another way to refuse costs a `match` arm at the call sites
+/// that care, not a sweep of every published sentence.
 ///
 /// # What makes the next variant safe
 ///
-/// Not "someone re-reads the accessors". `SourceMismatch` was added in al8n/smear#198's twenty-
-/// second round and three published sentences went stale the same day — [`Invalid`]'s header,
-/// [`Invalid::emitted`] ("it means one thing"), and [`Invalid::stopped`] ("there is exactly one
-/// verdict") — each a general claim asserted without listing what it ranges over, in a type whose
-/// whole reason for existing is that such a claim had gone stale once already.
-///
-/// So the invariant is structural: **this enum is the only place the refusal states are
+/// The invariant is structural: **this enum is the only place the refusal states are
 /// enumerated.** Every accessor points here instead of restating them, so there is nothing on them
 /// to go stale. And the enumeration that must stay in step with the variants is the `match` in
 /// [`Invalid`]'s [`Display`](core::fmt::Display) — inside the defining crate a `match` on a
@@ -553,13 +542,25 @@ pub enum Refusal {
   /// [`LosslessInvalid::recovery`](super::LosslessInvalid::recovery) is always `None`. Not a
   /// resource problem, which is why it is not [`Refusal::Budget`].
   SourceMismatch,
-  /// The lossless door was handed a parse that nests deeper than a projection will descend.
+  /// The lossless door was handed a parse whose tree is deeper than
+  /// `smear_parser::lossless::project::MAX_GREEN_DEPTH`.
   ///
-  /// Nothing about the **bytes** is wrong — they may agree exactly — so this is not
-  /// [`Refusal::SourceMismatch`], and nothing about the *budget* is either: no ceiling a caller
-  /// can raise admits it, because what it bounds is native stack frames. The one abandonment on
-  /// this list whose remedy is neither "re-parse" nor "raise a limit". al8n/smear#198.
+  /// A refusal of the supplied tree, not of its bytes, which may agree with the source exactly, so
+  /// this is not [`Refusal::SourceMismatch`]. It is not [`Refusal::Budget`] either: the check runs
+  /// before the ledger opens and no [`Budget`] field reaches it. A parse of the same source through
+  /// the dialect's own door is never this deep. Nothing was projected and nothing was validated.
+  /// al8n/smear#198.
   TooDeep,
+  /// The lossless door was handed a parse whose root is not the dialect's document root.
+  ///
+  /// No parse this crate's doors produce has one: the pair was minted through the public, generic
+  /// `finish_root`, which takes the root kind as an argument — outside the dialect's kind space, or
+  /// an in-space kind such as `Name`, answer alike. The bytes may agree exactly, so this is not
+  /// [`Refusal::SourceMismatch`]. Nothing was projected and nothing was validated. al8n/smear#218.
+  WrongRoot {
+    /// The root's raw kind, as the green tree stores it.
+    raw: u16,
+  },
 }
 
 impl Invalid {
@@ -570,32 +571,13 @@ impl Invalid {
   ///
   /// **Zero is a possible count on a verdict that is still `Err`.** It means validation was
   /// abandoned before it could produce anything, and [`Invalid::refusal`] says why — see
-  /// [`Refusal`] for the reasons. A caller that reported "no findings" without reading it would be
-  /// describing a check the validator never finished.
-  ///
-  /// This used to name the *one* way that happens. A second way arrived and the sentence did not
-  /// notice, which is why it now points at the enumeration instead of restating it.
-  /// al8n/smear#198.
+  /// [`Refusal`] for the reasons.
   #[inline]
   pub const fn emitted(&self) -> u32 {
     self.emitted
   }
 
-  /// Returns whether the **sink** stopped validation before the document was fully examined.
-  ///
-  /// True for [`First`](super::First) on any invalid document *that produced a diagnostic*. The
-  /// qualification is not pedantry: a verdict that is `Err` with [`Invalid::emitted`] zero was
-  /// abandoned, no diagnostic ever reached the sink, so the sink never asked for anything to stop
-  /// and this reads `false` on a document that was very much not fully examined. Read as "was the
-  /// whole document looked at", it says the opposite of the truth on the cases where it matters
-  /// most — and how many such cases there are is [`Refusal`]'s business, not this sentence's.
-  ///
-  /// So the two answer two questions and neither answers the other's: this one says **who** stopped
-  /// the walk, and [`Invalid::refusal`] says whether — and why — validation was abandoned. A caller
-  /// who wants "is anything about this document still unknown" reads both.
-  ///
-  /// When it is true, the absence of a diagnostic says nothing: the rest of the document was never
-  /// looked at. al8n/smear#196.
+  /// Returns whether the sink returned `Break` on a diagnostic.
   #[inline]
   pub const fn stopped(&self) -> bool {
     self.stopped
@@ -624,18 +606,18 @@ impl Invalid {
   ///
   /// When it is true the document is **invalid**, not "unvalidated": the engine refuses rather
   /// than passing what it could not finish examining. What it does *not* mean is that the rest of
-  /// the document is clean — the merge engine stopped, so anything it had not reached is unknown,
-  /// exactly as [`Invalid::stopped`] means for the sink.
+  /// the document is clean — the merge engine stopped, so anything it had not reached is unknown.
   #[inline]
   pub const fn budget_tripped(&self) -> bool {
     matches!(self.refusal, Some(Refusal::Budget))
   }
 
-  /// Returns why validation abandoned the document, when it did.
+  /// Returns the budget or pair refusal, when there was one.
   ///
-  /// `None` means it did not: every finding came from a rule that ran to completion, and
-  /// [`Invalid::emitted`] is non-zero. `Some` is the single place a caller reads to learn that part
-  /// of the document was never examined and why — see [`Refusal`].
+  /// `Some` names it — see [`Refusal`]. `None` means no budget tripped and no pair was refused; it
+  /// says nothing about the sink, which is [`Invalid::stopped`], or about whether the lossless
+  /// door's projection ran, which is
+  /// [`LosslessInvalid::recovery`](super::LosslessInvalid::recovery).
   #[inline]
   pub const fn refusal(&self) -> Option<Refusal> {
     self.refusal
@@ -654,9 +636,7 @@ impl Invalid {
   ///
   /// `pub(crate)` and used by exactly one caller: the lossless door refuses **before** it projects,
   /// so there is no [`Validator`] in existence to carry the flag out. The shape is the same one
-  /// `validate_charged` produces — `Err`, `budget_tripped`, and an `emitted` that may be zero —
-  /// because a second spelling of "gave up" is how a caller ends up reading one of them as
-  /// "finished".
+  /// `validate_charged` produces — `Err`, `budget_tripped`, and an `emitted` that may be zero.
   pub(crate) const fn refused(emitted: u32, stopped: bool) -> Self {
     Self {
       emitted,
@@ -665,12 +645,10 @@ impl Invalid {
     }
   }
 
-  /// The verdict of a run whose inputs did not describe one document.
+  /// The verdict of a run whose parse is deeper than the projection-depth policy.
   ///
-  /// The lossless door's other refusal, and the reason [`Invalid::budget_tripped`] is what
-  /// separates them: a `parse` and a `source` that disagree are not a resource problem, so this
-  /// reports `false` there and zero emitted. Nothing was validated either way, and a caller who
-  /// reads only the `Result` learns that from the `Err` alone.
+  /// Not a resource problem and not a mismatch: [`Invalid::budget_tripped`] reads `false`, nothing
+  /// is emitted, and [`Invalid::refusal`] names [`Refusal::TooDeep`].
   pub(crate) const fn too_deep() -> Self {
     Self {
       emitted: 0,
@@ -685,6 +663,15 @@ impl Invalid {
       emitted: 0,
       stopped: false,
       refusal: Some(Refusal::SourceMismatch),
+    }
+  }
+
+  /// The pre-projection refusal of a parse whose root is not the dialect's document root.
+  pub(crate) const fn wrong_root(raw: u16) -> Self {
+    Self {
+      emitted: 0,
+      stopped: false,
+      refusal: Some(Refusal::WrongRoot { raw }),
     }
   }
 }
@@ -702,6 +689,13 @@ impl core::fmt::Display for Invalid {
         Some(Refusal::TooDeep) => {
           "the parse nests deeper than a projection will descend, so nothing was validated"
         }
+        Some(Refusal::WrongRoot { raw }) => {
+          return write!(
+            f,
+            "the parse's root has raw kind {raw}, which is not this dialect's document root, so \
+             the parse was minted outside its door and nothing was validated"
+          );
+        }
         // Unreachable: `validate_charged` answers `Ok` for a zero count with no refusal, so this
         // combination is not constructed. Rendered rather than asserted — a `Display` that panics
         // is a worse answer than a vague one.
@@ -717,6 +711,10 @@ impl core::fmt::Display for Invalid {
       Some(Refusal::Budget) => f.write_str(" (resource budget exceeded)")?,
       Some(Refusal::SourceMismatch) => f.write_str(" (the parse and the source disagree)")?,
       Some(Refusal::TooDeep) => f.write_str(" (the parse is too deeply nested)")?,
+      Some(Refusal::WrongRoot { raw }) => write!(
+        f,
+        " (the parse's root has raw kind {raw}, which is not this dialect's document root)"
+      )?,
       None => {}
     }
     Ok(())

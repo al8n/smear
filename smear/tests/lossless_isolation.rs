@@ -536,9 +536,18 @@ fn the_substrate_names_no_dialect() {
 /// `Result<Parse, Refused>` — so the two items have no reason to exist and the count returns to
 /// where it was. A number that goes up and comes back down is worth a line, because the next
 /// reader would otherwise look for the two gates it names.
+///
+/// **22 with al8n/smear#217 and #218**: one gate, over a whole module. `lossless/project.rs`'s
+/// `walk` is the transcription machinery the GraphQLx projection wrote for al8n/smear#58 — the
+/// cursor, its kind-parameterised atoms, the extent fold and the three refusal constructors —
+/// hoisted so the GraphQL projection could take the same form rather than a second copy of it. It
+/// names no dialect (a dialect's trivia arrives through its `Trivia` impl), everything in it is
+/// `pub(crate)`, and its only callers are the two dialect projections: the `recover.rs` shape a
+/// fifth time. One gate on the module rather than one per item, which is why a hoist of some
+/// thirty items moves this count by one.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 21;
+const SUBSTRATE_FEATURE_GATES: usize = 22;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {

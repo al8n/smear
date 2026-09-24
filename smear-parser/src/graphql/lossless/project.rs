@@ -19,6 +19,32 @@
 //! # }
 //! ```
 //!
+//! # The second dialect's form, transcribed from this dialect's productions
+//!
+//! The contract, the error vocabulary, the span rule, the `(tree, source)` verification, the green
+//! traversal and — since al8n/smear#217 and #218 — the transcription atoms are
+//! [the substrate](crate::lossless::project)'s. The **form** is the one the GraphQLx projection
+//! arrived at over al8n/smear#58's seven rounds, and #218 measured that this file had every defect
+//! class that form closes. It is not a diff of that file: every walk below is GraphQL's own
+//! production under `graphql/lossless/*.rs`, transcribed, and four differences in this kind space
+//! change what a walk does rather than what it calls something:
+//!
+//! - **A definition's name is a bare `Name` token.** GraphQLx wraps it in a `DefinitionName` node;
+//!   here it is the token after the keyword, which the slot walk this replaces reached *by index*
+//!   into a three-slot collector. A transcription reads it at its position in the sequence, so a
+//!   name that spells a keyword (`directive @on on FIELD`) is a name because of where it is.
+//! - **A description is a node.** [`Description`](SyntaxKind::Description) sits inside the node it
+//!   precedes — and, unlike GraphQLx, inside an extension or a query shorthand too, because the
+//!   production opens those nodes at a mark taken before the description. The syntactic parser
+//!   refuses both, so both walks refuse the node as the first element their sequence has no place
+//!   for.
+//! - **A `!` is a wrapper node.** [`NonNullType`](SyntaxKind::NonNullType) retro-wraps the type it
+//!   modifies, so the type cycle has a wrapper level GraphQLx's does not, and `[T]!` builds one AST
+//!   list out of two tree nodes.
+//! - **A type condition is not a node.** Its `on` is a token of the fragment that carries it and its
+//!   type that fragment's [`NamedType`](SyntaxKind::NamedType) child, so the condition's span is
+//!   assembled from two elements of one sequence — which is what made finding 4 a panic.
+//!
 //! # Why `source` is a parameter, and why the pair is checked
 //!
 //! The AST is keyed by `S = &'src str` — the syntactic parser has the same property — and the
@@ -48,7 +74,179 @@
 //! In the other direction the projection is stricter than shape alone: a tree carrying an
 //! [`Error`](SyntaxKind::Error) hole or a [`Gap`](SyntaxKind::Gap) tile is refused outright,
 //! before any walk, because a hole is a region with no AST image and skipping it would be data
-//! loss wearing a success type.
+//! loss wearing a success type. The typed `to_ast` doors make the same scan over their own subtree.
+//!
+//! # What a tree the parser did not build is promised
+//!
+//! The projection is a **function of the tree**, and its guarantees are about its *output*:
+//!
+//! 1. **No panic** on any `(tree, source)` pair that passes the byte verification the doors run.
+//! 2. **Image membership** — every AST value it returns is one the syntactic parser produces for
+//!    *some* source, read **modulo the composite-span convention**. A composite node's span is its
+//!    token extent, so the lenient shapes below carry a span no source gives the parser: a
+//!    `FieldsDefinition` whose `}` is gone runs from its first field's name to its last field's
+//!    end. It is the value's *shape* that must be in the image; the span is the tree's, by the
+//!    rule the whole file is built on.
+//! 3. **Totality** — every non-trivia byte under a projected node is represented in the AST, or
+//!    the projection refuses.
+//!
+//! It does **not** promise that the tree is the one the lossless parser would build over those
+//! bytes. A caller can mint a green tree, and [`Verified`] exists so one can be projected; nothing
+//! in the three guarantees says the tree is a parse.
+//!
+//! **The worked case.** Over the source `[-12]`, a caller-built list can hold two adjacent
+//! [`IntValue`](SyntaxKind::IntValue) nodes, `-1` at `1..3` and `2` at `3..4`. Each slice is one
+//! whole integer to [`int_literal`], the byte verification passes because the concatenation is the
+//! source, and the projection answers `[-1, 2]` with exactly those two spans. The shipped lexer
+//! would read one integer `-12`, so this is an AST no *parse* of `[-12]` yields — and it is inside
+//! all three guarantees, because it is the AST of the sentence the **tree** spells.
+//! `a_tree_that_splits_a_token_projects_the_tree_it_was_handed` pins it as a decision: restoring
+//! lexical-boundary fidelity would mean re-lexing the source around every token, the re-parse
+//! `a_projection_that_re_parsed_the_source_would_fail_this` exists to forbid, and a second
+//! custodian of boundaries the lexer already owns.
+//!
+//! # What the parser reports and still builds
+//!
+//! GraphQL's lossless productions **report and continue**: a violation goes on the diagnostic
+//! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
+//! The population is every call that reports without building a hole — **38**
+//! `recover::report_unexpected::<…>` sites and **11** `recover::unclosed_{list,object,parens}::<…>`
+//! sites across `graphql/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
+//! **all 49 are mapped** below, one probe each: a text that reaches the site with a hole-free tree,
+//! and what this projection answers for it. `every_report_and_build_site_has_a_measured_answer`
+//! holds the same rows, asserts their count per file and family against the source's own spelling
+//! of each call, and measures every answer.
+//!
+//! **The "what the site leaves out" column is where the lenient set comes from.** A site either
+//! leaves out one token with **no AST image** (a closer, an `on`), leaves out a constituent the AST
+//! holds (a member, a name, a tail — never lenient), or leaves nothing out and reports something
+//! present (a description, a spelling a rule refuses). **Eleven project; thirty-eight refuse.**
+//!
+//! | file | site | probe | what the site leaves out | the projection |
+//! |---|---|---|---|---|
+//! | `document.rs` | report | `extend scalar S` | a constituent with an image | `MissingChild { ScalarTypeExtension }` |
+//! | `document.rs` | report | `extend type T` (and `extend interface I`, the same site) | a constituent with an image | `MissingChild { ObjectTypeExtension }` |
+//! | `document.rs` | report | `extend union U` | a constituent with an image | `MissingChild { UnionTypeExtension }` |
+//! | `document.rs` | report | `extend enum E` | a constituent with an image | `MissingChild { EnumTypeExtension }` |
+//! | `document.rs` | report | `extend input I` | a constituent with an image | `MissingChild { InputObjectTypeExtension }` |
+//! | `document.rs` | report | `extend schema` | a constituent with an image | `MissingChild { SchemaExtension }` |
+//! | `document.rs` | report | `extend` | a constituent with an image — the `extend` is rubble | `UnexpectedChild { Document, Name }` |
+//! | `document.rs` | report | `"d" { f }` | nothing — a present node is refused | `UnexpectedChild { OperationDefinition, Description }` |
+//! | `document.rs` | report | `"d" extend scalar S @k` | nothing — a present node is refused | `UnexpectedChild { ScalarTypeExtension, Description }` |
+//! | `document.rs` | report | `"d" extend scalar S @k` (SDL root) | nothing — a present node is refused | `UnexpectedChild { ScalarTypeExtension, Description }` |
+//! | `document.rs` | report | the empty document | a constituent with an image | `MissingChild { Document }` |
+//! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild { TypeSystemDocument }` |
+//! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
+//! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { Root, OperationType }` — the executable root abandons its document node, so the list is rubble beside no container |
+//! | `executable.rs` | report | `fragment on on T { f }` (executable root) | nothing — a present token is refused | `SemanticRule` |
+//! | `executable.rs` | report | `"d" { f }` (executable root) | nothing — a present node is refused | `UnexpectedChild { OperationDefinition, Description }` |
+//! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
+//! | `selection.rs` | report | `fragment F T { f }` | `on` of `FragmentDefinition` — **no image** | **projects** |
+//! | `selection.rs` | report | `fragment F on { f }` | a constituent with an image | `UnexpectedChild { FragmentDefinition, SelectionSet }` |
+//! | `selection.rs` | report | `{ ... }` | a constituent with an image — the `...` is rubble | `UnexpectedChild { SelectionSet, Spread }` |
+//! | `selection.rs` | report | `{ }` | a constituent with an image | `MissingChild { SelectionSet }` |
+//! | `selection.rs` | unclosed | `{ f` | `}` of `SelectionSet` — **no image** | **projects** |
+//! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild { ArgumentsDefinition }` |
+//! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild { Document, Name }` |
+//! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild { FieldsDefinition }` |
+//! | `definition.rs` | unclosed | `type T { f: Int` | `}` of `FieldsDefinition` — **no image** | **projects** |
+//! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild { InputFieldsDefinition }` |
+//! | `definition.rs` | unclosed | `input I { f: Int` | `}` of `InputFieldsDefinition` — **no image** | **projects** |
+//! | `definition.rs` | report | `type T implements { f: Int }` | a constituent with an image | `MissingChild { ImplementsInterfaces }` |
+//! | `definition.rs` | report | `type T implements A & { f: Int }` | a constituent with an image | `MissingChild { ImplementsInterfaces }` |
+//! | `definition.rs` | report | `union U =` | a constituent with an image | `MissingChild { UnionMemberTypes }` |
+//! | `definition.rs` | report | `union U = A \|` | a constituent with an image | `MissingChild { UnionMemberTypes }` |
+//! | `definition.rs` | report | `directive @d on FOO` | nothing — a present token is refused | `MalformedToken { Name }` |
+//! | `definition.rs` | report | `directive @d on \|` | a constituent with an image | `MissingChild { DirectiveLocations }` |
+//! | `definition.rs` | report | `directive @d on FIELD \|` | a constituent with an image | `MissingChild { DirectiveLocations }` |
+//! | `definition.rs` | report | `enum E { true }` | nothing — a present token is refused | `SemanticRule` |
+//! | `definition.rs` | report | `enum E { }` | a constituent with an image | `MissingChild { EnumValuesDefinition }` |
+//! | `definition.rs` | unclosed | `enum E { A` | `}` of `EnumValuesDefinition` — **no image** | **projects** |
+//! | `definition.rs` | report | `schema { foo: Q }` | nothing — a present token is refused | `MalformedToken { Name }` |
+//! | `definition.rs` | report | `schema { }` | a constituent with an image | `MissingChild { RootOperationTypeDefinitions }` |
+//! | `definition.rs` | unclosed | `schema { query: Q` | `}` of `RootOperationTypeDefinitions` — **no image** | **projects** |
+//! | `definition.rs` | report | `directive @d FIELD` | `on` of `DirectiveDefinition` — **no image** | **projects** |
+//! | `definition.rs` | report | `directive @d on` | a constituent with an image | `MissingChild { DirectiveDefinition }` |
+//! | `definition.rs` | report | `schema @k` | a constituent with an image | `MissingChild { SchemaDefinition }` |
+//! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
+//! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
+//! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present node is refused | `UnexpectedChild { DefaultValue, Variable }` |
+//!
+//! ## The missing-token class: where an absent token still projects
+//!
+//! **The criterion is the parser-witnessed floor.** A position is lenient iff the lossless parser
+//! itself builds a **hole-free** tree for the text with that token missing, *and* the token has no
+//! AST image of its own. Both halves matter: the first is why such a shape reaches a projection at
+//! all, the second is why nothing is lost by projecting it — only a token is gone, every
+//! constituent the AST holds is still there, and the value's shape is one the parser builds for the
+//! text with the token restored.
+//!
+//! | parent | absent token | witness |
+//! |---|---|---|
+//! | [`SelectionSet`](SyntaxKind::SelectionSet) | `}` | `selection.rs` unclosed — `{ f` |
+//! | [`FieldsDefinition`](SyntaxKind::FieldsDefinition) | `}` | `definition.rs` unclosed — `type T { f: Int` |
+//! | [`InputFieldsDefinition`](SyntaxKind::InputFieldsDefinition) | `}` | `definition.rs` unclosed — `input I { f: Int` |
+//! | [`EnumValuesDefinition`](SyntaxKind::EnumValuesDefinition) | `}` | `definition.rs` unclosed — `enum E { A` |
+//! | [`RootOperationTypeDefinitions`](SyntaxKind::RootOperationTypeDefinitions) | `}` | `definition.rs` unclosed — `schema { query: Q` |
+//! | [`Arguments`](SyntaxKind::Arguments) | `)` | `directive.rs` unclosed — `{ f(a: 1` |
+//! | [`FragmentDefinition`](SyntaxKind::FragmentDefinition) | `on` | `selection.rs` report — `fragment F T { f }` |
+//! | [`DirectiveDefinition`](SyntaxKind::DirectiveDefinition) | `on` | `definition.rs` report — `directive @d FIELD` |
+//! | [`ListType`](SyntaxKind::ListType) | `]` | `ty.rs` unclosed — `type T { f: [Int` |
+//! | [`ListValue`](SyntaxKind::ListValue) | `]` | `value.rs` unclosed — `{ f(a: [1` |
+//! | [`ObjectValue`](SyntaxKind::ObjectValue) | `}` | `value.rs` unclosed — `{ f(a: {b: 1` |
+//! | [`VariablesDefinition`](SyntaxKind::VariablesDefinition) | `)` | `executable.rs` unclosed — `query Q($a: Int`; refuses either way, the operation being lost |
+//! | [`ArgumentsDefinition`](SyntaxKind::ArgumentsDefinition) | `)` | `definition.rs` unclosed — `type T { f(a: Int`; refuses either way, the definition being lost |
+//!
+//! **This table is the criterion's whole extension, derived rather than listed.** The
+//! report-and-build census above enumerates every place the parser leaves a token out without a
+//! hole, and its thirteen image-less rows — each witnessed by its own probe's tree — are these
+//! thirteen, which the cell asserts. Two are witnessed only as **orphans**: at end of input the
+//! operation or the field around the list cannot be finished, so the root keeps the list as a stray
+//! child beside the lost definition's tokens, and every projection of such a tree refuses at the
+//! rubble. They are lenient by the criterion and change no answer.
+//!
+//! The `on` of an **inline** fragment is not a row, and not by omission: the same `type_condition`
+//! production serves both fragments, but the spread dispatch opens an inline fragment *because* it
+//! read `on`, so no parse holds an inline fragment's type without one. Its walk requires the `on`
+//! in front of the type.
+//!
+//! Every row is also **measured as a value** where a value exists: `tests/lossless_mutation.rs`
+//! deletes the token from a real tree — or finds a corpus tree already without it — and requires
+//! the projection to equal the syntactic parse of the text **with every missing lenient token
+//! restored**, innermost first at a shared offset, spans mapped back through the splices. Its
+//! per-row counts are asserted, and its own table is asserted equal to this one.
+//!
+//! **A described shorthand or extension is not in this class**: the description is *present*, and
+//! the syntactic parser rejects the combination categorically rather than doing without a token.
+//!
+//! **Which of these are *rules* rather than shapes.** The spelling rules are **derived from the
+//! syntactic crate**, not remembered: every production under `graphql/syntactic/**` whose match on
+//! a keyword *refuses* a `Name` rather than dispatching on it. The grep is `downcast_ref()` over
+//! that tree — this dialect's productions classify a token through the lexer's `DowncastRef`
+//! rather than through a `keyword_of` helper — filtered to the sites whose match refuses: four
+//! positions.
+//!
+//! | position | the syntactic refusal | the projection |
+//! |---|---|---|
+//! | a fragment's name is not `on` | `mod.rs:132`, `fragment_name` (`Expectation::FragmentName`), reached from `executable/mod.rs:647` | `name_except` in `fragment_definition` |
+//! | a fragment spread's target is not `on` | `selection/mod.rs:338` (the spread dispatch reads `on` as an inline fragment's head) and `fragment_name` again at `selection/mod.rs:443` | `name_except` in `fragment_spread` |
+//! | an enum value is not `true`, `false` or `null` | `value/mod.rs:393` and `:537` (the enum productions), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value/mod.rs:969-975` non-const, `:1081-1087` const | `name_except` in `enum_value_name`, shared by both value grammars |
+//! | an enum value definition is not named `true`, `false` or `null` | `definition/enum_type.rs:20` (`Expectation::EnumValue`) | `name_except` in `enum_value_name` — the declaring name sits inside the same `EnumValue` node kind |
+//!
+//! Each answers [`SemanticRule`](ProjectErrorKind::SemanticRule) at the offending name. The spread
+//! and value-position rules are invisible to the mutation law — a tree the parser builds never
+//! holds them, and a retexted one re-parses to a different skeleton — so hand-built cells pin all
+//! four. Every other `downcast_ref()` match dispatches (a definition's or an extension's keyword,
+//! an operation type, a directive location) and its refusal is a classification rather than a
+//! rule: a location or an operation keyword the lexer's table does not classify is
+//! [`MalformedToken`](ProjectErrorKind::MalformedToken).
+//!
+//! **No other position reserves a spelling.** This dialect's keywords are contextual: the lexer
+//! reads `on`, `query` and `type` as identifiers, and the syntactic parser accepts
+//! `type on { on: on }` — so every other name position takes any identifier, through the one door
+//! `name_token`. `a_contextual_keyword_is_a_name_at_every_name_position` pins it.
 //!
 //! # What is walked, and how a span is folded
 //!
@@ -66,57 +264,10 @@
 //!
 //! Every span is the **token extent** of the constituents it covers — never the node's own
 //! range, which includes committed trivia. See [`crate::lossless::project`] for that
-//! rule and the measurement behind it.
-//!
-//! It is folded **bottom-up, once**. Each node function walks its own
-//! [`children`](crate::lossless::project::Node::children) a single time: it covers the
-//! ranges of its non-trivia tokens,
-//! dispatches its child nodes into slots by kind, and covers the extent each projected child
-//! hands back beside its AST value — which is why so many of them answer
-//! `(value, TextRange)`. Nothing re-descends a subtree an ancestor has already walked. A child
-//! the projection has no place for is the one exception: its bytes still belong to the parent's
-//! span, so [`node_extent`] reads them, and that is the only call site left for it.
-//!
-//! # No node dispatch below spends a native frame per level
-//!
-//! The grammar is bounded above a value: a document holds definitions, a definition holds fields,
-//! a field holds arguments, and none of those can contain another of itself. **Four cycles are
-//! not** — `value` ↔ `object_field`, `const_value` ↔ `const_object_field`, `selection_set` ↔
-//! `field`/`inline_fragment`, and `ty` ↔ `list_element`/`non_null_type` — and each of them used to
-//! spend one native frame per level of nesting, with no counter of its own.
-//!
-//! `MAX_GREEN_DEPTH` did not close that, and no value of it could: cutting it under what the doors
-//! produce refuses a parse this crate just made. So at the top of the lexer's `HARD_MAX` the doors
-//! produced exactly the tree the dispatch could not descend. Measured on `aarch64-apple-darwin`,
-//! unoptimised, on the 2 MiB thread `std::thread::spawn` and the libtest harness each give:
-//! `scalar Foo @x(a: {a: … 1 … })` at 253 brackets and 514 green levels projected, and at 254
-//! brackets and 516 levels **aborted the process** — 4 080 bytes of frame per green level, against
-//! a green walk's 733. 254 and 255 parse clean; 256 is refused by `HARD_MAX`. al8n/smear#201.
-//!
-//! Each cycle is a **worklist** now, and the three of them share one shape:
-//!
-//! - A frame is a container the walk has entered and not finished: the node, its fold so far, the
-//!   child iterator it has not drained, and the accumulator it is filling. A container costs one
-//!   frame however **wide** it is, because the frame adopts the tree's own iterator rather than
-//!   copying the children out — which is the same trade the substrate's `Descent` makes, and the
-//!   reason a breadth-first queue would have been the wrong structure here.
-//! - **The fold stays bottom-up**, which is what the `Extent` threaded through these functions
-//!   requires: a parent's span is the cover of its children's, so a parent cannot be finished
-//!   before them. A frame is therefore only ever completed by the value the level below hands
-//!   back, and the constituent that value belongs to — an `ObjectField` waiting on its value, a
-//!   `Field` waiting on its selection set — travels **on the frame** as an open slot rather than
-//!   in a call frame.
-//! - A frame is pushed only with a live descent already chosen below it, so the open slot is never
-//!   empty while the frame is on the stack. That is a state the type system then does not have to
-//!   rule out, and it is why the `open_*_chain` helpers exist: they run the entry dispatch down to
-//!   the first constituent that finishes without a frame.
-//!
-//! What that costs is one heap entry per nesting level in place of a native frame, and the
-//! entries are bounded by `MAX_GREEN_DEPTH` — inherited rather than re-counted, because every door
-//! into this module opens with a verification that refuses past it. Measured on the same host and
-//! the same instrument: every bracket count `HARD_MAX` admits now projects on a **256 KiB** thread
-//! in both profiles, and the smallest stack the projection itself needs is the same at 255
-//! brackets as at one.
+//! rule and the measurement behind it. It is folded **bottom-up, once**: each node function reads
+//! its own children a single time, through the substrate's cursor in its production's order,
+//! covers the ranges of the tokens its atoms consume, and covers the extent each projected child
+//! hands back beside its AST value.
 //!
 //! Two places the tree's geometry and the AST's differ, and both are span-relevant:
 //!
@@ -132,6 +283,156 @@
 //!   That asymmetry is trunk's, not this module's, and it is reproduced rather than corrected:
 //!   `tests/lossless_project.rs` compares against the parser, so a "fix" here would be a
 //!   divergence.
+//!
+//! # Every non-trivia byte is represented, or the walk refuses
+//!
+//! A byte that is merely *covered* — folded into a span while reaching no AST field — is the shape
+//! of guarantee 3's failure. al8n/smear#218's addenda counted this file's ways to produce one at
+//! trunk `c885c07`, and every count held unchanged until this rewrite:
+//!
+//! | the hatch | what it dropped | the obligation now |
+//! |---|---|---|
+//! | `extent.token(token)` folded any non-trivia token — **48** sites | a stray `@`, a duplicated delimiter, a second name | **gone** — a token is consumed only by an atom that names its kind, at its place in the sequence |
+//! | `extent.unread(child)` covered a node with no arm — **34** sites, **28** of them `_ =>` wildcards, and **67** `is_none()` dispatch guards fell through to one | a second `Directives`, a second `SelectionSet`, a whole `FieldsDefinition` under a scalar | **gone**, and so are the guards — a child is consumed by an atom or refused by `end` |
+//! | `Names`, `[Option<Token>; 3]`, read by index at **22** sites | a fourth name; a fragment name split into `Name("o")` `Name("n")` passing the `on` rule | **gone** — a name is one atom per position the production spells |
+//! | a leaf that took the first token of its kind and folded the rest | `IntValue` over `Int("1")` and `Int("2")` answering `1` with a span across both | **gone** — a leaf is one token atom and then `end` |
+//! | a keyword slot read by index and never read | `directive @d foo FIELD` answering what `directive @d on FIELD` answers | each keyword is an atom at its own position |
+//! | a **shared** extension walker taking the union of six tails | a `ScalarTypeExtension` holding a `FieldsDefinition`, projected `Ok` with the block dropped | one transcription per kind |
+//! | the query shorthand's branch keeping a description and covering what it forbade | `"d" { f }` projected described; a recovering door counting it complete | the shorthand's sequence has no description |
+//!
+//! `every_walk_is_a_transcription` reads this file's own code and asserts the census: no
+//! `extent.token(`, no `unread(`, no `Names`, no `is_none() =>` guard, no wildcard arm that covers,
+//! and one child loop left — the recovering door's pass over the root. The file had **52** child
+//! loops; each became its production's cursor walk.
+//!
+//! **What "represented" means.** A token is represented when its *kind* is one the shape's own
+//! production spells, and, if its *text* would reach an AST field, when it actually reaches one. So
+//! a `{`, an `&` between two interfaces and a definition's `type` keyword are represented by being
+//! consumed: their text carries nothing the node kind does not already say. A `Name`, a literal
+//! image and the `repeatable` in a directive definition are not: their text selects a value.
+//!
+//! ## A walk is its production transcribed
+//!
+//! A walk that dispatches children into slots by kind can express a shape's **set** of children and
+//! cannot express their **sequence** or **multiplicity**, and wherever a production has a committing
+//! prefix (`on`, `implements`, `=`, `:`) or a separator (`&`, `|`) the same kinds in a different
+//! order or count are a different sentence. So each walk is a sequence of atoms over the
+//! substrate's cursor in the grammar's own order, ending in `end`: *represented* stops being a
+//! property checked against a table and becomes **consumed by an atom**, and sequence,
+//! multiplicity, vocabulary, one-of exclusivity, committing prefixes and separators become
+//! consequences of the transcription. There is no `token(K::Name)`: a `Name` is consumed by
+//! `keyword`, `name_token` or `spelling`.
+//!
+//! **What checks the transcription.** A node handed back by an atom and then neither projected nor
+//! descended into is the one cover-and-drop this form cannot make impossible.
+//! `tests/lossless_mutation.rs` is what finds it: it perturbs every hole-free corpus tree one child
+//! at a time and requires the projection to agree with the syntactic parser — with every lenient
+//! token restored, where one is missing — or refuse. Run against the slot walks this replaces it
+//! found **386** violations in 30 classes, 22 of them panics; against this file it finds none, and
+//! every population and bucket it counts is an asserted constant.
+//!
+//! ## The same rule one level down: leaf text
+//!
+//! A token whose text reaches the AST **as a value** is re-cooked through the lexer's own
+//! whole-slice door, because on a caller-minted tree the bytes under a token are whatever the
+//! caller wrote and the kind label is not evidence. A token whose text only contributes a *range*
+//! — every keyword and every piece of punctuation — is **not** re-cooked.
+//!
+//! | leaf | becomes | door |
+//! |---|---|---|
+//! | [`Int`](SyntaxKind::Int) | the raw slice, in [`IntValue`] | [`int_literal`], the shipped scanner, whole-slice — it validates the spelling and hands the slice back |
+//! | [`Float`](SyntaxKind::Float) | the raw slice, in [`FloatValue`] | [`float_literal`], likewise; the two doors do not coerce into each other |
+//! | [`String`](SyntaxKind::String), [`BlockString`](SyntaxKind::BlockString) | [`LitStr`] | `LitStr::try_from`, the string sub-lexer, as before |
+//! | [`Name`](SyntaxKind::Name) whose text becomes a name | [`Name`] | [`identifier`], added beside GraphQLx's for this — every name position reaches it through `name_token` |
+//! | a `Name` read for its **spelling** | an operation type, a directive location, `true`/`false`/`null` | `contextual_keyword` — the lexer's own table — and every reader of it refuses a spelling it does not classify |
+//!
+//! The last row is where [`NullValue`](SyntaxKind::NullValue) was: `BooleanValue` always compared
+//! its text and `NullValue` did not, so a `NullValue` node over any identifier projected to a
+//! `null` carrying that identifier's bytes. It classifies now.
+//!
+//! # Empty containers: the three-way rule
+//!
+//! A container the tree opens can be empty, and what the AST does about that is decided by the
+//! **syntactic production**, not by the node's presence. There are exactly three answers:
+//!
+//! | the grammar | the tree | the AST | this projection |
+//! |---|---|---|---|
+//! | `X+` | node present, no members | *no value* — the parser rejects the document | [`MissingChild`](ProjectErrorKind::MissingChild) |
+//! | `X*` inside delimiters, mapped to `None` when empty | node present, no members | `None` | `None`, with the node's extent still covered |
+//! | optional, undelimited | no node | `None` | `None`, nothing covered |
+//!
+//! **Why the first row is a refusal and not an empty carrier.** The projection never produces a
+//! value outside the syntactic parser's image, and a `SelectionSet` with no selections or a
+//! `FieldsDefinition` with no fields is a value the parser produces for no input. It is **not** the
+//! unclosed-brace case, which projects precisely because its image *is* a value the parser
+//! produces, for the closed text.
+//!
+//! ## The list, derived twice
+//!
+//! Once from the **productions** — a `report_unexpected` on an empty body, a mandatory first
+//! element followed by a `while` — and once from the **AST**: every container this file constructs
+//! from a `Vec`. What follows is the **union**; the two derivations differ by the two directive
+//! runs, which the production side misses because `directives` opens its node only at an `@` and
+//! never reports an empty one. Every row is measured.
+//!
+//! | AST container | grammar | present-empty | pinned by |
+//! |---|---|---|---|
+//! | [`Document`](SyntaxKind::Document), [`TypeSystemDocument`](SyntaxKind::TypeSystemDocument), [`ExecutableDocument`](SyntaxKind::ExecutableDocument) | `Definition+` | `MissingChild` | `every_report_and_build_site_has_a_measured_answer` |
+//! | [`SelectionSet`](SyntaxKind::SelectionSet) | `Selection+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | [`VariablesDefinition`](SyntaxKind::VariablesDefinition) | `VariableDefinition+` in `( )` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | [`FieldsDefinition`](SyntaxKind::FieldsDefinition) | `FieldDefinition+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | [`ArgumentsDefinition`](SyntaxKind::ArgumentsDefinition) | `InputValueDefinition+` in `( )` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | [`InputFieldsDefinition`](SyntaxKind::InputFieldsDefinition) | `InputValueDefinition+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | [`EnumValuesDefinition`](SyntaxKind::EnumValuesDefinition) | `EnumValueDefinition+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | [`RootOperationTypeDefinitions`](SyntaxKind::RootOperationTypeDefinitions) | `RootOperationTypeDefinition+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | [`ImplementsInterfaces`](SyntaxKind::ImplementsInterfaces) | `NamedType+` after `implements`, separated by `&` | `MissingChild` | `the_separated_atoms_refuse_at_the_obstruction` |
+//! | [`UnionMemberTypes`](SyntaxKind::UnionMemberTypes) | `NamedType+` after `=`, separated by `\|` | `MissingChild` | `the_separated_atoms_refuse_at_the_obstruction` |
+//! | [`DirectiveLocations`](SyntaxKind::DirectiveLocations) | `Name+` separated by `\|` | `MissingChild` | `the_separated_atoms_refuse_at_the_obstruction` |
+//! | [`Directives`](SyntaxKind::Directives), both flavours | `Directive+` | `MissingChild` | `a_present_directive_run_with_no_directive_refuses` |
+//! | [`Arguments`](SyntaxKind::Arguments), both flavours | `Argument*` in `( )` | `None`, extent covered | `a_written_down_empty_argument_list_is_none_with_a_span` |
+//! | a list or object **value** | `Value*` in its delimiters | an empty container value | `a_written_down_empty_argument_list_is_none_with_a_span` |
+//!
+//! The last row is not a fourth answer to the same question: those are not optional constituents at
+//! all, they are values, and `[]` is as much a value as `[1]`.
+//!
+//! **Row two, measured rather than asserted.** `Arguments` is in it only because the syntactic
+//! parser really does answer `None` for a written-down empty list: over `query Q { f() }` the
+//! parse's field answers `arguments().is_none() == true`, and so do `type T @d() { f: Int }` and
+//! `query Q { f @d() }` — compared with plain `==` against `graphql::syntactic::document` in
+//! `a_written_down_empty_argument_list_is_none_with_a_span`. al8n/smear#217.
+//!
+//! **The one container that may be empty and is not in the table** is the recovering doors'
+//! accumulator: [`project_executable_document_recovered`] and its twin answer a document with no
+//! definitions when every entry was skipped. That is the recovery contract — [`Recovery::skipped`]
+//! is the bound on what was lost — rather than a cardinality claim.
+//!
+//! # No node dispatch below spends a native frame per level
+//!
+//! The grammar is bounded above a value: a document holds definitions, a definition holds fields,
+//! a field holds arguments, and none of those can contain another of itself. **Four cycles are
+//! not** — `value` ↔ `object_field`, `const_value` ↔ `const_object_field`, `selection_set` ↔
+//! `field`/`inline_fragment`, and `ty` ↔ `list_element`/`non_null_type` — and each is a worklist
+//! rather than a recursion. al8n/smear#201.
+//!
+//! Each cycle is a **worklist**, and they share one shape:
+//!
+//! - A frame is a container the walk has entered and not finished: its **cursor** — the node, its
+//!   fold so far and the children it has not read — and the accumulator it is filling. A container
+//!   costs one frame however **wide** it is, because the cursor adopts the tree's own child
+//!   iterator rather than copying the children out.
+//! - **The fold stays bottom-up**: a parent's span is the cover of its children's, so a parent
+//!   cannot be finished before them. A frame is therefore only ever completed by the value the
+//!   level below hands back, and the constituent that value belongs to — an `ObjectField` waiting on
+//!   its value, a `Field` waiting on its selection set — travels **on the frame** as an open slot.
+//! - A frame is pushed only with a live descent already chosen below it, so the open slot is never
+//!   empty while the frame is on the stack, and it travels by value: an open selection holds a
+//!   finished `Alias`, `Arguments` and `Directives` that have to leave the frame when it closes.
+//!
+//! What that costs is one heap entry per nesting level in place of a native frame, bounded by
+//! `MAX_GREEN_DEPTH` — inherited rather than re-counted, because every door into this module opens
+//! with a verification that refuses past it. `smear-parser/tests/deep_projection.rs` reads the
+//! flatness off a real projection, one fixture per cycle and one per carrier a cycle passes
+//! through.
 
 use std::vec::Vec;
 
@@ -140,7 +441,9 @@ use tokora::SimpleSpan;
 
 use smear_lexer::{
   LitStr,
-  graphql::{ContextualKeyword, keyword::contextual_keyword},
+  graphql::{
+    ContextualKeyword, float_literal, identifier, int_literal, keyword::contextual_keyword,
+  },
   keywords::{Mutation, Query, Subscription},
 };
 
@@ -169,8 +472,11 @@ use crate::{
     syntactic::definition::classify_location,
   },
   lossless::project::{
-    Recovery, Unverified, node_extent, reject_holes, to_range, to_span, verify_source,
-    verify_source_at, verify_source_counted,
+    Recovery, Unverified, reject_foreign_kinds_and_holes, to_range, to_span, verify_root_kind,
+    verify_source, verify_source_at, verify_source_counted,
+    walk::{
+      Extent, Leading, Optional, Trivia, described_extents, missing, unexpected, unexpected_node,
+    },
   },
 };
 
@@ -203,13 +509,9 @@ type Node<'g> = crate::lossless::project::Node<'g, GraphQLLang>;
 /// [`Node`]'s other half.
 type Token<'g> = crate::lossless::project::Token<'g, GraphQLLang>;
 
-/// A [`Node`]'s children, each carrying its own absolute start.
-///
-/// Named here because the three worklists below suspend one: a frame adopts the tree's own child
-/// iterator rather than copying the children out, so a container costs one entry however wide it
-/// is. That is the substrate's `Descent` trade, reached through a plain `Vec` because these frames
-/// carry a partly-built AST value and there is no allocation-free promise over them to keep.
-type Children<'g> = crate::lossless::project::Children<'g, GraphQLLang>;
+/// A node's child sequence, read in its production's order — the substrate's cursor over this
+/// dialect's kind space. See the substrate's `walk` module for the atoms and why they are shared.
+type Cursor<'g> = crate::lossless::project::walk::Cursor<'g, GraphQLLang>;
 
 type Out<T> = Result<T, ProjectError>;
 
@@ -246,6 +548,7 @@ impl Unverified {
   pub(crate) fn of(error: &ProjectError) -> Self {
     match error.kind() {
       ProjectErrorKind::TooDeep { limit } => Self::TooDeep { limit: *limit },
+      ProjectErrorKind::WrongRoot { raw } => Self::WrongRoot { raw: *raw },
       _ => Self::SourceMismatch,
     }
   }
@@ -262,20 +565,24 @@ impl Unverified {
 pub fn project<'src>(parse: &Parse, source: &'src str) -> Out<Document<&'src str>> {
   let root = parse_root(parse);
   open(root, source)?;
-  let node = child_node(root, K::Document).ok_or_else(|| missing(root, "a document"))?;
-  document(node, source)
+  document(sole_document(root, K::Document, "a document")?, source)
 }
 
 impl super::ast::Document {
   /// Project this document node to the AST the syntactic parser produces for `source`.
   ///
   /// The compositional form of [`project`], for a caller that already holds the typed wrapper.
-  /// Unlike [`project`] it does **not** scan for recovery holes up front — a hole inside the
-  /// subtree still refuses when the walk reaches it, but a hole elsewhere in the parse is not
-  /// this node's business.
+  ///
+  /// The scan is **scoped rather than skipped**: a hole anywhere in this node's subtree refuses,
+  /// and a hole elsewhere in the parse is not this node's business. It used to be skipped, on the
+  /// claim that a hole inside the subtree would still refuse when the walk reached it — and that
+  /// claim was false while the walk's permissive arms routed a child they had no slot for into the
+  /// parent's *extent*, folding its bytes without ever looking at its kind. al8n/smear#218,
+  /// finding 2.
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<Document<&'src str>> {
     let node = Node::of(self.syntax());
     open_node(node, source)?;
+    scan_holes(node)?;
     document(node, source)
   }
 }
@@ -312,23 +619,20 @@ pub fn project_executable_document<'src>(
 ) -> Out<ExecutableDocument<&'src str>> {
   let root = parse_root(parse);
   open(root, source)?;
-  let node = executable_root(root).ok_or_else(|| missing(root, "an executable document"))?;
-  executable_document(node, source)
+  executable_document(
+    sole_document(root, K::ExecutableDocument, "an executable document")?,
+    source,
+  )
 }
 
 /// Project every definition of a lossless **executable** parse that has an AST image, and count
 /// the ones that do not.
 ///
 /// [`project_executable_document`] is fail-fast: one hole anywhere and the whole document is
-/// refused. That is the right answer for a caller that wants the AST or nothing, and the wrong
-/// one for an editor — a lossless CST exists precisely so it can represent a document somebody is
-/// still typing, and "no AST, no answer" is the outcome that makes the lossless leg pointless.
+/// refused.
 ///
 /// This door walks the top level instead, projects each definition **independently**, and keeps
-/// the ones that succeeded. What it could see is the [`Recovery`], and that value is the
-/// contract: read it before reading anything off the AST, because a document one definition was
-/// dropped from can both hide a finding and invent one. [`Recovery`]'s own documentation states
-/// which, and why neither can be corrected here.
+/// the ones that succeeded. What it could see is the [`Recovery`].
 ///
 /// # What counts as a top-level element
 ///
@@ -338,8 +642,12 @@ pub fn project_executable_document<'src>(
 /// recovery class drops a failed document production's children straight under the root, so
 /// `"{ a }\nquery Bad("` has no document node at all and its one good operation is reachable only
 /// from the root; and a gap tile can land beside an *empty* document node, so `"%"` has one
-/// top-level element and it is not the document node's child. Reading only the document node's
-/// children answered a complete [`Recovery`] for that second shape.
+/// top-level element and it is not the document node's child.
+///
+/// Every container of the root's kind is stepped through, not only the first: a caller-minted root
+/// holding two valid containers projects the definitions of both and reports complete, where this
+/// door's fail-fast twin, which asserts exactly one container, refuses the second. Each container
+/// is a legitimate document image and this door's contract is per entry — see [`Recovery`].
 ///
 /// ```
 /// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
@@ -359,8 +667,8 @@ pub fn project_executable_document<'src>(
 /// assert!(!recovery.is_complete());
 ///
 /// // A `source` the parse does not describe is refused rather than projected — including one that
-/// // merely *extends* the parse's text, where every definition would have matched at its own
-/// // range and the recovery would have read as complete.
+/// // merely *extends* the parse's text: the whole-root verification compares lengths, so the
+/// // appended bytes are refused rather than silently absent from a complete-looking recovery.
 /// let longer = format!("{source} query More {{ hero {{ name }} }}");
 /// assert!(project_executable_document_recovered(&parse, &longer).is_err());
 /// # }
@@ -395,11 +703,13 @@ impl super::ast::ExecutableDocument {
   /// Project this executable-document node to the AST the syntactic parser produces for `source`.
   ///
   /// The compositional form of [`project_executable_document`], and
-  /// [`Document::to_ast`](super::ast::Document::to_ast)'s twin: like it, and unlike the free
-  /// function, it does **not** scan the whole parse for recovery holes up front.
+  /// [`Document::to_ast`](super::ast::Document::to_ast)'s twin: like it, the hole scan is scoped to
+  /// this node's own subtree rather than run over the whole parse, and see it for why scoping it is
+  /// not the same as skipping it.
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<ExecutableDocument<&'src str>> {
     let node = Node::of(self.syntax());
     open_node(node, source)?;
+    scan_holes(node)?;
     executable_document(node, source)
   }
 }
@@ -441,25 +751,17 @@ pub fn project_type_system_document<'src>(
 ) -> Out<TypeSystemDocument<&'src str>> {
   let root = parse_root(parse);
   open(root, source)?;
-  let node = type_system_root(root).ok_or_else(|| missing(root, "a type system document"))?;
-  type_system_document(node, source)
+  type_system_document(
+    sole_document(root, K::TypeSystemDocument, "a type system document")?,
+    source,
+  )
 }
 
 /// Project every definition of a lossless **type-system** parse that has an AST image, and count
 /// the ones that do not.
 ///
 /// [`project_executable_document_recovered`]'s mirror at the SDL root, walking the same top level
-/// with the same accounting — see it for why a fail-fast projection is the wrong answer for an
-/// editor and why the [`Recovery`] is part of the contract rather than decoration.
-///
-/// What differs is only what a dropped definition costs. Draft §3 is not resolved per definition:
-/// a type this document defines is what every reference to it elsewhere resolves against, so
-/// dropping one turns every mention of it into an undefined-type refusal, and dropping the one
-/// that happened to be `Query` turns the whole document into a schema with no query root. A
-/// [`Recovery`] with [`is_complete`](Recovery::is_complete) false therefore says rather more here
-/// than at the executable root, and the direction is the same: the refusals may be artifacts of
-/// what was skipped, and a *clean* build over a partial projection is a schema missing whatever
-/// the author was mid-way through typing.
+/// with the same accounting.
 ///
 /// ```
 /// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
@@ -515,35 +817,21 @@ impl super::ast::TypeSystemDocument {
   /// Project this type-system-document node to the AST the syntactic parser produces for `source`.
   ///
   /// The compositional form of [`project_type_system_document`], and
-  /// [`ExecutableDocument::to_ast`](super::ast::ExecutableDocument::to_ast)'s twin: like it, and
-  /// unlike the free function, it does **not** scan the whole parse for recovery holes up front.
+  /// [`ExecutableDocument::to_ast`](super::ast::ExecutableDocument::to_ast)'s twin, scoping its
+  /// hole scan for the same reason.
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<TypeSystemDocument<&'src str>> {
     let node = Node::of(self.syntax());
     open_node(node, source)?;
+    scan_holes(node)?;
     type_system_document(node, source)
   }
 }
 
 /// A parse and the source it was produced from, **verified once**.
 ///
-/// # Why this is a type
-///
-/// Two properties a lossless door is asked for, which cannot both hold when the door is handed an
-/// unverified pair:
-///
-/// - a **source mismatch outranks a budget refusal**, because a stale pair is not a resource
-///   problem and telling a caller to raise a limit names a remedy that cannot work; and
-/// - the **ceiling is absolute**, because no input-linear work may run outside the ledger.
-///
-/// Deciding the first requires *finishing* the comparison; honouring the second requires being able
-/// to stop before finishing it. Whichever runs first, the other loses — and that is a property of
-/// the arguments, not of the ordering, so no rearrangement inside such a door satisfies both.
-///
-/// Moving the verification out of the bounded call is the only shape that does. A `Verified` is
-/// checked by whoever constructs it, once, and every door that takes one has nothing left to
-/// verify: it opens its ledger first and everything it then does is under it.
-/// [`project_executable_document_verified`] and its twin are infallible for the same reason — the
-/// only thing their fallible forms can answer with is the check this value already carries.
+/// [`Verified::new`] is the only constructor: it runs the whole-root byte comparison and the root
+/// check once. [`project_executable_document_verified`] and its twin take one and run no
+/// verification, so they have no error half.
 /// al8n/smear#198.
 #[derive(Clone, Copy)]
 pub struct Verified<'p, 'src> {
@@ -564,53 +852,54 @@ impl core::fmt::Debug for Verified<'_, '_> {
 }
 
 impl<'p, 'src> Verified<'p, 'src> {
-  /// Verifies that `source` is the whole text `parse` was produced from.
+  /// Verifies that `source` is the whole text `parse` was produced from, and that the parse's root
+  /// is this dialect's document root.
   ///
-  /// `O(tokens)` over the borrowed green root — see [`verify_parse`], which is the same comparison,
-  /// answers the same [`Unverified`], and carries the allocation contract below in full. This is
-  /// where a caller pays for it, and paying for it here is what lets a validation of this pair be
-  /// bounded.
+  /// The second half exists because `finish_root` is public and generic, so a `Parse` can be
+  /// minted over a root that is not this dialect's `Root` — outside the kind space, or an in-space
+  /// kind such as `Name` — and its bytes verify. The refusal is [`Unverified::WrongRoot`]. Kinds
+  /// below the root are checked by each entry's own scan, so a recovering door counts an entry
+  /// holding one as skipped. al8n/smear#218.
+  ///
+  /// `O(green elements + source bytes)` over the borrowed green root: [`verify_source_counted`]
+  /// visits every node and token and compares every token's bytes. See [`verify_parse`], which is
+  /// the same comparison and answers the same [`Unverified`].
   ///
   /// # Allocation
   ///
-  /// **It allocates nothing through sixteen branching ancestors, and not at every shape.** The
-  /// comparison keeps one entry per ancestor of the node in hand that still has an unvisited child,
-  /// the first sixteen of them in a fixed array in its own frame; a seventeenth spills to the heap
-  /// through an infallible `push`, at 24 bytes an entry and bounded by
-  /// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH). Sixteen is not a depth — a
-  /// chain of single-child nodes holds one entry however long it is — but it is not far off, either:
-  /// measured, `{ a { a … { b } … } }` at fifteen nested selection sets is **95 bytes**, its green
-  /// tree is 35 levels against a ceiling of 1024, and it spills once, for 96 bytes. Fourteen is the
-  /// last one that does not.
+  /// **It allocates nothing through sixteen branching ancestors.** The comparison keeps one entry
+  /// per ancestor of the node in hand that still has an unvisited child, the first sixteen of them
+  /// in a fixed array in its own frame; a seventeenth spills to the heap through an infallible
+  /// `push`, bounded by [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH).
   pub fn new(parse: &'p Parse, source: &'src str) -> Result<Self, Unverified> {
     // Counted by the same walk that verifies, so the proof and the price are established together
     // and cost one pass between them. See [`Verified::projection_cost`].
-    match verify_source_counted::<SyntaxKind>(parse.green(), source) {
+    //
+    // And the root's raw kind, which the byte walk never reads: a `Verified` proves the recovering
+    // walk's first question — whether a root child is the container — can be asked of this root
+    // without answering for a tree outside this dialect's space.
+    match verify_source_counted::<SyntaxKind>(parse.green(), source)
+      .and_then(|elements| verify_root_kind::<SyntaxKind>(parse.green()).map(|()| elements))
+    {
       Ok(elements) => Ok(Self {
         parse,
         source,
         elements,
       }),
-      // The counted walk distinguishes a byte divergence from a shape refusal; this used to answer
-      // one name for both, so a pair whose bytes agree exactly was reported as stale.
+      // The counted walk distinguishes a byte divergence from a shape refusal, and `Unverified::of`
+      // keeps them apart: a pair whose bytes agree exactly is never reported as stale.
       Err(refusal) => Err(Unverified::of(&refusal)),
     }
   }
 
   /// What projecting this pair costs, in **elements** — one per green node and one per token.
   ///
-  /// # A proof that does not bound what its consumer charges for is not a proof
-  ///
-  /// `Verified` proves the *bytes* agree. A door that then prices the projection from
-  /// `source.len()` is assuming bytes bound structure, and they do not:
+  /// `Verified` proves the *bytes* agree, and bytes do not bound structure:
   /// [`finish_root`](crate::lossless::runner::finish_root) is public, so a caller can mint a
   /// `Parse` from its own CST event stream, and a balanced pair of **zero-width** GraphQL nodes adds
-  /// structure without adding a byte. An empty source over a tree of a million empty top-level
-  /// nodes verifies against `""`, paid one unit, and then had every node visited.
-  ///
-  /// So the value carries the cost of the thing it proves, and the two measure the same quantity.
-  /// Saturating at [`u32::MAX`] — no budget any caller can name pays that, so a tree too large to
-  /// price refuses rather than wrapping into one it fits.
+  /// structure without adding a byte. This count is taken by the same walk that verified the pair.
+  /// It saturates at [`u32::MAX`]: no finite validation budget covers that cost, and a disabled
+  /// ledger or a projection that takes no budget proceeds.
   /// al8n/smear#198.
   #[inline]
   pub const fn projection_cost(&self) -> u32 {
@@ -630,124 +919,62 @@ impl<'p, 'src> Verified<'p, 'src> {
   }
 }
 
-/// That `parse` and `source` describe the same bytes, over the **whole root** — or the reason the
-/// pair is refused.
+/// That `parse` and `source` describe the same bytes, over the **whole root**, and that the root is
+/// this dialect's document root — or the reason the pair is refused.
 ///
-/// The recovering projection's precondition, and the one thing it cannot establish definition by
-/// definition. Each definition it projects is verified against `source` at that definition's own
-/// range, which refuses a pair whose bytes differ — and says nothing at all about a `source` that
-/// *begins* with the parse's text and then adds to it. There every definition matches, nothing is
-/// skipped, the [`Recovery`] reports complete, and whatever the caller appended is silently absent
-/// from the AST. A consumer that validated or built from that result would be answering about a
-/// prefix while believing it had the document.
+/// The recovering doors' precondition: their entries compare no bytes, so this whole-root
+/// comparison is the only one they make. It compares lengths first, so a `source` that *begins*
+/// with the parse's text and then adds to it is refused before a byte is walked.
 ///
-/// [`verify_source`] over the parse's **green** root, which is the same comparison the fail-fast
-/// doors make and the reason they were safe. It is `O(tokens)` and it reads no `Parse` state beyond
-/// a borrow.
+/// [`verify_source`] over the parse's **green** root — the comparison the fail-fast doors open
+/// with — then [`verify_root_kind`]. It is `O(green elements + source bytes)`: every node and token
+/// is visited and every token's bytes are compared. It reads no `Parse` state beyond a borrow.
+///
+/// The recovering projections make the same check themselves and answer [`Unverified`].
 ///
 /// # Allocation
 ///
-/// **It allocates nothing through sixteen branching ancestors, and not at every shape**, which is
-/// the half of this contract an earlier revision left out. The comparison keeps one entry per
+/// **It allocates nothing through sixteen branching ancestors.** The comparison keeps one entry per
 /// ancestor of the node in hand that still has an unvisited child, the first sixteen of them in a
-/// fixed array in its own frame; a seventeenth spills to the heap through an infallible `push`, at
-/// 24 bytes an entry and bounded by
-/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH).
+/// fixed array in its own frame; a seventeenth spills to the heap through an infallible `push`,
+/// bounded by [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH). A chain of
+/// single-child nodes holds one entry however long it is, and a node is handed over whole, so a
+/// wide one is one entry too. `tests/validator_allocation.rs`'s
+/// `the_whole_root_check_allocates_nothing` measures the zero over a fixture whose branching
+/// nesting is three.
 ///
-/// The number is easier to reach than "sixteen levels" suggests, and the omission mattered for
-/// exactly that reason. It is not a depth: a chain of single-child nodes holds one entry however
-/// long it is. It is not a width either: a node is handed over whole, so a selection set with a
-/// thousand fields is one entry. It is the **branching** nesting — and an ordinary nested query has
-/// one branching ancestor per selection set. Measured: `{ a { a … { b } … } }` at fifteen nested
-/// selection sets is **95 bytes**, its green tree is 35 levels against a ceiling of 1024, and it
-/// spills once, for 96 bytes; at fourteen — 89 bytes — the reading is still zero.
+/// # Why this is not a `bool`
 ///
-/// What that buys is stated where the trade is made rather than hidden: the failure past sixteen
-/// needs an allocator exhausted by a request proportional to the branching nesting of a tree
-/// already in memory, where the recursion this replaced ran out of native stack at a fixed depth on
-/// every machine. `tests/validator_allocation.rs`'s `the_whole_root_check_allocates_nothing`
-/// measures the zero over a fixture whose branching nesting is three.
-///
-/// This was `parse.syntax().text() == source` for one round, and that sentence was written about it
-/// too — wrongly. [`Parse::syntax`](crate::lossless::runner::Parse::syntax) *materialises rowan's red
-/// cursor*: it clones the `Arc` and allocates the root's cursor data, and `SyntaxText`'s equality
-/// then walks descendants through red nodes and tokens that are allocated and dropped as the walk
-/// passes them. A token-dense parse therefore made `Θ(elements)` transient allocations here, on
-/// every recovered projection and every lossless validation, and this helper is public and holds no
-/// budget. al8n/smear#198's nineteenth round.
-///
-/// The failure is worth recording where the mechanism is, because the fix is a function the crate
-/// already had and the round that introduced the defect is the round that **named** it: the
-/// fourteenth round's own diagnosis said the fail-fast doors never had the prefix defect precisely
-/// because they open with [`verify_source`] over the whole green root — and then wrote a second
-/// whole-root check beside it instead of calling that one.
-///
-/// The fail-fast doors never needed it: [`project_executable_document`] and its SDL twin open with
-/// [`verify_source`] over the whole green root, and that check compares *lengths* first, so an
-/// extended source is refused before a byte is walked. The recovering door was written from the
-/// **compositional** check instead — [`verify_source_at`], run once per definition — and that is
-/// the check with nothing to say about bytes no definition covers.
-///
-/// It is public because the check belongs to whoever holds the pair, and a caller may want the
-/// answer without projecting. Nothing has to call it to be safe: the recovering projections make
-/// the check themselves and answer [`Unverified`], so a consumer using them **directly** —
-/// with no validator and no door in front — cannot be handed a stale prefix either. al8n/smear#198.
-///
-/// # Why this is not a `bool`, and why the walk was not made conclusive instead
-///
-/// It was `matches_source`, returning `verify_source(..).is_ok()`, and that boolean was a lie
-/// about a pair it had no room to describe. [`verify_source`] refuses for two reasons and only
-/// one of them is *these are not the same document*: a tree deeper than
-/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) is refused for its **shape**,
-/// whatever its bytes say, so `.is_ok()` reported a parse whose every byte matches its source as
-/// stale. The two refusals have opposite remedies — a stale pair is re-parsed, and re-parsing a
-/// tree too deep to descend produces the same tree — so the boolean sent a caller to the one
-/// action that cannot work.
-///
-/// The other repair was to make the comparison iterative, so that [`Unverified::TooDeep`] could
-/// not arise here at all and the boolean became conclusive rather than merely wider. **The
-/// comparison is iterative now and the boolean still does not come back**, and the two reasons the
-/// round that wrote this gave are worth separating, because one of them was wrong and the other was
-/// right about something else.
-///
-/// The first said an iterative preorder needs an explicit stack as deep as the tree — an
-/// `O(depth)` heap allocation over a tree a caller minted, trading a refusal this crate can name
-/// for an allocation nobody can refuse. That is not what it costs. A source is a *borrowed*
-/// iterator over children `rowan` already allocated, one entry per branching ancestor rather than
-/// one per level, and it is dropped the moment its last child is taken — so a chain of any depth
-/// holds one entry. What the argument compared, besides, was an allocator exhausted by a request
-/// proportional to a tree already in memory against a stack overflow that arrives at a fixed depth
-/// on every machine; the second is the worse failure and it was the one actually happening.
-/// `crate::lossless::project::Descent` carries the measurement.
-///
-/// The second is still standing and is why the refusal stays: the third state is a property of the
-/// **pair** rather than of this walk. [`Verified::new`] answers for the same pair through
-/// [`verify_source_counted`], and both of those refuse past
-/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) — not because either walk would
-/// run out of stack, but because the projection behind them would. Erasing a distinction in one of
-/// the two places that answer for a pair is how the two come to disagree. al8n/smear#198.
+/// It refuses for three reasons, and [`Unverified`] names which: the bytes differ
+/// ([`Unverified::SourceMismatch`]), the tree is deeper than
+/// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH) whatever its bytes say
+/// ([`Unverified::TooDeep`]), or the root is not this dialect's ([`Unverified::WrongRoot`]).
+/// [`Verified::new`] refuses at the same ceiling. al8n/smear#198.
 pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
-  verify_source::<SyntaxKind>(parse.green(), source).map_err(|refusal| Unverified::of(&refusal))
+  verify_source::<SyntaxKind>(parse.green(), source)
+    .and_then(|()| verify_root_kind::<SyntaxKind>(parse.green()))
+    .map_err(|refusal| Unverified::of(&refusal))
 }
 
 /// The recovering top-level walk, shared by both single-half roots.
 ///
-/// One implementation rather than one per root, because what it computes is [`Recovery`], and
-/// `Recovery`'s documented meaning — *`skipped` is a bound on what was lost, counted per element*
-/// — has to be one statement about both doors rather than two statements that happen to agree
-/// today. The root's kind and the per-definition projection are the only things that differ, so
-/// they are the arguments; `entry_of` is a `fn` pointer rather than a generic parameter so this
-/// monomorphises once per root and nothing here becomes a shape a caller can dispatch through.
+/// One implementation rather than one per root, because what it computes is [`Recovery`] and both
+/// doors report it. The root's kind and the entry projection are the arguments; `entry_of` is a
+/// `fn` pointer.
 ///
 /// # Every element of the root, not every element of the document node
 ///
 /// The walk starts at the **root** and steps *through* the document node rather than starting
 /// inside it. The two are not the same population: the parser can leave a gap tile beside the
 /// document node instead of within it, and `"%"` parses to exactly that — `ExecutableDocument@0..0`
-/// with `Gap@0..1` as its sibling. Iterating the document node's children saw nothing, counted
-/// nothing, and answered a complete [`Recovery`] over a document whose every byte had no AST
-/// image. Which is [`Unverified`]'s defect one level down: state derived from a population
-/// that can be empty while the thing it describes is not.
+/// with `Gap@0..1` as its sibling.
+///
+/// **Every** container of `root_kind` under the root is stepped through, not only the first. The
+/// dialect's own doors build one; a caller-minted root can hold two, and this walk projects the
+/// definitions of both and reports complete. That is deliberate: each container is a legitimate
+/// document image, and this walk's contract is per entry — [`Recovery`] counts what had an AST
+/// image and what did not, and a second container's definitions have one. Whether the root is
+/// exactly one document is the fail-fast doors' question, and [`sole_document`] answers it there.
 ///
 /// Answers the surviving definitions, their span, and the tally — or [`Unverified`],
 /// which is none of those three and so is not spelled as a value of any of them.
@@ -758,16 +985,11 @@ fn recovered_top_level<'src, T>(
   source: &'src str,
 ) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
   // Established once, over the whole root, before a single element is projected, and **returned**
-  // rather than folded into the tally. See [`verify_parse`] for why a per-definition check
-  // cannot see a prefix, and [`Unverified`] for why the answer is not a [`Recovery`]: a
-  // mismatched pair used to project nothing and count every top-level element as skipped, which is
-  // a true statement about a parse that *has* elements and an empty one about a parse that does
-  // not — and `Recovery::is_complete` answers `true` at zero skipped.
-  // `verify_source` rather than `verify_parse`: this walk wants the `ProjectError` to build its
-  // own `Unverified` from, and `verify_parse` has already made that conversion. The two carry the
-  // same two reasons — which is the point, and is what the predicate's `bool` used to throw away.
-  // al8n/smear#198.
-  if let Err(refusal) = verify_source::<SyntaxKind>(parse.green(), source) {
+  // rather than folded into the tally. The entries below compare no bytes, so this is the only
+  // byte comparison this walk makes.
+  if let Err(refusal) = verify_source::<SyntaxKind>(parse.green(), source)
+    .and_then(|()| verify_root_kind::<SyntaxKind>(parse.green()))
+  {
     return Err(Unverified::of(&refusal));
   }
   Ok(recovered_top_level_verified(
@@ -777,10 +999,8 @@ fn recovered_top_level<'src, T>(
 
 /// [`recovered_top_level`] for a pair whose verification is already established.
 ///
-/// Infallible, because the only thing the fallible form can answer with is the check a
-/// [`Verified`] already carries. Splitting it is what lets a **bounded** caller exist at all: the
-/// check is `O(tokens)`, so a door that verifies inside its own call has an input-linear walk in
-/// front of its ledger, and one that takes a verified pair does not. al8n/smear#198.
+/// Infallible: it runs no verification. Its callers are [`recovered_top_level`], after its own, and
+/// the `_verified` doors, whose [`Verified`] carries one. al8n/smear#198.
 fn recovered_top_level_verified<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
@@ -799,7 +1019,14 @@ fn recovered_top_level_verified<'src, T>(
   let mut take = |element: NodeOrToken<Node<'_>, Token<'_>>| match element {
     // Rubble the parser could not attach to a definition. Counted per token rather than per run:
     // a bound on what was lost, which is what `Recovery::skipped` promises.
-    NodeOrToken::Token(token) if !is_trivia(token.kind()) => skipped = skipped.saturating_add(1),
+    //
+    // Read raw: this pass runs before any scan, so a token outside the kind space is counted as
+    // rubble rather than asked a kind `kind_from_raw` would panic on.
+    NodeOrToken::Token(token)
+      if !SyntaxKind::from_raw(token.green().kind().0).is_some_and(is_trivia) =>
+    {
+      skipped = skipped.saturating_add(1)
+    }
     NodeOrToken::Token(_) => {}
     NodeOrToken::Node(child) => match entry_of(child, source) {
       Ok((entry, piece)) => {
@@ -815,7 +1042,9 @@ fn recovered_top_level_verified<'src, T>(
       // under the root is a top-level element in its own right — the lost-node class puts a failed
       // production's children there, and the lexer's gap tiles land there when the document node
       // came out empty.
-      NodeOrToken::Node(child) if child.kind() == root_kind => child.children().for_each(&mut take),
+      NodeOrToken::Node(child) if child.green().kind() == raw_of(root_kind) => {
+        child.children().for_each(&mut take)
+      }
       other => take(other),
     }
   }
@@ -833,43 +1062,48 @@ fn recovered_top_level_verified<'src, T>(
   (span, definitions, recovery)
 }
 
-/// The [`ExecutableDocument`](SyntaxKind::ExecutableDocument) node under a parse's root.
-fn executable_root(root: Node<'_>) -> Option<Node<'_>> {
-  child_node(root, K::ExecutableDocument)
-}
-
-/// The [`TypeSystemDocument`](SyntaxKind::TypeSystemDocument) node under a parse's root.
-fn type_system_root(root: Node<'_>) -> Option<Node<'_>> {
-  child_node(root, K::TypeSystemDocument)
+/// The one document container a fail-fast door reads, with the rest of the root's shape refused.
+///
+/// **Finding the container is not enough.** `finish_root` is public, so a caller can mint a `Parse`
+/// whose root holds a valid document **and** a second container, or another node, or a bare token,
+/// and the door's whole-source verification passes over all of it: that check compares bytes, not
+/// shape.
+///
+/// So the shape is asserted rather than searched: one container of `kind`, trivia, and nothing
+/// else, and a sibling or a duplicate is `UnexpectedChild { parent: Root, found }`. The recovering
+/// doors do not share this assertion — see [`recovered_top_level`] for why. al8n/smear#218.
+fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> Out<Node<'g>> {
+  // `Trivia* Container Trivia*`, transcribed like every walk below.
+  let mut cursor = Cursor::new(root);
+  let container = cursor.node(kind, wanted)?;
+  cursor.end()?;
+  Ok(container)
 }
 
 /// One top-level definition, with the holes in **its own** subtree refused.
 ///
-/// The scan is scoped rather than global on purpose. [`project_executable_document`] refuses a
-/// tree carrying a hole anywhere, because a hole is a region with no AST image and a fail-fast
-/// door must not silently omit one; the recovering door makes the same refusal, one definition at
-/// a time, so a hole is charged to the definition that holds it and to no other. Without the
-/// scan a hole would instead be *skipped* by whichever `child(node, kind)` lookup walked past it,
-/// which is the data loss under a success type that both doors exist to refuse.
-/// The `(tree, source)` pair is checked here too, for the reason the hole scan is: the recovering
-/// door has no error channel of its own, so a definition whose bytes are not the caller's bytes
-/// has to fail *as that definition* to be counted as skipped rather than silently projected. The
-/// scope is the same one the hole scan uses, which keeps the two refusals attributed alike.
+/// The scan is scoped to the definition, so a hole is charged to the definition that holds it and
+/// to no other.
+///
+/// # It compares no bytes
+///
+/// **Both** recovering paths establish the pair over the whole root before the first definition
+/// is reached — [`recovered_top_level`] with [`verify_source`], and
+/// [`project_executable_document_verified`] through the [`Verified`] it is handed.
 fn recoverable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(DescribedExecutableDefinition<&'src str>, TextRange)> {
-  open_node(node, source)?;
   scan_holes(node)?;
   executable_entry(node, source)
 }
 
-/// [`recoverable_entry`]'s twin at the SDL root, scoped for the same reason.
+/// [`recoverable_entry`]'s twin at the SDL root, scoped for the same reason and comparing no bytes
+/// for the same one.
 fn recoverable_type_system_entry<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(TypeSystemDefinitionOrExtension<&'src str>, TextRange)> {
-  open_node(node, source)?;
   scan_holes(node)?;
   type_system_entry(node, source)
 }
@@ -881,20 +1115,21 @@ fn recoverable_type_system_entry<'src>(
 /// Open a fail-fast door: the `(tree, source)` pair verified whole, then every recovery hole
 /// refused.
 ///
-/// Both checks read the **green** tree, so together they cost two passes over the file's bytes
-/// and not a single cursor allocation. The pair is checked first because nothing else the door
-/// could report means anything if the tree is not this text's: a hole's range, a missing
-/// constituent's span and every slice below are all statements about `source`.
+/// Both walks read the **green** tree: the byte comparison visits every node and token and compares
+/// every token's bytes, and the hole scan visits every node and token. The pair is checked first,
+/// so every range the door reports afterwards is a range of `source`.
 fn open(root: Node<'_>, source: &str) -> Out<()> {
   verify_source(root.green(), source)?;
+  // The root's identity before anything reads its children: a parse rooted anywhere but this
+  // dialect's `Root` was not finished by a dialect door. al8n/smear#218.
+  verify_root_kind::<SyntaxKind>(root.green())?;
   scan_holes(root)
 }
 
 /// [`open`]'s subtree form: `node`'s own text is checked where `node` sits.
 ///
-/// The compositional doors' check, and the recovering door's per-definition one. No hole scan —
-/// [`Document::to_ast`](super::ast::Document::to_ast) and its twins deliberately do not make one,
-/// and the recovering door makes its own so it can charge the hole to a definition.
+/// The compositional doors' check. The hole scan beside it is theirs to make, scoped to the same
+/// node — see [`Document::to_ast`](super::ast::Document::to_ast).
 fn open_node(node: Node<'_>, source: &str) -> Out<()> {
   verify_source_at(node.green(), source, usize::from(node.start()))
 }
@@ -906,14 +1141,17 @@ fn open_node(node: Node<'_>, source: &str) -> Out<()> {
 /// document with no AST image, and a projection that silently omitted it would be losing data
 /// under a success type. At a fail-fast door the subtree is the **root's**, which is what reaches
 /// a hole the parser left beside the document node rather than inside it — see
-/// [`reject_holes`].
+/// [`reject_holes`](crate::lossless::project::reject_holes).
 fn scan_holes(node: Node<'_>) -> Out<()> {
   // `Gap` is a **token** kind, and this arm used to be dead for exactly that reason: `reject_holes`
   // tested node kinds only, so every gap tile in a scanned subtree was walked past and the
   // projection folded it into an enclosing extent as an ordinary non-trivia token. The arm was kept
   // as a statement of the refusal's scope; al8n/smear#58 made the substrate's scan token-aware, so
   // the statement is now a live branch and this door refuses a gap where it sits.
-  reject_holes(node, |kind| matches!(kind, K::Error | K::Gap))
+  // The kind check rides on the same pass: this scan is the first code in every door to ask an
+  // element its kind, so it is where a raw kind outside this space is refused rather than handed
+  // to `kind_from_raw`, which can only panic. al8n/smear#218.
+  reject_foreign_kinds_and_holes(node, |kind| matches!(kind, K::Error | K::Gap))
 }
 
 /// A parse's green root, as the walk's first node.
@@ -922,35 +1160,19 @@ fn parse_root(parse: &Parse) -> Node<'_> {
 }
 
 /// The first direct child of `parent` whose kind is `kind`.
+///
+/// Compared **raw**, because its one caller runs before the per-entry scan that checks kinds: a
+/// sibling outside the kind space is simply not the one wanted.
 fn child_node(parent: Node<'_>, kind: SyntaxKind) -> Option<Node<'_>> {
   parent.children().find_map(|child| match child {
-    NodeOrToken::Node(child) if child.kind() == kind => Some(child),
+    NodeOrToken::Node(child) if child.green().kind() == raw_of(kind) => Some(child),
     _ => None,
   })
 }
 
-fn missing(parent: Node<'_>, wanted: &'static str) -> ProjectError {
-  ProjectError::new(
-    ProjectErrorKind::MissingChild {
-      parent: parent.kind(),
-      wanted,
-    },
-    to_range(parent.text_range()),
-  )
-}
-
-fn unexpected(parent: Node<'_>, found: SyntaxKind, at: TextRange) -> ProjectError {
-  ProjectError::new(
-    ProjectErrorKind::UnexpectedChild {
-      parent: parent.kind(),
-      found,
-    },
-    to_range(at),
-  )
-}
-
-fn unexpected_node(parent: Node<'_>, found: Node<'_>) -> ProjectError {
-  unexpected(parent, found.kind(), found.text_range())
+/// `kind` as the green tree stores it.
+fn raw_of(kind: SyntaxKind) -> rowan::SyntaxKind {
+  <GraphQLLang as rowan::Language>::kind_to_raw(kind)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -965,169 +1187,166 @@ const fn is_trivia(kind: SyntaxKind) -> bool {
   )
 }
 
-/// A node's token extent, folded as its children are dispatched.
+impl Trivia for GraphQLLang {
+  #[inline]
+  fn is_trivia(kind: SyntaxKind) -> bool {
+    is_trivia(kind)
+  }
+}
+
+/// The two token images a string — a description's or a value's — can be written as.
+const STRING_KINDS: [SyntaxKind; 2] = [K::String, K::BlockString];
+
+/// This dialect's half of the cursor: the atoms that need its lexer or its keyword table.
 ///
-/// One of these lives on the stack of every node function: the function covers each non-trivia
-/// token it walks past and each extent a projected child hands back, and what is left at the end
-/// is the node's span. `None` — no non-trivia token anywhere under the node — is a finding rather
-/// than a fallback to the node's own range, which is why [`range`](Self::range) is fallible.
-#[derive(Debug, Clone, Copy, Default)]
-struct Extent {
-  /// The cover of every non-trivia token folded in so far.
-  range: Option<TextRange>,
-  /// Set when [`Extent::unread`]'s descent hit
-  /// [`MAX_GREEN_DEPTH`](crate::lossless::project::MAX_GREEN_DEPTH).
-  ///
-  /// The fold has no error channel — it is a `&mut self` accumulator threaded through
-  /// thirty-five call sites — so the refusal is **carried** rather than returned, and
-  /// [`Extent::range`] is where it becomes one. That reader already answers `Out<TextRange>`, so
-  /// nothing above it changes shape; what it must not do is answer a range it cannot establish.
-  /// al8n/smear#198.
-  too_deep: bool,
-}
-
-impl Extent {
-  /// Widen to include `piece`.
-  ///
-  /// `cover` rather than `start..piece.end()`: a fold that assumed document order would produce
-  /// an inverted range the moment it was handed a stream that was not in it, and an inverted span
-  /// is exactly the class `tests/support/span_extent.rs` exists to catch.
-  #[inline]
-  fn cover(&mut self, piece: TextRange) {
-    self.range = Some(match self.range {
-      Some(seen) => seen.cover(piece),
-      None => piece,
-    });
-  }
-
-  /// Widen to include `token`, unless it is trivia.
-  #[inline]
-  fn token(&mut self, token: Token<'_>) {
-    if !is_trivia(token.kind()) {
-      self.cover(token.text_range());
-    }
-  }
-
-  /// Widen to include a child the projection does not read.
-  ///
-  /// The one place a subtree is still descended: an element with no AST image is not part of the
-  /// AST, but its bytes are part of the parent's, and nothing else has walked it.
-  #[inline]
-  fn unread(&mut self, child: Node<'_>) {
-    match node_extent(child, is_trivia) {
-      Ok(Some(piece)) => self.cover(piece),
-      Ok(None) => {}
-      // The subtree is deeper than a walk will descend, so its extent is not knowable — and an
-      // all-trivia subtree's honest answer is `None`, which makes a manufactured range a different
-      // answer rather than a wider one. Carried to `Extent::range`.
-      Err(_) => self.too_deep = true,
-    }
-  }
-
-  /// Widen to include a projected child's extent, and keep the child.
-  ///
-  /// The bottom-up fold, spelled once: a child function answers its AST value beside the extent
-  /// it folded, and the parent covers the second while binding the first.
-  #[inline]
-  fn keep<T>(&mut self, projected: (T, TextRange)) -> T {
-    let (value, piece) = projected;
-    self.cover(piece);
-    value
-  }
-
-  /// [`keep`](Self::keep) for a constituent the grammar makes optional.
-  #[inline]
-  fn keep_opt<T>(&mut self, projected: Option<(T, TextRange)>) -> Option<T> {
-    projected.map(|projected| self.keep(projected))
-  }
-
-  #[inline]
-  const fn get(self) -> Option<TextRange> {
-    self.range
-  }
-
-  #[inline]
-  fn range(self, node: Node<'_>, wanted: &'static str) -> Out<TextRange> {
-    if self.too_deep {
-      return Err(ProjectError::new(
-        ProjectErrorKind::TooDeep {
-          limit: crate::lossless::project::MAX_GREEN_DEPTH,
-        },
-        to_range(node.text_range()),
-      ));
-    }
-    self.range.ok_or_else(|| missing(node, wanted))
-  }
-
-  #[inline]
-  fn span(self, node: Node<'_>, wanted: &'static str) -> Out<SimpleSpan> {
-    self.range(node, wanted).map(to_span)
-  }
-}
-
-/// The outer and inner extents of a described node, from the one fold.
+/// The substrate's cursor owns every atom that takes a kind as a parameter; what is left here is
+/// what reading a `Name` means in this dialect — a keyword by its spelling, a name through
+/// [`identifier`], a spelling a caller classifies. A trait rather than free functions so a walk
+/// reads as one sequence of calls on one cursor, and a trait rather than inherent methods because
+/// the cursor is the substrate's type.
 ///
-/// `inner` is everything the node's fold covered *except* its description; `described` is the
-/// description's own extent when the node carries one. The wrapper's span is their cover and the
-/// definition's is `inner`, which is where the hoist shows up as a number — see the module
-/// header, and note the three node types that give both the same span instead.
-fn described_extents(
-  node: Node<'_>,
-  inner: Extent,
-  described: Option<TextRange>,
-) -> Out<(TextRange, TextRange)> {
-  let inner = inner.range(
-    node,
-    match described {
-      Some(_) => "a constituent other than its description",
-      None => "a token",
-    },
-  )?;
-  let outer = match described {
-    Some(described) => inner.cover(described),
-    None => inner,
-  };
-  Ok((outer, inner))
+/// **There is no `token(K::Name)`**, and that is the point. The slot walks this file had until
+/// al8n/smear#218 collected every direct `Name` into a three-slot `Names` and read positions out of
+/// it — so a fourth name was dropped with its bytes covered, a fragment name split into `Name("o")`
+/// and `Name("n")` passed the `on` rule, and `directive @d foo FIELD` answered what
+/// `directive @d on FIELD` answers. A `Name` is consumed here by what it is at its position.
+trait Atoms<'g> {
+  fn keyword(&mut self, keyword: ContextualKeyword, wanted: &'static str) -> Out<Token<'g>>;
+  fn opt_keyword(&mut self, keyword: ContextualKeyword) -> Option<Token<'g>>;
+  fn name_token<'src>(&mut self, source: &'src str, wanted: &'static str) -> Out<Name<&'src str>>;
+  fn name_except<'src>(
+    &mut self,
+    source: &'src str,
+    reserved: &[ContextualKeyword],
+    rule: &'static str,
+    wanted: &'static str,
+  ) -> Out<Name<&'src str>>;
+  fn opt_name<'src>(&mut self, source: &'src str) -> Out<Option<Name<&'src str>>>;
+  fn spelling(&mut self, wanted: &'static str) -> Out<Token<'g>>;
+  fn opt_spelling(&mut self) -> Option<Token<'g>>;
 }
 
-/// The first three direct `Name` tokens of a node, in document order.
-///
-/// Three because that is the deepest index the grammar reaches: an extension spells `extend`,
-/// then the shape keyword, then the extended type's name. Direct children only — a name inside a
-/// child node belongs to that child, and this is filled from the parent's own walk, so a
-/// descendant can never reach it.
-#[derive(Debug, Default)]
-struct Names<'g>([Option<Token<'g>>; 3]);
-
-impl<'g> Names<'g> {
-  /// Record `token` if any of the three slots is still free.
-  ///
-  /// A fourth name is dropped rather than stored: no production reads one, and the extent it
-  /// belongs to was covered when the walk passed it.
-  #[inline]
-  fn push(&mut self, token: Token<'g>) {
-    if let Some(slot) = self.0.iter_mut().find(|slot| slot.is_none()) {
-      *slot = Some(token);
+impl<'g> Atoms<'g> for Cursor<'g> {
+  /// A `Name` token spelling `keyword`, through the lexer's own table.
+  fn keyword(&mut self, keyword: ContextualKeyword, wanted: &'static str) -> Out<Token<'g>> {
+    match self.peek() {
+      Some(NodeOrToken::Token(token))
+        if token.kind() == K::Name && keyword_of(token) == Some(keyword) =>
+      {
+        self.bump();
+        self.extent.cover(token.text_range());
+        Ok(token)
+      }
+      Some(element) => Err(self.unexpected(element)),
+      None => Err(self.missing(wanted)),
     }
   }
 
-  #[inline]
-  fn get(&self, index: usize) -> Option<Token<'g>> {
-    self.0[index]
+  /// [`keyword`](Self::keyword) where the production makes it optional.
+  fn opt_keyword(&mut self, keyword: ContextualKeyword) -> Option<Token<'g>> {
+    match self.peek() {
+      Some(NodeOrToken::Token(token))
+        if token.kind() == K::Name && keyword_of(token) == Some(keyword) =>
+      {
+        self.bump();
+        self.extent.cover(token.text_range());
+        Some(token)
+      }
+      _ => None,
+    }
   }
 
-  #[inline]
-  fn at(&self, index: usize, node: Node<'_>, wanted: &'static str) -> Out<Token<'g>> {
-    self.get(index).ok_or_else(|| missing(node, wanted))
+  /// A `Name` token in a position the grammar spells as a **name**, re-cooked into one.
+  ///
+  /// The one door every name position goes through: the slice is handed to [`identifier`] — the
+  /// shipped scanner, which must read the whole slice as exactly one identifier — so a `Name`
+  /// label over bytes the lexer would not produce a name from is
+  /// [`MalformedToken`](ProjectErrorKind::MalformedToken) here, at a name position. The other way a
+  /// `Name` reaches that refusal is a spelling position whose classifier does not know the word —
+  /// an operation keyword, a directive location — which a parse can reach. See [`name`].
+  fn name_token<'src>(&mut self, source: &'src str, wanted: &'static str) -> Out<Name<&'src str>> {
+    self.name_except(source, &[], "", wanted)
+  }
+
+  /// [`name_token`](Self::name_token) at a position the grammar makes a **rule** of: a spelling in
+  /// `reserved` is [`SemanticRule`](ProjectErrorKind::SemanticRule) naming `rule`.
+  ///
+  /// The positions are derived from the syntactic parser's own refusals — see the module header's
+  /// table. Everywhere else this dialect's keywords are contextual and every one of them is a
+  /// name: the lexer reads `on`, `true` and `type` as identifiers, and the syntactic parser accepts
+  /// `type on { on: Int }`.
+  fn name_except<'src>(
+    &mut self,
+    source: &'src str,
+    reserved: &[ContextualKeyword],
+    rule: &'static str,
+    wanted: &'static str,
+  ) -> Out<Name<&'src str>> {
+    match self.peek() {
+      Some(NodeOrToken::Token(token)) if token.kind() == K::Name => {
+        self.bump();
+        self.extent.cover(token.text_range());
+        if keyword_of(token).is_some_and(|keyword| reserved.contains(&keyword)) {
+          return Err(ProjectError::new(
+            ProjectErrorKind::SemanticRule { rule },
+            to_range(token.text_range()),
+          ));
+        }
+        name(source, token)
+      }
+      Some(element) => Err(self.unexpected(element)),
+      None => Err(self.missing(wanted)),
+    }
+  }
+
+  /// [`name_token`](Self::name_token) where the production makes the name optional.
+  fn opt_name<'src>(&mut self, source: &'src str) -> Out<Option<Name<&'src str>>> {
+    match self.peek() {
+      Some(NodeOrToken::Token(token)) if token.kind() == K::Name => {
+        self.name_token(source, "a name").map(Some)
+      }
+      _ => Ok(None),
+    }
+  }
+
+  /// A `Name` token read for its **spelling** — an operation keyword, a directive location,
+  /// `true`, `false`, `null`. The caller classifies it and refuses what it does not classify; the
+  /// atom only guarantees that it is one `Name` and not a node or a punctuation token.
+  fn spelling(&mut self, wanted: &'static str) -> Out<Token<'g>> {
+    match self.peek() {
+      Some(NodeOrToken::Token(token)) if token.kind() == K::Name => {
+        self.bump();
+        self.extent.cover(token.text_range());
+        Ok(token)
+      }
+      Some(element) => Err(self.unexpected(element)),
+      None => Err(self.missing(wanted)),
+    }
+  }
+
+  /// [`spelling`](Self::spelling) where one may be absent.
+  fn opt_spelling(&mut self) -> Option<Token<'g>> {
+    match self.peek() {
+      Some(NodeOrToken::Token(token)) if token.kind() == K::Name => {
+        self.bump();
+        self.extent.cover(token.text_range());
+        Some(token)
+      }
+      _ => None,
+    }
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// leaves: the lexer's own doors
+// ---------------------------------------------------------------------------------------------
 
 /// The source text under `token`.
 ///
 /// Bounds-checked, not compared: the door already verified every byte of the tree against
 /// `source`, so a token's range is in bounds and on a character boundary by construction. The
 /// refusal below is that invariant's receipt rather than a second check — see
-/// [`verify_source`](crate::lossless::project::verify_source).
+/// [`verify_source`].
 #[inline]
 fn slice<'src>(source: &'src str, token: Token<'_>) -> Out<&'src str> {
   let range = token.text_range();
@@ -1136,33 +1355,24 @@ fn slice<'src>(source: &'src str, token: Token<'_>) -> Out<&'src str> {
     .ok_or_else(|| ProjectError::new(ProjectErrorKind::SourceMismatch, to_range(range)))
 }
 
-fn name<'src>(source: &'src str, token: Token<'_>) -> Out<Name<&'src str>> {
-  Ok(Name::new(
-    to_span(token.text_range()),
-    slice(source, token)?,
-  ))
+/// The refusal a leaf door answers: the tree labelled bytes the scanner will not read back.
+fn malformed(token: Token<'_>) -> ProjectError {
+  ProjectError::new(
+    ProjectErrorKind::MalformedToken { kind: token.kind() },
+    to_range(token.text_range()),
+  )
 }
 
-/// The `Name` of a node whose only content is one — `NamedType`, `EnumValue`, `Variable`.
+/// Re-cook a name through the **same** door the lexer's identifiers come from.
 ///
-/// Answers the name and the node's extent, which for these three is the name token's own range
-/// unless the tree put something else under them.
-fn inner_name<'src>(node: Node<'_>, source: &'src str) -> Out<(Name<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => extent.unread(child),
-    }
-  }
-  let token = names.at(0, node, "a name")?;
-  Ok((name(source, token)?, extent.range(node, "a token")?))
+/// [`identifier`] is the shipped scanner, and it must answer the whole slice. The range comes from
+/// a token the *tree* labelled `Name`, so on a caller-minted tree the bytes are whatever the caller
+/// wrote, and `Name("1")` is a value the syntactic parser has no way to produce. al8n/smear#218's
+/// leaf-trust addendum.
+fn name<'src>(source: &'src str, token: Token<'_>) -> Out<Name<&'src str>> {
+  let text = slice(source, token)?;
+  identifier(text).map_err(|_| malformed(token))?;
+  Ok(Name::new(to_span(token.text_range()), text))
 }
 
 /// The keyword a `Name` token spells, classified through the lexer's own table.
@@ -1170,29 +1380,122 @@ fn keyword_of(token: Token<'_>) -> Option<ContextualKeyword> {
   contextual_keyword(token.text().as_bytes())
 }
 
+/// Re-cook a string literal through the **same** door the lexer's payload comes from.
+///
+/// [`LitStr`]'s `TryFrom<&str>` is the string lexer, so the `Plain`/`Complex` discriminant and
+/// the `required_capacity` a consumer allocates against are the lexer's answers rather than a
+/// second implementation of the escape rules. A refusal here means the token's text is not a
+/// string literal to that lexer — a caller-minted label, since a parse's string tokens come from
+/// it.
+fn string_value<'src>(token: Token<'_>, source: &'src str) -> Out<StringValue<&'src str>> {
+  let slice = slice(source, token)?;
+  let lit = LitStr::try_from(slice).map_err(|_| malformed(token))?;
+  Ok(StringValue::new(to_span(token.text_range()), lit))
+}
+
+/// An integer literal's text, checked by the scanner that produced it.
+///
+/// This dialect's AST stores the **raw slice** rather than a classified literal, so there is no
+/// radix to get wrong — but `IntValue("abc")` was producible all the same: the old walk sliced
+/// whatever a token labelled `Int` covered. [`int_literal`] is the shipped scanner over the whole
+/// slice, and it hands the slice back. al8n/smear#218's leaf-trust addendum.
+fn int_text<'src>(source: &'src str, token: Token<'_>) -> Out<&'src str> {
+  int_literal(slice(source, token)?).map_err(|_| malformed(token))
+}
+
+/// [`int_text`]'s twin for a float literal. The two doors do not coerce into each other, so an
+/// `Int`-labelled `1.5` and a `Float`-labelled `1` both refuse.
+fn float_text<'src>(source: &'src str, token: Token<'_>) -> Out<&'src str> {
+  float_literal(slice(source, token)?).map_err(|_| malformed(token))
+}
+
 // ---------------------------------------------------------------------------------------------
-// document
+// documents
 // ---------------------------------------------------------------------------------------------
 
-fn document<'src>(node: Node<'_>, source: &'src str) -> Out<Document<&'src str>> {
-  let mut extent = Extent::default();
-  let mut definitions = Vec::new();
-  for element in node.children() {
-    match element {
-      // Rubble: the lost-node recovery class drops a failed definition's bytes straight under
-      // the document, where the AST has no place for them.
-      NodeOrToken::Token(token) if !is_trivia(token.kind()) => {
-        return Err(unexpected(node, token.kind(), token.text_range()));
-      }
-      NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => {
-        let (entry, piece) = document_entry(child, source)?;
-        extent.cover(piece);
-        definitions.push(entry);
-      }
+/// The seven extension kinds, each its own transcription.
+const EXTENSION_KINDS: [SyntaxKind; 7] = [
+  K::ScalarTypeExtension,
+  K::ObjectTypeExtension,
+  K::InterfaceTypeExtension,
+  K::UnionTypeExtension,
+  K::EnumTypeExtension,
+  K::InputObjectTypeExtension,
+  K::SchemaExtension,
+];
+
+/// The eight type-system definition kinds.
+const TYPE_SYSTEM_DEFINITION_KINDS: [SyntaxKind; 8] = [
+  K::ScalarTypeDefinition,
+  K::ObjectTypeDefinition,
+  K::InterfaceTypeDefinition,
+  K::UnionTypeDefinition,
+  K::EnumTypeDefinition,
+  K::InputObjectTypeDefinition,
+  K::DirectiveDefinition,
+  K::SchemaDefinition,
+];
+
+/// What the mixed root's definition run holds: either executable definition, a type-system
+/// definition or an extension.
+const MIXED_ENTRY_KINDS: [SyntaxKind; 17] = entry_kinds::<17>(true, true);
+
+/// What the SDL root's definition run holds — the mixed run without the two executable kinds.
+const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 15] = entry_kinds::<15>(false, true);
+
+/// What the executable root's definition run holds.
+const EXECUTABLE_ENTRY_KINDS: [SyntaxKind; 2] = entry_kinds::<2>(true, false);
+
+/// One entry-kind row, assembled from the lists above so the three roots cannot disagree about a
+/// kind they share. `N` is checked by the assembly itself: a count that does not match the chosen
+/// halves fails const evaluation.
+const fn entry_kinds<const N: usize>(executable: bool, type_system: bool) -> [SyntaxKind; N] {
+  let mut kinds = [K::OperationDefinition; N];
+  let mut at = 0;
+  if executable {
+    kinds[at] = K::OperationDefinition;
+    kinds[at + 1] = K::FragmentDefinition;
+    at += 2;
+  }
+  if type_system {
+    let mut i = 0;
+    while i < TYPE_SYSTEM_DEFINITION_KINDS.len() {
+      kinds[at] = TYPE_SYSTEM_DEFINITION_KINDS[i];
+      at += 1;
+      i += 1;
+    }
+    let mut i = 0;
+    while i < EXTENSION_KINDS.len() {
+      kinds[at] = EXTENSION_KINDS[i];
+      at += 1;
+      i += 1;
     }
   }
-  Ok(Document::new(extent.span(node, "a token")?, definitions))
+  assert!(
+    at == N,
+    "an entry-kind row's length is the sum of its halves"
+  );
+  kinds
+}
+
+/// The three selection kinds a selection set holds.
+const SELECTION_KINDS: [SyntaxKind; 3] = [K::Field, K::FragmentSpread, K::InlineFragment];
+
+fn document<'src>(node: Node<'_>, source: &'src str) -> Out<Document<&'src str>> {
+  // `Definition+`. A token here is rubble — the lost-node recovery class drops a failed
+  // definition's bytes straight under the document — so the run stops at it and `end` refuses it
+  // where it stands.
+  let mut cursor = Cursor::new(node);
+  let entries = cursor.many1(&MIXED_ENTRY_KINDS, None, "a definition")?;
+  cursor.end()?;
+  let mut definitions = Vec::with_capacity(entries.len());
+  for child in entries {
+    definitions.push(cursor.keep(document_entry(child, source)?));
+  }
+  Ok(Document::new(
+    to_span(cursor.range("a token")?),
+    definitions,
+  ))
 }
 
 fn document_entry<'src>(
@@ -1214,24 +1517,17 @@ fn type_system_document<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<TypeSystemDocument<&'src str>> {
-  let mut extent = Extent::default();
-  let mut definitions = Vec::new();
-  for element in node.children() {
-    match element {
-      // Rubble, exactly as at the mixed root and for the same reason.
-      NodeOrToken::Token(token) if !is_trivia(token.kind()) => {
-        return Err(unexpected(node, token.kind(), token.text_range()));
-      }
-      NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => {
-        let (entry, piece) = type_system_entry(child, source)?;
-        extent.cover(piece);
-        definitions.push(entry);
-      }
-    }
+  // `TypeSystemDefinitionOrExtension+` — rubble exactly as at the mixed root, and an executable
+  // definition is not in this root's run at all, so `end` refuses it at its own range.
+  let mut cursor = Cursor::new(node);
+  let entries = cursor.many1(&TYPE_SYSTEM_ENTRY_KINDS, None, "a definition")?;
+  cursor.end()?;
+  let mut definitions = Vec::with_capacity(entries.len());
+  for child in entries {
+    definitions.push(cursor.keep(type_system_entry(child, source)?));
   }
   Ok(TypeSystemDocument::new(
-    extent.span(node, "a token")?,
+    to_span(cursor.range("a token")?),
     definitions,
   ))
 }
@@ -1241,7 +1537,7 @@ fn type_system_document<'src>(
 /// The extension arm stays — `extend` is type-system syntax and this root is the one that builds
 /// it — and what goes is the executable half: an `OperationDefinition` or a `FragmentDefinition`
 /// under this root has no image in a `TypeSystemDocument`, and the SDL root reports one at the
-/// parser's own position rather than shaping it, so reaching this arm means the tree is not the
+/// parser's own position rather than shaping it, so reaching that arm means the tree is not the
 /// one this door was handed.
 fn type_system_entry<'src>(
   node: Node<'_>,
@@ -1269,24 +1565,16 @@ fn executable_document<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<ExecutableDocument<&'src str>> {
-  let mut extent = Extent::default();
-  let mut definitions = Vec::new();
-  for element in node.children() {
-    match element {
-      // Rubble, exactly as at the mixed root and for the same reason.
-      NodeOrToken::Token(token) if !is_trivia(token.kind()) => {
-        return Err(unexpected(node, token.kind(), token.text_range()));
-      }
-      NodeOrToken::Token(_) => {}
-      NodeOrToken::Node(child) => {
-        let (entry, piece) = executable_entry(child, source)?;
-        extent.cover(piece);
-        definitions.push(entry);
-      }
-    }
+  // `ExecutableDefinition+` — the SDL root's mirror.
+  let mut cursor = Cursor::new(node);
+  let entries = cursor.many1(&EXECUTABLE_ENTRY_KINDS, None, "a definition")?;
+  cursor.end()?;
+  let mut definitions = Vec::with_capacity(entries.len());
+  for child in entries {
+    definitions.push(cursor.keep(executable_entry(child, source)?));
   }
   Ok(ExecutableDocument::new(
-    extent.span(node, "a token")?,
+    to_span(cursor.range("a token")?),
     definitions,
   ))
 }
@@ -1296,8 +1584,6 @@ fn executable_document<'src>(
 /// No extension arm — `extend` is not executable syntax and the root that produced this node
 /// reports one rather than building it — and the description hoist is the document-level one: the
 /// wrapper spans description-through-definition and the inner node starts after the description.
-/// A standard executable definition carries no description at all, so on standard input the two
-/// spans coincide and the hoist is the dialect-compatibility path only.
 fn executable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
@@ -1343,10 +1629,10 @@ fn definition<'src>(
 ) -> Out<Definition<'src, crate::graphql::ast::Definition<&'src str>>> {
   use crate::graphql::ast::Definition as D;
 
-  // The two executable kinds, then the nine type-system ones through the shared arm. One list of
-  // the nine, not two: `type_system_definition` is what the SDL root reaches them by, and a
-  // second copy here would be nine chances for the mixed root and the SDL root to build different
-  // ASTs out of the same node. Its refusal for an unknown kind is this one's, unchanged.
+  // The two executable kinds, then the eight type-system ones through the shared arm. One list of
+  // the eight, not two: `type_system_definition` is what the SDL root reaches them by, and a
+  // second copy here would be eight chances for the mixed root and the SDL root to build different
+  // ASTs out of the same node.
   Ok(match node.kind() {
     K::OperationDefinition => {
       let (description, operation, outer) = operation_definition(node, source)?;
@@ -1371,7 +1657,7 @@ fn definition<'src>(
   })
 }
 
-/// The nine type-system definition kinds, shared by the mixed root and the SDL-only one.
+/// The eight type-system definition kinds, shared by the mixed root and the SDL-only one.
 fn type_system_definition<'src>(
   node: Node<'_>,
   source: &'src str,
@@ -1443,9 +1729,11 @@ fn type_system_definition<'src>(
 
 /// `Some` when `node` is one of the seven extension kinds, `None` when it is anything else.
 ///
-/// An extension carries no description — `extend` heads its own production — so this answers
-/// before the hoist rather than inside it, and its extent is the node's own with nothing lifted
-/// out of it.
+/// An extension carries no description. The lossless production reports a string written in front
+/// of an `extend` and — unlike GraphQLx, where the string stays outside — builds the extension
+/// node **around** it, because the mark it opens at was taken before the description. So the
+/// description is inside the node here and each extension's walk refuses it as the first element
+/// its sequence has no place for.
 fn type_system_extension<'src>(
   node: Node<'_>,
   source: &'src str,
@@ -1514,27 +1802,17 @@ fn description<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(StringValue<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut literal = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if literal.is_none() && matches!(token.kind(), K::String | K::BlockString) {
-          literal = Some(token);
-        }
-      }
-      NodeOrToken::Node(child) => extent.unread(child),
-    }
-  }
-  let token = literal.ok_or_else(|| missing(node, "a string token"))?;
-  Ok((string_value(token, source)?, extent.range(node, "a token")?))
+  // `String | BlockString` — one token, nothing else.
+  let mut cursor = Cursor::new(node);
+  let token = cursor.token_of(&STRING_KINDS, "a string token")?;
+  let extent = cursor.finish("a token")?;
+  Ok((string_value(token, source)?, extent))
 }
 
 /// Project the `Description` a node's walk collected, if it collected one.
 ///
-/// Answers the hoisted string and its extent side by side, because
-/// [`described_extents`] needs the second to tell the wrapper's span from the definition's.
+/// Answers the hoisted string and its extent side by side, because [`described_extents`] needs the
+/// second to tell the wrapper's span from the definition's.
 fn hoisted_description<'src>(
   node: Option<Node<'_>>,
   source: &'src str,
@@ -1548,23 +1826,6 @@ fn hoisted_description<'src>(
   }
 }
 
-/// Re-cook a string literal through the **same** door the lexer's payload comes from.
-///
-/// [`LitStr`]'s `TryFrom<&str>` is the string lexer, so the `Plain`/`Complex` discriminant and
-/// the `required_capacity` a consumer allocates against are the lexer's answers rather than a
-/// second implementation of the escape rules. A refusal here means the two disagree about bytes
-/// the lossless lexer already accepted, which is a lexer finding, not a projection one.
-fn string_value<'src>(token: Token<'_>, source: &'src str) -> Out<StringValue<&'src str>> {
-  let slice = slice(source, token)?;
-  let lit = LitStr::try_from(slice).map_err(|_| {
-    ProjectError::new(
-      ProjectErrorKind::MalformedToken { kind: token.kind() },
-      to_range(token.text_range()),
-    )
-  })?;
-  Ok(StringValue::new(to_span(token.text_range()), lit))
-}
-
 // ---------------------------------------------------------------------------------------------
 // executable definitions
 // ---------------------------------------------------------------------------------------------
@@ -1573,64 +1834,44 @@ fn operation_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, OperationDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut operation_type_node = None;
-  let mut variables_node = None;
-  let mut directives_node = None;
-  let mut selection_set_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::OperationType if operation_type_node.is_none() => operation_type_node = Some(child),
-        K::VariablesDefinition if variables_node.is_none() => variables_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(child),
-      },
+  // `Description? OperationType Name? VariablesDefinition? Directives? SelectionSet`
+  //  | `Description? SelectionSet`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  let Some(type_node) = cursor.opt_node(K::OperationType) else {
+    // Query shorthand: the definition *is* its selection set, and the AST's span for it is the
+    // selection set's own. The grammar gives a shorthand no other constituent, so anything else
+    // here is not in the sequence and `end` refuses it.
+    //
+    // **The description is one the parser itself produces.** `"docs" { id }` is reported by
+    // `document.rs`'s `definition` and the operation is still built *around* the description,
+    // because the mark the node opens at was taken before it — so a parser-built pair reaches here
+    // with one, and the walk this replaces kept it: a `Described` shorthand, a value the syntactic
+    // parser produces for no input, and a recovering projection that counted the entry complete.
+    // `UnexpectedChild` and not `SemanticRule`: the syntactic side refuses it with an expectation
+    // at the `{` rather than by naming a rule. al8n/smear#218's round-four addendum.
+    if let Some(description) = description_node {
+      return Err(unexpected_node(node, description));
     }
-  }
+    let set = cursor.node(K::SelectionSet, "a selection set")?;
+    cursor.end()?;
+    let selections = cursor.keep(selection_set(set, source)?);
+    let (outer, _) = described_extents(node, cursor.extent, None)?;
+    return Ok((None, OperationDefinition::Shorthand(selections), outer));
+  };
+  let name = cursor.opt_name(source)?;
+  let variables_node = cursor.opt_node(K::VariablesDefinition);
+  let directives_node = cursor.opt_node(K::Directives);
+  let set = cursor.node(K::SelectionSet, "a selection set")?;
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let set = selection_set_node.ok_or_else(|| missing(node, "a selection set"))?;
-  let selections = extent.keep(selection_set(set, source)?);
+  let operation_type = cursor.keep(operation_type(type_node)?);
+  let variables = cursor.keep_opt(variables_definition(variables_node, source)?);
+  let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
+  let selections = cursor.keep(selection_set(set, source)?);
 
-  let Some(keyword_node) = operation_type_node else {
-    // Query shorthand: the definition *is* its selection set, and the AST's span for it is the
-    // selection set's own — which is why this arm builds no span of its own. The grammar gives a
-    // shorthand operation no other constituent, but the node's extent is still the whole of what
-    // the tree put under it, so anything else there is folded rather than dropped.
-    for child in [variables_node, directives_node].into_iter().flatten() {
-      extent.unread(child);
-    }
-    let (outer, _) = described_extents(node, extent, described)?;
-    return Ok((
-      description,
-      OperationDefinition::Shorthand(selections),
-      outer,
-    ));
-  };
-
-  let operation_type = extent.keep(operation_type(keyword_node)?);
-  let name = match names.get(0) {
-    Some(token) => Some(name(source, token)?),
-    None => None,
-  };
-  let variables = match variables_node {
-    Some(child) => Some(extent.keep(variables_definition(child, source)?)),
-    None => None,
-  };
-  let directives = extent.keep_opt(optional_directives(directives_node, source)?);
-
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     OperationDefinition::Named(NamedOperationDefinition::new(
@@ -1645,94 +1886,82 @@ fn operation_definition<'src>(
   ))
 }
 
+/// An `OperationType` node: one `Name` read for its spelling, which must be one of the three
+/// operation keywords.
 fn operation_type(node: Node<'_>) -> Out<(OperationType, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => extent.unread(child),
-    }
-  }
-  let token = names.at(0, node, "an operation keyword")?;
+  // `query | mutation | subscription`
+  let mut cursor = Cursor::new(node);
+  let token = cursor.spelling("an operation keyword")?;
+  let extent = cursor.finish("a token")?;
   let span = to_span(token.text_range());
   let operation_type = match keyword_of(token) {
     Some(ContextualKeyword::Query) => OperationType::Query(Query::new(span)),
     Some(ContextualKeyword::Mutation) => OperationType::Mutation(Mutation::new(span)),
     Some(ContextualKeyword::Subscription) => OperationType::Subscription(Subscription::new(span)),
-    _ => {
-      return Err(ProjectError::new(
-        ProjectErrorKind::MalformedToken { kind: token.kind() },
-        to_range(token.text_range()),
-      ));
-    }
+    _ => return Err(malformed(token)),
   };
-  Ok((operation_type, extent.range(node, "a token")?))
+  Ok((operation_type, extent))
 }
 
+/// An operation's variable definitions, `( VariableDefinition+ )`.
+///
+/// **A `+` container, not an `()` one**, and the pair is worth stating side by side: an argument
+/// list has no `at_least(1)`, so `f()` is a written-down empty list the syntactic parser maps to
+/// `None`; a variables definition has one, so `query Q() { f }` is a document the syntactic parser
+/// **rejects**. See the module header's three-way rule.
 fn variables_definition<'src>(
-  node: Node<'_>,
+  list: Option<Node<'_>>,
   source: &'src str,
-) -> Out<(VariablesDefinition<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut definitions = Vec::new();
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::VariableDefinition => {
-          definitions.push(extent.keep(variable_definition(child, source)?));
-        }
-        _ => return Err(unexpected_node(node, child)),
-      },
-    }
+) -> Out<Option<(VariablesDefinition<&'src str>, TextRange)>> {
+  let Some(list) = list else {
+    return Ok(None);
+  };
+  // `( VariableDefinition+ )`
+  let mut cursor = Cursor::new(list);
+  cursor.token(K::LParen, "the `(` a variables list opens with")?;
+  let listed = cursor.many1(
+    &[K::VariableDefinition],
+    Some(K::RParen),
+    "a variable definition",
+  )?;
+  // Lenient: no AST image, and `unclosed_parens` builds the node hole-free without it — see the
+  // module header's missing-token table.
+  cursor.opt_token(K::RParen);
+  cursor.end()?;
+  let mut definitions = Vec::with_capacity(listed.len());
+  for child in listed {
+    definitions.push(cursor.keep(variable_definition(child, source)?));
   }
-  let extent = extent.range(node, "a token")?;
-  Ok((
+  let extent = cursor.range("a token")?;
+  Ok(Some((
     VariablesDefinition::new(to_span(extent), definitions),
     extent,
-  ))
+  )))
 }
 
 fn variable_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(DescribedVariableDefinition<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut description_node = None;
-  let mut variable_node = None;
-  let mut type_node = None;
-  let mut default_node = None;
-  let mut directives_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::Variable if variable_node.is_none() => variable_node = Some(child),
-        kind if type_node.is_none() && TYPE_KINDS.contains(&kind) => type_node = Some(child),
-        K::DefaultValue if default_node.is_none() => default_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? Variable : Type DefaultValue? Directives[Const]?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  let variable_node = cursor.node(K::Variable, "a variable")?;
+  cursor.token(K::Colon, "the `:` before a variable's type")?;
+  let type_node = cursor.one_of(&TYPE_KINDS, "a type reference")?;
+  let default_node = cursor.opt_node(K::DefaultValue);
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let variable = variable_node.ok_or_else(|| missing(node, "a variable"))?;
-  let variable = extent.keep(variable_value(variable, source)?);
-  let ty = extent.keep(require_type(node, type_node, source)?);
-  let default_value = extent.keep_opt(optional_default_value(default_node, source)?);
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
+  let variable = cursor.keep(variable_value(variable_node, source)?);
+  let ty = cursor.keep(ty(type_node, source)?);
+  let default_value = cursor.keep_opt(optional_default_value(default_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
 
   // The one described node below document level whose inner span excludes the description — see
   // the module header for the three that do not.
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     Described::new(
       to_span(outer),
@@ -1747,55 +1976,39 @@ fn fragment_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, crate::graphql::ast::FragmentDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut condition_node = None;
-  let mut directives_node = None;
-  let mut selection_set_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::NamedType if condition_node.is_none() => condition_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? fragment FragmentName on? NamedType Directives? SelectionSet`, and
+  // `FragmentName : Name but not on`. The lossless production reports the violation on the
+  // diagnostic channel and still builds the node, so the shape alone cannot tell a legal fragment
+  // name from an illegal one and this is the rule's custodian beside the two parsers'.
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Fragment, "the `fragment` keyword")?;
+  let name = cursor.name_except(
+    source,
+    &[ContextualKeyword::On],
+    "a fragment may not be named `on`",
+    "a fragment name",
+  )?;
+  // Lenient: no AST image of its own — the condition stores only the type's name — and the
+  // production reports a missing `on` and still builds the definition, hole-free, around the type
+  // it did find. The type is required either way.
+  let on = cursor.opt_keyword(ContextualKeyword::On);
+  let condition_node = cursor.node(K::NamedType, "a type condition")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  let set = cursor.node(K::SelectionSet, "a selection set")?;
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  // `fragment` is the first `Name` token, the fragment's own name the second, `on` the third.
-  let name = fragment_name(names.at(1, node, "a fragment name")?, source)?;
+  let type_condition = cursor.keep(type_condition(on, condition_node, source)?);
+  let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
+  let selections = cursor.keep(selection_set(set, source)?);
 
-  let on_token = names.at(2, node, "an `on` keyword")?;
-  let condition = condition_node.ok_or_else(|| missing(node, "a type condition"))?;
-  let condition_name = extent.keep(inner_name(condition, source)?);
-  let type_condition = TypeCondition::new(
-    SimpleSpan::new(
-      usize::from(on_token.text_range().start()),
-      condition_name.span().end(),
-    ),
-    condition_name,
-  );
-
-  let directives = extent.keep_opt(optional_directives(directives_node, source)?);
-  let set = selection_set_node.ok_or_else(|| missing(node, "a selection set"))?;
-  let selections = extent.keep(selection_set(set, source)?);
-
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     crate::graphql::ast::FragmentDefinition::new(
       to_span(inner),
-      name,
+      FragmentName::from_name(name),
       type_condition,
       directives,
       selections,
@@ -1804,23 +2017,30 @@ fn fragment_definition<'src>(
   ))
 }
 
-/// A fragment name, with the one semantic rule the tree records only as a diagnostic.
+/// A type condition, `on NamedType` — **not a node in this kind space**: the keyword is a token of
+/// the fragment that carries it and the type is that fragment's `NamedType` child, so the two
+/// arrive here separately.
 ///
-/// `FragmentName::new` is deliberately crate-private so the syntactic productions are the single
-/// place that establishes `Name but not on`. This is the second custodian, and it exists because
-/// the lossless productions record the violation on the diagnostic channel and still build the
-/// node — so the shape alone cannot tell a legal fragment name from an illegal one.
-fn fragment_name<'src>(token: Token<'_>, source: &'src str) -> Out<FragmentName<&'src str>> {
-  let slice = slice(source, token)?;
-  if slice == "on" {
-    return Err(ProjectError::new(
-      ProjectErrorKind::SemanticRule {
-        rule: "a fragment may not be named `on`",
-      },
-      to_range(token.text_range()),
-    ));
-  }
-  Ok(FragmentName::new(to_span(token.text_range()), slice))
+/// The span runs from the `on` to the end of the type. It used to be built with
+/// `SimpleSpan::new(on.start, name.end)` from an `on` found by counting `Name` tokens and a type
+/// found by kind, and a caller-built tree with the type before the keyword made that constructor
+/// panic. Both callers now consume the `on` before the type in their own sequence, so the order is
+/// the cursor's rather than a claim, and `cover` could not invert even if it were not.
+/// al8n/smear#218, finding 4.
+///
+/// Without an `on` — the lenient fragment-definition case — the span is the type's own, which is
+/// the composite-span convention the module header states.
+fn type_condition<'src>(
+  on: Option<Token<'_>>,
+  node: Node<'_>,
+  source: &'src str,
+) -> Out<(TypeCondition<&'src str>, TextRange)> {
+  let (name, name_range) = named_type_name(node, source)?;
+  let range = match on {
+    Some(on) => on.text_range().cover(name_range),
+    None => name_range,
+  };
+  Ok((TypeCondition::new(to_span(range), name), range))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1830,9 +2050,9 @@ fn fragment_name<'src>(token: Token<'_>, source: &'src str) -> Out<FragmentName<
 /// A selection whose own selection set is being built below.
 ///
 /// Everything a `Field` or an `InlineFragment` needs *except* its selection set is bounded work —
-/// its alias, its name, its arguments, its directives — so it is all folded before the descent
-/// and travels here. A `FragmentSpread` never appears: it holds no selection set and is finished
-/// where it is read.
+/// its alias, its name, its arguments, its directives, its type condition — so it is all folded
+/// before the descent and travels here. A `FragmentSpread` never appears: it holds no selection set
+/// and is finished where it is read.
 enum OpenSelection<'g, 'src> {
   Field {
     /// The `Field` node, and the owner of the finished selection's span.
@@ -1873,12 +2093,9 @@ impl<'g> OpenSelection<'g, '_> {
 /// loop over these rather than a native frame per level — see the module header's *No node
 /// dispatch below spends a native frame per level*.
 struct SelectionFrame<'g, 'src> {
-  /// The `SelectionSet` node.
-  node: Node<'g>,
-  /// The fold over the set's own tokens and the selections already finished.
-  extent: Extent,
-  /// The selections not yet read.
-  children: Children<'g>,
+  /// The `SelectionSet`'s cursor: its node, the fold over its own tokens and the selections
+  /// already finished, and the selections not yet read.
+  cursor: Cursor<'g>,
   /// The selections already finished, in document order.
   selections: Vec<Selection<&'src str>>,
   /// The selection whose own set is being built below.
@@ -1886,41 +2103,39 @@ struct SelectionFrame<'g, 'src> {
 }
 
 /// What a [`SelectionFrame`] did when the set below it finished.
-enum ResumedSet<'g, T> {
-  /// The next nested selection set that has to be built.
+///
+/// The frame travels by value: an open selection holds a finished `Alias`, `Arguments` and
+/// `Directives` that have to leave the frame when it closes, and a frame that descends again is
+/// pushed back by the resume itself.
+enum ResumedSet<'g, 'src> {
+  /// The next nested selection set that has to be built; the frame is back on the worklist.
   Descend(Node<'g>),
   /// This frame is finished, and what it finished to.
-  Done(T, TextRange),
+  Done(SelectionSet<&'src str>, TextRange),
 }
 
 /// Read selections until one is waiting on a set of its own.
 ///
 /// Everything that finishes where it is read — a fragment spread, a field with no set — is folded
 /// into `selections` here, so only a selection that actually nests ever occupies the worklist.
-/// `None` means the set is complete.
+/// `None` means the set's selections have run out.
 fn next_selection<'g, 'src>(
-  set: Node<'g>,
-  children: &mut Children<'g>,
-  extent: &mut Extent,
+  cursor: &mut Cursor<'g>,
   selections: &mut Vec<Selection<&'src str>>,
   source: &'src str,
 ) -> Out<Option<OpenSelection<'g, 'src>>> {
-  for element in children.by_ref() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Field => match open_field(child, source)? {
-          Ok(open) => return Ok(Some(open)),
-          Err(finished) => selections.push(Selection::Field(extent.keep(finished))),
-        },
-        K::FragmentSpread => {
-          selections.push(Selection::FragmentSpread(
-            extent.keep(fragment_spread(child, source)?),
-          ));
-        }
-        K::InlineFragment => return Ok(Some(open_inline_fragment(child, source)?)),
-        _ => return Err(unexpected_node(set, child)),
+  while let Some(child) = cursor.opt_one_of(&SELECTION_KINDS) {
+    match child.kind() {
+      K::Field => match open_field(child, source)? {
+        Ok(open) => return Ok(Some(open)),
+        Err(finished) => selections.push(Selection::Field(cursor.keep(finished))),
       },
+      K::FragmentSpread => {
+        selections.push(Selection::FragmentSpread(
+          cursor.keep(fragment_spread(child, source)?),
+        ));
+      }
+      _ => return Ok(Some(open_inline_fragment(child, source)?)),
     }
   }
   Ok(None)
@@ -1930,13 +2145,7 @@ fn next_selection<'g, 'src>(
 /// one.
 ///
 /// Every set on the way is suspended on `frames` with the selection it must build first already
-/// chosen, so a frame is never on the stack without a live descent below it — which is what lets
-/// [`SelectionFrame::resume`] take a finished set rather than an optional one, and what keeps this
-/// walk free of a state the type system cannot rule out.
-///
-/// A frame is **pushed** rather than returned, because returning one means moving a few hundred
-/// bytes of partly-built AST through the caller's frame on a walk whose whole subject is frame
-/// size.
+/// chosen, so a frame is never on the stack without a live descent below it.
 fn open_selection_chain<'g, 'src>(
   frames: &mut Vec<SelectionFrame<'g, 'src>>,
   node: Node<'g>,
@@ -1944,66 +2153,77 @@ fn open_selection_chain<'g, 'src>(
 ) -> Out<(SelectionSet<&'src str>, TextRange)> {
   let mut node = node;
   loop {
-    let mut extent = Extent::default();
-    let mut children = node.children();
+    // `{ Selection+ }`, with the `}` lenient.
+    let mut cursor = Cursor::new(node);
+    cursor.token(K::LBrace, "the `{` a selection set opens with")?;
     let mut selections = Vec::new();
-    match next_selection(node, &mut children, &mut extent, &mut selections, source)? {
+    match next_selection(&mut cursor, &mut selections, source)? {
       Some(open) => {
         let nested = open.set();
         frames.push(SelectionFrame {
-          node,
-          extent,
-          children,
+          cursor,
           selections,
           open,
         });
         node = nested;
       }
-      None => {
-        let extent = extent.range(node, "a token")?;
-        return Ok((
-          SelectionSet::new(to_span(extent), selections.into()),
-          extent,
-        ));
-      }
+      None => return close_selection_set(cursor, selections),
     }
   }
 }
 
-impl<'g, 'src> SelectionFrame<'g, 'src> {
-  /// Fold the set the level below finished into the selection that was waiting on it, and read
-  /// on to the next selection that nests.
-  fn resume(
-    &mut self,
-    set: SelectionSet<&'src str>,
-    piece: TextRange,
-    source: &'src str,
-  ) -> Out<ResumedSet<'g, SelectionSet<&'src str>>> {
-    let Self {
-      node,
-      extent,
-      children,
-      selections,
-      open,
-    } = self;
-    let (selection, range) = close_selection(open, set, piece)?;
-    extent.cover(range);
-    selections.push(selection);
-    match next_selection(*node, children, extent, selections, source)? {
+/// Close a selection set whose selections have run out: `Selection+`, so an empty one is refused
+/// through the cursor's `absent`, and the `}` is **lenient** — see the module header's
+/// missing-token table.
+fn close_selection_set<'src>(
+  mut cursor: Cursor<'_>,
+  selections: Vec<Selection<&'src str>>,
+) -> Out<(SelectionSet<&'src str>, TextRange)> {
+  if selections.is_empty() {
+    return Err(cursor.absent(Some(K::RBrace), "a selection"));
+  }
+  cursor.opt_token(K::RBrace);
+  let extent = cursor.finish("a token")?;
+  Ok((
+    SelectionSet::new(to_span(extent), selections.into()),
+    extent,
+  ))
+}
+
+/// Fold the set the level below finished into the selection that was waiting on it, and read on to
+/// the next selection that nests.
+fn resume_selection<'g, 'src>(
+  frames: &mut Vec<SelectionFrame<'g, 'src>>,
+  frame: SelectionFrame<'g, 'src>,
+  set: SelectionSet<&'src str>,
+  piece: TextRange,
+  source: &'src str,
+) -> Out<ResumedSet<'g, 'src>> {
+  let SelectionFrame {
+    mut cursor,
+    mut selections,
+    open,
+  } = frame;
+  let (selection, range) = close_selection(open, set, piece)?;
+  cursor.extent.cover(range);
+  selections.push(selection);
+  Ok(
+    match next_selection(&mut cursor, &mut selections, source)? {
       Some(next) => {
         let nested = next.set();
-        *open = next;
-        Ok(ResumedSet::Descend(nested))
+        frames.push(SelectionFrame {
+          cursor,
+          selections,
+          open: next,
+        });
+        ResumedSet::Descend(nested)
       }
       None => {
-        let range = extent.range(*node, "a token")?;
-        Ok(ResumedSet::Done(
-          SelectionSet::new(to_span(range), core::mem::take(selections).into()),
-          range,
-        ))
+        let (set, range) = close_selection_set(cursor, selections)?;
+        ResumedSet::Done(set, range)
       }
-    }
-  }
+    },
+  )
 }
 
 /// A selection set, with the nesting inside it read on a worklist rather than a stack.
@@ -2014,16 +2234,13 @@ fn selection_set<'src>(
   let mut frames: Vec<SelectionFrame<'_, 'src>> = Vec::new();
   let mut built = open_selection_chain(&mut frames, node, source)?;
   loop {
-    let Some(frame) = frames.last_mut() else {
+    let Some(frame) = frames.pop() else {
       return Ok(built);
     };
     let (set, piece) = built;
-    built = match frame.resume(set, piece, source)? {
+    built = match resume_selection(&mut frames, frame, set, piece, source)? {
       ResumedSet::Descend(nested) => open_selection_chain(&mut frames, nested, source)?,
-      ResumedSet::Done(set, range) => {
-        frames.pop();
-        (set, range)
-      }
+      ResumedSet::Done(set, range) => (set, range),
     };
   }
 }
@@ -2038,48 +2255,23 @@ fn open_field<'g, 'src>(
   node: Node<'g>,
   source: &'src str,
 ) -> Out<Result<OpenSelection<'g, 'src>, (Field<&'src str>, TextRange)>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut alias_node = None;
-  let mut arguments_node = None;
-  let mut directives_node = None;
-  let mut selection_set_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Alias if alias_node.is_none() => alias_node = Some(child),
-        K::Arguments if arguments_node.is_none() => arguments_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Alias? Name Arguments? Directives? SelectionSet?` — the alias is a node holding its own `Name`
+  // and `:`, so the field's name is the one `Name` this node holds directly.
+  let mut cursor = Cursor::new(node);
+  let alias_node = cursor.opt_node(K::Alias);
+  let name = cursor.name_token(source, "a field name")?;
+  let arguments_node = cursor.opt_node(K::Arguments);
+  let directives_node = cursor.opt_node(K::Directives);
+  let selection_set_node = cursor.opt_node(K::SelectionSet);
+  cursor.end()?;
 
-  let alias = match alias_node {
-    Some(child) => {
-      // The alias node holds the `:`, and the AST's alias span holds it too — which the fold
-      // gives for free, since the `:` is one of the node's own non-trivia tokens.
-      let (alias_name, piece) = inner_name(child, source)?;
-      extent.cover(piece);
-      Some(Alias::new(to_span(piece), alias_name))
-    }
-    None => None,
-  };
-  // The alias's own `Name` lives inside the `Alias` node, so a direct scan answers the field's.
-  let name = name(source, names.at(0, node, "a field name")?)?;
-  let arguments = extent.keep_opt(optional_arguments(arguments_node, source)?);
-  let directives = extent.keep_opt(optional_directives(directives_node, source)?);
+  let alias = cursor.keep_opt(alias_node.map(|child| alias(child, source)).transpose()?);
+  let arguments = cursor.keep_optional(optional_arguments(arguments_node, source)?);
+  let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
   match selection_set_node {
     Some(set) => Ok(Ok(OpenSelection::Field {
       node,
-      extent,
+      extent: cursor.extent,
       alias,
       name,
       arguments,
@@ -2087,7 +2279,7 @@ fn open_field<'g, 'src>(
       pending: set,
     })),
     None => {
-      let extent = extent.range(node, "a token")?;
+      let extent = cursor.range("a token")?;
       Ok(Err((
         Field::new(to_span(extent), alias, name, arguments, directives, None),
         extent,
@@ -2096,32 +2288,38 @@ fn open_field<'g, 'src>(
   }
 }
 
+/// A field alias, `name :` — a node here, and its span holds the colon.
+fn alias<'src>(node: Node<'_>, source: &'src str) -> Out<(Alias<&'src str>, TextRange)> {
+  // `Name :`
+  let mut cursor = Cursor::new(node);
+  let name = cursor.name_token(source, "an alias")?;
+  cursor.token(K::Colon, "the `:` after an alias")?;
+  let extent = cursor.finish("a token")?;
+  Ok((Alias::new(to_span(extent), name), extent))
+}
+
 fn fragment_spread<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(FragmentSpread<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut directives_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = fragment_name(names.at(0, node, "a fragment name")?, source)?;
-  let directives = extent.keep_opt(optional_directives(directives_node, source)?);
-  let extent = extent.range(node, "a token")?;
+  // `... FragmentName Directives?`. `... on` is an inline fragment's head in both parsers — the
+  // lossless spread dispatch, the syntactic spread arm — and the committed spread reads its target
+  // through the same `FragmentName` door a definition does, so an `on` here is no spread any
+  // source produces.
+  let mut cursor = Cursor::new(node);
+  cursor.token(K::Spread, "the `...` a spread opens with")?;
+  let name = cursor.name_except(
+    source,
+    &[ContextualKeyword::On],
+    "a fragment spread may not target `on`",
+    "a fragment name",
+  )?;
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
+  let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
+  let extent = cursor.range("a token")?;
   Ok((
-    FragmentSpread::new(to_span(extent), name, directives),
+    FragmentSpread::new(to_span(extent), FragmentName::from_name(name), directives),
     extent,
   ))
 }
@@ -2132,47 +2330,29 @@ fn open_inline_fragment<'g, 'src>(
   node: Node<'g>,
   source: &'src str,
 ) -> Out<OpenSelection<'g, 'src>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut condition_node = None;
-  let mut directives_node = None;
-  let mut selection_set_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::NamedType if condition_node.is_none() => condition_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::SelectionSet if selection_set_node.is_none() => selection_set_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-
-  let type_condition = match condition_node {
-    Some(child) => {
-      let on_token = names.at(0, node, "an `on` keyword")?;
-      let condition_name = extent.keep(inner_name(child, source)?);
-      Some(TypeCondition::new(
-        SimpleSpan::new(
-          usize::from(on_token.text_range().start()),
-          condition_name.span().end(),
-        ),
-        condition_name,
-      ))
-    }
+  // `... (on NamedType)? Directives? SelectionSet` — **the `on` commits its type**, and here it is
+  // not lenient: the spread dispatch opens an inline fragment *because* it read `on`, so no parse
+  // holds this node's type without it, and a type with no `on` in front of it is refused where it
+  // stands.
+  let mut cursor = Cursor::new(node);
+  cursor.token(K::Spread, "the `...` an inline fragment opens with")?;
+  let condition = match cursor.opt_keyword(ContextualKeyword::On) {
+    Some(on) => Some((on, cursor.node(K::NamedType, "the type an `on` names")?)),
     None => None,
   };
-  let directives = extent.keep_opt(optional_directives(directives_node, source)?);
-  let set = selection_set_node.ok_or_else(|| missing(node, "a selection set"))?;
+  let directives_node = cursor.opt_node(K::Directives);
+  let set = cursor.node(K::SelectionSet, "a selection set")?;
+  cursor.end()?;
+
+  let type_condition = cursor.keep_opt(
+    condition
+      .map(|(on, child)| type_condition(Some(on), child, source))
+      .transpose()?,
+  );
+  let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
   Ok(OpenSelection::InlineFragment {
     node,
-    extent,
+    extent: cursor.extent,
     type_condition,
     directives,
     pending: set,
@@ -2180,18 +2360,15 @@ fn open_inline_fragment<'g, 'src>(
 }
 
 /// Build the selection that was waiting on `set`, and answer its own extent.
-///
-/// `open` is left drained: the caller replaces it with the next waiting selection, or drops the
-/// frame that holds it.
 fn close_selection<'src>(
-  open: &mut OpenSelection<'_, 'src>,
+  open: OpenSelection<'_, 'src>,
   set: SelectionSet<&'src str>,
   piece: TextRange,
 ) -> Out<(Selection<&'src str>, TextRange)> {
   Ok(match open {
     OpenSelection::Field {
       node,
-      extent,
+      mut extent,
       alias,
       name,
       arguments,
@@ -2199,14 +2376,14 @@ fn close_selection<'src>(
       ..
     } => {
       extent.cover(piece);
-      let range = extent.range(*node, "a token")?;
+      let range = extent.range(node, "a token")?;
       (
         Selection::Field(Field::new(
           to_span(range),
-          alias.take(),
-          *name,
-          arguments.take(),
-          directives.take(),
+          alias,
+          name,
+          arguments,
+          directives,
           Some(set),
         )),
         range,
@@ -2214,18 +2391,18 @@ fn close_selection<'src>(
     }
     OpenSelection::InlineFragment {
       node,
-      extent,
+      mut extent,
       type_condition,
       directives,
       ..
     } => {
       extent.cover(piece);
-      let range = extent.range(*node, "a token")?;
+      let range = extent.range(node, "a token")?;
       (
         Selection::InlineFragment(InlineFragment::new(
           to_span(range),
-          type_condition.take(),
-          directives.take(),
+          type_condition,
+          directives,
           set,
         )),
         range,
@@ -2238,31 +2415,35 @@ fn close_selection<'src>(
 // type references
 // ---------------------------------------------------------------------------------------------
 
+/// The three type-reference node kinds.
 const TYPE_KINDS: [SyntaxKind; 3] = [K::NamedType, K::ListType, K::NonNullType];
 
-/// The type reference a node's walk collected, refused when there is none.
+/// The two kinds a `NonNullType` wraps: `T!!` has no production, so a `NonNullType` is not one.
+const NULLABLE_KINDS: [SyntaxKind; 2] = [K::NamedType, K::ListType];
+
+/// A `NamedType` node's name and extent: `Name`, nothing else.
 ///
-/// `child` is the slot the caller's own dispatch filled; `node` is only ever the refusal's owner.
-/// It is also the **door** into the type walk: every caller outside this section reaches a type
-/// reference through here.
-fn require_type<'src>(
-  node: Node<'_>,
-  child: Option<Node<'_>>,
-  source: &'src str,
-) -> Out<(Type<Name<&'src str>>, TextRange)> {
-  let child = child.ok_or_else(|| missing(node, "a type reference"))?;
-  ty(child, source)
+/// The AST holds a bare [`Name`] wherever the grammar can hold no `!` and no brackets — an
+/// implemented interface, a union member, a type condition, a root operation type — so those
+/// positions read the name out of the node rather than building a type reference over it.
+fn named_type_name<'src>(node: Node<'_>, source: &'src str) -> Out<(Name<&'src str>, TextRange)> {
+  // `Name`
+  let mut cursor = Cursor::new(node);
+  let name = cursor.name_token(source, "a type name")?;
+  let extent = cursor.finish("a token")?;
+  Ok((name, extent))
 }
 
 /// A `ListType` whose element is being built below, and the `!` that folds into it.
 ///
-/// The single-child half of this file's three worklists. `[[[Int]]]` nests without bound, so the
+/// The single-child half of this file's four worklists. `[[[Int]]]` nests without bound, so the
 /// walk that reads it is a loop over these rather than a native frame per bracket — see the
-/// module header's *No node dispatch below spends a native frame per level*.
+/// module header's *No node dispatch below spends a native frame per level*. A list holds exactly
+/// one element, so its whole sequence is read before the descent and only the folds travel.
 struct TypeFrame<'g> {
-  /// The `ListType` node, whose own tokens are the brackets [`Self::extent`] folds.
+  /// The `ListType` node, whose own tokens are the brackets [`Self::extent`] folded.
   list: Node<'g>,
-  /// The fold over `list`'s tokens and its unread children.
+  /// The fold over `list`'s tokens.
   extent: Extent,
   /// The `NonNullType` that wraps `list`, when the AST list being built is `[T]!`.
   ///
@@ -2278,25 +2459,16 @@ struct Required<'g> {
   extent: Extent,
 }
 
-/// The element type a `ListType` node wraps, with the list node's own extent — brackets included.
-///
-/// Split out because the `!` folds: `[T]!` builds one AST list from **two** tree nodes, and the
-/// span it carries is the outer one's, so the inner node has to answer its element and its extent
-/// without also building a list of its own.
+/// A `ListType`'s sequence, `[ Type ]`, read up to its element: the list's fold and the element's
+/// node.
 fn open_list_element<'g>(node: Node<'g>) -> Out<(Extent, Node<'g>)> {
-  let mut extent = Extent::default();
-  let mut wrapped = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if wrapped.is_none() && TYPE_KINDS.contains(&kind) => wrapped = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let wrapped = wrapped.ok_or_else(|| missing(node, "a type reference"))?;
-  Ok((extent, wrapped))
+  // `[ Type ]`, with the `]` lenient — `unclosed_list` builds the node hole-free without it.
+  let mut cursor = Cursor::new(node);
+  cursor.token(K::LBracket, "the `[` a list type opens with")?;
+  let element = cursor.one_of(&TYPE_KINDS, "a type reference")?;
+  cursor.opt_token(K::RBracket);
+  cursor.end()?;
+  Ok((cursor.extent, element))
 }
 
 /// Open list types from `node` down to the first type reference that needs no frame, and answer
@@ -2305,12 +2477,6 @@ fn open_list_element<'g>(node: Node<'g>) -> Out<(Extent, Node<'g>)> {
 /// The `!` folds into the node it wraps, exactly as the syntactic parser folds it: a `NonNullType`
 /// has no AST image of its own, `T!` is a `NamedType` with `required` set, and its span is the
 /// extent that includes the `!`.
-///
-/// Every list on the way is suspended on `frames` with its element already chosen, so a frame is
-/// never on the stack without a live descent below it — which is what lets [`close_type`] take a
-/// finished element rather than an optional one, and what keeps this walk free of a state the type
-/// system cannot rule out. A frame is **pushed** rather than returned, for the reason
-/// [`open_selection_chain`] gives.
 fn open_type_chain<'g, 'src>(
   frames: &mut Vec<TypeFrame<'g>>,
   node: Node<'g>,
@@ -2320,56 +2486,49 @@ fn open_type_chain<'g, 'src>(
   loop {
     match node.kind() {
       K::NamedType => {
-        let (name, extent) = inner_name(node, source)?;
+        let (name, extent) = named_type_name(node, source)?;
         return Ok((
           Type::Name(NamedType::new(to_span(extent), name, false)),
           extent,
         ));
       }
       K::ListType => {
-        let (extent, wrapped) = open_list_element(node)?;
+        let (extent, element) = open_list_element(node)?;
         frames.push(TypeFrame {
           list: node,
           extent,
           required: None,
         });
-        node = wrapped;
+        node = element;
       }
-      // `T!` and `[T]!`, where the `!` is a token of this node and the span it produces is this
-      // node's.
       K::NonNullType => {
-        let mut extent = Extent::default();
-        let mut wrapped = None;
-        for element in node.children() {
-          match element {
-            NodeOrToken::Token(token) => extent.token(token),
-            NodeOrToken::Node(child) => match child.kind() {
-              kind if wrapped.is_none() && TYPE_KINDS.contains(&kind) => wrapped = Some(child),
-              _ => extent.unread(child),
-            },
-          }
-        }
-        let inner = wrapped.ok_or_else(|| missing(node, "a wrapped type"))?;
+        // `(NamedType | ListType) !` — the `!` is a token of this node, and the span it produces
+        // is this node's.
+        let mut cursor = Cursor::new(node);
+        let inner = cursor.one_of(&NULLABLE_KINDS, "a wrapped type")?;
+        cursor.token(K::Bang, "the `!` a non-null type ends with")?;
+        cursor.end()?;
         match inner.kind() {
           K::NamedType => {
-            let name = extent.keep(inner_name(inner, source)?);
-            let extent = extent.range(node, "a token")?;
+            let name = cursor.keep(named_type_name(inner, source)?);
+            let extent = cursor.range("a token")?;
             return Ok((
               Type::Name(NamedType::new(to_span(extent), name, true)),
               extent,
             ));
           }
-          K::ListType => {
-            let (inner_extent, wrapped) = open_list_element(inner)?;
+          _ => {
+            let (inner_extent, element) = open_list_element(inner)?;
             frames.push(TypeFrame {
               list: inner,
               extent: inner_extent,
-              required: Some(Required { node, extent }),
+              required: Some(Required {
+                node,
+                extent: cursor.extent,
+              }),
             });
-            node = wrapped;
+            node = element;
           }
-          // `T!!` has no production, so a nested `NonNullType` is not a shape the AST can hold.
-          found => return Err(unexpected(node, found, inner.text_range())),
         }
       }
       found => return Err(unexpected(node, found, node.text_range())),
@@ -2424,147 +2583,121 @@ fn ty<'src>(node: Node<'_>, source: &'src str) -> Out<(Type<Name<&'src str>>, Te
 // directives and arguments
 // ---------------------------------------------------------------------------------------------
 
-/// The `Directives` node exists only where at least one directive was written, and the AST
-/// records an absent run as `None` — so the two agree without a zero-width placeholder.
-///
-/// `run` is the slot the caller's own dispatch filled, which is why this takes an `Option` rather
-/// than looking the child up again.
+/// A directive run, `Directive+` — **row one** of the container table: undelimited and at least
+/// one, so a present node with no [`Directive`](SyntaxKind::Directive) child stands for no value
+/// the parser produces and is refused as [`MissingChild`](ProjectErrorKind::MissingChild). The
+/// walk this replaces answered `Some(Directives { directives: [] })` for a run holding a stray `@`
+/// and no directive — al8n/smear#218's worse form of finding 1. Only an *absent* run is `None`.
 fn optional_directives<'src>(
   run: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Option<(Directives<&'src str>, TextRange)>> {
-  let Some(run) = run else { return Ok(None) };
-  let mut extent = Extent::default();
-  let mut directives = Vec::new();
-  for element in run.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Directive => directives.push(extent.keep(directive(child, source)?)),
-        _ => return Err(unexpected_node(run, child)),
-      },
-    }
+) -> Out<Optional<Directives<&'src str>>> {
+  let Some(run) = run else {
+    return Ok((None, None));
+  };
+  // `Directive+`
+  let mut cursor = Cursor::new(run);
+  let listed = cursor.many1(&[K::Directive], None, "a directive")?;
+  cursor.end()?;
+  let mut directives = Vec::with_capacity(listed.len());
+  for child in listed {
+    directives.push(cursor.keep(directive(child, source)?));
   }
-  let extent = extent.range(run, "a token")?;
-  Ok(Some((Directives::new(to_span(extent), directives), extent)))
+  let extent = cursor.range("a token")?;
+  Ok((
+    Some(Directives::new(to_span(extent), directives)),
+    Some(extent),
+  ))
 }
 
 fn directive<'src>(node: Node<'_>, source: &'src str) -> Out<(Directive<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut arguments_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Arguments if arguments_node.is_none() => arguments_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = name(source, names.at(0, node, "a directive name")?)?;
-  let arguments = extent.keep_opt(optional_arguments(arguments_node, source)?);
-  let extent = extent.range(node, "a token")?;
+  // `@ Name Arguments?`
+  let mut cursor = Cursor::new(node);
+  cursor.token(K::At, "the `@` a directive opens with")?;
+  let name = cursor.name_token(source, "a directive name")?;
+  let arguments_node = cursor.opt_node(K::Arguments);
+  cursor.end()?;
+  let arguments = cursor.keep_optional(optional_arguments(arguments_node, source)?);
+  let extent = cursor.range("a token")?;
   Ok((Directive::new(to_span(extent), name, arguments), extent))
 }
 
+/// An argument list, `( Argument* )` — **row two** of the container table.
+///
+/// Delimited, so `()` is a real, written-down empty list and gets its node — and the syntactic
+/// parser answers `None` for it while still covering the parentheses. The walk this replaces
+/// answered `Some(Arguments { arguments: [] })`, so `project(&parse, src) != document(src)` over
+/// `query Q { f() }` and `type T @d() { f: Int }`. al8n/smear#217.
 fn optional_arguments<'src>(
   list: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Option<(Arguments<&'src str>, TextRange)>> {
-  let Some(list) = list else { return Ok(None) };
-  let mut extent = Extent::default();
-  let mut arguments = Vec::new();
-  for element in list.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Argument => arguments.push(extent.keep(argument(child, source)?)),
-        _ => return Err(unexpected_node(list, child)),
-      },
-    }
+) -> Out<Optional<Arguments<&'src str>>> {
+  let Some(list) = list else {
+    return Ok((None, None));
+  };
+  // `( Argument* )`, with the `)` **lenient** — see the module header's missing-token table.
+  let mut cursor = Cursor::new(list);
+  cursor.token(K::LParen, "the `(` an argument list opens with")?;
+  let listed = cursor.many(&[K::Argument]);
+  cursor.opt_token(K::RParen);
+  cursor.end()?;
+  let mut arguments = Vec::with_capacity(listed.len());
+  for child in listed {
+    arguments.push(cursor.keep(argument(child, source)?));
   }
-  let extent = extent.range(list, "a token")?;
-  Ok(Some((Arguments::new(to_span(extent), arguments), extent)))
+  let extent = cursor.range("a token")?;
+  Ok((
+    (!arguments.is_empty()).then(|| Arguments::new(to_span(extent), arguments)),
+    Some(extent),
+  ))
 }
 
 fn argument<'src>(node: Node<'_>, source: &'src str) -> Out<(Argument<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut value_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = name(source, names.at(0, node, "an argument name")?)?;
-  let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(value(value_node, source)?);
-  let extent = extent.range(node, "a token")?;
+  // `Name : Value`
+  let mut cursor = Cursor::new(node);
+  let name = cursor.name_token(source, "an argument name")?;
+  cursor.token(K::Colon, "the `:` before an argument's value")?;
+  let value_node = cursor.one_of(&VALUE_KINDS, "a value")?;
+  cursor.end()?;
+  let value = cursor.keep(value(value_node, source)?);
+  let extent = cursor.range("a token")?;
   Ok((Argument::new(to_span(extent), name, value), extent))
 }
 
 fn optional_const_directives<'src>(
   run: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Option<(ConstDirectives<&'src str>, TextRange)>> {
-  let Some(run) = run else { return Ok(None) };
-  let mut extent = Extent::default();
-  let mut directives = Vec::new();
-  for element in run.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Directive => directives.push(extent.keep(const_directive(child, source)?)),
-        _ => return Err(unexpected_node(run, child)),
-      },
-    }
+) -> Out<Optional<ConstDirectives<&'src str>>> {
+  let Some(run) = run else {
+    return Ok((None, None));
+  };
+  // `Directive[Const]+`
+  let mut cursor = Cursor::new(run);
+  let listed = cursor.many1(&[K::Directive], None, "a directive")?;
+  cursor.end()?;
+  let mut directives = Vec::with_capacity(listed.len());
+  for child in listed {
+    directives.push(cursor.keep(const_directive(child, source)?));
   }
-  let extent = extent.range(run, "a token")?;
-  Ok(Some((
-    ConstDirectives::new(to_span(extent), directives),
-    extent,
-  )))
+  let extent = cursor.range("a token")?;
+  Ok((
+    Some(ConstDirectives::new(to_span(extent), directives)),
+    Some(extent),
+  ))
 }
 
 fn const_directive<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(ConstDirective<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut arguments_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Arguments if arguments_node.is_none() => arguments_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = name(source, names.at(0, node, "a directive name")?)?;
-  let arguments = extent.keep_opt(optional_const_arguments(arguments_node, source)?);
-  let extent = extent.range(node, "a token")?;
+  // `@ Name Arguments[Const]?`
+  let mut cursor = Cursor::new(node);
+  cursor.token(K::At, "the `@` a directive opens with")?;
+  let name = cursor.name_token(source, "a directive name")?;
+  let arguments_node = cursor.opt_node(K::Arguments);
+  cursor.end()?;
+  let arguments = cursor.keep_optional(optional_const_arguments(arguments_node, source)?);
+  let extent = cursor.range("a token")?;
   Ok((
     ConstDirective::new(to_span(extent), name, arguments),
     extent,
@@ -2574,51 +2707,39 @@ fn const_directive<'src>(
 fn optional_const_arguments<'src>(
   list: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Option<(ConstArguments<&'src str>, TextRange)>> {
-  let Some(list) = list else { return Ok(None) };
-  let mut extent = Extent::default();
-  let mut arguments = Vec::new();
-  for element in list.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Argument => arguments.push(extent.keep(const_argument(child, source)?)),
-        _ => return Err(unexpected_node(list, child)),
-      },
-    }
+) -> Out<Optional<ConstArguments<&'src str>>> {
+  let Some(list) = list else {
+    return Ok((None, None));
+  };
+  // `( Argument[Const]* )`, the `)` lenient as in the non-const list.
+  let mut cursor = Cursor::new(list);
+  cursor.token(K::LParen, "the `(` an argument list opens with")?;
+  let listed = cursor.many(&[K::Argument]);
+  cursor.opt_token(K::RParen);
+  cursor.end()?;
+  let mut arguments = Vec::with_capacity(listed.len());
+  for child in listed {
+    arguments.push(cursor.keep(const_argument(child, source)?));
   }
-  let extent = extent.range(list, "a token")?;
-  Ok(Some((
-    ConstArguments::new(to_span(extent), arguments),
-    extent,
-  )))
+  let extent = cursor.range("a token")?;
+  Ok((
+    (!arguments.is_empty()).then(|| ConstArguments::new(to_span(extent), arguments)),
+    Some(extent),
+  ))
 }
 
 fn const_argument<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(ConstArgument<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut value_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = name(source, names.at(0, node, "an argument name")?)?;
-  let value_node = value_node.ok_or_else(|| missing(node, "a value"))?;
-  let value = extent.keep(const_value(node, value_node, source)?);
-  let extent = extent.range(node, "a token")?;
+  // `Name : Value[Const]`
+  let mut cursor = Cursor::new(node);
+  let name = cursor.name_token(source, "an argument name")?;
+  cursor.token(K::Colon, "the `:` before an argument's value")?;
+  let value_node = cursor.one_of(&VALUE_KINDS, "a value")?;
+  cursor.end()?;
+  let value = cursor.keep(const_value(node, value_node, source)?);
+  let extent = cursor.range("a token")?;
   Ok((ConstArgument::new(to_span(extent), name, value), extent))
 }
 
@@ -2626,6 +2747,7 @@ fn const_argument<'src>(
 // values
 // ---------------------------------------------------------------------------------------------
 
+/// The nine value node kinds.
 const VALUE_KINDS: [SyntaxKind; 9] = [
   K::Variable,
   K::IntValue,
@@ -2638,71 +2760,93 @@ const VALUE_KINDS: [SyntaxKind; 9] = [
   K::ObjectValue,
 ];
 
-/// A leaf value's extent and the one token it carries, from the node's single walk.
+/// A leaf value node's one token and the node's extent.
 ///
-/// `kinds` is what the leaf's own production committed, so a token of any other kind is not the
-/// literal even when it comes first — which is the distinction between "no literal here" and "the
-/// tree put something else here".
-fn leaf_token<'g>(node: Node<'g>, kinds: &[SyntaxKind]) -> (Extent, Option<Token<'g>>) {
-  let mut extent = Extent::default();
-  let mut literal = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if literal.is_none() && kinds.contains(&token.kind()) {
-          literal = Some(token);
-        }
-      }
-      NodeOrToken::Node(child) => extent.unread(child),
-    }
-  }
-  (extent, literal)
+/// One literal token and nothing else. The walk this replaces read the first token of the leaf's
+/// kind and folded the rest, so `IntValue` over `Int("1")` and `Int("2")` answered `1` with a span
+/// across both.
+fn leaf<'g>(node: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> Out<(Token<'g>, TextRange)> {
+  let mut cursor = Cursor::new(node);
+  let token = cursor.token(kind, wanted)?;
+  let extent = cursor.finish("a token")?;
+  Ok((token, extent))
 }
 
-/// A leaf value's slice, span and extent — every leaf but the string one, which has to cook.
-fn leaf<'src>(
-  node: Node<'_>,
-  source: &'src str,
-  kinds: &[SyntaxKind],
+/// A leaf holding one `Name` read for its **spelling** — `true`, `false`, `null` — and the
+/// spelling's classification through the lexer's own table. The caller refuses what it does not
+/// classify.
+fn spelled_leaf<'g>(
+  node: Node<'g>,
   wanted: &'static str,
-) -> Out<(&'src str, SimpleSpan, TextRange)> {
-  let (extent, token) = leaf_token(node, kinds);
-  let extent = extent.range(node, "a token")?;
-  let token = token.ok_or_else(|| missing(node, wanted))?;
-  Ok((slice(source, token)?, to_span(extent), extent))
+) -> Out<(Option<ContextualKeyword>, Token<'g>, TextRange)> {
+  let mut cursor = Cursor::new(node);
+  let token = cursor.spelling(wanted)?;
+  let extent = cursor.finish("a token")?;
+  Ok((keyword_of(token), token, extent))
 }
 
-/// A string leaf: the [`StringValue`]'s span is its **token's**, not the node's extent, which is
-/// what the syntactic parser produces and therefore what the differential gate compares against.
 fn string_literal<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(StringValue<&'src str>, TextRange)> {
-  let (extent, token) = leaf_token(node, &[K::String, K::BlockString]);
-  let extent = extent.range(node, "a token")?;
-  let token = token.ok_or_else(|| missing(node, "a string literal"))?;
+  // One string token, either spelling. The [`StringValue`]'s span is its **token's**, which is
+  // what the syntactic parser produces.
+  let mut cursor = Cursor::new(node);
+  let token = cursor.token_of(&STRING_KINDS, "a string literal")?;
+  let extent = cursor.finish("a token")?;
   Ok((string_value(token, source)?, extent))
 }
 
-fn boolean_literal<'src>(
+fn boolean_literal<'src>(node: Node<'_>) -> Out<(BooleanValue<&'src str>, TextRange)> {
+  // One `Name`, read for its spelling.
+  let (keyword, token, extent) = spelled_leaf(node, "a `true` or `false` keyword")?;
+  let span = to_span(token.text_range());
+  match keyword {
+    Some(ContextualKeyword::True) => Ok((BooleanValue::new(span, true), extent)),
+    Some(ContextualKeyword::False) => Ok((BooleanValue::new(span, false), extent)),
+    _ => Err(malformed(token)),
+  }
+}
+
+/// An `EnumValue` node's name — in a value position and in an enum value definition alike — and the
+/// one rule both positions share: it is not `true`, `false` or `null`.
+///
+/// Derived from the syntactic parser rather than remembered: the enum production refuses the three
+/// spellings, and the value dispatch reads them as a boolean and a null before an enum is ever
+/// tried. The lossless enum value definition reports the violation and still builds the node, so
+/// the shape alone cannot tell a legal declaring name from an illegal one.
+fn enum_value_name<'src>(node: Node<'_>, source: &'src str) -> Out<(Name<&'src str>, TextRange)> {
+  // `Name`, not `true`, `false` or `null`.
+  let mut cursor = Cursor::new(node);
+  let name = cursor.name_except(
+    source,
+    &[
+      ContextualKeyword::True,
+      ContextualKeyword::False,
+      ContextualKeyword::Null,
+    ],
+    "an enum value may not be `true`, `false` or `null`",
+    "an enum value",
+  )?;
+  let extent = cursor.finish("a token")?;
+  Ok((name, extent))
+}
+
+fn variable_value<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(BooleanValue<&'src str>, TextRange)> {
-  let (slice, span, extent) = leaf(node, source, &[K::Name], "a `true` or `false` keyword")?;
-  match slice {
-    "true" => Ok((BooleanValue::new(span, true), extent)),
-    "false" => Ok((BooleanValue::new(span, false), extent)),
-    _ => Err(ProjectError::new(
-      ProjectErrorKind::MalformedToken { kind: K::Name },
-      to_range(node.text_range()),
-    )),
-  }
+) -> Out<(VariableValue<&'src str>, TextRange)> {
+  // `$ Name`
+  let mut cursor = Cursor::new(node);
+  cursor.token(K::Dollar, "the `$` a variable opens with")?;
+  let name = cursor.name_token(source, "a variable name")?;
+  let extent = cursor.finish("a token")?;
+  Ok((VariableValue::new(to_span(extent), name), extent))
 }
 
 /// The two value grammars this dialect projects, over one walk.
 ///
-/// `value` and `const_value` were each other with `Const` spelled in: nine arms, seven of them
+/// `value` and `const_value` are each other with `Const` spelled in: nine arms, seven of them
 /// character-for-character identical, differing in the constructors they name and in one refusal.
 /// Duplicating a `match` is cheap; **duplicating a worklist is not** — the arms are the easy half
 /// and the frame discipline is the half a second copy gets subtly wrong — so the machine below is
@@ -2833,9 +2977,6 @@ impl<'src> ValueGrammar<'src> for Constant {
 }
 
 /// An `ObjectField` whose name and own tokens are folded and whose value is being built below.
-///
-/// Everything a field needs but its value is bounded work, so it is all done where the field is
-/// read.
 #[derive(Clone, Copy)]
 struct OpenField<'g, 'src> {
   /// The `ObjectField` node — the owner of the field's span, and the parent a refusal inside its
@@ -2850,16 +2991,12 @@ struct OpenField<'g, 'src> {
 
 /// A container value suspended while the value below it is built.
 ///
-/// `{a: {a: … }}` nests without bound at the lexer's own ceiling, so the walk that reads it is a
-/// loop over these rather than a native frame per level — see the module header's *No node
-/// dispatch below spends a native frame per level*.
+/// `{a: {a: … }}` and `[[…]]` nest without bound at the lexer's own ceiling, so the walk that
+/// reads them is a loop over these rather than a native frame per level.
 struct ValueFrame<'g, 'src, G: ValueGrammar<'src>> {
-  /// The `ListValue` or `ObjectValue` node.
-  node: Node<'g>,
-  /// The fold over the container's own tokens and the children already finished.
-  extent: Extent,
-  /// The children not yet read.
-  children: Children<'g>,
+  /// The container's cursor: its node, the fold over its own tokens and the members already
+  /// finished, and the members not yet read.
+  cursor: Cursor<'g>,
   /// What has been folded so far, and which container this is.
   built: Built<'g, 'src, G>,
 }
@@ -2875,80 +3012,46 @@ enum Built<'g, 'src, G: ValueGrammar<'src>> {
   },
 }
 
-/// What a [`ValueFrame`] did when the value below it finished.
-enum ResumedValue<'g, T> {
-  /// The next value that has to be built, and the node whose dispatch reaches it.
+/// What a [`ValueFrame`] did with the value the level below finished.
+///
+/// A frame that descends again is pushed back onto the worklist by the resume itself, so this
+/// answer carries only the two nodes.
+enum ResumedValue<'g, 'src, G: ValueGrammar<'src>> {
+  /// The node whose dispatch reaches the next value, and that value's node; the frame is back on
+  /// the worklist.
   Descend(Node<'g>, Node<'g>),
   /// This frame is finished, and what it finished to.
-  Done(T, TextRange),
+  Done(G::Value, TextRange),
 }
 
-/// The next element of a list value, with the tokens passed on the way folded in.
+/// The next field of an object value.
 ///
-/// No kind test: a `ListValue`'s node children are its elements whatever they are, and a kind the
-/// value grammar has no arm for is refused where it is entered rather than where it is read.
-fn next_element<'g>(children: &mut Children<'g>, extent: &mut Extent) -> Option<Node<'g>> {
-  for element in children.by_ref() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => return Some(child),
-    }
-  }
-  None
-}
-
-/// The next field of an object value, with the tokens passed on the way folded in.
-///
-/// `None` means the object is complete.
-///
-/// **It does not ask whether the field's value is a container**, and the first draft of it did:
-/// deciding that meant entering the value, and entering an object value is what calls this — so
-/// the peek was one native frame per level of nesting, which is the whole defect back again on
-/// the other side of the worklist. A field whose value is a leaf costs nothing extra for being
-/// opened here: [`open_value_chain`] finishes a leaf without pushing a frame, and the field's own
-/// slot is on the frame this returns to, which already exists.
+/// **It does not ask whether the field's value is a container**, and it must not: deciding that
+/// means entering the value, and entering an object value is what calls this — so the peek would be
+/// one native frame per level of nesting, which is the whole defect back again on the other side of
+/// the worklist.
 fn next_field<'g, 'src>(
-  object: Node<'g>,
-  children: &mut Children<'g>,
-  extent: &mut Extent,
+  cursor: &mut Cursor<'g>,
   source: &'src str,
 ) -> Out<Option<OpenField<'g, 'src>>> {
-  for element in children.by_ref() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::ObjectField => return open_object_field(child, source).map(Some),
-        _ => return Err(unexpected_node(object, child)),
-      },
-    }
+  match cursor.opt_node(K::ObjectField) {
+    Some(child) => open_object_field(child, source).map(Some),
+    None => Ok(None),
   }
-  Ok(None)
 }
 
 /// An `ObjectField` read as far as its value.
 fn open_object_field<'g, 'src>(node: Node<'g>, source: &'src str) -> Out<OpenField<'g, 'src>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut value_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let name = name(source, names.at(0, node, "a field name")?)?;
-  let pending = value_node.ok_or_else(|| missing(node, "a value"))?;
+  // `Name : Value` — the value is the last constituent, so everything else is read before the
+  // descent and only the fold travels.
+  let mut cursor = Cursor::new(node);
+  let name = cursor.name_token(source, "a field name")?;
+  cursor.token(K::Colon, "the `:` before a field's value")?;
+  let pending = cursor.one_of(&VALUE_KINDS, "a value")?;
+  cursor.end()?;
   Ok(OpenField {
     node,
-    extent,
+    extent: cursor.extent,
     name,
     pending,
   })
@@ -2975,14 +3078,10 @@ fn close_field<'src, G: ValueGrammar<'src>>(
 /// one.
 ///
 /// Every container on the way is suspended on `frames` with the child it must build first already
-/// chosen, so a frame is never on the stack without a live descent below it — which is what lets
-/// [`ValueFrame::resume`] take a finished value rather than an optional one, and what keeps this
-/// walk free of a state the type system cannot rule out. A frame is **pushed** rather than
-/// returned, for the reason [`open_selection_chain`] gives.
+/// chosen, so a frame is never on the stack without a live descent below it.
 ///
 /// `parent` is the node whose dispatch reached `node`. A green tree carries no parent pointer, and
-/// this is where the one a refusal names comes from — see
-/// [`Node`](crate::lossless::project::Node).
+/// this is where the one a refusal names comes from.
 fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
   frames: &mut Vec<ValueFrame<'g, 'src, G>>,
   parent: Node<'g>,
@@ -2994,70 +3093,79 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
     match node.kind() {
       K::Variable => return G::variable(parent, node, source),
       K::IntValue => {
-        let (text, span, extent) = leaf(node, source, &[K::Int], "an integer literal")?;
-        return Ok((G::int(span, text), extent));
+        let (token, extent) = leaf(node, K::Int, "an integer literal")?;
+        let text = int_text(source, token)?;
+        return Ok((G::int(to_span(token.text_range()), text), extent));
       }
       K::FloatValue => {
-        let (text, span, extent) = leaf(node, source, &[K::Float], "a float literal")?;
-        return Ok((G::float(span, text), extent));
+        let (token, extent) = leaf(node, K::Float, "a float literal")?;
+        let text = float_text(source, token)?;
+        return Ok((G::float(to_span(token.text_range()), text), extent));
       }
       K::StringValue => {
         let (string, extent) = string_literal(node, source)?;
         return Ok((G::string(string), extent));
       }
       K::BooleanValue => {
-        let (boolean, extent) = boolean_literal(node, source)?;
+        let (boolean, extent) = boolean_literal(node)?;
         return Ok((G::boolean(boolean), extent));
       }
       K::NullValue => {
-        let (text, span, extent) = leaf(node, source, &[K::Name], "a `null` keyword")?;
-        return Ok((G::null(span, text), extent));
+        let (keyword, token, extent) = spelled_leaf(node, "a `null` keyword")?;
+        // The spelling, not just the kind: `NullValue` carries its own text into the AST, so a
+        // node of this kind over any other identifier would project to a `null` the parser has no
+        // way to produce. Its sibling `BooleanValue` has always checked; this one did not.
+        if keyword != Some(ContextualKeyword::Null) {
+          return Err(malformed(token));
+        }
+        return Ok((
+          G::null(to_span(token.text_range()), slice(source, token)?),
+          extent,
+        ));
       }
       K::EnumValue => {
-        let (text, span, extent) = leaf(node, source, &[K::Name], "an enum value")?;
-        return Ok((G::enumeration(span, text), extent));
+        let (name, extent) = enum_value_name(node, source)?;
+        return Ok((G::enumeration(to_span(extent), name.source()), extent));
       }
-      K::ListValue => {
-        let mut extent = Extent::default();
-        let mut children = node.children();
-        match next_element(&mut children, &mut extent) {
-          Some(first) => {
-            frames.push(ValueFrame {
-              node,
-              extent,
-              children,
-              built: Built::List(Vec::new()),
-            });
-            parent = node;
+      K::ListValue | K::ObjectValue => {
+        // `[ Value* ]` and `{ ObjectField* }` — the opener here, each member one descent, and the
+        // closer when the members run out.
+        let mut cursor = Cursor::new(node);
+        let opened = match node.kind() {
+          K::ListValue => {
+            cursor.token(K::LBracket, "the `[` a list opens with")?;
+            cursor
+              .opt_one_of(&VALUE_KINDS)
+              .map(|first| (node, first, Built::List(Vec::new())))
+          }
+          _ => {
+            cursor.token(K::LBrace, "the `{` an object opens with")?;
+            next_field(&mut cursor, source)?.map(|open| {
+              (
+                open.node,
+                open.pending,
+                Built::Object {
+                  fields: Vec::new(),
+                  open,
+                },
+              )
+            })
+          }
+        };
+        match opened {
+          Some((owner, first, built)) => {
+            frames.push(ValueFrame { cursor, built });
+            parent = owner;
             node = first;
           }
           None => {
-            let extent = extent.range(node, "a token")?;
-            return Ok((G::list(to_span(extent), Vec::new()), extent));
-          }
-        }
-      }
-      K::ObjectValue => {
-        let mut extent = Extent::default();
-        let mut children = node.children();
-        match next_field(node, &mut children, &mut extent, source)? {
-          Some(open) => {
-            let (field, first) = (open.node, open.pending);
-            frames.push(ValueFrame {
-              node,
-              extent,
-              children,
-              built: Built::Object {
-                fields: Vec::new(),
-                open,
-              },
-            });
-            parent = field;
-            node = first;
-          }
-          None => {
-            let extent = extent.range(node, "a token")?;
-            return Ok((G::object(to_span(extent), Vec::new()), extent));
+            let range = close_container(&mut cursor)?;
+            let span = to_span(range);
+            let empty = match node.kind() {
+              K::ListValue => G::list(span, Vec::new()),
+              _ => G::object(span, Vec::new()),
+            };
+            return Ok((empty, range));
           }
         }
       }
@@ -3066,60 +3174,69 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
   }
 }
 
-impl<'g, 'src, G: ValueGrammar<'src>> ValueFrame<'g, 'src, G> {
-  /// Fold the value the level below finished into this frame, and read on to its next child that
-  /// needs one.
-  fn resume(
-    &mut self,
-    value: G::Value,
-    piece: TextRange,
-    source: &'src str,
-  ) -> Out<ResumedValue<'g, G::Value>> {
-    let Self {
-      node,
-      extent,
-      children,
-      built,
-    } = self;
-    match built {
-      Built::List(values) => {
-        extent.cover(piece);
-        values.push(value);
-        match next_element(children, extent) {
-          Some(next) => Ok(ResumedValue::Descend(*node, next)),
-          None => {
-            let range = extent.range(*node, "a token")?;
-            Ok(ResumedValue::Done(
-              G::list(to_span(range), core::mem::take(values)),
-              range,
-            ))
-          }
+/// The closer of a container value whose members have run out: `]` for a list, `}` for an object
+/// — **lenient**, because `unclosed_list` and `unclosed_object` build each hole-free without it and
+/// the closer has no AST image — and then nothing left over.
+fn close_container(cursor: &mut Cursor<'_>) -> Out<TextRange> {
+  match cursor.node.kind() {
+    K::ListValue => cursor.opt_token(K::RBracket),
+    _ => cursor.opt_token(K::RBrace),
+  };
+  cursor.finish("a token")
+}
+
+/// Fold the value the level below finished into the frame that was waiting on it, and read on to
+/// the next child that needs one.
+fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
+  frames: &mut Vec<ValueFrame<'g, 'src, G>>,
+  frame: ValueFrame<'g, 'src, G>,
+  value: G::Value,
+  piece: TextRange,
+  source: &'src str,
+) -> Out<ResumedValue<'g, 'src, G>> {
+  let ValueFrame { mut cursor, built } = frame;
+  let node = cursor.node;
+  Ok(match built {
+    Built::List(mut values) => {
+      cursor.extent.cover(piece);
+      values.push(value);
+      match cursor.opt_one_of(&VALUE_KINDS) {
+        Some(next) => {
+          frames.push(ValueFrame {
+            cursor,
+            built: Built::List(values),
+          });
+          ResumedValue::Descend(node, next)
         }
-      }
-      Built::Object { fields, open } => {
-        let (field, range) = close_field::<G>(*open, value, piece)?;
-        extent.cover(range);
-        fields.push(field);
-        match next_field(*node, children, extent, source)? {
-          Some(next) => {
-            let (parent, pending) = (next.node, next.pending);
-            *open = next;
-            Ok(ResumedValue::Descend(parent, pending))
-          }
-          None => {
-            let range = extent.range(*node, "a token")?;
-            Ok(ResumedValue::Done(
-              G::object(to_span(range), core::mem::take(fields)),
-              range,
-            ))
-          }
+        None => {
+          let range = close_container(&mut cursor)?;
+          ResumedValue::Done(G::list(to_span(range), values), range)
         }
       }
     }
-  }
+    Built::Object { mut fields, open } => {
+      let (field, range) = close_field::<G>(open, value, piece)?;
+      cursor.extent.cover(range);
+      fields.push(field);
+      match next_field(&mut cursor, source)? {
+        Some(next) => {
+          let (parent, pending) = (next.node, next.pending);
+          frames.push(ValueFrame {
+            cursor,
+            built: Built::Object { fields, open: next },
+          });
+          ResumedValue::Descend(parent, pending)
+        }
+        None => {
+          let range = close_container(&mut cursor)?;
+          ResumedValue::Done(G::object(to_span(range), fields), range)
+        }
+      }
+    }
+  })
 }
 
-/// A value, with the list and object nesting inside it read on a worklist rather than a stack.
+/// A value, with the nesting inside it read on a worklist rather than a stack.
 fn value_tree<'src, G: ValueGrammar<'src>>(
   parent: Node<'_>,
   node: Node<'_>,
@@ -3128,18 +3245,15 @@ fn value_tree<'src, G: ValueGrammar<'src>>(
   let mut frames: Vec<ValueFrame<'_, 'src, G>> = Vec::new();
   let mut built = open_value_chain::<G>(&mut frames, parent, node, source)?;
   loop {
-    let Some(frame) = frames.last_mut() else {
+    let Some(frame) = frames.pop() else {
       return Ok(built);
     };
     let (value, piece) = built;
-    built = match frame.resume(value, piece, source)? {
+    built = match resume_value::<G>(&mut frames, frame, value, piece, source)? {
       ResumedValue::Descend(parent, node) => {
         open_value_chain::<G>(&mut frames, parent, node, source)?
       }
-      ResumedValue::Done(value, range) => {
-        frames.pop();
-        (value, range)
-      }
+      ResumedValue::Done(value, range) => (value, range),
     };
   }
 }
@@ -3150,12 +3264,8 @@ fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>,
 
 /// A constant value position, where the AST's own type system forbids a variable.
 ///
-/// [`ConstInputValue`] has no `Variable` variant, so the refusal is not a policy this module
-/// invented: there is nothing to construct.
-///
 /// `parent` is the node whose dispatch reached `node`. A green tree carries no parent pointer, and
-/// the caller's own frame is where the one the refusal names comes from — see
-/// [`Node`](crate::lossless::project::Node).
+/// the caller's own frame is where the one the refusal names comes from.
 fn const_value<'src>(
   parent: Node<'_>,
   node: Node<'_>,
@@ -3164,14 +3274,7 @@ fn const_value<'src>(
   value_tree::<Constant>(parent, node, source)
 }
 
-fn variable_value<'src>(
-  node: Node<'_>,
-  source: &'src str,
-) -> Out<(VariableValue<&'src str>, TextRange)> {
-  let (name, extent) = inner_name(node, source)?;
-  Ok((VariableValue::new(to_span(extent), name), extent))
-}
-
+/// `= Value[Const]`, which is const in both positions the grammar puts it in.
 fn optional_default_value<'src>(
   default: Option<Node<'_>>,
   source: &'src str,
@@ -3179,21 +3282,13 @@ fn optional_default_value<'src>(
   let Some(default) = default else {
     return Ok(None);
   };
-  let mut extent = Extent::default();
-  let mut value_node = None;
-  for element in default.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        kind if value_node.is_none() && VALUE_KINDS.contains(&kind) => value_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let value_node = value_node.ok_or_else(|| missing(default, "a value"))?;
-  let value = extent.keep(const_value(default, value_node, source)?);
-  // The span covers the `=` and the value, which is the node's own token extent.
-  let extent = extent.range(default, "a token")?;
+  // `= Value[Const]` — the span covers the `=` and the value, which is the node's own extent.
+  let mut cursor = Cursor::new(default);
+  cursor.token(K::Equal, "the `=` a default opens with")?;
+  let value_node = cursor.one_of(&VALUE_KINDS, "a value")?;
+  cursor.end()?;
+  let value = cursor.keep(const_value(default, value_node, source)?);
+  let extent = cursor.range("a token")?;
   Ok(Some((
     DefaultInputValue::new(to_span(extent), value),
     extent,
@@ -3204,13 +3299,9 @@ fn optional_default_value<'src>(
 // SDL definitions
 // ---------------------------------------------------------------------------------------------
 
-/// The name behind a definition's keyword: `scalar S`, `type T`, `directive @d` all reach it at
-/// index 1 among the node's direct `Name` tokens, the keyword being index 0.
-const KEYWORD_NAMED: usize = 1;
-
-/// An extension's name is its **third** `Name`: `extend`, the shape keyword, then the name.
-const EXTENSION_NAMED: usize = 2;
-
+/// `implements &? NamedType (& NamedType)*` — the AST holds `Name`s, not `NamedType`s: an
+/// implemented interface can carry no `!` and no brackets, so the type-reference level would be a
+/// wrapper over nothing.
 fn optional_implements<'src>(
   clause: Option<Node<'_>>,
   source: &'src str,
@@ -3218,20 +3309,20 @@ fn optional_implements<'src>(
   let Some(clause) = clause else {
     return Ok(None);
   };
-  let mut extent = Extent::default();
-  let mut interfaces = Vec::new();
-  for element in clause.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        // The AST holds `Name`s, not `NamedType`s: an implemented interface can carry no `!`
-        // and no brackets, so the type-reference level would be a wrapper over nothing.
-        K::NamedType => interfaces.push(extent.keep(inner_name(child, source)?)),
-        _ => return Err(unexpected_node(clause, child)),
-      },
-    }
+  // `implements &? NamedType (& NamedType)*`
+  let mut cursor = Cursor::new(clause);
+  cursor.keyword(ContextualKeyword::Implements, "the `implements` keyword")?;
+  let members = cursor.separated_nodes(
+    &[K::NamedType],
+    K::Ampersand,
+    Leading::Allowed,
+    "an interface",
+  )?;
+  let mut interfaces = Vec::with_capacity(members.len());
+  for child in members {
+    interfaces.push(cursor.keep(named_type_name(child, source)?));
   }
-  let extent = extent.range(clause, "a token")?;
+  let extent = cursor.finish("a token")?;
   Ok(Some((
     ImplementInterfaces::new(to_span(extent), interfaces),
     extent,
@@ -3245,18 +3336,16 @@ fn optional_union_members<'src>(
   let Some(clause) = clause else {
     return Ok(None);
   };
-  let mut extent = Extent::default();
-  let mut members = Vec::new();
-  for element in clause.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::NamedType => members.push(extent.keep(inner_name(child, source)?)),
-        _ => return Err(unexpected_node(clause, child)),
-      },
-    }
+  // `= |? NamedType (| NamedType)*`
+  let mut cursor = Cursor::new(clause);
+  cursor.token(K::Equal, "the `=` before a union's members")?;
+  let listed =
+    cursor.separated_nodes(&[K::NamedType], K::Pipe, Leading::Allowed, "a member type")?;
+  let mut members = Vec::with_capacity(listed.len());
+  for child in listed {
+    members.push(cursor.keep(named_type_name(child, source)?));
   }
-  let extent = extent.range(clause, "a token")?;
+  let extent = cursor.finish("a token")?;
   Ok(Some((
     UnionMemberTypes::new(to_span(extent), members),
     extent,
@@ -3270,18 +3359,17 @@ fn optional_fields_definition<'src>(
   let Some(block) = block else {
     return Ok(None);
   };
-  let mut extent = Extent::default();
-  let mut fields = Vec::new();
-  for element in block.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::FieldDefinition => fields.push(extent.keep(field_definition(child, source)?)),
-        _ => return Err(unexpected_node(block, child)),
-      },
-    }
+  // `{ FieldDefinition+ }`, with the `}` lenient.
+  let mut cursor = Cursor::new(block);
+  cursor.token(K::LBrace, "the `{` a fields block opens with")?;
+  let listed = cursor.many1(&[K::FieldDefinition], Some(K::RBrace), "a field definition")?;
+  cursor.opt_token(K::RBrace);
+  cursor.end()?;
+  let mut fields = Vec::with_capacity(listed.len());
+  for child in listed {
+    fields.push(cursor.keep(field_definition(child, source)?));
   }
-  let extent = extent.range(block, "a token")?;
+  let extent = cursor.range("a token")?;
   Ok(Some((
     FieldsDefinition::new(to_span(extent), fields),
     extent,
@@ -3292,43 +3380,28 @@ fn field_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(crate::graphql::ast::FieldDefinition<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut arguments_node = None;
-  let mut type_node = None;
-  let mut directives_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::ArgumentsDefinition if arguments_node.is_none() => arguments_node = Some(child),
-        kind if type_node.is_none() && TYPE_KINDS.contains(&kind) => type_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? Name ArgumentsDefinition? : Type Directives[Const]?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  let name = cursor.name_token(source, "a field name")?;
+  let arguments_node = cursor.opt_node(K::ArgumentsDefinition);
+  cursor.token(K::Colon, "the `:` before a field's type")?;
+  let type_node = cursor.one_of(&TYPE_KINDS, "a type reference")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
 
   // One span for both halves, description included — trunk's rule for this node, see the header.
   // The description is therefore folded straight in rather than kept apart for the hoist.
   let (description, described) = hoisted_description(description_node, source)?;
   if let Some(described) = described {
-    extent.cover(described);
+    cursor.extent.cover(described);
   }
-  let name = name(source, names.at(0, node, "a field name")?)?;
   let arguments_definition =
-    extent.keep_opt(optional_arguments_definition(arguments_node, source)?);
-  let ty = extent.keep(require_type(node, type_node, source)?);
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
+    cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
+  let ty = cursor.keep(ty(type_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
 
-  let extent = extent.range(node, "a token")?;
+  let extent = cursor.range("a token")?;
   let span = to_span(extent);
   Ok((
     Described::new(
@@ -3352,20 +3425,23 @@ fn optional_arguments_definition<'src>(
   let Some(block) = block else {
     return Ok(None);
   };
-  let mut extent = Extent::default();
-  let mut definitions = Vec::new();
-  for element in block.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::InputValueDefinition => {
-          definitions.push(extent.keep(input_value_definition(child, source)?));
-        }
-        _ => return Err(unexpected_node(block, child)),
-      },
-    }
+  // `( InputValueDefinition+ )`
+  let mut cursor = Cursor::new(block);
+  cursor.token(K::LParen, "the `(` an arguments definition opens with")?;
+  let listed = cursor.many1(
+    &[K::InputValueDefinition],
+    Some(K::RParen),
+    "an argument definition",
+  )?;
+  // Lenient: no AST image, and `unclosed_parens` builds the node hole-free without it — see the
+  // module header's missing-token table.
+  cursor.opt_token(K::RParen);
+  cursor.end()?;
+  let mut definitions = Vec::with_capacity(listed.len());
+  for child in listed {
+    definitions.push(cursor.keep(input_value_definition(child, source)?));
   }
-  let extent = extent.range(block, "a token")?;
+  let extent = cursor.range("a token")?;
   Ok(Some((
     ArgumentsDefinition::new(to_span(extent), definitions),
     extent,
@@ -3379,41 +3455,26 @@ fn input_value_definition<'src>(
   crate::graphql::ast::InputValueDefinition<&'src str>,
   TextRange,
 )> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut type_node = None;
-  let mut default_node = None;
-  let mut directives_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        kind if type_node.is_none() && TYPE_KINDS.contains(&kind) => type_node = Some(child),
-        K::DefaultValue if default_node.is_none() => default_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? Name : Type DefaultValue? Directives[Const]?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  let name = cursor.name_token(source, "an input value name")?;
+  cursor.token(K::Colon, "the `:` before an input value's type")?;
+  let type_node = cursor.one_of(&TYPE_KINDS, "a type reference")?;
+  let default_node = cursor.opt_node(K::DefaultValue);
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
 
   // The second of the three node types whose wrapper and inner span agree — see the header.
   let (description, described) = hoisted_description(description_node, source)?;
   if let Some(described) = described {
-    extent.cover(described);
+    cursor.extent.cover(described);
   }
-  let name = name(source, names.at(0, node, "an input value name")?)?;
-  let ty = extent.keep(require_type(node, type_node, source)?);
-  let default_value = extent.keep_opt(optional_default_value(default_node, source)?);
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
+  let ty = cursor.keep(ty(type_node, source)?);
+  let default_value = cursor.keep_opt(optional_default_value(default_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
 
-  let extent = extent.range(node, "a token")?;
+  let extent = cursor.range("a token")?;
   let span = to_span(extent);
   Ok((
     Described::new(
@@ -3432,20 +3493,21 @@ fn optional_input_fields_definition<'src>(
   let Some(block) = block else {
     return Ok(None);
   };
-  let mut extent = Extent::default();
-  let mut definitions = Vec::new();
-  for element in block.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::InputValueDefinition => {
-          definitions.push(extent.keep(input_value_definition(child, source)?));
-        }
-        _ => return Err(unexpected_node(block, child)),
-      },
-    }
+  // `{ InputValueDefinition+ }`, with the `}` lenient.
+  let mut cursor = Cursor::new(block);
+  cursor.token(K::LBrace, "the `{` an input fields block opens with")?;
+  let listed = cursor.many1(
+    &[K::InputValueDefinition],
+    Some(K::RBrace),
+    "an input field definition",
+  )?;
+  cursor.opt_token(K::RBrace);
+  cursor.end()?;
+  let mut definitions = Vec::with_capacity(listed.len());
+  for child in listed {
+    definitions.push(cursor.keep(input_value_definition(child, source)?));
   }
-  let extent = extent.range(block, "a token")?;
+  let extent = cursor.range("a token")?;
   Ok(Some((
     InputFieldsDefinition::new(to_span(extent), definitions),
     extent,
@@ -3459,18 +3521,21 @@ fn optional_enum_values<'src>(
   let Some(block) = block else {
     return Ok(None);
   };
-  let mut extent = Extent::default();
-  let mut values = Vec::new();
-  for element in block.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::EnumValueDefinition => values.push(extent.keep(enum_value_definition(child, source)?)),
-        _ => return Err(unexpected_node(block, child)),
-      },
-    }
+  // `{ EnumValueDefinition+ }`, with the `}` lenient.
+  let mut cursor = Cursor::new(block);
+  cursor.token(K::LBrace, "the `{` an enum values block opens with")?;
+  let listed = cursor.many1(
+    &[K::EnumValueDefinition],
+    Some(K::RBrace),
+    "an enum value definition",
+  )?;
+  cursor.opt_token(K::RBrace);
+  cursor.end()?;
+  let mut values = Vec::with_capacity(listed.len());
+  for child in listed {
+    values.push(cursor.keep(enum_value_definition(child, source)?));
   }
-  let extent = extent.range(block, "a token")?;
+  let extent = cursor.range("a token")?;
   Ok(Some((
     EnumValuesDefinition::new(to_span(extent), values),
     extent,
@@ -3484,34 +3549,23 @@ fn enum_value_definition<'src>(
   crate::graphql::ast::EnumValueDefinition<&'src str>,
   TextRange,
 )> {
-  let mut extent = Extent::default();
-  let mut description_node = None;
-  let mut value_node = None;
-  let mut directives_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::EnumValue if value_node.is_none() => value_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? EnumValue Directives[Const]?` — the declaring name sits inside an `EnumValue`
+  // node, the same kind a value position uses, and carries the same rule.
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  let value_node = cursor.node(K::EnumValue, "an enum value")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
 
   // The third of the three node types whose wrapper and inner span agree — see the header.
   let (description, described) = hoisted_description(description_node, source)?;
   if let Some(described) = described {
-    extent.cover(described);
+    cursor.extent.cover(described);
   }
-  // The value's name lives inside the `EnumValue` node the tree opens for it, but the AST holds
-  // a bare `Name` — the enum-value level has nothing else to carry.
-  let value_node = value_node.ok_or_else(|| missing(node, "an enum value"))?;
-  let value = extent.keep(inner_name(value_node, source)?);
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
+  let value = cursor.keep(enum_value_name(value_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
 
-  let extent = extent.range(node, "a token")?;
+  let extent = cursor.range("a token")?;
   let span = to_span(extent);
   Ok((
     Described::new(
@@ -3527,34 +3581,18 @@ fn scalar_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ScalarTypeDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut directives_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? scalar Name Directives[Const]?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Scalar, "the `scalar` keyword")?;
+  let name = cursor.name_token(source, "a name after the keyword")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let name = name(
-    source,
-    names.at(KEYWORD_NAMED, node, "a name after the keyword")?,
-  )?;
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     ScalarTypeDefinition::new(to_span(inner), name, directives),
@@ -3566,40 +3604,22 @@ fn object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ObjectTypeDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut implements_node = None;
-  let mut directives_node = None;
-  let mut fields_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::ImplementsInterfaces if implements_node.is_none() => implements_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::FieldsDefinition if fields_node.is_none() => fields_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? type Name ImplementsInterfaces? Directives[Const]? FieldsDefinition?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Type, "the `type` keyword")?;
+  let name = cursor.name_token(source, "a name after the keyword")?;
+  let implements_node = cursor.opt_node(K::ImplementsInterfaces);
+  let directives_node = cursor.opt_node(K::Directives);
+  let fields_node = cursor.opt_node(K::FieldsDefinition);
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let name = name(
-    source,
-    names.at(KEYWORD_NAMED, node, "a name after the keyword")?,
-  )?;
-  let implements = extent.keep_opt(optional_implements(implements_node, source)?);
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
-  let fields_definition = extent.keep_opt(optional_fields_definition(fields_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let fields_definition = cursor.keep_opt(optional_fields_definition(fields_node, source)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     ObjectTypeDefinition::new(
@@ -3617,40 +3637,22 @@ fn interface_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, InterfaceTypeDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut implements_node = None;
-  let mut directives_node = None;
-  let mut fields_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::ImplementsInterfaces if implements_node.is_none() => implements_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::FieldsDefinition if fields_node.is_none() => fields_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? interface Name ImplementsInterfaces? Directives[Const]? FieldsDefinition?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Interface, "the `interface` keyword")?;
+  let name = cursor.name_token(source, "a name after the keyword")?;
+  let implements_node = cursor.opt_node(K::ImplementsInterfaces);
+  let directives_node = cursor.opt_node(K::Directives);
+  let fields_node = cursor.opt_node(K::FieldsDefinition);
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let name = name(
-    source,
-    names.at(KEYWORD_NAMED, node, "a name after the keyword")?,
-  )?;
-  let implements = extent.keep_opt(optional_implements(implements_node, source)?);
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
-  let fields_definition = extent.keep_opt(optional_fields_definition(fields_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let fields_definition = cursor.keep_opt(optional_fields_definition(fields_node, source)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     InterfaceTypeDefinition::new(
@@ -3668,37 +3670,20 @@ fn union_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, UnionTypeDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut directives_node = None;
-  let mut members_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::UnionMemberTypes if members_node.is_none() => members_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? union Name Directives[Const]? UnionMemberTypes?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Union, "the `union` keyword")?;
+  let name = cursor.name_token(source, "a name after the keyword")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  let members_node = cursor.opt_node(K::UnionMemberTypes);
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let name = name(
-    source,
-    names.at(KEYWORD_NAMED, node, "a name after the keyword")?,
-  )?;
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
-  let members = extent.keep_opt(optional_union_members(members_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let members = cursor.keep_opt(optional_union_members(members_node, source)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     UnionTypeDefinition::new(to_span(inner), name, directives, members),
@@ -3710,37 +3695,20 @@ fn enum_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, EnumTypeDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut directives_node = None;
-  let mut values_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::EnumValuesDefinition if values_node.is_none() => values_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? enum Name Directives[Const]? EnumValuesDefinition?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Enum, "the `enum` keyword")?;
+  let name = cursor.name_token(source, "a name after the keyword")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  let values_node = cursor.opt_node(K::EnumValuesDefinition);
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let name = name(
-    source,
-    names.at(KEYWORD_NAMED, node, "a name after the keyword")?,
-  )?;
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
-  let values = extent.keep_opt(optional_enum_values(values_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     EnumTypeDefinition::new(to_span(inner), name, directives, values),
@@ -3752,37 +3720,20 @@ fn input_object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, InputObjectTypeDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut directives_node = None;
-  let mut fields_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::InputFieldsDefinition if fields_node.is_none() => fields_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? input Name Directives[Const]? InputFieldsDefinition?`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Input, "the `input` keyword")?;
+  let name = cursor.name_token(source, "a name after the keyword")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  let fields_node = cursor.opt_node(K::InputFieldsDefinition);
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let name = name(
-    source,
-    names.at(KEYWORD_NAMED, node, "a name after the keyword")?,
-  )?;
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
-  let fields = extent.keep_opt(optional_input_fields_definition(fields_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let fields = cursor.keep_opt(optional_input_fields_definition(fields_node, source)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     InputObjectTypeDefinition::new(to_span(inner), name, directives, fields),
@@ -3794,44 +3745,30 @@ fn directive_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, crate::graphql::ast::DirectiveDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
-  let mut description_node = None;
-  let mut arguments_node = None;
-  let mut locations_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::ArgumentsDefinition if arguments_node.is_none() => arguments_node = Some(child),
-        K::DirectiveLocations if locations_node.is_none() => locations_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? directive @ Name ArgumentsDefinition? repeatable? on DirectiveLocations` — three
+  // keyword positions, each read by its spelling in its own place. The walk this replaces took
+  // "the `Name` at index 2 is `repeatable` or `on`" and never read the `on`, so
+  // `directive @d foo FIELD` answered what `directive @d on FIELD` answers.
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Directive, "the `directive` keyword")?;
+  cursor.token(K::At, "the `@` before a directive's name")?;
+  let name = cursor.name_token(source, "a name after the keyword")?;
+  let arguments_node = cursor.opt_node(K::ArgumentsDefinition);
+  let repeatable = cursor.opt_keyword(ContextualKeyword::Repeatable).is_some();
+  // Lenient, as a fragment definition's `on` is: no AST image, and the production reports a
+  // missing one and still builds the definition, hole-free, around the locations. The locations
+  // stay required.
+  cursor.opt_keyword(ContextualKeyword::On);
+  let locations_node = cursor.node(K::DirectiveLocations, "a location list")?;
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let name = name(
-    source,
-    names.at(KEYWORD_NAMED, node, "a name after the keyword")?,
-  )?;
   let arguments_definition =
-    extent.keep_opt(optional_arguments_definition(arguments_node, source)?);
-  // `repeatable` is optional and `on` is not, so the token at index 2 is one or the other. The
-  // spelling is read rather than the count: an index that only counted would answer `on`.
-  let repeatable = names
-    .get(2)
-    .is_some_and(|token| keyword_of(token) == Some(ContextualKeyword::Repeatable));
-  let locations_node = locations_node.ok_or_else(|| missing(node, "a location list"))?;
-  let locations = extent.keep(directive_locations(locations_node)?);
+    cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
+  let locations = cursor.keep(directive_locations(locations_node)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     DirectiveDefinition::new(
@@ -3845,33 +3782,28 @@ fn directive_definition<'src>(
   ))
 }
 
+/// A directive definition's `FIELD | QUERY` location list.
+///
+/// The locations are bare `Name` tokens inside one node, and the `on` before them is a token of the
+/// **definition** rather than of this node — so the extent opens on the optional leading `|` or on
+/// the first location, which is what the syntactic parser builds.
 fn directive_locations(node: Node<'_>) -> Out<(DirectiveLocations<Location>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut locations = Vec::new();
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() != K::Name {
-          continue;
-        }
-        let location = keyword_of(token)
-          .and_then(|keyword| classify_location(keyword, to_span(token.text_range())))
-          .ok_or_else(|| {
-            ProjectError::new(
-              ProjectErrorKind::MalformedToken { kind: token.kind() },
-              to_range(token.text_range()),
-            )
-          })?;
-        locations.push(location);
-      }
-      NodeOrToken::Node(child) => extent.unread(child),
-    }
+  // `|? Name (| Name)*` — each location a `Name` read for its spelling.
+  let mut cursor = Cursor::new(node);
+  let (tokens, _) = cursor.separated(
+    |cursor| Ok(cursor.opt_spelling()),
+    K::Pipe,
+    Leading::Allowed,
+    "a directive location",
+  )?;
+  let mut locations = Vec::with_capacity(tokens.len());
+  for token in tokens {
+    let location = keyword_of(token)
+      .and_then(|keyword| classify_location(keyword, to_span(token.text_range())))
+      .ok_or_else(|| malformed(token))?;
+    locations.push(location);
   }
-  if locations.is_empty() {
-    return Err(missing(node, "a directive location"));
-  }
-  let extent = extent.range(node, "a token")?;
+  let extent = cursor.finish("a token")?;
   Ok((DirectiveLocations::new(to_span(extent), locations), extent))
 }
 
@@ -3879,28 +3811,22 @@ fn schema_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, SchemaDefinition<&'src str>>> {
-  let mut extent = Extent::default();
-  let mut description_node = None;
-  let mut directives_node = None;
-  let mut roots_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Description if description_node.is_none() => description_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::RootOperationTypeDefinitions if roots_node.is_none() => roots_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
+  // `Description? schema Directives[Const]? RootOperationTypeDefinitions`
+  let mut cursor = Cursor::new(node);
+  let description_node = cursor.opt_node(K::Description);
+  cursor.keyword(ContextualKeyword::Schema, "the `schema` keyword")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  let roots_node = cursor.node(
+    K::RootOperationTypeDefinitions,
+    "a root operation types block",
+  )?;
+  cursor.end()?;
 
   let (description, described) = hoisted_description(description_node, source)?;
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
-  let roots_node = roots_node.ok_or_else(|| missing(node, "a root operation types block"))?;
-  let roots = extent.keep(root_operation_types(roots_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let roots = cursor.keep(root_operation_types(roots_node, source)?);
 
-  let (outer, inner) = described_extents(node, extent, described)?;
+  let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
     SchemaDefinition::new(to_span(inner), directives, roots),
@@ -3912,20 +3838,21 @@ fn root_operation_types<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(RootOperationTypesDefinition<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut roots = Vec::new();
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::RootOperationTypeDefinition => {
-          roots.push(extent.keep(root_operation_type(child, source)?));
-        }
-        _ => return Err(unexpected_node(node, child)),
-      },
-    }
+  // `{ RootOperationTypeDefinition+ }`, with the `}` lenient.
+  let mut cursor = Cursor::new(node);
+  cursor.token(K::LBrace, "the `{` a root operation types block opens with")?;
+  let listed = cursor.many1(
+    &[K::RootOperationTypeDefinition],
+    Some(K::RBrace),
+    "a root operation type",
+  )?;
+  cursor.opt_token(K::RBrace);
+  cursor.end()?;
+  let mut roots = Vec::with_capacity(listed.len());
+  for child in listed {
+    roots.push(cursor.keep(root_operation_type(child, source)?));
   }
-  let extent = extent.range(node, "a token")?;
+  let extent = cursor.range("a token")?;
   Ok((
     RootOperationTypesDefinition::new(to_span(extent), roots),
     extent,
@@ -3936,24 +3863,15 @@ fn root_operation_type<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(RootOperationTypeDefinition<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut keyword_node = None;
-  let mut named_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::OperationType if keyword_node.is_none() => keyword_node = Some(child),
-        K::NamedType if named_node.is_none() => named_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let keyword_node = keyword_node.ok_or_else(|| missing(node, "an operation keyword"))?;
-  let operation_type = extent.keep(operation_type(keyword_node)?);
-  let named_node = named_node.ok_or_else(|| missing(node, "a root type name"))?;
-  let named = extent.keep(inner_name(named_node, source)?);
-  let extent = extent.range(node, "a token")?;
+  // `OperationType : NamedType`
+  let mut cursor = Cursor::new(node);
+  let keyword_node = cursor.node(K::OperationType, "an operation keyword")?;
+  cursor.token(K::Colon, "the `:` before a root type")?;
+  let named_node = cursor.node(K::NamedType, "a root type name")?;
+  cursor.end()?;
+  let operation_type = cursor.keep(operation_type(keyword_node)?);
+  let named = cursor.keep(named_type_name(named_node, source)?);
+  let extent = cursor.range("a token")?;
   Ok((
     RootOperationTypeDefinition::new(to_span(extent), operation_type, named),
     extent,
@@ -3964,12 +3882,14 @@ fn root_operation_type<'src>(
 // SDL extensions
 // ---------------------------------------------------------------------------------------------
 
-/// The four constituents every extension's tail is assembled from, and its extent.
+/// The constituents an extension's tail is assembled from, and its extent.
 ///
-/// The seven extension productions differ only in which of these the grammar lets them carry and
-/// in how the combination is encoded, so the walk is written once and each of them reads the slots
-/// it has a place for. A slot the production has no place for stays `None` — the walk never fills
-/// one that is not in the tree.
+/// Each extension kind is its own transcription, and what they share is a sequence **prefix**
+/// rather than a slot struct filled from the union of six vocabularies — the union is what let a
+/// caller-built `ScalarTypeExtension` carry a `FieldsDefinition` into a constructor that reads the
+/// directives and answered `Ok` with the block dropped inside its span. al8n/smear#218's round-four
+/// addendum. A slot below that the kind's own sequence has no place for is simply never filled:
+/// the foreign child is not in the sequence, and `end` refuses it.
 struct ExtensionParts<'src> {
   name: Name<&'src str>,
   implements: Option<ImplementInterfaces<Name<&'src str>>>,
@@ -3982,44 +3902,69 @@ struct ExtensionParts<'src> {
 }
 
 fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionParts<'src>> {
-  let mut extent = Extent::default();
-  let mut names = Names::default();
+  // `extend <keyword> Name <this kind's tail>` — the prefix, then one tail per kind. A string a
+  // caller wrote in front of the `extend` is inside this node (see `type_system_extension`) and
+  // the `extend` atom is what refuses it.
+  let mut cursor = Cursor::new(node);
+  cursor.keyword(ContextualKeyword::Extend, "the `extend` keyword")?;
+  let (keyword, spelling) = match node.kind() {
+    K::ScalarTypeExtension => (ContextualKeyword::Scalar, "the `scalar` keyword"),
+    K::ObjectTypeExtension => (ContextualKeyword::Type, "the `type` keyword"),
+    K::InterfaceTypeExtension => (ContextualKeyword::Interface, "the `interface` keyword"),
+    K::UnionTypeExtension => (ContextualKeyword::Union, "the `union` keyword"),
+    K::EnumTypeExtension => (ContextualKeyword::Enum, "the `enum` keyword"),
+    K::InputObjectTypeExtension => (ContextualKeyword::Input, "the `input` keyword"),
+    // Not an extension this walk transcribes — `SchemaExtension` has its own, and anything else
+    // means a caller was wired to the wrong one. A refusal and not a panic: a caller mints trees.
+    _ => {
+      return Err(missing(
+        node,
+        "an extension whose tail this walk transcribes",
+      ));
+    }
+  };
+  cursor.keyword(keyword, spelling)?;
+  let name = cursor.name_token(source, "an extended type's name")?;
+
   let mut implements_node = None;
-  let mut directives_node = None;
   let mut fields_node = None;
   let mut input_fields_node = None;
   let mut members_node = None;
   let mut values_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => {
-        extent.token(token);
-        if token.kind() == K::Name {
-          names.push(token);
-        }
-      }
-      NodeOrToken::Node(child) => match child.kind() {
-        K::ImplementsInterfaces if implements_node.is_none() => implements_node = Some(child),
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::FieldsDefinition if fields_node.is_none() => fields_node = Some(child),
-        K::InputFieldsDefinition if input_fields_node.is_none() => input_fields_node = Some(child),
-        K::UnionMemberTypes if members_node.is_none() => members_node = Some(child),
-        K::EnumValuesDefinition if values_node.is_none() => values_node = Some(child),
-        _ => extent.unread(child),
-      },
+  let directives_node;
+  match node.kind() {
+    // `extend scalar Name Directives[Const]`
+    K::ScalarTypeExtension => directives_node = cursor.opt_node(K::Directives),
+    // `extend (type|interface) Name ImplementsInterfaces? Directives[Const]? FieldsDefinition?`
+    K::ObjectTypeExtension | K::InterfaceTypeExtension => {
+      implements_node = cursor.opt_node(K::ImplementsInterfaces);
+      directives_node = cursor.opt_node(K::Directives);
+      fields_node = cursor.opt_node(K::FieldsDefinition);
+    }
+    // `extend union Name Directives[Const]? UnionMemberTypes?`
+    K::UnionTypeExtension => {
+      directives_node = cursor.opt_node(K::Directives);
+      members_node = cursor.opt_node(K::UnionMemberTypes);
+    }
+    // `extend enum Name Directives[Const]? EnumValuesDefinition?`
+    K::EnumTypeExtension => {
+      directives_node = cursor.opt_node(K::Directives);
+      values_node = cursor.opt_node(K::EnumValuesDefinition);
+    }
+    // `extend input Name Directives[Const]? InputFieldsDefinition?`
+    _ => {
+      directives_node = cursor.opt_node(K::Directives);
+      input_fields_node = cursor.opt_node(K::InputFieldsDefinition);
     }
   }
+  cursor.end()?;
 
-  let name = name(
-    source,
-    names.at(EXTENSION_NAMED, node, "an extended type's name")?,
-  )?;
-  let implements = extent.keep_opt(optional_implements(implements_node, source)?);
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
-  let fields = extent.keep_opt(optional_fields_definition(fields_node, source)?);
-  let input_fields = extent.keep_opt(optional_input_fields_definition(input_fields_node, source)?);
-  let members = extent.keep_opt(optional_union_members(members_node, source)?);
-  let values = extent.keep_opt(optional_enum_values(values_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let fields = cursor.keep_opt(optional_fields_definition(fields_node, source)?);
+  let input_fields = cursor.keep_opt(optional_input_fields_definition(input_fields_node, source)?);
+  let members = cursor.keep_opt(optional_union_members(members_node, source)?);
+  let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
   Ok(ExtensionParts {
     name,
@@ -4029,7 +3974,7 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
     input_fields,
     members,
     values,
-    extent: extent.range(node, "a token")?,
+    extent: cursor.range("a token")?,
   })
 }
 
@@ -4184,22 +4129,17 @@ fn schema_extension<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(SchemaExtension<&'src str>, TextRange)> {
-  let mut extent = Extent::default();
-  let mut directives_node = None;
-  let mut roots_node = None;
-  for element in node.children() {
-    match element {
-      NodeOrToken::Token(token) => extent.token(token),
-      NodeOrToken::Node(child) => match child.kind() {
-        K::Directives if directives_node.is_none() => directives_node = Some(child),
-        K::RootOperationTypeDefinitions if roots_node.is_none() => roots_node = Some(child),
-        _ => extent.unread(child),
-      },
-    }
-  }
-  let directives = extent.keep_opt(optional_const_directives(directives_node, source)?);
+  // `extend schema Directives[Const]? RootOperationTypeDefinitions?`
+  let mut cursor = Cursor::new(node);
+  cursor.keyword(ContextualKeyword::Extend, "the `extend` keyword")?;
+  cursor.keyword(ContextualKeyword::Schema, "the `schema` keyword")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  let roots_node = cursor.opt_node(K::RootOperationTypeDefinitions);
+  cursor.end()?;
+
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let roots = match roots_node {
-    Some(block) => Some(extent.keep(root_operation_types(block, source)?)),
+    Some(block) => Some(cursor.keep(root_operation_types(block, source)?)),
     None => None,
   };
   let data = match (directives, roots) {
@@ -4215,6 +4155,6 @@ fn schema_extension<'src>(
       ));
     }
   };
-  let extent = extent.range(node, "a token")?;
+  let extent = cursor.range("a token")?;
   Ok((SchemaExtension::new(to_span(extent), data), extent))
 }

@@ -31,8 +31,8 @@ use super::Diagnostic;
 
 /// Caller-provided diagnostic storage.
 ///
-/// Returning [`ControlFlow::Break`] stops validation; the entry point then reports that it
-/// stopped early through [`Invalid::stopped`](super::Invalid::stopped). Returning
+/// Returning [`ControlFlow::Break`] stops validation; the entry point then reports that the sink
+/// returned `Break` through [`Invalid::stopped`](super::Invalid::stopped). Returning
 /// [`ControlFlow::Continue`] asks for the rest of the document's diagnostics.
 pub trait Sink<S> {
   /// Accepts one diagnostic, and says whether validation should continue.

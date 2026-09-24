@@ -1800,3 +1800,34 @@ where
     "Should match"
   );
 }
+
+/// The three whole-slice doors are the scanner: a slice passes iff it scans to exactly one token of
+/// the door's kind with the whole slice as its span, and the answer is the slice itself.
+/// al8n/smear#218's leaf-trust addendum; the projection's own cells are in
+/// `smear/tests/lossless_project.rs`.
+#[test]
+fn the_whole_slice_doors_read_one_token_of_their_kind() {
+  use super::{float_literal, identifier, int_literal};
+
+  for text in ["a", "_x1", "query", "on", "true", "null"] {
+    assert_eq!(identifier(text).ok(), Some(text), "{text}");
+  }
+  for text in ["-0", "0", "12", "-34"] {
+    assert_eq!(int_literal(text).ok(), Some(text), "{text}");
+  }
+  for text in ["1.5", "-0.0", "1e3", "2.5E-1"] {
+    assert_eq!(float_literal(text).ok(), Some(text), "{text}");
+  }
+
+  // Refused: another kind, a second token, trivia at either end, nothing at all, and a spelling
+  // the scanner itself rejects.
+  for text in ["1", "a b", " a", "a ", "", "$a", "\"a\""] {
+    assert!(identifier(text).is_err(), "identifier({text:?})");
+  }
+  for text in ["abc", "1.5", "01", "1 2", "", "0x1", " 1"] {
+    assert!(int_literal(text).is_err(), "int_literal({text:?})");
+  }
+  for text in ["1", "abc", "1.", ".5", "1.5 2", ""] {
+    assert!(float_literal(text).is_err(), "float_literal({text:?})");
+  }
+}
