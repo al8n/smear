@@ -71,23 +71,46 @@
 //! accumulator, effectively a chunked `memcmp` over the whole file. Per-token access after it is
 //! plain slicing.
 //!
-//! # No walk here spends a native frame per level, and nothing behind them does either
+//! # What a caller-minted `Parse` is and is not proven to be
 //!
-//! All four of them recursed, and each carried a counter that refused at [`MAX_GREEN_DEPTH`]. A
-//! counter cannot bound a native stack — the frames are the host's and the stack is the caller's —
-//! so a tree the counter would have refused took the process first on any thread too small to hold
-//! the ceiling's worth of frames, and the typed refusal was never reached. `Descent` is what they
-//! run on now: it adopts the tree's own child iterators rather than copying children out, keeps one
-//! entry per branching ancestor, and drops a source the moment its last child is taken. The counter
-//! survives, and its header says what it now answers for.
+//! [`finish_root`](super::runner::finish_root) is public and generic over the language: it
+//! materialises any tokora `Cst` a caller produced, under the caller's own `CstProfile` and the
+//! caller's own `root` argument, into a dialect's `Parse`. So the facts a dialect door establishes
+//! by construction are, for such a `Parse`, claims: that the root is a document root, that every
+//! element's kind is in the space, and the rest of the rows below. This table is the enumeration:
+//! every assumption the projection doors and the compiler's lossless doors make about a `Parse`,
+//! and which of the three things answers for it.
 //!
-//! **What these walks gate no longer recurses either**, which is the sentence that used to be
-//! missing. The dialect projection's node dispatch spent one native frame per grammar-nesting
-//! level, in the four cycles a value, a selection set and a type reference form, and at the top of
-//! the lexer's own ceiling that cost more stack than a document the doors produce could afford:
-//! 254 brackets of object value parsed clean and aborted the process. Those cycles are worklists
-//! now — see the dialect module's own header — so the deepest tree [`MAX_GREEN_DEPTH`] admits is
-//! projected on any stack the walks above run on. al8n/smear#201.
+//! | assumption | `finish_root` | the projection | status |
+//! |---|---|---|---|
+//! | the root is the dialect's document root | **no** — the root kind is the caller's argument, checked only against the caller's profile | [`verify_root_kind`] against `KindSpace::ROOT`, the constant the dialect doors pass as that argument: in every fail-fast door's opening check, `Verified::new`, `verify_parse` and the recovering doors; the typed door's cast compares the wrapper's kind raw | closed — `WrongRoot` |
+//! | every element's kind is in the dialect's space | **no** — the caller's validator admits what it admits | [`reject_foreign_kinds_and_holes`], the scan every fail-fast door, typed `to_ast` and recovering entry runs before its first `kind()`; the recovering root walk compares kinds raw | closed — `InvalidRawKind`, or the entry counted skipped |
+//! | the tree's text is the source | **no** — it slices the `Cst`'s own buffer, not the caller's | [`verify_source`], [`verify_source_at`] and [`verify_source_counted`], byte for byte, at every door | closed — `SourceMismatch` |
+//! | the tree is no deeper than [`MAX_GREEN_DEPTH`] | not relied on | the verifications refuse past [`MAX_GREEN_DEPTH`] before any projection | closed — `TooDeep` |
+//! | the source is UTF-8 and its length addressable | yes — `NonUtf8Source`, `OffsetOverflow` | — | enforced upstream |
+//! | the root holds one document container of the door's kind, plus trivia | **no** | the fail-fast doors assert it (`sole_document`, `UnexpectedChild { Root, .. }`); the recovering doors do not — every root child is an element, stepped through when it is a container of the door's kind and otherwise counted skipped, so a root with two valid containers projects both and is complete. That difference is the contract, not a gap: each container is a legitimate document image and the recovering contract is per entry — see [`Recovery`] | closed, differently per door family |
+//! | the recovery tiles are the dialect's `Error` and `Gap` | **no** — the profile names its own | nothing reads a tile *as* a tile except the hole scan, which refuses the dialect's two; a tile of any other kind is an element like any other and meets the production that holds it | closed by not being assumed |
+//! | the element count a `Verified` pair is priced by | — | counted by [`verify_source_counted`] from the tree itself, never read from the `Parse` | closed by not being assumed |
+//! | `Parse::diagnostics` and `Parse::has_errors` describe the tree | **no** — they are the caller's emitter's | no projection door and no compiler lossless door reads either; they are a consumer's, and a consumer of a minted `Parse` reads what its minter wrote | not relied on |
+//! | a token's text is what its kind spells | **no** | re-cooked, through the lexer's own doors, wherever the text reaches the AST — names, numbers, strings, the spellings a walk classifies. A token whose text reaches **no** AST field — trivia, punctuation, a keyword read by kind — is taken at its label | **out of contract, by decision** — see below |
+//!
+//! **The last row is the one not closed, and deliberately.** It is al8n/smear#58's leaf-table
+//! decision and the same class as the split-token case that header pins: the projection is a
+//! function of the **tree**. A `Space` token over the bytes `garbage` is, to the tree, trivia, and
+//! the walks step over trivia without reading its text.
+//!
+//! The typed layer beyond `cast_node` — a wrapper's own child and token accessors, and tokora's
+//! `cast` helpers they build on — reads kinds through `rowan::Language::kind_from_raw` and is not a
+//! projection door; it is `rowan`'s contract, not this module's.
+//!
+//! # No walk here recurses
+//!
+//! The four walks — the two verifications, `node_extent` and the hole scan — run on `Descent`: it
+//! adopts the tree's own child iterators rather than copying children out, keeps one entry per
+//! branching ancestor, and drops a source the moment its last child is taken. Each refuses at
+//! [`MAX_GREEN_DEPTH`]. The dialect projections those walks gate are worklists too, in the four
+//! cycles a value, a selection set and a type reference form — see each dialect module's own
+//! header. al8n/smear#201.
 
 use core::{fmt, iter::FusedIterator, marker::PhantomData, ops::Range};
 
@@ -98,121 +121,29 @@ use tokora::SimpleSpan;
 
 /// The deepest green tree a projection door will accept.
 ///
-/// # It stopped bounding this module's walks, and that is the whole of this branch
+/// The substrate walks — [`verify_source`], [`verify_source_at`], [`verify_source_counted`],
+/// [`extent_of`] and the hole scan — each count levels down from this number and refuse with
+/// `TooDeep` when it is exhausted. No dialect projection constructs that refusal: every projection
+/// door runs one of those verifications over the tree it is handed before it projects, so the
+/// projection is never handed a tree deeper than this.
 ///
-/// It used to read *the deepest green tree any walk in this module will descend*, and every one of
-/// those walks recursed with this number as its counter. **A counter cannot bound a native stack.**
-/// The frames belong to the host and the stack belongs to whichever thread the caller walks on, so
-/// a tree this constant would have refused at 1024 levels took the process first on any thread too
-/// small to hold 1024 frames — and the typed refusal it was supposed to produce was never reached.
-/// Measured on `aarch64-apple-darwin`, unoptimised, one child process per depth, the tree built on
-/// one thread and the walk run on another of the stated size: `node_extent` aborted at **726**
-/// levels on 512 KiB and `reject_holes` at **927**; `verify_source` and `verify_source_counted`
-/// aborted at **566** and **530** on 256 KiB. All four are below the ceiling. See `Descent`,
-/// which is what they run on now and which reaches the verdict on any stack.
+/// The walks run on `Descent`, which holds one entry per branching ancestor — the first sixteen in
+/// an inline array, the rest in a `Vec` — so this number is also the most entries a walk holds.
+/// These helpers take a `&GreenNodeData` and `rowan`'s builder is public, so the tree can be one
+/// no parser built; this counter is what stops such a tree growing that `Vec`.
 ///
-/// # So what does it bound, and why does it stay
-///
-/// **Three things, none of them a native stack.** It is a policy — the deepest tree a door will
-/// admit — and it is answered in one place so the doors and the helpers cannot disagree about
-/// which trees are projectable.
-///
-/// - *These walks' own storage.* `Descent` holds one entry per branching ancestor and this is what
-///   caps how many there can be, so a caller-supplied tree cannot grow the worklist without bound.
-/// - *What a door hands the dialect behind it.* A fail-fast door opens with [`verify_source`] over
-///   the whole green root and a [`reject_holes`] scan over the same tree, and only then dispatches
-///   on node kinds; the compositional doors open with [`verify_source_at`] over their own subtree.
-///   Every one of those refuses past this number, so the depth the dispatch behind them ever sees
-///   is this one.
-/// - *The dialect projection's own worklists*, by that inheritance and not by a counter of their
-///   own. Their frames follow the tree's grammar nesting, which is at most its green depth, so the
-///   admission ceiling above is already their ceiling — see the paragraph below for what used to be
-///   here instead.
-///
-/// **It used to bound a native recursion, and that is what it could not do.** The dispatch behind
-/// these walks spent one frame per grammar-nesting level in both the value and the selection
-/// cycles, so at the top of the lexer's `HARD_MAX` a document the doors produce clean — 254
-/// brackets of object value, 516 green levels — aborted the process in `project_type_system_document`
-/// on a 2 MiB debug thread, at 4 080 bytes of frame per green level. No value of this constant
-/// closed that: cutting it under `WORST_DOOR_GREEN_TREE` refuses a parse this crate just produced,
-/// and it would take `MAX_DOOR_BRACKETS` below `HARD_MAX`, which the crate root refuses to
-/// compile. What closed it was the dispatch, which is a worklist now: measured on the same host and
-/// the same instrument, every bracket count `HARD_MAX` admits projects on a 256 KiB thread in both
-/// profiles, and the smallest stack the projection itself needs is the same at 255 brackets as at
-/// one. al8n/smear#201.
-///
-/// # The population this is derived over, which is not the one it used to name
-///
-/// This header used to rest on two figures — the deepest green tree in the repository's 472
-/// corpus fixtures is **12** levels, and the deepest document at
-/// the lexer's default `MAX_NESTING_DEPTH` of 24 open brackets materialises
-/// **51** — and conclude that *nothing a parser produces comes near it*. **That conclusion was
-/// false, and the reason is the population.** The lossless doors do not clamp to
-/// `MAX_NESTING_DEPTH`; they clamp to the lexer's `HARD_MAX`, which is 256.
-/// A margin derived at 24 brackets was being stated over 256 of them, and at the top of that
-/// range the tree really did cross the old ceiling: a 254-bracket object-value chain parses
-/// clean and materialises **516** levels, so an ordinary `project` answered
-/// `TooDeep { limit: 512 }` on a document this crate's own parser had just accepted with no
-/// diagnostic at all. The window was per-shape rather than per-bracket-count — it opened at 253
-/// brackets for an object-value chain and at 255 for a selection chain — which is itself the
-/// tell that a single fitted formula was the wrong instrument. al8n/smear#198.
-///
-/// So the figure below is derived over the population that reaches it: `WORST_DOOR_GREEN_TREE` is
-/// what the doors produce, and it is asserted against this constant. There was a second figure
-/// beside it — what the recursion this gate stood in front of could afford — recorded and not
-/// asserted because the comparison was false. Nothing behind this gate recurses now, so that
-/// figure has no subject and one side of the relationship is all there is; see the assertions
-/// below.
-///
-/// # Why any bound is needed here at all
-///
-/// These helpers take a `&GreenNodeData`, and `rowan`'s builder is public, so the tree can come
-/// from anywhere — including `finish_root`, which finishes an event stream this crate did not
-/// emit. A projection over an unproved tree used to be a stack overflow rather than a refusal, and
-/// a crash is worse than every charge defect al8n/smear#198 has found. It is now a worklist over an
-/// unproved tree instead, which is a heap the caller did not ask for rather than a dead process —
-/// a smaller hazard and still one worth refusing. The gate walks are what refuse on the
-/// projection's behalf, which is what "independently bounded" has to mean when the caller supplies
-/// the tree and the walk that would grow is not the one holding the counter.
-///
-/// What this does **not** bound is the tree's *construction* or its *destruction*: `rowan` drops a
-/// green tree recursively, so a tree deep enough to overflow the projection was already deep enough
-/// to overflow its own `Drop`, in the caller's code, before any of these functions saw it. That
-/// route is `rowan`'s and is reachable without this crate; see `crate::lossless::runner::finish_root`.
+/// It bounds what these walks descend, not the tree's construction or destruction; see
+/// `crate::lossless::runner::finish_root`.
 ///
 /// # Why 1024
 ///
-/// The interval it used to be cut from had this constant's own native-stack boundary at the top of
-/// it. There is no such boundary any more, so what is left is the lower bound and the tie-break:
-///
 /// | bound | from | value |
 /// |---|---|---|
-/// | lower: the tree the doors produce | `WORST_DOOR_GREEN_TREE` | **516** |
-/// | upper: none — no walk this gate stands in front of has a boundary any more | — | — |
+/// | lower: the deepest tree the doors were measured to produce | `WORST_DOOR_GREEN_TREE` | **516** |
+/// | upper: none | — | — |
 ///
-/// The upper row was a real number twice and is now genuinely empty, which is a different state
-/// from "not measured". It was these walks' own native boundary until they stopped having one; it
-/// was then the projection's, recorded but never asserted because the comparison it stood for was
-/// false; and the projection has no such boundary either now. So what is left is the lower bound
-/// and the tie-break.
-///
-/// 1024 is the value the old interval `[516, 1505]` was taken at, and it is kept rather than raised
-/// because nothing here wants a wider one: raising it widens only what the projection is handed,
-/// and what the projection now spends on that width is heap rather than stack.
-///
-/// **What it costs a caller is a bounded worklist rather than 750 KiB of stack.** The walks spend no
-/// native frame at all; what they spend instead is one entry per branching ancestor, the first
-/// sixteen in the walk's own frame and the rest on the heap. An entry is **24 bytes** for the two
-/// verifications, 32 for `node_extent` and 40 for `reject_holes` — the tag and the child iterator
-/// differ — so a tree at the full ceiling holds at most 1024 of them, **at most 40 KiB of entries
-/// and up to twice that in vector capacity**, and zero for anything with sixteen or fewer branching
-/// ancestors. The recursion this replaced priced 733 bytes of stack a level and needed 750 KiB.
-///
-/// The first version of this paragraph said the cost "is now nothing" and priced the ceiling at
-/// "a few tens of bytes of heap". Both are the chain reading: a chain of single-child nodes does
-/// hold one entry at any depth, and that is not the shape the ceiling admits the most of. Measured
-/// on an ordinary parse rather than argued: `{ a { a … { b } … } }` at fifteen nested selection
-/// sets — 95 bytes, green tree 35 levels — spills for the first time, in all four walks at once.
+/// The assertion below keeps `WORST_DOOR_GREEN_TREE` under this constant, and `MAX_DOOR_BRACKETS`
+/// carries the crate root's assertion against the lexer's `HARD_MAX`.
 pub const MAX_GREEN_DEPTH: usize = 1024;
 
 /// The deepest green tree either dialect's own lossless doors will produce.
@@ -233,88 +164,45 @@ pub const MAX_GREEN_DEPTH: usize = 1024;
 /// GraphQLx measures identically on every row it shares and is never worse, which is worth
 /// stating because `HARD_MAX`'s own table found GraphQLx the worse of the two by 0.3%.
 ///
-/// **The obvious relationship is wrong, and this is why the number is recorded rather than
-/// computed.** `2 x brackets + 3` is what a selection chain costs and it gives 515; the object
-/// value chain costs 2.020 a bracket and reaches 516, one level *above* it. A formula fitted to
-/// the first shape anyone measures is how this drifts again, so the fitted relationship is not
-/// what the assertions use — `GREEN_LEVELS_PER_BRACKET` is, and it is an integer above every
-/// row of this table.
+/// **The number is recorded rather than computed.** The assertions use `GREEN_LEVELS_PER_BRACKET`,
+/// an integer above every row of this table, rather than a formula fitted to one row.
 const WORST_DOOR_GREEN_TREE: usize = 516;
 
 /// Green levels one open bracket can add to the tree.
 ///
 /// Three, where the worst row of `WORST_DOOR_GREEN_TREE`'s table measures 2.020. It is the
-/// coefficient the scaling assertion below uses, and it is deliberately the next integer above
-/// every measured shape rather than the measured maximum: the table is nine shape-and-dialect
-/// pairs, which is an enumeration and not a proof, so the coefficient carries the margin for the
-/// shape nobody has written yet.
+/// coefficient the crate root's assertion uses through `MAX_DOOR_BRACKETS`.
 const GREEN_LEVELS_PER_BRACKET: usize = 3;
 
 /// The deepest bracket ceiling a lossless door may clamp to and still produce a tree these walks
 /// will descend.
 ///
 /// **The obligation this module owes the other side of a relationship it must not name.**
-/// `MAX_GREEN_DEPTH` and the lexer's `HARD_MAX` live in different crates and had a relationship
-/// nothing enforced, so a margin derived at 24 brackets went on being stated over 256 of them.
-/// What closes that is one comparison — and this module is the dialect-*generic* substrate, which
-/// is parameterised over `L: Lexer` and may not name a concrete lexer crate at all: the rule is
-/// `lossless_isolation::SUBSTRATE_FORBIDDEN`, and `ALLOWED_CRATE_ROOTS` sanctions the lexer
-/// crate's `limits` root for the two dialect trees and deliberately not for this one. That scan
-/// is textual and carries no prose carve-out, which is why this paragraph does not spell the
-/// path either.
+/// `MAX_GREEN_DEPTH` and the lexer's `HARD_MAX` live in different crates, and their relationship is
+/// one comparison — and this module is the dialect-*generic* substrate, which is parameterised over
+/// `L: Lexer` and may not name a concrete lexer crate at all: the rule is
+/// `lossless_isolation::SUBSTRATE_FORBIDDEN`, and `ALLOWED_CRATE_ROOTS` sanctions the lexer crate's
+/// `limits` root for the two dialect trees and deliberately not for this one. That scan is textual
+/// and carries no prose carve-out, which is why this paragraph does not spell the path either.
 ///
-/// So the substrate states what it **affords**, in its own constants, and the crate root — which
-/// assembles the lexer, the substrate and the dialects, and is the one place entitled to see all
-/// three — performs the comparison. `smear_parser`'s own root carries it, unconditionally in every
-/// configuration that compiles this module, so the guarantee is one site and not one per dialect.
-///
-/// `MAX_GREEN_DEPTH / GREEN_LEVELS_PER_BRACKET` is the same predicate the assertion here used to
-/// spell as `HARD_MAX * GREEN_LEVELS_PER_BRACKET <= MAX_GREEN_DEPTH`: over integers the two agree
-/// at every value, so the move is a relocation and not a loosening. The plant that proves it is
-/// still live is a `HARD_MAX` of 342 — that value passes `HARD_MAX`'s OWN 1.9x margin assertion,
-/// so every gate that existed before al8n/smear#198's round admits it, and it is exactly the edit
-/// that reopens the projection window. 342 > 341, so the crate root refuses to compile.
+/// So the substrate states what it **affords**, in its own constants, and the crate root performs
+/// the comparison: `smear_parser`'s root asserts `HARD_MAX <= MAX_DOOR_BRACKETS`. At a `HARD_MAX`
+/// of 342 that assertion fails, since `MAX_DOOR_BRACKETS` is 1024 / 3 = 341.
 pub(crate) const MAX_DOOR_BRACKETS: usize = MAX_GREEN_DEPTH / GREEN_LEVELS_PER_BRACKET;
 
-// -- THE INVARIANT THAT WAS MISSING, AND THE WINDOW IT WOULD HAVE CLOSED ----------------------
+// -- THE INVARIANT ------------------------------------------------------------------------------
 //
-// Two assertions hold it now, and they fail on different edits: the crate root's on a `HARD_MAX`
-// raise — see `MAX_DOOR_BRACKETS` for why it is written there and not here — and the first below
-// on a `MAX_GREEN_DEPTH` cut.
+// Two assertions hold it, and they fail on different edits: the crate root's on a `HARD_MAX` raise
+// — see `MAX_DOOR_BRACKETS` for why it is written there and not here — and the one below on a
+// `MAX_GREEN_DEPTH` cut.
 const _: () = assert!(
   WORST_DOOR_GREEN_TREE <= MAX_GREEN_DEPTH,
   "the deepest tree the lossless doors were measured to produce does not fit under \
    MAX_GREEN_DEPTH, so a projection refuses a parse this crate just produced"
 );
 
-// THE THIRD ASSERTION IS GONE, AND ITS SUBJECT WITH IT — TWICE. It read
-//
-//   MAX_GREEN_DEPTH * 19 <= WORST_GREEN_WALK_BOUNDARY * 10
-//
-// over `WORST_GREEN_WALK_BOUNDARY = 2861`, the depth at which the worst of the four walks here ran
-// out of native stack on a 2 MiB debug thread. Those walks no longer run out of native stack at any
-// depth, so its subject did not exist and a passing assertion over it would have said something
-// true about nothing.
-//
-// `WORST_PROJECTION_GREEN_TREE = 514` took its place: the depth at which the walk BEHIND this gate
-// — the dialect projection's own node dispatch — ran out of native stack on the same thread. It was
-// recorded and deliberately not asserted, because the comparison it stood in for,
-//
-//   WORST_DOOR_GREEN_TREE <= WORST_PROJECTION_GREEN_TREE
-//
-// was false: 516 against 514, which is the window al8n/smear#201 reported. A tripwire assertion
-// beside it held the other direction, so the paragraph describing the window could not outlive it.
-//
-// The projection does not recurse any more, so THAT number has no subject either and both are
-// gone. What the pair was standing in for is a real obligation and it survives in the one
-// assertion above: the doors must not produce a tree the walks behind this gate refuse. Every walk
-// that refuses now does so at `MAX_GREEN_DEPTH` itself, on any stack — which is what makes
-// `WORST_DOOR_GREEN_TREE <= MAX_GREEN_DEPTH` the whole of it rather than half of it.
-//
-// What is NOT closed by this, and is not this module's, is `rowan`'s own recursive `Drop` of a
-// green tree: measured on the same instrument, a `Parse` at 192 brackets moved to a 128 KiB thread
-// aborts in its destructor with no projection called at all. See `crate::lossless::runner`'s
-// `finish_root`, which records construction and destruction separately for that reason.
+// The assertion above compares the deepest tree the doors were measured to produce with the
+// ceiling the walks refuse at.
 
 /// How a depth-bounded green walk stopped: on a divergence, or on the ceiling.
 ///
@@ -353,31 +241,43 @@ impl Depth {
 pub enum ProjectErrorKind<K> {
   /// A constituent the AST shape requires is absent from the tree.
   ///
-  /// The recovered-in-place class: `type T { x: }` keeps its `FieldDefinition` node and hangs
-  /// an `Error` hole where the type should be, so the node exists and its type does not.
+  /// The node is there and a member its production requires is not: a present-but-empty `X+`
+  /// container (`type T { }`, a directive run with no directive), a separator with nothing after
+  /// it, an extension with no tail, or a caller-built node missing a required child. A recovery
+  /// hole standing where the member should be is not this refusal — the hole scan answers
+  /// [`UnexpectedChild`](Self::UnexpectedChild) for it first.
   MissingChild {
     /// The node kind that is missing a constituent.
     parent: K,
     /// What was wanted, in the grammar's vocabulary.
     wanted: &'static str,
   },
-  /// An element the AST shape has no place for.
+  /// An element the AST shape has no place for, named where it stands.
   ///
-  /// Three sources, all real: a recovery hole or gap tile anywhere the projection walks; the
-  /// rubble a failed definition leaves as bare children of the document; and a `Variable` in a
-  /// constant position, which the AST's own type system forbids (`ConstInputValue` has no
-  /// `Variable` variant).
+  /// Every element a production does not spell at its position: a recovery hole or gap tile; the
+  /// rubble a failed definition leaves as bare children of the document; a description a
+  /// production reports and builds around but has no slot for; a second copy of an expected-once
+  /// child, a stray token, a foreign child or a doubled separator in a caller-built tree; a sibling
+  /// of the document container under the root; and a `Variable` in a constant position, which the
+  /// AST's own type system forbids (`ConstInputValue` has no `Variable` variant).
   UnexpectedChild {
     /// The node kind whose children were being read.
     parent: K,
     /// The kind that has no place there.
     found: K,
   },
-  /// A token was present but would not cook.
+  /// A token's text cannot be read in the role its kind and position give it.
   ///
-  /// Today this is reachable only for string literals, which are re-lexed through the same
-  /// `impl TryFrom<&str> for LitStr` door the syntactic lexer's payload comes from. An
-  /// internal-inconsistency class: the lossless lexer already accepted these bytes.
+  /// Two ways, one answer. Every token whose text reaches the AST is re-read through the dialect's
+  /// own lexer door — a name through the identifier door, a number through the integer or float
+  /// door, a string through `LitStr`'s — and when the door will not read the whole slice back as
+  /// the declared kind, the label is the caller's: a parse's tokens come from that lexer, so this
+  /// half is reachable only from a caller-minted tree. And at a position that reads a **spelling**
+  /// — an operation keyword, a directive location, a root operation type, `true`/`false`/`null` — a
+  /// slice that lexes perfectly well as a `Name` can still be none of the spellings the position
+  /// classifies. The lossless productions report that and still build the node (`directive @d on
+  /// FOO`, `schema { foo: Q }`), so this half **is** reachable from a parse. The variant says which
+  /// token and where; it says nothing about who produced the bytes.
   MalformedToken {
     /// The token kind that refused.
     kind: K,
@@ -388,25 +288,54 @@ pub enum ProjectErrorKind<K> {
   /// mismatched pair is refused rather than silently projected into a wrong AST. The span names
   /// the first bytes that diverge.
   SourceMismatch,
-  /// A grammar rule the tree records only as a diagnostic.
+  /// A spelling a grammar rule forbids at a name position.
   ///
-  /// Today exactly one: a fragment may not be named `on`. The lossless productions record that
-  /// as an error diagnostic and still build the node, so the shape alone cannot tell the two
-  /// apart and the projection re-checks it — the second in-crate custodian of the invariant
-  /// `FragmentName::new` is kept crate-private to protect.
+  /// The positions are the ones each dialect's projection header derives from its syntactic
+  /// parser's refusals — a fragment's name and a spread's target that is `on`, an enum value or an
+  /// enum value definition spelled `true`, `false` or `null`. Where the lossless productions record
+  /// the violation only as a diagnostic and still build the node, the shape alone cannot tell the
+  /// two apart and the projection re-checks it; where they never build it, a caller-built tree can,
+  /// and the same check answers.
   SemanticRule {
     /// The rule, named for a human.
     rule: &'static str,
   },
-  /// The tree nests deeper than a projection will descend.
+  /// The supplied tree is deeper than [`MAX_GREEN_DEPTH`].
   ///
-  /// Not reachable from a parsed document — [`MAX_GREEN_DEPTH`] carries the assertion that keeps
-  /// it unreachable, and the window where it briefly was not. It exists because these helpers take
-  /// an arbitrary `GreenNodeData`, so the tree can be one no parser built, and a projection over an
-  /// unproved tree would otherwise grow a worklist with nothing bounding it.
+  /// A refusal of the tree's **shape**; its bytes may agree with the source exactly. Only the
+  /// substrate walks construct it — the byte verifications, [`extent_of`] and the hole scan — and
+  /// no dialect projection does. The crate's own lossless doors produce no tree this deep: the
+  /// assertions beside [`MAX_GREEN_DEPTH`] and at the crate root keep their measured deepest tree
+  /// under it. The tree that reaches it is one a caller built — with `rowan`'s public builder, or
+  /// through `finish_root` — and whose shape its bytes do not determine.
   TooDeep {
     /// The limit that was reached.
     limit: usize,
+  },
+  /// An element carries a raw kind outside the dialect's kind space.
+  ///
+  /// Not reachable from a dialect door's parse: every such door runs the emitted kinds through the
+  /// dialect's validator first. It exists because a caller can mint a green tree with rowan's
+  /// public builder and cast it to a typed wrapper whose *root* kind is legal, or mint a `Parse`
+  /// through the public, generic [`finish_root`](super::runner::finish_root) under a profile of
+  /// its own, and hand either to a projection door — and `rowan::Language::kind_from_raw` has no
+  /// fallible form, so asking such an element its kind would panic.
+  /// [`reject_foreign_kinds_and_holes`] reads the raw value through the dialect's
+  /// [`KindSpace::from_raw`](super::KindSpace::from_raw) before anything else asks, and answers
+  /// this with the element's range. al8n/smear#218.
+  InvalidRawKind {
+    /// The raw value, as the green tree stores it.
+    raw: u16,
+  },
+  /// A parse's root is not the dialect's document root.
+  ///
+  /// [`InvalidRawKind`](Self::InvalidRawKind) is about an *element*; this is about the tree's
+  /// identity, and it answers for an out-of-space root and an in-space wrong one alike, because a
+  /// root that is not [`KindSpace::ROOT`](super::KindSpace::ROOT) is a tree no dialect door
+  /// finished. See [`verify_root_kind`]. al8n/smear#218.
+  WrongRoot {
+    /// The root's raw kind, as the green tree stores it.
+    raw: u16,
   },
 }
 
@@ -454,7 +383,8 @@ impl<K: fmt::Debug> fmt::Display for ProjectError<K> {
       ),
       ProjectErrorKind::MalformedToken { kind } => write!(
         f,
-        "{start}..{end}: the {kind:?} token did not cook, though the lossless lexer accepted it"
+        "{start}..{end}: the {kind:?} token's text cannot be read in the role this position gives \
+         it"
       ),
       ProjectErrorKind::SourceMismatch => write!(
         f,
@@ -464,6 +394,15 @@ impl<K: fmt::Debug> fmt::Display for ProjectError<K> {
       ProjectErrorKind::TooDeep { limit } => write!(
         f,
         "{start}..{end}: the tree nests deeper than the {limit} levels a projection will descend"
+      ),
+      ProjectErrorKind::InvalidRawKind { raw } => write!(
+        f,
+        "{start}..{end}: raw kind {raw} is outside this dialect's syntax-kind space"
+      ),
+      ProjectErrorKind::WrongRoot { raw } => write!(
+        f,
+        "{start}..{end}: the parse's root has raw kind {raw}, which is not this dialect's document \
+         root"
       ),
     }
   }
@@ -478,21 +417,29 @@ impl<K: fmt::Debug> core::error::Error for ProjectError<K> {}
 /// question an editor asks instead — *what does the part that is still well-formed say?* — and
 /// this is the honesty half of that answer.
 ///
-/// # Read it before you read the verdict
+/// # What `skipped` says
 ///
-/// A consumer that skips it is reading a statement about **some** of the document as though it
-/// were a statement about all of it. `skipped() > 0` means at least one top-level element had no
-/// AST image, so:
-///
-/// - an **absence** of findings is weaker than it looks — nothing examined what was skipped; and
-/// - a **presence** of findings may include an artifact of the skip, because a rule that reads
-///   the document as a whole (an undefined fragment spread, an unused fragment) cannot tell a
-///   definition that was never written from one that was dropped.
+/// `skipped() > 0` means at least one top-level element had no AST image, and nothing in the AST
+/// covers it.
 ///
 /// [`is_complete`](Self::is_complete) is the one-call form of that question. It is a statement
 /// about **loss**, not about validity: it is the only state in which the AST covers the whole
-/// document, and a fail-fast projection of the same parse can still refuse it — a document that is
-/// empty, or nothing but trivia, lost nothing and has no definition either.
+/// document, and it does not imply that a fail-fast projection of the same parse succeeds.
+///
+/// # Complete here, refused fail-fast — deliberately
+///
+/// The two door families answer different contracts. A recovering door steps through **every**
+/// document container under the root and answers per entry; a fail-fast door asserts the root holds
+/// **exactly one** container plus trivia, and that the document has a definition. So two shapes are
+/// complete here and refused there:
+///
+/// - a caller-minted root holding two valid containers: every definition of both is projected,
+///   `skipped` is zero, and the fail-fast door answers `UnexpectedChild { parent: Root, .. }` at
+///   the second container. This is kept, not closed: **each container is a legitimate document
+///   image, and the recovering door's contract is per entry** — it reports what had an AST image
+///   and what did not, and every definition of the second container has one; and
+/// - an empty or trivia-only parse: nothing is lost and nothing is projected, and the fail-fast
+///   door refuses a document with no definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Recovery {
   projected: u32,
@@ -515,10 +462,8 @@ impl Recovery {
   /// Returns how many top-level elements had no AST image and were dropped.
   ///
   /// An *element*, not a definition: the count includes a definition the projection refused, a
-  /// recovery hole or gap tile the parser left in the definition's place, and any rubble the
-  /// parser could not attach to a definition at all. One mistyped keyword can therefore leave
-  /// more than one behind, so this is evidence that something was dropped and a bound on how
-  /// much — not a count of the constructs the author meant to write.
+  /// recovery hole or gap tile the parser left in the definition's place, and each non-trivia token
+  /// the parser could not attach to a definition. One mistyped keyword can leave several.
   #[inline]
   pub const fn skipped(&self) -> u32 {
     self.skipped
@@ -526,14 +471,13 @@ impl Recovery {
 
   /// Returns whether every top-level element had an AST image.
   ///
-  /// When it is true, anything read off the result is a statement about the whole document rather
-  /// than about a surviving part of it — which is the question a consumer of a recovering
-  /// projection has to answer before it reads anything else.
+  /// True exactly when [`skipped`](Self::skipped) is zero: every top-level element had an AST
+  /// image.
   ///
-  /// It does not say the fail-fast projection would have succeeded. That door additionally refuses
-  /// a document with no definition in it, and an empty or trivia-only parse loses nothing while
-  /// having nothing: complete, with [`projected`](Self::projected) zero. The two answers coincide
-  /// everywhere else.
+  /// It does not say the fail-fast projection would have succeeded. That door additionally asserts
+  /// the root holds exactly one document container and that the document has a definition, so a
+  /// caller-minted root with two valid containers and an empty or trivia-only parse are both
+  /// complete here and refused there — see the type's documentation for why.
   #[inline]
   pub const fn is_complete(&self) -> bool {
     self.skipped == 0
@@ -551,32 +495,42 @@ impl fmt::Display for Recovery {
 ///
 /// # Why this is a type and not a [`Recovery`] with nothing projected
 ///
-/// It was one, briefly. A mismatched pair projected nothing and reported every top-level element
-/// as skipped, which reads as "the whole document was dropped" and is true — **unless the parse has
-/// no top-level elements to report**. An empty or trivia-only parse handed a different, non-empty
-/// source counted zero skipped, and [`Recovery::is_complete`] answers `true` at zero: an empty AST
-/// marked complete, over source nothing examined.
+/// A mismatched pair projects nothing, and reporting that as a [`Recovery`] would need a `skipped`
+/// count — which reads as "the whole document was dropped" only while the parse has top-level
+/// elements to count. An empty or trivia-only parse handed a different, non-empty source counts
+/// zero skipped, and [`Recovery::is_complete`] answers `true` at zero: an empty AST marked
+/// complete, over source nothing examined.
 ///
 /// A count cannot carry a state. `skipped` answers *how much of this parse had no AST image*, and
 /// "these are not the same document" is not a quantity of anything — at every size, including none.
-/// So the mismatch leaves [`Recovery`] entirely and becomes the error half of a [`Result`], which a
-/// caller cannot read past without deciding what to do about it.
+/// So the mismatch is the error half of a [`Result`] rather than a value of [`Recovery`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Unverified {
   /// The parse and the source do not describe one document.
   ///
-  /// A caller's remedy is to re-parse the source, or to stop holding a stale pair. Nothing about
-  /// the resources it would take is at stake.
+  /// The tree's text and `source` differ, in length or in a byte.
   SourceMismatch,
-  /// The tree nests deeper than a projection will descend.
+  /// The supplied tree is deeper than [`MAX_GREEN_DEPTH`].
   ///
-  /// Nothing about the *bytes* is wrong — they may agree exactly — so reporting this as a mismatch
-  /// tells the caller to fix the one thing that is not the problem. See
-  /// [`MAX_GREEN_DEPTH`].
+  /// A refusal of the tree, not of its bytes, which may agree with the source exactly. A parse of
+  /// the same source through the dialect's own door is never this deep — see
+  /// [`ProjectErrorKind::TooDeep`] — so the tree was built outside that door.
   TooDeep {
     /// The limit that was reached.
     limit: usize,
+  },
+  /// The parse's root is not this dialect's document root.
+  ///
+  /// Nothing a dialect door parses can have one: every door finishes its tree at the dialect's
+  /// [`KindSpace::ROOT`](super::KindSpace::ROOT). It exists because
+  /// [`finish_root`](super::runner::finish_root) is public and generic, takes the root kind as an
+  /// argument, and checks it only against the caller's own profile — so a caller can mint a
+  /// dialect's `Parse` rooted at raw 60000, or at an in-space kind such as `Name`, and either one
+  /// over an empty source verifies byte for byte. One variant for both. al8n/smear#218.
+  WrongRoot {
+    /// The root's raw kind, as the green tree stores it.
+    raw: u16,
   },
 }
 
@@ -588,11 +542,37 @@ impl fmt::Display for Unverified {
         f,
         "the parse nests deeper than the {limit} levels a projection will descend"
       ),
+      Self::WrongRoot { raw } => write!(
+        f,
+        "the parse's root has raw kind {raw}, which is not this dialect's document root, so the \
+         parse was minted outside its door and nothing was projected"
+      ),
     }
   }
 }
 
 impl core::error::Error for Unverified {}
+
+/// Refuse a root that is not `K`'s document root, at the root's range.
+///
+/// The part of a pair's proof the byte comparison cannot give: [`verify_source`] reads green data
+/// only. Compared raw against `K::ROOT`, the constant each dialect's door passes to
+/// [`finish_root`](super::runner::finish_root) as its `root`. Every door that takes a `Parse` runs
+/// it right after the bytes; the typed `to_ast` doors take a wrapper whose cast already compared
+/// its kind.
+///
+/// Membership in the kind space is not enough: `Name` is in the space, and a parse rooted at it is
+/// not a document. al8n/smear#218.
+pub fn verify_root_kind<K: super::KindSpace>(root: &GreenNodeData) -> Result<(), ProjectError<K>> {
+  let raw = root.kind().0;
+  if raw == K::ROOT.raw() {
+    return Ok(());
+  }
+  Err(ProjectError::new(
+    ProjectErrorKind::WrongRoot { raw },
+    0..usize::from(root.text_len()),
+  ))
+}
 
 /// [`TextRange`] as the AST's span type.
 #[inline]
@@ -628,14 +608,30 @@ impl<L> Clone for Node<'_, L> {
 
 impl<L> Copy for Node<'_, L> {}
 
-impl<L: Language> fmt::Debug for Node<'_, L> {
+/// The kind when the language's space names it, the raw value when it does not — never a panic,
+/// so a refusal's `Debug` over a caller-minted tree can always be printed.
+impl<L> fmt::Debug for Node<'_, L>
+where
+  L: Language,
+  L::Kind: super::KindSpace,
+{
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{:?}@{:?}", self.kind(), self.text_range())
+    let raw = self.green.kind().0;
+    match <L::Kind as super::KindSpace>::from_raw(raw) {
+      Some(kind) => write!(f, "{kind:?}@{:?}", self.text_range()),
+      None => write!(f, "raw({raw})@{:?}", self.text_range()),
+    }
   }
 }
 
 impl<'g, L> Node<'g, L> {
   /// Views `green` as a node starting at `start` bytes into the source.
+  ///
+  /// **Nothing is checked**: not that `start` is where `green` sits in any source, and not that
+  /// `green`'s kinds — its own or any descendant's — are in `L`'s kind space. `green` can come
+  /// from rowan's public builder. Every public walk in this module that reads a kind checks it
+  /// raw first and answers [`ProjectErrorKind::InvalidRawKind`]; [`kind`](Self::kind) itself does
+  /// not, and panics — see its own section.
   #[inline]
   pub const fn new(green: &'g GreenNodeData, start: TextSize) -> Self {
     Self {
@@ -687,6 +683,13 @@ impl<'g, L: Language> Node<'g, L> {
   }
 
   /// This node's kind, in `L`'s vocabulary.
+  ///
+  /// # Panics
+  ///
+  /// When the raw kind is outside `L`'s space: this is `rowan::Language::kind_from_raw`, which
+  /// has no fallible form, and a caller-built tree can hold such a kind. The public walks in this
+  /// module check raw kinds before they call it; a caller holding a tree it did not get from a
+  /// parse reads `self.green().kind()` and checks it the same way.
   #[inline]
   pub fn kind(self) -> L::Kind {
     L::kind_from_raw(self.green.kind())
@@ -711,9 +714,18 @@ impl<L> Clone for Token<'_, L> {
 
 impl<L> Copy for Token<'_, L> {}
 
-impl<L: Language> fmt::Debug for Token<'_, L> {
+/// [`Node`]'s `Debug`, and for the same reason.
+impl<L> fmt::Debug for Token<'_, L>
+where
+  L: Language,
+  L::Kind: super::KindSpace,
+{
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{:?}@{:?}", self.kind(), self.text_range())
+    let raw = self.green.kind().0;
+    match <L::Kind as super::KindSpace>::from_raw(raw) {
+      Some(kind) => write!(f, "{kind:?}@{:?}", self.text_range()),
+      None => write!(f, "raw({raw})@{:?}", self.text_range()),
+    }
   }
 }
 
@@ -760,6 +772,10 @@ impl<'g, L> Token<'g, L> {
 
 impl<L: Language> Token<'_, L> {
   /// This token's kind, in `L`'s vocabulary.
+  ///
+  /// # Panics
+  ///
+  /// As [`Node::kind`], and for the same reason.
   #[inline]
   pub fn kind(self) -> L::Kind {
     L::kind_from_raw(self.green.kind())
@@ -1015,10 +1031,14 @@ impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
 ///
 /// See this module's header for why the node's own range is the wrong answer.
 #[inline]
-pub fn node_extent<L: Language>(
+pub fn node_extent<L>(
   node: Node<'_, L>,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
-) -> Result<Option<TextRange>, ProjectError<L::Kind>> {
+) -> Result<Option<TextRange>, ProjectError<L::Kind>>
+where
+  L: Language,
+  L::Kind: super::KindSpace,
+{
   extent_of(node.children(), is_trivia)
 }
 
@@ -1027,11 +1047,17 @@ pub fn node_extent<L: Language>(
 /// The general form [`node_extent`] is written in terms of. A projection that has to exclude
 /// one constituent — the description a definition node holds but the AST hoists out — folds
 /// the filtered child stream through here rather than reaching for the node's range.
-pub fn extent_of<'g, L: Language, I>(
+///
+/// Every element's raw kind is checked against `L`'s space before the trivia predicate is asked
+/// anything, nodes included, and one outside it is [`ProjectErrorKind::InvalidRawKind`] at its
+/// range. al8n/smear#218.
+pub fn extent_of<'g, L, I>(
   elements: I,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
 ) -> Result<Option<TextRange>, ProjectError<L::Kind>>
 where
+  L: Language,
+  L::Kind: super::KindSpace,
   I: IntoIterator<Item = Element<'g, L>>,
 {
   extent_of_bounded(elements, is_trivia, MAX_GREEN_DEPTH)
@@ -1067,12 +1093,14 @@ where
 /// the answer is the cover of every non-trivia token in the run whatever order they arrive in. The
 /// loop still walks in document order, because a refusal has to name the *first* node past the
 /// ceiling and not whichever one a different order reached first.
-fn extent_of_bounded<'g, L: Language, I>(
+fn extent_of_bounded<'g, L, I>(
   elements: I,
   is_trivia: impl Fn(L::Kind) -> bool + Copy,
   left: usize,
 ) -> Result<Option<TextRange>, ProjectError<L::Kind>>
 where
+  L: Language,
+  L::Kind: super::KindSpace,
   I: IntoIterator<Item = Element<'g, L>>,
 {
   let mut extent: Option<TextRange> = None;
@@ -1083,8 +1111,20 @@ where
   for element in elements {
     let mut item = Some((left, element));
     while let Some((left, element)) = item {
+      // Raw first: a kind outside the space is refused here rather than handed to
+      // `kind_from_raw`, which can only panic.
+      let (raw, at) = match element {
+        NodeOrToken::Token(token) => (token.green().kind().0, token.text_range()),
+        NodeOrToken::Node(node) => (node.green().kind().0, node.text_range()),
+      };
+      let Some(kind) = <L::Kind as super::KindSpace>::from_raw(raw) else {
+        return Err(ProjectError::new(
+          ProjectErrorKind::InvalidRawKind { raw },
+          to_range(at),
+        ));
+      };
       let piece = match element {
-        NodeOrToken::Token(token) => (!is_trivia(token.kind())).then(|| token.text_range()),
+        NodeOrToken::Token(token) => (!is_trivia(kind)).then(|| token.text_range()),
         NodeOrToken::Node(node) => {
           match left.checked_sub(1) {
             Some(left) => descent.open(left, (), node.children()),
@@ -1148,8 +1188,9 @@ pub fn verify_slice<'src, L: Language>(
 /// it is about to do rather than for a proxy that does not bound it. al8n/smear#198.
 ///
 /// Nodes and tokens both count: the projection visits a node to dispatch on its kind and a token to
-/// read its text. Saturating at [`u32::MAX`], which no ledger can pay, so a tree too large to
-/// price refuses rather than wrapping into a budget it fits.
+/// read its text. The count saturates at [`u32::MAX`] rather than wrapping. No finite validation
+/// budget covers a saturated count; a disabled ledger and a projection that takes no budget
+/// proceed.
 pub fn verify_source_counted<K>(
   root: &GreenNodeData,
   source: &str,
@@ -1301,6 +1342,92 @@ pub fn verify_source_at<K>(
   walk(green, source.as_bytes(), &mut offset, MAX_GREEN_DEPTH).map_err(Depth::into_error)
 }
 
+/// [`reject_holes`], reading every element's kind **raw** and refusing one outside the dialect's
+/// kind space before anything asks it the question `rowan::Language::kind_from_raw` can only
+/// answer by panicking.
+///
+/// # Why the hole scan is where the check lives
+///
+/// Every projection door already runs a whole-subtree scan right after it verifies the bytes and
+/// before its first walk, and that scan is the first code to ask an element its kind. So the check
+/// that every raw kind names one [`KindSpace::from_raw`](super::KindSpace::from_raw) admits — the
+/// predicate the sink's validator already applies to every kind a parse emits, reused rather than
+/// restated — is folded into that pass: one walk, and no element's kind is read before it is
+/// checked. A parse never trips it; a tree minted with rowan's public builder and cast to a typed
+/// wrapper over a legal root kind can, and the answer is
+/// [`InvalidRawKind`](ProjectErrorKind::InvalidRawKind) at the element's range rather than a panic
+/// out of a safe door. al8n/smear#218.
+///
+/// The root's own kind is checked too, though a typed wrapper can only be cast from a legal one:
+/// the fail-fast doors hand a `Parse`'s root here, and nothing about that root is the caller's
+/// promise either.
+pub fn reject_foreign_kinds_and_holes<L>(
+  node: Node<'_, L>,
+  is_hole: impl Fn(L::Kind) -> bool + Copy,
+) -> Result<(), ProjectError<L::Kind>>
+where
+  L: Language,
+  L::Kind: super::KindSpace,
+{
+  fn checked<K: super::KindSpace>(
+    raw: rowan::SyntaxKind,
+    at: TextRange,
+  ) -> Result<K, ProjectError<K>> {
+    K::from_raw(raw.0).ok_or_else(|| {
+      ProjectError::new(
+        ProjectErrorKind::InvalidRawKind { raw: raw.0 },
+        to_range(at),
+      )
+    })
+  }
+
+  let root = checked::<L::Kind>(node.green().kind(), node.text_range())?;
+  let mut descent: Descent<L::Kind, Children<'_, L>> = Descent::new();
+  let mut visiting = Some((MAX_GREEN_DEPTH, root, node, root));
+  while let Some((left, parent, node, kind)) = visiting {
+    let Some(left) = left.checked_sub(1) else {
+      return Err(ProjectError::new(
+        ProjectErrorKind::TooDeep {
+          limit: MAX_GREEN_DEPTH,
+        },
+        to_range(node.text_range()),
+      ));
+    };
+    if is_hole(kind) {
+      return Err(ProjectError::new(
+        ProjectErrorKind::UnexpectedChild {
+          parent,
+          found: kind,
+        },
+        to_range(node.text_range()),
+      ));
+    }
+    descent.open(left, kind, node.children());
+    visiting = loop {
+      match descent.take() {
+        Some((left, parent, NodeOrToken::Node(child))) => {
+          let kind = checked::<L::Kind>(child.green().kind(), child.text_range())?;
+          break Some((left, parent, child, kind));
+        }
+        Some((_, parent, NodeOrToken::Token(token))) => {
+          let kind = checked::<L::Kind>(token.green().kind(), token.text_range())?;
+          if is_hole(kind) {
+            return Err(ProjectError::new(
+              ProjectErrorKind::UnexpectedChild {
+                parent,
+                found: kind,
+              },
+              to_range(token.text_range()),
+            ));
+          }
+        }
+        None => break None,
+      }
+    };
+  }
+  Ok(())
+}
+
 /// Refuse a subtree that carries an element the AST has no image for, in preorder.
 ///
 /// The recovery-hole scan. `is_hole` names the kinds — a dialect's error and gap tiles — and the
@@ -1329,60 +1456,541 @@ pub fn verify_source_at<K>(
 ///
 /// So the scan is token-aware, and `is_hole` is asked of every element rather than of every node.
 /// A token has no children, so nothing else about the walk changes. al8n/smear#58.
-pub fn reject_holes<L: Language>(
+pub fn reject_holes<L>(
   node: Node<'_, L>,
   is_hole: impl Fn(L::Kind) -> bool + Copy,
-) -> Result<(), ProjectError<L::Kind>> {
-  // Preorder, in document order, so the refusal names the first hole the document reaches — which
-  // is what makes the answer independent of how the scan is written. The parent kind travels on the
-  // source rather than in a parameter: it is the kind of the node whose children are being drained,
-  // and [`Descent::take`] hands it back with the child.
-  let mut descent: Descent<L::Kind, Children<'_, L>> = Descent::new();
-  let mut visiting = Some((MAX_GREEN_DEPTH, node.kind(), node));
-  while let Some((left, parent, node)) = visiting {
-    // Its own counter, on its own terms: this takes a caller-supplied tree, and what the counter
-    // answers for is the depth a projection will accept — not this walk's frames, which it does not
-    // have. See [`MAX_GREEN_DEPTH`] and [`Descent`].
-    let Some(left) = left.checked_sub(1) else {
-      return Err(ProjectError::new(
-        ProjectErrorKind::TooDeep {
-          limit: MAX_GREEN_DEPTH,
-        },
-        to_range(node.text_range()),
-      ));
-    };
-    let kind = node.kind();
-    if is_hole(kind) {
-      return Err(ProjectError::new(
-        ProjectErrorKind::UnexpectedChild {
-          parent,
-          found: kind,
-        },
-        to_range(node.text_range()),
-      ));
+) -> Result<(), ProjectError<L::Kind>>
+where
+  L: Language,
+  L::Kind: super::KindSpace,
+{
+  // The same walk, with every kind read raw first, so a caller-built tree with a kind outside the
+  // space is refused rather than panicking a safe `Result` function. al8n/smear#218.
+  reject_foreign_kinds_and_holes(node, is_hole)
+}
+
+// ---------------------------------------------------------------------------------------------
+// the transcription atoms
+// ---------------------------------------------------------------------------------------------
+
+/// The atoms a dialect's projection transcribes its productions with — hoisted here because none of
+/// them names a dialect.
+///
+/// # Why these are the substrate's
+///
+/// al8n/smear#58 wrote them for the second dialect's projection, and every one of them takes the
+/// node kinds it tests as **parameters**: a cursor over a node's children, the extent fold, the
+/// `token`/`node`/`one_of`/`many`/`separated`/`end` atoms, and the three refusal constructors. The
+/// only thing any of them needs from a dialect is which token kinds are trivia, which is the
+/// [`Trivia`](walk::Trivia) bound. al8n/smear#217 and #218 asked the first dialect's projection for the same form,
+/// and a second copy of a machine whose whole value is that it is written once is the drift this
+/// module exists to prevent — the Lego rule, applied to a walk rather than to a production.
+///
+/// **What stays with a dialect** is every atom that needs its lexer or its keyword table: reading a
+/// `Name` for its spelling, re-cooking one through the dialect's identifier door, a reserved-spelling
+/// rule, a description's shape. Those are written per dialect over this cursor's
+/// [`peek`](walk::Cursor::peek) and [`bump`](walk::Cursor::bump), and they are where the two projections differ.
+///
+/// # Why it is gated
+///
+/// Everything here is `pub(crate)` and its only callers are the dialect projections, so a build
+/// with no dialect has nothing to mean by it and `dead_code` would say so under `-Dwarnings` — the
+/// `recover.rs` shape `tests/lossless_isolation.rs` records. One gate over the module, rather than
+/// one per item.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) mod walk {
+  use std::vec::Vec;
+
+  use rowan::{Language, NodeOrToken, TextRange};
+
+  use super::{Children, Element, Node, ProjectError, ProjectErrorKind, Token, to_range};
+
+  /// What a dialect's language marker tells the cursor: which of its token kinds are trivia.
+  ///
+  /// The one fact every atom below needs from a dialect, and the only one. The tree keeps trivia;
+  /// no atom consumes it and no span contains it.
+  pub(crate) trait Trivia: Language {
+    /// Whether `kind` is one of the dialect's ignorable token images.
+    fn is_trivia(kind: Self::Kind) -> bool;
+  }
+
+  /// A constituent whose node the tree opens even where the AST records nothing for it.
+  ///
+  /// `( )` is a written-down empty argument list: the tree gives it a node and the syntactic parser
+  /// answers `None` for it while still covering the parentheses. So the value and the extent travel
+  /// separately, and [`Extent::keep_optional`] is where a parent puts them back together.
+  pub(crate) type Optional<T> = (Option<T>, Option<TextRange>);
+
+  /// A node's token extent, folded as its children are consumed.
+  ///
+  /// One of these lives in every [`Cursor`]: a token atom covers the token it consumed and
+  /// [`keep`](Cursor::keep) covers the extent a projected child hands back, so what is left at the
+  /// end is the node's span. `None` — no non-trivia token anywhere under the node — is a finding
+  /// rather than a fallback to the node's own range, which is why [`range`](Self::range) is
+  /// fallible.
+  #[derive(Debug, Clone, Copy, Default)]
+  pub(crate) struct Extent {
+    /// The cover of every non-trivia token folded in so far.
+    range: Option<TextRange>,
+  }
+
+  impl Extent {
+    /// Widen to include `piece`.
+    ///
+    /// `cover` rather than `start..piece.end()`: a fold that assumed document order would produce
+    /// an inverted range the moment it was handed a stream that was not in it, and an inverted span
+    /// is exactly the class `tests/support/span_extent.rs` exists to catch.
+    #[inline]
+    pub(crate) fn cover(&mut self, piece: TextRange) {
+      self.range = Some(match self.range {
+        Some(seen) => seen.cover(piece),
+        None => piece,
+      });
     }
-    descent.open(left, kind, node.children());
-    visiting = loop {
-      match descent.take() {
-        Some((left, parent, NodeOrToken::Node(child))) => break Some((left, parent, child)),
-        // A token has no children to descend into, and until al8n/smear#58 that was read as
-        // having no kind this scan could refuse either. A gap tile is a token image in both
-        // dialects, so this is where every one of them was walked past.
-        Some((_, parent, NodeOrToken::Token(token))) => {
-          let kind = token.kind();
-          if is_hole(kind) {
-            return Err(ProjectError::new(
-              ProjectErrorKind::UnexpectedChild {
-                parent,
-                found: kind,
-              },
-              to_range(token.text_range()),
-            ));
+
+    /// Widen to include a projected child's extent, and keep the child.
+    ///
+    /// The bottom-up fold, spelled once: a child function answers its AST value beside the extent
+    /// it folded, and the parent covers the second while binding the first.
+    #[inline]
+    pub(crate) fn keep<T>(&mut self, projected: (T, TextRange)) -> T {
+      let (value, piece) = projected;
+      self.cover(piece);
+      value
+    }
+
+    /// [`keep`](Self::keep) for a constituent the grammar makes optional.
+    #[inline]
+    pub(crate) fn keep_opt<T>(&mut self, projected: Option<(T, TextRange)>) -> Option<T> {
+      projected.map(|projected| self.keep(projected))
+    }
+
+    /// [`keep`](Self::keep) for a constituent whose node the tree opens even where the AST records
+    /// nothing for it — see [`Optional`].
+    #[inline]
+    pub(crate) fn keep_optional<T>(&mut self, projected: Optional<T>) -> Option<T> {
+      let (value, piece) = projected;
+      if let Some(piece) = piece {
+        self.cover(piece);
+      }
+      value
+    }
+
+    /// The cover so far, or `None` when nothing has been folded.
+    #[inline]
+    pub(crate) const fn get(self) -> Option<TextRange> {
+      self.range
+    }
+
+    /// The cover so far, refused as [`MissingChild`](ProjectErrorKind::MissingChild) on `node`
+    /// when nothing has been folded.
+    #[inline]
+    pub(crate) fn range<L: Language>(
+      self,
+      node: Node<'_, L>,
+      wanted: &'static str,
+    ) -> Result<TextRange, ProjectError<L::Kind>> {
+      self.range.ok_or_else(|| missing(node, wanted))
+    }
+  }
+
+  /// The outer and inner extents of a described node, from the one fold.
+  ///
+  /// `inner` is everything the node's fold covered *except* its description; `described` is the
+  /// description's own extent when the node carries one. The wrapper's span is their cover and the
+  /// definition's is `inner`, which is where the hoist shows up as a number — and note the three
+  /// node types each dialect's header lists, which give both the same span instead.
+  pub(crate) fn described_extents<L: Language>(
+    node: Node<'_, L>,
+    inner: Extent,
+    described: Option<TextRange>,
+  ) -> Result<(TextRange, TextRange), ProjectError<L::Kind>> {
+    let inner = inner.range(
+      node,
+      match described {
+        Some(_) => "a constituent other than its description",
+        None => "a token",
+      },
+    )?;
+    let outer = match described {
+      Some(described) => inner.cover(described),
+      None => inner,
+    };
+    Ok((outer, inner))
+  }
+
+  /// [`MissingChild`](ProjectErrorKind::MissingChild) on `parent`, over the parent's own range.
+  pub(crate) fn missing<L: Language>(
+    parent: Node<'_, L>,
+    wanted: &'static str,
+  ) -> ProjectError<L::Kind> {
+    ProjectError::new(
+      ProjectErrorKind::MissingChild {
+        parent: parent.kind(),
+        wanted,
+      },
+      to_range(parent.text_range()),
+    )
+  }
+
+  /// [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) of kind `found` under `parent`, at `at`.
+  pub(crate) fn unexpected<L: Language>(
+    parent: Node<'_, L>,
+    found: L::Kind,
+    at: TextRange,
+  ) -> ProjectError<L::Kind> {
+    ProjectError::new(
+      ProjectErrorKind::UnexpectedChild {
+        parent: parent.kind(),
+        found,
+      },
+      to_range(at),
+    )
+  }
+
+  /// [`unexpected`] at a child node.
+  pub(crate) fn unexpected_node<L: Language>(
+    parent: Node<'_, L>,
+    found: Node<'_, L>,
+  ) -> ProjectError<L::Kind> {
+    unexpected(parent, found.kind(), found.text_range())
+  }
+
+  /// [`unexpected`] at a child token.
+  pub(crate) fn unexpected_token<L: Language>(
+    parent: Node<'_, L>,
+    found: Token<'_, L>,
+  ) -> ProjectError<L::Kind> {
+    unexpected(parent, found.kind(), found.text_range())
+  }
+
+  /// Whether a separated list may open with its separator — `on | FIELD | QUERY` may, `A & B` may
+  /// not.
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  pub(crate) enum Leading {
+    Allowed,
+    // Every separated list the vanilla dialect has — an interface list, a union's members, a
+    // directive's locations — admits a leading separator, so a build with only that dialect never
+    // constructs this. It is not dead in the substrate's sense: the other dialect's paths and
+    // `where` bounds forbid one. An `allow` rather than a gate, because a gate here would have to
+    // name a dialect.
+    #[allow(dead_code)]
+    Forbidden,
+  }
+
+  /// A node's child sequence, read in the order its production writes it.
+  ///
+  /// # Why a cursor and not a slot dispatch
+  ///
+  /// Through al8n/smear#58's fourth round every walk in the second dialect's projection was a
+  /// `match child.kind()` filling slots behind `is_none()` guards, with a token vocabulary beside
+  /// it — and al8n/smear#218 measured the first dialect's still was. That form can express a
+  /// shape's *set* of children and cannot express their **sequence** or **multiplicity**, and the
+  /// same kinds in a different order or count are a different sentence wherever a production has a
+  /// committing prefix or a separator. Each round had found the previous such gap, because a
+  /// vocabulary is an *approximation* of the production it stands in for and the two differ
+  /// somewhere.
+  ///
+  /// So a walk is its production **transcribed**: a sequence of atoms over this cursor, in the
+  /// grammar's order, ending in [`end`](Self::end). *Represented* stops being a property a reviewer
+  /// checks against a table and becomes *consumed by an atom*; sequence, multiplicity, vocabulary,
+  /// one-of exclusivity, committing prefixes and separators are consequences of the transcription
+  /// rather than rules laid over it.
+  ///
+  /// # What an atom does
+  ///
+  /// Trivia is skipped, everywhere. A **token** atom covers what it consumed, because a token's
+  /// bytes are the node's own. A **node** atom does not: a child's contribution is its *token*
+  /// extent, which only the child's own walk knows, so the caller folds it back with
+  /// [`keep`](Self::keep) when it projects the child — or, for a worklist cycle, when the descent
+  /// returns. A node handed back and neither projected nor descended into is the one thing this
+  /// form cannot make impossible; each dialect's mutation law is what finds it.
+  ///
+  /// **No atom here consumes a name.** A dialect's `Name` reaches its walk as a keyword, as a name
+  /// re-cooked through that dialect's identifier door, or as a spelling its caller classifies —
+  /// never as "some `Name`, any number of them" — and every one of those needs the dialect's
+  /// lexer, so they are written beside the dialect's projection over [`peek`](Self::peek) and
+  /// [`bump`](Self::bump).
+  ///
+  /// Refusals are positioned: [`MissingChild`](ProjectErrorKind::MissingChild) when the children
+  /// run out, [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) at the element actually in
+  /// hand.
+  pub(crate) struct Cursor<'g, L> {
+    /// The node whose children are being read, and the parent every refusal names.
+    pub(crate) node: Node<'g, L>,
+    children: Children<'g, L>,
+    peeked: Option<Element<'g, L>>,
+    /// The fold over what the atoms have consumed so far.
+    pub(crate) extent: Extent,
+  }
+
+  impl<'g, L: Trivia> Cursor<'g, L> {
+    #[inline]
+    pub(crate) fn new(node: Node<'g, L>) -> Self {
+      Self {
+        node,
+        children: node.children(),
+        peeked: None,
+        extent: Extent::default(),
+      }
+    }
+
+    /// The next non-trivia element, without consuming it.
+    #[inline]
+    pub(crate) fn peek(&mut self) -> Option<Element<'g, L>> {
+      if self.peeked.is_none() {
+        for element in self.children.by_ref() {
+          match element {
+            NodeOrToken::Token(token) if L::is_trivia(token.kind()) => {}
+            other => {
+              self.peeked = Some(other);
+              break;
+            }
           }
         }
-        None => break None,
       }
-    };
+      self.peeked
+    }
+
+    /// Consume the element [`peek`](Self::peek) answered.
+    #[inline]
+    pub(crate) fn bump(&mut self) {
+      self.peeked = None;
+    }
+
+    /// [`missing`] on this cursor's node.
+    #[inline]
+    pub(crate) fn missing(&self, wanted: &'static str) -> ProjectError<L::Kind> {
+      missing(self.node, wanted)
+    }
+
+    /// [`unexpected`] at `element`, under this cursor's node.
+    #[inline]
+    pub(crate) fn unexpected(&self, element: Element<'g, L>) -> ProjectError<L::Kind> {
+      match element {
+        NodeOrToken::Node(child) => unexpected_node(self.node, child),
+        NodeOrToken::Token(token) => unexpected_token(self.node, token),
+      }
+    }
+
+    /// The refusal for a required constituent that is not next: **what is in hand decides it**.
+    ///
+    /// [`MissingChild`](ProjectErrorKind::MissingChild) when the children ran out, or when the next
+    /// element is the enclosing `closer` — a present-but-empty `{ }` is row one of the container
+    /// table, and its answer is that the member is missing. Anything else is a present element the
+    /// production has no place for, refused as
+    /// [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) **at that element**: a refusal that
+    /// named the parent while the obstruction sat in plain view would point a caller at the wrong
+    /// bytes, which is al8n/smear#58 Codex round five's third finding.
+    pub(crate) fn absent(
+      &mut self,
+      closer: Option<L::Kind>,
+      wanted: &'static str,
+    ) -> ProjectError<L::Kind> {
+      match self.peek() {
+        None => self.missing(wanted),
+        Some(NodeOrToken::Token(token)) if Some(token.kind()) == closer => self.missing(wanted),
+        Some(element) => self.unexpected(element),
+      }
+    }
+
+    /// The next element must be a token of `kind`.
+    pub(crate) fn token(
+      &mut self,
+      kind: L::Kind,
+      wanted: &'static str,
+    ) -> Result<Token<'g, L>, ProjectError<L::Kind>> {
+      self.token_of(&[kind], wanted)
+    }
+
+    /// The next element must be a token whose kind is one of `kinds` — a literal leaf's one token.
+    pub(crate) fn token_of(
+      &mut self,
+      kinds: &[L::Kind],
+      wanted: &'static str,
+    ) -> Result<Token<'g, L>, ProjectError<L::Kind>> {
+      match self.peek() {
+        Some(NodeOrToken::Token(token)) if kinds.contains(&token.kind()) => {
+          self.bump();
+          self.extent.cover(token.text_range());
+          Ok(token)
+        }
+        Some(element) => Err(self.unexpected(element)),
+        None => Err(self.missing(wanted)),
+      }
+    }
+
+    /// A token of `kind` if one is next.
+    pub(crate) fn opt_token(&mut self, kind: L::Kind) -> Option<Token<'g, L>> {
+      match self.peek() {
+        Some(NodeOrToken::Token(token)) if token.kind() == kind => {
+          self.bump();
+          self.extent.cover(token.text_range());
+          Some(token)
+        }
+        _ => None,
+      }
+    }
+
+    /// The next element must be a node of `kind`. **Not covered** — see the type's header.
+    pub(crate) fn node(
+      &mut self,
+      kind: L::Kind,
+      wanted: &'static str,
+    ) -> Result<Node<'g, L>, ProjectError<L::Kind>> {
+      self.one_of(&[kind], wanted)
+    }
+
+    /// A node of `kind` if one is next.
+    pub(crate) fn opt_node(&mut self, kind: L::Kind) -> Option<Node<'g, L>> {
+      self.opt_one_of(&[kind])
+    }
+
+    /// A node whose kind is one of `kinds` — a slot the production fills from a set.
+    pub(crate) fn one_of(
+      &mut self,
+      kinds: &[L::Kind],
+      wanted: &'static str,
+    ) -> Result<Node<'g, L>, ProjectError<L::Kind>> {
+      match self.peek() {
+        Some(NodeOrToken::Node(child)) if kinds.contains(&child.kind()) => {
+          self.bump();
+          Ok(child)
+        }
+        Some(element) => Err(self.unexpected(element)),
+        None => Err(self.missing(wanted)),
+      }
+    }
+
+    /// [`one_of`](Self::one_of) where the production makes the slot optional.
+    pub(crate) fn opt_one_of(&mut self, kinds: &[L::Kind]) -> Option<Node<'g, L>> {
+      match self.peek() {
+        Some(NodeOrToken::Node(child)) if kinds.contains(&child.kind()) => {
+          self.bump();
+          Some(child)
+        }
+        _ => None,
+      }
+    }
+
+    /// Every node of one of `kinds`, greedily — an undelimited `*` repetition.
+    pub(crate) fn many(&mut self, kinds: &[L::Kind]) -> Vec<Node<'g, L>> {
+      let mut taken = Vec::new();
+      while let Some(child) = self.opt_one_of(kinds) {
+        taken.push(child);
+      }
+      taken
+    }
+
+    /// `X+` — [`many`](Self::many) with the first member required, refused through
+    /// [`absent`](Self::absent) so a present-but-empty container is `MissingChild` and a present
+    /// stranger is `UnexpectedChild` at the stranger.
+    ///
+    /// `closer` is the delimiter that ends the run inside its container, and `None` for an
+    /// undelimited run.
+    pub(crate) fn many1(
+      &mut self,
+      kinds: &[L::Kind],
+      closer: Option<L::Kind>,
+      wanted: &'static str,
+    ) -> Result<Vec<Node<'g, L>>, ProjectError<L::Kind>> {
+      let taken = self.many(kinds);
+      if taken.is_empty() {
+        return Err(self.absent(closer, wanted));
+      }
+      Ok(taken)
+    }
+
+    /// `sep? item (sep item)*` — one separator between adjacent items, the leading one only where
+    /// `leading` allows it. Answers the items and whether a leading separator was written.
+    ///
+    /// `item` probes for one item **without consuming anything else**: `Ok(None)` means the next
+    /// element is not an item. An item is required after the opening position and after every
+    /// separator the list consumes, and where one is not there the refusal is decided by what *is*
+    /// ([`absent`](Self::absent)): `MissingChild` when the node's children ran out, and
+    /// `UnexpectedChild` at the element in hand otherwise — a leading separator where none is
+    /// allowed, a doubled separator, a node of the wrong kind.
+    pub(crate) fn separated<T>(
+      &mut self,
+      mut item: impl FnMut(&mut Self) -> Result<Option<T>, ProjectError<L::Kind>>,
+      separator: L::Kind,
+      leading: Leading,
+      wanted: &'static str,
+    ) -> Result<(Vec<T>, bool), ProjectError<L::Kind>> {
+      let led = leading == Leading::Allowed && self.opt_token(separator).is_some();
+      let mut taken = Vec::new();
+      match item(self)? {
+        Some(first) => taken.push(first),
+        None => return Err(self.absent(None, wanted)),
+      }
+      while self.opt_token(separator).is_some() {
+        match item(self)? {
+          Some(next) => taken.push(next),
+          None => return Err(self.absent(None, wanted)),
+        }
+      }
+      Ok((taken, led))
+    }
+
+    /// [`separated`](Self::separated) over **nodes** of one of `kinds`.
+    pub(crate) fn separated_nodes(
+      &mut self,
+      kinds: &[L::Kind],
+      separator: L::Kind,
+      leading: Leading,
+      wanted: &'static str,
+    ) -> Result<Vec<Node<'g, L>>, ProjectError<L::Kind>> {
+      self
+        .separated(
+          |cursor| Ok(cursor.opt_one_of(kinds)),
+          separator,
+          leading,
+          wanted,
+        )
+        .map(|(taken, _)| taken)
+    }
+
+    /// Fold a projected child's extent in, and keep its value.
+    #[inline]
+    pub(crate) fn keep<T>(&mut self, projected: (T, TextRange)) -> T {
+      self.extent.keep(projected)
+    }
+
+    /// [`keep`](Self::keep) for a constituent the grammar makes optional.
+    #[inline]
+    pub(crate) fn keep_opt<T>(&mut self, projected: Option<(T, TextRange)>) -> Option<T> {
+      self.extent.keep_opt(projected)
+    }
+
+    /// [`keep`](Self::keep) for a constituent whose node the tree opens even where the AST records
+    /// nothing for it — see [`Optional`].
+    #[inline]
+    pub(crate) fn keep_optional<T>(&mut self, projected: Optional<T>) -> Option<T> {
+      self.extent.keep_optional(projected)
+    }
+
+    /// **The totality obligation.** Nothing may be left over.
+    pub(crate) fn end(&mut self) -> Result<(), ProjectError<L::Kind>> {
+      match self.peek() {
+        Some(element) => Err(self.unexpected(element)),
+        None => Ok(()),
+      }
+    }
+
+    /// The node's token extent, after [`end`](Self::end).
+    #[inline]
+    pub(crate) fn range(&self, wanted: &'static str) -> Result<TextRange, ProjectError<L::Kind>> {
+      self.extent.range(self.node, wanted)
+    }
+
+    /// Finish: nothing left over, and the extent the fold arrived at.
+    #[inline]
+    pub(crate) fn finish(
+      &mut self,
+      wanted: &'static str,
+    ) -> Result<TextRange, ProjectError<L::Kind>> {
+      self.end()?;
+      self.range(wanted)
+    }
   }
-  Ok(())
 }

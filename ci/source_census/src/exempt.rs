@@ -95,6 +95,15 @@ const EXTENSION_KEY: &str = "A draft §7.1.7 `extensions` key, which is not sour
      not acquit it because `Extensions<V>` is parameterised by the driver's *value* type and has \
      no source type to hold.";
 
+/// The GraphQL lexer's three whole-slice doors, al8n/smear#218.
+const GRAPHQL_WHOLE_SLICE_DOOR: &str = "One token's slice, re-cooked: the GraphQL CST → AST \
+     projection hands in the bytes under a single `Name`, `Int` or `Float` token and asks whether \
+     the shipped scanner reads exactly one token of that kind over all of them — the question \
+     `smear::lexer::graphqlx::identifier` answers for the other dialect, and the reason is the \
+     same. It is text by construction — the answer is the same `&str` handed back as the AST's \
+     payload — and the document it came from is already verified and sliced by the caller. Test 4 \
+     does not acquit it because a free function over one slice has no source type to hold.";
+
 /// The twelve concrete lossless parse doors, `fn(&str) -> Parse`.
 const LOSSLESS_DOOR: &str = "Concrete BY DESIGN, and beside a wide sibling that is not. \
    al8n/smear#121 made all twelve of these generic over the source and Codex measured what that \
@@ -605,7 +614,31 @@ pub const EXEMPTIONS: &[Exemption] = &[
              crate's `&str` and not the caller's buffer. Test 3 does not acquit it because \
              `PackedType` is a `u32` bitfield with no source type to hold.",
   },
-  // ── The lexer's whole-slice re-cook door, whose input is one token and not a document ────────
+  // ── The lexer's whole-slice re-cook doors, whose input is one token and not a document ───────
+  Exemption {
+    module: "smear::lexer::graphql",
+    entry: "identifier",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: GRAPHQL_WHOLE_SLICE_DOOR,
+  },
+  Exemption {
+    module: "smear::lexer::graphql",
+    entry: "int_literal",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: GRAPHQL_WHOLE_SLICE_DOOR,
+  },
+  Exemption {
+    module: "smear::lexer::graphql",
+    entry: "float_literal",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: GRAPHQL_WHOLE_SLICE_DOOR,
+  },
   Exemption {
     module: "smear::lexer::graphqlx",
     entry: "identifier",

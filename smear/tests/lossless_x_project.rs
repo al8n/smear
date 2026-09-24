@@ -73,7 +73,8 @@ use smear::parser::{
     kinds::{GraphQLxLang, SyntaxKind as K},
     lossless::{
       ProjectErrorKind, Recovery, SyntaxNode, Unverified, ast::Document as DocumentNode,
-      ast::ExecutableDocument as ExecutableDocumentNode, parse_document, parse_executable_document,
+      ast::ExecutableDocument as ExecutableDocumentNode,
+      ast::TypeSystemDocument as TypeSystemDocumentNode, parse_document, parse_executable_document,
       parse_type_system_document, project, project_executable_document,
       project_executable_document_recovered, project_type_system_document,
       project_type_system_document_recovered, verify_parse,
@@ -2213,12 +2214,14 @@ fn every_refusal_kind_has_a_witness() {
   );
 
   // `TooDeep` is the sixth and is pinned by
-  // `a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended`, which needs a synthetic
-  // tree; what this count owns is the claim that six variants exist and six are witnessed
-  // somewhere in this file.
-  const KIND_COUNT: usize = 6;
+  // `a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended`, `InvalidRawKind` the
+  // seventh, pinned by `a_raw_kind_outside_the_space_refuses_rather_than_panicking`, and
+  // `WrongRoot` the eighth, pinned by `a_parse_minted_over_a_wrong_root_is_refused_not_reported_complete`;
+  // all three need a synthetic tree. What this count owns is the claim that eight variants exist
+  // and eight are witnessed somewhere in this file.
+  const KIND_COUNT: usize = 8;
   assert_eq!(
-    distinct.len() + 1,
+    distinct.len() + 3,
     KIND_COUNT,
     "ProjectErrorKind has a variant with no witness in this file; add one and raise the count"
   );
@@ -4780,11 +4783,29 @@ fn every_walk_is_a_transcription() {
   );
   // The two loops over a child iterator that remain are not walks: the cursor's own trivia skip,
   // and the recovering door's pass over the root, which counts what it skips rather than
-  // projecting a production.
+  // projecting a production. The cursor is the substrate's since al8n/smear#217/#218 hoisted it,
+  // so its loop is counted where it now lives — the substrate's `walk` module — and the two still
+  // sum to the two this census has always found.
   assert_eq!(
     count("for element in"),
-    2,
+    1,
     "a child loop outside the cursor"
+  );
+  let substrate = std::fs::read_to_string(
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../smear-parser/src/lossless/project.rs"),
+  )
+  .expect("the substrate's source is readable");
+  let walk = &substrate[substrate
+    .find("pub(crate) mod walk {")
+    .expect("the substrate's walk module")..];
+  assert_eq!(
+    walk
+      .lines()
+      .filter(|line| !line.trim_start().starts_with("//"))
+      .map(|line| line.matches("for element in").count())
+      .sum::<usize>(),
+    1,
+    "the cursor's trivia skip, and nothing else"
   );
   assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
 }
@@ -5085,5 +5106,397 @@ fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
       oracle(src).expect(src),
       "{src}"
     );
+  }
+}
+
+/// **Codex round 1 on al8n/smear#217/#218.** A raw kind outside this dialect's space refuses at
+/// every typed door rather than panicking.
+///
+/// A caller mints a tree with rowan's public builder: a legal root kind, so the cast to the typed
+/// wrapper succeeds, and one element whose raw kind no `SyntaxKind` names. `kind_from_raw` has no
+/// fallible form and panics on it, and the hole scan the typed doors gained was the first code to
+/// ask. The substrate's `reject_foreign_kinds_and_holes` now reads every kind raw first.
+///
+/// **No `catch_unwind` here**, deliberately: the cell calls the door in-process, so a panic is the
+/// test failing, which is the regression it exists to catch. The fail-fast and recovering doors
+/// take a `Parse`, which has no public constructor that skips the kind validator; they run the
+/// same scan, and the cell cannot mint their input.
+#[test]
+fn a_raw_kind_outside_the_space_refuses_rather_than_panicking() {
+  const FOREIGN: u16 = 60_000;
+  let foreign = rowan::SyntaxKind(FOREIGN);
+  let refusal = ProjectErrorKind::InvalidRawKind { raw: FOREIGN };
+  for root in [K::Document, K::ExecutableDocument, K::TypeSystemDocument] {
+    // A foreign token, and a foreign node holding a legal one.
+    for as_node in [false, true] {
+      let mut builder = GreenNodeBuilder::new();
+      builder.start_node(GraphQLxLang::kind_to_raw(root));
+      if as_node {
+        builder.start_node(foreign);
+        builder.token(GraphQLxLang::kind_to_raw(K::Name), "x");
+        builder.finish_node();
+      } else {
+        builder.token(foreign, "x");
+      }
+      builder.finish_node();
+      let node = SyntaxNode::new_root(builder.finish());
+      let error = match root {
+        K::Document => DocumentNode::cast_node(node)
+          .expect("a legal root")
+          .to_ast("x")
+          .map(|_| ())
+          .expect_err("refuses"),
+        K::ExecutableDocument => ExecutableDocumentNode::cast_node(node)
+          .expect("a legal root")
+          .to_ast("x")
+          .map(|_| ())
+          .expect_err("refuses"),
+        _ => TypeSystemDocumentNode::cast_node(node)
+          .expect("a legal root")
+          .to_ast("x")
+          .map(|_| ())
+          .expect_err("refuses"),
+      };
+      assert_eq!(error.kind(), &refusal, "{root:?}, as a node: {as_node}");
+      assert_eq!(error.span(), &(0..1), "{root:?}, as a node: {as_node}");
+    }
+  }
+}
+
+/// A `Parse` minted through the public, generic `finish_root` from a `Cst` whose profile admits every
+/// raw kind, over the root kind `root` — the one public route to this dialect's `Parse` that skips
+/// its door. The
+/// closure consumes nothing, so a non-empty source is tiled as one gap token under the root.
+fn foreign_root_parse<'a>(src: &'a str, root: u16) -> smear::parser::graphqlx::lossless::Parse {
+  use smear::parser::{
+    graphqlx::lossless::{Brand, GraphqlxLosslessErrors, Lexer, LexerState},
+    lossless::runner::finish_root,
+  };
+  use tokora::{
+    InputRef, SimpleSpan,
+    cache::DefaultCache,
+    cst::{CstProfile, KindValidator, Sink, parse_lossless},
+    emitter::Verbose,
+  };
+
+  type Lx<'a> = Lexer<'a, str>;
+  type Em<'a> = Verbose<GraphqlxLosslessErrors<&'a str>, SimpleSpan, Brand>;
+  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
+
+  fn unmapped<T>(_: &T) -> u16 {
+    0
+  }
+
+  let profile = CstProfile::new(
+    unmapped as fn(&_) -> u16,
+    KindValidator::accept_all(),
+    GraphQLxLang::kind_to_raw(K::Error).0,
+    GraphQLxLang::kind_to_raw(K::Gap).0,
+  );
+  let (cst, _) = parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
+    src,
+    LexerState::default(),
+    Em::new(),
+    profile,
+    DefaultCache::<'a, Lx<'a>>::default(),
+    |_: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| Ok(()),
+  );
+  finish_root::<GraphQLxLang, Lx<'a>, Em<'a>>(cst, root, "a permissive profile")
+    .expect("the permissive profile admits the root")
+}
+
+/// **Codex rounds 2 and 4 on al8n/smear#217/#218.** A `Parse` whose root is not this dialect's
+/// document root is refused by every projection door — never projected, never reported complete.
+///
+/// The public generic `finish_root` takes the root kind as an argument and checks it only against
+/// the caller's profile, so it can mint this dialect's `Parse` rooted at raw 60000 (outside the
+/// space) or at `Name` (inside it, and not a document). The byte comparison reads green data only,
+/// and over an empty source the recovering doors answered `Recovery::new(0, 0)` — complete, over a
+/// tree no door finished. Round 2 closed the out-of-space root and passed `Name`; the check is the
+/// root's identity now, and both answer `WrongRoot`.
+///
+/// **The typed door is reached through a cast, and the cast refuses first**: `cast_node` compares
+/// the raw kind with the wrapper's own, so neither root casts to a `Document`, an
+/// `ExecutableDocument` or a `TypeSystemDocument`, and `to_ast` cannot be called on it. The cast
+/// used to ask `SyntaxNode::kind`, which panicked on the out-of-space root. In-process, no
+/// `catch_unwind`.
+#[test]
+fn a_parse_minted_over_a_wrong_root_is_refused_not_reported_complete() {
+  use smear::parser::graphqlx::lossless::{
+    Verified, ast::ExecutableDocument as ExecutableDocumentNode,
+    ast::TypeSystemDocument as TypeSystemDocumentNode,
+  };
+
+  for root in [GraphQLxLang::kind_to_raw(K::Name).0, 60_000] {
+    let unverified = Unverified::WrongRoot { raw: root };
+    let refusal = ProjectErrorKind::WrongRoot { raw: root };
+    for src in ["", "{ f }"] {
+      let parse = foreign_root_parse(src, root);
+      assert_eq!(parse.green().kind().0, root, "{root} {src:?}: the premise");
+      assert_eq!(
+        project_executable_document_recovered(&parse, src).map(|(_, recovery)| recovery),
+        Err(unverified),
+        "{root} {src:?}: the executable recovering door"
+      );
+      assert_eq!(
+        project_type_system_document_recovered(&parse, src).map(|(_, recovery)| recovery),
+        Err(unverified),
+        "{root} {src:?}: the type-system recovering door"
+      );
+      assert_eq!(
+        Verified::new(&parse, src).map(|_| ()),
+        Err(unverified),
+        "{root} {src:?}: `Verified::new`"
+      );
+      assert_eq!(
+        verify_parse(&parse, src),
+        Err(unverified),
+        "{root} {src:?}: `verify_parse`"
+      );
+      for (what, refused) in [
+        ("project", project(&parse, src).map(|_| ()).err()),
+        (
+          "project_executable_document",
+          project_executable_document(&parse, src).map(|_| ()).err(),
+        ),
+        (
+          "project_type_system_document",
+          project_type_system_document(&parse, src).map(|_| ()).err(),
+        ),
+      ] {
+        assert_eq!(
+          refused.map(|error| error.kind().clone()),
+          Some(refusal.clone()),
+          "{root} {src:?}: {what}"
+        );
+      }
+      // The typed door: the cast answers `None` for all three wrappers, without panicking.
+      let node = parse.syntax();
+      assert!(
+        DocumentNode::cast_node(node.clone()).is_none(),
+        "{root} {src:?}"
+      );
+      assert!(
+        ExecutableDocumentNode::cast_node(node.clone()).is_none(),
+        "{root} {src:?}"
+      );
+      assert!(
+        TypeSystemDocumentNode::cast_node(node).is_none(),
+        "{root} {src:?}"
+      );
+    }
+  }
+}
+
+/// **Codex round 6 on al8n/smear#217/#218.** `MalformedToken` is reachable from a parse, at a
+/// position that reads a spelling.
+///
+/// `FOO` and `foo` lex as identifiers; what they are not is a directive location and a root
+/// operation type. The lossless productions report both and still build the node — the
+/// report-and-build table's two `MalformedToken { Name }` rows — so the variant's doc and Display
+/// describe a token that cannot be read in the role its position gives it, and make no claim that
+/// only a caller-minted tree reaches it.
+#[test]
+fn a_spelling_a_position_does_not_classify_is_malformed_in_a_parse() {
+  for (src, at) in [
+    ("directive @d on FOO", 16..19),
+    ("schema { foo: Q }", 9..12),
+  ] {
+    let parse = parse_document(src);
+    assert!(parse.has_errors(), "{src}: the parser reports it");
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{src}: and builds the node whole"
+    );
+    let refusal = project(&parse, src)
+      .map(|_| ())
+      .expect_err("the word is not one the position classifies");
+    assert_eq!(
+      refusal.kind(),
+      &ProjectErrorKind::MalformedToken { kind: K::Name },
+      "{src}"
+    );
+    assert_eq!(refusal.span(), &at, "{src}: the token's own range");
+    assert_eq!(
+      refusal.to_string(),
+      std::format!(
+        "{}..{}: the Name token's text cannot be read in the role this position gives it",
+        at.start,
+        at.end
+      ),
+      "{src}"
+    );
+  }
+}
+
+/// One step of a tree's shape, replayed through the sink by [`twin_container_parse`].
+enum Replay {
+  Open(u16),
+  Token,
+  Close(u16),
+}
+
+/// A `Parse` minted through `finish_root` whose root holds **two** document containers of `kind`,
+/// each the tree this dialect's own door builds for `one`, over the source `one` written twice.
+///
+/// The shape is read off a real parse of `one` and replayed through the dialect's own profile, so
+/// every node and token kind is one the door itself emits; only the root's arity is the caller's.
+/// `one` ends in punctuation, so its second copy lexes to the same tokens as its first and every
+/// token the replay takes — trivia included — is the one the shape names.
+fn twin_container_parse(one: &str, kind: K) -> (String, smear::parser::graphqlx::lossless::Parse) {
+  use smear::parser::{
+    graphqlx::lossless::{Brand, GraphqlxLosslessErrors, Lexer, LexerState, profile},
+    lossless::runner::finish_root,
+  };
+  use tokora::{InputRef, SimpleSpan, cache::DefaultCache, cst::Sink, emitter::Verbose};
+
+  type Lx<'a> = Lexer<'a, str>;
+  type Em<'a> = Verbose<GraphqlxLosslessErrors<&'a str>, SimpleSpan, Brand>;
+  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
+
+  let raw = |kind: K| GraphQLxLang::kind_to_raw(kind).0;
+  let single = match kind {
+    K::ExecutableDocument => parse_executable_document(one),
+    _ => parse_type_system_document(one),
+  };
+  assert!(!single.has_errors(), "{one:?} parses clean");
+  let root = single.syntax();
+  let container = root
+    .children()
+    .find(|child| child.kind() == kind)
+    .expect("the door builds its container");
+  assert_eq!(
+    root.children_with_tokens().count(),
+    1,
+    "{one:?}: nothing beside the container"
+  );
+  let mut shape = Vec::new();
+  for event in container.preorder_with_tokens() {
+    match event {
+      rowan::WalkEvent::Enter(rowan::NodeOrToken::Node(node)) => {
+        shape.push(Replay::Open(raw(node.kind())))
+      }
+      rowan::WalkEvent::Leave(rowan::NodeOrToken::Node(node)) => {
+        shape.push(Replay::Close(raw(node.kind())))
+      }
+      rowan::WalkEvent::Enter(rowan::NodeOrToken::Token(_)) => shape.push(Replay::Token),
+      rowan::WalkEvent::Leave(rowan::NodeOrToken::Token(_)) => {}
+    }
+  }
+
+  let src = format!("{one}{one}");
+  let parse = mint(&src, &shape);
+  return (src, parse);
+
+  fn mint<'a>(src: &'a str, shape: &[Replay]) -> smear::parser::graphqlx::lossless::Parse {
+    let (cst, _) =
+      tokora::cst::parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
+        src,
+        LexerState::default(),
+        Em::new(),
+        profile::<str>(),
+        DefaultCache::<'a, Lx<'a>>::default(),
+        |inp: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| {
+          for _ in 0..2 {
+            for step in shape {
+              match step {
+                Replay::Open(kind) => {
+                  let _ = inp.cst_start(*kind);
+                }
+                Replay::Token => {
+                  let _ = inp.next();
+                }
+                Replay::Close(kind) => inp.cst_finish(*kind),
+              }
+            }
+          }
+          Ok(())
+        },
+      );
+    finish_root::<GraphQLxLang, Lx<'a>, Em<'a>>(
+      cst,
+      GraphQLxLang::kind_to_raw(K::Root).0,
+      "the dialect's profile",
+    )
+    .expect("the dialect's profile admits its own root")
+  }
+}
+
+/// A root holding two valid document containers: the recovering doors project both, the fail-fast
+/// doors refuse the second.
+///
+/// The two answers are different contracts, and this cell pins both. A recovering door steps
+/// through **every** container of its kind under the root, and each container is a legitimate
+/// document image: its definitions are projected one by one, so the [`Recovery`] is complete with
+/// both halves' definitions counted. A fail-fast door asserts the root holds **exactly one**
+/// container, so the second is `UnexpectedChild { parent: Root, .. }` at the second container's
+/// range. A complete [`Recovery`] therefore says nothing was lost, not that the fail-fast door
+/// would have answered.
+#[test]
+fn a_root_with_two_containers_is_recovered_whole_and_refused_fail_fast() {
+  for (one, kind) in [
+    ("{a}", K::ExecutableDocument),
+    ("enum E{A}", K::TypeSystemDocument),
+  ] {
+    let (src, parse) = twin_container_parse(one, kind);
+    let root = parse.syntax();
+    assert_eq!(
+      root.text().to_string(),
+      src,
+      "{kind:?}: the minted tree spells its source"
+    );
+    assert_eq!(
+      root
+        .children_with_tokens()
+        .map(|e| e.kind())
+        .collect::<Vec<_>>(),
+      vec![kind, kind],
+      "{kind:?}: the root holds two containers and nothing else"
+    );
+    let second = one.len()..src.len();
+    let wanted = Recovery::new(2, 0);
+
+    let (fail_fast, recovered, verified) = match kind {
+      K::ExecutableDocument => (
+        project_executable_document(&parse, &src).map(|_| ()),
+        project_executable_document_recovered(&parse, &src)
+          .map(|(ast, r)| (ast.definitions().len(), r)),
+        {
+          let (ast, r) = smear::parser::graphqlx::lossless::project_executable_document_verified(
+            smear::parser::graphqlx::lossless::Verified::new(&parse, &src)
+              .expect("the pair verifies"),
+          );
+          (ast.definitions().len(), r)
+        },
+      ),
+      _ => (
+        project_type_system_document(&parse, &src).map(|_| ()),
+        project_type_system_document_recovered(&parse, &src)
+          .map(|(ast, r)| (ast.definitions().len(), r)),
+        {
+          let (ast, r) = smear::parser::graphqlx::lossless::project_type_system_document_verified(
+            smear::parser::graphqlx::lossless::Verified::new(&parse, &src)
+              .expect("the pair verifies"),
+          );
+          (ast.definitions().len(), r)
+        },
+      ),
+    };
+    assert_eq!(recovered, Ok((2, wanted)), "{kind:?}: recovered");
+    assert!(wanted.is_complete());
+    assert_eq!(verified, (2, wanted), "{kind:?}: verified");
+    let refusal = fail_fast.expect_err("the fail-fast door asserts one container");
+    assert_eq!(
+      refusal.kind(),
+      &ProjectErrorKind::UnexpectedChild {
+        parent: K::Root,
+        found: kind,
+      },
+      "{kind:?}: fail-fast"
+    );
+    assert_eq!(refusal.span(), &second, "{kind:?}: at the second container");
   }
 }

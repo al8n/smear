@@ -33,12 +33,16 @@
 //! is 64 brackets, which a recursive projection descends in about 530 KiB — a quarter of the
 //! smallest stack this suite runs on. The assertion goes red; the harness lives.
 //!
-//! # Four fixtures, because there are four cycles
+//! # One fixture per cycle, and one per carrier a cycle passes through
 //!
-//! One shape would leave three of them unmeasured, and they are genuinely separate walks over
+//! One shape would leave three of the cycles unmeasured, and they are genuinely separate walks over
 //! separate frame types. A constant object value reaches `const_value`, an executable argument's
 //! object value reaches `value`, a selection chain reaches `selection_set`, and a nested list type
-//! reaches `ty`.
+//! reaches `ty`. Since al8n/smear#217 and #218 transcribed those walks onto the substrate's cursor —
+//! a frame now suspends a whole cursor rather than a raw child iterator — the other carriers each
+//! cycle passes through get a fixture too, as `deep_projection_x.rs` gives GraphQLx's: a list
+//! value in both value grammars, a nested list type without the `NonNullType` wrapper that folds
+//! into the frame, and an inline fragment's set.
 
 #![cfg(all(feature = "graphql", feature = "rowan", feature = "std"))]
 
@@ -305,6 +309,76 @@ fn a_nested_list_type_projects_flat() {
       source.push_str("]!");
     }
     source.push_str(" }");
+    source
+  });
+}
+
+/// `scalar S @d(a: [[[ … 1 … ]]])` — the constant value cycle through a list, the frame kind the
+/// object fixture does not reach.
+#[test]
+fn a_constant_list_value_projects_flat() {
+  assert_projection_is_flat("const_value / list", false, |brackets| {
+    let mut source = String::from("scalar S @d(a: ");
+    for _ in 0..brackets {
+      source.push('[');
+    }
+    source.push('1');
+    for _ in 0..brackets {
+      source.push(']');
+    }
+    source.push(')');
+    source
+  });
+}
+
+/// `query { f(a: [[[ … 1 … ]]]) }` — the executable value cycle through a list.
+#[test]
+fn an_executable_list_value_projects_flat() {
+  assert_projection_is_flat("value / list", true, |brackets| {
+    let mut source = String::from("query { f(a: ");
+    for _ in 0..brackets {
+      source.push('[');
+    }
+    source.push('1');
+    for _ in 0..brackets {
+      source.push(']');
+    }
+    source.push_str(") }");
+    source
+  });
+}
+
+/// `type T { f: [[[ … Int … ]]] }` — the type cycle with no `!`, so every frame is a bare list and
+/// none carries the `NonNullType` fold.
+#[test]
+fn a_nested_list_type_without_bangs_projects_flat() {
+  assert_projection_is_flat("ty / list", false, |brackets| {
+    let mut source = String::from("type T { f: ");
+    for _ in 0..brackets {
+      source.push('[');
+    }
+    source.push_str("Int");
+    for _ in 0..brackets {
+      source.push(']');
+    }
+    source.push_str(" }");
+    source
+  });
+}
+
+/// `query { ... on T { ... on T { … } } }` — the selection cycle through inline fragments, the
+/// other selection that waits on a set of its own.
+#[test]
+fn an_inline_fragment_chain_projects_flat() {
+  assert_projection_is_flat("selection_set / inline fragment", true, |brackets| {
+    let mut source = String::from("query ");
+    for _ in 0..brackets {
+      source.push_str("{ ... on T ");
+    }
+    source.push_str("{ __typename }");
+    for _ in 0..brackets {
+      source.push_str(" }");
+    }
     source
   });
 }

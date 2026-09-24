@@ -25,6 +25,19 @@ pub type SyntaxToken<L> = rowan::SyntaxToken<L>;
 /// A node-or-token in `L`'s space.
 pub type SyntaxElement<L> = rowan::SyntaxElement<L>;
 
+/// Whether `node` is of `kind`, compared **raw** — the typed cast's test.
+///
+/// `SyntaxNode::kind` goes through `rowan::Language::kind_from_raw`, which has no fallible form and
+/// panics on a raw kind outside the language's space, and `CastNode::cast_node`'s contract is that
+/// it never panics. A tree minted with rowan's public builder can hold such a kind at the node a
+/// caller casts, so the comparison is made on the green tree's raw value instead: a foreign kind is
+/// simply not the kind asked for. al8n/smear#218.
+#[doc(hidden)]
+#[inline]
+pub fn is_kind<L: rowan::Language>(node: &SyntaxNode<L>, kind: L::Kind) -> bool {
+  node.green().kind() == L::kind_to_raw(kind)
+}
+
 /// [`NodeChildren`] with the language named second.
 ///
 /// A convenience alias and nothing more — the iterator and its `Iterator` impl are tokora's. It
@@ -45,7 +58,8 @@ pub fn token_any<L: rowan::Language>(
   parent
     .children_with_tokens()
     .filter_map(|child| child.into_token())
-    .find(|t| kinds.contains(&t.kind()))
+    // Compared raw, for `is_kind`'s reason: a token kind outside the space is not one asked for.
+    .find(|t| kinds.iter().any(|kind| t.green().kind() == L::kind_to_raw(*kind)))
 }
 
 /// Every direct token child of `parent` with the given kind, in document order.
@@ -78,10 +92,11 @@ impl<L: rowan::Language> Iterator for AstTokens<L> {
   fn next(&mut self) -> Option<Self::Item> {
     // Direct children only, exactly as `cast::token` scans: a `Name` belonging to a child node is
     // that node's, and reaching it here would make a parent answer for its child.
-    self
-      .inner
-      .by_ref()
-      .find_map(|child| child.into_token().filter(|t| t.kind() == self.kind))
+    self.inner.by_ref().find_map(|child| {
+      child
+        .into_token()
+        .filter(|t| t.green().kind() == L::kind_to_raw(self.kind))
+    })
   }
 }
 
@@ -170,7 +185,9 @@ macro_rules! ast_node {
         // A kind check and a wrap. `CastNode`'s contract is that this never panics: the
         // navigation helpers call it once per child and read `None` as "not this type, keep
         // looking", so a panicking impl would abort a walk instead of skipping a sibling.
-        if syntax.kind() == $kind {
+        // Compared raw: `syntax.kind()` panics on a raw kind outside the space, which a
+        // caller-minted tree can hold. See `is_kind`.
+        if $crate::lossless::ast::is_kind(&syntax, $kind) {
           ::core::option::Option::Some(Self(syntax))
         } else {
           ::core::option::Option::None
