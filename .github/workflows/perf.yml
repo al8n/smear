@@ -54,9 +54,9 @@ name: perf
 on:
   push:
     # `main` is both the DEFAULT branch and the TRUNK. Any further entry is a live integration
-    # branch, which takes merges too and so needs a lane for the same reason: today that is
-    # `feat/proto`, temporary, dropped when the `proto` campaign lands on `main`. Kept identical to
-    # `ci.yml`'s list, whose comment carries the full reasoning and the order a retired entry has
+    # branch, which takes merges too and so needs a lane for the same reason: the last one was
+    # `feat/proto`, dropped once the `proto` campaign was rebase-merged into `main`. Kept identical
+    # to `ci.yml`'s list, whose comment carries the full reasoning and the order a retired entry has
     # to be removed in.
     #
     # The push lane here is NOT a second copy of the pull-request gate — a merge-base comparison
@@ -66,7 +66,6 @@ on:
     # writing it down is how a threshold goes stale.
     branches:
       - main
-      - feat/proto
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'
