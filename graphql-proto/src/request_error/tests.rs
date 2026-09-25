@@ -6,6 +6,16 @@
 //! because it is not something a caller acts on. So the case that a result does not retain a spine
 //! its own ceilings never authorised has to be written here, on the same terms as
 //! `execute/tests.rs`'s executor-side twin.
+//!
+//! # Under Miri
+//!
+//! `an_accepted_map_retains_no_capacity_the_result_never_authorised` carries
+//! `#[cfg_attr(miri, ignore)]` for its kind: it is an allocation gate — how many slots a result
+//! retains — and the shape of an allocation is not a question of undefined behaviour. What found it
+//! was a measurement, the one `execute/tests.rs`'s header describes: alone under
+//! `cargo miri test -p graphql-proto --lib -- --exact`, Stacked Borrows, aarch64-apple-darwin,
+//! 2026-09-25, it had not returned after five minutes, the `GROWN_ENTRIES` quadratic inserts and
+//! removes being the cost. The other test here runs, in 0.2 s.
 
 use core::num::NonZeroU32;
 
@@ -33,6 +43,19 @@ const GROWN_ENTRIES: usize = 4096;
 /// Read off the result's own field rather than through
 /// [`take_extensions`](RequestErrorResult::take_extensions), because the claim is about what is
 /// *retained*, and taking the map back is one of the two things that ends the retention.
+#[cfg_attr(
+  miri,
+  ignore = "AN ALLOCATION GATE, AND NOT A MIRI SUBJECT. What is asserted below is how many entry \
+            slots a result retains after accepting a map grown under laxer limits, which is the \
+            shape of an allocation, re-derived by an interpreter out of the same MIR, and not a \
+            question of undefined behaviour. Its fixture is `GROWN_ENTRIES` inserts and removes \
+            into a map whose `insert` scans for a duplicate, quadratic by design; its \
+            executor-side twin in `execute/tests.rs` is skipped alike. Found by the five-minute \
+            detector's measurement: over five minutes under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
+            measurement. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this \
+            from being a coverage cut nobody chose."
+)]
 #[test]
 fn an_accepted_map_retains_no_capacity_the_result_never_authorised() {
   let lax = Limits {

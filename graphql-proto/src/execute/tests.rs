@@ -6,6 +6,53 @@
 //! second walk over a drained subtree releases nothing, changes no state and alters no response, so
 //! no counter and no assertion on the response can tell the two apart — only a slot the walk would
 //! have overwritten can, and reaching one means reaching into the executor.
+//!
+//! # Under Miri
+//!
+//! Twenty-one tests here carry `#[cfg_attr(miri, ignore)]`, and what each one's reason names is its
+//! KIND. A cost gate — an assertion about units charged, steps taken, definitions walked or slots
+//! retained — is not a Miri subject: Miri decides whether an execution has undefined behaviour,
+//! and the arithmetic a gate checks is re-derived out of the same MIR with no `unsafe` in it to
+//! find. Nor is a source census, which asserts on this crate's text and never runs the executor.
+//! `a_colliding_set_of_document_variables_cannot_outrun_the_budget` is a cost gate whose fixture
+//! also exhausts the 32-bit interpreted address space.
+//!
+//! A measurement found them and does not decide them. Every test was run alone under
+//! `cargo miri test -p graphql-proto --lib -- --exact`, Stacked Borrows,
+//! `-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-alignment-check`, on
+//! aarch64-apple-darwin, 2026-09-25, and every one that runs was run again under Tree Borrows.
+//! Past five minutes under either model a test is a candidate, killed and recorded as `>300`; past
+//! one minute under Stacked Borrows it is read for its kind as well. Among those a cost gate or a
+//! census is skipped, and behaviour stays whatever it costs. A cost gate that neither detector
+//! finds is not a candidate and runs.
+//!
+//! | skipped | kind | seconds |
+//! |---|---|---|
+//! | `a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment` | cost | >300 |
+//! | `a_colliding_set_of_document_variables_cannot_outrun_the_budget` | cost, address space | — |
+//! | `a_condition_does_not_pay_for_the_arguments_after_if` | cost | 279.0 |
+//! | `a_flat_fragment_chain_is_linear` | cost | >300 |
+//! | `a_matched_argument_does_not_pay_for_the_arguments_after_it` | cost | >300 |
+//! | `a_refused_index_pass_reserves_no_fragment_storage` | cost, allocation | 82.1 |
+//! | `a_refused_operation_lookup_reads_nothing_past_the_ceiling` | cost | 101.4 |
+//! | `a_refused_probe_run_stops_at_the_refusal` | cost | >300 |
+//! | `a_repeated_response_key_charges_one_comparison_each_time` | cost | 26.2, TB >580 |
+//! | `a_serial_release_does_not_grow_with_the_response` | cost | 111.4 |
+//! | `a_skipped_selection_does_not_pay_for_the_directives_after_the_skip` | cost | >300 |
+//! | `an_accepted_map_retains_no_capacity_the_executor_never_authorised` | allocation | >300 |
+//! | `collection_scratch_cannot_outgrow_the_ceiling_that_refuses_it` | allocation | >300 |
+//! | `distinct_response_keys_are_linear_however_they_are_spelled` | cost | >300 |
+//! | `every_public_entry_point_declares_its_discharge_and_its_phases` | source census | 206.9 |
+//! | `indexing_the_documents_fragments_is_charged` | cost | >300 |
+//! | `the_collection_charge_tracks_the_bytes_a_name_costs` | cost | >300 |
+//! | `the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger` | cost | 109.6 |
+//! | `the_index_pass_reads_each_definition_once` | cost | 114.1 |
+//! | `the_operation_lookup_charges_one_unit_per_definition_read` | cost | 103.0 |
+//! | `the_written_arguments_are_charged_and_the_declared_ones_are_not` | cost | >300 |
+//!
+//! The 34 that run took 242.0 s under the same flags and 614.2 s under Tree Borrows. Run
+//! 35944196326 is where the five-minute ones were first seen, at the six-hour job ceiling of a cell
+//! that ran every member at once.
 
 use smear_parser::{
   graphql::{
@@ -235,6 +282,17 @@ fn a_drained_subtree_is_not_walked_again() {
 /// times; after it, the buffer never holds more than four. A narrower query — anything under the
 /// bound — would pass against the defect and prove nothing, which is the trap a sibling line hit
 /// tonight with a fixture that was wide but not wide enough.
+#[cfg_attr(
+  miri,
+  ignore = "AN ALLOCATION GATE, AND NOT A MIRI SUBJECT. What is asserted below is the staging \
+            buffer's capacity against the metadata ceiling that refuses it, which is the shape of \
+            an allocation, re-derived by an interpreter out of the same MIR, and not a question of \
+            undefined behaviour. Its fixture is a 4 096-alias selection set. Found by the \
+            five-minute detector's measurement: over five minutes under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
+            table. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this from \
+            being a coverage cut nobody chose."
+)]
 #[test]
 fn collection_scratch_cannot_outgrow_the_ceiling_that_refuses_it() {
   const WIDTH: usize = 4096;
@@ -353,6 +411,17 @@ fn collection_work(sdl: &str, query: &str) -> u32 {
 /// `take_bytes` and the total stops moving with the key's length — which
 /// `distinct_response_keys_are_linear_however_they_are_spelled` measures across lengths and this
 /// one pins at one.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is the exact units 1 024 \
+            repeats of one response key cost — one comparison per repeat after the first, which is \
+            arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Found by the five-minute detector's measurement: 26.2 s under \
+            Stacked Borrows and over nine and a half minutes under Tree Borrows, alone under \
+            `cargo miri test` on aarch64-apple-darwin, 2026-09-25. The file's header carries the \
+            table. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this from \
+            being a coverage cut nobody chose."
+)]
 #[test]
 fn a_repeated_response_key_charges_one_comparison_each_time() {
   use crate::collect::byte_units;
@@ -433,6 +502,16 @@ fn a_repeated_response_key_charges_one_comparison_each_time() {
 /// `h ^= h >> 32` instead: the width-8 and width-16 rows at radices 36 and 63 read 11,943, 11,766,
 /// 18,401 and 17,568, and every width-6 row stays green. Each defect leaves the other one's rows
 /// passing, which is the whole reason both axes are here.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that 4 096 distinct \
+            response keys cost between a floor and one comparison per key in every spelling, which \
+            is arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Found by the five-minute detector's measurement: over five \
+            minutes under `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). \
+            The file's header carries the table. Declared in `ci/miri_scope.py`'s ignore table, \
+            which is what stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn distinct_response_keys_are_linear_however_they_are_spelled() {
   const KEYS: u32 = 4096;
@@ -574,6 +653,18 @@ fn distinct_response_keys_are_linear_however_they_are_spelled() {
 /// The bound is two-sided and both sides are what matters: eight a link against the `LINKS² / 2`
 /// that scanning the definitions per spread costs is three orders of magnitude, so a ceiling with
 /// room in it still separates linear from quadratic.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that collecting a 4 \
+            096-link fragment chain costs between six and ten units per link, which is arithmetic \
+            an interpreter re-derives out of the same MIR rather than a question of undefined \
+            behaviour. Found by the five-minute detector's measurement: over five minutes under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25), and still \
+            running after 7 025 to 9 318 s in three Stacked Borrows cells of run 35944196326 when \
+            the job ceiling cancelled them. The file's header carries the table. Declared in \
+            `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
+            nobody chose."
+)]
 #[test]
 fn a_flat_fragment_chain_is_linear() {
   const LINKS: u32 = 4096;
@@ -741,6 +832,16 @@ fn fragment_chain(links: u32) -> std::string::String {
 /// is the one refusal this fixture is about. `spent()` is asserted to have reached the definitions
 /// charge, so a fixture mis-tuned low enough to be refused at the *first* charge fails instead of
 /// passing for the wrong reason.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is the exact units a \
+            refused index pass spends and that it reserves no fragment storage — a charge and a \
+            capacity, which is arithmetic an interpreter re-derives out of the same MIR rather \
+            than a question of undefined behaviour. Found by the five-minute detector's \
+            measurement: 82.1 s under `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, \
+            2026-09-25). The file's header carries the table. Declared in `ci/miri_scope.py`'s \
+            ignore table, which is what stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn a_refused_index_pass_reserves_no_fragment_storage() {
   const LINKS: u32 = 256;
@@ -852,6 +953,16 @@ fn a_refused_index_pass_reserves_no_fragment_storage() {
 /// instead of moving the selection in, counting what it reads as every reader in that module does.
 /// `walked` doubles, and the response, all four totals in `Charges` and `fragment_reserved()` stay
 /// exactly as they are.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that the index pass \
+            reads each of 513 definitions once and spends exactly the budget it was given, which \
+            is arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Found by the five-minute detector's measurement: 114.1 s under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's \
+            header carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_index_pass_reads_each_definition_once() {
   /// Named operations, so that what the pass walks is overwhelmingly not fragments.
@@ -1042,6 +1153,18 @@ fn colliding_spread_cost(spread: &str) -> u32 {
 ///
 /// Delete the charge in `Fragments::build` and the first half goes green while the document is
 /// indexed for nothing, which is exactly the state this closed.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that indexing a \
+            document's fragments is charged — refused one unit short of its cost and served at it, \
+            which is arithmetic an interpreter re-derives out of the same MIR rather than a \
+            question of undefined behaviour. Its fixture is `colliding_fragment_names()`, a search \
+            that keeps every candidate it rejects live until 512 names share one bucket of 1 024. \
+            Found by the five-minute detector's measurement: over five minutes under `cargo miri \
+            test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries \
+            the table. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this \
+            from being a coverage cut nobody chose."
+)]
 #[test]
 fn indexing_the_documents_fragments_is_charged() {
   let names = colliding_fragment_names();
@@ -1073,6 +1196,20 @@ fn indexing_the_documents_fragments_is_charged() {
 /// names probes `n²/2` slots, in a constructor no ceiling watched. Chaining pushes at a bucket head
 /// and never probes, so this total is exact and every term in it is a count of something the
 /// document has — not of something the names did to each other.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is the exact charge a \
+            colliding fragment table costs, one unit per definition and fragment, which is \
+            arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Its fixture is `colliding_fragment_names()`, a search that keeps \
+            every candidate it rejects live until 512 names share one bucket of 1 024. Found by \
+            the five-minute detector's measurement: over five minutes under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25), and 11 625 s on \
+            x86_64-unknown-linux-gnu under Stacked Borrows on run 35944196326, where no Tree \
+            Borrows cell saw it return. The file's header carries the table. Declared in \
+            `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
+            nobody chose."
+)]
 #[test]
 fn a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment() {
   let names = colliding_fragment_names();
@@ -1129,6 +1266,17 @@ fn a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment() {
 /// **The plants.** Delete any one `take_bytes`/`spend_bytes` and that row's three totals collapse
 /// onto each other. Drop the stored hash and compare bytes on every chain step instead: the
 /// interner row's exact total gains a `k²/2 · byte_units` term and fails on the first width.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that the collection \
+            charge grows with the bytes a name costs, row by row, which is arithmetic an \
+            interpreter re-derives out of the same MIR rather than a question of undefined \
+            behaviour. Its fixture runs `colliding_names_of` at three widths, up to 261-byte \
+            spellings. Found by the five-minute detector's measurement: over five minutes under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's \
+            header carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_collection_charge_tracks_the_bytes_a_name_costs() {
   use crate::collect::byte_units;
@@ -1231,6 +1379,18 @@ fn the_collection_charge_tracks_the_bytes_a_name_costs() {
 /// The budget cannot show this: comparisons are charged one for one, so the charge and the count
 /// agree by construction under either version. Only a count taken independently of the charge —
 /// `Fragments::compares` — can separate them, which is what it exists for.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that a refused probe \
+            run stops charging at the refusal, which is arithmetic an interpreter re-derives out \
+            of the same MIR rather than a question of undefined behaviour. Its fixture is \
+            `colliding_fragment_names()`, a search that keeps every candidate it rejects live \
+            until 512 names share one bucket of 1 024. Found by the five-minute detector's \
+            measurement: over five minutes under `cargo miri test` on aarch64-apple-darwin \
+            (Stacked Borrows, 2026-09-25). The file's header carries the table. Declared in \
+            `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
+            nobody chose."
+)]
 #[test]
 fn a_refused_probe_run_stops_at_the_refusal() {
   /// Units left for probing once the index pass and the root's selection are paid for.
@@ -1292,6 +1452,16 @@ fn a_refused_probe_run_stops_at_the_refusal() {
 /// Both halves are asserted, because either alone can be satisfied by the wrong mechanism: the
 /// long list costs exactly what the short one costs, and the operation is then served under a
 /// budget set to precisely that. At 555deb7 the first is `short + 1600`.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that a skipped \
+            selection pays for the directive that skipped it and not for the 1 600 written after \
+            it, which is arithmetic an interpreter re-derives out of the same MIR rather than a \
+            question of undefined behaviour. Found by the five-minute detector's measurement: over \
+            five minutes under `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, \
+            2026-09-25). The file's header carries the table. Declared in `ci/miri_scope.py`'s \
+            ignore table, which is what stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn a_skipped_selection_does_not_pay_for_the_directives_after_the_skip() {
   /// Past any plausible slack in the budget below, so a refusal cannot be a near miss.
@@ -1353,6 +1523,17 @@ fn a_skipped_selection_does_not_pay_for_the_directives_after_the_skip() {
 /// input there is no suffix and no difference to see. This executor does not validate — the whole
 /// collection ledger exists because what reaches it is what the *client* wrote — so the population
 /// with a suffix is the unvalidated one, and it is the one the charge has to be honest about.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that one `@skip` usage \
+            costs the same units with 1 600 arguments written after `if` as with none, which is \
+            arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Found by the five-minute detector's measurement: 279.0 s under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25), and 321.5 to \
+            405.1 s on run 35944196326. The file's header carries the table. Declared in \
+            `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
+            nobody chose."
+)]
 #[test]
 fn a_condition_does_not_pay_for_the_arguments_after_if() {
   const SUFFIX: usize = 1_600;
@@ -1657,6 +1838,17 @@ fn an_unreadable_argument_variable_serves_the_optional_argument_it_names() {
 ///
 /// Both halves, because either alone is satisfiable by the wrong mechanism: the two costs are
 /// equal, and the long form is then served under a ceiling set to precisely the short one's cost.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that step 5's scan pays \
+            for the one entry it matches and not for the 1 600 written after it, and that the long \
+            form is served under a ceiling set to the short form's exact cost, which is arithmetic \
+            an interpreter re-derives out of the same MIR rather than a question of undefined \
+            behaviour. Found by the five-minute detector's measurement: over five minutes under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's \
+            header carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn a_matched_argument_does_not_pay_for_the_arguments_after_it() {
   /// Past any plausible slack in the budget below, so a refusal cannot be a near miss.
@@ -1848,10 +2040,12 @@ fn the_metered_scan_admits_what_the_whole_slice_rule_admits() {
             `-p graphql-proto --lib` binary dies with it — `ci/miri_sb.sh` already carries \
             `-Zmiri-address-reuse-rate=1.0` for that target and records it as measured \
             insufficient, and no reuse is possible inside one call where nothing has been freed \
-            yet. The three `colliding_fragment_names` gates above run the same search at half the \
-            mask and DO complete in this binary, which is what puts the peak in this call rather \
-            than in the accumulation. Declared in `ci/miri_scope.py`'s ignore table, which is \
-            what stops this from being a coverage cut nobody chose."
+            yet. At half the mask the same search fits: on run 35944196326 \
+            `a_colliding_fragment_table_costs_one_unit_per_definition_and_fragment` completed on \
+            that target in 13 594 s, which is what puts the peak in this call rather than in the \
+            accumulation — and that gate and the other two over `colliding_fragment_names` are cost \
+            gates too, skipped here for their kind. Declared in `ci/miri_scope.py`'s ignore table, \
+            which is what stops this from being a coverage cut nobody chose."
 )]
 #[test]
 fn a_colliding_set_of_document_variables_cannot_outrun_the_budget() {
@@ -1932,6 +2126,16 @@ fn many_operations(count: u32) -> std::string::String {
 ///
 /// **The plant.** Delete the `visits.take(1)` and the first total falls to one, the second to two
 /// and the third to two, while every response in the file is unchanged.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that draft §6.1's \
+            lookup charges one unit per definition it reads, over 512 operations, which is \
+            arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Found by the five-minute detector's measurement: 103.0 s under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's \
+            header carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_operation_lookup_charges_one_unit_per_definition_read() {
   const OPERATIONS: u32 = 512;
@@ -2032,6 +2236,16 @@ fn an_unnamed_lookup_reads_every_definition_before_it_can_say_the_operation_is_t
 /// **The plant.** Take the charge after the read instead of before it, or spend
 /// `definitions.len()` up front. The first leaves `walked` at `OPERATIONS`, the second at zero;
 /// the refusal, the message and every response in this file are identical under both.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that a lookup refused \
+            at eight units walks exactly eight of 512 definitions and spends exactly that, which \
+            is arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Found by the five-minute detector's measurement: 101.4 s under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's \
+            header carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn a_refused_operation_lookup_reads_nothing_past_the_ceiling() {
   const OPERATIONS: u32 = 512;
@@ -2204,6 +2418,16 @@ fn a_serial_release_costs_one_step_per_top_level_field() {
 /// fields; the cursor spends 63 links on both, and the planted walk spends **6,112 and 133,120** —
 /// twenty-two times the driver's requests bought twenty-two times the serial gate's work, for a
 /// document that did not change.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that a serial release \
+            takes the same number of steps however many requests the driver's lists make, which is \
+            arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Found by the five-minute detector's measurement: 111.4 s under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's \
+            header carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn a_serial_release_does_not_grow_with_the_response() {
   const FIELDS: usize = 64;
@@ -2761,6 +2985,17 @@ fn guards_read(body: &str) -> std::vec::Vec<Guard> {
 /// That is the shape to keep in mind when a ninth entry point arrives: this table is an enumeration
 /// of *attributes of the answer*, and the failure mode is not a missing row, it is a missing
 /// column.
+#[cfg_attr(
+  miri,
+  ignore = "A SOURCE CENSUS, AND NOT A MIRI SUBJECT. What is asserted below is that every public \
+            entry point in `execute.rs` opens with its declared discharge and reads exactly its \
+            declared phase guards — a property of 5 133 lines of source read through \
+            `include_str!`, and not of an execution: nothing here runs the executor, so an \
+            interpreter has none of this crate's code to check. Read for its kind at 206.9 s under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25), 198.7 s under \
+            Tree Borrows. The file's header carries the table. Declared in `ci/miri_scope.py`'s \
+            ignore table, which is what stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn every_public_entry_point_declares_its_discharge_and_its_phases() {
   let entries = entry_points(SOURCE);
@@ -3201,6 +3436,18 @@ const GROWN_ENTRIES: usize = 4096;
 /// Read off the executor's own field rather than through
 /// [`take_extensions`](Executor::take_extensions), because the claim is about what is *retained*:
 /// taking the map back is one of the three things that ends the retention.
+#[cfg_attr(
+  miri,
+  ignore = "AN ALLOCATION GATE, AND NOT A MIRI SUBJECT. What is asserted below is how many entry \
+            slots the executor retains after accepting a map grown under laxer limits, which is \
+            the shape of an allocation, re-derived by an interpreter out of the same MIR, and not \
+            a question of undefined behaviour. Its fixture is `GROWN_ENTRIES` inserts and removes \
+            into a map whose `insert` scans for a duplicate, quadratic by design. Found by the \
+            five-minute detector's measurement: over five minutes under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
+            table. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this from \
+            being a coverage cut nobody chose."
+)]
 #[test]
 fn an_accepted_map_retains_no_capacity_the_executor_never_authorised() {
   let lax = Limits {
@@ -4630,6 +4877,17 @@ fn a_name_the_arena_refuses_is_not_charged_for_its_copy() {
 /// arguments written at *every one* of a million positions, which is tens of megabytes of request.
 /// And what stays uncharged is bounded — the comparison total is now `declared × (charged units)`,
 /// a schema constant times the ledger, rather than a product with a free factor in it.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that written arguments \
+            are charged and declared ones are not, which is arithmetic an interpreter re-derives \
+            out of the same MIR rather than a question of undefined behaviour. Its fixture is six \
+            documents, the largest writing 32 arguments at each of 64 positions against 32 \
+            declared. Found by the five-minute detector's measurement: over five minutes under \
+            `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's \
+            header carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_written_arguments_are_charged_and_the_declared_ones_are_not() {
   fn visits(declared: usize, written: usize, positions: usize) -> u32 {
@@ -4724,6 +4982,16 @@ fn the_written_arguments_are_charged_and_the_declared_ones_are_not() {
 /// repair. The last two are the repair: at `6c06ba6` a field of any width builds, so a fixture that
 /// performs `positions × declared` work for zero units can be written at any `declared` a test
 /// cares to type. It cannot any more.
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that the units charged \
+            over a 512-element list do not move with a field's declared-argument count and do move \
+            with the list, which is arithmetic an interpreter re-derives out of the same MIR \
+            rather than a question of undefined behaviour. Found by the five-minute detector's \
+            measurement: 109.6 s under `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, \
+            2026-09-25). The file's header carries the table. Declared in `ci/miri_scope.py`'s \
+            ignore table, which is what stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger() {
   fn sdl(declared: usize) -> String {
