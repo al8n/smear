@@ -771,7 +771,7 @@ let parts = Components {
   status: Status::Valid,
 };
 // error[E0277]: the trait bound `Owned: Leaf` is not satisfied
-let _ = Name::<Owned>::from_components(parts);
+let _ = <Name<Owned> as FromComponents>::from_components(parts);
 ```
 
 `ErrorNode`, which needs no payload from the caller because it mints one — and is therefore the
@@ -793,7 +793,7 @@ impl ErrorNode<SimpleSpan> for Owned {
 }
 
 // error[E0277]: the trait bound `Owned: Leaf` is not satisfied
-let _ = Name::<Owned>::error(SimpleSpan::new(0, 1));
+let _ = <Name<Owned> as ErrorNode<SimpleSpan>>::error(SimpleSpan::new(0, 1));
 ```
 
 One control for all three, over the `S` that satisfies the bound. Every name the three blocks
