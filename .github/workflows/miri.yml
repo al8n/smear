@@ -148,21 +148,28 @@ name: Miri
 
 # ── WHAT THIS MATRIX DOES NOT COVER, AND WHY IT IS STATED HERE ──────────────────────────────
 #
-# Of the 50 integration targets in `smear/tests/`, 46 are NOT built with anything in them by any
-# cell in this file, on any target, under either aliasing model, and 6 of the tests inside the
-# targets and libraries that ARE built are skipped. All of it is derived and all of it is printed
-# by `ci/miri_scope.py` at the end of every cell:
+# No cell in this file builds any of the 64 integration targets in `smear/tests/`, on any target,
+# under either aliasing model: a cell selects one member of `ci/miri_scope.py`'s `MIRI_PACKAGES`,
+# and the umbrella `smear` is not one. Of the members' own nine targets the cells build three,
+# and 36 of the tests inside the targets and libraries the guard declares are skipped — 32 in
+# what the cells build, and 4 in `smear/tests/`, which `--selftest` alone holds to the table. All
+# of it is derived and all of it is printed by `ci/miri_scope.py`: per cell at its end, and for
+# `smear/tests/`, the fixture `--selftest` partitions, before every cell starts:
 #
-#   37  `#![cfg(feature = "rowan")]` — the entire lossless CST tower. `rowan` itself has
-#       undefined behaviour reachable from its ordinary public API, live in every published
-#       version including `0.17.0` (2026-08-02), reported upstream since 2021 and unfixed.
-#       `ci/miri_sb.sh` and `ci/miri_tb.sh` carry the two sites, the reproduction and the
-#       upstream references, and #77 carries the decision.
-#    9  gated on `validator`, `proto` or `introspection` — features `smear` does not default to
-#       and these scripts do not pass. They are `core` + `alloc` rule engines with no `unsafe`
-#       reachable from them that the lib tests do not already interpret, so the cost of turning
-#       the features on is minutes per cell for nothing Miri can answer.
-#    6  individual tests, not targets, and not all of them in `smear/tests/`:
+#   64  `smear/tests/`, outside every cell. 44 are `#![cfg(feature = "rowan")]` — the entire
+#       lossless CST tower. `rowan` itself has undefined behaviour reachable from its ordinary
+#       public API, live in every published version including `0.17.0` (2026-08-02), reported
+#       upstream since 2021 and unfixed. `ci/miri_sb.sh` and `ci/miri_tb.sh` carry the two sites,
+#       the reproduction and the upstream references; #73 and #77 carry the decision. The other
+#       20 are not rowan-gated, and what keeps them out is that no cell selects `smear`:
+#       al8n/smear#228 owns that.
+#    6  of the members' own targets, excluded by their cell's partition: `smear-parser`'s two
+#       rowan-gated `deep_projection` targets, its two behind `materialized-numbers`, which it
+#       does not default to, and `enum_attribute_parity`, a source census that excludes itself
+#       with `not(miri)`; and `smear-schema`'s `introspection_allocation`, behind `introspection`.
+#       Excluded / compiled per cell: smear-lexer 0/0, smear-parser 5/1, smear-schema 1/0,
+#       smear-compiler 0/0, graphql-proto 0/2.
+#   36  individual tests, not targets, and not all of them in `smear/tests/`:
 #
 #       * the two corpus sweeps in each of `tests/syntactic_span_extent.rs` and
 #         `tests/syntactic_x_span_extent.rs`. These are why this workflow had never produced a
@@ -182,8 +189,28 @@ name: Miri
 #         binary, and with it every other test in it, which is how one gate rendered several cells
 #         of this matrix red. `-Zmiri-address-reuse-rate=1.0` is already on for that target and
 #         `ci/miri_sb.sh` records it as measured insufficient; nothing inside the call has been
-#         freed, so there is nothing for it to reuse. The three sibling gates that run the same
-#         search at half the mask still run here.
+#         freed, so there is nothing for it to reuse. Its three siblings over the same search at
+#         half the mask are skipped too, below, for their kind.
+#       * 30 more, skipped for their KIND: 29 found by the measurement, and one, 0.2 s, skipped with
+#         the rest of its module's gate so the hash's gate is skipped whole. A test whose assertion
+#         is a cost or a statistical property — units, steps, slots, allocations, a hash's spread, a
+#         price at a ceiling — or whose fixture enumerates thousands of candidates — a
+#         colliding-name search, 226 800 arrival orders, every line of a source tree — is not a Miri
+#         subject: Miri decides whether an execution has undefined behaviour, and none of those is
+#         that question. Each member's tests were run alone on aarch64-apple-darwin on 2026-09-25; a
+#         test past five minutes under either aliasing model is a candidate, one past a minute under
+#         Stacked Borrows is read for its kind as well, and behaviour stays whatever it costs —
+#         `smear-parser`'s 100 000-deep map type is released in 498.2 s and runs. By file:
+#         `graphql-proto/src/execute/tests.rs` 20 (cost and allocation gates, one source census),
+#         `graphql-proto/src/request_error/tests.rs` 1 (an allocation gate),
+#         `graphql-proto/tests/response_order.rs` 2 (the two exhaustive arrival-order sweeps),
+#         `smear-parser/tests/syntactic_terminal_reads.rs` 2 (source censuses),
+#         `smear-schema/src/builder/tests.rs` 1 (a price at a ceiling) and
+#         `smear-schema/src/repr/name/tests.rs` 4 (the hash's output properties). One whole target
+#         goes the same way at the crate level, where the guard prints it:
+#         `smear-parser/tests/enum_attribute_parity.rs` is one source census, past five minutes
+#         under Tree Borrows, and carries `#![cfg(not(miri))]` because a target whose every test is
+#         skipped should say so as a target.
 #
 #       Each carries `#[cfg_attr(miri, ignore)]` with its own reason, and each file's header
 #       carries the measurement.
@@ -208,19 +235,66 @@ name: Miri
 # per-binary cross-check — the guard parsed each lib binary's `ignored` digit and compared it to
 # nothing. The row above exists because that gap was found while adding it.
 #
-# What is left in a cell is the lib unit tests, `tests/oracle.rs`,
-# `tests/tokora_conformance.rs` and the eight span-extent witnesses — the SIMD lexer over a
-# corpus, and tokora's own input-layer conformance kit. That is where this project's `unsafe`
-# is, and it is what the job exists for.
+# What is left in a cell is its member's lib unit tests and the member's integration targets its
+# partition compiles, three across the five. The SIMD lexer's own tests are among them, and that
+# is where this project's `unsafe` is and what the job exists for.
 #
 # This is an exclusion, not a silence. `ci/miri_scope.py` derives every line above by parsing
 # each target's crate-level `#![cfg(...)]` and evaluating it against the feature set it reads out
-# of `smear/Cargo.toml`, prints the result with its reason, and FAILS the cell in either
+# of the member's own `Cargo.toml`, prints the result with its reason, and FAILS the cell in either
 # direction: if a target this cell DOES compile ran zero tests (#73's mechanism — a built,
 # linked, passing, empty harness), or if an excluded one ran any test at all (#77's mechanism — a
 # new workspace member unifying `smear/rowan` back into the resolve), or if the `ignored` count a
 # target reports is not the one its source declares. The matrix is therefore allowed to be
 # narrower than the test tree, and not allowed to be narrower than it says.
+
+# ── ONE MEMBER PER CELL, AND A CEILING ON EACH ──────────────────────────────────────────────
+#
+# A cell selects ONE member of `ci/miri_scope.py`'s `MIRI_PACKAGES`, and the matrix is target x
+# member: 4 x 5 cells per aliasing model, 40 in all, named `miri-{sb,tb}-<target>-<member>`. The
+# five used to share one `cargo miri test` per cell, and run 35944196326 (at c964a6a) is why they
+# no longer do: all eight cells were cancelled at the six-hour job ceiling inside
+# `graphql-proto`'s lib binary, which cargo runs first — six of its 64 tests done under Stacked
+# Borrows, one under Tree Borrows — so no other member had been interpreted on a push since
+# 2026-08-21. A cell of one member finishes or fails on its own clock.
+#
+# IT IS A SCHEDULING CHANGE, NOT A COVERAGE ONE, and that was measured. Cargo unifies features over
+# the selected packages, so a member alone may resolve less than it did beside the other four.
+# `cargo +nightly test --unit-graph` on all four targets, the five-member selection against each
+# one-member one: four members resolve the same set alone, and `smear-schema` loses `build` — which
+# `smear-compiler` and `graphql-proto`'s dev-dependency were asking for, and which its lib tests
+# sit behind — so its cells pass `--features build` and nothing else. `MIRI_SHARD_FEATURES` in
+# `ci/miri_scope.py` carries that measurement and the one thing it leaves different: two
+# DEPENDENCIES' features, not any member's own. `rowan` is off in every cell.
+#
+# `--verify-exclusions` runs in ONE cell: `miri-sb-x86_64-unknown-linux-gnu-smear-compiler`. It is
+# a native host build of the five members plus `smear`, so it answers the same on every target,
+# member and model, and it was most of what each cell of that run spent before its first test —
+# 5 to 6 minutes on Linux and 18 to 24 on macOS. The `include:` entry below is the designation.
+#
+# THE CEILING IS ON THE MIRI STEP, NOT THE JOB, because the two end differently. A job past its
+# `timeout-minutes` is CANCELLED, which is how all eight cells of that run ended at the 360-minute
+# default; a step past its own FAILS, with "The action ... has timed out after N minutes" (actions/
+# runner, `StepsRunner.cs`). A runaway test therefore reddens its cell, and the log above the
+# error names the last test that finished. The minutes are per member and per model: the worst
+# Miri-step wall the member measured across the four targets on run 36141578092 — setup, build and
+# tests, all inside the step — x2, rounded up to five, floor 60 and cap 240:
+#
+#                    Miri step on run 36141578092, minutes,
+#                    x86_64 / i686 / powerpc64 / aarch64                    timeout-minutes
+#     member         SB                          TB                          SB     TB
+#     smear-lexer     1.7 /  1.6 /  1.9 /  2.3    2.1 /  2.3 /  2.7 /  1.8    60     60
+#     smear-parser   23.2 / 25.2 / 23.8 / 21.6   51.9 / 51.6 / 36.2 / 64.9    60    130
+#     smear-schema    4.5 /  4.8 /  4.7 /  6.2   44.2 / 58.7 / 41.3 / 37.4    60    120
+#     smear-compiler  7.4*/  1.4 /  1.7 /  1.4    1.3 /  2.1 /  2.1 /  2.5    60     60
+#     graphql-proto   8.7 /  5.9 /  6.7 / 10.4   20.2 / 17.6 / 10.7 / 23.7    60     60
+#
+# * is `miri-sb-x86_64-unknown-linux-gnu-smear-compiler`, whose step also runs
+# `--verify-exclusions`: six minutes of native build before its first test. The previous revision
+# set these ceilings from a projection, the local wall x3 x1.45, and it was short where the runners
+# were slowest: `smear-schema` under Tree Borrows took 3.0x its local wall on i686 rather than
+# 1.45x, and `smear-parser` under Tree Borrows 2.8x on aarch64-apple-darwin. `graphql-proto` under
+# Tree Borrows measured 23.7 at worst, so it is one cell.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
 # `.github/workflows/ci.yml` and `.github/workflows/macos.yml`; read the comment there for why the
@@ -307,19 +381,20 @@ env:
 
 jobs:
   miri-tb:
-    name: miri-tb-${{ matrix.target }}
+    name: miri-tb-${{ matrix.target }}-${{ matrix.package }}
     strategy:
       # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
       # a cross toolchain (installed below); don't let a failure there
       # cancel the other, unrelated cells in this matrix.
       fail-fast: false
       matrix:
-        # ONE dimension. Until #77 there was an `os` dimension too, with five `exclude:` entries
-        # pairing each target to the only host that could build it — a 2 x 5 product carved back
-        # down to 5. The pairing is real again, because `criterion` is back in `smear`'s dev
-        # graph, but it is expressed in `runs-on:` below instead: the host is a CONSEQUENCE of
-        # the target, and a second dimension would state four pairs where a target list plus one
-        # rule states them once and cannot be half-edited.
+        # TWO dimensions, and the host is still not one of them. Until #77 there was an `os`
+        # dimension, with five `exclude:` entries pairing each target to the only host that could
+        # build it — a 2 x 5 product carved back down to 5. The pairing is real again, because
+        # `criterion` is back in `smear`'s dev graph, but it is expressed in `runs-on:` below
+        # instead: the host is a CONSEQUENCE of the target, and a host dimension would state four
+        # pairs where a target list plus one rule states them once and cannot be half-edited. The
+        # second dimension is the member, and the header's "ONE MEMBER PER CELL" says why.
         #
         # FOUR entries, not five: `x86_64-apple-darwin` was dropped because it is the one target
         # here that interprets the same program as another — same arch, width, endianness and
@@ -333,6 +408,30 @@ jobs:
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - aarch64-apple-darwin
+        # One member per cell, and exactly `ci/miri_scope.py`'s `MIRI_PACKAGES`: `--package`
+        # refuses any other name, so this list cannot select a member the guard does not account
+        # for. `smear` is not here for the reason `MIRI_NOT_SELECTED` records.
+        package:
+          - smear-lexer
+          - smear-parser
+          - smear-schema
+          - smear-compiler
+          - graphql-proto
+        # `timeout` is the Miri step's ceiling in minutes, per member: the worst Miri-step wall
+        # measured on run 36141578092 across the four targets x2, floor 60, cap 240. The header's
+        # "ONE MEMBER PER CELL" section carries the measurements and why it is on the
+        # step. `MIRI_NOT_SELECTED` is re-measured in one cell of the other job.
+        include:
+          - package: smear-lexer
+            timeout: 60
+          - package: smear-parser
+            timeout: 130
+          - package: smear-schema
+            timeout: 120
+          - package: smear-compiler
+            timeout: 60
+          - package: graphql-proto
+            timeout: 60
     # `aarch64-apple-darwin` cannot be built from a Linux host — `criterion` -> `alloca` -> a C
     # build script; see the header. Every other target here builds on Linux and should stay
     # there, because the account's macOS runner concurrency is the queue this workflow's header
@@ -347,8 +446,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-miri-${{ matrix.package }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-miri-${{ matrix.package }}-
             ${{ runner.os }}-miri-
       - name: Install cross C toolchain for ${{ matrix.target }}
         # Named targets rather than a negation. The guard used to read
@@ -372,23 +472,30 @@ jobs:
               ;;
           esac
       - name: Miri
+        # On the STEP: past its own `timeout-minutes` a step FAILS, while a job past its ceiling
+        # is CANCELLED. The header's "ONE MEMBER PER CELL" section has the measurement.
+        timeout-minutes: ${{ matrix.timeout }}
+        env:
+          # Never in this job: the one cell that re-measures `MIRI_NOT_SELECTED` is in `miri-sb`.
+          MIRI_VERIFY_EXCLUSIONS: '0'
         run: |
-          bash ci/miri_tb.sh ${{ matrix.target }}
+          bash ci/miri_tb.sh ${{ matrix.target }} ${{ matrix.package }}
 
   miri-sb:
-    name: miri-sb-${{ matrix.target }}
+    name: miri-sb-${{ matrix.target }}-${{ matrix.package }}
     strategy:
       # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
       # a cross toolchain (installed below); don't let a failure there
       # cancel the other, unrelated cells in this matrix.
       fail-fast: false
       matrix:
-        # ONE dimension. Until #77 there was an `os` dimension too, with five `exclude:` entries
-        # pairing each target to the only host that could build it — a 2 x 5 product carved back
-        # down to 5. The pairing is real again, because `criterion` is back in `smear`'s dev
-        # graph, but it is expressed in `runs-on:` below instead: the host is a CONSEQUENCE of
-        # the target, and a second dimension would state four pairs where a target list plus one
-        # rule states them once and cannot be half-edited.
+        # TWO dimensions, and the host is still not one of them. Until #77 there was an `os`
+        # dimension, with five `exclude:` entries pairing each target to the only host that could
+        # build it — a 2 x 5 product carved back down to 5. The pairing is real again, because
+        # `criterion` is back in `smear`'s dev graph, but it is expressed in `runs-on:` below
+        # instead: the host is a CONSEQUENCE of the target, and a host dimension would state four
+        # pairs where a target list plus one rule states them once and cannot be half-edited. The
+        # second dimension is the member, and the header's "ONE MEMBER PER CELL" says why.
         #
         # FOUR entries, not five: `x86_64-apple-darwin` was dropped because it is the one target
         # here that interprets the same program as another — same arch, width, endianness and
@@ -402,6 +509,34 @@ jobs:
           - i686-unknown-linux-gnu
           - powerpc64-unknown-linux-gnu
           - aarch64-apple-darwin
+        # One member per cell, and exactly `ci/miri_scope.py`'s `MIRI_PACKAGES`: `--package`
+        # refuses any other name, so this list cannot select a member the guard does not account
+        # for. `smear` is not here for the reason `MIRI_NOT_SELECTED` records.
+        package:
+          - smear-lexer
+          - smear-parser
+          - smear-schema
+          - smear-compiler
+          - graphql-proto
+        # `timeout` is the Miri step's ceiling in minutes, per member: the worst Miri-step wall
+        # measured on run 36141578092 across the four targets x2, floor 60, cap 240. The header's
+        # "ONE MEMBER PER CELL" section carries the measurements and why it is on the
+        # step. `verify-exclusions` names the one cell in the workflow that re-measures
+        # `MIRI_NOT_SELECTED`.
+        include:
+          - package: smear-lexer
+            timeout: 60
+          - package: smear-parser
+            timeout: 60
+          - package: smear-schema
+            timeout: 60
+          - package: smear-compiler
+            timeout: 60
+          - package: graphql-proto
+            timeout: 60
+          - target: x86_64-unknown-linux-gnu
+            package: smear-compiler
+            verify-exclusions: true
     # `aarch64-apple-darwin` cannot be built from a Linux host — `criterion` -> `alloca` -> a C
     # build script; see the header. Every other target here builds on Linux and should stay
     # there, because the account's macOS runner concurrency is the queue this workflow's header
@@ -416,8 +551,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-miri-${{ matrix.package }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-miri-${{ matrix.package }}-
             ${{ runner.os }}-miri-
       - name: Install cross C toolchain for ${{ matrix.target }}
         # Named targets rather than a negation. The guard used to read
@@ -441,5 +577,10 @@ jobs:
               ;;
           esac
       - name: Miri
+        # On the STEP: past its own `timeout-minutes` a step FAILS, while a job past its ceiling
+        # is CANCELLED. The header's "ONE MEMBER PER CELL" section has the measurement.
+        timeout-minutes: ${{ matrix.timeout }}
+        env:
+          MIRI_VERIFY_EXCLUSIONS: ${{ matrix.verify-exclusions && '1' || '0' }}
         run: |
-          bash ci/miri_sb.sh ${{ matrix.target }}
+          bash ci/miri_sb.sh ${{ matrix.target }} ${{ matrix.package }}

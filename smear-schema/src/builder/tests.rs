@@ -11,6 +11,21 @@
 //! The unchecked arithmetic these replaced was measured at the real boundary, at `fcac941`, by
 //! padding `strings` directly; the two rows are in the [`Interner`] header. They are not cells here
 //! because a 4 GiB resize is not something a test run should do.
+//!
+//! # Under Miri
+//!
+//! `the_possible_table_is_a_price_at_its_ceiling_and_a_refusal_one_past_it` carries
+//! `#[cfg_attr(miri, ignore)]` for its kind: it is a cost gate — a table's capacity at its word
+//! ceiling, and which of two million-type schemas fits under the real one — and that arithmetic is
+//! not a question of undefined behaviour, in a crate that forbids `unsafe`. A measurement found it:
+//! alone under `cargo miri test -p smear-schema --features build --lib -- --exact`, Stacked
+//! Borrows, `-Zmiri-strict-provenance -Zmiri-disable-isolation -Zmiri-symbolic-alignment-check`,
+//! aarch64-apple-darwin, 2026-09-25, it took 171.2 s, and anything over a minute is read for its
+//! kind. `an_objects_bitset_is_itself_and_costs_no_row` took 101.8 s and was read the same way, and
+//! it runs: its layout assertions ride on 200 objects' answers being unchanged, and the answers are
+//! behaviour. It builds its SDL in a local `String` and [`parse`] borrows it for that string's own
+//! lifetime, so the test frees everything it allocates before Miri's leak check at exit. The other
+//! twelve took 35.9 s together.
 
 use smear_parser::graphql::ast::{
   ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstList, Described, EnumValue,
@@ -20,11 +35,11 @@ use smear_parser::graphql::ast::{
 use super::*;
 
 /// `type Query { ok: Int }` and friends, through the same door `Schema::build` uses.
-fn parse(sdl: &'static str) -> TypeSystemDocument<&'static str> {
+fn parse<'a>(sdl: &'a str) -> TypeSystemDocument<&'a str> {
   Parser::with_parser::<
-    GraphqlLexer<'static, str>,
-    TypeSystemDocument<&'static str>,
-    GraphqlErrors<&'static str>,
+    GraphqlLexer<'a, str>,
+    TypeSystemDocument<&'a str>,
+    GraphqlErrors<&'a str>,
     _,
     GraphQL,
   >(type_system_document)
@@ -514,8 +529,7 @@ fn an_objects_bitset_is_itself_and_costs_no_row() {
   for at in 0..OBJECTS {
     sdl.push_str(&std::format!("type T{at} implements Node {{ id: Int }}\n"));
   }
-  let sdl: &'static str = std::boxed::Box::leak(sdl.into_boxed_str());
-  let schema = Schema::build(&parse(sdl)).expect("an ordinary schema");
+  let schema = Schema::build(&parse(&sdl)).expect("an ordinary schema");
 
   let id = |name: &[u8]| schema.type_by_name(name).expect("defined").0;
   let names = |ids: Vec<TypeId>| {
@@ -569,6 +583,18 @@ fn an_objects_bitset_is_itself_and_costs_no_row() {
 /// [`MAX_POSSIBLE_WORDS`] is four billion words — 34 GB — so this drives [`possible_table`], which
 /// is the whole mechanism with the ceiling as a parameter, exactly as the arena cells drive
 /// [`Interner::intern_within`].
+#[cfg_attr(
+  miri,
+  ignore = "A COST GATE, AND NOT A MIRI SUBJECT. What is asserted below is that a possible-type \
+            table exactly at its word ceiling is built with exactly that capacity and one word \
+            past it is refused, and which of two million-type schemas fits the real ceiling, which \
+            is arithmetic an interpreter re-derives out of the same MIR rather than a question of \
+            undefined behaviour. Its fixture builds a table for a million object types. Found by \
+            the five-minute detector's measurement: 171.2 s under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
+            measurement. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this \
+            from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_possible_table_is_a_price_at_its_ceiling_and_a_refusal_one_past_it() {
   assert_eq!(
