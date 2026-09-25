@@ -439,7 +439,7 @@ tokora = { workspace = true, features = ["conformance"] }
 # re-verification the whitelist's own tests perform. It resolves `apollo-parser` to 0.8.6 — the
 # same version named above — so the oracle adds no second copy of the parser and no third rowan.
 [target.'cfg(target_pointer_width = "64")'.dev-dependencies]
-apollo-compiler = "=1.32.0"
+apollo-compiler = "=1.33.0"
 
 [lib]
 bench = false
