@@ -29,7 +29,7 @@ quote = "1"
 # than only the one at its top level. A hand-rolled walk over `Expr` would miss a `match` inside a
 # closure or a `?` chain, and would go on missing it as `syn` grows variants — silently, which is
 # the failure direction this tool exists to refuse.
-syn = { version = "2", features = [
+syn = { version = "3", features = [
   "full",
   "parsing",
   "printing",
