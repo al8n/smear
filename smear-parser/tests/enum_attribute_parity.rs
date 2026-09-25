@@ -131,6 +131,18 @@
 //! what is gone is the case where resolving it was the only way to tell two enums apart.
 //! `every_value_tree_declares_the_same_variants` and the round trips in
 //! `syntactic::value::materialized::tests` hold the resolved axis.
+//!
+//! # Under Miri
+//!
+//! This target excludes itself with `not(miri)`, at the crate level because its one test is the
+//! census and a target whose every test is skipped should say so where `ci/miri_scope.py` prints
+//! it. A census asserts on source text embedded with `include_str!` and never runs the parser, so
+//! an interpreter has none of this crate's code to check in it. A measurement found it — 36.4 s
+//! alone under `cargo miri test -p smear-parser --test enum_attribute_parity`, Stacked Borrows,
+//! aarch64-apple-darwin, 2026-09-25, and past five minutes under Tree Borrows — and the kind
+//! decided it.
+
+#![cfg(not(miri))]
 
 use std::collections::BTreeSet;
 

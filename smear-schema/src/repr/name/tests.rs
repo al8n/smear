@@ -5,6 +5,24 @@
 //! That is a fine end-to-end gate and a bad unit one: it can only fail when a *document* costs too
 //! much, so a hash that maps two names onto one hash passes it silently as long as the collision is
 //! cheap. This module fails on the hash.
+//!
+//! # Under Miri
+//!
+//! All four tests here carry `#[cfg_attr(miri, ignore)]`, for their kind: each asserts a property
+//! of the hash's output — distinct values, bucket spread, a probe ceiling, lengths kept apart — and
+//! [`hash_bytes`] is plain arithmetic in a crate that forbids `unsafe`, so the question Miri
+//! answers has nothing here to find. `hash_bytes` itself stays interpreted: every schema the
+//! builder's tests build indexes its names through it. A measurement found three of them — alone
+//! under `cargo miri test -p smear-schema --features build --lib -- --exact`, Stacked Borrows,
+//! aarch64-apple-darwin, 2026-09-25 — and the fourth is not a measurement's find: it takes 0.2 s
+//! and is skipped for its kind alone, with the rest of the hash's gate.
+//!
+//! | skipped | seconds |
+//! |---|---|
+//! | `a_generated_alias_family_has_one_hash_per_name` | >575 |
+//! | `a_generated_alias_family_spreads_across_the_buckets` | >300 |
+//! | `the_name_index_finds_every_symbol_in_a_bounded_walk` | >300 |
+//! | `the_tail_length_is_part_of_the_key` | 0.2 |
 
 use std::{string::String, vec, vec::Vec};
 
@@ -68,6 +86,17 @@ fn family(radix: &[u8], width: usize, count: usize) -> Vec<String> {
 /// on `radix 36, width 8` at 1,660 distinct hashes of 4,096 and on `radix 63, width 8` at 895.
 /// Deleting the *finalizer* instead leaves this test green — a bijection maps no key onto another
 /// — which is why the two that follow it are here.
+#[cfg_attr(
+  miri,
+  ignore = "A STATISTICAL PROPERTY OF THE HASH, AND NOT A MIRI SUBJECT. What is asserted below is \
+            that each of 24 generated families of 4 096 names hashes to 4 096 distinct values, \
+            which is a property of the hash's output — pure arithmetic in a crate that forbids \
+            `unsafe` — and not a question of undefined behaviour. Its fixture hashes, sorts and \
+            deduplicates 98 304 names. Found by the five-minute detector's measurement: over nine \
+            and a half minutes under `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, \
+            2026-09-25). The file's header carries the table. Declared in `ci/miri_scope.py`'s \
+            ignore table, which is what stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn a_generated_alias_family_has_one_hash_per_name() {
   const COUNT: usize = 4096;
@@ -113,6 +142,17 @@ fn a_generated_alias_family_has_one_hash_per_name() {
 /// Delete `h ^= h >> 32` instead and it fails on `radix 36, width 8` at **1,343** — the
 /// multi-chunk half. Each defect leaves the other one's rows green, which is what the second axis
 /// buys.
+#[cfg_attr(
+  miri,
+  ignore = "A STATISTICAL PROPERTY OF THE HASH, AND NOT A MIRI SUBJECT. What is asserted below is \
+            that each of 24 generated families of 4 096 names occupies at least 2 400 of 4 096 \
+            buckets, which is a property of the hash's output — pure arithmetic in a crate that \
+            forbids `unsafe` — and not a question of undefined behaviour. Found by the five-minute \
+            detector's measurement: over five minutes under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
+            table. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this from \
+            being a coverage cut nobody chose."
+)]
 #[test]
 fn a_generated_alias_family_spreads_across_the_buckets() {
   const COUNT: usize = 4096;
@@ -153,6 +193,18 @@ fn a_generated_alias_family_spreads_across_the_buckets() {
 ///
 /// **The plants.** Deleting `finalize` reads 23,336 on `radix 10, width 6`; deleting
 /// `h ^= h >> 32` reads 15,132 on `radix 36, width 8`. Both against a ceiling of 8,192.
+#[cfg_attr(
+  miri,
+  ignore = "A STATISTICAL PROPERTY OF THE HASH, AND NOT A MIRI SUBJECT. What is asserted below is \
+            that 4 096 lookups in each of 24 generated families walk at most two slots each on \
+            average — a probe ceiling over the hash's spread — and find what was indexed, which is \
+            a property of the hash's output — pure arithmetic in a crate that forbids `unsafe` — \
+            and not a question of undefined behaviour. Found by the five-minute detector's \
+            measurement: over five minutes under `cargo miri test` on aarch64-apple-darwin \
+            (Stacked Borrows, 2026-09-25). The file's header carries the table. Declared in \
+            `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
+            nobody chose."
+)]
 #[test]
 fn the_name_index_finds_every_symbol_in_a_bounded_walk() {
   const COUNT: usize = 4096;
@@ -212,6 +264,17 @@ fn the_name_index_finds_every_symbol_in_a_bounded_walk() {
 /// The tail word is `bytes ^ (len << 56)`, which is the only thing separating `"a"` from `"a\0"`
 /// once both are widened to eight bytes — and the eight-byte case is the one where the tail word is
 /// *empty*, so the length is all there is.
+#[cfg_attr(
+  miri,
+  ignore = "A HASH-QUALITY PROPERTY, AND NOT A MIRI SUBJECT. What is asserted below is that the \
+            hash keeps every length from 0 to 24 of one repeated byte apart from the next, which \
+            is a property of the hash's output — pure arithmetic in a crate that forbids `unsafe` \
+            — and not a question of undefined behaviour. It is skipped for that kind and not for \
+            its cost — alone under `cargo miri test` on aarch64-apple-darwin (Stacked Borrows, \
+            2026-09-25) it takes 0.2 s — with the rest of the hash's own gate. The file's header \
+            carries the table. Declared in `ci/miri_scope.py`'s ignore table, which is what stops \
+            this from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_tail_length_is_part_of_the_key() {
   for len in 0..24usize {

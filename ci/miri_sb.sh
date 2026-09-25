@@ -9,12 +9,23 @@ fi
 
 TARGET=$1
 
+# ONE MEMBER PER CELL. The workflow runs this once per (target, member) pair, and the member has to
+# be one of `ci/miri_scope.py`'s `MIRI_PACKAGES`: `--print-packages --package` below refuses anything
+# else, which leaves the selection empty and stops this script before `cargo miri test`.
+if [ -z "$2" ]; then
+  echo "Error: PACKAGE is not provided (one of MIRI_PACKAGES in ci/miri_scope.py)"
+  exit 1
+fi
+
+PACKAGE=$2
+
 # Prove the scope guard can fail, BEFORE `rustup`, before `cargo miri setup`, before anything
 # that costs minutes. `ci/miri_scope.py` is what makes this cell's coverage claim checkable
 # rather than asserted, and a guard that has quietly stopped checking is worse than no guard —
 # it is the exact shape of #73. Sub-second, and it reads the real `smear/tests/` partition and
 # the real `smear/Cargo.toml` feature table, so it also fails if that tree stops having both
-# excluded and compiled targets to distinguish, or if `rowan` starts resolving on from defaults.
+# excluded and compiled targets to distinguish, or if `rowan` starts resolving on from defaults —
+# and every member's own `tests/` and manifest, which are what this cell's verdict reads.
 # PYTHON >= 3.11, checked here rather than discovered as a traceback twenty minutes in.
 # `ci/miri_scope.py` parses `smear/Cargo.toml` with `tomllib`, which entered the standard library
 # in 3.11; on macOS `/usr/bin/python3` is 3.9 and would fail on the import alone. The other Python
@@ -39,7 +50,17 @@ python3 ci/miri_scope.py --selftest
 # selftest, so a check that reads the real world cannot live among them; that mistake was made once
 # already and reported the gate as broken on every plant. Nothing calls `verify_exclusions` with
 # planted inputs: it reads the constant and runs cargo.
-python3 ci/miri_scope.py --verify-exclusions
+#
+# IN ONE CELL, NOT IN EVERY ONE. It is a native build for the host, so it gives the same answer on
+# every target, for every member and under either aliasing model, and it was most of what each
+# cell of run 35944196326 spent before its first test: 5-6 minutes on the Linux cells and 18-24 on
+# the two macOS ones. The workflow names the one cell that runs it (`MIRI_VERIFY_EXCLUSIONS=1`) and
+# passes `0` to the rest; unset, as in a run outside the workflow, it runs.
+if [ "${MIRI_VERIFY_EXCLUSIONS:-1}" != 0 ]; then
+  python3 ci/miri_scope.py --verify-exclusions
+else
+  echo "miri_scope: --verify-exclusions runs in the workflow's one designated cell, not in this one"
+fi
 
 rustup toolchain install nightly --component miri
 rustup override set nightly
@@ -196,15 +217,18 @@ export MIRIFLAGS
 #
 # WHAT THIS CELL COVERS, and it is measured rather than claimed. The half where this project's own
 # `unsafe` lives — the SIMD lexer and the syntactic parser, through `tokora`'s substrate — and all
-# four of those `unsafe` sites are in `smear-lexer/src/string_lexer/`. The selection is
-# `smear-lexer`, `smear-parser`, `smear-schema`, `smear-compiler` and `graphql-proto`:
-# 125 + 353 + 3 + 12 + 15 = 508 lib unit tests, counted per binary UNDER THIS SELECTION rather than
-# one package at a time.
+# four of those `unsafe` sites are in `smear-lexer/src/string_lexer/`. The members are
+# `smear-lexer`, `smear-parser`, `smear-schema`, `smear-compiler` and `graphql-proto`, and a cell
+# runs ONE of them (see below): 144, 367, 21, 16 and 64 lib unit tests, each counted at its own
+# cell's feature set on 2026-09-25.
 #
 # THAT DISTINCTION COST A ROUND. `smear-schema` was excluded on "0 lib unit tests", measured with an
-# isolated `cargo test -p smear-schema --lib` — but this selection contains `smear-compiler`, which
-# takes `smear-schema` WITH `build`, and behind `build` it has three. Feature unification decides
-# the count, and an isolated measurement is taken where unification does not apply.
+# isolated `cargo test -p smear-schema --lib` — but the five-member selection contained
+# `smear-compiler`, which takes `smear-schema` WITH `build`, and behind `build` it has three. Feature
+# unification decides the count, and an isolated measurement is taken where unification does not
+# apply. A one-member cell IS that isolated build, so its selection restores `build` by name;
+# `ci/miri_scope.py`'s `MIRI_SHARD_FEATURES` carries the measurement and the one thing it does not
+# restore.
 #
 # `smear` IS DELIBERATELY OUT, and not for a test count: co-selecting it with `smear-compiler` does
 # not COMPILE. The compiler forces `smear-schema/build`, the umbrella at default features has
@@ -217,6 +241,13 @@ export MIRIFLAGS
 # this script still passed two, so the guard was checking a declaration the run did not execute and
 # the cell failed late, after the expensive part. Read `ci/miri_scope.py`'s header before changing
 # any of this.
+#
+# ONE MEMBER OF IT PER CELL, the one this script's second argument names. Run 35944196326 selected
+# all five in one `cargo miri test`, cargo ran `graphql-proto`'s lib binary first, and every cell
+# spent its six hours inside two or three of that binary's tests before the job ceiling cancelled
+# it — no other member had been interpreted on a push since 2026-08-21. `--print-packages --package`
+# prints that member's `-p` and any `--features` its cell restores, and `--log --package` reads that
+# member's own `tests/` and manifest and expects its lib binary alone.
 LOG="$(mktemp)"
 set +e
 # BUILT FROM `MIRI_PACKAGES`, not written out beside it. These two lists were hard-coded
@@ -228,7 +259,7 @@ set +e
 # Read into an array so each token is one argument, which `-p smear-lexer` needs and word-splitting
 # an unquoted string would only get right by accident.
 MIRI_SELECTION=()
-while IFS= read -r token; do MIRI_SELECTION+=("$token"); done < <(python3 ci/miri_scope.py --print-packages)
+while IFS= read -r token; do MIRI_SELECTION+=("$token"); done < <(python3 ci/miri_scope.py --print-packages --package "$PACKAGE")
 if [ "${#MIRI_SELECTION[@]}" -eq 0 ]; then
   echo "FAIL: ci/miri_scope.py printed no package selection." >&2
   exit 1
@@ -243,7 +274,7 @@ set -e
 # statement of what this cell does not cover, and that is worth reading either way. Its own
 # verdict is folded in below rather than allowed to mask Miri's.
 SCOPE=0
-python3 ci/miri_scope.py --log "$LOG" --tests-selected "$TESTS_SELECTED" \
+python3 ci/miri_scope.py --log "$LOG" --package "$PACKAGE" --tests-selected "$TESTS_SELECTED" \
   --miri-status "$STATUS" || SCOPE=$?
 rm -f "$LOG"
 

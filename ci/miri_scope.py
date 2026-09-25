@@ -147,9 +147,9 @@ ROWAN_REASON = (
     "published version through 0.17.0 (al8n/smear#77, rust-analyzer/rowan#108 and #192)"
 )
 MIRI_REASON = (
-    "the file excludes itself from Miri with `not(miri)`, on wall clock: measured on CI run "
-    "31318425279, `tests/syntactic_span_extent.rs` had not finished after 5h40m and the cell was "
-    "killed there. The file's own header carries the decision and what it costs (al8n/smear#141)"
+    "the file excludes itself from Miri with `not(miri)`: every test in it is of a kind Miri does "
+    "not decide — a cost, a statistical property, an enumeration or a source census — and its own "
+    "header carries the measurement that found it and the kind that decided it"
 )
 
 # Resolved from this file, not from the process's cwd. `ci/miri_sb.sh` and `ci/miri_tb.sh` run
@@ -214,11 +214,35 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 #                                            measured insufficient; nothing is freed inside the
 #                                            call, so there is nothing to reuse. The attribute's
 #                                            own `ignore = "..."` reason carries the argument.
+#
+# THE REST ARE SKIPPED FOR THEIR KIND, and a measurement only found them: 29 of the 30, the other —
+# 0.2 s — skipped with the rest of its module's gate so the hash's gate is skipped whole. A test
+# whose assertion is a cost or a statistical property — units, steps, slots, allocations, a hash's
+# spread, a price at a ceiling — or whose fixture enumerates thousands of candidates (a
+# colliding-name search, every arrival order, every line of a source tree) is not a Miri subject:
+# Miri decides whether an execution has undefined behaviour, and none of those is that question.
+# What found them: each member's tests run alone under `cargo miri test` on aarch64-apple-darwin,
+# 2026-09-25, a test past five minutes under either aliasing model a candidate, and one past a
+# minute under Stacked Borrows read for its kind as well. Behaviour stays whatever it costs. Each
+# file's header carries its measurement, and each attribute names its kind:
+#
+#   graphql-proto/src/execute/tests.rs       20 more: cost and allocation gates, one source census
+#   graphql-proto/src/request_error/tests.rs an allocation gate, the executor-side one's twin
+#   graphql-proto/tests/response_order.rs    the two 226 800-order sweeps; the named cases run
+#   smear-parser/tests/syntactic_terminal_reads.rs
+#                                            two source censuses; the positive control runs
+#   smear-schema/src/builder/tests.rs        a price at a ceiling
+#   smear-schema/src/repr/name/tests.rs      the hash's four output properties
 MIRI_DECLARED_IGNORES = {
     "smear/tests/syntactic_span_extent.rs": 2,
     "smear/tests/syntactic_x_span_extent.rs": 2,
     "graphql-proto/src/response/tests.rs": 1,
-    "graphql-proto/src/execute/tests.rs": 1,
+    "graphql-proto/src/execute/tests.rs": 21,
+    "graphql-proto/src/request_error/tests.rs": 1,
+    "graphql-proto/tests/response_order.rs": 2,
+    "smear-parser/tests/syntactic_terminal_reads.rs": 2,
+    "smear-schema/src/builder/tests.rs": 1,
+    "smear-schema/src/repr/name/tests.rs": 4,
 }
 
 # The same decision as one number, because `.github/workflows/miri.yml` states a total and every
@@ -258,6 +282,29 @@ MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 # `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
 MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto")
 
+# ONE MEMBER PER CELL, AND THE FEATURES THAT KEEP THAT A SCHEDULING CHANGE.
+#
+# Every Miri cell selects ONE of the members above — `--print-packages --package <member>` — because
+# one selection of all five could not finish. Run 35944196326 (2026-09-24, c964a6a): all eight
+# cells were cancelled at the six-hour job ceiling inside `graphql-proto`'s lib binary, which cargo
+# runs first, so no other member had been interpreted on a push since 2026-08-21.
+#
+# A SELECTION IS ALSO A RESOLVE, and a member selected alone loses every feature another member
+# was asking for on its behalf. Measured with `cargo +nightly test --unit-graph -Z unstable-options`
+# on all four targets, the five-member selection against each one-member one: four members resolve
+# exactly the set they resolved together, and `smear-schema` resolves `default, std` where the
+# five resolved `build, default, std` — `smear-compiler` and `graphql-proto`'s dev-dependency both
+# ask for `build`, and its lib unit tests are behind it. Its cells pass `--features build`, which
+# restores that set and nothing past it. `--selftest` fails if any shard resolves `rowan`.
+#
+# What this does NOT restore is a DEPENDENCY's features. Selected alone, the `smear-schema`,
+# `smear-compiler` and `graphql-proto` cells resolve `smear-lexer` and `smear-parser` without
+# `graphqlx` and `smallvec` (and without the `default` label, which no cfg reads): `graphqlx` is a
+# dialect none of the three calls, and `smallvec` swaps the lexer's error container from
+# `SmallVec<[_; 1]>` to `Vec`. Each member's OWN code is compiled exactly as the five compiled it,
+# and the lexer's and the parser's cells still interpret their default set.
+MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
+
 # The publishable member deliberately NOT selected, and the reason is now a BEHAVIOUR rather than a
 # count.
 #
@@ -284,6 +331,13 @@ MIRI_NOT_SELECTED = {
                "lib unit tests at any feature set either",
     },
 }
+
+
+def shard_selection(package: str) -> list[str]:
+    """The `cargo miri test` arguments that select one member: its `-p`, and any features its cell
+    has to restore (see `MIRI_SHARD_FEATURES`)."""
+    features = MIRI_SHARD_FEATURES.get(package, ())
+    return ["-p", package, *(["--features", ",".join(features)] if features else [])]
 
 
 def verify_exclusions(cargo: str = "cargo") -> int:
@@ -611,7 +665,7 @@ def declared_ignores(tests_dir: pathlib.Path) -> dict[str, int]:
     return {path.stem: ignores_in(path) for path in sorted(tests_dir.glob("*.rs"))}
 
 
-def declared_lib_ignores() -> dict[str, int]:
+def declared_lib_ignores(packages: tuple[str, ...] = MIRI_PACKAGES) -> dict[str, int]:
     """Per selected package, how many of its LIB unit tests the source says a cell will skip.
 
     The half that was not being asked. Cargo spells every package's unit-test binary the same way,
@@ -624,11 +678,13 @@ def declared_lib_ignores() -> dict[str, int]:
             ignores_in(path)
             for path in sorted((REPO_ROOT / package / "src").rglob("*.rs"))
         )
-        for package in MIRI_PACKAGES
+        for package in packages
     }
 
 
-def ignore_sources(tests_dir: pathlib.Path, compiled: list[str]) -> dict[str, int]:
+def ignore_sources(
+    tests_dir: pathlib.Path, compiled: list[str], packages: tuple[str, ...] = MIRI_PACKAGES
+) -> dict[str, int]:
     """Every source a Miri cell compiles that carries a per-test `#[ignore]`, and how many.
 
     Keyed the way `MIRI_DECLARED_IGNORES` is keyed, because the two are compared entry by entry.
@@ -650,7 +706,7 @@ def ignore_sources(tests_dir: pathlib.Path, compiled: list[str]) -> dict[str, in
         count = ignores_in(path)
         if count:
             out[repo_relative(path)] = count
-    for package in MIRI_PACKAGES:
+    for package in packages:
         for path in sorted((REPO_ROOT / package / "src").rglob("*.rs")):
             count = ignores_in(path)
             if count:
@@ -658,7 +714,31 @@ def ignore_sources(tests_dir: pathlib.Path, compiled: list[str]) -> dict[str, in
     return out
 
 
-def package_of(binary: str) -> str | None:
+def member_test_sources(packages: tuple[str, ...] = MIRI_PACKAGES) -> dict[str, int]:
+    """Every integration target in a member's own `tests/` that its cell compiles and that carries
+    an ignore, keyed the way `MIRI_DECLARED_IGNORES` is.
+
+    A one-member cell reads these through `ignore_sources`, because its tree IS the member's. The
+    five-member check reads `smear/tests/` instead and adds these, so that the table is held against
+    every file the members' own selection compiles and an entry under a member's `tests/` is not
+    one that only a cell can see. Raises `CfgError` on a predicate `eval_cfg` does not model.
+    """
+    out: dict[str, int] = {}
+    for package in packages:
+        tests_dir = REPO_ROOT / package / "tests"
+        features = resolved_features(
+            REPO_ROOT / package / "Cargo.toml", list(MIRI_SHARD_FEATURES.get(package, ())), True
+        )
+        _, compiled = partition(tests_dir, features)
+        for stem in compiled:
+            path = tests_dir / f"{stem}.rs"
+            count = ignores_in(path)
+            if count:
+                out[repo_relative(path)] = count
+    return out
+
+
+def package_of(binary: str, packages: tuple[str, ...] = MIRI_PACKAGES) -> str | None:
     """Which selected package a `Running unittests src/lib.rs (<path>)` line belongs to.
 
     Cargo names a lib test binary `<package with `-` spelled `_`>-<hash>`, and that file name is
@@ -667,13 +747,18 @@ def package_of(binary: str) -> str | None:
     selected package, which is a finding rather than something to skip past.
     """
     stem = pathlib.Path(binary).name.rsplit("-", 1)[0]
-    for package in MIRI_PACKAGES:
+    for package in packages:
         if stem == package.replace("-", "_"):
             return package
     return None
 
 
-def budget_findings(sources: dict[str, int]) -> dict[str, str]:
+def budget_findings(
+    sources: dict[str, int],
+    *,
+    shard: str | None = None,
+    table: dict[str, int] | None = None,
+) -> dict[str, str]:
     """The declared-set checks, as {case name: finding} for the cases that FAILED.
 
     Keyed rather than listed because `--selftest` has to show each one failing on its own, and a
@@ -684,16 +769,25 @@ def budget_findings(sources: dict[str, int]) -> dict[str, str]:
     `sources` is what `ignore_sources()` derived — every file a cell compiles that carries an
     ignore. The finding names the FILE in both directions, because "the total moved" sent a reader
     looking for a number and what they need is the line.
+
+    `shard` narrows the table to the entries under that member's directory, because a one-member
+    cell compiles nothing else: an entry in another member's tree is held by that member's cells,
+    and an entry under `smear/` by `--selftest` alone, which still partitions that tree. The
+    restated total stays the whole table's, since the header states one number. `table` exists so
+    `--selftest` can plant an entry; every real caller leaves it alone.
     """
+    table = MIRI_DECLARED_IGNORES if table is None else table
+    if shard is not None:
+        table = {path: count for path, count in table.items() if path.startswith(f"{shard}/")}
     out: dict[str, str] = {}
     over = sorted(
-        f"{path} carries {count} and the table declares {MIRI_DECLARED_IGNORES.get(path, 0)}"
+        f"{path} carries {count} and the table declares {table.get(path, 0)}"
         for path, count in sources.items()
-        if count > MIRI_DECLARED_IGNORES.get(path, 0)
+        if count > table.get(path, 0)
     )
     under = sorted(
         f"{path} carries {sources.get(path, 0)} and the table declares {count}"
-        for path, count in MIRI_DECLARED_IGNORES.items()
+        for path, count in table.items()
         if sources.get(path, 0) < count
     )
     if over:
@@ -741,9 +835,13 @@ def budget_findings(sources: dict[str, int]) -> dict[str, str]:
 
 
 def partition(
-    tests_dir: pathlib.Path, features: set[str]
+    tests_dir: pathlib.Path, features: set[str], resolves: str = "`smear`'s default features"
 ) -> tuple[dict[str, str], list[str]]:
-    """Split `smear/tests/*.rs` into ({excluded target: why}, [compiled targets])."""
+    """Split `<tests_dir>/*.rs` into ({excluded target: why}, [compiled targets]).
+
+    `resolves` names the feature set in the printed reason, because a shard's is its member's and
+    not `smear`'s. A tree that does not exist partitions to nothing: two members have no `tests/`.
+    """
     excluded: dict[str, str] = {}
     compiled: list[str] = []
     for path in sorted(tests_dir.glob("*.rs")):
@@ -770,8 +868,8 @@ def partition(
             excluded[path.stem] = MIRI_REASON
         else:
             excluded[path.stem] = (
-                f"{', '.join(missing)} — this cell resolves `smear`'s default features and "
-                "nothing else, so the target compiles to an empty harness here"
+                f"{', '.join(missing)} — this cell resolves {resolves} and nothing else, so the "
+                "target compiles to an empty harness here"
             )
     return excluded, compiled
 
@@ -865,7 +963,12 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     # `graphql-proto` and the two would then be the same key — the collapse this guard has already
     # been bitten by once, rebuilt inside its own selftest.
     def log(entries: list[tuple[str, int | None]],
-            ignored_override: dict[str, int] | None = None) -> str:
+            ignored_override: dict[str, int] | None = None,
+            *,
+            target_skips: dict[str, int] | None = None,
+            lib_skips: dict[str, int] | None = None) -> str:
+        target_skips = declared if target_skips is None else target_skips
+        lib_skips = lib_declared if lib_skips is None else lib_skips
         out = []
         for name, count in entries:
             package = name[4:] if name.startswith("lib:") else None
@@ -878,9 +981,9 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
                 if ignored_override and name in ignored_override:
                     skip = ignored_override[name]
                 elif package is None:
-                    skip = declared.get(name, 0)
+                    skip = target_skips.get(name, 0)
                 else:
-                    skip = lib_declared.get(package, 0)
+                    skip = lib_skips.get(package, 0)
                 out.append(f"running {count} tests")
                 out.append(
                     f"test result: ok. {count - skip} passed; 0 failed; {skip} ignored; "
@@ -963,6 +1066,66 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
              log(clean, {f"lib:{a_lib_skipping}": a_lib_declared - 1}), True, 0, 1)
         )
 
+    # THE ONE-MEMBER CELLS, which are what every Miri cell runs: one member, its own `tests/`, its
+    # own manifest plus `MIRI_SHARD_FEATURES`. Each member's REAL tree is partitioned here, so a
+    # cfg in a member's `tests/` this guard cannot model stops the cell before the expensive part
+    # rather than after it, and a clean one-member log has to pass for every member, with `--tests`
+    # and with `--lib` alone. The three cases after those are what a one-member check adds, and
+    # each is required to fail.
+    stray = sorted(set(MIRI_SHARD_FEATURES) - set(MIRI_PACKAGES))
+    if stray:
+        print(f"::error::miri_scope selftest: MIRI_SHARD_FEATURES names {stray}, which no Miri "
+              "cell selects")
+        return 1
+    trees: dict[str, tuple[pathlib.Path, pathlib.Path, list[str]]] = {}
+    shard_clean: dict[str, list[tuple[str, int | None]]] = {}
+    shard_skips: dict[str, tuple[dict[str, int], dict[str, int]]] = {}
+    shard_shape: list[str] = []
+    for package in MIRI_PACKAGES:
+        s_tests, s_manifest = REPO_ROOT / package / "tests", REPO_ROOT / package / "Cargo.toml"
+        try:
+            s_features = resolved_features(
+                s_manifest, list(MIRI_SHARD_FEATURES.get(package, ())), True)
+            s_excluded, s_compiled = partition(s_tests, s_features)
+        except CfgError as err:
+            print(f"::error::miri_scope selftest: {package}: {err}")
+            return 1
+        if "rowan" in s_features:
+            print(f"::error::miri_scope selftest: `{package}`'s cell resolves `rowan`, so the "
+                  "lossless tower would enter a Miri cell — the condition #77 was about")
+            return 1
+        s_declared = declared_ignores(s_tests)
+        s_floor = max((s_declared.get(n, 0) for n in s_compiled), default=0) + 1
+        trees[package] = (s_tests, s_manifest, s_compiled)
+        shard_skips[package] = (s_declared, declared_lib_ignores((package,)))
+        shard_clean[package] = ([(f"lib:{package}", 400)]
+                                + [(n, 0) for n in sorted(s_excluded)]
+                                + [(n, s_floor) for n in sorted(s_compiled)])
+        shard_shape.append(f"{package} {len(s_excluded)}/{len(s_compiled)}")
+
+    def shard_log(package: str, entries: list[tuple[str, int | None]],
+                  ignored_override: dict[str, int] | None = None) -> str:
+        s_declared, s_lib = shard_skips[package]
+        return log(entries, ignored_override, target_skips=s_declared, lib_skips=s_lib)
+
+    shard_cases: list[tuple[str, str, bool, int, int, str]] = []
+    for package in MIRI_PACKAGES:
+        shard_cases.append((f"a correct `{package}` cell passes",
+                            shard_log(package, shard_clean[package]), True, 0, 0, package))
+        shard_cases.append((f"a correct `{package}` cell running `--lib` alone passes",
+                            shard_log(package, shard_clean[package][:1]), False, 0, 0, package))
+    one, other = MIRI_PACKAGES[0], MIRI_PACKAGES[1]
+    home = next((p for p in MIRI_PACKAGES if shard_skips[p][1].get(p)), one)
+    home_skips = shard_skips[home][1].get(home, 0)
+    shard_cases += [
+        ("a cell whose log carries another member's lib binary fails",
+         shard_log(one, shard_clean[one] + [(f"lib:{other}", 7)]), True, 0, 1, one),
+        ("a cell that ran an integration target its member's tree does not contain fails",
+         shard_log(one, shard_clean[one] + [("not_a_target_of_this_member", 3)]), True, 0, 1, one),
+        ("a cell's lib binary reporting one more ignored test than its member declares fails",
+         shard_log(home, shard_clean[home], {f"lib:{home}": home_skips + 1}), True, 0, 1, home),
+    ]
+
     # Read first, and printed first, because every case below is built out of `declared` and so
     # agrees with the tree by construction: if the tree has drifted off the budget these will say
     # so once, and the synthetic cases will then fail as collateral rather than as findings.
@@ -971,7 +1134,12 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     # one input this guard both reads and is constrained by, so a case that only synthesises a log
     # exercises the half that was never the problem.
     budget_cases = (BUDGET_OVER, BUDGET_UNDER, BUDGET_STATED)
-    found = budget_findings(ignore_sources(tests_dir, compiled))
+    try:
+        members = member_test_sources()
+    except CfgError as err:
+        print(f"::error::miri_scope selftest: {err}")
+        return 1
+    found = budget_findings({**ignore_sources(tests_dir, compiled), **members})
     bad = 0
     for name in budget_cases:
         finding = found.get(name)
@@ -980,14 +1148,40 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
             bad += 1
             print(f"       {finding}")
 
+    # The declared set as a one-member cell holds it: an entry in the member's own tree that its
+    # sources no longer carry is that cell's finding, and an entry in another member's tree is not.
+    # Planted rather than read, because the real table agrees with the tree by construction.
+    away = next(p for p in MIRI_PACKAGES if p != home)
+    home_tests, _, home_compiled = trees[home]
+    home_sources = ignore_sources(home_tests, home_compiled, (home,))
+
+    def planted(path: str) -> dict[str, int]:
+        return {**MIRI_DECLARED_IGNORES, path: MIRI_DECLARED_IGNORES.get(path, 0) + 1}
+
+    scoping_cases = [
+        ("a declared ignore the member's own sources lost fails its cell",
+         BUDGET_UNDER in budget_findings(home_sources, shard=home,
+                                         table=planted(f"{home}/src/lib.rs"))),
+        ("a declared ignore in another member's tree is not held against the cell",
+         not {BUDGET_OVER, BUDGET_UNDER} & set(
+             budget_findings(home_sources, shard=home, table=planted(f"{away}/src/lib.rs")))),
+    ]
+    for name, held in scoping_cases:
+        print(f"  {'ok  ' if held else 'FAIL'} {name}")
+        if not held:
+            bad += 1
+
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="miri-scope-selftest-"))
     try:
-        for i, (name, text, sel, status, want) in enumerate(cases):
+        runs = [(*case, None) for case in cases] + shard_cases
+        for i, (name, text, sel, status, want, shard) in enumerate(runs):
             path = tmp / f"case{i}.log"
             path.write_text(text, encoding="utf-8")
+            where, recipe = (tests_dir, manifest) if shard is None else trees[shard][:2]
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                got = check(tests_dir, manifest, path, tests_selected=sel, miri_status=status)
+                got = check(where, recipe, path, tests_selected=sel, miri_status=status,
+                            shard=shard)
             mark = "ok  " if got == want else "FAIL"
             if got != want:
                 bad += 1
@@ -1025,17 +1219,19 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
             bad += 1
             print(f"  FAIL [{got!r} vs want {want!r}] cfg `{text}`")
 
-    total_cases = len(budget_cases) + len(cases) + len(cfg_cases)
+    total_cases = (len(budget_cases) + len(scoping_cases) + len(cases) + len(shard_cases)
+                   + len(cfg_cases))
     if bad:
         print(f"::error::miri_scope selftest: {bad} of {total_cases} cases did "
               "not behave as written — this guard does not check what its header claims")
         return 1
-    sources = ignore_sources(tests_dir, compiled)
+    sources = {**ignore_sources(tests_dir, compiled), **members}
     print(f"miri_scope selftest OK: {total_cases} cases, "
           f"{len(excluded)} excluded / {len(compiled)} compiled targets in {tests_dir}, "
           f"{sum(sources.values())} individual tests skipped in {len(sources)} source file(s), "
           f"against a declared set of {MIRI_IGNORE_BUDGET} in {len(MIRI_DECLARED_IGNORES)}, "
-          f"feature set {{{', '.join(sorted(features))}}}")
+          f"feature set {{{', '.join(sorted(features))}}}; one-member cells, excluded/compiled "
+          f"targets: {', '.join(shard_shape)}")
     return 0
 
 
@@ -1048,37 +1244,54 @@ def check(
     miri_status: int,
     cargo_features: list[str] | None = None,
     default_features: bool = True,
+    shard: str | None = None,
 ) -> int:
-    """Print the covered/excluded split, then return 0 if the run matched it and 1 if it did not."""
+    """Print the covered/excluded split, then return 0 if the run matched it and 1 if it did not.
+
+    `shard` is the one member a cell selected. The lib binary expected is then its alone, the
+    feature set is its own manifest's closure plus whatever `MIRI_SHARD_FEATURES` restores, the
+    tree partitioned is its own `tests/` — which may be absent, since the lib binary is still
+    checked — and the declared ignores held against the run are the entries in its own directory.
+    Without `shard` this is the five-member check `--selftest` exercises over `smear/tests/`.
+    """
+    packages = (shard,) if shard else MIRI_PACKAGES
+    restored = MIRI_SHARD_FEATURES.get(shard, ()) if shard else ()
+    resolves = f"`{shard or 'smear'}`'s default features" + "".join(
+        f" plus `{feature}`" for feature in restored
+    )
     try:
-        features = resolved_features(manifest, cargo_features or [], default_features)
-        excluded, compiled = partition(tests_dir, features)
+        features = resolved_features(manifest, [*restored, *(cargo_features or [])],
+                                     default_features)
+        excluded, compiled = partition(tests_dir, features, resolves)
+        members = member_test_sources(packages) if shard is None else {}
     except CfgError as err:
         print(f"::error::miri_scope: {err}")
         return 1
-    if not excluded and not compiled:
+    if not excluded and not compiled and shard is None:
         print(f"::error::miri_scope: {tests_dir} holds no test targets — this guard would "
               "pass by having nothing to check, which is the defect it exists to catch")
         return 1
 
     counts, libs, ignored, lib_ignored = ran_counts(log)
     declared = declared_ignores(tests_dir)
-    lib_declared = declared_lib_ignores()
-    sources = ignore_sources(tests_dir, compiled)
+    lib_declared = declared_lib_ignores(packages)
+    sources = {**ignore_sources(tests_dir, compiled, packages), **members}
+    held = {path: count for path, count in MIRI_DECLARED_IGNORES.items()
+            if shard is None or path.startswith(f"{shard}/")}
 
     print()
     print("── Miri scope ──────────────────────────────────────────────────────────────────")
-    print(f"features resolved for `smear`: {', '.join(sorted(features))}")
+    print(f"features resolved for `{shard or 'smear'}`: {', '.join(sorted(features))}")
     print(f"NOT COVERED by this cell: {len(excluded)} of {len(excluded) + len(compiled)} "
           f"integration targets in {tests_dir}")
     for reason in sorted(set(excluded.values())):
         print(f"  reason: {reason}")
         for name in sorted(n for n, r in excluded.items() if r == reason):
             print(f"    - {name}")
-    print(f"COVERED: the lib unit tests of {len(MIRI_PACKAGES)} packages plus {len(compiled)} "
+    print(f"COVERED: the lib unit tests of {len(packages)} package(s) plus {len(compiled)} "
           "integration targets"
           + ("" if tests_selected else " (this cell runs `--lib` only; see the script header)"))
-    for package in MIRI_PACKAGES:
+    for package in packages:
         skip = lib_declared.get(package, 0)
         note = f"  ({skip} of its lib unit tests carry `#[ignore]` here)" if skip else ""
         print(f"    + {package} (lib){note}")
@@ -1087,8 +1300,10 @@ def check(
         note = f"  ({skip} of its tests carry `#[ignore]` here)" if skip else ""
         print(f"    + {name}{note}")
     print(f"SKIPPED INSIDE THOSE: {sum(sources.values())} individual tests in "
-          f"{len(sources)} source file(s), against a declared set of {MIRI_IGNORE_BUDGET} in "
-          f"{len(MIRI_DECLARED_IGNORES)}")
+          f"{len(sources)} source file(s), against a declared set of {sum(held.values())} in "
+          f"{len(held)}"
+          + (f" (this member's share of {MIRI_IGNORE_BUDGET} in {len(MIRI_DECLARED_IGNORES)})"
+             if shard else ""))
     for path in sorted(sources):
         print(f"    ! {path}  ({sources[path]})")
     print("────────────────────────────────────────────────────────────────────────────────")
@@ -1102,11 +1317,11 @@ def check(
         (notes if aborted else failures).append(
             "no lib unit-test binary ran; every cell must interpret one per selected package"
         )
-    elif len(libs) != len(MIRI_PACKAGES):
-        wider = len(libs) > len(MIRI_PACKAGES)
+    elif len(libs) != len(packages):
+        wider = len(libs) > len(packages)
         failures.append(
             f"{len(libs)} lib unit-test binaries ran and these scripts select "
-            f"{len(MIRI_PACKAGES)} package(s) ({', '.join(MIRI_PACKAGES)}), so the selection is "
+            f"{len(packages)} package(s) ({', '.join(packages)}), so the selection is "
             + ("WIDER than they pass — that is #77's mechanism seen from the other end"
                if wider else
                "NARROWER than they pass — a package's unit tests stopped being interpreted and "
@@ -1125,11 +1340,11 @@ def check(
     # have had since #73's repair and the libraries did not, even though they are the larger part of
     # what a cell interprets.
     for path, _ in libs:
-        package = package_of(path)
+        package = package_of(path, packages)
         if package is None:
             failures.append(
                 f"{path}: a lib unit-test binary whose file name matches no selected package "
-                f"({', '.join(MIRI_PACKAGES)}). Cargo names it after the package it belongs to, so "
+                f"({', '.join(packages)}). Cargo names it after the package it belongs to, so "
                 "either the selection is wider than these scripts pass or this guard can no longer "
                 "tell whose unit tests it is reading — and it cannot check a skip count it cannot "
                 "attribute"
@@ -1205,9 +1420,21 @@ def check(
                 "#70 and #84 both did it. Pin the selection rather than let it be resolved"
             )
 
+    # A target that ran and that this tree does not contain is one this guard cannot classify,
+    # and it is the shape of the defect the shards were found beside: the five-member check
+    # partitioned `smear/tests/` for a selection that has not built `smear` since the crate split,
+    # and passed over every target the selection did build without a word.
+    known = set(excluded) | set(compiled)
+    for name in sorted(set(counts) - known):
+        failures.append(
+            f"{name}: an integration target ran that {tests_dir} does not contain, so this guard "
+            "partitioned a different tree from the one cargo built and cannot say whether it "
+            "was meant to run"
+        )
+
     # Everything above compares the run to the tree. This compares the tree to the decision, and
     # is the only check here that a log cannot satisfy by agreeing with the sources.
-    failures.extend(budget_findings(sources).values())
+    failures.extend(budget_findings(sources, shard=shard).values())
 
     if notes:
         print(f"miri_scope: `cargo miri test` exited {miri_status}, so the run stopped early "
@@ -1235,12 +1462,25 @@ def check(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", type=pathlib.Path)
-    ap.add_argument("--tests-dir", default=pathlib.Path("smear/tests"), type=pathlib.Path)
+    ap.add_argument(
+        "--package",
+        choices=MIRI_PACKAGES,
+        help="The one member this cell selected; every cell selects one since the per-package "
+        "shards. `--print-packages` then prints its `-p` and the features its cell restores, and "
+        "`--log` reads its own `tests/` and `Cargo.toml` and holds the run to its lib binary and "
+        "its share of the declared ignores. Required with `--log`.",
+    )
+    ap.add_argument(
+        "--tests-dir",
+        type=pathlib.Path,
+        help="Defaults to `<package>/tests` with `--package` and to `smear/tests`, the "
+        "`--selftest` fixture, without it.",
+    )
     ap.add_argument(
         "--manifest",
-        default=pathlib.Path("smear/Cargo.toml"),
         type=pathlib.Path,
-        help="The package whose feature closure decides which test targets this cell compiles.",
+        help="The package whose feature closure decides which test targets this cell compiles. "
+        "Defaults to `<package>/Cargo.toml` with `--package` and to `smear/Cargo.toml` without it.",
     )
     ap.add_argument(
         "--cargo-features",
@@ -1265,7 +1505,8 @@ def main() -> int:
     ap.add_argument(
         "--print-packages",
         action="store_true",
-        help="Print the `-p` arguments for `cargo miri test`, one token per line, and exit. This "
+        help="Print the `-p` arguments for `cargo miri test`, one token per line, and exit — with "
+        "`--package`, that member's `-p` and any `--features` its cell restores. This "
         "is how ci/miri_sb.sh and ci/miri_tb.sh build their selection: MIRI_PACKAGES is then the "
         "single source of truth for what RUNS as well as for what the guard EXPECTS. They used to "
         "be two hard-coded lists and they did drift — the constant grew to six members while the "
@@ -1296,7 +1537,20 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    if not args.tests_dir.is_dir():
+    if args.package and (args.tests_dir or args.manifest):
+        ap.error("--package derives --tests-dir and --manifest from the member; pass neither")
+    if args.package and args.selftest:
+        ap.error("--selftest takes no --package: it partitions every member's tree itself")
+    if args.package:
+        args.tests_dir = pathlib.Path(args.package) / "tests"
+        args.manifest = pathlib.Path(args.package) / "Cargo.toml"
+    else:
+        args.tests_dir = args.tests_dir or pathlib.Path("smear/tests")
+        args.manifest = args.manifest or pathlib.Path("smear/Cargo.toml")
+
+    # A member's `tests/` may be absent — two of the five have none — and its cell still checks
+    # the lib binary. Without `--package` an absent tree is still the misconfiguration it was.
+    if not args.package and not args.tests_dir.is_dir():
         print(f"::error::miri_scope: no such directory: {args.tests_dir}", file=sys.stderr)
         return 1
     if not args.manifest.is_file():
@@ -1310,9 +1564,10 @@ def main() -> int:
         if not MIRI_PACKAGES:
             print("::error::miri_scope: MIRI_PACKAGES is empty", file=sys.stderr)
             return 1
-        for package in MIRI_PACKAGES:
-            print("-p")
-            print(package)
+        tokens = (shard_selection(args.package) if args.package
+                  else [arg for package in MIRI_PACKAGES for arg in ("-p", package)])
+        for token in tokens:
+            print(token)
         return 0
 
     if args.selftest:
@@ -1327,6 +1582,10 @@ def main() -> int:
     ]
     if missing:
         ap.error("required without --selftest: " + ", ".join(missing))
+    # The five-member check reads `smear/tests/`, which no selection has built since the crate
+    # split, so a real log can only be checked against the member it ran.
+    if not args.package:
+        ap.error("--log needs --package: every Miri cell selects one member")
     if not args.log.is_file():
         print(f"::error::miri_scope: no such log: {args.log}", file=sys.stderr)
         return 1
@@ -1339,6 +1598,7 @@ def main() -> int:
         miri_status=args.miri_status,
         cargo_features=[f for f in args.cargo_features.split(",") if f],
         default_features=not args.no_default_features,
+        shard=args.package,
     )
 
 

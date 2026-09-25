@@ -34,6 +34,17 @@
 //! root's own verdict rather than the read's return type. And the scan **panics** on a directory
 //! that does not exist or holds no `.rs` file, so a mistyped path can never be the thing that made
 //! a count zero.
+//!
+//! # Under Miri
+//!
+//! `no_syntactic_read_folds_a_terminal_stop_into_an_absent_outcome` and
+//! `the_watched_trees_read_through_the_terminal_aware_primitives` carry `#[cfg_attr(miri, ignore)]`
+//! for their kind: each is a source census, asserting on the text of the watched trees read from
+//! disk line by line and never running the parser, so an interpreter has none of this crate's code
+//! to check in them. A measurement found them — alone under `cargo miri test -p smear-parser
+//! --test syntactic_terminal_reads -- --exact`, Stacked Borrows, aarch64-apple-darwin, 2026-09-25,
+//! each was past five minutes — and the positive control, which scans one small tree, runs:
+//! `the_forbidden_patterns_match_rust_that_exists` took 3.8 s.
 
 #![cfg(any(feature = "graphql", feature = "graphqlx"))]
 #![allow(missing_docs)]
@@ -230,6 +241,19 @@ const FIXTURE: &str = r#"
   }
 "#;
 
+#[cfg_attr(
+  miri,
+  ignore = "A SOURCE CENSUS, AND NOT A MIRI SUBJECT. What is asserted below is that no line of the \
+            watched syntactic trees calls a blind read, a property of the source text, read from \
+            disk and scanned line by line once per pattern, and not of an execution: nothing here \
+            runs the parser, so an interpreter has none of this crate's code to check. Found by \
+            the five-minute detector's measurement: over five minutes under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25). \
+            `the_forbidden_patterns_match_rust_that_exists`, the positive control, scans one small \
+            tree and runs. The file's header carries the measurement. Declared in \
+            `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
+            nobody chose."
+)]
 #[test]
 fn no_syntactic_read_folds_a_terminal_stop_into_an_absent_outcome() {
   let mut findings = Vec::new();
@@ -287,6 +311,17 @@ fn the_forbidden_patterns_match_rust_that_exists() {
   );
 }
 
+#[cfg_attr(
+  miri,
+  ignore = "A SOURCE CENSUS, AND NOT A MIRI SUBJECT. What is asserted below is that the watched \
+            syntactic trees hold at least 70 terminal-aware reads, a property of the source text, \
+            read from disk and scanned line by line once per pattern, and not of an execution: \
+            nothing here runs the parser, so an interpreter has none of this crate's code to \
+            check. Found by the five-minute detector's measurement: over five minutes under `cargo \
+            miri test` on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header \
+            carries the measurement. Declared in `ci/miri_scope.py`'s ignore table, which is what \
+            stops this from being a coverage cut nobody chose."
+)]
 #[test]
 fn the_watched_trees_read_through_the_terminal_aware_primitives() {
   // The other half of the same claim: the blind names are absent because the reads MOVED, not

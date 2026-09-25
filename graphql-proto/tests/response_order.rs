@@ -559,6 +559,17 @@
 //! round, and under the relink at every depth the whole sequence is the completion order. A sweep's
 //! failure prints the arrival order beside it, which is the fact the named cases carry in their
 //! name and an enumerated run cannot.
+//!
+//! # Under Miri
+//!
+//! The two sweeps carry `#[cfg_attr(miri, ignore)]` for their kind: each asserts a behaviour over
+//! an enumeration — all 226 800 arrival orders of one document, each driven twice — and the
+//! enumeration is what an interpreter cannot hold. `every_arrival_order_of_the_mirror_serialises_
+//! in_the_mirror_s_order` was past five minutes alone under `cargo miri test -p graphql-proto
+//! --test response_order -- --exact`, Stacked Borrows, aarch64-apple-darwin, 2026-09-25, and its
+//! twin over `QUERY` is the same sweep. The named cases drive both documents through the same
+//! executor under Miri, one arrival order each; this file's other six tests took 19.2 s under
+//! those flags and 36.8 s under Tree Borrows.
 
 use graphql_proto::{Executor, Leaf, Node, ReqId, Values};
 use smear_parser::{
@@ -2060,6 +2071,19 @@ fn the_mirror_document_s_opposite_order_is_served_by_the_same_executor() {
 /// can never reach; and, on the minimal schedule, the run that answers each offer as it takes it,
 /// which is the only one that leaves a sibling `Ready` at every answer. See [`sweep`] for why it
 /// carries no permutation premise and what stands in its place, and [`Polls`] for the axis.
+#[cfg_attr(
+  miri,
+  ignore = "AN EXHAUSTIVE SWEEP, AND NOT A MIRI SUBJECT. What is asserted below is that `QUERY` \
+            serialises in its own order out of all 226 800 orders its results could arrive in, \
+            each driven twice — a behaviour, asserted over an enumeration: the 453 600 runs are \
+            the part an interpreter cannot hold, while the named cases in this file still drive \
+            the same documents through the same executor under Miri, one arrival order each. Its \
+            twin over `MIRROR` was over five minutes under `cargo miri test` on \
+            aarch64-apple-darwin (Stacked Borrows, 2026-09-25), and this is the same sweep over \
+            the same number of orders. The file's header carries the measurement. Declared in \
+            `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
+            nobody chose."
+)]
 #[test]
 fn every_arrival_order_of_the_query_serialises_in_the_query_s_order() {
   sweep(QUERY);
@@ -2070,6 +2094,18 @@ fn every_arrival_order_of_the_query_serialises_in_the_query_s_order() {
 /// pair: exhausting the *arrival* orders closes the history-derived family, and says nothing about
 /// an assembly that reads the keys. One document swept exhaustively is still one document, and a
 /// key-only comparator answers it correctly whenever the document happens to agree with it.
+#[cfg_attr(
+  miri,
+  ignore = "AN EXHAUSTIVE SWEEP, AND NOT A MIRI SUBJECT. What is asserted below is that `MIRROR` \
+            serialises in its own order out of all 226 800 orders its results could arrive in, \
+            each driven twice — a behaviour, asserted over an enumeration: the 453 600 runs are \
+            the part an interpreter cannot hold, while the named cases in this file still drive \
+            the same documents through the same executor under Miri, one arrival order each. Found \
+            by the five-minute detector's measurement: over five minutes under `cargo miri test` \
+            on aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
+            measurement. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this \
+            from being a coverage cut nobody chose."
+)]
 #[test]
 fn every_arrival_order_of_the_mirror_serialises_in_the_mirror_s_order() {
   sweep(MIRROR);
