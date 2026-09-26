@@ -37,13 +37,12 @@ on:
     # `main` is both the DEFAULT branch and the TRUNK; the separate trunk `feat/tokora-0.8` was
     # retired after `main` was fast-forwarded onto it. While they were different branches this lane
     # named only `main` and so never ran for a merge (#74). Any further entry is a live integration
-    # branch, which takes merges too and so needs a lane for the same reason: today that is
-    # `feat/proto`, temporary, dropped when the `proto` campaign lands on `main`. Kept identical to
-    # `ci.yml`'s list, whose comment carries the full reasoning, the order a retired entry has to be
-    # removed in, and the note on why a literal name is unavoidable in an `on:` block.
+    # branch, which takes merges too and so needs a lane for the same reason: the last one was
+    # `feat/proto`, dropped once the `proto` campaign was rebase-merged into `main`. Kept identical
+    # to `ci.yml`'s list, whose comment carries the full reasoning, the order a retired entry has to
+    # be removed in, and the note on why a literal name is unavoidable in an `on:` block.
     branches:
       - main
-      - feat/proto
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'

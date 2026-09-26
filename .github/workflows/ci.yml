@@ -45,10 +45,9 @@ on:
     # that invariant's stacked-PR exemption cannot stand in, since it wants the branch to be the
     # head of an open pull request and a branch forked from the trunk has no commits of its own for
     # GitHub to open one from. And an entry of this kind is TEMPORARY, so it names the condition
-    # that retires it:
-    #
-    #   * `feat/proto` — integration branch for the `proto` §6/§7 campaign, one pull request per
-    #     phase. Drop this entry when that subsystem merges into `main`.
+    # that retires it. No further entry is live right now: the last one, `feat/proto` — the `proto`
+    # §6/§7 campaign's integration branch — was dropped once that campaign was rebase-merged into
+    # `main` as 1ef52c3, on 2026-09-25.
     #
     # A literal name is forced here. `on:` is resolved before any context exists, so
     # `${{ github.event.repository.default_branch }}` cannot be written in this block, and there is
@@ -68,7 +67,6 @@ on:
     # is being merged INTO has a push lane, and fails when it does not.
     branches:
       - main
-      - feat/proto
     # `**.md` used to sit in these lists. It cannot: three READMEs are `include_str!`-ed into a
     # crate's rustdoc — the root `README.md` through `smear/README.md`, which is a symlink to it,
     # plus `smear-lexer/README.md` and `smear-parser/README.md` — so editing one is a compile-time
