@@ -328,7 +328,7 @@ pub fn text_hits(ty: &Type) -> Vec<TextHit> {
           }
           if let PathArguments::Parenthesized(pa) = &segment.arguments {
             for input in &pa.inputs {
-              walk(input, out_param, konstant, out);
+              walk(&input.ty, out_param, konstant, out);
             }
           }
         }
@@ -548,7 +548,7 @@ pub fn signature_types(sig: &Signature, self_ty: Option<&Type>) -> Vec<Type> {
   for arg in &sig.inputs {
     match arg {
       syn::FnArg::Typed(t) => out.push((*t.ty).clone()),
-      syn::FnArg::Receiver(r) => out.push((*r.ty).clone()),
+      syn::FnArg::Receiver(r) => out.push(receiver_type(r)),
     }
   }
   if let ReturnType::Type(_, ty) = &sig.output {
@@ -556,6 +556,18 @@ pub fn signature_types(sig: &Signature, self_ty: Option<&Type>) -> Vec<Type> {
   }
   out.extend(bound_type_list(&sig.generics));
   out
+}
+
+/// The type a receiver stands for — `&'a mut Self` for `&'a mut self` — which syn 3 no longer
+/// materialises on `Receiver` and records as a `ReceiverKind` instead.
+fn receiver_type(r: &syn::Receiver) -> Type {
+  match &r.kind {
+    syn::ReceiverKind::Reference(_, lifetime, mutability) => {
+      syn::parse_quote!(& #lifetime #mutability Self)
+    }
+    syn::ReceiverKind::Typed(_, ty) => (**ty).clone(),
+    _ => syn::parse_quote!(Self),
+  }
 }
 
 /// The types named in an item's bounds, as `Type` values — `Sink<&'src str>` from
@@ -566,6 +578,7 @@ pub fn bound_type_list(generics: &Generics) -> Vec<Type> {
     for bound in bounds {
       if let TypeParamBound::Trait(t) = bound {
         out.push(Type::Path(syn::TypePath {
+          attrs: Vec::new(),
           qself: None,
           path: t.path.clone(),
         }));
