@@ -612,11 +612,9 @@ fn generic_params(generics: &Generics) -> Vec<String> {
       match &mut param {
         GenericParam::Type(ty) => {
           ty.default = None;
-          ty.eq_token = None;
         }
         GenericParam::Const(c) => {
           c.default = None;
-          c.eq_token = None;
         }
         GenericParam::Lifetime(_) => {}
       }
@@ -979,7 +977,7 @@ fn impl_blocks(surface: &Surface) -> Vec<ImplBlock> {
 }
 
 fn trait_name(block: &ItemImpl) -> Option<String> {
-  let (_, path, _) = block.trait_.as_ref()?;
+  let (path, _) = block.trait_.as_ref()?;
   Some(path.segments.last()?.ident.to_string())
 }
 
