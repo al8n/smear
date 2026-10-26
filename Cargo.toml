@@ -79,7 +79,7 @@ rust-version = "1.95"
 [workspace.dependencies]
 bstr = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
-smol-bytes = { version = "0.1", default-features = false }
+smol-bytes = { version = "0.2", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
 # `rowan` is in tokora's PUBLIC API: `Cst::checkpoint` returns `rowan::Checkpoint`, `Cst::finish`
 # returns `rowan::GreenNode`, `cst::cast::token` returns `rowan::SyntaxToken`. So smear's `rowan`
