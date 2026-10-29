@@ -38,12 +38,14 @@
 //! explicitly sized thread, with the bisection reading the child's exit status — a shape a test
 //! harness cannot host. `MAX_NESTING_DEPTH`'s own documentation carries the resulting table.
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use smear::lexer::limits::MAX_NESTING_DEPTH;
 
 /// `{ ... on Query { … } }` nested `depth` deep: `depth + 1` simultaneously open braces.
 ///
 /// The shape from the issue, and the most expensive one measured — an inline fragment spends more
 /// native stack per level than a plain field selection, a list value or an input object.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn inline_fragments(depth: usize) -> String {
   let mut src = String::with_capacity(depth * 16 + 32);
   src.push('{');
@@ -59,6 +61,7 @@ fn inline_fragments(depth: usize) -> String {
 }
 
 /// The greatest `depth` [`inline_fragments`] may use and stay inside the budget.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 const DEEPEST_ACCEPTED: usize = MAX_NESTING_DEPTH - 1;
 
 /// The ceiling is [`MAX_NESTING_DEPTH`] open brackets, and it is what an **unconfigured** parse

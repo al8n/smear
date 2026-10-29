@@ -7,9 +7,13 @@ use std::{
 use super::read;
 use crate::introspection::{
   ResponseErrorKind,
-  json::{Text, visited},
+  json::Text,
   model::{IntrospectedSchema, IntrospectedType, Name, TypeRef},
 };
+// The byte gates at the foot of this file read `json::visited`, a thread-local counter, and
+// `thread_local!` is `std`'s. Under a `no_std` row they are absent rather than vacuous.
+#[cfg(feature = "std")]
+use crate::introspection::json::visited;
 
 // ---------------------------------------------------------------------------------------------
 // fixtures
@@ -1096,9 +1100,11 @@ fn every_envelope_reads_the_same_document() {
 ///
 /// Measured on the tree that introduced this gate: 4.7 for an added occurrence, 8.5 for an added
 /// `ofType` level. Measured for the two defects it was written against: 1 300 and 470.
+#[cfg(feature = "std")]
 const LOOKS_PER_ADDED_BYTE: u64 = 32;
 
 /// Bytes of the response the reader looked at while reading it.
+#[cfg(feature = "std")]
 fn visits(response: &str) -> u64 {
   let before = visited();
   drop(read(response));
@@ -1110,6 +1116,7 @@ fn visits(response: &str) -> u64 {
 /// **Accepted.** Every one of the `k` builds a refusal that the final occurrence takes away, which
 /// is what makes it the shape a hostile response would use: the door returns a schema, so nothing
 /// about the outcome says how much work the response cost.
+#[cfg(feature = "std")]
 fn discarded_refusals(k: usize) -> String {
   let discarded = r#""name":0,"#.repeat(k);
   format!(
@@ -1126,6 +1133,7 @@ fn discarded_refusals(k: usize) -> String {
 ///
 /// **Refused**, and refused by the innermost object — so the failure is deferred out through every
 /// enclosing `ofType` member, each of which has the whole subtree in front of it.
+#[cfg(feature = "std")]
 fn deep_refusal(depth: usize, prose: usize) -> String {
   let description = "p".repeat(prose);
   let mut reference = format!(r#"{{"kind":"WIDGET","name":"W","description":"{description}"}}"#);
@@ -1142,6 +1150,7 @@ fn deep_refusal(depth: usize, prose: usize) -> String {
 }
 
 /// Reports the marginal cost of the bytes one fixture has and a smaller one does not.
+#[cfg(feature = "std")]
 fn per_added_byte(small: &str, large: &str) -> u64 {
   let added = (large.len() - small.len()) as u64;
   assert!(added > 0, "the two fixtures are the same size");
@@ -1156,6 +1165,7 @@ fn per_added_byte(small: &str, large: &str) -> u64 {
 /// performed at construction is performed `k` times for an answer thrown away `k` times — and if it
 /// walks the response, that is Θ(k²) byte visits for a schema the door goes on to return. A network
 /// peer chooses `k`.
+#[cfg(feature = "std")]
 #[test]
 fn a_discarded_refusal_costs_a_constant_number_of_bytes() {
   // The control that makes the measurement mean what it says: this is the accepted path, so the
@@ -1188,6 +1198,7 @@ fn a_discarded_refusal_costs_a_constant_number_of_bytes() {
 /// the whole of it again, once for every level of `ofType` between the defect and the document.
 /// Within the 128-container bound that is up to 128 walks of one subtree, and the subtree here is a
 /// string the door does not even read.
+#[cfg(feature = "std")]
 #[test]
 fn a_deferred_refusal_is_not_re_walked_by_every_enclosing_member() {
   const PROSE: usize = 16 * 1024;
@@ -1216,6 +1227,7 @@ fn a_deferred_refusal_is_not_re_walked_by_every_enclosing_member() {
 /// The counter is wired to the reader, and it moves by what the reader reads.
 ///
 /// Without this, both gates above could pass because nothing was being counted.
+#[cfg(feature = "std")]
 #[test]
 fn the_byte_gate_counts() {
   // Every byte of the document is proved to be JSON, so reading one cannot visit fewer bytes than

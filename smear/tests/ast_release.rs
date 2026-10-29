@@ -66,11 +66,16 @@
 #![cfg(feature = "parser")]
 #![allow(missing_docs)]
 
+// The helpers and imports below are gated on `any(graphql, graphqlx)`, which is the union of the
+// dialects of the tests that use them: a `parser`-only row compiles no test in this file, and a
+// helper that none of them reaches is `dead_code` under `-Dwarnings`.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use std::vec::Vec;
 
 #[cfg(feature = "graphql")]
 use std::{rc::Rc, sync::Arc};
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use smear::lexer::tokora::SimpleSpan;
 #[cfg(feature = "graphql")]
 use smear::parser::graphql::ast as g;
@@ -79,6 +84,7 @@ use smear::parser::graphqlx::ast as x;
 
 /// Forty-six times the depth at which the shallower of the two aborted on [`STACK`], and twelve
 /// times the deeper one's.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 const DEPTH: usize = 100_000;
 
 /// The stack each fixture is built and released on.
@@ -87,8 +93,10 @@ const DEPTH: usize = 100_000;
 /// levels of type and 2 157 of selection in a release build, so [`DEPTH`] is an order of magnitude
 /// past both. It is also what the fixtures cost, since a release that does not recurse needs no
 /// more of it at 100 000 levels than at one.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 const STACK: usize = 256 * 1024;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn span() -> SimpleSpan {
   SimpleSpan::new(0, 0)
 }
@@ -98,6 +106,7 @@ fn span() -> SimpleSpan {
 /// A regression aborts the process, which no assertion can soften and no `#[should_panic]` sees, so
 /// the thread is not there to contain the failure — nothing can. It is there so the failure is
 /// *reachable*: see the module header for the two boundaries this size sits between.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn on_a_small_stack(fixture: impl FnOnce() + Send + 'static) {
   std::thread::Builder::new()
     .stack_size(STACK)
@@ -108,6 +117,7 @@ fn on_a_small_stack(fixture: impl FnOnce() + Send + 'static) {
 }
 
 /// Releases the fixture, which is the whole of each gate below.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn release<T>(owner: T) {
   drop(owner);
 }

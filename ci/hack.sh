@@ -44,9 +44,25 @@ cd "$REPO_ROOT" || exit 1
 status=0
 
 # Pass 1 — every feature of every member, one at a time, plus none and all.
-echo "== pass 1: cargo hack clippy --each-feature =="
+#
+# `--tests` is on both passes, and it is what makes each row check the member's TEST code too: unit
+# tests and `tests/*.rs`, built with the row's features and nothing else. Without it a row compiles
+# only the library, so a test that names `std` while its row is `no_std` — `to_string()` with no
+# `alloc` import, `thread_local!`, `std::thread` — was checked in no row but the full-feature
+# ones. al8n/smear#140. It is not `--all-targets`: examples and benches are built by their own
+# steps, and a bench pulls the criterion stack into every row.
+#
+# `--keep-going` is on both passes: one run must report EVERY failing row, not the first. cargo-hack
+# stops at the first row that fails, and with test targets in every row the first failure hides the
+# rest, which costs one CI round trip per row. It still exits non-zero when any row fails, and
+# `|| status=1` below carries that out of each pass, so the script fails if either pass did.
+#
+# The cost is wall-clock, a test target compiled once per row, and the first CI run of this change
+# is its measurement. If it proves too dear the answer is a smaller set of chosen no-`std` rows with
+# `--tests`, not dropping it again.
+echo "== pass 1: cargo hack clippy --each-feature --tests =="
 # shellcheck disable=SC2086
-$CARGO $TOOLCHAIN hack clippy --each-feature || status=1
+$CARGO $TOOLCHAIN hack clippy --each-feature --tests --keep-going || status=1
 
 # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
 # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its build
@@ -68,9 +84,12 @@ $CARGO $TOOLCHAIN hack clippy --each-feature || status=1
 # not need to be there — it already skips the `parser,parser` cell on its own. Nine cells, one per
 # remaining feature, and a feature added to the manifest later joins them without anyone editing
 # this file.
+#
+# `--tests` here for the reason pass 1 gives: these are the cells whose test targets no other row
+# builds.
 echo "== pass 2: the parser x feature pairs =="
 # shellcheck disable=SC2086
-$CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features parser \
+$CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features parser --tests --keep-going \
   --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
   --exclude-no-default-features --exclude-all-features || status=1
 

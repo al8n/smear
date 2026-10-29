@@ -76,7 +76,7 @@ use crate::{
 // Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
 // compiles under `--no-default-features`, where `crate::std` is `alloc` and `ToString` is not in
 // the prelude. The crate's other in-crate test modules that render a value spell it the same way.
-use std::string::ToString;
+use std::string::{String, ToString};
 
 use core::num::NonZeroU32;
 
@@ -1930,6 +1930,7 @@ fn an_entry_of_another_length_is_charged_for_the_length_test_that_rejected_it() 
 
   let (schema, long_document) = compile_against(SDL, &long);
   let spent_long = drive(&schema, &long_document, None);
+  #[cfg(feature = "std")]
   std::println!(
     "one written entry no declared name can equal: 1-byte {} units, {SPELLING}-byte {} units",
     spent_short.visits,
@@ -4667,6 +4668,7 @@ fn a_fragment_names_hashing_pass_is_charged_for_its_bytes() {
   };
   let narrow = least(short);
   let wide = least(long);
+  #[cfg(feature = "std")]
   std::println!(
     "fragment name: {narrow} visits at 1 byte, {wide} at {}",
     long.len()
@@ -4753,6 +4755,7 @@ fn a_warm_fragment_table_charges_what_a_cold_one_charges() {
 
   let cold = least(1);
   let warm = least(2);
+  #[cfg(feature = "std")]
   std::println!("fragment index: {cold} visits on the first start, {warm} on the second");
   assert_eq!(
     cold, warm,
@@ -4921,6 +4924,7 @@ fn the_written_arguments_are_charged_and_the_declared_ones_are_not() {
   // Written moves the ledger, and in proportion to the positions it was written at.
   let (bare, loaded) = (visits(32, 0, 8), visits(32, 32, 8));
   let wide = visits(32, 32, 64);
+  #[cfg(feature = "std")]
   println!("visits: 0 written {bare}, 32 written {loaded}, 32 written x 64 positions {wide}");
   assert!(
     loaded > bare + 200,

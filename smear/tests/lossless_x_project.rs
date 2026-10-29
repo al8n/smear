@@ -4496,7 +4496,8 @@ fn the_separated_atoms_refuse_at_the_obstruction() {
 
   // The caller-built half: the doubled and wrong-kind shapes the parser recovers with a hole, in
   // every separated walk, and the path's own three.
-  let cases: [(K, fn(&mut Tree), ProjectErrorKind, &str); 9] = [
+  type Case = (K, fn(&mut Tree), ProjectErrorKind, &'static str);
+  let cases: [Case; 9] = [
     (
       K::WherePredicate,
       |tree| {

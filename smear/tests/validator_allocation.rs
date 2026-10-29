@@ -34,25 +34,36 @@ mod counting;
 
 use std::vec::Vec;
 
-use counting::{allocations, peak_bytes};
+use counting::allocations;
+// `peak_bytes` is read only by the `std`-gated tests below, so a row without `std` has no use for it.
+#[cfg(feature = "std")]
+use counting::peak_bytes;
 
 use smear::{
   diagnostic::{Diagnose, DiagnoseExt},
-  lexer::tokora::{Parse as _, Parser, SimpleSpan},
+  lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
     GraphQL,
-    ast::{
-      ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList,
-      Described, ExecutableDocument, Name, Nested, ScalarTypeDefinition, TypeDefinition,
-      TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
-    },
+    ast::{ExecutableDocument, TypeSystemDocument},
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   validator::{
-    Budget, Collect, Count, Diagnostic, First, Ignore, Schema, Scratch, schema::SchemaBuilder,
-    validate_executable,
+    Budget, Collect, Count, Diagnostic, First, Ignore, Schema, Scratch, validate_executable,
   },
+};
+
+// Read only by `a_literal_leaf_costs_the_build_one_copy_per_distinct_spelling`, which is
+// `std`-gated, so a row without `std` has no use for them.
+#[cfg(feature = "std")]
+use smear::{
+  lexer::tokora::SimpleSpan,
+  parser::graphql::ast::{
+    ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList,
+    Described, Name, Nested, ScalarTypeDefinition, TypeDefinition, TypeSystemDefinition,
+    TypeSystemDefinitionOrExtension,
+  },
+  validator::schema::SchemaBuilder,
 };
 
 // ---------------------------------------------------------------------------------------------

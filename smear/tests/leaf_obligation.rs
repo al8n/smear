@@ -155,7 +155,7 @@ fn died_by_signal(output: &std::process::Output) -> bool {
   #[cfg(unix)]
   {
     use std::os::unix::process::ExitStatusExt as _;
-    return output.status.signal().is_some();
+    output.status.signal().is_some()
   }
   #[cfg(not(unix))]
   {

@@ -72,7 +72,7 @@ trait TestInt: MaterializedInt + Copy + core::fmt::Debug + Into<i64> {}
 impl<I> TestInt for I where I: MaterializedInt + Copy + core::fmt::Debug + Into<i64> {}
 
 /// The `IntWidth` an `IntOverflow` names, or a description of whatever else came back.
-fn overflow_width(errors: &GraphqlErrors<&str>) -> Result<IntWidth, String> {
+fn overflow_width(errors: &GraphqlErrors<&str>) -> Result<IntWidth, std::string::String> {
   match errors[0].data() {
     ErrorData::IntOverflow(overflow) => Ok(overflow.width()),
     other => Err(std::format!("{other:?}")),

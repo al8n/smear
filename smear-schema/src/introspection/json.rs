@@ -77,7 +77,9 @@ pub(super) type Scanned<T = ()> = Result<T, ResponseError>;
 //
 // Bytes visited is the quantity the two properties are stated in, so it is the quantity the gate
 // counts. A byte looked at twice counts twice, because that is precisely the defect.
-#[cfg(test)]
+// `std` as well as `test`: `thread_local!` is `std`'s, so a `no_std` row's test build has no counter
+// and the byte gates that read it (`decode/tests.rs`) are `std`-gated to match.
+#[cfg(all(test, feature = "std"))]
 thread_local! {
   /// Response bytes the reader has looked at on this thread.
   static VISITED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
@@ -88,14 +90,14 @@ thread_local! {
 /// Compiles to nothing outside this crate's own tests.
 #[inline]
 fn visit(count: usize) {
-  #[cfg(test)]
+  #[cfg(all(test, feature = "std"))]
   VISITED.with(|visited| visited.set(visited.get() + count as u64));
-  #[cfg(not(test))]
+  #[cfg(not(all(test, feature = "std")))]
   let _ = count;
 }
 
 /// Returns how many response bytes the reader has looked at on this thread.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn visited() -> u64 {
   VISITED.with(core::cell::Cell::get)
 }

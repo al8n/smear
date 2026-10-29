@@ -46,12 +46,15 @@
 //!   no longer superlinear: since #169 a nesting refusal is terminal, so the document root
 //!   returns instead of resynchronising and `Cst::finish_partial` tiles the tail.
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use std::time::Instant;
 
 /// A dialect's document root, labelled: what `long_trivia_tokens_do_not_buy_allowance` iterates.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 type Root = (&'static str, fn(&str) -> (usize, usize));
 
 /// `n` repetitions of `unit`.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn rep(unit: &str, n: usize) -> String {
   unit.repeat(n)
 }
@@ -73,6 +76,7 @@ fn bypass(levels: usize) -> String {
 }
 
 /// Parses `src` at `root`, asserts the lossless guarantee, and returns (seconds, diagnostics).
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn timed(root: fn(&str) -> (usize, usize), src: &str) -> (f64, usize) {
   let t = Instant::now();
   let (diags, covered) = root(src);
@@ -104,6 +108,7 @@ fn graphqlx(src: &str) -> (usize, usize) {
 }
 
 /// One doubling curve. A ratio near 2 is linear; near 4 is quadratic.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn curve(label: &str, root: fn(&str) -> (usize, usize), unit: &str, sizes: &[usize]) {
   print!("{label:<10} {:<12}", format!("{unit:?}"));
   let mut prev: Option<f64> = None;
@@ -137,6 +142,7 @@ fn graphql_recovery_cost() {
 /// `k` copies of a one-byte junk atom, each followed by a `pad`-byte comment.
 ///
 /// Bytes grow with `pad` while produce-events do not, which is the whole point.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn padded(atom: &str, k: usize, pad: usize) -> String {
   let comment = format!("#{}\n", "x".repeat(pad));
   let mut src = String::with_capacity(k * (atom.len() + comment.len()));
