@@ -1376,24 +1376,42 @@ jobs:
         # already runs the default set (lib unit tests + `tests/*`) in addition to doc tests,
         # which is the full equivalent of the old lib+tests+doctests selection.
         #
-        # `graphqlx` and `rowan` are named for the reason the `parser` paragraph gives, and NOT
-        # because the leg would otherwise resolve without them. `--workspace` selects
-        # `smear-smoke`, whose `smear` dependency names every declared feature, and cargo unifies
-        # that across the selected packages, so the unit graph is identical with these two names
-        # and without them. What changes is who decided. Until they were written, the resolve this
-        # job leans on was another member's dependency edge — the shape the paragraph above
-        # refuses for `parser`.
+        # `graphqlx`, `rowan` and `materialized-numbers` are named for the reason the `parser`
+        # paragraph gives, and NOT because the leg would otherwise resolve without them.
+        # `--workspace` selects `smear-smoke`, whose `smear` dependency names every declared
+        # feature, and cargo unifies that across the selected packages, so the unit graph is
+        # identical with these names and without them. What changes is who decided. Until they were
+        # written, the resolve this job leans on was another member's dependency edge — the shape
+        # the paragraph above refuses for `parser`.
         #
         # It is this leg the decision rests on, because this is the repository's ONLY nightly
         # `cargo test --doc`. A `compile_fail,EXXXX` fence has its ERROR CODE checked only by a
         # nightly rustdoc; on stable a snippet that fails with some other code satisfies the fence
-        # and the run is green. So every coded fence in the workspace — 17 of the 18 today — is
-        # enforced here or nowhere. Two of the 18 need exactly what these names buy:
-        # `smear_parser::graphqlx`'s `OperationType` sits behind `#[cfg(feature = "graphqlx")]`,
-        # and the crate-root cross-dialect cast fence is a `cfg_attr(all(graphql, rowan), doc)`.
-        # Neither is compiled by `graphql,parser` alone.
+        # and the run is green. So every coded fence in the workspace — 37 today, across
+        # `smear-lexer` (18), `smear-parser` (17) and `graphql-proto` (2) — is enforced here or
+        # nowhere, and this is the one leg that enforces all of them. There is no second nightly
+        # doctest step because none is needed: the audit of al8n/smear#173 found no coded fence
+        # whose item needs a feature this feature set lacks, and none whose point is that a feature
+        # is OFF. The gates, by what the fence's item needs:
+        #   - nothing: `graphql-proto` (2); `smear-lexer`'s `keyword!` (1), the string carriers
+        #     under `string_lexer` (11)
+        #   - `graphql`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
+        #     `graphql::ast` hash-key fences (4: `OperationType` and the three `type_system`
+        #     locations) and `value::nesting`'s `Leaf` fences under a `cfg_attr(graphql, doc)` (5)
+        #   - `graphqlx`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
+        #     `graphqlx::ast::OperationType` (1) and `value::nesting`'s `cfg_attr(graphqlx, doc)`
+        #     fences (3)
+        #   - `graphql` and `rowan`: the crate-root cross-dialect cast fence (1), a
+        #     `cfg_attr(all(graphql, rowan), doc)`
+        #   - `materialized-numbers`: `IntOverflow::checked`, `MaterializedInt` and the last
+        #     `value::nesting` fence (3), all behind `#[cfg(feature = "materialized-numbers")]` or
+        #     a `cfg_attr` on it
+        # Adding a coded fence behind a feature this list does not name, or a fence that must fail
+        # because a feature is off, means this step needs a second leg; do not rely on the
+        # smoke member's edge to carry it.
         run: |
-          cargo llvm-cov --no-default-features --features graphql,graphqlx,rowan,parser \
+          cargo llvm-cov --no-default-features \
+            --features graphql,graphqlx,rowan,parser,materialized-numbers \
             --doctests --workspace \
             --cobertura --output-path cobertura.xml
       - name: Upload to codecov.io
