@@ -11,19 +11,18 @@
 //! engine is consulted the walk has already finished spending. al8n/smear#198.
 //!
 //! - **Variable usages.** Every usage scanned every definition of the operation, comparing names
-//!   byte for byte. 4,000 of each, off 250 KB, measured 60 ms against 0.33 ms for the same
-//!   declarations with one usage.
+//!   byte for byte: `U · V` comparisons off `U + V` of syntax.
 //! - **Shared fragments.** The operation loop restarts the selection walk for each operation, and
 //!   `Frame::CHECK` suppresses a definition's repeated *diagnostics*, not its traversal. 3,200
-//!   operations spreading one 3,200-field fragment — 129 KB — spent 189 ms in the walk.
+//!   operations spreading one 3,200-field fragment — 129 KB — walk ten million selections.
 //!
 //! # The two halves, and why the halves are different kinds of test
 //!
-//! The **ceiling** is a refusal, so it is asserted exactly: rule, count, verdict, wall clock. The
-//! **index** is a cost, so it is asserted as one — a scaling ratio wide enough that a quadratic
-//! cannot pass it and noise cannot fail it, plus an absolute wall clock, both measured with the
-//! merge rules out of the way. The merge engine has its own quadratic on these documents and its
-//! own branch; leaving it in would make this file's numbers a measurement of that.
+//! The **ceiling** is a refusal, so it is asserted exactly: rule, count, verdict, and the units the
+//! refusal reports. The **index** is a cost, so it is asserted as one — a scaling ratio wide enough
+//! that a quadratic cannot pass it, plus an absolute bound per usage, both measured with the merge
+//! rules out of the way. The merge engine has its own quadratic on these documents and its own
+//! branch; leaving it in would make this file's numbers a measurement of that.
 //!
 //! # And the third half, which is the one that could go wrong quietly
 //!
@@ -33,13 +32,32 @@
 //! where the risk is: every definition of it is marked used, and a usage resolves against the
 //! **first**, so an index whose ties broke the other way would silently change which declaration
 //! draft 5.8.5 reads.
+//!
+//! # Counted, not timed
+//!
+//! Every cost here is a count, and a count answers the same on a loaded runner as on a quiet one
+//! and the same in a debug build as in a release one: the smallest [`Budget::validation_work`] a
+//! document clears ([`min_budget`]), the working set's own row count ([`Scratch::capacity`]), or
+//! allocation events on the test's own thread (`support/counting.rs`). Wall-clock shapes stood in
+//! some of these places and reddened loaded and instrumented runners with no change under
+//! `smear/`, which is a gate measuring the runner rather than the property it names —
+//! al8n/smear#210. What a count cannot see is work the ledger does not charge and that allocates
+//! nothing; the tests whose subject is that kind of work say so.
 
 // The same gate every other validator test carries: `smear::validator` does not exist in the
 // crate's API surface with the feature off.
 #![cfg(feature = "validator")]
 #![allow(missing_docs)]
 
-use std::{string::String, thread, time::Instant, vec::Vec};
+// The allocation instrument, for the two questions a unit count cannot answer: whether the
+// lossless door projected before it refused, and whether its verified twin verified at all.
+// `tests/support/counting.rs` owns the allocator, the thread-local counters and the window that
+// reads them, and its header says why it is a file shared between targets; the `#[path]` form is
+// what puts its `#[global_allocator]` into this binary.
+#[path = "support/counting.rs"]
+mod counting;
+
+use std::{string::String, thread, vec::Vec};
 
 use smear::{
   lexer::{
@@ -53,8 +71,8 @@ use smear::{
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   validator::{
-    Budget, Collect, Diagnostic, Rule, RuleSet, Schema, Scratch, schema::MAX_FIELD_ARGUMENTS,
-    validate_executable_with,
+    Budget, Collect, Context, Diagnostic, Rule, RuleSet, Schema, Scratch,
+    schema::MAX_FIELD_ARGUMENTS, validate_executable_with,
   },
 };
 
@@ -122,12 +140,14 @@ fn parse(source: &str) -> ExecutableDocument<&str> {
   .expect("the query parses")
 }
 
-/// Everything one run produces: whether a bound refused, what was emitted, and the wall clock.
+/// Everything one run produces: whether a bound refused, and what was emitted.
 struct Run {
   refused: bool,
   emitted: u32,
   diagnostics: Vec<(Rule, usize, usize, Option<String>)>,
-  ms: f64,
+  /// The count a [`Rule::ValidationWorkBudget`] diagnostic carries — the ceiling the refusal
+  /// reached — when one was emitted.
+  reported: Option<u32>,
 }
 
 impl Run {
@@ -145,9 +165,7 @@ fn run(schema: &Schema, source: &str, budget: &Budget, rules: RuleSet) -> Run {
   let mut scratch = Scratch::new();
   let mut collected = Vec::new();
   let mut sink = Collect::new(&mut collected);
-  let start = Instant::now();
   let verdict = validate_executable_with(schema, &document, &mut scratch, budget, rules, &mut sink);
-  let ms = start.elapsed().as_secs_f64() * 1e3;
   let invalid = verdict.err();
   Run {
     refused: invalid.is_some_and(|invalid| invalid.budget_tripped()),
@@ -167,7 +185,12 @@ fn run(schema: &Schema, source: &str, budget: &Budget, rules: RuleSet) -> Run {
         )
       })
       .collect(),
-    ms,
+    reported: collected.iter().find_map(|diagnostic| {
+      match (diagnostic.rule(), diagnostic.context_of()) {
+        (Rule::ValidationWorkBudget, Context::Count(ceiling)) => Some(ceiling),
+        _ => None,
+      }
+    }),
   }
 }
 
@@ -204,7 +227,8 @@ fn on_a_deep_stack<T: Send + 'static>(body: impl FnOnce() -> T + Send + 'static)
 
 /// The smallest [`Budget::validation_work`] at which a pre-parsed document is not refused.
 ///
-/// [`min_budget`]'s twin for a document the shared parse door cannot produce.
+/// [`min_budget`]'s twin for a document the shared parse door cannot produce, and for one large
+/// enough that parsing it again for each of the thirty-two probes would be most of the run.
 fn min_budget_of<S>(schema: &Schema, document: &ExecutableDocument<S>, rules: RuleSet) -> u32
 where
   S: AsRef<[u8]> + Clone,
@@ -259,36 +283,6 @@ fn min_budget(schema: &Schema, source: &str, rules: RuleSet) -> u32 {
     }
   }
   lo
-}
-
-/// How long a refusal is allowed to take.
-///
-/// The ceiling is four million units and an unoptimised build spends roughly sixteen times what an
-/// optimised one does on each — measured at 42 ms release against 663 ms debug for the same
-/// document — so a single number here would either be vacuous in release or red in debug. Both
-/// halves are assertions about the same property: reaching the ceiling costs a bounded amount of
-/// time, and doubling the document does not change it.
-///
-/// `validator_merge.rs` gets away with one number because its budget is 65,536 units, sixty-four
-/// times smaller, so its debug cost lands under the same threshold its release cost does.
-fn refusal_budget_ms() -> f64 {
-  if cfg!(debug_assertions) {
-    4_000.0
-  } else {
-    500.0
-  }
-}
-
-/// The fastest of `rounds` runs, kept whole so its diagnostics can be asserted on too.
-fn best_of(rounds: usize, mut once: impl FnMut() -> Run) -> Run {
-  let mut best = once();
-  for _ in 1..rounds {
-    let next = once();
-    if next.ms < best.ms {
-      best = next;
-    }
-  }
-  best
 }
 
 /// [`RuleSet::ALL`] without draft 5.3.2 and its two bounds.
@@ -371,59 +365,50 @@ fn fragment_bomb(ops: usize, fields: usize) -> String {
 /// Variable-use validation is linear in the operation's size, not quadratic in it.
 ///
 /// Quadrupling `n` quadruples a linear cost and multiplies a quadratic one by sixteen. The
-/// threshold is eight — twice the linear expectation and half the quadratic one — so neither a
-/// slow machine nor a fast one decides the verdict.
+/// threshold is eight — twice the linear expectation and half the quadratic one.
 ///
-/// Measured on this machine, release, with the rule set below. At a46ab95, the commit before the
-/// index: 2,000 usages 7.13 ms, 8,000 usages 159.26 ms, **ratio 22.34** — this assertion is the one
-/// that fails there. With the index: 0.74 ms and 3.06 ms, ratio 3.93. The 22.34 is above sixteen
-/// rather than at it because the scan's inner comparison gets cache-colder as the definition list
-/// grows, which is the same reason the byte length of a name is charged and not just its identity.
+/// # What the reading can see
+///
+/// The cost is [`min_budget_of`]: the ledger's price for the whole validation, the same number on
+/// every machine. A scan priced the way this crate prices a loop whose length the document
+/// decides — a unit per entry it examines — would cost `n²` units on these documents and fail the
+/// ratio. The scan the index replaced was priced at nothing, and a step priced at nothing moves no
+/// reading in this file; what this pins is that no priced one came back.
+///
+/// Measured on this tree: 2,000 usages 28,041 units and 8,000 usages 112,134, ratio 4.00. The
+/// 8,000-declaration control is 32,144, so the 7,999 usages it does not have cost ten units each.
 #[test]
 fn a_variable_index_replaces_the_scan_at_every_usage() {
   let schema = build(SCHEMA);
-  let budget = Budget::default();
   let rules = without_merge();
 
-  // Best of five, **interleaved**. A single sample of a millisecond-scale run is mostly scheduler
-  // noise and a ratio of two noisy samples is twice that, so the minimum is the one statistic a
-  // busy machine can only move in one direction — but measuring all five smalls and then all five
-  // larges lets a burst of load land on one side of the ratio and not the other. This suite runs
-  // eighty-five test binaries in parallel, and that is exactly what happened: 4.2 in isolation,
-  // 8.7 under the full run, against a threshold of 8. Alternating puts any burst on both sides.
-  let (mut small_ms, mut large_ms, mut control_ms) = (f64::MAX, f64::MAX, f64::MAX);
-  let mut large = run(&schema, &variable_bomb(8_000), &budget, rules);
-  for _ in 0..5 {
-    small_ms = small_ms.min(run(&schema, &variable_bomb(2_000), &budget, rules).ms);
-    let round = run(&schema, &variable_bomb(8_000), &budget, rules);
-    large_ms = large_ms.min(round.ms);
-    large = round;
-    control_ms = control_ms.min(run(&schema, &variable_control(8_000), &budget, rules).ms);
-  }
-  let ratio = large_ms / small_ms;
+  let large_source = variable_bomb(8_000);
+  let small = min_budget_of(&schema, &parse(&variable_bomb(2_000)), rules);
+  let large = min_budget_of(&schema, &parse(&large_source), rules);
+  let control = min_budget_of(&schema, &parse(&variable_control(8_000)), rules);
+  let ratio = f64::from(large) / f64::from(small);
+  let usages = large - control;
   println!(
-    "variable bomb: n=2000 {small_ms:.3} ms, n=8000 {large_ms:.3} ms (ratio {ratio:.2}), \
-     control {control_ms:.3} ms"
+    "variable bomb: n=2000 {small} units, n=8000 {large} units (ratio {ratio:.2}), control \
+     {control} units, so 7,999 usages cost {usages}"
   );
 
   // The usages are the term. Neither document is refused: they are honest in size, and what was
   // wrong with them was the work, not the size.
-  assert!(!large.refused, "the linear document was refused");
-  assert_eq!(large.rules(), [Rule::AllVariablesUsed]);
+  let outcome = run(&schema, &large_source, &Budget::default(), rules);
+  assert!(!outcome.refused, "the linear document was refused");
+  assert_eq!(outcome.rules(), [Rule::AllVariablesUsed]);
   assert!(
     ratio < 8.0,
-    "quadrupling the operation's size multiplied the cost by {ratio:.2}; a scan per usage would"
+    "quadrupling the operation's size multiplied its units by {ratio:.2}; a scan per usage would"
   );
   // The ratio above is the real claim; this is the backstop that catches a regression too small
-  // to move a ratio. Scaled for an unoptimised build the same way the refusal budget is.
-  let ceiling = if cfg!(debug_assertions) {
-    1_600.0
-  } else {
-    100.0
-  };
+  // to move a ratio. A usage measures ten units, and twenty is room for one more reader of its
+  // names but not for a search that pays per comparison — thirteen more a usage at 8,000
+  // declarations, which leaves the ratio near four.
   assert!(
-    large_ms < ceiling,
-    "8,000 usages against 8,000 definitions took {large_ms:.3} ms"
+    usages <= 7_999 * 20,
+    "7,999 usages against 8,000 definitions cost {usages} units"
   );
 }
 
@@ -577,48 +562,62 @@ impl TapSorted for Vec<Rule> {
 // CEILING-SECTION-BEGIN
 
 /// A shared fragment walked once per operation is refused rather than walked, and the refusal is
-/// bounded in wall clock rather than in document size.
+/// bounded by the ceiling rather than by the document.
 ///
-/// The document doubles between the two halves and the refusal does not get slower, which is the
-/// whole property: before the ceiling the same pair measured 48 ms and 189 ms.
+/// The document doubles between the two halves and the walk it asks for quadruples, while what
+/// refusing it costs does not move — which is the whole property. A refusal costs the ceiling by
+/// construction: the ledger refuses the first charge that does not fit, and every charge stands in
+/// front of the work it prices. So what is read here is what construction does not give: that the
+/// shape really is a product, and that one ceiling stopped both halves.
+///
+/// # The instrument
+///
+/// The product is [`min_budget`] at a size bisection affords — a full-size half asks for millions
+/// of units, and bisecting one validates it thirty-two times — with the merge rules out, for the
+/// reason [`without_merge`] gives; the walk in front of them is the same walk. The ceiling is the
+/// count the refusal itself reports.
+///
+/// Measured on this tree: 100 x 100 asks for 22,103 units and 200 x 200 for 84,203, x3.81, and
+/// both full-size halves report the 4,194,304-unit default.
 #[test]
 fn the_ceiling_refuses_a_shared_fragment_walked_once_per_operation() {
   let schema = build(SCHEMA);
   let budget = Budget::default();
 
-  let source = fragment_bomb(1_600, 1_600);
-  let small = run(&schema, &source, &budget, RuleSet::ALL);
-  println!(
-    "fragment bomb: {} bytes, 1600 x 1600, {:.3} ms",
-    source.len(),
-    small.ms
-  );
-  assert!(small.refused, "the verdict does not report the bound");
-  assert_eq!(small.rules(), [Rule::ValidationWorkBudget]);
+  let walk = |n: usize| min_budget(&schema, &fragment_bomb(n, n), without_merge());
+  let (single, double) = (walk(100), walk(200));
+  let growth = f64::from(double) / f64::from(single);
+  println!("fragment bomb walk: 100 x 100 {single} units, 200 x 200 {double} units (x{growth:.2})");
+  // Doubling both dimensions doubles a sum and quadruples a product; three is between them.
   assert!(
-    small.ms < refusal_budget_ms(),
-    "refusing took {:.3} ms",
-    small.ms
+    growth > 3.0,
+    "doubling the document multiplied its walk by {growth:.2}, so this is not the shape the \
+     ceiling is for"
   );
 
-  // Exactly one. A collecting sink does not stop the unwinding, and one refusal per remaining unit
-  // of work would bury whatever else the document got wrong.
-  assert_eq!(small.emitted, 1, "the refusal was reported more than once");
-
-  let source = fragment_bomb(3_200, 3_200);
-  let large = run(&schema, &source, &budget, RuleSet::ALL);
-  println!(
-    "fragment bomb: {} bytes, 3200 x 3200, {:.3} ms",
-    source.len(),
-    large.ms
-  );
-  assert!(large.refused);
-  assert_eq!(large.rules(), [Rule::ValidationWorkBudget]);
-  assert!(
-    large.ms < refusal_budget_ms(),
-    "four times the work refused in {:.3} ms",
-    large.ms
-  );
+  for n in [1_600, 3_200] {
+    let source = fragment_bomb(n, n);
+    let outcome = run(&schema, &source, &budget, RuleSet::ALL);
+    println!(
+      "fragment bomb: {} bytes, {n} x {n}, refused at {:?} units",
+      source.len(),
+      outcome.reported
+    );
+    assert!(outcome.refused, "the verdict does not report the bound");
+    assert_eq!(outcome.rules(), [Rule::ValidationWorkBudget]);
+    // Exactly one. A collecting sink does not stop the unwinding, and one refusal per remaining
+    // unit of work would bury whatever else the document got wrong.
+    assert_eq!(
+      outcome.emitted, 1,
+      "the refusal was reported more than once"
+    );
+    assert_eq!(
+      outcome.reported,
+      Some(Budget::DEFAULT_VALIDATION_WORK),
+      "refusing {n} x {n} reported {:?} units rather than the ceiling",
+      outcome.reported
+    );
+  }
 }
 
 /// Filtering the bound's rule out switches off its **diagnostic**, not its refusal.
@@ -627,6 +626,14 @@ fn the_ceiling_refuses_a_shared_fragment_walked_once_per_operation() {
 /// `Ok` would be spelling giving up exactly the way it spells finishing. So the verdict is `Err`,
 /// [`Invalid::budget_tripped`] is true, and [`Invalid::emitted`] is zero — a combination that means
 /// one thing and only one thing.
+///
+/// # And it stops where the refusal stops
+///
+/// Read as the working set. The two `held` runs below differ in exactly one thing, whether the
+/// bound's rule is in the set, so [`Scratch::capacity`] reads the same for both exactly when
+/// filtering the rule out left the stopping where it was: a validator that went on past the
+/// ceiling with nothing to say would reach the passes behind it, and those size tables of their
+/// own. Measured on this tree: 6,202 rows either way.
 #[test]
 fn giving_up_is_not_spelled_like_finishing() {
   let schema = build(SCHEMA);
@@ -641,24 +648,31 @@ fn giving_up_is_not_spelled_like_finishing() {
   );
   assert_eq!(quiet.emitted, 0, "{:?}", quiet.diagnostics);
   assert_eq!(quiet.diagnostics, []);
-  assert!(
-    quiet.ms < refusal_budget_ms(),
-    "refusing took {:.3} ms",
-    quiet.ms
-  );
 
   // And the refusal is still a refusal to the type system: `Err`, whatever the count.
   let document = parse(&source);
-  let mut scratch = Scratch::new();
-  let mut sink = smear::validator::Ignore;
-  let invalid =
-    validate_executable_with(&schema, &document, &mut scratch, &budget, rules, &mut sink)
-      .expect_err("a document the ceiling refused came back Ok");
+  let held = |rules: RuleSet| {
+    let mut scratch = Scratch::new();
+    let mut sink = smear::validator::Ignore;
+    let verdict =
+      validate_executable_with(&schema, &document, &mut scratch, &budget, rules, &mut sink);
+    (verdict, scratch.capacity())
+  };
+  let (verdict, quiet_rows) = held(rules);
+  let invalid = verdict.expect_err("a document the ceiling refused came back Ok");
   assert!(invalid.budget_tripped());
   assert_eq!(invalid.emitted(), 0);
   assert_eq!(
     invalid.to_string(),
     "resource budget exceeded before the document was fully examined"
+  );
+
+  let (_, loud_rows) = held(RuleSet::ALL);
+  println!("giving up: {quiet_rows} rows with the rule off, {loud_rows} with it on");
+  assert_eq!(
+    quiet_rows, loud_rows,
+    "refusing with the rule off held {quiet_rows} rows against {loud_rows} with it on, so giving \
+     up went further than the refusal it is"
   );
 }
 
@@ -904,36 +918,60 @@ fn a_nested_literal_pays_for_the_coordinates_it_rebuilds() {
 /// This one is not about the *amount*: 5.4.2, 5.6.3 and 5.7.3 charge the same total wherever the
 /// charge sits. It is about the **position**. The charge used to be per-argument inside the loop
 /// that follows the sort, so `O(N log N)` comparisons over bytes the client chose all happened
-/// before the ledger could refuse anything — which is a clock, so this is measured with one.
+/// before the ledger could refuse anything.
+///
+/// # The instrument
+///
+/// A unit count cannot see a position, so this reads the sort's footprint instead. 5.4.2 pushes its
+/// index permutation into the working set before it sorts it, a row per argument, so a sort that
+/// ran leaves at least sixty thousand rows in [`Scratch::capacity`] and a refusal in front of it
+/// leaves none of them. Measured on this tree: 8 rows refused at sixteen units, 65,749 with the
+/// bound off.
 #[test]
 fn a_uniqueness_sort_cannot_outrun_the_ledger() {
+  const ARGUMENTS: usize = 60_000;
   let schema = build(SCHEMA);
   // 60,000 distinct argument names on one field. Every one of them is a name the sort compares.
   let mut source = String::from("{ dog { isHouseTrained(");
-  for i in 0..60_000 {
+  for i in 0..ARGUMENTS {
     source.push_str(&std::format!("argument{i}: true "));
   }
   source.push_str(") } }");
+  let document = parse(&source);
+
+  let held = |budget: &Budget| {
+    let mut scratch = Scratch::new();
+    let mut sink = smear::validator::Ignore;
+    let refused = validate_executable_with(
+      &schema,
+      &document,
+      &mut scratch,
+      budget,
+      RuleSet::ALL,
+      &mut sink,
+    )
+    .err()
+    .is_some_and(|invalid| invalid.budget_tripped());
+    (refused, scratch.capacity())
+  };
 
   // Sixteen units: enough to reach `check_arguments` — the selection and the field name cost about
   // four — and nothing like enough for sixty thousand argument names.
-  let budget = Budget::default().with_validation_work(16);
-  let outcome = best_of(3, || run(&schema, &source, &budget, RuleSet::ALL));
+  let (refused, starved) = held(&Budget::default().with_validation_work(16));
+  // The premise: with the bound off the same sort runs, and its rows are in the reading.
+  let (_, sorted) = held(&Budget::default().with_validation_work(u32::MAX));
   println!(
-    "uniqueness sort: {} bytes refused in {:.3} ms",
-    source.len(),
-    outcome.ms
+    "uniqueness sort: {} bytes, {starved} rows refused at sixteen units, {sorted} rows sorted",
+    source.len()
   );
-  assert!(outcome.refused);
-  // Measured, this machine, release: 0.003 ms with the charge in front of the sort, and 4.9 ms
-  // with it behind — the same total, spent after `O(N log N)` comparisons instead of before the
-  // first one. One millisecond separates them by two orders of magnitude in one direction and
-  // five times in the other.
-  let ceiling = if cfg!(debug_assertions) { 8.0 } else { 1.0 };
+  assert!(refused);
   assert!(
-    outcome.ms < ceiling,
-    "refusing at a budget of sixteen units took {:.3} ms, which is a sort that ran first",
-    outcome.ms
+    sorted >= ARGUMENTS,
+    "the sort that ran held only {sorted} rows, so the reading below discriminates nothing"
+  );
+  assert!(
+    starved < ARGUMENTS,
+    "refusing at a budget of sixteen units held {starved} rows, which is a sort that ran first"
   );
 }
 
@@ -951,11 +989,21 @@ fn a_uniqueness_sort_cannot_outrun_the_ledger() {
 ///
 /// So the ledger opens in `validate_executable_lossless_with`, the projection spends from it
 /// first, and the validator continues on what is left.
+///
+/// # The instrument
+///
+/// An AST is allocations — a selection set per operation at the least — so a projection that ran
+/// shows up as allocation events on this thread, and a refusal in front of it as none. The door
+/// verifies the pair first, outside the ledger, and at this fixture's nesting that allocates
+/// nothing; `validator_allocation.rs` pins the zero. Measured on this tree: projecting the
+/// 161,801-byte pair — 120,016 elements — allocates 16,022 times, and refusing it allocates none.
 #[cfg(feature = "rowan")]
 #[test]
 fn the_projection_is_charged_before_it_runs() {
   use smear::{
-    parser::graphql::lossless::parse_executable_document,
+    parser::graphql::lossless::{
+      Verified, parse_executable_document, project_executable_document_verified,
+    },
     validator::validate_executable_lossless_with,
   };
 
@@ -968,26 +1016,30 @@ fn the_projection_is_charged_before_it_runs() {
   let refuse_at = |work: u32, rules: RuleSet| {
     let budget = Budget::default().with_validation_work(work);
     let mut scratch = Scratch::new();
-    let mut collected = Vec::new();
+    // Room for the one diagnostic before the window opens, so the sink's growth is not read as
+    // the door's.
+    let mut collected = Vec::with_capacity(1);
     let mut sink = Collect::new(&mut collected);
-    let start = Instant::now();
-    let verdict = validate_executable_lossless_with(
-      &schema,
-      &parse,
-      &source,
-      &mut scratch,
-      &budget,
-      rules,
-      &mut sink,
-    );
-    let ms = start.elapsed().as_secs_f64() * 1e3;
-    (verdict, collected, ms)
+    let mut verdict = None;
+    let allocated = counting::allocations(|| {
+      verdict = Some(validate_executable_lossless_with(
+        &schema,
+        &parse,
+        &source,
+        &mut scratch,
+        &budget,
+        rules,
+        &mut sink,
+      ));
+    });
+    let verdict = verdict.expect("the window ran the door");
+    (verdict, collected, allocated)
   };
 
-  // Sixteen units against a document whose projection alone is priced in the tens of thousands.
-  let (verdict, collected, ms) = refuse_at(16, RuleSet::ALL);
+  // Sixteen units against a document whose projection alone is priced at over a hundred thousand:
+  // a unit per element and one per eight bytes.
+  let (verdict, collected, allocated) = refuse_at(16, RuleSet::ALL);
   let invalid = verdict.expect_err("a projection the budget cannot pay for came back Ok");
-  println!("projection: {} bytes refused in {ms:.3} ms", source.len());
   assert!(invalid.invalid().budget_tripped());
   assert_eq!(invalid.invalid().emitted(), 1);
   assert_eq!(
@@ -997,11 +1049,27 @@ fn the_projection_is_charged_before_it_runs() {
   // Nothing was projected, so there is no recovery — not a recovery that reads as a clean parse,
   // and not one carrying a number nobody counted.
   assert_eq!(invalid.recovery(), None);
-  // And it did not project first: the whole point is that this is not a walk of the CST.
-  let ceiling = if cfg!(debug_assertions) { 20.0 } else { 2.0 };
+
+  // And it did not project first: the whole point is that this is not a walk of the CST. What the
+  // projection allocates is the premise, so the zero below is a reading and not a blind gate.
+  let pair = Verified::new(&parse, &source).expect("the pair matches");
+  let projected = counting::allocations(|| {
+    std::hint::black_box(project_executable_document_verified(pair));
+  });
+  println!(
+    "projection: {} bytes, {} elements, refused at 16 units with {allocated} allocations; \
+     projecting allocates {projected}",
+    source.len(),
+    pair.projection_cost()
+  );
   assert!(
-    ms < ceiling,
-    "refusing before the projection took {ms:.3} ms, which is a projection that ran"
+    projected >= 4_000,
+    "projecting 4,000 operations allocated only {projected} times, so the reading below \
+     discriminates nothing"
+  );
+  assert_eq!(
+    allocated, 0,
+    "refusing before the projection allocated {allocated} times, which is a projection that ran"
   );
 
   // Giving up is not spelled like finishing, on this path either: with the rule filtered out there
@@ -2075,25 +2143,23 @@ fn a_schema_sized_scan_is_charged_per_position_that_reaches_it() {
 /// charges what a pass *examines* and this is what a pass *prepares*. Generation stamps remove the
 /// clear rather than pricing it.
 ///
-/// **The repair is not measurable at any size this suite can carry.** Measured on this machine,
-/// release, `O = F = n`, bitset against stamps: 1.32/1.44 ms at 2,000, 8.85/9.64 at 10,000,
-/// 33.64/32.30 at 30,000, 85.35/78.78 at 60,000 — indistinguishable, and the sign flips with
-/// ordering noise. The arithmetic says why: at `n = 60,000` the clear is 56 million `u64` writes
-/// over a buffer that stays in cache, about 7 ms of an 85 ms run, while a per-operation walk costs
-/// microseconds against that buffer's nanoseconds. The quadratic term overtakes the linear one at
-/// roughly two million fragments — a sixty-megabyte document, which is a legitimate input and not a
-/// test fixture.
+/// **No count can see that repair.** The clear was never charged, so it moved no unit, and it wrote
+/// into a buffer already sized, so it moved no allocation either. A clock could not see it at any
+/// size this suite can carry: the writes stay in cache, and the quadratic term overtakes the linear
+/// one at roughly two million fragments — a sixty-megabyte document, which is a legitimate input
+/// and not a test fixture.
 ///
-/// So this asserts the **property** — opening a walk is `O(1)` in the fragment population — and
-/// would fail if a later change put document-sized setup back at the top of a per-operation walk
-/// with a constant big enough to see. It does not distinguish `ad7fed3` from its successor, and
-/// nothing in this suite does. Fourth time on this branch that a repair has arrived without a
-/// witness; recording the failed measurement is what stops it reading as one.
+/// So this asserts the **property** in the instrument it has — the ledger's price of opening a walk
+/// is `O(1)` in the fragment population — and would fail if a later change put a charged,
+/// document-sized step back at the top of a per-operation walk. It does not distinguish `ad7fed3`
+/// from its successor, and nothing in this suite does.
+///
+/// Measured on this tree: the operation walk is 27,000 units at 1,000 pairs and 270,000 at 10,000,
+/// the subscription roots 37,000 and 370,000 — ratio 10.00 both, linear to the unit.
 #[test]
 fn opening_a_walk_does_not_scale_with_the_fragment_population() {
   let schema = build(SCHEMA);
   let rules = without_merge();
-  let budget = Budget::default();
 
   // `n` operations and `n` distinct fragments, each operation spreading exactly one. The walk is
   // tiny; the population is not.
@@ -2125,20 +2191,23 @@ fn opening_a_walk_does_not_scale_with_the_fragment_population() {
     ("operation walk", &queries as &dyn Fn(usize) -> String),
     ("subscription roots", &subscriptions),
   ] {
-    let small = best_of(3, || run(&schema, &build_source(2_000), &budget, rules));
-    let large = best_of(3, || run(&schema, &build_source(20_000), &budget, rules));
-    let ratio = large.ms / small.ms;
-    println!(
-      "{label}: 2,000 pairs {:.3} ms, 20,000 pairs {:.3} ms (ratio {ratio:.2})",
-      small.ms, large.ms
+    let small = min_budget_of(&schema, &parse(&build_source(1_000)), rules);
+    let large = min_budget_of(&schema, &parse(&build_source(10_000)), rules);
+    let ratio = f64::from(large) / f64::from(small);
+    println!("{label}: 1,000 pairs {small} units, 10,000 pairs {large} units (ratio {ratio:.2})");
+    // The smallest budget the document clears is under the default one, so the default does not
+    // refuse it.
+    assert!(
+      large <= Budget::DEFAULT_VALIDATION_WORK,
+      "the document is valid and was refused"
     );
-    assert!(!large.refused, "the document is valid and was refused");
 
-    // Ten times the document. Linear-plus-sorting measures about sixteen; the threshold is set
-    // where a document-sized clear with a *visible* constant would land and honest growth does not.
+    // Ten times the document. Linear growth measures ten and a per-operation step over the
+    // fragment population measures a hundred; thirty is between them on the scale a ratio lives
+    // on, so neither an extra unit somewhere nor a missing one decides this.
     assert!(
       ratio < 30.0,
-      "{label}: ten times the document cost {ratio:.2} times the work"
+      "{label}: ten times the document cost {ratio:.2} times the units"
     );
   }
 }
@@ -3688,10 +3757,15 @@ fn a_sort_is_charged_for_the_bytes_its_comparisons_read() {
 ///
 /// # The instrument
 ///
-/// A ratio between two input sizes on the **same** door, so no absolute timing threshold is
-/// involved and a slow machine does not decide the verdict. The two sizes are measured interleaved,
-/// so a load burst lands on both. At a budget of zero the verified door refuses in `O(1)`; the
-/// unverified one scans the pair first.
+/// The work in question runs outside the ledger by design, so no unit sees it; two other counts
+/// do. The verification's own: [`Verified::projection_cost`] is the element count of the walk that
+/// verified the pair, so it grows exactly as verifying does. And its footprint: that walk keeps the
+/// first sixteen branching ancestors in its own frame and spills the rest to the heap, so verifying
+/// a pair nested past them is an allocation event on this thread. Both inputs carry the same
+/// nesting in front of different widths, which makes every verification visible to the counter —
+/// and at a budget of zero the verified door must leave none. Measured on this tree: 508 and
+/// 280,228 elements; verifying the large pair allocates twice, the unverified door twice, and the
+/// verified door never.
 #[cfg(feature = "rowan")]
 #[test]
 fn a_verified_pair_is_bounded_from_the_first_instruction() {
@@ -3701,23 +3775,41 @@ fn a_verified_pair_is_bounded_from_the_first_instruction() {
   };
 
   let schema = build(SCHEMA);
-  let small = fragment_bomb(2, 40);
-  let large = fragment_bomb(2, 40_000);
+  // Twenty selection sets deep, past what the verification walk holds in its own frame, in front
+  // of the fragment whose width is the only difference between the two inputs.
+  let nested = |fields: usize| {
+    let mut source = String::from("query deep {");
+    for _ in 0..19 {
+      source.push_str(" nest {");
+    }
+    source.push_str(" leaf");
+    for _ in 0..19 {
+      source.push_str(" }");
+    }
+    source.push_str(" }\n");
+    source.push_str(&fragment_bomb(2, fields));
+    source
+  };
+  let small = nested(40);
+  let large = nested(40_000);
   let small_parse = parse_executable_document(&small);
   let large_parse = parse_executable_document(&large);
   assert!(
     large.len() > small.len() * 100,
     "the two inputs have to differ enough for a ratio to mean anything"
   );
+  let small_pair = Verified::new(&small_parse, &small).expect("the pair matches");
+  let large_pair = Verified::new(&large_parse, &large).expect("the pair matches");
+  let growth = f64::from(large_pair.projection_cost()) / f64::from(small_pair.projection_cost());
 
   let budget = Budget::default().with_validation_work(0);
-  let reps = if cfg!(debug_assertions) { 20 } else { 200 };
-
-  // Warm both paths so neither reading includes a first-call cost.
-  for _ in 0..5 {
+  let verifying = counting::allocations(|| {
+    let _ = std::hint::black_box(Verified::new(&large_parse, &large));
+  });
+  let unverified = counting::allocations(|| {
     let mut scratch = Scratch::new();
     let mut sink = smear::validator::Ignore;
-    let _ = validate_executable_lossless_with(
+    let _ = std::hint::black_box(validate_executable_lossless_with(
       &schema,
       &large_parse,
       &large,
@@ -3725,72 +3817,62 @@ fn a_verified_pair_is_bounded_from_the_first_instruction() {
       &budget,
       RuleSet::ALL,
       &mut sink,
-    );
-  }
-
-  let mut unverified = [0.0f64; 2];
-  let mut verified = [0.0f64; 2];
-  let inputs = [
-    (&small_parse, small.as_str()),
-    (&large_parse, large.as_str()),
-  ];
-  // Interleaved: one repetition of every cell before the second repetition of any of them.
-  for _ in 0..reps {
-    for (slot, (parse, source)) in inputs.iter().enumerate() {
+    ));
+  });
+  let verified = |pair: Verified<'_, '_>| {
+    counting::allocations(|| {
       let mut scratch = Scratch::new();
       let mut sink = smear::validator::Ignore;
-      let start = Instant::now();
-      let _ = validate_executable_lossless_with(
-        &schema,
-        parse,
-        source,
-        &mut scratch,
-        &budget,
-        RuleSet::ALL,
-        &mut sink,
-      );
-      unverified[slot] += start.elapsed().as_secs_f64();
-
-      let pair = Verified::new(parse, source).expect("the pair matches");
-      let start = Instant::now();
-      let _ = validate_executable_lossless_verified_with(
+      let _ = std::hint::black_box(validate_executable_lossless_verified_with(
         &schema,
         pair,
         &mut scratch,
         &budget,
         RuleSet::ALL,
         &mut sink,
-      );
-      verified[slot] += start.elapsed().as_secs_f64();
-    }
-  }
-
-  let growth = unverified[1] / unverified[0];
-  let saved = unverified[1] / verified[1];
+      ));
+    })
+  };
+  let (verified_small, verified_large) = (verified(small_pair), verified(large_pair));
   println!(
-    "at validation_work = 0 over {} B and {} B: the unverified door grows {growth:.1}x with its \
-     input, and on the large one the verified door is {saved:.1}x faster",
+    "at validation_work = 0 over {} B and {} B: verifying walks {} and {} elements ({growth:.1}x) \
+     and allocates {verifying} times on the large one; the unverified door allocates \
+     {unverified}, the verified door {verified_small} and {verified_large}",
     small.len(),
-    large.len()
+    large.len(),
+    small_pair.projection_cost(),
+    large_pair.projection_cost()
   );
 
-  // The premise: the unverified door really does scale with the input it was handed, which is the
-  // finding. A thousandfold size difference against a fourfold threshold.
+  // The premise: the walk the unverified door runs before its ledger grows with the input it was
+  // handed, which is the finding. Hundreds of times the elements against a fourfold threshold.
   assert!(
     growth > 4.0,
-    "the unverified door did not scale with its input ({growth:.1}x), so the comparison below is \
+    "verifying the larger input walked only {growth:.1}x the elements, so the comparison below is \
      not measuring anything"
   );
-  // And the claim, read on the **large** input where both readings are big enough to survive a
-  // parallel test run: refusing without reading the pair is an order of magnitude cheaper than
-  // reading it first. A ratio of two small numbers is what a loaded machine perturbs, so this is
-  // deliberately not `verified[1] / verified[0]`.
+  // And the counter sees that walk, on that door: a zero further down is a reading, not a counter
+  // that was never looking.
   assert!(
-    saved > 10.0,
-    "the verified door was only {saved:.1}x cheaper than the unverified one on a {} B input it \
-     was supposed to refuse before reading",
-    large.len()
+    verifying >= 1,
+    "verifying a pair nested past the walk's own frame allocated nothing, so a zero below would \
+     be blind"
   );
+  assert!(
+    unverified >= verifying,
+    "the unverified door allocated {unverified} times at a budget of zero against the \
+     {verifying} its verification costs, so it no longer verifies before its ledger"
+  );
+  // And the claim, on both inputs: refusing without reading the pair leaves no trace of reading it.
+  for (allocated, input) in [(verified_small, &small), (verified_large, &large)] {
+    assert_eq!(
+      allocated,
+      0,
+      "the verified door allocated {allocated} times on a {} B input it was supposed to refuse \
+       before reading",
+      input.len()
+    );
+  }
 }
 
 /// The pair's proof and the door's charge measure the same quantity: **elements**, not bytes.
