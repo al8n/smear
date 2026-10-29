@@ -779,3 +779,27 @@ impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
     }
   }
 }
+
+/// Why a `StringValue` spelling denotes no value — what [`decode_string_value`](crate::decode_string_value),
+/// [`string_value_len`](crate::string_value_len) and [`string_value_pieces`](crate::string_value_pieces)
+/// refuse.
+///
+/// Only [`NotUtf8`](Self::NotUtf8) is reachable from a spelling a lexer produced. The byte lexer
+/// passes a literal's content through unread, so a `[u8]` source can hand a decoder bytes that are no
+/// text at all; the other two are what the lexer itself refuses, and a decoder that reads a spelling
+/// rather than trusting where it came from answers them instead of guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum StringValueError {
+  /// The spelling is not wrapped in `"…"` or `"""…"""`.
+  #[error("a string value is not wrapped in `\"` or `\"\"\"`")]
+  Unquoted,
+  /// The value is not UTF-8, which draft §2.9's `StringValue` — a sequence of Unicode scalar values
+  /// — always is.
+  #[error("a string value is not UTF-8")]
+  NotUtf8,
+  /// The backslash at this byte offset of the spelling begins no escape draft §2.9.1 defines: an
+  /// unknown character after it, too few or too many hex digits, or a code point that is a lone
+  /// surrogate or past U+10FFFF.
+  #[error("the backslash at byte {0} begins no string escape")]
+  InvalidEscape(usize),
+}
